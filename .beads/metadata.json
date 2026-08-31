@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "Kraft",
+  "project_id": "7037e3cb-b628-45bf-a87c-a03c01f40cb5"
+}
