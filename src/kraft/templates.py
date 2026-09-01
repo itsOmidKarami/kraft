@@ -105,3 +105,17 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
         valid[tid] = Template(id=tid, nodes=nodes)
 
     return TemplateSet(valid=valid, invalid=invalid)
+
+
+def materialize(template: Template) -> dict:
+    return {
+        "template_id": template.id,
+        "nodes": [
+            {
+                "id": n["id"],
+                "tasks": list(n["tasks"]),
+                "gate_after": n.get("gate_after"),
+            }
+            for n in template.nodes
+        ],
+    }

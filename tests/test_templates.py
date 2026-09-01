@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -114,3 +115,20 @@ def test_shape_failures_and_dup_ids_quarantine(tmp_path):
     assert "noid" in ts.invalid
     assert any("dup" in k or "quick-task" in v for k, v in ts.invalid.items()
                if "duplicate" in v.lower())
+
+
+def test_materialize_quick_task_from_shipped_templates():
+    reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
+    ts = templates.load_templates(TEMPLATES_DIR, reg)
+    chain = templates.materialize(ts.valid["quick-task"])
+
+    assert chain == {
+        "template_id": "quick-task",
+        "nodes": [
+            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None},
+            {"id": "implementation", "tasks": ["on.implementation.start"], "gate_after": None},
+            {"id": "verify", "tasks": ["on.test.run"], "gate_after": None},
+        ],
+    }
+    assert "current_node_id" not in chain
+    assert json.loads(json.dumps(chain)) == chain  # round-trips
