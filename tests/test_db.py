@@ -23,8 +23,7 @@ def test_migrate_creates_schema_from_empty(tmp_path):
     cols = {r[1]: r for r in conn.execute("PRAGMA table_info(events)").fetchall()}
     assert cols["seq"][5] == 1  # pk position 1
 
-    index_names = {r[0] for r in conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='index'")}
+    index_names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
     assert {"idx_events_work_item", "idx_worker_sessions_status"} <= index_names
     assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
     assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
@@ -49,11 +48,8 @@ def test_migrate_is_idempotent(tmp_path):
 def test_migrate_rejects_newer_db(tmp_path):
     conn = db._connect(tmp_path / "orchestrator.db")
     conn.execute(f"PRAGMA user_version = {db.SCHEMA_VERSION + 1}")
-    try:
+    with pytest.raises(RuntimeError):
         db.migrate(conn)
-        assert False, "expected RuntimeError"
-    except RuntimeError:
-        pass
 
 
 def test_migrate_atomicity_rolls_back_on_error(tmp_path):
@@ -70,11 +66,8 @@ CREATE TABLE work_items (
 );
 INVALID SQL STATEMENT;
 """
-        try:
+        with pytest.raises(sqlite3.OperationalError):
             db.migrate(conn)
-            assert False, "expected migration to fail"
-        except sqlite3.OperationalError:
-            pass
 
         # Verify rollback: no tables and user_version still 0
         tables = conn.execute(
@@ -105,11 +98,8 @@ def test_status_check_constraints(tmp_path):
         "status, created_at, updated_at) VALUES ('w1', 't', '/r', 'quick-task', '{}', "
         "'active', 'now', 'now')"
     )
-    try:
+    with pytest.raises(sqlite3.IntegrityError):
         conn.execute("UPDATE work_items SET status = 'bogus' WHERE id = 'w1'")
-        assert False, "expected IntegrityError"
-    except sqlite3.IntegrityError:
-        pass
 
 
 def test_write_commits_on_success(tmp_path):
@@ -124,9 +114,7 @@ def test_write_commits_on_success(tmp_path):
                 )
             )
             row = database.read(
-                lambda c: c.execute(
-                    "SELECT title FROM work_items WHERE id = 'w1'"
-                ).fetchone()
+                lambda c: c.execute("SELECT title FROM work_items WHERE id = 'w1'").fetchone()
             )
             assert row["title"] == "t"
         finally:
@@ -139,6 +127,7 @@ def test_write_rolls_back_on_exception(tmp_path):
     async def scenario():
         database = await db.Database.open(tmp_path / "orchestrator.db")
         try:
+
             def failing(c):
                 c.execute(
                     "INSERT INTO work_items (id, title, repo, chain_template, "
@@ -147,16 +136,11 @@ def test_write_rolls_back_on_exception(tmp_path):
                 )
                 raise RuntimeError("boom")
 
-            try:
+            with pytest.raises(RuntimeError):
                 await database.write(failing)
-                assert False, "expected RuntimeError"
-            except RuntimeError:
-                pass
 
             count = database.read(
-                lambda c: c.execute(
-                    "SELECT count(*) FROM work_items WHERE id = 'w2'"
-                ).fetchone()[0]
+                lambda c: c.execute("SELECT count(*) FROM work_items WHERE id = 'w2'").fetchone()[0]
             )
             assert count == 0
         finally:
@@ -179,16 +163,14 @@ def test_writes_are_serialized_in_order(tmp_path):
 
             async def bump(n):
                 await database.write(
-                    lambda c: c.execute(
-                        "UPDATE work_items SET title = ? WHERE id = 'w'", (str(n),)
-                    )
+                    lambda c: c.execute("UPDATE work_items SET title = ? WHERE id = 'w'", (str(n),))
                 )
 
             await asyncio.gather(*(bump(n) for n in range(20)))
             title = database.read(
-                lambda c: c.execute(
-                    "SELECT title FROM work_items WHERE id = 'w'"
-                ).fetchone()["title"]
+                lambda c: c.execute("SELECT title FROM work_items WHERE id = 'w'").fetchone()[
+                    "title"
+                ]
             )
             assert title == "19"
         finally:
@@ -201,6 +183,7 @@ def test_writer_survives_failing_fn_and_serves_next_write(tmp_path):
     async def scenario():
         database = await db.Database.open(tmp_path / "orchestrator.db")
         try:
+
             def failing(c):
                 raise RuntimeError("boom")
 
@@ -216,9 +199,7 @@ def test_writer_survives_failing_fn_and_serves_next_write(tmp_path):
                 )
             )
             row = database.read(
-                lambda c: c.execute(
-                    "SELECT title FROM work_items WHERE id = 'w1'"
-                ).fetchone()
+                lambda c: c.execute("SELECT title FROM work_items WHERE id = 'w1'").fetchone()
             )
             assert row["title"] == "t"
         finally:
@@ -232,9 +213,7 @@ def test_write_after_close_raises_instead_of_hanging(tmp_path):
         database = await db.Database.open(tmp_path / "orchestrator.db")
         await database.close()
         with pytest.raises(RuntimeError, match="writer is not running"):
-            await asyncio.wait_for(
-                database.write(lambda c: c.execute("SELECT 1")), timeout=2
-            )
+            await asyncio.wait_for(database.write(lambda c: c.execute("SELECT 1")), timeout=2)
 
     asyncio.run(scenario())
 
@@ -247,13 +226,15 @@ def test_raising_rollback_still_informs_caller_and_next_db_works(tmp_path, monke
             raise sqlite3.OperationalError("rollback failed")
 
     monkeypatch.setattr(
-        db.sqlite3, "connect",
+        db.sqlite3,
+        "connect",
         lambda p, *a, **k: real_connect(p, *a, factory=_BadRollback, **k),
     )
 
     async def scenario():
         database = await db.Database.open(tmp_path / "orchestrator.db")
         try:
+
             def failing(c):
                 raise RuntimeError("boom")
 
@@ -276,11 +257,10 @@ def test_raising_rollback_still_informs_caller_and_next_db_works(tmp_path, monke
                     "VALUES ('w1', 't', '/r', 'quick-task', '{}', 'active', 'now', 'now')"
                 )
             )
-            assert fresh.read(
-                lambda c: c.execute(
-                    "SELECT count(*) FROM work_items"
-                ).fetchone()[0]
-            ) == 1
+            assert (
+                fresh.read(lambda c: c.execute("SELECT count(*) FROM work_items").fetchone()[0])
+                == 1
+            )
         finally:
             await fresh.close()
 
