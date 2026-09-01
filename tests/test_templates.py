@@ -68,11 +68,11 @@ def test_load_registry_ok(tmp_path):
 @pytest.mark.parametrize(
     "body",
     [
-        "hooks:\n  on.x: { handler: foo }\n",                       # missing kind
-        "hooks:\n  on.x: { kind: wat, handler: foo }\n",            # unknown kind
-        "hooks:\n  on.x: { kind: builtin }\n",                      # builtin needs handler
+        "hooks:\n  on.x: { handler: foo }\n",  # missing kind
+        "hooks:\n  on.x: { kind: wat, handler: foo }\n",  # unknown kind
+        "hooks:\n  on.x: { kind: builtin }\n",  # builtin needs handler
         "hooks:\n  on.x: { kind: subprocess, command: pytest }\n",  # subprocess needs list
-        "hooks:\n  on.x: { kind: agent, command: [claude] }\n",     # agent needs string
+        "hooks:\n  on.x: { kind: agent, command: [claude] }\n",  # agent needs string
     ],
 )
 def test_load_registry_rejects_bad_bindings(tmp_path, body):
@@ -113,7 +113,7 @@ def test_shape_failures_and_dup_ids_quarantine(tmp_path):
 
     assert "quick-task" in ts.valid
     assert "noid" in ts.invalid
-    assert "quick-task" in ts.invalid          # the later file, quarantined
+    assert "quick-task" in ts.invalid  # the later file, quarantined
     assert "duplicate" in ts.invalid["quick-task"].lower()
 
 

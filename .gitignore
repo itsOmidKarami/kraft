@@ -10,3 +10,11 @@
 # Python build artifacts
 __pycache__/
 *.egg-info/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+.uv-cache/
+
+# macOS
+.DS_Store

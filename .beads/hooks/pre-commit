@@ -31,3 +31,9 @@ if command -v bd >/dev/null 2>&1; then
   if [ $_bd_exit -ne 0 ]; then exit $_bd_exit; fi
 fi
 # --- END BEADS INTEGRATION v1.2.2 ---
+
+# --- project: pre-commit framework (ruff lint + format) ---
+# Beads owns core.hooksPath so `pre-commit install` can't; invoke it here.
+if command -v uv >/dev/null 2>&1; then
+  uv run --no-sync pre-commit run || exit 1
+fi

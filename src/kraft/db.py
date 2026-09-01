@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import TypeVar
 
 T = TypeVar("T")
 
@@ -71,15 +72,11 @@ def migrate(conn: sqlite3.Connection) -> None:
     if version == SCHEMA_VERSION:
         return
     if version > SCHEMA_VERSION:
-        raise RuntimeError(
-            f"database schema v{version} is newer than code v{SCHEMA_VERSION}"
-        )
+        raise RuntimeError(f"database schema v{version} is newer than code v{SCHEMA_VERSION}")
     if version != 0:
         # Only a fresh (v0) DB gets the full SCHEMA_SQL. A populated older
         # version needs a real migration path, not a re-run of CREATE TABLE.
-        raise RuntimeError(
-            f"no migration path from schema v{version} to v{SCHEMA_VERSION}"
-        )
+        raise RuntimeError(f"no migration path from schema v{version} to v{SCHEMA_VERSION}")
     # Explicit transaction: sqlite3 with isolation_level='' does NOT auto-open txns for DDL.
     # Must BEGIN explicitly to ensure all DDL + user_version bump commit atomically or not at all.
     try:
@@ -103,7 +100,7 @@ class Database:
         self._task: asyncio.Task | None = None
 
     @classmethod
-    async def open(cls, path: str | Path) -> "Database":
+    async def open(cls, path: str | Path) -> Database:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         writer = _connect(path)
