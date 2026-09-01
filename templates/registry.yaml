@@ -1,0 +1,4 @@
+hooks:
+  on.env.prepare:          { kind: builtin,    handler: env_setup }
+  on.implementation.start: { kind: agent,      command: claude }
+  on.test.run:             { kind: subprocess, command: [pytest, -q] }
