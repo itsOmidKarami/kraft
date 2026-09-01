@@ -74,6 +74,12 @@ def migrate(conn: sqlite3.Connection) -> None:
         raise RuntimeError(
             f"database schema v{version} is newer than code v{SCHEMA_VERSION}"
         )
+    if version != 0:
+        # Only a fresh (v0) DB gets the full SCHEMA_SQL. A populated older
+        # version needs a real migration path, not a re-run of CREATE TABLE.
+        raise RuntimeError(
+            f"no migration path from schema v{version} to v{SCHEMA_VERSION}"
+        )
     # Explicit transaction: sqlite3 with isolation_level='' does NOT auto-open txns for DDL.
     # Must BEGIN explicitly to ensure all DDL + user_version bump commit atomically or not at all.
     try:
@@ -118,9 +124,14 @@ class Database:
                     result = fn(self._writer)
                     self._writer.commit()
                 except BaseException as exc:  # noqa: BLE001 - re-raised to caller
-                    self._writer.rollback()
+                    # Inform the caller FIRST: if rollback() itself raises, the
+                    # exception escaping _run kills the writer task and wedges
+                    # every pending/future write(). A failed rollback still
+                    # propagates (dirty txn must not be silently committed by
+                    # the next write), but only after the caller has its result.
                     if not fut.done():
                         fut.set_exception(exc)
+                    self._writer.rollback()
                 else:
                     if not fut.done():
                         fut.set_result(result)
@@ -128,12 +139,17 @@ class Database:
                 self._queue.task_done()
 
     async def write(self, fn: Callable[[sqlite3.Connection], T]) -> T:
+        if self._task is None or self._task.done():
+            raise RuntimeError("db writer is not running")
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         await self._queue.put((fn, fut))
         return await fut
 
     def read(self, fn: Callable[[sqlite3.Connection], T]) -> T:
-        self._reader.rollback()  # drop any stale read snapshot so we see latest commits
+        # SELECT-only work leaves no Python-level txn to roll back; the read
+        # snapshot is actually released when CPython finalizes the temp cursor.
+        # Keep this call anyway: harmless, and correct if a read fn does DML.
+        self._reader.rollback()
         return fn(self._reader)
 
     async def close(self) -> None:

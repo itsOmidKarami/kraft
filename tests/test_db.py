@@ -1,4 +1,7 @@
+import asyncio
 import sqlite3
+
+import pytest
 
 from kraft import db
 
@@ -19,6 +22,12 @@ def test_migrate_creates_schema_from_empty(tmp_path):
     # events.seq is an autoincrement integer primary key
     cols = {r[1]: r for r in conn.execute("PRAGMA table_info(events)").fetchall()}
     assert cols["seq"][5] == 1  # pk position 1
+
+    index_names = {r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='index'")}
+    assert {"idx_events_work_item", "idx_worker_sessions_status"} <= index_names
+    assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+    assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
 
 def test_migrate_is_idempotent(tmp_path):
@@ -103,9 +112,6 @@ def test_status_check_constraints(tmp_path):
         pass
 
 
-import asyncio
-
-
 def test_write_commits_on_success(tmp_path):
     async def scenario():
         database = await db.Database.open(tmp_path / "orchestrator.db")
@@ -187,5 +193,95 @@ def test_writes_are_serialized_in_order(tmp_path):
             assert title == "19"
         finally:
             await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_writer_survives_failing_fn_and_serves_next_write(tmp_path):
+    async def scenario():
+        database = await db.Database.open(tmp_path / "orchestrator.db")
+        try:
+            def failing(c):
+                raise RuntimeError("boom")
+
+            with pytest.raises(RuntimeError):
+                await database.write(failing)
+
+            # writer task must still be alive and serving
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at) "
+                    "VALUES ('w1', 't', '/r', 'quick-task', '{}', 'active', 'now', 'now')"
+                )
+            )
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT title FROM work_items WHERE id = 'w1'"
+                ).fetchone()
+            )
+            assert row["title"] == "t"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_write_after_close_raises_instead_of_hanging(tmp_path):
+    async def scenario():
+        database = await db.Database.open(tmp_path / "orchestrator.db")
+        await database.close()
+        with pytest.raises(RuntimeError, match="writer is not running"):
+            await asyncio.wait_for(
+                database.write(lambda c: c.execute("SELECT 1")), timeout=2
+            )
+
+    asyncio.run(scenario())
+
+
+def test_raising_rollback_still_informs_caller_and_next_db_works(tmp_path, monkeypatch):
+    real_connect = sqlite3.connect
+
+    class _BadRollback(sqlite3.Connection):
+        def rollback(self):
+            raise sqlite3.OperationalError("rollback failed")
+
+    monkeypatch.setattr(
+        db.sqlite3, "connect",
+        lambda p, *a, **k: real_connect(p, *a, factory=_BadRollback, **k),
+    )
+
+    async def scenario():
+        database = await db.Database.open(tmp_path / "orchestrator.db")
+        try:
+            def failing(c):
+                raise RuntimeError("boom")
+
+            # caller gets its own exception, not a hang
+            with pytest.raises(RuntimeError, match="boom"):
+                await asyncio.wait_for(database.write(failing), timeout=2)
+        finally:
+            # writer task died on the raising rollback; close re-raises it
+            with pytest.raises(sqlite3.OperationalError):
+                await database.close()
+
+        # a fresh Database (normal connections) on the same file is functional
+        monkeypatch.undo()
+        fresh = await db.Database.open(tmp_path / "orchestrator.db")
+        try:
+            await fresh.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at) "
+                    "VALUES ('w1', 't', '/r', 'quick-task', '{}', 'active', 'now', 'now')"
+                )
+            )
+            assert fresh.read(
+                lambda c: c.execute(
+                    "SELECT count(*) FROM work_items"
+                ).fetchone()[0]
+            ) == 1
+        finally:
+            await fresh.close()
 
     asyncio.run(scenario())
