@@ -4,3 +4,9 @@
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+.kraft-run/
+
+# Python build artifacts
+__pycache__/
+*.egg-info/
