@@ -113,8 +113,8 @@ def test_shape_failures_and_dup_ids_quarantine(tmp_path):
 
     assert "quick-task" in ts.valid
     assert "noid" in ts.invalid
-    assert any("dup" in k or "quick-task" in v for k, v in ts.invalid.items()
-               if "duplicate" in v.lower())
+    assert "quick-task" in ts.invalid          # the later file, quarantined
+    assert "duplicate" in ts.invalid["quick-task"].lower()
 
 
 def test_materialize_quick_task_from_shipped_templates():
