@@ -88,18 +88,13 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
             for n in nodes
         ):
             invalid[tid] = (
-                f"template {tid!r}: each node needs a string 'id' and a "
-                f"list-of-strings 'tasks'"
+                f"template {tid!r}: each node needs a string 'id' and a list-of-strings 'tasks'"
             )
             continue
 
-        unknown = sorted(
-            {t for n in nodes for t in n["tasks"] if t not in registry.hooks}
-        )
+        unknown = sorted({t for n in nodes for t in n["tasks"] if t not in registry.hooks})
         if unknown:
-            invalid[tid] = (
-                f"template {tid!r}: hook(s) {unknown} are not in the registry"
-            )
+            invalid[tid] = f"template {tid!r}: hook(s) {unknown} are not in the registry"
             continue
 
         valid[tid] = Template(id=tid, nodes=nodes)
