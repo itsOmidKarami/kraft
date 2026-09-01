@@ -101,3 +101,91 @@ def test_status_check_constraints(tmp_path):
         assert False, "expected IntegrityError"
     except sqlite3.IntegrityError:
         pass
+
+
+import asyncio
+
+
+def test_write_commits_on_success(tmp_path):
+    async def scenario():
+        database = await db.Database.open(tmp_path / "orchestrator.db")
+        try:
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at) "
+                    "VALUES ('w1', 't', '/r', 'quick-task', '{}', 'active', 'now', 'now')"
+                )
+            )
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT title FROM work_items WHERE id = 'w1'"
+                ).fetchone()
+            )
+            assert row["title"] == "t"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_write_rolls_back_on_exception(tmp_path):
+    async def scenario():
+        database = await db.Database.open(tmp_path / "orchestrator.db")
+        try:
+            def failing(c):
+                c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at) "
+                    "VALUES ('w2', 't', '/r', 'quick-task', '{}', 'active', 'now', 'now')"
+                )
+                raise RuntimeError("boom")
+
+            try:
+                await database.write(failing)
+                assert False, "expected RuntimeError"
+            except RuntimeError:
+                pass
+
+            count = database.read(
+                lambda c: c.execute(
+                    "SELECT count(*) FROM work_items WHERE id = 'w2'"
+                ).fetchone()[0]
+            )
+            assert count == 0
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_writes_are_serialized_in_order(tmp_path):
+    async def scenario():
+        database = await db.Database.open(tmp_path / "orchestrator.db")
+        try:
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at) "
+                    "VALUES ('w', 't', '/r', 'quick-task', '{}', 'active', 'now', 'now')"
+                )
+            )
+
+            async def bump(n):
+                await database.write(
+                    lambda c: c.execute(
+                        "UPDATE work_items SET title = ? WHERE id = 'w'", (str(n),)
+                    )
+                )
+
+            await asyncio.gather(*(bump(n) for n in range(20)))
+            title = database.read(
+                lambda c: c.execute(
+                    "SELECT title FROM work_items WHERE id = 'w'"
+                ).fetchone()["title"]
+            )
+            assert title == "19"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
