@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from kraft import db, events
 
 
@@ -71,11 +73,8 @@ def test_row_and_event_commit_atomically(tmp_path):
                 events.append(c, "w1", "node_completed", {"node": "env_setup"})
                 raise RuntimeError("crash before commit")
 
-            try:
+            with pytest.raises(RuntimeError):
                 await database.write(change_and_event)
-                assert False, "expected RuntimeError"
-            except RuntimeError:
-                pass
 
             node = database.read(
                 lambda c: c.execute(
