@@ -4,6 +4,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import yaml
+
 from kraft.templates import Registry, load_registry
 
 _SUPPORT = Path(__file__).parent
@@ -50,3 +52,28 @@ def fake_registry(python_exe: str, fake_agent_path: Path) -> Registry:
         "command": f"{python_exe} {fake_agent_path}",
     }
     return Registry(hooks=hooks)
+
+
+def fake_templates_dir(tmp_path: Path, agent_command: str) -> Path:
+    d = tmp_path / "templates"
+    d.mkdir(parents=True, exist_ok=True)
+    shutil.copy(_REPO_ROOT / "templates" / "quick-task.yaml", d / "quick-task.yaml")
+    (d / "registry.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "hooks": {
+                    "on.env.prepare": {"kind": "builtin", "handler": "env_setup"},
+                    "on.implementation.start": {"kind": "agent", "command": agent_command},
+                    "on.test.run": {
+                        "kind": "subprocess",
+                        "command": ["python", "-m", "pytest", "-q"],
+                    },
+                }
+            }
+        )
+    )
+    return d
+
+
+def e2e_templates_dir(tmp_path: Path) -> Path:
+    return fake_templates_dir(tmp_path, "claude --model claude-haiku-4-5-20251001")

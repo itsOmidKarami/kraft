@@ -12,19 +12,28 @@ import psutil
 from kraft import store
 
 
+def _resolve_result_file(path: Path) -> str | None:
+    """Status from a result file alone, or None if it's missing/empty."""
+    if not path.exists():
+        return None
+    try:
+        raw = path.read_text().strip()
+    except OSError:
+        return "failed"
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return "failed"
+    status = data.get("status") if isinstance(data, dict) else None
+    return status if status in ("done", "failed") else "failed"
+
+
 def _resolve(result_path: Path, returncode: int) -> str:
-    if result_path.exists():
-        try:
-            raw = result_path.read_text().strip()
-        except OSError:
-            return "failed"
-        if raw:
-            try:
-                data = json.loads(raw)
-            except json.JSONDecodeError:
-                return "failed"
-            status = data.get("status") if isinstance(data, dict) else None
-            return status if status in ("done", "failed") else "failed"
+    file_status = _resolve_result_file(result_path)
+    if file_status is not None:
+        return file_status
     return "done" if returncode == 0 else "failed"
 
 

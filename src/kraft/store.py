@@ -114,3 +114,26 @@ def session_exited(conn: sqlite3.Connection, session_id, status) -> None:
         "worker_session_exited",
         {"session_id": session_id, "status": status},
     )
+
+
+def session_unknown(conn: sqlite3.Connection, session_id) -> None:
+    conn.execute(
+        "UPDATE worker_sessions SET status = 'unknown', exited_at = ? WHERE id = ?",
+        (_now(), session_id),
+    )
+    row = conn.execute(
+        "SELECT work_item_id FROM worker_sessions WHERE id = ?", (session_id,)
+    ).fetchone()
+    events.append(conn, row["work_item_id"], "session_unknown", {"session_id": session_id})
+
+
+def session_reattached(conn: sqlite3.Connection, session_id) -> None:
+    row = conn.execute(
+        "SELECT work_item_id, pid FROM worker_sessions WHERE id = ?", (session_id,)
+    ).fetchone()
+    events.append(
+        conn,
+        row["work_item_id"],
+        "session_reattached",
+        {"session_id": session_id, "pid": row["pid"]},
+    )
