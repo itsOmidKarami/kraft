@@ -54,6 +54,8 @@ async def _dispatch(
     )
     if kind == "builtin" and binding.get("handler") == "env_setup":
         return await _builtins.env_setup(db, run_dirs, repo=work_item_row["repo"], **common)
+    if kind == "builtin" and binding.get("handler") == "noop":
+        return await _builtins.noop(db, run_dirs, hook_point=task_hook, **common)
     if kind == "agent":
         return await _agent.run_agent_task(
             db,
@@ -103,8 +105,23 @@ async def _walk_node(
     return "ok"
 
 
+async def _maybe_gate(db, work_item_id: str, node: dict) -> bool:
+    """If the node ends in a gate, request it and return True (caller stops the walk)."""
+    gate = node.get("gate_after")
+    if not gate:
+        return False
+    await db.write(lambda c: store.request_gate(c, work_item_id, node["id"], gate))
+    return True
+
+
 async def run(
-    db, run_dirs, *, work_item_id: str, registry: Registry, bd_cwd: str | None = None
+    db,
+    run_dirs,
+    *,
+    work_item_id: str,
+    registry: Registry,
+    bd_cwd: str | None = None,
+    start_index: int = 0,
 ) -> str:
     row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
@@ -115,12 +132,15 @@ async def run(
     nodes = chain["nodes"]
     worktree = run_dirs.worktrees / work_item_id
 
-    await db.write(lambda c: store.load_chain(c, work_item_id, nodes[0]["id"]))
+    if start_index == 0:
+        await db.write(lambda c: store.load_chain(c, work_item_id, nodes[0]["id"]))
 
-    for node in nodes:
+    for node in nodes[start_index:]:
         result = await _walk_node(db, run_dirs, work_item_id, node, row, registry, worktree)
         if result == "needs_human":
             return "needs_human"
+        if await _maybe_gate(db, work_item_id, node):
+            return "awaiting_gate"
 
     await db.write(lambda c: store.mark_completed(c, work_item_id))
     try:
@@ -209,12 +229,17 @@ async def resume(
     ):
         return "needs_human"
 
+    if await _maybe_gate(db, work_item_id, nodes[start]):
+        return "awaiting_gate"
+
     for node in nodes[start + 1 :]:
         if (
             await _walk_node(db, run_dirs, work_item_id, node, row, registry, worktree)
             == "needs_human"
         ):
             return "needs_human"
+        if await _maybe_gate(db, work_item_id, node):
+            return "awaiting_gate"
 
     await db.write(lambda c: store.mark_completed(c, work_item_id))
     try:
