@@ -130,3 +130,72 @@ def test_get_unknown_work_item_404(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
         assert client.get("/work-items/does-not-exist").status_code == 404
         assert client.get("/worker-sessions/nope/log").status_code == 404
+
+
+def _post_default(client, repo):
+    return client.post(
+        "/work-items",
+        json={
+            "title": "make the failing test pass",
+            "repo": str(repo),
+            "chain_template": "default",
+        },
+    ).json()["id"]
+
+
+def test_gate_approve_advances_chain(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+        item = client.get(f"/work-items/{wid}").json()
+        assert item["status"] == "needs_human"
+
+        r = client.post(f"/work-items/{wid}/gates/spec_approval/approve")
+        assert r.status_code == 200, r.text
+        _poll_events(client, wid, "gate_approved")
+        assert any(
+            e["type"] == "node_started" and e["payload"]["node_id"] == "plan"
+            for e in client.get(f"/work-items/{wid}/events").json()
+        )
+
+
+def test_gate_approve_wrong_gate_409(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+        r = client.post(f"/work-items/{wid}/gates/plan_approval/approve")
+        assert r.status_code == 409
+
+
+def test_gate_unknown_name_404(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+        assert client.post(f"/work-items/{wid}/gates/not_a_gate/approve").status_code == 404
+
+
+def test_gate_reject_requires_note_and_is_terminal(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+
+        assert (
+            client.post(f"/work-items/{wid}/gates/spec_approval/reject", json={}).status_code == 422
+        )
+
+        r = client.post(f"/work-items/{wid}/gates/spec_approval/reject", json={"note": "too vague"})
+        assert r.status_code == 200, r.text
+        evts = client.get(f"/work-items/{wid}/events").json()
+        rej = [e for e in evts if e["type"] == "gate_rejected"]
+        assert rej and rej[0]["payload"] == {"gate": "spec_approval", "note": "too vague"}
+        assert client.get(f"/work-items/{wid}").json()["status"] == "needs_human"
+
+
+def test_gate_approve_unknown_work_item_404(tmp_path, monkeypatch):
+    with _client(tmp_path, monkeypatch) as client:
+        assert client.post("/work-items/nope/gates/spec_approval/approve").status_code == 404

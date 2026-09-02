@@ -6,6 +6,7 @@ from pathlib import Path
 import yaml
 
 _VALID_KINDS = {"builtin", "agent", "subprocess"}
+_GATE_NAMES = {"spec_approval", "plan_approval", "chain_finalized", "human_review_approval"}
 
 
 class RegistryError(Exception):
@@ -90,6 +91,17 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
             invalid[tid] = (
                 f"template {tid!r}: each node needs a string 'id' and a list-of-strings 'tasks'"
             )
+            continue
+
+        bad_gates = sorted(
+            {
+                n["gate_after"]
+                for n in nodes
+                if n.get("gate_after") is not None and n["gate_after"] not in _GATE_NAMES
+            }
+        )
+        if bad_gates:
+            invalid[tid] = f"template {tid!r}: unknown gate_after value(s) {bad_gates}"
             continue
 
         unknown = sorted({t for n in nodes for t in n["tasks"] if t not in registry.hooks})
