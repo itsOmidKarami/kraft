@@ -196,3 +196,67 @@ def test_row_and_event_are_atomic(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_session_unknown_sets_status_and_event(tmp_path):
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await _mk_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="env_setup",
+                    hook_point="on.env.prepare",
+                    log_path="/l",
+                    result_path="/r",
+                )
+            )
+            await database.write(lambda c: store.session_unknown(c, "s1"))
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT status, exited_at FROM worker_sessions WHERE id='s1'"
+                ).fetchone()
+            )
+            assert row["status"] == "unknown"
+            assert row["exited_at"] is not None
+            ev = database.read(lambda c: events.read_after(c, 0, "w1"))[-1]
+            assert ev["type"] == "session_unknown"
+            assert ev["payload"] == {"session_id": "s1"}
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_session_reattached_emits_event_without_row_change(tmp_path):
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await _mk_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="env_setup",
+                    hook_point="on.env.prepare",
+                    log_path="/l",
+                    result_path="/r",
+                )
+            )
+            await database.write(lambda c: store.session_running(c, "s1", 4321, 111.5))
+            await database.write(lambda c: store.session_reattached(c, "s1"))
+            row = database.read(
+                lambda c: c.execute("SELECT status FROM worker_sessions WHERE id='s1'").fetchone()
+            )
+            assert row["status"] == "running"  # unchanged
+            ev = database.read(lambda c: events.read_after(c, 0, "w1"))[-1]
+            assert ev["type"] == "session_reattached"
+            assert ev["payload"] == {"session_id": "s1", "pid": 4321}
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
