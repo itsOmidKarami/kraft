@@ -23,7 +23,7 @@ parallel. B needs A's schema and event bus; C needs B's adapters and executor.
 |---|---|---|---|
 | **A — Foundation** | Kraft-rnx.1 | §2 state model, §3 templates + validation, event bus | — |
 | **B — Execution** | Kraft-rnx.2 | §3 executor loop, §4 adapters | A |
-| **C — Resilience + API** | Kraft-rnx.3 | §5 reattach, §6 API, §7 fixture + tests | B |
+| **C — Resilience + API** ✅ | Kraft-rnx.3 | §5 reattach, §6 API, §7 fixture + tests | B |
 
 ### Chunk A — Foundation
 
@@ -132,6 +132,10 @@ in this chunk.
 The skeleton proves the three risk goals. The next master plans (own
 spec → plan → implement cycles, in this rough order) come off the deferred table
 in the design doc §8:
+
+The walking skeleton is now green — all 3 chunks (A, B, C) are built and the
+hermetic suite passes (70 passed / 1 skipped) — so the deferred master plans
+below can begin.
 
 1. Full `default.yaml` + gates (`01` §8)
 2. Policy engine as a component + backward-motion coordinator + fix loops
