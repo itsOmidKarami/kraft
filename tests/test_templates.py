@@ -21,11 +21,13 @@ def test_shipped_yaml_parses_and_matches_spec():
     assert all(n["gate_after"] is None for n in quick["nodes"])
 
     registry = yaml.safe_load((TEMPLATES_DIR / "registry.yaml").read_text())
-    assert set(registry["hooks"]) == {
+    assert {
         "on.env.prepare",
         "on.implementation.start",
         "on.test.run",
-    }
+    } <= set(registry["hooks"])
+    assert registry["hooks"]["on.spec.requested"] == {"kind": "builtin", "handler": "noop"}
+    assert registry["hooks"]["on.merge"] == {"kind": "builtin", "handler": "noop"}
     assert registry["hooks"]["on.env.prepare"] == {"kind": "builtin", "handler": "env_setup"}
     assert registry["hooks"]["on.implementation.start"] == {"kind": "agent", "command": "claude"}
     assert registry["hooks"]["on.test.run"] == {"kind": "subprocess", "command": ["pytest", "-q"]}
@@ -51,6 +53,54 @@ id: broken
 nodes:
   - { id: n1, tasks: [on.bogus], gate_after: null }
 """
+
+
+GATE_NAMES = {"spec_approval", "plan_approval", "chain_finalized", "human_review_approval"}
+
+
+def test_shipped_default_yaml_is_the_ten_node_chain():
+    reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
+    ts = templates.load_templates(TEMPLATES_DIR, reg)
+    assert "default" in ts.valid, ts.invalid
+    nodes = ts.valid["default"].nodes
+    assert [n["id"] for n in nodes] == [
+        "spec",
+        "plan",
+        "chain_review",
+        "env_setup",
+        "implementation",
+        "verify",
+        "open_mr",
+        "mr_checks",
+        "human_review",
+        "merge",
+    ]
+    gates = {n["id"]: n.get("gate_after") for n in nodes}
+    assert gates["spec"] == "spec_approval"
+    assert gates["plan"] == "plan_approval"
+    assert gates["chain_review"] == "chain_finalized"
+    assert gates["human_review"] == "human_review_approval"
+    assert gates["env_setup"] is None and gates["merge"] is None
+
+
+def test_unknown_gate_after_quarantines_template(tmp_path):
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "quick-task.yaml": GOOD_TEMPLATE,
+            "weirdgate.yaml": (
+                "id: weirdgate\n"
+                "nodes:\n"
+                "  - { id: n1, tasks: [on.test.run], gate_after: bogus_gate }\n"
+            ),
+        },
+    )
+    reg = templates.load_registry(d / "registry.yaml")
+    ts = templates.load_templates(d, reg)
+    assert "quick-task" in ts.valid
+    assert "weirdgate" in ts.invalid
+    assert "bogus_gate" in ts.invalid["weirdgate"]
 
 
 def _dir(tmp_path, **files):

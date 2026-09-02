@@ -58,6 +58,8 @@ def fake_templates_dir(tmp_path: Path, agent_command: str) -> Path:
     d = tmp_path / "templates"
     d.mkdir(parents=True, exist_ok=True)
     shutil.copy(_REPO_ROOT / "templates" / "quick-task.yaml", d / "quick-task.yaml")
+    shutil.copy(_REPO_ROOT / "templates" / "default.yaml", d / "default.yaml")
+    noop = {"kind": "builtin", "handler": "noop"}
     (d / "registry.yaml").write_text(
         yaml.safe_dump(
             {
@@ -68,6 +70,15 @@ def fake_templates_dir(tmp_path: Path, agent_command: str) -> Path:
                         "kind": "subprocess",
                         "command": ["python", "-m", "pytest", "-q"],
                     },
+                    "on.spec.requested": noop,
+                    "on.plan.requested": noop,
+                    "on.chain.review_ready": noop,
+                    "on.review.local.run": noop,
+                    "on.mr.open": noop,
+                    "on.ci.poll": noop,
+                    "on.review.mr.run": noop,
+                    "on.human_review.requested": noop,
+                    "on.merge": noop,
                 }
             }
         )
