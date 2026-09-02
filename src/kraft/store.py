@@ -67,6 +67,27 @@ def mark_completed(conn: sqlite3.Connection, work_item_id) -> None:
     events.append(conn, work_item_id, "work_item_completed", {})
 
 
+def request_gate(conn: sqlite3.Connection, work_item_id, node_id, gate) -> None:
+    conn.execute(
+        "UPDATE work_items SET status = 'needs_human', updated_at = ? WHERE id = ?",
+        (_now(), work_item_id),
+    )
+    events.append(conn, work_item_id, "gate_requested", {"gate": gate, "node_id": node_id})
+
+
+def approve_gate(conn: sqlite3.Connection, work_item_id, gate) -> None:
+    conn.execute(
+        "UPDATE work_items SET status = 'active', updated_at = ? WHERE id = ?",
+        (_now(), work_item_id),
+    )
+    events.append(conn, work_item_id, "gate_approved", {"gate": gate})
+
+
+def reject_gate(conn: sqlite3.Connection, work_item_id, gate, note) -> None:
+    conn.execute("UPDATE work_items SET updated_at = ? WHERE id = ?", (_now(), work_item_id))
+    events.append(conn, work_item_id, "gate_rejected", {"gate": gate, "note": note})
+
+
 def create_session(
     conn: sqlite3.Connection, *, id, work_item_id, node_id, hook_point, log_path, result_path
 ) -> None:

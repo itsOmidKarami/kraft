@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
 
+_GATE_NAMES = {"spec_approval", "plan_approval", "chain_finalized", "human_review_approval"}
+
 
 async def _guard(db, wid: str, coro) -> None:
     try:
@@ -159,6 +161,22 @@ def _work_item_row(st, wid):
     return row
 
 
+def _pending_gate(st, wid: str) -> str | None:
+    evts = st.db.read(lambda c: events.read_after(c, 0, wid))
+    for e in reversed(evts):
+        if e["type"] in ("gate_requested", "gate_approved", "gate_rejected"):
+            return e["payload"]["gate"] if e["type"] == "gate_requested" else None
+    return None
+
+
+def _gate_node_index(chain: dict, gate: str) -> int:
+    return next(i for i, n in enumerate(chain["nodes"]) if n.get("gate_after") == gate)
+
+
+class GateReject(BaseModel):
+    note: str
+
+
 @app.get("/work-items/{wid}")
 async def get_work_item(wid: str, request: Request):
     st = request.app.state
@@ -180,6 +198,48 @@ async def get_events(wid: str, request: Request, after_seq: int = 0):
     st = request.app.state
     _work_item_row(st, wid)
     return st.db.read(lambda c: events.read_after(c, after_seq, wid))
+
+
+@app.post("/work-items/{wid}/gates/{gate}/approve")
+async def approve_gate(wid: str, gate: str, request: Request):
+    st = request.app.state
+    row = _work_item_row(st, wid)
+    if gate not in _GATE_NAMES:
+        raise HTTPException(404, f"unknown gate {gate!r}")
+    if _pending_gate(st, wid) != gate:
+        raise HTTPException(409, f"gate {gate!r} is not pending")
+    await st.db.write(lambda c: store.approve_gate(c, wid, gate))
+    chain = json.loads(row["chain_definition"])
+    start = _gate_node_index(chain, gate) + 1
+    _spawn(
+        request.app,
+        wid,
+        _guard(
+            st.db,
+            wid,
+            executor.run(
+                st.db,
+                st.run_dirs,
+                work_item_id=wid,
+                registry=st.registry,
+                bd_cwd=_bd_cwd(),
+                start_index=start,
+            ),
+        ),
+    )
+    return {k: v for k, v in dict(_work_item_row(st, wid)).items()}
+
+
+@app.post("/work-items/{wid}/gates/{gate}/reject")
+async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
+    st = request.app.state
+    _work_item_row(st, wid)
+    if gate not in _GATE_NAMES:
+        raise HTTPException(404, f"unknown gate {gate!r}")
+    if _pending_gate(st, wid) != gate:
+        raise HTTPException(409, f"gate {gate!r} is not pending")
+    await st.db.write(lambda c: store.reject_gate(c, wid, gate, body.note))
+    return {k: v for k, v in dict(_work_item_row(st, wid)).items()}
 
 
 @app.get("/worker-sessions/{sid}/log")
