@@ -3,6 +3,8 @@ default:
 
 variables:
   UV_CACHE_DIR: .uv-cache
+  # Chunk B's adapters shell out to real `git` and `bd`; the slim image ships neither.
+  BD_VERSION: "1.2.2"
 
 cache:
   key:
@@ -12,6 +14,11 @@ cache:
     - .uv-cache
 
 lint-and-test:
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl
+    - curl -fsSL "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_amd64.tar.gz" | tar -xz -C /usr/local/bin bd
+    - git config --global user.email ci@kraft.invalid && git config --global user.name "Kraft CI"
+    - git --version && bd version
   script:
     - uv sync --frozen
     - uv run ruff check .
