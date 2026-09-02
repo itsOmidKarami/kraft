@@ -8,6 +8,9 @@ async def env_setup(
 ) -> str:
     worktree = run_dirs.worktrees / work_item_id
     branch = f"kraft/{work_item_id}"
+    if worktree.is_dir():
+        # idempotent: a prior (crashed) run already created the worktree.
+        return "done"
     return await _subprocess.run_task(
         db,
         run_dirs,

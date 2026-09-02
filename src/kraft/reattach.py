@@ -1,0 +1,111 @@
+from __future__ import annotations
+
+import asyncio
+import logging
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import psutil
+
+from kraft import store
+from kraft.adapters.subprocess import _resolve_result_file
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ReattachSummary:
+    scanned: int = 0
+    adopted: list[str] = field(default_factory=list)
+    resolved_from_file: list[str] = field(default_factory=list)
+    unknown: list[str] = field(default_factory=list)
+    resumed_work_items: list[str] = field(default_factory=list)
+
+
+_resolve_file = _resolve_result_file
+
+
+def _pid_alive(pid: int) -> bool:
+    """True only if pid names a live process (a zombie/defunct child is NOT alive)."""
+    try:
+        return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return False
+    except psutil.Error:
+        return False
+
+
+def _identity_ok(pid: int, pid_start_time) -> bool:
+    if pid_start_time is None or not _pid_alive(pid):
+        return False
+    try:
+        return abs(psutil.Process(pid).create_time() - pid_start_time) < 1e-6
+    except psutil.Error:
+        return False
+
+
+async def _adopt(db, session_id: str, pid: int, poll_s: float = 0.5) -> None:
+    while _pid_alive(pid):
+        await asyncio.sleep(poll_s)
+    row = db.read(
+        lambda c: c.execute(
+            "SELECT result_path FROM worker_sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+    )
+    status = _resolve_file(Path(row["result_path"])) or "failed"
+    await db.write(lambda c: store.session_exited(c, session_id, status))
+
+
+async def reattach(db, run_dirs, registry) -> tuple[ReattachSummary, dict[str, asyncio.Task]]:
+    rows = db.read(
+        lambda c: c.execute(
+            "SELECT * FROM worker_sessions WHERE status IN ('pending', 'running')"
+        ).fetchall()
+    )
+    summary = ReattachSummary(scanned=len(rows))
+    adopted_tasks: dict[str, asyncio.Task] = {}
+
+    for r in rows:
+        sid = r["id"]
+        if r["status"] == "pending":
+            await db.write(lambda c, sid=sid: store.session_unknown(c, sid))
+            await db.write(
+                lambda c, r=r: store.mark_needs_human(
+                    c,
+                    r["work_item_id"],
+                    r["node_id"],
+                    "reattach: session pending, spawn unconfirmed",
+                )
+            )
+            summary.unknown.append(sid)
+            continue
+
+        pid = r["pid"]
+        if pid is not None and _identity_ok(pid, r["pid_start_time"]):
+            await db.write(lambda c, sid=sid: store.session_reattached(c, sid))
+            adopted_tasks[sid] = asyncio.create_task(_adopt(db, sid, pid))
+            summary.adopted.append(sid)
+            continue
+
+        status = _resolve_file(Path(r["result_path"]))
+        if status is not None:
+            await db.write(lambda c, sid=sid: store.session_reattached(c, sid))
+            await db.write(lambda c, sid=sid, status=status: store.session_exited(c, sid, status))
+            summary.resolved_from_file.append(sid)
+        else:
+            await db.write(lambda c, sid=sid: store.session_unknown(c, sid))
+            await db.write(
+                lambda c, r=r: store.mark_needs_human(
+                    c,
+                    r["work_item_id"],
+                    r["node_id"],
+                    "reattach: running session, PID identity unconfirmed, no result",
+                )
+            )
+            summary.unknown.append(sid)
+
+    active = db.read(
+        lambda c: c.execute("SELECT id FROM work_items WHERE status = 'active'").fetchall()
+    )
+    summary.resumed_work_items = [row["id"] for row in active]
+    return summary, adopted_tasks

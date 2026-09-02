@@ -3,10 +3,20 @@ name = "kraft"
 version = "0.0.0"
 description = "Kraft orchestrator walking skeleton"
 requires-python = ">=3.14"
-dependencies = ["pyyaml>=6", "psutil>=5"]
+dependencies = [
+    "pyyaml>=6",
+    "psutil>=5",
+    "fastapi>=0.141.1",
+    "uvicorn>=0.52.4",
+]
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.9", "pre-commit>=4"]
+dev = [
+    "pytest>=8",
+    "ruff>=0.9",
+    "pre-commit>=4",
+    "httpx>=0.28.1",
+]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -17,7 +27,10 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["e2e: end-to-end tests needing a real claude binary (Chunk C)"]
+markers = [
+    "e2e: end-to-end tests needing a real claude binary (Chunk C)",
+    "slow: tests that take tens of seconds (reattach/shutdown)",
+]
 
 [tool.ruff]
 line-length = 100
