@@ -137,10 +137,17 @@ The walking skeleton is now green — all 3 chunks (A, B, C) are built and the
 hermetic suite passes (70 passed / 1 skipped) — so the deferred master plans
 below can begin.
 
-1. Full `default.yaml` + gates (`01` §8)
-2. Policy engine as a component + backward-motion coordinator + fix loops
+1. ✅ Full `default.yaml` + gates (`01` §8)
+2. ✅ Policy engine as a component + backward-motion coordinator + fix loops
    (`02` §7)
-3. WebSocket transport + the React UI (`05`)
+3. ✅ WebSocket transport + the React UI (`05`) — shipped as **3A** (WS
+   backend: `Database.on_commit`, `Broadcaster`, `WS /ws/events`,
+   `GET /work-items` + `/templates`, static SPA serving) and **3B**
+   (`frontend/` Vite + React 18 + TS SPA: Board, New Work Item modal, Work
+   Item Detail with chain stepper / current-node panel / event timeline /
+   log modal / inline gates; one global WS with backoff reconnect;
+   Playwright e2e). Deferred UI slices (auth, pause/steer, search panel,
+   cross-repo federation panels) tracked against their own efforts.
 4. Indexer + search (`04`)
 5. GitLab adapter + `open_mr` / `mr_checks` / `merge` (`03` §6)
 6. Cross-repo federation (`06`)

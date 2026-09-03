@@ -26,3 +26,42 @@ lint-and-test:
     - uv run pytest -m "not e2e"
   after_script:
     - uv cache prune --ci
+
+frontend:
+  image: node:20-bookworm-slim
+  cache:
+    key:
+      files:
+        - frontend/package-lock.json
+    paths:
+      - frontend/node_modules
+  before_script:
+    - cd frontend && npm ci
+  script:
+    - npm run build
+    - npm test
+
+# Manual / non-blocking, mirroring the gated Python e2e (pytest -m "not e2e").
+# Needs a live orchestrator + a browser, so it stays out of the blocking gate.
+frontend-e2e:
+  image: mcr.microsoft.com/playwright:v1.62.1-noble
+  when: manual
+  allow_failure: true
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl python3
+    - curl -fsSL "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_amd64.tar.gz" | tar -xz -C /usr/local/bin bd
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+    - export PATH="$HOME/.local/bin:$PATH"
+    - git config --global user.email ci@kraft.invalid && git config --global user.name "Kraft CI"
+    - uv sync --frozen
+    - cd frontend && npm ci && npx playwright install chromium && cd ..
+  script:
+    - cd frontend && npm run build && cd ..
+    - export PATH="$HOME/.local/bin:$PATH"
+    - uv run python frontend/e2e/serve.py > e2e-server.log 2>&1 &
+    - for i in $(seq 1 60); do grep -q KRAFT_E2E_REPO e2e-server.log && break; sleep 1; done
+    - export KRAFT_E2E_REPO=$(sed -n 's/.*KRAFT_E2E_REPO=//p' e2e-server.log)
+    - test -n "$KRAFT_E2E_REPO" || { cat e2e-server.log; exit 1; }
+    - cd frontend && npm run e2e
+  after_script:
+    - cat e2e-server.log || true
