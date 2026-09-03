@@ -10,7 +10,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -53,7 +53,33 @@ CREATE TABLE worker_sessions (
 );
 
 CREATE INDEX idx_worker_sessions_status ON worker_sessions(status);
+
+CREATE TABLE retry_counters (
+  work_item_id  TEXT NOT NULL REFERENCES work_items(id),
+  key           TEXT NOT NULL,
+  count         INTEGER NOT NULL DEFAULT 0,
+  cap_attempts  INTEGER NOT NULL,
+  cap_wall_s    INTEGER NOT NULL,
+  started_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL,
+  PRIMARY KEY (work_item_id, key)
+);
 """
+
+_MIGRATIONS: dict[int, list[str]] = {
+    1: [
+        """CREATE TABLE retry_counters (
+  work_item_id  TEXT NOT NULL REFERENCES work_items(id),
+  key           TEXT NOT NULL,
+  count         INTEGER NOT NULL DEFAULT 0,
+  cap_attempts  INTEGER NOT NULL,
+  cap_wall_s    INTEGER NOT NULL,
+  started_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL,
+  PRIMARY KEY (work_item_id, key)
+)"""
+    ],
+}
 
 
 def _connect(path: str | Path) -> sqlite3.Connection:
@@ -74,9 +100,19 @@ def migrate(conn: sqlite3.Connection) -> None:
     if version > SCHEMA_VERSION:
         raise RuntimeError(f"database schema v{version} is newer than code v{SCHEMA_VERSION}")
     if version != 0:
-        # Only a fresh (v0) DB gets the full SCHEMA_SQL. A populated older
-        # version needs a real migration path, not a re-run of CREATE TABLE.
-        raise RuntimeError(f"no migration path from schema v{version} to v{SCHEMA_VERSION}")
+        # Forward-only migration: apply each version step's statements, bump
+        # user_version after each, all-or-nothing.
+        try:
+            conn.execute("BEGIN")
+            for v in range(version, SCHEMA_VERSION):
+                for stmt in _MIGRATIONS[v]:
+                    conn.execute(stmt)
+                conn.execute(f"PRAGMA user_version = {v + 1}")
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        return
     # Explicit transaction: sqlite3 with isolation_level='' does NOT auto-open txns for DDL.
     # Must BEGIN explicitly to ensure all DDL + user_version bump commit atomically or not at all.
     try:

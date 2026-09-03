@@ -19,6 +19,11 @@ def _quick_task() -> Template:
     return load_templates(_REPO_ROOT / "templates", reg).valid["quick-task"]
 
 
+def _default_template() -> Template:
+    reg = load_registry(_REPO_ROOT / "templates" / "registry.yaml")
+    return load_templates(_REPO_ROOT / "templates", reg).valid["default"]
+
+
 def _types(database, wid):
     return [e["type"] for e in database.read(lambda c: events.read_after(c, 0, wid))]
 
@@ -265,6 +270,128 @@ def test_resume_awaits_adopted_task_before_reading_status(tmp_path):
             t = _types(database, wid)
             assert "node_completed" in t
             assert t[-1] == "work_item_completed"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_resume_after_gate_approval_does_not_re_request_gate(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "fix")
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="make the failing test pass",
+                repo=str(repo),
+                template=_default_template(),
+                bd_cwd=str(tracker),
+            )
+            # walk to the spec gate
+            r = await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+            )
+            assert r == "awaiting_gate"
+            # approve it, then simulate a crash BEFORE the approve endpoint's run() spawns
+            await database.write(lambda c: store.approve_gate(c, wid, "spec_approval"))
+            wi = database.read(
+                lambda c: c.execute(
+                    "SELECT status, current_node_id FROM work_items WHERE id=?", (wid,)
+                ).fetchone()
+            )
+            assert wi["status"] == "active" and wi["current_node_id"] == "spec"
+
+            before = _types(database, wid)
+            r2 = await executor.resume(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                adopted={},
+                bd_cwd=str(tracker),
+            )
+            after = _types(database, wid)
+            new_events = after[len(before) :]
+            # the spec gate is NOT re-requested; the walk moves on to the plan gate
+            assert "gate_requested" in new_events  # for plan_approval
+            plan_gate = [
+                e
+                for e in database.read(lambda c: events.read_after(c, 0, wid))
+                if e["type"] == "gate_requested"
+            ][-1]
+            assert plan_gate["payload"]["gate"] == "plan_approval"
+            # no duplicate node_completed for spec
+            spec_completions = [
+                e
+                for e in database.read(lambda c: events.read_after(c, 0, wid))
+                if e["type"] == "node_completed" and e["payload"]["node_id"] == "spec"
+            ]
+            assert len(spec_completions) == 1
+            assert r2 == "awaiting_gate"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_resume_before_gate_approval_still_re_requests_gate(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "fix")
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(repo),
+                template=_default_template(),
+                bd_cwd=str(tracker),
+            )
+            await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+            )
+            # NOT approved. Force status back to active as a crash-mid-await would look?
+            # No — a genuine await leaves status=needs_human, which reattach does not
+            # resume. This case only matters if something set active without approving.
+            # Simulate that pathological state:
+            await database.write(
+                lambda c: c.execute("UPDATE work_items SET status='active' WHERE id=?", (wid,))
+            )
+            r = await executor.resume(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                adopted={},
+                bd_cwd=str(tracker),
+            )
+            assert r == "awaiting_gate"
+            last_gate = [
+                e
+                for e in database.read(lambda c: events.read_after(c, 0, wid))
+                if e["type"] == "gate_requested"
+            ][-1]
+            assert last_gate["payload"]["gate"] == "spec_approval"
         finally:
             await database.close()
 

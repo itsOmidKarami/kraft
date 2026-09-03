@@ -4,6 +4,7 @@ import sqlite3
 from datetime import UTC, datetime
 
 from kraft import events
+from kraft.policy import Cap
 
 
 def _now() -> str:
@@ -65,6 +66,55 @@ def mark_completed(conn: sqlite3.Connection, work_item_id) -> None:
         (_now(), work_item_id),
     )
     events.append(conn, work_item_id, "work_item_completed", {})
+
+
+def bump_counter(conn: sqlite3.Connection, work_item_id, key, cap) -> tuple[int, str, Cap]:
+    """Insert (count=1) or increment. Returns (count, started_at, effective_cap).
+
+    The effective cap is the one snapshotted on the row: `cap` on insert, the
+    stored snapshot on increment. Per spec §2.C the cap is written once at first
+    fire and not re-resolved per attempt, so callers must `check` against the
+    returned cap, not a fresh `resolve_cap` (which would pick up an edited
+    policy.yaml across a restart).
+    """
+    now = _now()
+    row = conn.execute(
+        "SELECT count, cap_attempts, cap_wall_s, started_at "
+        "FROM retry_counters WHERE work_item_id = ? AND key = ?",
+        (work_item_id, key),
+    ).fetchone()
+    if row is None:
+        conn.execute(
+            "INSERT INTO retry_counters (work_item_id, key, count, cap_attempts, "
+            "cap_wall_s, started_at, updated_at) VALUES (?, ?, 1, ?, ?, ?, ?)",
+            (work_item_id, key, cap.attempts, cap.wall_clock_s, now, now),
+        )
+        return 1, now, cap
+    new_count = row["count"] + 1
+    conn.execute(
+        "UPDATE retry_counters SET count = ?, updated_at = ? WHERE work_item_id = ? AND key = ?",
+        (new_count, now, work_item_id, key),
+    )
+    return new_count, row["started_at"], Cap(row["cap_attempts"], row["cap_wall_s"])
+
+
+def read_counter(conn: sqlite3.Connection, work_item_id, key):
+    return conn.execute(
+        "SELECT * FROM retry_counters WHERE work_item_id = ? AND key = ?",
+        (work_item_id, key),
+    ).fetchone()
+
+
+def mark_sessions_capped_out(conn: sqlite3.Connection, work_item_id, node_id) -> None:
+    # On breach every measuring task in the node becomes capped_out (02 §7.2) —
+    # including one that ended 'failed' on the final cycle. A 'done' co-task
+    # (a clean noop review) is left as-is.
+    conn.execute(
+        "UPDATE worker_sessions SET status = 'capped_out', exited_at = ? "
+        "WHERE work_item_id = ? AND node_id = ? "
+        "AND status NOT IN ('done', 'capped_out')",
+        (_now(), work_item_id, node_id),
+    )
 
 
 def request_gate(conn: sqlite3.Connection, work_item_id, node_id, gate) -> None:

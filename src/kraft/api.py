@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from kraft import events, executor, reattach, store
+from kraft import policy as policy_mod
 from kraft.db import Database
 from kraft.paths import RunDirs
 from kraft.templates import load_registry, load_templates
@@ -52,6 +53,14 @@ async def lifespan(app: FastAPI):
     templates_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or TEMPLATES_DIR)
     registry = load_registry(templates_dir / "registry.yaml")
     templates = load_templates(templates_dir, registry)
+
+    policy_obj = None
+    invalid_policy: list[str] = []
+    try:
+        policy_obj = policy_mod.load_policy(templates_dir / "policy.yaml")
+    except policy_mod.PolicyError as exc:
+        invalid_policy = [str(exc)]
+
     summary, adopted = await reattach.reattach(database, run_dirs, registry)
     app.state.tasks.update(adopted)
     for wid in summary.resumed_work_items:
@@ -68,6 +77,7 @@ async def lifespan(app: FastAPI):
                     registry=registry,
                     adopted=adopted,
                     bd_cwd=_bd_cwd(),
+                    policy=policy_obj,
                 ),
             ),
         )
@@ -76,6 +86,8 @@ async def lifespan(app: FastAPI):
     app.state.run_dirs = run_dirs
     app.state.registry = registry
     app.state.templates = templates
+    app.state.policy = policy_obj
+    app.state.invalid_policy = invalid_policy
     app.state.reattach_summary = summary
     try:
         yield
@@ -106,6 +118,11 @@ class NewWorkItem(BaseModel):
 @app.post("/work-items", status_code=201)
 async def create_work_item(body: NewWorkItem, request: Request):
     st = request.app.state
+    if st.invalid_policy:
+        # Spec §9: a malformed policy.yaml makes the process refuse work, same
+        # posture as an invalid registry — do not accept a run we cannot bound.
+        detail = "; ".join(st.invalid_policy)
+        raise HTTPException(503, f"policy config invalid, refusing work: {detail}")
     template = st.templates.valid.get(body.chain_template)
     if template is None:
         raise HTTPException(422, "unknown or invalid template")
@@ -130,7 +147,12 @@ async def create_work_item(body: NewWorkItem, request: Request):
             st.db,
             wid,
             executor.run(
-                st.db, st.run_dirs, work_item_id=wid, registry=st.registry, bd_cwd=_bd_cwd()
+                st.db,
+                st.run_dirs,
+                work_item_id=wid,
+                registry=st.registry,
+                bd_cwd=_bd_cwd(),
+                policy=st.policy,
             ),
         ),
     )
@@ -224,6 +246,7 @@ async def approve_gate(wid: str, gate: str, request: Request):
                 registry=st.registry,
                 bd_cwd=_bd_cwd(),
                 start_index=start,
+                policy=st.policy,
             ),
         ),
     )
@@ -260,8 +283,10 @@ async def get_log(sid: str, request: Request):
 async def health(request: Request):
     st = request.app.state
     invalid = st.templates.invalid
+    invalid_policy = st.invalid_policy
     return {
-        "status": "degraded" if invalid else "ok",
+        "status": "degraded" if (invalid or invalid_policy) else "ok",
         "invalid_templates": invalid,
+        "invalid_policy": invalid_policy,
         "reattach_summary": asdict(st.reattach_summary),
     }
