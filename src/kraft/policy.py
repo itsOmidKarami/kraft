@@ -29,7 +29,7 @@ def _cap(name: str, raw: object) -> Cap:
     try:
         attempts = raw["attempts"]
         wall_clock_s = raw["wall_clock_s"]
-    except (KeyError, TypeError) as exc:
+    except KeyError as exc:
         raise PolicyError(f"{name}: missing 'attempts' or 'wall_clock_s'") from exc
     if not isinstance(attempts, int) or isinstance(attempts, bool) or attempts < 1:
         raise PolicyError(f"{name}: 'attempts' must be a positive int")
