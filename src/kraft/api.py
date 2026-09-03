@@ -396,6 +396,10 @@ async def _spa_deep_link(request: Request, exc: HTTPException):
     # A client-side route that shadows a real API path (e.g. GET /work-items/<id>)
     # 404s before the catch-all sees it; hand those GETs the SPA shell too.
     dist = getattr(request.app.state, "frontend_dist", None)
-    if dist is not None and request.method == "GET":
+    if (
+        dist is not None
+        and request.method == "GET"
+        and "text/html" in request.headers.get("accept", "")
+    ):
         return FileResponse(dist / "index.html")
     return JSONResponse({"detail": exc.detail}, status_code=404)

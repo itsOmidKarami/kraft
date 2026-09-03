@@ -60,7 +60,7 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
     invalid: dict[str, str] = {}
 
     for path in sorted(Path(dir).glob("*.yaml")):
-        if path.name == "registry.yaml":
+        if path.name in {"registry.yaml", "policy.yaml"}:
             continue
         stem = path.stem
         try:

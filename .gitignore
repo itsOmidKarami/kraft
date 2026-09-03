@@ -18,3 +18,11 @@ __pycache__/
 
 # macOS
 .DS_Store
+
+# Frontend (Vite SPA)
+node_modules/
+*.tsbuildinfo
+frontend/node_modules/
+frontend/dist/
+frontend/playwright-report/
+frontend/test-results/
