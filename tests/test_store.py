@@ -128,6 +128,16 @@ def test_mark_sessions_capped_out_scoped_to_measuring_hook_points(tmp_path):
             )
             status = {r["id"]: r["status"] for r in rows}
             assert status == {"measure": "capped_out", "fix": "pending"}
+
+            # The SPA only learns session status from worker_session_* events, so
+            # the cap must emit one for each session it flipped (and only those).
+            evts = database.read(lambda c: events.read_after(c, 0, "w1"))
+            capped_evts = [
+                e
+                for e in evts
+                if e["type"] == "worker_session_exited" and e["payload"]["status"] == "capped_out"
+            ]
+            assert [e["payload"]["session_id"] for e in capped_evts] == ["measure"]
         finally:
             await database.close()
 

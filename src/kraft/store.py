@@ -127,12 +127,25 @@ def mark_sessions_capped_out(
     # points so the fix task's own session (on.implementation.start) is not
     # mislabelled as a capped-out measurement.
     placeholders = ",".join("?" * len(hook_points))
-    conn.execute(
-        f"UPDATE worker_sessions SET status = 'capped_out', exited_at = ? "
-        f"WHERE work_item_id = ? AND node_id = ? AND hook_point IN ({placeholders}) "
-        f"AND status NOT IN ('done', 'capped_out')",
-        (_now(), work_item_id, node_id, *hook_points),
+    where = (
+        f"work_item_id = ? AND node_id = ? AND hook_point IN ({placeholders}) "
+        f"AND status NOT IN ('done', 'capped_out')"
     )
+    args = (work_item_id, node_id, *hook_points)
+    capped = conn.execute(f"SELECT id FROM worker_sessions WHERE {where}", args).fetchall()
+    conn.execute(
+        f"UPDATE worker_sessions SET status = 'capped_out', exited_at = ? WHERE {where}",
+        (_now(), *args),
+    )
+    # The SPA only learns session status from worker_session_* events + hydrate;
+    # without this the chip stays on its last live status until the reconcile.
+    for row in capped:
+        events.append(
+            conn,
+            work_item_id,
+            "worker_session_exited",
+            {"session_id": row["id"], "status": "capped_out"},
+        )
 
 
 def request_gate(conn: sqlite3.Connection, work_item_id, node_id, gate) -> None:

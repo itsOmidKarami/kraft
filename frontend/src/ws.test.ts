@@ -58,6 +58,19 @@ describe("connectEvents", () => {
     expect(FakeWS.instances).toHaveLength(3);
   });
 
+  it("error+close on the same socket only schedules one reconnect", () => {
+    connectEvents();
+    // A broken socket fires 'error' then 'close'; both must not each retry.
+    FakeWS.instances[0].onerror!();
+    FakeWS.instances[0].onclose?.(); // detached by the first retry -> no-op
+    vi.advanceTimersByTime(1000);
+    expect(FakeWS.instances).toHaveLength(2);
+    // attempt incremented once, so the next rung is 2000ms, not 5000ms.
+    FakeWS.instances[1].onclose!();
+    vi.advanceTimersByTime(2000);
+    expect(FakeWS.instances).toHaveLength(3);
+  });
+
   it("the disposer stops reconnection", () => {
     const stop = connectEvents();
     stop();

@@ -22,6 +22,10 @@ export function connectEvents(): () => void {
       useStore.getState().applyEvent(JSON.parse(e.data));
     };
     const retry = () => {
+      // A broken socket fires 'error' then 'close'; detach both so only the
+      // first schedules a reconnect (otherwise attempt double-increments and
+      // the first timer leaks a duplicate WebSocket).
+      if (socket) socket.onclose = socket.onerror = null;
       if (stopped) return;
       useStore.getState().setConnection("reconnecting");
       const wait = BACKOFF[Math.min(attempt, BACKOFF.length - 1)];
