@@ -148,7 +148,13 @@ below can begin.
    log modal / inline gates; one global WS with backoff reconnect;
    Playwright e2e). Deferred UI slices (auth, pause/steer, search panel,
    cross-repo federation panels) tracked against their own efforts.
-4. Indexer + search (`04`)
+4. Indexer + search (`04`) — **4A shipped**: second SQLite index DB,
+   `.engineering/**/*.md` artifact ingestion (open-tag `kind`, content-hash
+   rename/delete diff), event + startup-scan triggers (no poll loop), FTS
+   `GET /search` / `GET /documents/{id}` / `POST /index/rescan`. 4B
+   (session-summary ingestion + `document_links` + `/work-items/{id}/documents`,
+   blocked on the Execution Worker) and 4C (`sqlite-vec` + local embedding +
+   hybrid search) tracked as Kraft-bj9.2 / Kraft-bj9.3.
 5. GitLab adapter + `open_mr` / `mr_checks` / `merge` (`03` §6)
 6. Cross-repo federation (`06`)
 

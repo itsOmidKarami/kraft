@@ -13,6 +13,10 @@ class RunDirs:
         return self.base / "orchestrator.db"
 
     @property
+    def index_db(self) -> Path:
+        return self.base / "index.db"
+
+    @property
     def logs(self) -> Path:
         return self.base / "logs"
 

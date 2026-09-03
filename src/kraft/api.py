@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import sqlite3
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
@@ -17,6 +18,8 @@ from starlette.websockets import WebSocketDisconnect
 from kraft import events, executor, reattach, store
 from kraft import policy as policy_mod
 from kraft.db import Database
+from kraft.index import db as index_db
+from kraft.index.service import Indexer
 from kraft.paths import RunDirs
 from kraft.templates import load_registry, load_templates
 from kraft.ws import Broadcaster
@@ -98,15 +101,24 @@ async def lifespan(app: FastAPI):
     dist = Path(os.environ.get("KRAFT_FRONTEND_DIST") or DEFAULT_FRONTEND_DIST)
     app.state.frontend_dist = dist if dist.is_dir() else None
 
+    index_conn = index_db.open_index(run_dirs.index_db)
+    indexer = Indexer(index_conn, database, repos_env=os.environ.get("KRAFT_INDEX_REPOS"))
+    await indexer.startup_scan()  # 04 §2: once, before live event handling
+    await indexer.start()
+    app.state.index_conn = index_conn
+    app.state.indexer = indexer
+
     broadcaster = Broadcaster(database)
     await broadcaster.start()
-    database.set_on_commit(broadcaster.notify)
+    database.set_on_commit(lambda: (broadcaster.notify(), indexer.notify()))
     app.state.broadcaster = broadcaster
     try:
         yield
     finally:
         database.set_on_commit(None)
         await broadcaster.stop()
+        await indexer.stop()
+        index_conn.close()
         tasks = list(app.state.tasks.values())
         for task in tasks:
             task.cancel()
@@ -339,6 +351,56 @@ async def get_log(sid: str, request: Request):
     return FileResponse(path, media_type="text/plain")
 
 
+@app.get("/search")
+async def search(
+    request: Request,
+    q: str = "",
+    source_kind: str | None = None,
+    kind: str | None = None,
+    repo: str | None = None,
+    mode: str = "fts",
+    limit: int = 20,
+):
+    if not q.strip():
+        raise HTTPException(422, "q is required")
+    if mode != "fts":
+        raise HTTPException(422, "only mode=fts is supported in this build")
+    limit = max(1, min(limit, 100))
+    try:
+        results = request.app.state.indexer.search(
+            q, source_kind=source_kind, kind=kind, repo=repo, limit=limit
+        )
+    except sqlite3.OperationalError as exc:
+        raise HTTPException(422, f"bad search query: {exc}") from exc
+    return {"query": q, "mode": mode, "results": results}
+
+
+@app.get("/documents/{doc_id}")
+async def get_document(doc_id: str, request: Request):
+    doc = request.app.state.indexer.get_document(doc_id)
+    if doc is None:
+        raise HTTPException(404, "unknown document")
+    return doc
+
+
+@app.post("/index/rescan")
+async def index_rescan(request: Request, repo: str | None = None):
+    ix = request.app.state.indexer
+    if repo is not None:
+        if repo not in ix.repos():
+            raise HTTPException(404, f"unknown repo: {repo}")
+        stats = await ix.rescan_repo(repo)
+        return {"repo": repo, "stats": vars(stats)}
+    allstats = await ix.rescan_all()
+    return {
+        "repo": None,
+        "stats": {
+            k: sum(getattr(s, k) for s in allstats.values())
+            for k in ("inserted", "updated", "renamed", "deleted")
+        },
+    }
+
+
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "[::1]", "::1"}
 
 
@@ -394,6 +456,7 @@ async def health(request: Request):
         "invalid_templates": invalid,
         "invalid_policy": invalid_policy,
         "reattach_summary": asdict(st.reattach_summary),
+        "index": st.indexer.health(),
     }
 
 
