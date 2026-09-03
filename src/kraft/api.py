@@ -124,6 +124,23 @@ def _spawn(app: FastAPI, wid: str, coro) -> asyncio.Task:
 app = FastAPI(lifespan=lifespan)
 
 
+@app.middleware("http")
+async def _spa_navigation(request: Request, call_next):
+    # A browser deep-link / refresh on a client-side route (e.g. /work-items/<id>)
+    # would otherwise hit the matching API route and render raw JSON. Any top-level
+    # navigation carries Sec-Fetch-Dest: document; hand those the SPA shell and let
+    # the client router resolve the path. Static assets are dest=script/style, XHR
+    # is dest=empty, so only real navigations are caught.
+    dist = getattr(request.app.state, "frontend_dist", None)
+    if (
+        dist is not None
+        and request.method == "GET"
+        and request.headers.get("sec-fetch-dest") == "document"
+    ):
+        return FileResponse(dist / "index.html")
+    return await call_next(request)
+
+
 class NewWorkItem(BaseModel):
     title: str
     repo: str

@@ -346,6 +346,13 @@ def test_spa_catchall_serves_index_when_dist_present(tmp_path, monkeypatch):
         # API route still wins
         assert client.get("/health").json()["status"] in ("ok", "degraded")
         assert client.get("/work-items").json() == {"items": [], "cursor": 0}
+        # browser navigation to a path that shadows a real API route (never 404s,
+        # so the exception handler can't catch it) -> SPA shell, not raw JSON
+        nav = {"sec-fetch-dest": "document"}
+        assert "<title>kraft</title>" in client.get("/work-items", headers=nav).text
+        assert "<title>kraft</title>" in client.get("/health", headers=nav).text
+        # a script/style/XHR fetch (dest != document) still hits the API
+        assert client.get("/health", headers={"sec-fetch-dest": "empty"}).json()["status"]
 
 
 @pytest.mark.parametrize(
