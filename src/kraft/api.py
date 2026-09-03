@@ -7,20 +7,25 @@ import os
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
+from starlette.websockets import WebSocketDisconnect
 
 from kraft import events, executor, reattach, store
 from kraft import policy as policy_mod
 from kraft.db import Database
 from kraft.paths import RunDirs
 from kraft.templates import load_registry, load_templates
+from kraft.ws import Broadcaster
 
 logger = logging.getLogger(__name__)
 
-TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+TEMPLATES_DIR = _REPO_ROOT / "templates"
+DEFAULT_FRONTEND_DIST = _REPO_ROOT / "frontend" / "dist"
 
 _GATE_NAMES = {"spec_approval", "plan_approval", "chain_finalized", "human_review_approval"}
 
@@ -89,9 +94,19 @@ async def lifespan(app: FastAPI):
     app.state.policy = policy_obj
     app.state.invalid_policy = invalid_policy
     app.state.reattach_summary = summary
+
+    dist = Path(os.environ.get("KRAFT_FRONTEND_DIST") or DEFAULT_FRONTEND_DIST)
+    app.state.frontend_dist = dist if dist.is_dir() else None
+
+    broadcaster = Broadcaster(database)
+    await broadcaster.start()
+    database.set_on_commit(broadcaster.notify)
+    app.state.broadcaster = broadcaster
     try:
         yield
     finally:
+        database.set_on_commit(None)
+        await broadcaster.stop()
         tasks = list(app.state.tasks.values())
         for task in tasks:
             task.cancel()
@@ -199,6 +214,34 @@ class GateReject(BaseModel):
     note: str
 
 
+@app.get("/work-items")
+async def list_work_items(request: Request):
+    st = request.app.state
+
+    def _read(c):
+        rows = c.execute("SELECT * FROM work_items ORDER BY created_at").fetchall()
+        cursor = c.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()[0]
+        return rows, cursor
+
+    rows, cursor = st.db.read(_read)
+    items = [
+        {
+            "id": r["id"],
+            "title": r["title"],
+            "repo": r["repo"],
+            "status": r["status"],
+            "chain_template": r["chain_template"],
+            "chain_definition": json.loads(r["chain_definition"]),
+            "current_node_id": r["current_node_id"],
+            "bead_id": r["bead_id"],
+            "created_at": r["created_at"],
+            "updated_at": r["updated_at"],
+        }
+        for r in rows
+    ]
+    return {"items": items, "cursor": cursor}
+
+
 @app.get("/work-items/{wid}")
 async def get_work_item(wid: str, request: Request):
     st = request.app.state
@@ -279,6 +322,51 @@ async def get_log(sid: str, request: Request):
     return FileResponse(path, media_type="text/plain")
 
 
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "[::1]", "::1"}
+
+
+def _origin_ok(origin: str | None) -> bool:
+    if not origin:
+        return True  # non-browser client
+    return urlsplit(origin).hostname in _LOCAL_HOSTS
+
+
+@app.websocket("/ws/events")
+async def ws_events(websocket: WebSocket, after_seq: int = 0):
+    if not _origin_ok(websocket.headers.get("origin")):
+        await websocket.close(code=1008)
+        return
+    st = websocket.app.state
+    bc = st.broadcaster
+    client = bc.register()
+    live_start = bc.cursor
+    await websocket.accept()
+    try:
+        for ev in st.db.read(lambda c: events.read_after(c, after_seq)):
+            if ev["seq"] <= live_start:
+                await websocket.send_json(ev)
+        while True:
+            if client.dropped:
+                await websocket.close(code=1011)
+                return
+            try:
+                ev = await asyncio.wait_for(client.queue.get(), timeout=1.0)
+            except TimeoutError:
+                continue
+            if ev["seq"] <= live_start:
+                continue
+            await websocket.send_json(ev)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        bc.unregister(client)
+
+
+@app.get("/templates")
+async def list_templates(request: Request):
+    return [{"id": tid} for tid in sorted(request.app.state.templates.valid)]
+
+
 @app.get("/health")
 async def health(request: Request):
     st = request.app.state
@@ -290,3 +378,24 @@ async def health(request: Request):
         "invalid_policy": invalid_policy,
         "reattach_summary": asdict(st.reattach_summary),
     }
+
+
+@app.get("/{path:path}")
+async def spa(path: str, request: Request):
+    dist = request.app.state.frontend_dist
+    if dist is None:
+        raise HTTPException(404, "not found")
+    candidate = (dist / path).resolve()
+    if dist.resolve() in candidate.parents and candidate.is_file():
+        return FileResponse(candidate)
+    return FileResponse(dist / "index.html")
+
+
+@app.exception_handler(404)
+async def _spa_deep_link(request: Request, exc: HTTPException):
+    # A client-side route that shadows a real API path (e.g. GET /work-items/<id>)
+    # 404s before the catch-all sees it; hand those GETs the SPA shell too.
+    dist = getattr(request.app.state, "frontend_dist", None)
+    if dist is not None and request.method == "GET":
+        return FileResponse(dist / "index.html")
+    return JSONResponse({"detail": exc.detail}, status_code=404)

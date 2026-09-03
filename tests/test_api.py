@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from support.harness import fake_templates_dir, isolated_bd, make_repo
 
@@ -16,6 +18,11 @@ def _client(tmp_path, monkeypatch, *, templates_dir=None):
     monkeypatch.setenv(
         "KRAFT_TEMPLATES_DIR",
         str(templates_dir or fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))),
+    )
+    # Hermetic against a real frontend/dist appearing (3B `npm run build`);
+    # a test that already pinned its own dist keeps it.
+    monkeypatch.setenv(
+        "KRAFT_FRONTEND_DIST", os.environ.get("KRAFT_FRONTEND_DIST") or str(tmp_path / "no-dist")
     )
     import kraft.api as api
 
@@ -268,3 +275,88 @@ def test_gate_reject_requires_note_and_is_terminal(tmp_path, monkeypatch):
 def test_gate_approve_unknown_work_item_404(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
         assert client.post("/work-items/nope/gates/spec_approval/approve").status_code == 404
+
+
+def test_list_work_items_shape_and_cursor(tmp_path, monkeypatch):
+    with _client(tmp_path, monkeypatch) as client:
+        client.post(
+            "/work-items", json={"title": "make the failing test pass", "repo": str(tmp_path)}
+        )
+        body = client.get("/work-items").json()
+        assert set(body) == {"items", "cursor"}
+        assert isinstance(body["cursor"], int) and body["cursor"] > 0
+        item = body["items"][0]
+        assert set(item) >= {
+            "id",
+            "title",
+            "repo",
+            "status",
+            "chain_template",
+            "chain_definition",
+            "current_node_id",
+            "bead_id",
+            "created_at",
+            "updated_at",
+        }
+        assert isinstance(item["chain_definition"], dict)
+        assert item["chain_definition"]["nodes"][0]["id"]
+
+
+def test_list_work_items_empty(tmp_path, monkeypatch):
+    with _client(tmp_path, monkeypatch) as client:
+        body = client.get("/work-items").json()
+        assert body == {"items": [], "cursor": 0}
+
+
+def test_templates_lists_only_resolvable_sorted(tmp_path, monkeypatch):
+    bad = fake_templates_dir(tmp_path, "claude")
+    (bad / "broken.yaml").write_text(
+        "id: broken\nnodes:\n  - {id: x, tasks: [on.nope], gate_after: null}\n"
+    )
+    with _client(tmp_path, monkeypatch, templates_dir=bad) as client:
+        got = client.get("/templates").json()
+        ids = [t["id"] for t in got]
+        assert "broken" not in ids
+        assert ids == sorted(ids)
+        assert "quick-task" in ids
+
+
+def test_spa_catchall_serves_index_when_dist_present(tmp_path, monkeypatch):
+    dist = tmp_path / "fe-dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<!doctype html><title>kraft</title>")
+    (dist / "assets" / "app.js").write_text("console.log(1)")
+    monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(dist))
+    with _client(tmp_path, monkeypatch) as client:
+        assert "<title>kraft</title>" in client.get("/").text
+        # deep link -> index.html
+        assert "<title>kraft</title>" in client.get("/work-items/abc123").text
+        # real asset -> that file
+        assert client.get("/assets/app.js").text == "console.log(1)"
+        # API route still wins
+        assert client.get("/health").json()["status"] in ("ok", "degraded")
+        assert client.get("/work-items").json() == {"items": [], "cursor": 0}
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["../secret", "../../etc/passwd", "/etc/passwd", "//etc/passwd", "assets/../../secret"],
+)
+def test_spa_catchall_never_serves_files_outside_dist(tmp_path, monkeypatch, path):
+    dist = tmp_path / "fe-dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<!doctype html><title>kraft shell</title>")
+    (tmp_path / "secret").write_text("TOP SECRET")
+    monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(dist))
+    with _client(tmp_path, monkeypatch) as client:
+        r = client.get(f"/{path}")
+        assert r.status_code == 200
+        assert "TOP SECRET" not in r.text
+        assert "kraft shell" in r.text
+
+
+def test_spa_catchall_404s_when_dist_absent(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "nope"))
+    with _client(tmp_path, monkeypatch) as client:
+        assert client.get("/some/spa/route").status_code == 404
+        assert client.get("/health").status_code == 200

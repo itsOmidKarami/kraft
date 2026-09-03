@@ -46,6 +46,17 @@ def enter_node(conn: sqlite3.Connection, work_item_id, node_id) -> None:
 
 
 def complete_node(conn: sqlite3.Connection, work_item_id, node_id) -> None:
+    # Idempotent: resume can re-enter an already-completed node (a reconciled
+    # non-fix node, or a fix_loop node re-measured after a crash in the
+    # complete_node -> enter_node window) and must not emit a second
+    # node_completed. See Kraft-gbt / Kraft-126.
+    done = conn.execute(
+        "SELECT 1 FROM events WHERE work_item_id = ? AND type = 'node_completed' "
+        "AND json_extract(payload, '$.node_id') = ? LIMIT 1",
+        (work_item_id, node_id),
+    ).fetchone()
+    if done:
+        return
     conn.execute("UPDATE work_items SET updated_at = ? WHERE id = ?", (_now(), work_item_id))
     events.append(conn, work_item_id, "node_completed", {"node_id": node_id})
 
@@ -68,7 +79,9 @@ def mark_completed(conn: sqlite3.Connection, work_item_id) -> None:
     events.append(conn, work_item_id, "work_item_completed", {})
 
 
-def bump_counter(conn: sqlite3.Connection, work_item_id, key, cap) -> tuple[int, str, Cap]:
+def bump_counter(
+    conn: sqlite3.Connection, work_item_id: str, key: str, cap: Cap
+) -> tuple[int, str, Cap]:
     """Insert (count=1) or increment. Returns (count, started_at, effective_cap).
 
     The effective cap is the one snapshotted on the row: `cap` on insert, the
@@ -98,22 +111,27 @@ def bump_counter(conn: sqlite3.Connection, work_item_id, key, cap) -> tuple[int,
     return new_count, row["started_at"], Cap(row["cap_attempts"], row["cap_wall_s"])
 
 
-def read_counter(conn: sqlite3.Connection, work_item_id, key):
+def read_counter(conn: sqlite3.Connection, work_item_id: str, key: str) -> sqlite3.Row | None:
     return conn.execute(
         "SELECT * FROM retry_counters WHERE work_item_id = ? AND key = ?",
         (work_item_id, key),
     ).fetchone()
 
 
-def mark_sessions_capped_out(conn: sqlite3.Connection, work_item_id, node_id) -> None:
-    # On breach every measuring task in the node becomes capped_out (02 §7.2) —
+def mark_sessions_capped_out(
+    conn: sqlite3.Connection, work_item_id: str, node_id: str, hook_points: list[str]
+) -> None:
+    # On breach every *measuring* task in the node becomes capped_out (02 §7.2) —
     # including one that ended 'failed' on the final cycle. A 'done' co-task
-    # (a clean noop review) is left as-is.
+    # (a clean noop review) is left as-is. Scoped to the node's measuring hook
+    # points so the fix task's own session (on.implementation.start) is not
+    # mislabelled as a capped-out measurement.
+    placeholders = ",".join("?" * len(hook_points))
     conn.execute(
-        "UPDATE worker_sessions SET status = 'capped_out', exited_at = ? "
-        "WHERE work_item_id = ? AND node_id = ? "
-        "AND status NOT IN ('done', 'capped_out')",
-        (_now(), work_item_id, node_id),
+        f"UPDATE worker_sessions SET status = 'capped_out', exited_at = ? "
+        f"WHERE work_item_id = ? AND node_id = ? AND hook_point IN ({placeholders}) "
+        f"AND status NOT IN ('done', 'capped_out')",
+        (_now(), work_item_id, node_id, *hook_points),
     )
 
 

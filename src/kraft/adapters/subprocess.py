@@ -49,6 +49,7 @@ async def run_task(
     cwd: str | Path,
     env: dict | None = None,
     post_resolve: Callable[[str, Path, int], str] | None = None,
+    poll_s: float = 0.05,
 ) -> str:
     log_path = run_dirs.logs / f"{session_id}.log"
     result_path = run_dirs.results / f"{session_id}.json"
@@ -89,7 +90,13 @@ async def run_task(
         pid_start_time = None
     await db.write(lambda c: store.session_running(c, session_id, proc.pid, pid_start_time))
 
-    returncode = await asyncio.to_thread(proc.wait)
+    # Poll instead of `await asyncio.to_thread(proc.wait)`: a blocked thread is
+    # uncancellable, so on SIGTERM the executor task's cancel() could not
+    # interrupt it and uvicorn fell back to a hard exit (same fix as
+    # reattach._adopt).
+    while proc.poll() is None:
+        await asyncio.sleep(poll_s)
+    returncode = proc.returncode
     status = _resolve(result_path, returncode)
     if post_resolve is not None:
         status = post_resolve(status, log_path, returncode)

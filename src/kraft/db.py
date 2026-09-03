@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
 from typing import TypeVar
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -129,20 +132,32 @@ def migrate(conn: sqlite3.Connection) -> None:
 
 
 class Database:
-    def __init__(self, writer: sqlite3.Connection, reader: sqlite3.Connection) -> None:
+    def __init__(
+        self,
+        writer: sqlite3.Connection,
+        reader: sqlite3.Connection,
+        *,
+        on_commit: Callable[[], None] | None = None,
+    ) -> None:
         self._writer = writer
         self._reader = reader
+        self._on_commit = on_commit
         self._queue: asyncio.Queue = asyncio.Queue()
         self._task: asyncio.Task | None = None
 
+    def set_on_commit(self, cb: Callable[[], None] | None) -> None:
+        self._on_commit = cb
+
     @classmethod
-    async def open(cls, path: str | Path) -> Database:
+    async def open(
+        cls, path: str | Path, *, on_commit: Callable[[], None] | None = None
+    ) -> Database:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         writer = _connect(path)
         migrate(writer)
         reader = _connect(path)
-        self = cls(writer, reader)
+        self = cls(writer, reader, on_commit=on_commit)
         self._task = asyncio.create_task(self._run())
         return self
 
@@ -168,6 +183,11 @@ class Database:
                 else:
                     if not fut.done():
                         fut.set_result(result)
+                    if self._on_commit is not None:
+                        try:
+                            self._on_commit()
+                        except Exception:
+                            logger.exception("on_commit listener raised")
             finally:
                 self._queue.task_done()
 

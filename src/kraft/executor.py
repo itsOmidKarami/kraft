@@ -7,6 +7,7 @@ import uuid
 
 from kraft import builtins as _builtins
 from kraft import events, store
+from kraft import policy as _policy
 from kraft.adapters import agent as _agent
 from kraft.adapters import beads
 from kraft.adapters import subprocess as _subprocess
@@ -123,7 +124,15 @@ async def _measure_node(
 
 
 async def _walk_node(
-    db, run_dirs, work_item_id: str, node: dict, row, registry: Registry, worktree, *, policy=None
+    db,
+    run_dirs,
+    work_item_id: str,
+    node: dict,
+    row,
+    registry: Registry,
+    worktree,
+    *,
+    policy: _policy.Policy | None = None,
 ) -> str:
     key = node.get("fix_loop")
 
@@ -143,8 +152,6 @@ async def _walk_node(
     if policy is None:
         raise RuntimeError(f"node {node['id']!r} has fix_loop but no policy was provided")
 
-    from kraft import policy as _policy
-
     cap = _policy.resolve_cap(policy, key)
     while True:
         verdict, failed, _excs = await _measure_node(
@@ -163,7 +170,11 @@ async def _walk_node(
         )
         if _policy.check(count=count, started_at=started_at, cap=cap, now=_now()) == "breached":
             reason = f"{key} exhausted after {count - 1} fix cycle(s)"
-            await db.write(lambda c: store.mark_sessions_capped_out(c, work_item_id, node["id"]))
+            await db.write(
+                lambda c: store.mark_sessions_capped_out(
+                    c, work_item_id, node["id"], list(node["tasks"])
+                )
+            )
             await db.write(
                 lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node["id"], reason)
             )
@@ -212,7 +223,7 @@ async def run(
     registry: Registry,
     bd_cwd: str | None = None,
     start_index: int = 0,
-    policy=None,
+    policy: _policy.Policy | None = None,
 ) -> str:
     row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
@@ -244,7 +255,16 @@ async def run(
 
 
 async def _reconcile_current_node(
-    db, run_dirs, work_item_id, node, row, registry, worktree, adopted, *, policy=None
+    db,
+    run_dirs,
+    work_item_id,
+    node,
+    row,
+    registry,
+    worktree,
+    adopted,
+    *,
+    policy: _policy.Policy | None = None,
 ) -> str:
     node_id = node["id"]
     sessions = db.read(
@@ -321,7 +341,7 @@ async def resume(
     registry: Registry,
     adopted: dict,
     bd_cwd: str | None = None,
-    policy=None,
+    policy: _policy.Policy | None = None,
 ) -> str:
     row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
