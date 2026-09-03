@@ -329,8 +329,18 @@ def test_spa_catchall_serves_index_when_dist_present(tmp_path, monkeypatch):
     monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(dist))
     with _client(tmp_path, monkeypatch) as client:
         assert "<title>kraft</title>" in client.get("/").text
-        # deep link -> index.html
-        assert "<title>kraft</title>" in client.get("/work-items/abc123").text
+        # browser navigation deep link -> index.html
+        html = {"accept": "text/html,application/xhtml+xml"}
+        assert "<title>kraft</title>" in client.get("/work-items/abc123", headers=html).text
+        # XHR (Accept: application/json) still gets a real JSON 404
+        r = client.get("/work-items/abc123", headers={"accept": "application/json"})
+        assert r.status_code == 404
+        assert "detail" in r.json()
+        r = client.get(
+            "/worker-sessions/does-not-exist/log", headers={"accept": "application/json"}
+        )
+        assert r.status_code == 404
+        assert "detail" in r.json()
         # real asset -> that file
         assert client.get("/assets/app.js").text == "console.log(1)"
         # API route still wins
