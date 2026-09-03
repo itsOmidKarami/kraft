@@ -81,6 +81,59 @@ def test_node_lifecycle_events_and_current_node(tmp_path):
     asyncio.run(scenario())
 
 
+def test_complete_node_is_idempotent(tmp_path):
+    """Resume can re-enter an already-completed node; only one node_completed."""
+
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await _mk_item(database)
+            await database.write(lambda c: store.load_chain(c, "w1", "env_setup"))
+            await database.write(lambda c: store.complete_node(c, "w1", "env_setup"))
+            await database.write(lambda c: store.complete_node(c, "w1", "env_setup"))
+            types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0))]
+            assert types.count("node_completed") == 1
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_mark_sessions_capped_out_scoped_to_measuring_hook_points(tmp_path):
+    """Only the node's measuring sessions are capped_out, not the fix task's."""
+
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await _mk_item(database)
+            for sid, hook in (("measure", "on.test.run"), ("fix", "on.implementation.start")):
+                await database.write(
+                    lambda c, sid=sid, hook=hook: store.create_session(
+                        c,
+                        id=sid,
+                        work_item_id="w1",
+                        node_id="verify",
+                        hook_point=hook,
+                        log_path="/l",
+                        result_path="/r",
+                    )
+                )
+            await database.write(
+                lambda c: store.mark_sessions_capped_out(c, "w1", "verify", ["on.test.run"])
+            )
+            rows = database.read(
+                lambda c: c.execute(
+                    "SELECT id, status FROM worker_sessions WHERE work_item_id='w1'"
+                ).fetchall()
+            )
+            status = {r["id"]: r["status"] for r in rows}
+            assert status == {"measure": "capped_out", "fix": "pending"}
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 def test_mark_needs_human_and_completed(tmp_path):
     async def scenario():
         database = await _open(tmp_path)
