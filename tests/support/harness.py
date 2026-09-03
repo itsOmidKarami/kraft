@@ -27,6 +27,18 @@ def make_repo(tmp_path: Path, name: str = "sample") -> Path:
     return dest
 
 
+def make_repo_with_engineering(tmp_path: Path, files: dict[str, str], name: str = "sample") -> Path:
+    """make_repo(), then add repo-relative `files` (path -> text), commit, return the repo."""
+    dest = make_repo(tmp_path, name)
+    for rel, text in files.items():
+        fp = dest / rel
+        fp.parent.mkdir(parents=True, exist_ok=True)
+        fp.write_text(text)
+    _git(dest, "add", "-A")
+    _git(dest, "commit", "-m", "add engineering docs")
+    return dest
+
+
 def isolated_bd(tmp_path: Path) -> Path:
     """A throwaway git repo with its own beads workspace. Return the repo path."""
     repo = tmp_path / "tracker"

@@ -294,17 +294,24 @@ surface (`02` §10.1).
 
 ## 11. Build Order
 
-1. **Schema + migrations** — `documents`, `documents_fts`, `document_links`. Nothing
-   else works without it.
-2. **Artifact ingestion** — git scan, front-matter parse, content-hash diff (§4, §5).
-   Exercises the open-tag `kind` mechanism end to end first.
-3. **Event-bus subscription + startup scan** — wires ingestion into the
-   orchestrator's live flow (§2), no standalone poll loop.
-4. **Session-summary ingestion + node/task linkage** — depends on Execution Worker's
-   `session_summary_ref` existing; validates the merge story (§3/§4/§5).
-5. **FTS5 `/search` endpoint, text-only** — usable milestone before vector work.
-6. **`sqlite-vec` + local embedding + chunking + hybrid ranking** — the optional half
-   from `01` §11, last since it's the piece most likely to need iteration.
+1. ✅ **Schema + migrations** (Effort 4A) — `documents`, `documents_fts`,
+   `document_links` (links table created, populated in 4B). Second SQLite file,
+   disposable/rebuildable.
+2. ✅ **Artifact ingestion** (Effort 4A) — git scan, front-matter parse,
+   content-hash diff (§4, §5). Exercises the open-tag `kind` mechanism end to end.
+3. ✅ **Event-bus subscription + startup scan** (Effort 4A) — `on_commit`
+   multiplexer, `work_item_completed` triggers a targeted repo rescan, one startup
+   full scan, `POST /index/rescan` escape hatch. No poll loop (§2). Connected-repo
+   set = distinct `work_items.repo` ∪ `KRAFT_INDEX_REPOS`.
+4. **Session-summary ingestion + node/task linkage** (Effort 4B, bead Kraft-bj9.2) —
+   blocked on the Execution Worker writing `.engineering/sessions/*.md` +
+   `session_summary_ref`; validates the merge story (§3/§4/§5). Also lands
+   `GET /work-items/{id}/documents` and the `on.env.prepare` piggyback rescan.
+5. ✅ **FTS5 `/search` endpoint, text-only** (Effort 4A) — plus `GET /documents/{id}`.
+   `mode=fts` only; `mode=vector|hybrid` rejected with 422 until 4C.
+6. **`sqlite-vec` + local embedding + chunking + hybrid ranking** (Effort 4C, bead
+   Kraft-bj9.3) — the optional half from `01` §11, last since it's the piece most
+   likely to need iteration.
 
 ---
 
