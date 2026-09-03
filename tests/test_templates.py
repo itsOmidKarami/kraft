@@ -62,6 +62,8 @@ def test_shipped_default_yaml_is_the_ten_node_chain():
     reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
     ts = templates.load_templates(TEMPLATES_DIR, reg)
     assert "default" in ts.valid, ts.invalid
+    # policy.yaml lives in the templates dir but is not a chain template
+    assert "policy" not in ts.invalid
     nodes = ts.valid["default"].nodes
     assert [n["id"] for n in nodes] == [
         "spec",
