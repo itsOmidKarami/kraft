@@ -432,7 +432,7 @@ piece that depended on research finished last (federation).
 
 ## Changelog
 
-Consolidated from `docs/drive/ai_workflow_conceptual_model_v1.md` plus the
+Consolidated from `ai_workflow_conceptual_model_v1.md` plus the
 conceptual-level content of `chain_flow_model_addendum_v1.md`,
 `chain_backward_motion_addendum_v1.md`, and the §6/§7 rewrite from
 `cross_repo_federation_design_v1.md`. Decisions preserved; superseded drafts dropped.

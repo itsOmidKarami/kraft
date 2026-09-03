@@ -83,6 +83,7 @@ def fake_templates_dir(tmp_path: Path, agent_command: str) -> Path:
             }
         )
     )
+    shutil.copy(_REPO_ROOT / "templates" / "policy.yaml", d / "policy.yaml")
     return d
 
 

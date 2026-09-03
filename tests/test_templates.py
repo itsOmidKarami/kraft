@@ -175,10 +175,71 @@ def test_materialize_quick_task_from_shipped_templates():
     assert chain == {
         "template_id": "quick-task",
         "nodes": [
-            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None},
-            {"id": "implementation", "tasks": ["on.implementation.start"], "gate_after": None},
-            {"id": "verify", "tasks": ["on.test.run"], "gate_after": None},
+            {
+                "id": "env_setup",
+                "tasks": ["on.env.prepare"],
+                "gate_after": None,
+                "fix_loop": None,
+            },
+            {
+                "id": "implementation",
+                "tasks": ["on.implementation.start"],
+                "gate_after": None,
+                "fix_loop": None,
+            },
+            {"id": "verify", "tasks": ["on.test.run"], "gate_after": None, "fix_loop": None},
         ],
     }
     assert "current_node_id" not in chain
     assert json.loads(json.dumps(chain)) == chain  # round-trips
+
+
+def test_default_yaml_verify_node_has_fix_loop():
+    reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
+    ts = templates.load_templates(TEMPLATES_DIR, reg)
+    assert "default" in ts.valid, ts.invalid
+    verify = next(n for n in ts.valid["default"].nodes if n["id"] == "verify")
+    assert verify["fix_loop"] == "verify_fix_loop"
+
+
+def test_materialize_carries_fix_loop():
+    reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
+    tmpl = templates.load_templates(TEMPLATES_DIR, reg).valid["default"]
+    mat = templates.materialize(tmpl)
+    by_id = {n["id"]: n for n in mat["nodes"]}
+    assert by_id["verify"]["fix_loop"] == "verify_fix_loop"
+    assert by_id["env_setup"]["fix_loop"] is None
+
+
+def test_non_string_fix_loop_quarantines_template(tmp_path):
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "quick-task.yaml": GOOD_TEMPLATE,
+            "badloop.yaml": (
+                "id: badloop\nnodes:\n  - { id: n1, tasks: [on.test.run], fix_loop: 123 }\n"
+            ),
+        },
+    )
+    reg = templates.load_registry(d / "registry.yaml")
+    ts = templates.load_templates(d, reg)
+    assert "quick-task" in ts.valid
+    assert "badloop" in ts.invalid
+    assert "fix_loop" in ts.invalid["badloop"]
+
+
+def test_fix_loop_with_no_tasks_quarantines_template(tmp_path):
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "emptyloop.yaml": (
+                "id: emptyloop\nnodes:\n  - { id: n1, tasks: [], fix_loop: n1_fix_loop }\n"
+            ),
+        },
+    )
+    reg = templates.load_registry(d / "registry.yaml")
+    ts = templates.load_templates(d, reg)
+    assert "emptyloop" in ts.invalid
+    assert "fix_loop" in ts.invalid["emptyloop"]

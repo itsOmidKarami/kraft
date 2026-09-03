@@ -46,6 +46,75 @@ def test_health_ok_and_degraded(tmp_path, monkeypatch):
         assert "reattach_summary" in body
 
 
+def test_health_reports_invalid_policy(tmp_path, monkeypatch):
+    bad = fake_templates_dir(tmp_path, "claude")
+    (bad / "policy.yaml").write_text("default: { attempts: 0, wall_clock_s: 1 }\n")
+    with _client(tmp_path, monkeypatch, templates_dir=bad) as client:
+        h = client.get("/health").json()
+        assert h["status"] == "degraded"
+        assert h["invalid_policy"]
+
+
+def test_health_ok_with_valid_policy(tmp_path, monkeypatch):
+    with _client(tmp_path, monkeypatch) as client:
+        h = client.get("/health").json()
+        assert h["invalid_policy"] == []
+
+
+def test_post_refused_when_policy_invalid(tmp_path, monkeypatch):
+    bad = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
+    (bad / "policy.yaml").write_text("default: { attempts: 0, wall_clock_s: 1 }\n")
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch, templates_dir=bad) as client:
+        r = client.post(
+            "/work-items",
+            json={"title": "x", "repo": str(repo), "chain_template": "default"},
+        )
+        assert r.status_code != 201
+        assert "policy" in r.json()["detail"].lower()
+
+
+def test_default_chain_fix_loop_breach_over_http(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "noop")
+    repo = make_repo(tmp_path)
+    # Own policy fixture — do not gate on the shipped attempts value.
+    tdir = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
+    (tdir / "policy.yaml").write_text(
+        "loops:\n  verify_fix_loop: { attempts: 2, wall_clock_s: 3600 }\n"
+        "default: { attempts: 2, wall_clock_s: 3600 }\n"
+    )
+    with _client(tmp_path, monkeypatch, templates_dir=tdir) as client:
+        wid = client.post(
+            "/work-items",
+            json={
+                "title": "make the failing test pass",
+                "repo": str(repo),
+                "chain_template": "default",
+            },
+        ).json()["id"]
+        # verify (fix_loop) sits before the human_review gate, so the cap breach
+        # drops the item to needs_human before human_review_approval is ever reached.
+        for gate in ("spec_approval", "plan_approval", "chain_finalized"):
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                r = client.post(f"/work-items/{wid}/gates/{gate}/approve")
+                if r.status_code == 200:
+                    break
+                time.sleep(0.2)
+            assert r.status_code == 200, r.text
+        events = _poll_events(client, wid, "work_item_needs_human", timeout=60)
+
+        assert len([e for e in events if e["type"] == "fix_cycle_started"]) == 2
+
+        item = client.get(f"/work-items/{wid}").json()
+        assert item["status"] == "needs_human"
+        assert item["current_node_id"] == "verify"
+        assert any(
+            s["node_id"] == "verify" and s["status"] == "capped_out"
+            for s in item["worker_sessions"]
+        )
+
+
 def test_post_materializes_chain(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:

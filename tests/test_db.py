@@ -42,7 +42,7 @@ def test_migrate_is_idempotent(tmp_path):
     table_count = conn2.execute(
         "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
     ).fetchone()[0]
-    assert table_count == 3
+    assert table_count == 4
 
 
 def test_migrate_rejects_newer_db(tmp_path):
@@ -83,11 +83,82 @@ INVALID SQL STATEMENT;
         tables = conn.execute(
             "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
         ).fetchone()[0]
-        assert tables == 3
+        assert tables == 4
         user_version = conn.execute("PRAGMA user_version").fetchone()[0]
         assert user_version == db.SCHEMA_VERSION
     finally:
         db.SCHEMA_SQL = original_schema
+
+
+def test_migrate_creates_retry_counters(tmp_path):
+    conn = db._connect(tmp_path / "orchestrator.db")
+    db.migrate(conn)
+    assert "retry_counters" in _tables(conn)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+
+
+def test_migrate_v1_to_v2_adds_retry_counters(tmp_path):
+    path = tmp_path / "orchestrator.db"
+    conn = db._connect(path)
+    # Build a v1 DB by hand: run every CREATE from SCHEMA_SQL except retry_counters.
+    conn.execute("BEGIN")
+    for stmt in (s.strip() for s in db.SCHEMA_SQL.split(";")):
+        if stmt and "retry_counters" not in stmt:
+            conn.execute(stmt)
+    conn.execute("PRAGMA user_version = 1")
+    conn.commit()
+    conn.execute(
+        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
+        "'active','now','now')"
+    )
+    conn.commit()
+    conn.close()
+
+    conn2 = db._connect(path)
+    db.migrate(conn2)
+    assert conn2.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert "retry_counters" in _tables(conn2)
+    assert conn2.execute("SELECT count(*) FROM work_items").fetchone()[0] == 1  # data preserved
+
+
+def test_bump_counter_inserts_then_increments(tmp_path):
+    import asyncio as _a
+
+    from kraft import policy, store
+
+    async def scenario():
+        database = await db.Database.open(tmp_path / "orchestrator.db")
+        try:
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at) VALUES "
+                    "('w','t','/r','quick-task','{}','active','now','now')"
+                )
+            )
+            cap = policy.Cap(attempts=3, wall_clock_s=100)
+            n1, s1, c1 = await database.write(
+                lambda c: store.bump_counter(c, "w", "verify_fix_loop", cap)
+            )
+            assert n1 == 1
+            assert c1 == cap  # insert returns the passed cap
+            # a later bump with a DIFFERENT live cap must still return the snapshot
+            n2, s2, c2 = await database.write(
+                lambda c: store.bump_counter(
+                    c, "w", "verify_fix_loop", policy.Cap(attempts=99, wall_clock_s=1)
+                )
+            )
+            assert n2 == 2
+            assert s2 == s1  # started_at frozen at first fire
+            assert c2 == cap  # increment returns the row's snapshot, not attempts=99
+            row = database.read(lambda c: store.read_counter(c, "w", "verify_fix_loop"))
+            assert row["count"] == 2
+            assert row["cap_attempts"] == 3 and row["cap_wall_s"] == 100
+        finally:
+            await database.close()
+
+    _a.run(scenario())
 
 
 def test_status_check_constraints(tmp_path):

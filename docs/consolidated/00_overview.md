@@ -8,9 +8,9 @@ tool identities (remote-review CLI, exact `bd` CLI surface, local embedding mode
 and all Codex support are explicit placeholders — see each document's §"Open
 Questions".
 
-This set was consolidated from 10 layered documents in `../drive/` (one base
-conceptual model + five component designs + four addendums). The originals are
-retained unchanged; `DECISION_MAP.md` traces every decision from there to here.
+This set was consolidated from 10 layered documents (one base conceptual model +
+five component designs + four addendums), since removed. `DECISION_MAP.md` traces
+every decision from each original (named there) to here.
 
 ---
 

@@ -17,6 +17,7 @@ nodes:
     gate_after: null
   - id: verify
     tasks: [on.test.run, on.review.local.run]
+    fix_loop: verify_fix_loop
     gate_after: null
   - id: open_mr
     tasks: [on.mr.open]

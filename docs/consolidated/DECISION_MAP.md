@@ -1,6 +1,6 @@
 # Decision Map
 
-Traceability from the 10 original documents in `../drive/` to the 7 consolidated
+Traceability from the 10 original documents (since removed) to the 7 consolidated
 documents here. Use this to confirm the consolidation preserved every decision and
 spec — not byte-for-byte, but every design decision, schema, endpoint, and rule.
 
