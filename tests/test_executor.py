@@ -275,9 +275,15 @@ def test_run_unknown_hook_in_registry_is_needs_human(tmp_path):
             )
             assert row["status"] == "needs_human"
 
-            types = _events(database, wid)
+            evts = database.read(lambda c: events.read_after(c, 0, wid))
+            types = [e["type"] for e in evts]
             assert "work_item_needs_human" in types
             assert "work_item_completed" not in types
+            # the raised exception's repr is preserved in the needs_human reason
+            reason = next(
+                e["payload"]["reason"] for e in evts if e["type"] == "work_item_needs_human"
+            )
+            assert "on.bogus" in reason and "KeyError" in reason
         finally:
             await database.close()
 

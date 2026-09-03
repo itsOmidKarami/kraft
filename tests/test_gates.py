@@ -6,7 +6,7 @@ from pathlib import Path
 
 from support.harness import fake_registry, isolated_bd, make_repo
 
-from kraft import db, events, executor, store
+from kraft import db, events, executor, policy, store
 from kraft.paths import RunDirs
 from kraft.templates import load_registry, load_templates
 
@@ -90,6 +90,7 @@ def test_approving_all_four_gates_completes_chain(tmp_path):
         database = await db.Database.open(rd.db)
         try:
             registry = fake_registry(sys.executable, _FAKE_AGENT)
+            pol = policy.load_policy(_REPO_ROOT / "templates" / "policy.yaml")
             wid = await executor.intake(
                 database,
                 rd,
@@ -105,7 +106,7 @@ def test_approving_all_four_gates_completes_chain(tmp_path):
             )["chain_definition"]
 
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
             )
             for gate in (
                 "spec_approval",
@@ -124,6 +125,7 @@ def test_approving_all_four_gates_completes_chain(tmp_path):
                     registry=registry,
                     bd_cwd=str(tracker),
                     start_index=start,
+                    policy=pol,
                 )
             assert result == "completed"
             row = database.read(

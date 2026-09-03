@@ -104,6 +104,29 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
             invalid[tid] = f"template {tid!r}: unknown gate_after value(s) {bad_gates}"
             continue
 
+        bad_loop = next(
+            (
+                n["id"]
+                for n in nodes
+                if "fix_loop" in n
+                and n["fix_loop"] is not None
+                and not (isinstance(n["fix_loop"], str) and n["fix_loop"])
+            ),
+            None,
+        )
+        if bad_loop is not None:
+            invalid[tid] = (
+                f"template {tid!r}: node {bad_loop!r} 'fix_loop' must be a non-empty string or null"
+            )
+            continue
+
+        empty_loop = next((n["id"] for n in nodes if n.get("fix_loop") and not n["tasks"]), None)
+        if empty_loop is not None:
+            invalid[tid] = (
+                f"template {tid!r}: node {empty_loop!r} has 'fix_loop' but no tasks to measure"
+            )
+            continue
+
         unknown = sorted({t for n in nodes for t in n["tasks"] if t not in registry.hooks})
         if unknown:
             invalid[tid] = f"template {tid!r}: hook(s) {unknown} are not in the registry"
@@ -122,6 +145,7 @@ def materialize(template: Template) -> dict:
                 "id": n["id"],
                 "tasks": list(n["tasks"]),
                 "gate_after": n.get("gate_after"),
+                "fix_loop": n.get("fix_loop"),
             }
             for n in template.nodes
         ],

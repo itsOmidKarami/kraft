@@ -1,0 +1,5 @@
+# Cap defaults for loop-bounded work. Every number here is a placeholder
+# (docs/consolidated/02_orchestrator_core.md §13) — tune against real runs.
+loops:
+  verify_fix_loop:   { attempts: 3, wall_clock_s: 3600 }
+default:             { attempts: 3, wall_clock_s: 3600 }
