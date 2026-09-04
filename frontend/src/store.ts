@@ -97,6 +97,25 @@ export const useStore = create<State>((set, get) => ({
               completedNodes: [...new Set([...(w.completedNodes ?? []), p.node_id])],
             })),
           };
+        // Emitted the moment the row is created, whatever the hook kind. A builtin
+        // hook never reaches worker_session_started, and worker_session_exited has
+        // no node_id/hook_point to rebuild from — so without this the panel saw no
+        // session for the current node and rendered no gate until a reload
+        // (Kraft-dce).
+        case "worker_session_created": {
+          const rows = s.sessionsByItem[id] ?? [];
+          const row: WorkerSession = {
+            id: p.session_id,
+            work_item_id: id,
+            node_id: p.node_id,
+            hook_point: p.hook_point,
+            status: "pending",
+            attempt: 1,
+            created_at: ev.created_at,
+            exited_at: null,
+          };
+          return { ...base, sessionsByItem: { ...s.sessionsByItem, [id]: upsert(rows, row) } };
+        }
         case "worker_session_started": {
           const rows = s.sessionsByItem[id] ?? [];
           const row: WorkerSession = {

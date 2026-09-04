@@ -191,11 +191,14 @@ def test_session_lifecycle(tmp_path):
             )
             assert row["status"] == "pending"
             assert row["pid"] is None
-            # create_session emits no event
-            assert (
-                database.read(lambda c: events.read_after(c, 0, "w1"))[-1]["type"]
-                == "work_item_created"
-            )
+            # create_session announces the session (Kraft-dce)
+            created = database.read(lambda c: events.read_after(c, 0, "w1"))[-1]
+            assert created["type"] == "worker_session_created"
+            assert created["payload"] == {
+                "session_id": "s1",
+                "node_id": "env_setup",
+                "hook_point": "on.env.prepare",
+            }
 
             await database.write(lambda c: store.session_running(c, "s1", 4321, 111.5))
             row = database.read(
@@ -319,6 +322,45 @@ def test_session_reattached_emits_event_without_row_change(tmp_path):
             ev = database.read(lambda c: events.read_after(c, 0, "w1"))[-1]
             assert ev["type"] == "session_reattached"
             assert ev["payload"] == {"session_id": "s1", "pid": 4321}
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_create_session_announces_the_session(tmp_path):
+    """Every session must announce itself at creation, whatever the hook kind.
+
+    `worker_session_started` is emitted only by `session_running`, which only the
+    subprocess adapter calls. A builtin hook goes create_session -> session_exited,
+    so the SPA is never told the session exists; `worker_session_exited` carries
+    only {session_id, status}, with no node_id or hook_point to build a row from.
+    The client then has no session for the current node, decides no gate is
+    awaiting, and renders no Approve button until someone reloads (Kraft-dce).
+    """
+
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await _mk_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s9",
+                    work_item_id="w1",
+                    node_id="chain_review",
+                    hook_point="on.chain.review_ready",
+                    log_path="/l",
+                    result_path="/r",
+                )
+            )
+            ev = database.read(lambda c: events.read_after(c, 0, "w1"))[-1]
+            assert ev["type"] == "worker_session_created"
+            assert ev["payload"] == {
+                "session_id": "s9",
+                "node_id": "chain_review",
+                "hook_point": "on.chain.review_ready",
+            }
         finally:
             await database.close()
 

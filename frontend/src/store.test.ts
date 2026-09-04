@@ -65,6 +65,26 @@ describe("applyEvent", () => {
     expect(rows[0].status).toBe("done");
   });
 
+  it("worker_session_created makes the row appear before anything runs", () => {
+    // A builtin hook never emits worker_session_started, so without this the row
+    // only existed after a REST hydrate — and CurrentNodePanel, seeing no session
+    // for the current node, rendered no gate at all (Kraft-dce).
+    const st = useStore.getState();
+    st.applyEvent(ev({ seq: 2, type: "worker_session_created", payload: { session_id: "s7", node_id: "chain_review", hook_point: "on.chain.review_ready" } }));
+    const rows = useStore.getState().sessionsByItem.w1;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: "s7", node_id: "chain_review", hook_point: "on.chain.review_ready", status: "pending" });
+  });
+
+  it("a created session survives the exit event that follows it", () => {
+    const st = useStore.getState();
+    st.applyEvent(ev({ seq: 2, type: "worker_session_created", payload: { session_id: "s7", node_id: "chain_review", hook_point: "on.chain.review_ready" } }));
+    st.applyEvent(ev({ seq: 3, type: "worker_session_exited", payload: { session_id: "s7", status: "done" } }));
+    const rows = useStore.getState().sessionsByItem.w1;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe("done");
+  });
+
   it("session_unknown sets the session row status to unknown", () => {
     const st = useStore.getState();
     st.applyEvent(ev({ seq: 2, type: "worker_session_started", payload: { session_id: "s1", node_id: "env_setup", hook_point: "on.env.prepare" } }));
