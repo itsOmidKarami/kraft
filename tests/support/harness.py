@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import atexit
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -39,20 +41,39 @@ def make_repo_with_engineering(tmp_path: Path, files: dict[str, str], name: str 
     return dest
 
 
+_bd_template_dir: Path | None = None
+
+
+def _bd_template() -> Path:
+    """One `bd init`ed workspace per test-run process, built lazily and reused.
+
+    `bd init` spins up Dolt (~3.6s); doing it per test dominated the suite. Every
+    caller only needs a *working* bd workspace (adapters run `bd create`/`close`,
+    tests run `bd show <id>` — no test inspects cross-issue state), so we init
+    once and hand out `copytree` copies.
+    """
+    global _bd_template_dir
+    if _bd_template_dir is None:
+        tpl = Path(tempfile.mkdtemp(prefix="kraft-bd-tpl-"))
+        _git(tpl, "init", "-q", "-b", "main")
+        _git(tpl, "config", "user.email", "t@t")
+        _git(tpl, "config", "user.name", "t")
+        subprocess.run(
+            ["bd", "init", "--prefix", "TEST"],
+            cwd=tpl,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        atexit.register(shutil.rmtree, tpl, ignore_errors=True)
+        _bd_template_dir = tpl
+    return _bd_template_dir
+
+
 def isolated_bd(tmp_path: Path) -> Path:
     """A throwaway git repo with its own beads workspace. Return the repo path."""
     repo = tmp_path / "tracker"
-    repo.mkdir(parents=True, exist_ok=True)
-    _git(repo, "init", "-q", "-b", "main")
-    _git(repo, "config", "user.email", "t@t")
-    _git(repo, "config", "user.name", "t")
-    subprocess.run(
-        ["bd", "init", "--prefix", "TEST"],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    shutil.copytree(_bd_template(), repo)
     return repo
 
 
