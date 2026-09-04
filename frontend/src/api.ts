@@ -1,4 +1,11 @@
-import type { Health, KraftEvent, WorkItem, WorkerSession } from "./types";
+import type {
+  DocumentDetail,
+  Health,
+  KraftEvent,
+  SearchResponse,
+  WorkItem,
+  WorkerSession,
+} from "./types";
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -50,3 +57,19 @@ export const getTemplates = () => req<{ id: string }[]>("/templates");
 export const getHealth = () => req<Health>("/health");
 
 export const logUrl = (sessionId: string) => `/worker-sessions/${sessionId}/log`;
+
+export const search = (params: {
+  q: string;
+  source_kind?: string;
+  kind?: string;
+  repo?: string;
+}) => {
+  const qs = new URLSearchParams({ q: params.q });
+  if (params.source_kind) qs.set("source_kind", params.source_kind);
+  if (params.kind) qs.set("kind", params.kind);
+  if (params.repo) qs.set("repo", params.repo);
+  return req<SearchResponse>(`/search?${qs}`);
+};
+
+export const getDocument = (id: string) =>
+  req<DocumentDetail>(`/documents/${encodeURIComponent(id)}`);
