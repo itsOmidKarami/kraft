@@ -275,8 +275,14 @@ def approve_gate(conn: sqlite3.Connection, work_item_id, gate) -> None:
     events.append(conn, work_item_id, "gate_approved", {"gate": gate})
 
 
-def reject_gate(conn: sqlite3.Connection, work_item_id, gate, note) -> None:
-    conn.execute("UPDATE work_items SET updated_at = ? WHERE id = ?", (_now(), work_item_id))
+def reject_gate(conn: sqlite3.Connection, work_item_id, gate, note, *, reopen: bool) -> None:
+    """Record the rejection. `reopen` flips the item back to active for the
+    backward-motion re-run (02 §7.2); a terminal reject leaves it needs_human."""
+    status = "'active'" if reopen else "status"
+    conn.execute(
+        f"UPDATE work_items SET status = {status}, updated_at = ? WHERE id = ?",
+        (_now(), work_item_id),
+    )
     events.append(conn, work_item_id, "gate_rejected", {"gate": gate, "note": note})
 
 

@@ -90,6 +90,10 @@ def test_repo_crud_round_trips_through_the_yaml(tmp_path, client, templates_dir)
     assert patched.json()["enabled"] is False and patched.json()["name"] == "renamed"
     assert client.patch("/repos?path=/nope", json={"enabled": False}).status_code == 404
 
+    # POST stores git's resolved toplevel, so the path a client connected with is
+    # not always the path stored — patch and delete must still find it.
+    assert client.patch(f"/repos?path={repo}", json={"enabled": True}).status_code == 200
+
     assert client.delete(f"/repos?path={path}").status_code == 204
     assert client.get("/repos").json()["repos"] == []
     assert client.delete(f"/repos?path={path}").status_code == 404
