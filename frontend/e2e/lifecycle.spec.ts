@@ -88,3 +88,19 @@ test("pause, steer and resume from the detail screen", async ({ page, request })
     });
   }
 });
+
+test("a deep link to a work item loads it, not an empty husk", async ({ page }) => {
+  // Opening or refreshing /work-items/<id> is a document navigation, which the
+  // server answers with the SPA shell. Cached under that URL, the shell was then
+  // served to the SPA's own fetch for the same path: every panel rendered empty
+  // and the controls were the ones for a state the item was not in.
+  const id = await createItem(page, "deep link reload", "quick-task");
+  await expect(page.locator(".detail h2")).toHaveText("deep link reload");
+  await page.goto(`/work-items/${id}`); // full page load, not a client-side route
+  await page.getByRole("tab", { name: /Timeline/ }).click();
+  await expect(page.locator('[data-type="node_started"]').first()).toBeVisible({
+    timeout: 30_000,
+  });
+  await page.getByRole("tab", { name: /Tasks/ }).click();
+  await expect(page.locator(".current-node .row").first()).toBeVisible();
+});

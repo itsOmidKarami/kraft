@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { CaretDown, CaretRight, X } from "@phosphor-icons/react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import * as api from "../api";
 import { useStore } from "../store";
 import { useModal } from "../useModal";
@@ -19,9 +19,14 @@ const MERGE_POLICIES = [
 ];
 export function IntakeModal({ onClose }: { onClose: () => void }) {
   const nav = useNavigate();
-  const knownRepos = useStore((s) => [
-    ...new Set(Object.values(s.workItems).map((w) => w.repo)),
-  ]);
+  // Design 5.1 says this field offers the connected-repo set. Reading it off
+  // existing work items instead left a fresh install with an empty field, no
+  // suggestions and nothing saying a repo has to be connected first — the app's
+  // primary action, dead on arrival. Connected repos lead; repos already in
+  // flight follow, so an item outlives its repo being disconnected.
+  const itemRepos = useStore((s) => Object.values(s.workItems).map((w) => w.repo));
+  const [connected, setConnected] = useState<string[]>([]);
+  const knownRepos = [...new Set([...connected, ...itemRepos])];
   const [templates, setTemplates] = useState<string[]>(["quick-task"]);
   const [repo, setRepo] = useState("");
   const [title, setTitle] = useState("");
@@ -47,6 +52,10 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
         // would submit a chain the server never listed (Kraft-2ih).
         setTpl((cur) => (ids.includes(cur) ? cur : ids[0]));
       })
+      .catch(() => {});
+    api
+      .getRepos()
+      .then(({ repos }) => setConnected(repos.filter((r) => r.enabled).map((r) => r.path)))
       .catch(() => {});
   }, []);
 
@@ -106,6 +115,12 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
               <option key={r} value={r} />
             ))}
           </datalist>
+          {knownRepos.length === 0 && (
+            <span className="field-hint">
+              no repos connected yet — <Link to="/settings/repos">connect one in Settings</Link>,
+              or type an absolute path
+            </span>
+          )}
         </div>
 
         <div className="field">

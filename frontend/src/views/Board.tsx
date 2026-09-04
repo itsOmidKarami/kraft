@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Prohibit } from "@phosphor-icons/react";
 import { ChainBar } from "../components/ui";
 import { Gate } from "../components/Gate";
-import { ago } from "../format";
+import { ago, repoName } from "../format";
 import { useStore } from "../store";
 import type { WorkItem } from "../types";
 
@@ -35,8 +35,9 @@ function Facet({
           aria-pressed={name === value}
           // clicking the selected facet clears it — there is no explicit "all" row
           onClick={() => onPick(name === value ? null : name)}
+          title={name}
         >
-          {name}
+          {label === "Repos" ? repoName(name) : name}
           <span className="facet-count">{n}</span>
         </button>
       ))}
@@ -53,8 +54,17 @@ export function Board() {
   const [tpl, setTpl] = useState<string | null>(null);
   const [allDone, setAllDone] = useState(false);
 
+  // A board that cannot reach the server rendered as a board with no work on
+  // it — the same empty state as "you are all caught up". Say which it is.
+  const [loadErr, setLoadErr] = useState<string | null>(null);
   useEffect(() => {
-    useStore.getState().bootstrap().catch(() => {});
+    useStore
+      .getState()
+      .bootstrap()
+      .then(
+        () => setLoadErr(null),
+        (e) => setLoadErr(e instanceof Error ? e.message : String(e)),
+      );
   }, []);
 
   // Each facet's counts are taken with the *other* facet applied, so the two
@@ -106,6 +116,11 @@ export function Board() {
       </aside>
 
       <div className="board-groups">
+        {loadErr && (
+          <p className="form-error" role="alert">
+            could not load the board — {loadErr}
+          </p>
+        )}
         {groups.map((g) => (
           <section key={g.id}>
             <div className="group-head">
@@ -140,8 +155,8 @@ function BoardRow({ item }: { item: WorkItem }) {
           {item.title}
         </Link>
         <div className="board-row-meta">
-          <span>{item.repo}</span>
-          <code>{item.id}</code>
+          <span title={item.repo}>{repoName(item.repo)}</span>
+          {item.bead_id && <code>{item.bead_id}</code>}
           <span>{item.chain_template}</span>
           <span>{ago(item.updated_at)}</span>
         </div>
