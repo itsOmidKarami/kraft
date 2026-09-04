@@ -63,3 +63,36 @@ export interface Health {
   invalid_templates: Record<string, string>;
   invalid_policy: string[];
 }
+
+export interface SearchResult {
+  id: string;
+  repo: string;
+  source_kind: "artifact" | "session_summary";
+  kind: string | null;
+  title: string;
+  path: string;
+  snippet: string;
+  score: number;
+  links: unknown[];
+}
+
+export interface SearchResponse {
+  query: string;
+  mode: string;
+  results: SearchResult[];
+}
+
+export interface DocumentDetail {
+  id: string;
+  repo: string;
+  source_kind: "artifact" | "session_summary";
+  kind: string | null;
+  title: string;
+  path: string;
+  content: string;
+  metadata: Record<string, unknown>;
+  source_created_at: string | null;
+  source_updated_at: string | null;
+  indexed_at: string;
+  links: unknown[];
+}

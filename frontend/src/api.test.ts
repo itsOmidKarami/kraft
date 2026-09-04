@@ -53,4 +53,27 @@ describe("api", () => {
   it("logUrl builds the log path", () => {
     expect(api.logUrl("s9")).toBe("/worker-sessions/s9/log");
   });
+
+  it("search builds the query string and omits blank filters", async () => {
+    const f = mockFetch(200, { query: "x", mode: "fts", results: [] });
+    vi.stubGlobal("fetch", f);
+    await api.search({ q: "reconnect backoff", kind: "specs", repo: "", source_kind: "" });
+    const url = f.mock.calls[0][0] as string;
+    expect(url).toContain("/search?");
+    expect(url).toContain("q=reconnect+backoff");
+    expect(url).toContain("kind=specs");
+    expect(url).not.toContain("repo=");
+    expect(url).not.toContain("source_kind=");
+  });
+
+  it("getDocument fetches by id and returns the row", async () => {
+    vi.stubGlobal("fetch", mockFetch(200, { id: "d1", content: "# hi", metadata: {} }));
+    const doc = await api.getDocument("d1");
+    expect(doc.id).toBe("d1");
+  });
+
+  it("search surfaces the 422 detail from a bad FTS query", async () => {
+    vi.stubGlobal("fetch", mockFetch(422, { detail: 'bad search query: near "x"' }));
+    await expect(api.search({ q: '"x' })).rejects.toThrow(/bad search query/);
+  });
 });
