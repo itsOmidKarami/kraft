@@ -44,17 +44,6 @@ function Facet({
   );
 }
 
-/**
- * The gate a needs-you item is waiting on. `pendingGate` is only present once
- * the item has been hydrated or a `gate_requested` event has landed, so fall
- * back to the current node's own gate — the board never fetches per item.
- */
-function pendingGate(i: WorkItem): string | null {
-  if (i.pendingGate) return i.pendingGate;
-  const node = i.chain_definition.nodes.find((n) => n.id === i.current_node_id);
-  return node?.gate_after ?? null;
-}
-
 const DONE_PREVIEW = 5;
 
 export function Board() {
@@ -142,7 +131,7 @@ export function Board() {
 }
 
 function BoardRow({ item }: { item: WorkItem }) {
-  const gate = item.status === "needs_human" ? pendingGate(item) : null;
+  const gate = item.status === "needs_human" ? (item.pending_gate ?? null) : null;
   const capped = item.status === "completed" ? null : item.cappedOut;
   return (
     <div className="board-row" data-testid="board-card">

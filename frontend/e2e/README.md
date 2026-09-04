@@ -1,8 +1,17 @@
 # Playwright end-to-end
 
-One spec (`chain.spec.ts`): open the Board, create a `quick-task` work item
-against a sample repo with a failing test, watch the chain run to
-`work_item_completed` in the UI, then confirm the Board card shows `completed`.
+Four specs, all against one running orchestrator:
+
+| spec | what it drives |
+| --- | --- |
+| `chain.spec.ts` | create a `quick-task` item against a sample repo with a failing test, watch it reach `work_item_completed`, open the linked session summary |
+| `lifecycle.spec.ts` | the human-in-the-loop controls: gate approve, gate reject → re-plan, pause / steer / resume |
+| `regression.spec.ts` | every Settings page (repos, templates, plugins, policy, access), Analytics, the search overlay |
+| `search.spec.ts` | the search overlay in detail: filters, document viewer, Escape handling |
+
+`lifecycle.spec.ts` slows the implementation hook through `PUT /registry` so
+there is something to pause, and puts it back afterwards — so these run one at
+a time (`workers: 1`, already set in `playwright.config.ts`).
 
 This is **manual / non-blocking**, mirroring the gated Python e2e
 (`pytest -m e2e`, `KRAFT_E2E=1`). It is not part of `npm test` or the blocking

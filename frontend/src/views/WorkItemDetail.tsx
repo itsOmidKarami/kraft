@@ -9,7 +9,6 @@ import { Gate } from "../components/Gate";
 import { LinkedDocuments } from "../components/LinkedDocuments";
 import { PausedCard } from "../components/PausedCard";
 import { ChainBar, Row, RowState, RowText, StatusGlyph, Tabs } from "../components/ui";
-import { awaitingGate } from "../gate";
 import { elapsed, tokens, usd } from "../format";
 import { useStore } from "../store";
 import type { KraftEvent, WorkItem } from "../types";
@@ -75,7 +74,7 @@ export function WorkItemDetail() {
   const nodes = item.chain_definition.nodes;
   const at = nodes.findIndex((n) => n.id === item.current_node_id);
   const runtime = nodeRuntime(events, item.current_node_id);
-  const gate = awaitingGate(item, sessions);
+  const gate = item.pending_gate ?? null;
   const nodeSessions = sessions.filter((s) => s.node_id === item.current_node_id);
 
   const pause = async () => {

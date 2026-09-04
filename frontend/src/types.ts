@@ -25,8 +25,10 @@ export interface WorkItem {
   pending_steer_context?: string | null;
   created_at: string;
   updated_at: string;
+  /** The gate waiting on a person, straight from the server — a rejected gate
+   *  is not pending, which no client-side inference from sessions can see. */
+  pending_gate?: string | null;
   // client-derived, not from the list endpoint:
-  pendingGate?: string | null;
   rejectNote?: string | null;
   fixCycle?: number;
   completedNodes?: string[];
