@@ -69,3 +69,43 @@ def test_open_index_rebuilds_when_file_corrupt(tmp_path):
 
 def test_rundirs_index_db_path(tmp_path):
     assert RunDirs(tmp_path).index_db == tmp_path / "index.db"
+
+
+def test_fresh_index_has_vector_tables(tmp_path):
+    """4C: chunks + vec0 vectors land in the same file as FTS (04 §7)."""
+    conn = index_db.open_index(tmp_path / "index.db")
+    names = {
+        r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type IN ('table','view')")
+    }
+    assert {"document_chunks", "document_vectors"} <= names
+    assert conn.execute("select vec_version()").fetchone()[0]
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == index_db.INDEX_SCHEMA_VERSION
+    conn.close()
+
+
+def test_v1_index_migrates_forward_keeping_documents(tmp_path):
+    path = tmp_path / "index.db"
+    conn = index_db.connect(path)
+    schema = "\n".join(
+        ln
+        for ln in index_db.INDEX_SCHEMA_SQL.splitlines()
+        if "document_chunks" not in ln and "document_vectors" not in ln
+    )
+    # crude but sufficient: drop the two 4C statements, keep everything else
+    stmts = [s.strip() for s in schema.split(";") if s.strip()]
+    conn.executescript(";\n".join(s for s in stmts if "chunk" not in s and "vec0" not in s) + ";")
+    conn.execute("PRAGMA user_version = 1")
+    conn.execute(
+        "INSERT INTO documents (id, repo, source_kind, kind, title, path, content, "
+        "content_hash, metadata_json, indexed_at) VALUES "
+        "('d1','/r','artifact','specs','A','.engineering/specs/a.md','body','h','{}','t')"
+    )
+    conn.commit()
+    conn.close()
+
+    conn = index_db.open_index(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == index_db.INDEX_SCHEMA_VERSION
+    assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1
+    names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "document_chunks" in names
+    conn.close()

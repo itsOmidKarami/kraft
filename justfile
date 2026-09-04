@@ -10,6 +10,12 @@ setup:
     uv sync
     cd frontend && npm install
 
+# Install deps including semantic search (downloads a ~130MB model on first
+# search). Without this, /search still works in fts mode.
+setup-vector:
+    uv sync --extra vector
+    cd frontend && npm install
+
 # Run backend only (127.0.0.1:8765)
 api:
     uv run python -m kraft

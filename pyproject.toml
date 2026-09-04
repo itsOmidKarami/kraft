@@ -9,7 +9,13 @@ dependencies = [
     "fastapi>=0.141.1",
     "uvicorn>=0.52.4",
     "websockets>=15",
+    "sqlite-vec>=0.1.9",
 ]
+
+[project.optional-dependencies]
+# Semantic search (Effort 4C). Optional: without it FTS still works, hybrid
+# degrades to fts, and mode=vector 422s. Keeps a ~130MB model download opt-in.
+vector = ["fastembed>=0.8"]
 
 [dependency-groups]
 dev = [
