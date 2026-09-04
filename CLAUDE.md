@@ -60,13 +60,35 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 
 ## Build & Test
 
-_Add your build and test commands here_
+Everything goes through `just` — run `just` for the list.
 
 ```bash
-# Example:
-# npm install
-# npm test
+just setup      # uv sync + npm install
+just test       # backend tests (pass args: just test -k search)
+just test-ui    # frontend unit tests
+just lint       # ruff check + format check
 ```
+
+## Running Kraft
+
+Two ways, and neither is `python -m kraft` by hand.
+
+```bash
+just dev        # dev instance: state in .dev/, agents faked, UI on :5173
+just dev-seed   # fill a running dev instance with work items in every state
+just dev-reset  # throw .dev/ away
+
+just install    # build the SPA, install the `kraft` command; then run `kraft`
+```
+
+`just dev` puts `fixtures/bin` (a `claude` symlink to `fixtures/fake-claude.sh`)
+ahead of the real agent on PATH, so a dev instance never spends tokens. A work
+item title containing `KRAFT_FAIL` or `KRAFT_SLOW` steers its own fake agent.
+
+Installed Kraft keeps state in `$KRAFT_HOME` (default `~/.kraft`): `run/` for the
+databases, logs and worktrees, `templates/` for the YAML the Settings screens
+edit, seeded from the packaged defaults on first run and never overwritten after.
+Design: `docs/superpowers/specs/2026-09-04-packaging-and-dev-execution-design.md`.
 
 ## Architecture Overview
 
