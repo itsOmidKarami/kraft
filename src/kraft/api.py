@@ -21,7 +21,7 @@ from kraft.db import Database
 from kraft.index import db as index_db
 from kraft.index.service import Indexer
 from kraft.paths import RunDirs
-from kraft.templates import load_registry, load_templates
+from kraft.templates import GATE_NAMES, load_registry, load_templates
 from kraft.ws import Broadcaster
 
 logger = logging.getLogger(__name__)
@@ -29,8 +29,6 @@ logger = logging.getLogger(__name__)
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES_DIR = _REPO_ROOT / "templates"
 DEFAULT_FRONTEND_DIST = _REPO_ROOT / "frontend" / "dist"
-
-_GATE_NAMES = {"spec_approval", "plan_approval", "chain_finalized", "human_review_approval"}
 
 
 async def _guard(db, wid: str, coro) -> None:
@@ -307,7 +305,7 @@ async def get_work_item_documents(wid: str, request: Request):
 async def approve_gate(wid: str, gate: str, request: Request):
     st = request.app.state
     row = _work_item_row(st, wid)
-    if gate not in _GATE_NAMES:
+    if gate not in GATE_NAMES:
         raise HTTPException(404, f"unknown gate {gate!r}")
     if _pending_gate(st, wid) != gate:
         raise HTTPException(409, f"gate {gate!r} is not pending")
@@ -338,7 +336,7 @@ async def approve_gate(wid: str, gate: str, request: Request):
 async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
     st = request.app.state
     _work_item_row(st, wid)
-    if gate not in _GATE_NAMES:
+    if gate not in GATE_NAMES:
         raise HTTPException(404, f"unknown gate {gate!r}")
     if _pending_gate(st, wid) != gate:
         raise HTTPException(409, f"gate {gate!r} is not pending")

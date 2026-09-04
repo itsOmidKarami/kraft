@@ -55,9 +55,6 @@ nodes:
 """
 
 
-GATE_NAMES = {"spec_approval", "plan_approval", "chain_finalized", "human_review_approval"}
-
-
 def test_policy_yaml_is_not_scanned_as_a_template():
     """policy.yaml sits in the templates dir but is not a chain template, so it
     must not surface as an invalid one and degrade /health (Kraft-2ih)."""
