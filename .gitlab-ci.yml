@@ -1,3 +1,13 @@
+# Free-tier minutes: a pipeline per WIP push was most of the spend (3 of 6 recent
+# pipelines were pushes to a working branch nobody was reviewing yet). Pipelines now
+# run where a result is actually read — an MR, the default branch, or a tag.
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+    - when: never
+
 default:
   image: ghcr.io/astral-sh/uv:python3.14-bookworm-slim
 
@@ -21,6 +31,9 @@ cache:
   - git --version && bd version
 
 # Blocking fast feedback: lint + everything except the slow/e2e tiers.
+# Deliberately ungated: it is the cheapest job, and keeping one job unconditional
+# means every MR has a pipeline for `merge_when_pipeline_succeeds` to wait on. A
+# fully path-gated pipeline can produce zero jobs, and auto-merge then never fires.
 lint-and-test:
   before_script: *py-before-script
   script:
@@ -35,6 +48,15 @@ lint-and-test:
 # Subprocess servers, real uvicorn, multi-second sleeps (see pyproject `slow` marker).
 slow-tests:
   needs: []
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - changes:
+        - src/**/*
+        - tests/**/*
+        - templates/**/*
+        - pyproject.toml
+        - uv.lock
+        - .gitlab-ci.yml
   before_script: *py-before-script
   script:
     - uv sync --frozen
@@ -44,6 +66,11 @@ slow-tests:
 
 frontend:
   image: node:20-bookworm-slim
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - changes:
+        - frontend/**/*
+        - .gitlab-ci.yml
   cache:
     key:
       files:
