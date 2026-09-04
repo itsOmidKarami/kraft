@@ -70,7 +70,12 @@ def test_search_validation(tmp_path, monkeypatch):
         assert client.get("/search").status_code == 422
         assert client.get("/search", params={"q": "  "}).status_code == 422
         assert client.get("/search", params={"q": "x", "mode": "vector"}).status_code == 422
-        assert client.get("/search", params={"q": '"unterminated'}).status_code == 422
+        # Kraft-bj9.4: an unparseable query is retried as a literal phrase, not a 422
+        r = client.get("/search", params={"q": '"unterminated'})
+        assert r.status_code == 200
+        assert r.json()["results"] == []
+        r = client.get("/search", params={"q": "effort-4a"})
+        assert r.status_code == 200
 
 
 def test_rescan_unknown_repo_404(tmp_path, monkeypatch):
@@ -89,3 +94,13 @@ def test_health_has_index_block(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
         h = client.get("/health").json()
         assert set(h["index"]) == {"last_scan_at", "repos_scanned", "documents", "errors"}
+
+
+def test_work_item_documents_endpoint(tmp_path, monkeypatch):
+    repo = make_repo_with_engineering(tmp_path, {".engineering/specs/a.md": "# A\nx\n"})
+    with _client(tmp_path, monkeypatch, index_repos=str(repo)) as client:
+        assert client.get("/work-items/nope/documents").status_code == 404
+        wid = client.post("/work-items", json={"title": "t", "repo": str(repo)}).json()["id"]
+        r = client.get(f"/work-items/{wid}/documents")
+        assert r.status_code == 200
+        assert r.json() == {"work_item_id": wid, "documents": []}

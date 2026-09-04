@@ -80,7 +80,9 @@ def test_running_dead_pid_resolves_from_result_file(tmp_path):
         database = await db.Database.open(rd.db)
         try:
             await _seed_item(database)
-            (rd.results / "s1.json").write_text('{"status": "done"}')
+            (rd.results / "s1.json").write_text(
+                '{"status": "done", "session_summary_ref": ".engineering/sessions/s1.md"}'
+            )
             await database.write(
                 lambda c: store.create_session(
                     c,
@@ -101,6 +103,12 @@ def test_running_dead_pid_resolves_from_result_file(tmp_path):
                 lambda c: c.execute("SELECT status FROM worker_sessions WHERE id='s1'").fetchone()
             )
             assert row["status"] == "done"
+            ref = database.read(
+                lambda c: c.execute(
+                    "SELECT session_summary_ref FROM worker_sessions WHERE id='s1'"
+                ).fetchone()
+            )
+            assert ref["session_summary_ref"] == ".engineering/sessions/s1.md"
             t = _types(database, "w1")
             assert "session_reattached" in t and "worker_session_exited" in t
             assert summary.resumed_work_items == ["w1"]

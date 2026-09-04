@@ -102,7 +102,9 @@ async def lifespan(app: FastAPI):
     app.state.frontend_dist = dist if dist.is_dir() else None
 
     index_conn = index_db.open_index(run_dirs.index_db)
-    indexer = Indexer(index_conn, database, repos_env=os.environ.get("KRAFT_INDEX_REPOS"))
+    indexer = Indexer(
+        index_conn, database, repos_env=os.environ.get("KRAFT_INDEX_REPOS"), run_dirs=run_dirs
+    )
     await indexer.startup_scan()  # 04 §2: once, before live event handling
     await indexer.start()
     app.state.index_conn = index_conn
@@ -292,6 +294,13 @@ async def get_events(wid: str, request: Request, after_seq: int = 0):
     st = request.app.state
     _work_item_row(st, wid)
     return st.db.read(lambda c: events.read_after(c, after_seq, wid))
+
+
+@app.get("/work-items/{wid}/documents")
+async def get_work_item_documents(wid: str, request: Request):
+    st = request.app.state
+    _work_item_row(st, wid)  # 404s on an unknown work item
+    return {"work_item_id": wid, "documents": st.indexer.documents_for_work_item(wid)}
 
 
 @app.post("/work-items/{wid}/gates/{gate}/approve")

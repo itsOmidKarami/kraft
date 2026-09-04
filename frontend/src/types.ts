@@ -64,6 +64,25 @@ export interface Health {
   invalid_policy: string[];
 }
 
+export interface DocumentLink {
+  work_item_id: string | null;
+  node_id: string | null;
+  hook_point: string | null;
+  worker_session_id: string | null;
+}
+
+export interface WorkItemDocument {
+  document_id: string;
+  repo: string;
+  title: string;
+  kind: string | null;
+  source_kind: string;
+  path: string;
+  node_id: string | null;
+  hook_point: string | null;
+  worker_session_id: string | null;
+}
+
 export interface SearchResult {
   id: string;
   repo: string;
@@ -73,7 +92,7 @@ export interface SearchResult {
   path: string;
   snippet: string;
   score: number;
-  links: unknown[];
+  links: DocumentLink[];
 }
 
 export interface SearchResponse {
@@ -94,5 +113,5 @@ export interface DocumentDetail {
   source_created_at: string | null;
   source_updated_at: string | null;
   indexed_at: string;
-  links: unknown[];
+  links: DocumentLink[];
 }

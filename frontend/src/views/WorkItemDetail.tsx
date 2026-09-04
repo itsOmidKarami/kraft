@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { ChainStrip } from "../components/ChainStrip";
 import { CurrentNodePanel } from "../components/CurrentNodePanel";
 import { EventTimeline } from "../components/EventTimeline";
+import { LinkedDocuments } from "../components/LinkedDocuments";
 import { useStore } from "../store";
 
 export function WorkItemDetail() {
@@ -26,6 +27,7 @@ export function WorkItemDetail() {
       <h2>{item.title}</h2>
       <ChainStrip item={item} size="lg" />
       <CurrentNodePanel item={item} sessions={sessions} />
+      <LinkedDocuments workItemId={id} eventCount={events.length} />
       <EventTimeline events={events} />
     </div>
   );

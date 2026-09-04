@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import os
 
-import pytest
 from support.harness import make_repo_with_engineering
 
 from kraft.db import Database
@@ -91,16 +90,211 @@ def test_startup_scan_then_search(tmp_path):
     asyncio.run(scenario())
 
 
-def test_search_malformed_query_raises(tmp_path):
-    import sqlite3
+def test_search_punctuated_terms_match_literally(tmp_path):
+    """Kraft-bj9.4: hyphens/dots are FTS5 syntax, not text — retry them quoted."""
+
+    async def scenario():
+        state = await Database.open(tmp_path / "state.db")
+        conn = index_db.open_index(tmp_path / "index.db")
+        try:
+            repo = make_repo_with_engineering(
+                tmp_path,
+                {
+                    ".engineering/specs/e4.md": "# effort-4a\nindexer touches api.py\n",
+                    ".engineering/plans/other.md": "# other\nunrelated prose\n",
+                },
+            )
+            await _seed_work_item(state, str(repo))
+            ix = Indexer(conn, state, repos_env="")
+            await ix.startup_scan()
+
+            assert [h["path"] for h in ix.search("effort-4a")] == [".engineering/specs/e4.md"]
+            assert [h["path"] for h in ix.search("api.py")] == [".engineering/specs/e4.md"]
+            # multi-term punctuated query keeps AND semantics across terms
+            assert [h["path"] for h in ix.search("effort-4a api.py")] == [
+                ".engineering/specs/e4.md"
+            ]
+            assert ix.search("effort-4a nonexistentword") == []
+            # a plain query still goes through the unquoted path untouched
+            assert [h["path"] for h in ix.search("indexer")] == [".engineering/specs/e4.md"]
+        finally:
+            conn.close()
+            await state.close()
+
+    asyncio.run(scenario())
+
+
+def test_search_unparseable_query_falls_back_to_literal(tmp_path):
+    """An unterminated quote is treated as text, not a 422."""
 
     async def scenario():
         state = await Database.open(tmp_path / "state.db")
         conn = index_db.open_index(tmp_path / "index.db")
         try:
             ix = Indexer(conn, state, repos_env="")
-            with pytest.raises(sqlite3.OperationalError):
-                ix.search('"unterminated')
+            assert ix.search('"unterminated') == []
+        finally:
+            conn.close()
+            await state.close()
+
+    asyncio.run(scenario())
+
+
+def _seed_session(db, sid, wid, ref, node="implementation", hook="on.implementation.start"):
+    from kraft import store
+
+    return db.write(
+        lambda c: (
+            store.create_session(
+                c,
+                id=sid,
+                work_item_id=wid,
+                node_id=node,
+                hook_point=hook,
+                log_path="/dev/null",
+                result_path="/dev/null",
+            ),
+            c.execute("UPDATE worker_sessions SET session_summary_ref=? WHERE id=?", (ref, sid)),
+        )
+    )
+
+
+def test_ingest_session_summary_from_worktree(tmp_path):
+    from kraft.paths import RunDirs
+
+    async def scenario():
+        state = await Database.open(tmp_path / "state.db")
+        conn = index_db.open_index(tmp_path / "index.db")
+        try:
+            repo = make_repo_with_engineering(tmp_path, {".engineering/specs/a.md": "# A\nx\n"})
+            await _seed_work_item(state, str(repo))
+            rd = RunDirs(tmp_path / "run").ensure()
+            wt = rd.worktrees / "w1" / ".engineering" / "sessions"
+            wt.mkdir(parents=True)
+            (wt / "s1.md").write_text(
+                "---\ntitle: Implementation session\nwork_item_ids: [w1, w2]\n"
+                "node_id: bogus\nhook_point: on.bogus\nworker_session_id: s1\n---\n"
+                "rewrote the adapter\n"
+            )
+            await _seed_session(state, "s1", "w1", ".engineering/sessions/s1.md")
+
+            ix = Indexer(conn, state, repos_env="", run_dirs=rd)
+            assert await ix.ingest_session_summary("s1") is True
+
+            hits = ix.search("adapter")
+            assert [h["path"] for h in hits] == [".engineering/sessions/s1.md"]
+            assert hits[0]["source_kind"] == "session_summary"
+            assert hits[0]["repo"] == str(repo)
+            assert hits[0]["title"] == "Implementation session"
+
+            doc_id = hits[0]["id"]
+            rows = conn.execute(
+                "SELECT work_item_id, node_id, hook_point, worker_session_id "
+                "FROM document_links WHERE document_id=? ORDER BY COALESCE(work_item_id, '')",
+                (doc_id,),
+            ).fetchall()
+            # DB wins for the session triple; front-matter's bogus values are dropped
+            assert rows[0]["node_id"] == "implementation"
+            assert rows[0]["hook_point"] == "on.implementation.start"
+            assert rows[0]["worker_session_id"] == "s1"
+            # front-matter work items unioned with the session's own
+            assert sorted(r["work_item_id"] for r in rows if r["work_item_id"]) == ["w1", "w2"]
+
+            # idempotent
+            assert await ix.ingest_session_summary("s1") is True
+            assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM document_links WHERE document_id=?", (doc_id,)
+                ).fetchone()[0]
+                == 3
+            )
+        finally:
+            conn.close()
+            await state.close()
+
+    asyncio.run(scenario())
+
+
+def test_ingest_session_summary_missing_file_is_false(tmp_path):
+    from kraft.paths import RunDirs
+
+    async def scenario():
+        state = await Database.open(tmp_path / "state.db")
+        conn = index_db.open_index(tmp_path / "index.db")
+        try:
+            repo = make_repo_with_engineering(tmp_path, {".engineering/specs/a.md": "# A\nx\n"})
+            await _seed_work_item(state, str(repo))
+            await _seed_session(state, "s1", "w1", ".engineering/sessions/nope.md")
+            ix = Indexer(conn, state, repos_env="", run_dirs=RunDirs(tmp_path / "run").ensure())
+            assert await ix.ingest_session_summary("s1") is False
+            assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 0
+        finally:
+            conn.close()
+            await state.close()
+
+    asyncio.run(scenario())
+
+
+def test_ingest_session_summary_rejects_path_escape(tmp_path):
+    from kraft.paths import RunDirs
+
+    async def scenario():
+        state = await Database.open(tmp_path / "state.db")
+        conn = index_db.open_index(tmp_path / "index.db")
+        try:
+            repo = make_repo_with_engineering(tmp_path, {".engineering/specs/a.md": "# A\nx\n"})
+            await _seed_work_item(state, str(repo))
+            rd = RunDirs(tmp_path / "run").ensure()
+            (tmp_path / "secret.md").write_text("# secret\ndo not index\n")
+            await _seed_session(state, "s1", "w1", "../../secret.md")
+            await _seed_session(state, "s2", "w1", "/etc/hosts")
+            ix = Indexer(conn, state, repos_env="", run_dirs=rd)
+            assert await ix.ingest_session_summary("s1") is False
+            assert await ix.ingest_session_summary("s2") is False
+            assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 0
+        finally:
+            conn.close()
+            await state.close()
+
+    asyncio.run(scenario())
+
+
+def test_links_resolved_in_search_and_document_and_by_work_item(tmp_path):
+    from kraft.paths import RunDirs
+
+    async def scenario():
+        state = await Database.open(tmp_path / "state.db")
+        conn = index_db.open_index(tmp_path / "index.db")
+        try:
+            repo = make_repo_with_engineering(tmp_path, {".engineering/specs/a.md": "# A\nx\n"})
+            await _seed_work_item(state, str(repo))
+            rd = RunDirs(tmp_path / "run").ensure()
+            sessions = rd.worktrees / "w1" / ".engineering" / "sessions"
+            sessions.mkdir(parents=True)
+            (sessions / "s1.md").write_text("# Session\nlinked prose\n")
+            await _seed_session(state, "s1", "w1", ".engineering/sessions/s1.md")
+
+            ix = Indexer(conn, state, repos_env="", run_dirs=rd)
+            await ix.startup_scan()
+            await ix.ingest_session_summary("s1")
+
+            hit = ix.search("linked")[0]
+            assert {ln["work_item_id"] for ln in hit["links"] if ln["work_item_id"]} == {"w1"}
+            assert any(ln["worker_session_id"] == "s1" for ln in hit["links"])
+
+            doc = ix.get_document(hit["id"])
+            assert doc["links"] == hit["links"]
+
+            # an artifact has no links, and still reports an empty list
+            spec = ix.search("x")[0]
+            assert spec["links"] == []
+
+            docs = ix.documents_for_work_item("w1")
+            assert [d["path"] for d in docs] == [".engineering/sessions/s1.md"]
+            assert docs[0]["title"] == "Session"
+            assert docs[0]["source_kind"] == "session_summary"
+            assert ix.documents_for_work_item("nope") == []
         finally:
             conn.close()
             await state.close()

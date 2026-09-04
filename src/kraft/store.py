@@ -202,10 +202,12 @@ def session_running(conn: sqlite3.Connection, session_id, pid, pid_start_time) -
     )
 
 
-def session_exited(conn: sqlite3.Connection, session_id, status) -> None:
+def session_exited(conn: sqlite3.Connection, session_id, status, summary_ref=None) -> None:
+    # COALESCE: a None ref must not erase one an earlier resolution already stored.
     conn.execute(
-        "UPDATE worker_sessions SET status = ?, exited_at = ? WHERE id = ?",
-        (status, _now(), session_id),
+        "UPDATE worker_sessions SET status = ?, exited_at = ?, "
+        "session_summary_ref = COALESCE(?, session_summary_ref) WHERE id = ?",
+        (status, _now(), summary_ref, session_id),
     )
     row = conn.execute(
         "SELECT work_item_id FROM worker_sessions WHERE id = ?", (session_id,)

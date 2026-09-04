@@ -39,6 +39,12 @@ def test_e2e_happy_path(tmp_path):
 
         item = srv.client.get(f"/work-items/{wid}").json()
         assert item["status"] == "completed"
+
+        docs = srv.client.get(f"/work-items/{wid}/documents").json()["documents"]
+        summaries = [d for d in docs if d["source_kind"] == "session_summary"]
+        assert summaries, f"no session summary linked to {wid}; got {docs}"
+        assert summaries[0]["path"].startswith(".engineering/sessions/")
+        assert any(d["worker_session_id"] for d in docs)
         assert "a + b" in (run_dir / "worktrees" / wid / "calc.py").read_text()
 
         # context-injection boundary: the agent never wrote into the target repo

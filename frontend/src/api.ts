@@ -4,6 +4,7 @@ import type {
   KraftEvent,
   SearchResponse,
   WorkItem,
+  WorkItemDocument,
   WorkerSession,
 } from "./types";
 
@@ -73,3 +74,8 @@ export const search = (params: {
 
 export const getDocument = (id: string) =>
   req<DocumentDetail>(`/documents/${encodeURIComponent(id)}`);
+
+export const getWorkItemDocuments = (id: string) =>
+  req<{ work_item_id: string; documents: WorkItemDocument[] }>(
+    `/work-items/${encodeURIComponent(id)}/documents`,
+  );
