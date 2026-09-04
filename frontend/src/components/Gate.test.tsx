@@ -18,7 +18,7 @@ describe("Gate", () => {
     const spy = vi.spyOn(api, "rejectGate").mockResolvedValue();
     render(<Gate item={item} gate="spec_approval" />);
     await userEvent.click(screen.getByRole("button", { name: /^reject/i }));
-    const submit = screen.getByRole("button", { name: /submit rejection/i });
+    const submit = screen.getByRole("button", { name: /reject and re-plan/i });
     expect(submit).toBeDisabled();
     await userEvent.type(screen.getByLabelText("reject note"), "redo the spec");
     expect(submit).toBeEnabled();
@@ -35,5 +35,19 @@ describe("Gate", () => {
     await userEvent.click(approve);
     expect(await screen.findByText(/not pending/)).toHaveClass("form-error");
     expect(approve).toBeEnabled();
+  });
+
+  it("labels the reject action 'Reject and stop' when there is nothing to loop back to", async () => {
+    render(<Gate item={item} gate="human_review_approval" />);
+    await userEvent.click(screen.getByRole("button", { name: /^reject/i }));
+    expect(screen.getByRole("button", { name: /reject and stop/i })).toBeInTheDocument();
+  });
+
+  it("the inline variant names the gate and offers the same two actions", async () => {
+    render(<Gate item={item} gate="plan_approval" variant="inline" />);
+    expect(screen.getByText("plan_approval")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /approve/i })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^reject/i }));
+    expect(screen.getByLabelText("reject note")).toBeInTheDocument();
   });
 });

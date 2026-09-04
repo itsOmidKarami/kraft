@@ -42,7 +42,7 @@ def test_migrate_is_idempotent(tmp_path):
     table_count = conn2.execute(
         "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
     ).fetchone()[0]
-    assert table_count == 4
+    assert table_count == 5  # + auth_sessions (v6)
 
 
 def test_migrate_rejects_newer_db(tmp_path):
@@ -83,18 +83,48 @@ INVALID SQL STATEMENT;
         tables = conn.execute(
             "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
         ).fetchone()[0]
-        assert tables == 4
+        assert tables == 5
         user_version = conn.execute("PRAGMA user_version").fetchone()[0]
         assert user_version == db.SCHEMA_VERSION
     finally:
         db.SCHEMA_SQL = original_schema
 
 
-def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=()):
-    """Hand-build a pre-current schema: SCHEMA_SQL minus some lines/statements."""
+# The worker_sessions columns schema v4 added. Old-schema fixtures are built by
+# subtraction from the current SCHEMA_SQL, so they have to name what to remove.
+V4_COLS = (
+    "-- usage capture",
+    "started_at     TEXT,",
+    "round          INTEGER",
+    "model          TEXT",
+    "tokens_in",
+    "tokens_out",
+    "cost_usd",
+    "wall_ms",
+)
+
+
+def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
+    """Hand-build a pre-current schema: SCHEMA_SQL minus some lines/statements.
+
+    `replace` is (needle, replacement-line) pairs for a line that has to change
+    shape rather than disappear — a CHECK constraint that gained a value, say.
+    """
+
+    def rewrite(ln):
+        for needle, new in replace:
+            if needle in ln:
+                return new
+        return ln
+
     schema = "\n".join(
-        ln for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
+        rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
     )
+    # tables introduced after `version` were not there yet
+    if version < 6:
+        skip_stmts = (*skip_stmts, "auth_sessions")
+    if version < 7:
+        drop_lines = (*drop_lines, "submodules", "root_merge_policy", "-- cross-repo")
     conn.execute("BEGIN")
     for stmt in (x.strip() for x in schema.split(";")):
         if stmt and not any(skip in stmt for skip in skip_stmts):
@@ -113,7 +143,9 @@ def test_migrate_creates_retry_counters(tmp_path):
 def test_migrate_v1_to_v2_adds_retry_counters(tmp_path):
     path = tmp_path / "orchestrator.db"
     conn = db._connect(path)
-    _build_old_db(conn, 1, drop_lines=("session_summary_ref",), skip_stmts=("retry_counters",))
+    _build_old_db(
+        conn, 1, drop_lines=("session_summary_ref", *V4_COLS), skip_stmts=("retry_counters",)
+    )
     conn.execute(
         "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
         "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
@@ -348,7 +380,7 @@ def test_raising_rollback_still_informs_caller_and_next_db_works(tmp_path, monke
 def test_migrate_v2_to_v3_adds_session_summary_ref(tmp_path):
     """A v2 database migrates forward and gains worker_sessions.session_summary_ref."""
     conn = db._connect(tmp_path / "orchestrator.db")
-    _build_old_db(conn, 2, drop_lines=("session_summary_ref",))
+    _build_old_db(conn, 2, drop_lines=("session_summary_ref", *V4_COLS))
 
     db.migrate(conn)
 
@@ -363,7 +395,9 @@ def test_migrate_mid_step_failure_rolls_back_whole_run(monkeypatch, tmp_path):
     BEGIN spans the whole range, not one step (Kraft-g5x)."""
     path = tmp_path / "orchestrator.db"
     conn = db._connect(path)
-    _build_old_db(conn, 1, drop_lines=("session_summary_ref",), skip_stmts=("retry_counters",))
+    _build_old_db(
+        conn, 1, drop_lines=("session_summary_ref", *V4_COLS), skip_stmts=("retry_counters",)
+    )
     assert "retry_counters" not in _tables(conn)
 
     broken = dict(db._MIGRATIONS)
@@ -384,3 +418,47 @@ def test_migrate_mid_step_failure_rolls_back_whole_run(monkeypatch, tmp_path):
     assert "retry_counters" in _tables(conn)
     cols = {r[1] for r in conn.execute("PRAGMA table_info(worker_sessions)").fetchall()}
     assert "session_summary_ref" in cols
+
+
+def test_migrate_v4_to_v5_rebuilds_work_items_for_the_paused_status(tmp_path):
+    """v4's status CHECK has no 'paused'; SQLite cannot alter a constraint, so the
+    table is rebuilt. Rows and the events FK have to survive it."""
+    path = tmp_path / "orchestrator.db"
+    conn = db._connect(path)
+    _build_old_db(
+        conn,
+        4,
+        drop_lines=("pending_steer_context", "-- steer text"),
+        replace=(
+            (
+                "status           TEXT NOT NULL CHECK (status IN",
+                "  status           TEXT NOT NULL CHECK (status IN "
+                "('active', 'needs_human', 'completed')),",
+            ),
+            ("('active', 'needs_human', 'completed', 'paused')),", ""),
+        ),
+    )
+    conn.execute(
+        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
+        "'active','now','now')"
+    )
+    conn.execute(
+        "INSERT INTO events (work_item_id, type, payload, created_at) "
+        "VALUES ('w1','node_started','{}','now')"
+    )
+    conn.commit()
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("UPDATE work_items SET status = 'paused' WHERE id = 'w1'")
+    conn.close()
+
+    conn2 = db._connect(path)
+    db.migrate(conn2)
+    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    assert conn2.execute("SELECT count(*) FROM work_items").fetchone()[0] == 1
+    assert conn2.execute("SELECT count(*) FROM events").fetchone()[0] == 1
+    conn2.execute("UPDATE work_items SET status = 'paused' WHERE id = 'w1'")
+    cols = {r[1] for r in conn2.execute("PRAGMA table_info(work_items)").fetchall()}
+    assert "pending_steer_context" in cols
+    # the events FK still points somewhere real after the drop/rename
+    assert conn2.execute("PRAGMA foreign_key_check").fetchall() == []

@@ -41,3 +41,34 @@ async def complete(bead_id: str, *, cwd: str | None = None) -> None:
         text=True,
         check=True,
     )
+
+
+async def search(q: str, *, cwd: str | None = None, limit: int = 5) -> list[dict]:
+    """Live bead search — a thin `bd search --json` passthrough (06 §6.1).
+
+    Live, not indexed: the search overlay's own results are a lagging shadow of
+    the repo, and this footer strip is the one line in it that is not.
+    """
+    proc = await asyncio.to_thread(
+        subprocess.run,
+        ["bd", "search", q, "--json"],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0 or "[" not in proc.stdout:
+        return []
+    try:
+        rows = json.loads(proc.stdout[proc.stdout.index("[") :])
+    except json.JSONDecodeError:
+        return []
+    return [
+        {
+            "id": r.get("id"),
+            "title": r.get("title"),
+            "status": r.get("status"),
+            "issue_type": r.get("issue_type"),
+        }
+        for r in rows[:limit]
+        if isinstance(r, dict)
+    ]

@@ -1,66 +1,178 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChainStrip } from "../components/ChainStrip";
-import { IntakeModal } from "../components/IntakeModal";
+import { Prohibit } from "@phosphor-icons/react";
+import { ChainBar } from "../components/ui";
+import { Gate } from "../components/Gate";
+import { ago } from "../format";
 import { useStore } from "../store";
+import type { WorkItem } from "../types";
 
-const uniq = (xs: string[]) => [...new Set(xs)].sort();
+/** Sidebar counts, sorted by name so the list does not reorder as work moves. */
+function tally(items: WorkItem[], key: (i: WorkItem) => string) {
+  const counts = new Map<string, number>();
+  for (const i of items) counts.set(key(i), (counts.get(key(i)) ?? 0) + 1);
+  return [...counts].sort(([a], [b]) => a.localeCompare(b));
+}
+
+function Facet({
+  label,
+  rows,
+  value,
+  onPick,
+}: {
+  label: string;
+  rows: [string, number][];
+  value: string | null;
+  onPick: (v: string | null) => void;
+}) {
+  return (
+    <div className="facet">
+      <div className="section-label">{label}</div>
+      {rows.map(([name, n]) => (
+        <button
+          key={name}
+          className="facet-opt"
+          aria-pressed={name === value}
+          // clicking the selected facet clears it — there is no explicit "all" row
+          onClick={() => onPick(name === value ? null : name)}
+        >
+          {name}
+          <span className="facet-count">{n}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The gate a needs-you item is waiting on. `pendingGate` is only present once
+ * the item has been hydrated or a `gate_requested` event has landed, so fall
+ * back to the current node's own gate — the board never fetches per item.
+ */
+function pendingGate(i: WorkItem): string | null {
+  if (i.pendingGate) return i.pendingGate;
+  const node = i.chain_definition.nodes.find((n) => n.id === i.current_node_id);
+  return node?.gate_after ?? null;
+}
+
+const DONE_PREVIEW = 5;
 
 export function Board() {
   const items = useStore((s) => Object.values(s.workItems));
-  const [modal, setModal] = useState(false);
-  const [repo, setRepo] = useState("");
-  const [status, setStatus] = useState("");
-  const [tpl, setTpl] = useState("");
+  const connection = useStore((s) => s.connection);
+  const [repo, setRepo] = useState<string | null>(null);
+  const [tpl, setTpl] = useState<string | null>(null);
+  const [allDone, setAllDone] = useState(false);
 
   useEffect(() => {
     useStore.getState().bootstrap().catch(() => {});
   }, []);
 
+  // Each facet's counts are taken with the *other* facet applied, so the two
+  // filters read as combining rather than as two independent views.
+  const repoRows = useMemo(
+    () => tally(tpl ? items.filter((i) => i.chain_template === tpl) : items, (i) => i.repo),
+    [items, tpl],
+  );
+  const tplRows = useMemo(
+    () => tally(repo ? items.filter((i) => i.repo === repo) : items, (i) => i.chain_template),
+    [items, repo],
+  );
+
   const shown = useMemo(
     () =>
       items.filter(
-        (i) =>
-          (!repo || i.repo === repo) &&
-          (!status || i.status === status) &&
-          (!tpl || i.chain_template === tpl),
+        (i) => (!repo || i.repo === repo) && (!tpl || i.chain_template === tpl),
       ),
-    [items, repo, status, tpl],
+    [items, repo, tpl],
   );
+
+  const groups = [
+    {
+      id: "needs",
+      label: "Needs you",
+      tone: "accent" as const,
+      // paused belongs here too: nothing moves until a person resumes it, and this
+      // board is grouped by who is being waited on
+      items: shown.filter((i) => i.status === "needs_human" || i.status === "paused"),
+    },
+    { id: "running", label: "Running", items: shown.filter((i) => i.status === "active") },
+    { id: "done", label: "Done", items: shown.filter((i) => i.status === "completed") },
+  ];
 
   return (
     <div className="board">
-      <header className="board-toolbar">
-        <select aria-label="repo" value={repo} onChange={(e) => setRepo(e.target.value)}>
-          <option value="">all repos</option>
-          {uniq(items.map((i) => i.repo)).map((r) => <option key={r}>{r}</option>)}
-        </select>
-        <select aria-label="status" value={status} onChange={(e) => setStatus(e.target.value)}>
-          <option value="">any status</option>
-          {["active", "needs_human", "completed"].map((s) => <option key={s}>{s}</option>)}
-        </select>
-        <select aria-label="template" value={tpl} onChange={(e) => setTpl(e.target.value)}>
-          <option value="">any template</option>
-          {uniq(items.map((i) => i.chain_template)).map((t) => <option key={t}>{t}</option>)}
-        </select>
-        <button onClick={() => setModal(true)}>New Work Item</button>
-      </header>
+      <aside className="board-sidebar">
+        <Facet label="Repos" rows={repoRows} value={repo} onPick={setRepo} />
+        <Facet label="Template" rows={tplRows} value={tpl} onPick={setTpl} />
+        <div className="board-foot">
+          {/* the header's ConnBadge names the exact state; here it is just a pulse */}
+          <span className="live" data-connection={connection} title={connection}>
+            <span className="live-dot" />
+            {connection === "open" ? "live" : "offline"}
+          </span>
+          {/* Design gap: the design's "index rescan: 2 min ago" has no source —
+              nothing reports when the indexer last ran. Omitted until it does. */}
+        </div>
+      </aside>
 
-      <ul className="board-list">
-        {shown.map((i) => (
-          <li key={i.id} data-testid="board-card" className="board-card">
-            <Link to={`/work-items/${i.id}`}>
-              <span className="repo-tag">{i.repo}</span>
-              <span className="title">{i.title}</span>
-              <span className="status" data-status={i.status}>{i.status}</span>
-              <code className="wid">{i.id}</code>
-            </Link>
-            <ChainStrip item={i} size="sm" />
-          </li>
+      <div className="board-groups">
+        {groups.map((g) => (
+          <section key={g.id}>
+            <div className="group-head">
+              <span className="group-label" data-tone={g.tone}>{g.label}</span>
+              <span className="group-count">{g.items.length}</span>
+            </div>
+            {g.items.length === 0 && (
+              <div className="group-empty">nothing here for this filter</div>
+            )}
+            {(g.id === "done" && !allDone ? g.items.slice(0, DONE_PREVIEW) : g.items).map((i) => (
+              <BoardRow key={i.id} item={i} />
+            ))}
+            {g.id === "done" && !allDone && g.items.length > DONE_PREVIEW && (
+              <button className="btn btn-ghost show-all" onClick={() => setAllDone(true)}>
+                show all {g.items.length}
+              </button>
+            )}
+          </section>
         ))}
-      </ul>
+      </div>
+    </div>
+  );
+}
 
-      {modal && <IntakeModal onClose={() => setModal(false)} />}
+function BoardRow({ item }: { item: WorkItem }) {
+  const gate = item.status === "needs_human" ? pendingGate(item) : null;
+  const capped = item.status === "completed" ? null : item.cappedOut;
+  return (
+    <div className="board-row" data-testid="board-card">
+      <div className="board-row-main">
+        <Link className="board-row-title" to={`/work-items/${item.id}`}>
+          {item.title}
+        </Link>
+        <div className="board-row-meta">
+          <span>{item.repo}</span>
+          <code>{item.id}</code>
+          <span>{item.chain_template}</span>
+          <span>{ago(item.updated_at)}</span>
+        </div>
+        {gate && (
+          <Gate item={item} gate={gate} variant="inline" />
+        )}
+      </div>
+      <ChainBar item={item} size="sm" />
+      <div className="board-row-current">
+        {item.current_node_id}
+        {item.fixCycle != null && (
+          <span className="tag tag-outline tag-tight">fix·{item.fixCycle}</span>
+        )}
+        {capped && (
+          <span className="tag tag-outline tag-tight">
+            <Prohibit size={10} />
+            capped {capped.cycles}/{capped.attempts}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

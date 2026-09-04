@@ -1,0 +1,986 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><meta name="design_doc_mode" content="canvas"><link rel="stylesheet" href="_ds/nocturne-d0c338da-cd62-483a-916a-d8539ca213a0/styles.css"><script src="_ds/nocturne-d0c338da-cd62-483a-916a-d8539ca213a0/_ds_bundle.js"></script><link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css"><style>body{margin:0;background:#0f1019}a{color:var(--color-accent)}a:hover{color:var(--color-accent-300)}@keyframes kpulse{0%,100%{box-shadow:0 0 0 0 rgba(145,132,217,.55)}70%{box-shadow:0 0 0 6px rgba(145,132,217,0)}}.dv-turn{padding:40px 44px 32px;border-bottom:1px solid rgba(255,255,255,.06);scroll-margin-top:16px}.dv-thd{display:flex;align-items:baseline;gap:10px;margin:0 0 20px}.dv-tid{font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:#e9e9ed;color:#161826;border-radius:4px;text-decoration:none}.dv-tname{font:500 13px/1.2 Inter,system-ui,sans-serif;color:#e9e9ed}.dv-row{font:500 11px/1.2 Inter,system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#75798c;margin:36px 0 14px}.dv-opts{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}.dv-opt{flex:none;display:flex;flex-direction:column;gap:9px;scroll-margin-top:16px;max-width:100%}.dv-oid{font:600 10.5px ui-monospace,Menlo,monospace;padding:3px 7px;background:#3f424d;color:#f3f5fe;border-radius:5px;text-decoration:none}a.dv-oid,a.dv-oid:hover{color:#f3f5fe}.dv-card .seg-opt,.dv-card .tag{white-space:nowrap}.dv-olabel{display:flex;align-items:baseline;gap:8px;font:400 11.5px/1.3 Inter,system-ui,sans-serif;color:#9397ab}.dv-card{max-width:100%;background:#161826;border-radius:8px;box-shadow:0 0 0 1px #292b31;overflow:hidden;font-family:Inter,system-ui,sans-serif;color:#e9e9ed}.dv-opt:target .dv-oid{background:#9184d9;color:#161826}.dv-next{margin:28px 0 0;font:12px/1.6 Inter,system-ui,sans-serif;color:#75798c}.dv-note{max-width:820px;font:13px/1.6 Inter,system-ui,sans-serif;color:#9397ab;margin:0 0 8px}.dv-note b{color:#e9e9ed;font-weight:500}</style></helmet>
+
+<p class="dv-note"><b>Kraft — chosen direction.</b> Consolidated from the exploration in <b>Kraft Mockups.dc.html</b>. Board = grouped list with sidebar filters and a segment-bar chain (<a class="dv-oid" href="#2a">2a</a>); Detail = current node as the hero, the same bar with per-node labels, repos panel for multi-repo items, tabs for tasks / timeline / documents (<a class="dv-oid" href="#3a">3a</a>, <a class="dv-oid" href="#3b">3b</a>). Documents and session logs open as modals over the work item (<a class="dv-oid" href="#6a">6a</a>, <a class="dv-oid" href="#6c">6c</a>); Analytics is its own view (<a class="dv-oid" href="#6b">6b</a>). Screens for handoff: 2a, 3a, 3b, 4a–4e, 5a–5e, 6a–6c, 1g, 1h, 1m, 1n. One list pattern everywhere: open rows on fading hairlines, a status glyph in a 20px ring, plain-text state. Attention surfaces (gate, cap) are the only outlined, glowing cards. Mono-accent: <b>running</b> = accent pulse, <b>done</b> = check, <b>failed</b> = x-circle, <b>capped_out</b> = prohibit + "capped n/n", <b>unknown</b> = question, <b>needs_human</b> = the one solid accent tag. <b>Implied API additions:</b> retry-after-cap carrying steer text; open-worktree action.</p>
+
+<section class="dv-turn" id="s6">
+<div class="dv-thd"><a class="dv-tid" href="#s6">6</a><span class="dv-tname">Document viewer as a modal · Log modal · Analytics view · template filter made live in <a class="dv-oid" href="#2a">2a</a> · archive deferred to spec review</span></div>
+<div class="dv-opts">
+
+<div class="dv-opt" id="6a"><div class="dv-olabel"><a class="dv-oid" href="#6a">6a</a>Document modal · opens over the work item, rendered markdown, "Open in" with preferred editor (menu open)</div>
+<div class="dv-card" style="width:1100px;position:relative" data-screen-label="6a Document modal">
+  <div class="nav" style="border-bottom:1px solid var(--color-divider);padding:8px 16px"><a href="#" style="color:var(--color-neutral-400);font-size:13px;display:inline-flex;align-items:center;gap:6px;text-decoration:none"><i class="ph ph-arrow-left"></i>Board</a><span class="nav-brand" style="font-size:16px;margin-left:8px">Kraft</span><button class="btn btn-secondary" style="font-size:13px;padding:5px 10px"><i class="ph ph-magnifying-glass"></i>Search<span style="opacity:.5;font-size:11px;margin-left:4px">⌘K</span></button></div>
+  <div style="padding:28px 40px 32px;display:flex;flex-direction:column;gap:24px;max-width:900px;min-height:640px">
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--color-neutral-500)"><span>repo-a</span><span style="font-family:ui-monospace,Menlo,monospace">wi_01HX3K9</span><span>default</span></div>
+      <h2 style="font-size:20px;margin:0;color:var(--color-neutral-300);font-weight:400">Migrate config loader to new schema</h2>
+      <div style="display:flex;align-items:baseline;gap:14px;margin-top:6px"><span style="font-size:32px;line-height:1;font-weight:500;letter-spacing:-.02em">verify</span><span class="tag tag-outline">fix · cycle 2 of 3</span><span style="font-size:12px;color:var(--color-neutral-500)">node 6 of 10 · running 41 min</span></div>
+    </div>
+    <div style="display:flex;gap:18px;font-size:13px;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px">
+      <span style="padding:6px 2px;color:var(--color-neutral-500)">Tasks · 3</span><span style="padding:6px 2px;color:var(--color-neutral-500)">Timeline · 12</span><span style="padding:6px 2px;color:var(--color-accent);box-shadow:inset 0 -1px 0 var(--color-accent)">Documents · 4</span>
+    </div>
+    <div style="display:flex;flex-direction:column">
+      <sc-for list="{{ docRows }}" as="d" hint-placeholder-count="4">
+      <div style="display:grid;grid-template-columns:20px 1fr 120px 130px auto;gap:14px;align-items:center;padding:11px 4px;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px">
+        <i class="ph {{ d.icon }}" style="color:var(--color-accent);font-size:16px"></i>
+        <div style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font-size:14px">{{ d.title }}</span><span style="font-size:11px;color:var(--color-neutral-600);font-family:ui-monospace,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ d.path }}</span></div>
+        <span class="tag tag-neutral" style="font-size:10px;padding:1px 7px;justify-self:start">{{ d.kind }}</span>
+        <span style="font-size:12px;color:var(--color-neutral-500)">{{ d.node }}</span>
+        <span style="font-size:11px;color:var(--color-neutral-600);white-space:nowrap">{{ d.when }}</span>
+      </div>
+      </sc-for>
+    </div>
+  </div>
+  <div style="position:absolute;inset:0;background:rgba(15,16,25,.72);display:flex;align-items:flex-start;justify-content:center;padding:44px 24px">
+    <div class="dialog" style="width:820px;max-width:100%;padding:0;display:flex;flex-direction:column;max-height:calc(100% - 20px);overflow:hidden">
+      <div style="display:flex;align-items:flex-start;gap:14px;padding:18px 22px 14px;border-bottom:1px solid var(--color-divider)">
+        <i class="ph ph-list-checks" style="color:var(--color-accent);font-size:20px;margin-top:2px"></i>
+        <div style="display:flex;flex-direction:column;gap:5px;min-width:0;flex:1">
+          <span style="font-size:16px;font-weight:500">Plan: config loader migration</span>
+          <div style="display:flex;align-items:center;gap:10px;font-size:11px;color:var(--color-neutral-500);flex-wrap:wrap"><span class="tag tag-neutral" style="font-size:10px;padding:0 6px">plan</span><span>plan · written 09:12</span><span style="font-family:ui-monospace,Menlo,monospace;color:var(--color-neutral-600)">repo-a/.engineering/plans/config-loader.md</span><span>index 2 min behind git</span></div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;position:relative">
+          <button class="btn btn-primary" onClick="{{ toggleOpenIn }}" style="font-size:12px;padding:4px 10px;white-space:nowrap"><i class="ph ph-arrow-square-out"></i>Open in VS Code<i class="ph ph-caret-down" style="opacity:.7"></i></button>
+          <button class="btn btn-icon btn-ghost" style="font-size:14px" title="Copy path"><i class="ph ph-copy"></i></button>
+          <button class="btn btn-icon btn-ghost" style="font-size:14px" title="Close · Esc"><i class="ph ph-x"></i></button>
+          <sc-if value="{{ openIn }}" hint-placeholder-val="{{ true }}">
+          <div class="card elev-lg" style="position:absolute;top:34px;right:72px;width:220px;padding:6px;gap:0;display:flex;flex-direction:column;z-index:2">
+            <sc-for list="{{ editors }}" as="e" hint-placeholder-count="5"><button style="display:grid;grid-template-columns:18px 1fr auto;gap:10px;align-items:center;padding:7px 8px;border:0;border-radius:6px;background:transparent;color:var(--color-neutral-300);font:inherit;font-size:13px;text-align:left;cursor:pointer" style-hover="background:rgba(145,132,217,.12);color:var(--color-accent-300)"><i class="ph {{ e.icon }}" style="font-size:15px"></i>{{ e.name }}<span style="font-size:10px;color:var(--color-neutral-600)">{{ e.defLabel }}</span></button></sc-for>
+            <div style="font-size:11px;color:var(--color-neutral-600);padding:8px 8px 4px;border-top:1px solid var(--color-divider);margin-top:4px">Default editor is set in Settings → General.</div>
+          </div>
+          </sc-if>
+        </div>
+      </div>
+      <div style="padding:20px 22px 26px;overflow:auto;display:flex;flex-direction:column;gap:12px;font-size:13.5px;line-height:1.6;color:var(--color-neutral-300)">
+        <h3 style="margin:0;font-size:15px;font-weight:500;color:var(--color-text)">Goal</h3>
+        <p style="margin:0">Replace the ad-hoc dict loader in <code style="font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--color-neutral-900);padding:1px 5px;border-radius:4px">kraft/config.py</code> with a schema-validated loader so that invalid config fails at startup with a path-qualified error instead of at first use.</p>
+        <h3 style="margin:8px 0 0;font-size:15px;font-weight:500;color:var(--color-text)">Steps</h3>
+        <ol style="margin:0;padding-left:22px;display:flex;flex-direction:column;gap:4px"><li>Define <code style="font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--color-neutral-900);padding:1px 5px;border-radius:4px">ConfigSchema</code> mirroring the current YAML shape; keep field names.</li><li>Load, validate, then freeze; expose <code style="font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--color-neutral-900);padding:1px 5px;border-radius:4px">load_config(path) -&gt; Config</code>.</li><li>Map validation errors to <code style="font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--color-neutral-900);padding:1px 5px;border-radius:4px">ConfigError(path, message)</code>.</li><li>Migrate callers; delete the old <code style="font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--color-neutral-900);padding:1px 5px;border-radius:4px">get()</code> accessor.</li></ol>
+        <h3 style="margin:8px 0 0;font-size:15px;font-weight:500;color:var(--color-text)">Verification</h3>
+        <pre style="margin:0;flex:none;padding:12px 14px;border-radius:6px;background:var(--color-neutral-900);font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.5;color:var(--color-neutral-300);overflow:auto">uv run pytest tests/test_config.py -q
+uv run kraft --config fixtures/bad.yaml   # expect ConfigError: repos[1].path</pre>
+        <p style="margin:0;font-size:12px;color:var(--color-neutral-600)">Read-only here. Edits happen in your editor; the index picks them up on the next scan.</p>
+      </div>
+    </div>
+  </div>
+</div></div>
+
+<div class="dv-opt" id="6b"><div class="dv-olabel"><a class="dv-oid" href="#6b">6b</a>Analytics · totals, throughput by week, cost by node and by repo · range/repo filters</div>
+<div class="dv-card" style="width:1100px" data-screen-label="6b Analytics">
+  <div class="nav" style="border-bottom:1px solid var(--color-divider);padding:8px 16px"><a href="#" style="color:var(--color-neutral-400);font-size:13px;display:inline-flex;align-items:center;gap:6px;text-decoration:none"><i class="ph ph-arrow-left"></i>Board</a><span class="nav-brand" style="font-size:16px;margin-left:8px">Kraft</span><button class="btn btn-secondary" style="font-size:13px;padding:5px 10px"><i class="ph ph-magnifying-glass"></i>Search<span style="opacity:.5;font-size:11px;margin-left:4px">⌘K</span></button></div>
+  <div style="display:grid;grid-template-columns:200px 1fr;min-height:640px">
+    <aside style="padding:20px 16px;border-right:1px solid var(--color-divider);display:flex;flex-direction:column;gap:18px;font-size:13px">
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:6px">Range</div>
+        <sc-for list="{{ ranges }}" as="r" hint-placeholder-count="4"><button onClick="{{ r.pick }}" style="display:flex;padding:5px 8px;border-radius:6px;border:0;font:inherit;text-align:left;cursor:pointer;background:{{ r.bg }};color:{{ r.color }}">{{ r.name }}</button></sc-for>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:6px">Repos</div>
+        <sc-for list="{{ repos }}" as="r" hint-placeholder-count="3"><button onClick="{{ r.pick }}" style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;border-radius:6px;border:0;font:inherit;text-align:left;cursor:pointer;background:{{ r.bg }};color:{{ r.color }}">{{ r.name }}</button></sc-for>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:6px">Template</div>
+        <sc-for list="{{ tpls }}" as="t" hint-placeholder-count="3"><button onClick="{{ t.pick }}" style="display:flex;padding:5px 8px;border-radius:6px;border:0;font:inherit;text-align:left;cursor:pointer;background:{{ t.bg }};color:{{ t.color }}">{{ t.name }}</button></sc-for>
+      </div>
+      <div style="margin-top:auto;font-size:11px;color:var(--color-neutral-600)">aggregated from worker_session usage · archived items included</div>
+    </aside>
+    <div style="padding:24px 32px 32px;display:flex;flex-direction:column;gap:30px">
+      <div style="display:flex;align-items:baseline;gap:12px"><h2 style="font-size:20px;margin:0">Analytics</h2><span style="font-size:12px;color:var(--color-neutral-500)">last 30 days · all repos</span></div>
+      <div style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:20px">
+        <sc-for list="{{ kpis }}" as="k" hint-placeholder-count="6"><div style="display:flex;flex-direction:column;gap:6px;padding-left:12px;border-left:1px solid var(--color-accent-700)"><span style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--color-neutral-600)">{{ k.label }}</span><span style="font-size:26px;line-height:1;font-weight:500;letter-spacing:-.02em">{{ k.v }}</span><span style="font-size:11px;color:var(--color-neutral-500);line-height:1.4">{{ k.sub }}</span></div></sc-for>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;align-items:baseline;gap:10px"><span style="font-size:13px;font-weight:500">Merged per week</span><span style="font-size:11px;color:var(--color-neutral-600)">this week is partial</span></div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:10px;align-items:end;height:96px;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px;padding-bottom:1px">
+          <sc-for list="{{ weeks }}" as="w" hint-placeholder-count="7"><div style="display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end"><span style="font-size:11px;color:var(--color-neutral-500)">{{ w.n }}</span><span style="width:100%;height:{{ w.h }}px;border-radius:3px 3px 0 0;background:var(--color-accent-800);border-top:2px solid var(--color-accent)"></span></div></sc-for>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:10px"><sc-for list="{{ weeks }}" as="w" hint-placeholder-count="7"><span style="font-size:10px;color:var(--color-neutral-600);text-align:center">{{ w.label }}</span></sc-for></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(440px,1fr));gap:32px;align-items:start">
+        <div style="display:flex;flex-direction:column">
+          <div style="font-size:13px;font-weight:500;margin-bottom:8px">By node</div>
+          <div style="display:grid;grid-template-columns:100px minmax(40px,1fr) 36px 66px 50px 46px 80px;gap:10px;padding:0 0 6px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-600)"><span>node</span><span>cost share</span><span style="text-align:right">runs</span><span style="text-align:right">avg time</span><span style="text-align:right">tokens</span><span style="text-align:right">cost</span><span style="text-align:right">rounds</span></div>
+          <sc-for list="{{ byNode }}" as="n" hint-placeholder-count="7">
+          <div style="display:grid;grid-template-columns:100px minmax(40px,1fr) 36px 66px 50px 46px 80px;gap:10px;align-items:center;padding:9px 0;font-size:12.5px;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px">
+            <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px">{{ n.node }}</span>
+            <span style="height:4px;border-radius:2px;background:var(--color-neutral-900);overflow:hidden"><span style="display:block;height:100%;width:{{ n.w }}%;background:var(--color-accent);opacity:.8"></span></span>
+            <span style="text-align:right;color:var(--color-neutral-400)">{{ n.runs }}</span><span style="text-align:right;color:var(--color-neutral-400)">{{ n.t }}</span><span style="text-align:right;color:var(--color-neutral-400)">{{ n.tok }}</span><span style="text-align:right">{{ n.cost }}</span><span style="text-align:right;color:var(--color-neutral-500);white-space:nowrap">{{ n.rounds }}</span>
+          </div>
+          </sc-for>
+        </div>
+        <div style="display:flex;flex-direction:column">
+          <div style="font-size:13px;font-weight:500;margin-bottom:8px">By repo</div>
+          <div style="display:grid;grid-template-columns:minmax(56px,1fr) 40px 36px 50px 46px;gap:10px;padding:0 0 6px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-600)"><span>repo</span><span style="text-align:right">items</span><span style="text-align:right">MRs</span><span style="text-align:right">tokens</span><span style="text-align:right">cost</span></div>
+          <sc-for list="{{ byRepo }}" as="r" hint-placeholder-count="4">
+          <div style="display:grid;grid-template-columns:minmax(56px,1fr) 40px 36px 50px 46px;gap:10px;align-items:center;padding:9px 0;font-size:12.5px;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px">
+            <span>{{ r.repo }}</span><span style="text-align:right;color:var(--color-neutral-400)">{{ r.items }}</span><span style="text-align:right;color:var(--color-neutral-400)">{{ r.mrs }}</span><span style="text-align:right;color:var(--color-neutral-400)">{{ r.tok }}</span><span style="text-align:right">{{ r.cost }}</span>
+          </div>
+          </sc-for>
+          <div style="font-size:12px;color:var(--color-neutral-600);padding:14px 0 0;line-height:1.5">Rounds = verify/mr_checks fix cycles. Wall time counts human_review waits separately.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div></div>
+
+<div class="dv-opt" id="6c"><div class="dv-olabel"><a class="dv-oid" href="#6c">6c</a>Log modal · "view log" on tasks, timeline events and capped cycles · source filter, follow-tail while running, copy</div>
+<div class="dv-card" style="width:1100px;position:relative" data-screen-label="6c Log modal">
+  <div class="nav" style="border-bottom:1px solid var(--color-divider);padding:8px 16px"><a href="#" style="color:var(--color-neutral-400);font-size:13px;display:inline-flex;align-items:center;gap:6px;text-decoration:none"><i class="ph ph-arrow-left"></i>Board</a><span class="nav-brand" style="font-size:16px;margin-left:8px">Kraft</span><button class="btn btn-secondary" style="font-size:13px;padding:5px 10px"><i class="ph ph-magnifying-glass"></i>Search<span style="opacity:.5;font-size:11px;margin-left:4px">⌘K</span></button></div>
+  <div style="padding:28px 40px 32px;display:flex;flex-direction:column;gap:24px;max-width:900px;min-height:640px">
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--color-neutral-500)"><span>repo-a</span><span style="font-family:ui-monospace,Menlo,monospace">wi_01HX3K9</span><span>default</span></div>
+      <h2 style="font-size:20px;margin:0;color:var(--color-neutral-300);font-weight:400">Migrate config loader to new schema</h2>
+      <div style="display:flex;align-items:baseline;gap:14px;margin-top:6px"><span style="font-size:32px;line-height:1;font-weight:500;letter-spacing:-.02em">verify</span><span class="tag tag-outline">fix · cycle 2 of 3</span><span style="font-size:12px;color:var(--color-neutral-500)">node 6 of 10 · running 41 min</span></div>
+    </div>
+    <div style="display:flex;gap:18px;font-size:13px;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px">
+      <span style="padding:6px 2px;color:var(--color-accent);box-shadow:inset 0 -1px 0 var(--color-accent)">Tasks · 3</span><span style="padding:6px 2px;color:var(--color-neutral-500)">Timeline · 12</span><span style="padding:6px 2px;color:var(--color-neutral-500)">Documents · 4</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:2px">
+      <sc-for list="{{ detail.tasks }}" as="t" hint-placeholder-count="3">
+      <div style="display:grid;grid-template-columns:22px 1fr auto auto;gap:14px;align-items:center;padding:12px 0;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px">
+        <span style="width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:{{ t.color }};border:1px solid {{ t.border }}"><i class="ph {{ t.icon }}"></i></span>
+        <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:14px">{{ t.hook }}</span><span style="font-size:12px;color:var(--color-neutral-500)">{{ t.sub }}</span></div>
+        <span style="font-size:12px;color:{{ t.color }}">{{ t.status }}</span>
+        <a href="#" style="font-size:12px;text-decoration:none">view log</a>
+      </div>
+      </sc-for>
+    </div>
+  </div>
+  <div style="position:absolute;inset:0;background:rgba(15,16,25,.72);display:flex;align-items:flex-start;justify-content:center;padding:44px 24px">
+  <div class="dialog elev-lg"  style="width:880px;max-width:100%;padding:0;gap:0;display:flex;flex-direction:column;max-height:calc(100% - 20px);overflow:hidden">
+    <div style="display:flex;align-items:flex-start;gap:14px;padding:16px 22px 12px;border-bottom:1px solid var(--color-divider)">
+      <span style="width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:var(--color-accent);border:1px solid var(--color-accent);animation:kpulse 1.8s infinite;margin-top:2px"><i class="ph ph-circle-notch"></i></span>
+      <div style="display:flex;flex-direction:column;gap:5px;min-width:0;flex:1">
+        <span style="font-size:16px;font-weight:500">on.test.run</span>
+        <div style="display:flex;align-items:center;gap:10px;font-size:11px;color:var(--color-neutral-500);flex-wrap:wrap"><span style="color:var(--color-accent-300)">running · 4 min</span><span style="white-space:nowrap">verify · fix cycle 2 of 3</span><span style="font-family:ui-monospace,Menlo,monospace;color:var(--color-neutral-600)">s_7f2a</span><span>41.2k tokens · $1.38</span></div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button class="btn btn-secondary" onClick="{{ toggleFollow }}" style="font-size:12px;padding:4px 10px;white-space:nowrap;color:{{ followColor }}"><i class="ph ph-arrow-line-down"></i>{{ followLabel }}</button>
+        <button class="btn btn-icon btn-ghost"  style="font-size:14px" title="Copy log"><i class="ph {{ logCopyIcon }}"></i></button>
+        <button class="btn btn-icon btn-ghost"  style="font-size:14px" title="Close · Esc"><i class="ph ph-x"></i></button>
+      </div>
+    </div>
+    <div style="display:flex;gap:6px;padding:8px 22px;border-bottom:1px solid var(--color-divider);font-size:11px">
+      <sc-for list="{{ logFilters }}" as="f" hint-placeholder-count="4"><button class="kbtn" onClick="{{ f.pick }}" style="padding:2px 8px;border-radius:999px;border:1px solid {{ f.border }};color:{{ f.color }};background:{{ f.bg }};font-size:11px;font:inherit;font-size:11px;cursor:pointer">{{ f.label }}</button></sc-for>
+      <span style="margin-left:auto;color:var(--color-neutral-600)">{{ logCount }} lines</span>
+    </div>
+    <div style="padding:12px 22px 16px;overflow:auto;display:flex;flex-direction:column;flex:1;font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.55">
+      <sc-for list="{{ logLines }}" as="l" hint-placeholder-count="12"><div style="display:grid;grid-template-columns:96px 44px 1fr;gap:12px;padding:1px 0;flex:none;color:{{ l.color }}"><span style="color:var(--color-neutral-700)">{{ l.t }}</span><span style="color:{{ l.srcColor }}">{{ l.src }}</span><span style="white-space:pre-wrap;word-break:break-word">{{ l.text }}</span></div></sc-for>
+      <sc-if value="{{ logFollowing }}" hint-placeholder-val="{{ true }}"><div style="display:flex;align-items:center;gap:8px;padding:6px 0 0;flex:none;color:var(--color-neutral-600);font-size:11px;font-family:var(--font-body)"><span style="width:6px;height:6px;border-radius:50%;background:var(--color-accent);animation:kpulse 1.8s infinite"></span>following · new lines appear here</div></sc-if>
+    </div>
+  </div>
+  </div>
+</div></div>
+
+</div>
+<p class="dv-next"><b style="color:#e9e9ed">Implied API additions:</b> per-worker-session usage (tokens in/out, cost, wall time) — none is recorded today — plus an aggregate endpoint with range/repo/template filters; an open-in-editor action (server-side <span style="font-family:ui-monospace,Menlo,monospace">code path</span> launch, or <span style="font-family:ui-monospace,Menlo,monospace">vscode://file/…</span> URLs from the browser) and a preferred-editor setting; a markdown renderer for the modal body; the log endpoint should stream (SSE tail) with per-line source tags (sys / stdout / agent / tool) so the log modal can filter and follow. <b style="color:#e9e9ed">Archive:</b> deferred to the spec review as you suggested — the open questions are which states can be archived/cancelled, whether archive is a status or a flag on top of status, and what an archived item can still do (view docs and timeline, no resume). Board-side, I'd hide archived items by default and expose them under a "Show archived" toggle in the Done group rather than a separate view.</p>
+</section>
+
+<section class="dv-turn" id="s1">
+<div class="dv-thd"><a class="dv-tid" href="#s1">1</a><span class="dv-tname">Board</span></div>
+<div class="dv-opts">
+<div class="dv-opt" id="2a"><div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Board · grouped by attention, sidebar filters (repo and template filters are live and combine), segment-bar chain</div>
+<div class="dv-card" style="width:1100px" data-screen-label="2a Board grouped bars">
+  <div class="nav" style="border-bottom:1px solid var(--color-divider);padding:8px 16px"><span class="nav-brand" style="font-size:16px">Kraft</span><button class="btn btn-secondary" style="font-size:13px;padding:5px 10px"><i class="ph ph-magnifying-glass"></i>Search<span style="opacity:.5;font-size:11px;margin-left:4px">⌘K</span></button><button class="btn btn-primary" style="font-size:13px;padding:5px 10px"><i class="ph ph-plus"></i>New work item</button></div>
+  <div style="display:grid;grid-template-columns:200px 1fr;min-height:560px">
+    <aside style="padding:20px 16px;border-right:1px solid var(--color-divider);display:flex;flex-direction:column;gap:18px;font-size:13px">
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:6px">Repos</div>
+        <sc-for list="{{ repos }}" as="r" hint-placeholder-count="3"><button onClick="{{ r.pick }}" style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;border-radius:6px;border:0;font:inherit;text-align:left;cursor:pointer;background:{{ r.bg }};color:{{ r.color }}">{{ r.name }}<span style="font-size:11px;opacity:.6">{{ r.n }}</span></button></sc-for>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:6px">Template</div>
+        <sc-for list="{{ tpls }}" as="t" hint-placeholder-count="3"><button onClick="{{ t.pick }}" style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;border-radius:6px;border:0;font:inherit;text-align:left;cursor:pointer;background:{{ t.bg }};color:{{ t.color }}">{{ t.name }}<span style="font-size:11px;opacity:.6">{{ t.n }}</span></button></sc-for>
+      </div>
+      <div style="margin-top:auto;font-size:11px;color:var(--color-neutral-600);display:flex;flex-direction:column;gap:4px"><span style="display:flex;gap:6px;align-items:center"><span style="width:6px;height:6px;border-radius:50%;background:var(--color-accent);animation:kpulse 1.8s infinite"></span>live</span><span>index rescan: 2 min ago</span></div>
+    </aside>
+    <div style="padding:16px 20px 24px;display:flex;flex-direction:column;gap:22px">
+      <sc-for list="{{ groups }}" as="g" hint-placeholder-count="3">
+      <section>
+        <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px;padding-bottom:6px;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px"><span style="font-size:13px;font-weight:500;color:{{ g.color }}">{{ g.label }}</span><span style="font-size:11px;color:var(--color-neutral-600)">{{ g.n }}</span></div>
+        <sc-if value="{{ g.empty }}" hint-placeholder-val="{{ false }}"><div style="font-size:12px;color:var(--color-neutral-600);padding:8px 10px">nothing here for this repo</div></sc-if>
+        <sc-for list="{{ g.items }}" as="i" hint-placeholder-count="2">
+        <div style="display:grid;grid-template-columns:1fr 260px 120px;gap:20px;align-items:center;padding:10px 10px;border-radius:8px" style-hover="background:color-mix(in srgb,var(--color-text) 4%,transparent)">
+          <div style="display:flex;flex-direction:column;gap:4px;min-width:0">
+            <div style="font-size:14px;font-weight:500">{{ i.title }}</div>
+            <div style="display:flex;align-items:center;gap:10px;font-size:11px;color:var(--color-neutral-500);white-space:nowrap"><span>{{ i.repo }}<sc-if value="{{ i.multi }}" hint-placeholder-val="{{ false }}"> +{{ i.extra }}</sc-if></span><span style="font-family:ui-monospace,Menlo,monospace">{{ i.id }}</span><span>{{ i.template }}</span><span>{{ i.ago }}</span></div>
+            <sc-if value="{{ i.gateOpen }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:8px;margin-top:6px"><span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--color-accent-300)"><i class="ph ph-flag"></i>{{ i.gateName }}</span><button class="btn btn-primary" style="font-size:12px;padding:3px 9px">Approve</button><button class="btn btn-secondary" style="font-size:12px;padding:3px 9px">Reject…</button><a href="#" style="font-size:12px;margin-left:4px;white-space:nowrap">open plan</a></div></sc-if>
+          </div>
+          <div style="display:flex;gap:3px;align-items:center;height:14px">
+            <sc-for list="{{ i.nodes }}" as="n" hint-placeholder-count="8"><span title="{{ n.id }}" style="flex:1;height:{{ n.cH }}px;border-radius:2px;background:{{ n.cBg }};box-shadow:{{ n.cShadow }};position:relative"><sc-if value="{{ n.gate }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;right:-2px;top:-5px;width:1px;height:14px;background:var(--color-accent-400)"></span></sc-if></span></sc-for>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--color-accent-300);white-space:nowrap">{{ i.current }}<sc-if value="{{ i.fix }}" hint-placeholder-val="{{ false }}"><span class="tag tag-outline" style="padding:0 5px;font-size:10px">fix·2</span></sc-if><sc-if value="{{ i.capped }}" hint-placeholder-val="{{ false }}"><span class="tag tag-outline" style="padding:0 5px;font-size:10px;gap:4px"><i class="ph ph-prohibit"></i>capped 3/3</span></sc-if></div>
+        </div>
+        </sc-for>
+      </section>
+      </sc-for>
+    </div>
+  </div>
+</div></div>
+</div>
+</section>
+
+<section class="dv-turn" id="s2">
+<div class="dv-thd"><a class="dv-tid" href="#s2">2</a><span class="dv-tname">Work item detail</span></div>
+<div class="dv-opts">
+<div class="dv-opt" id="3a"><div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>Detail · multi-repo item in merge · repos panel under the chain</div>
+<div class="dv-card" style="width:1100px" data-screen-label="3a Detail focus multi">
+  <div class="nav" style="border-bottom:1px solid var(--color-divider);padding:8px 16px"><a href="#" style="color:var(--color-neutral-400);font-size:13px;display:inline-flex;align-items:center;gap:6px;text-decoration:none"><i class="ph ph-arrow-left"></i>Board</a><span class="nav-brand" style="font-size:16px;margin-left:8px">Kraft</span><button class="btn btn-secondary" style="font-size:13px;padding:5px 10px"><i class="ph ph-magnifying-glass"></i>Search<span style="opacity:.5;font-size:11px;margin-left:4px">⌘K</span></button></div>
+  <div style="padding:28px 40px 32px;display:flex;flex-direction:column;gap:24px;max-width:900px">
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--color-neutral-500);white-space:nowrap"><span>repo-c</span><span class="tag tag-neutral" style="padding:0 6px;font-size:10px">+2 submodules</span><span style="font-family:ui-monospace,Menlo,monospace">wi_01HX3P1</span><span>default</span><span>bead repo-c-9a1</span></div>
+      <h2 style="font-size:20px;margin:0;color:var(--color-neutral-300);font-weight:400">Bump submodule pointers after API change</h2>
+      <div style="display:flex;align-items:baseline;gap:14px;margin-top:6px"><span style="font-size:32px;line-height:1;font-weight:500;letter-spacing:-.02em">merge</span><span style="font-size:12px;color:var(--color-neutral-500)">node 10 of 10 · repo 2 of 3 · running 5 min</span></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;gap:3px;align-items:flex-start">
+        <sc-for list="{{ multi.nodes }}" as="n" hint-placeholder-count="10"><span title="{{ n.id }}" style="flex:1;display:flex;flex-direction:column;gap:7px;min-width:0"><span style="height:14px;display:flex;align-items:center"><span style="width:100%;height:{{ n.cH2 }}px;border-radius:3px;background:{{ n.cBg }};box-shadow:{{ n.cShadow }};position:relative;animation:{{ n.cAnim }}"><sc-if value="{{ n.gate }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;right:-3px;top:-6px;width:1.5px;height:18px;background:var(--color-accent-400)"></span></sc-if></span></span><span style="font-size:9.5px;letter-spacing:-.01em;color:{{ n.lColor }};white-space:nowrap;overflow:visible">{{ n.id }}</span></span></sc-for>
+      </div>
+    </div>
+    <section style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;align-items:baseline;gap:10px;font-size:12px;color:var(--color-neutral-500)"><span style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-600)">Repos</span><span>merge rank · deepest first</span><span style="margin-left:auto">root_merge_policy: <span style="color:var(--color-neutral-400)">bump</span></span></div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <sc-for list="{{ multi.repos }}" as="r" hint-placeholder-count="3">
+        <div style="display:grid;grid-template-columns:22px 1fr 100px 120px auto;gap:14px;align-items:center;padding:10px 0;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px">
+          <span style="width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;color:{{ r.color }};border:1px solid {{ r.border }};animation:{{ r.anim }}"><i class="ph {{ r.icon }}"></i></span>
+          <div style="display:flex;flex-direction:column;gap:2px;white-space:nowrap"><span style="font-size:14px">{{ r.repo }}</span><span style="font-size:12px;color:var(--color-neutral-500)"><span style="font-family:ui-monospace,Menlo,monospace">{{ r.path }}</span> · merge rank {{ r.rank }}</span></div>
+          <span style="font-size:12px;color:var(--color-neutral-500)">{{ r.role }}</span>
+          <span style="font-size:12px;color:{{ r.color }}">{{ r.state }}</span>
+          <a href="#" style="font-size:12px;text-decoration:none;display:inline-flex;align-items:center;gap:4px">{{ r.mr }}<i class="ph ph-arrow-square-out"></i></a>
+        </div>
+        </sc-for>
+      </div>
+    </section>
+    <div style="display:flex;gap:10px;align-items:center">
+      <button class="btn btn-secondary" style="font-size:13px"><i class="ph ph-pause"></i>Pause</button><span style="font-size:11px;color:var(--color-neutral-600)">GitLab task · not steerable</span><span style="font-size:12px;color:var(--color-neutral-600);margin-left:auto">1 task · 0 tokens this node · 212k total</span>
+    </div>
+    <div style="display:flex;gap:18px;font-size:13px;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px">
+      <span style="padding:6px 2px;color:var(--color-accent);box-shadow:inset 0 -1px 0 var(--color-accent)">Tasks · 1</span><span style="padding:6px 2px;color:var(--color-neutral-500)">Timeline · 24</span><span style="padding:6px 2px;color:var(--color-neutral-500)">Documents · 3</span>
+    </div>
+    <div style="display:grid;grid-template-columns:22px 1fr auto auto;gap:14px;align-items:center;padding:12px 0;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px">
+      <span style="width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:var(--color-accent);border:1px solid var(--color-accent);animation:kpulse 1.8s infinite"><i class="ph ph-circle-notch"></i></span>
+      <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:14px">on.merge</span><span style="font-size:12px;color:var(--color-neutral-500)">GitLab · HttpClientAdapter · merging repo-b !87</span></div>
+      <span style="font-size:12px;color:var(--color-accent)">running</span>
+      <span style="font-size:12px;color:var(--color-neutral-600)">no log</span>
+    </div>
+  </div>
+</div></div>
+
+<div class="dv-opt" id="3b"><div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>Detail · single-repo item in verify · fix cycle live</div>
+<div class="dv-card" style="width:1100px" data-screen-label="3b Detail focus single">
+  <div class="nav" style="border-bottom:1px solid var(--color-divider);padding:8px 16px"><a href="#" style="color:var(--color-neutral-400);font-size:13px;display:inline-flex;align-items:center;gap:6px;text-decoration:none"><i class="ph ph-arrow-left"></i>Board</a><span class="nav-brand" style="font-size:16px;margin-left:8px">Kraft</span><button class="btn btn-secondary" style="font-size:13px;padding:5px 10px"><i class="ph ph-magnifying-glass"></i>Search<span style="opacity:.5;font-size:11px;margin-left:4px">⌘K</span></button></div>
+  <div style="padding:28px 40px 32px;display:flex;flex-direction:column;gap:24px;max-width:900px">
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--color-neutral-500)"><span>repo-a</span><span style="font-family:ui-monospace,Menlo,monospace">wi_01HX3K9</span><span>default</span><span>bead repo-a-4f2</span></div>
+      <h2 style="font-size:20px;margin:0;color:var(--color-neutral-300);font-weight:400">Migrate config loader to new schema</h2>
+      <div style="display:flex;align-items:baseline;gap:14px;margin-top:6px"><span style="font-size:32px;line-height:1;font-weight:500;letter-spacing:-.02em">verify</span><span class="tag tag-outline">fix · cycle 2 of 3</span><span style="font-size:12px;color:var(--color-neutral-500)">node 6 of 10 · running 41 min</span></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;gap:3px;align-items:flex-start">
+        <sc-for list="{{ detail.nodes }}" as="n" hint-placeholder-count="10"><span title="{{ n.id }}" style="flex:1;display:flex;flex-direction:column;gap:7px;min-width:0"><span style="height:14px;display:flex;align-items:center"><span style="width:100%;height:{{ n.cH2 }}px;border-radius:3px;background:{{ n.cBg }};box-shadow:{{ n.cShadow }};position:relative;animation:{{ n.cAnim }}"><sc-if value="{{ n.gate }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;right:-3px;top:-6px;width:1.5px;height:18px;background:var(--color-accent-400)"></span></sc-if></span></span><span style="font-size:9.5px;letter-spacing:-.01em;color:{{ n.lColor }};white-space:nowrap;overflow:visible">{{ n.id }}</span></span></sc-for>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center">
+      <button class="btn btn-secondary" style="font-size:13px"><i class="ph ph-pause"></i>Pause</button><button class="btn btn-ghost" style="font-size:13px" disabled><i class="ph ph-chat-text"></i>Steer</button><span style="font-size:11px;color:var(--color-neutral-600)">steer unlocks once paused</span><span style="font-size:12px;color:var(--color-neutral-600);margin-left:auto">3 tasks · 41.2k tokens this node · 138k total</span>
+    </div>
+    <div style="display:flex;gap:18px;font-size:13px;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px">
+      <span style="padding:6px 2px;color:var(--color-accent);box-shadow:inset 0 -1px 0 var(--color-accent)">Tasks · 3</span><span style="padding:6px 2px;color:var(--color-neutral-500)">Timeline · 12</span><span style="padding:6px 2px;color:var(--color-neutral-500)">Documents · 3</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:2px">
+      <sc-for list="{{ detail.tasks }}" as="t" hint-placeholder-count="3">
+      <div style="display:grid;grid-template-columns:22px 1fr auto auto;gap:14px;align-items:center;padding:12px 0;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px">
+        <span style="width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:{{ t.color }};border:1px solid {{ t.border }};animation:{{ t.anim }}"><i class="ph {{ t.icon }}"></i></span>
+        <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:14px">{{ t.hook }}</span><span style="font-size:12px;color:var(--color-neutral-500)">{{ t.sub }}</span></div>
+        <span style="font-size:12px;color:{{ t.color }}">{{ t.status }}</span>
+        <a href="#" style="font-size:12px;text-decoration:none">view log</a>
+      </div>
+      </sc-for>
+    </div>
+  </div>
+</div></div>
+</div>
+</section>
+
+<section class="dv-turn" id="s3">
+<div class="dv-thd"><a class="dv-tid" href="#s3">3</a><span class="dv-tname">Detail states and tabs</span></div>
+<div class="dv-opts">
+<div class="dv-opt" id="4a"><div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>needs_human · gate card replaces the controls</div>
+<div class="dv-card" style="width:1100px" data-screen-label="4a Detail gate">
+  <div class="nav" style="border-bottom:1px solid var(--color-divider);padding:8px 16px"><a href="#" style="color:var(--color-neutral-400);font-size:13px;display:inline-flex;align-items:center;gap:6px;text-decoration:none"><i class="ph ph-arrow-left"></i>Board</a><span class="nav-brand" style="font-size:16px;margin-left:8px">Kraft</span><button class="btn btn-secondary" style="font-size:13px;padding:5px 10px"><i class="ph ph-magnifying-glass"></i>Search<span style="opacity:.5;font-size:11px;margin-left:4px">⌘K</span></button></div>
+  <div style="padding:28px 40px 32px;display:flex;flex-direction:column;gap:24px;max-width:900px">
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--color-neutral-500)"><span>repo-b</span><span style="font-family:ui-monospace,Menlo,monospace">wi_01HX3M2</span><span>default</span><span class="tag tag-accent" style="margin-left:auto;gap:5px"><i class="ph ph-flag"></i>needs you</span></div>
+      <h2 style="font-size:20px;margin:0;color:var(--color-neutral-300);font-weight:400">Add pagination to list endpoint</h2>
+      <div style="display:flex;align-items:baseline;gap:14px;margin-top:6px"><span style="font-size:32px;line-height:1;font-weight:500;letter-spacing:-.02em">plan</span><span style="font-size:12px;color:var(--color-neutral-500)">node 2 of 10 · waiting 12 min</span></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;gap:3px;align-items:flex-start">
+        <sc-for list="{{ gateNodes }}" as="n" hint-placeholder-count="10"><span title="{{ n.id }}" style="flex:1;display:flex;flex-direction:column;gap:7px;min-width:0"><span style="height:14px;display:flex;align-items:center"><span style="width:100%;height:{{ n.cH2 }}px;border-radius:3px;background:{{ n.cBg }};box-shadow:{{ n.cShadow }};position:relative"><sc-if value="{{ n.gate }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;right:-3px;top:-6px;width:1.5px;height:18px;background:var(--color-accent-400)"></span></sc-if></span></span><span style="font-size:9.5px;letter-spacing:-.01em;color:{{ n.lColor }};white-space:nowrap;overflow:visible">{{ n.id }}</span></span></sc-for>
+      </div>
+    </div>
+    <div class="card" style="padding:16px 18px;gap:12px;box-shadow:0 0 0 1px var(--color-accent-700),0 0 24px rgba(145,132,217,.18)">
+      <div style="display:flex;align-items:center;gap:10px"><i class="ph ph-flag" style="color:var(--color-accent);font-size:18px"></i><div style="display:flex;flex-direction:column"><span style="font-size:15px;font-weight:500">plan_approval — approve the plan to continue</span><span style="font-size:12px;color:var(--color-neutral-500)">on.plan.requested completed clean · reject loop 0 of 2</span></div></div>
+      <button style="display:flex;gap:10px;align-items:center;padding:8px 10px;border-radius:6px;border:1px solid var(--color-divider);background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer" style-hover="border-color:var(--color-neutral-600)"><i class="ph ph-list-checks" style="color:var(--color-accent)"></i><span style="font-size:13px;flex:1">Plan: pagination for list endpoint</span><span style="font-size:11px;color:var(--color-neutral-600);font-family:ui-monospace,Menlo,monospace">.engineering/plans/pagination.md</span></button>
+      <div style="display:flex;gap:8px"><button class="btn btn-primary" style="font-size:13px"><i class="ph ph-check"></i>Approve</button><button class="btn btn-secondary" style="font-size:13px">Reject…</button></div>
+    </div>
+    <div style="display:flex;gap:18px;font-size:13px;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px">
+      <span style="padding:6px 2px;color:var(--color-accent);box-shadow:inset 0 -1px 0 var(--color-accent)">Tasks · 1</span><span style="padding:6px 2px;color:var(--color-neutral-500)">Timeline · 5</span><span style="padding:6px 2px;color:var(--color-neutral-500)">Documents · 2</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:2px">
+      <sc-for list="{{ detail.gateTasks }}" as="t" hint-placeholder-count="1">
+      <div style="display:grid;grid-template-columns:22px 1fr auto auto;gap:14px;align-items:center;padding:12px 0;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px">
+        <span style="width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:{{ t.color }};border:1px solid {{ t.border }}"><i class="ph {{ t.icon }}"></i></span>
+        <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:14px">{{ t.hook }}</span><span style="font-size:12px;color:var(--color-neutral-500)">{{ t.sub }}</span></div>
+        <span style="font-size:12px;color:{{ t.color }}">{{ t.status }}</span>
+        <a href="#" style="font-size:12px;text-decoration:none">view log</a>
+      </div>
+      </sc-for>
+    </div>
+  </div>
+</div></div>
+
+<div class="dv-opt" id="4b"><div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>capped_out · per-cycle trace, steer and retry (implies new API)</div>
+<div class="dv-card" style="width:1100px" data-screen-label="4b Detail capped">
+  <div class="nav" style="border-bottom:1px solid var(--color-divider);padding:8px 16px"><a href="#" style="color:var(--color-neutral-400);font-size:13px;display:inline-flex;align-items:center;gap:6px;text-decoration:none"><i class="ph ph-arrow-left"></i>Board</a><span class="nav-brand" style="font-size:16px;margin-left:8px">Kraft</span><button class="btn btn-secondary" style="font-size:13px;padding:5px 10px"><i class="ph ph-magnifying-glass"></i>Search<span style="opacity:.5;font-size:11px;margin-left:4px">⌘K</span></button></div>
+  <div style="padding:28px 40px 32px;display:flex;flex-direction:column;gap:24px;max-width:900px">
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--color-neutral-500)"><span>repo-a</span><span style="font-family:ui-monospace,Menlo,monospace">wi_01HX3Q4</span><span>quick-task</span><span class="tag tag-accent" style="margin-left:auto;gap:5px"><i class="ph ph-flag"></i>needs you</span></div>
+      <h2 style="font-size:20px;margin:0;color:var(--color-neutral-300);font-weight:400">Harden retry backoff</h2>
+      <div style="display:flex;align-items:baseline;gap:14px;margin-top:6px"><span style="font-size:32px;line-height:1;font-weight:500;letter-spacing:-.02em">verify</span><span class="tag tag-outline" style="gap:5px"><i class="ph ph-prohibit"></i>capped · 3 of 3</span><span style="font-size:12px;color:var(--color-neutral-500)">node 3 of 7 · stopped 38 min ago</span></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;gap:3px;align-items:flex-start">
+        <sc-for list="{{ capNodes }}" as="n" hint-placeholder-count="7"><span title="{{ n.id }}" style="flex:1;display:flex;flex-direction:column;gap:7px;min-width:0"><span style="height:14px;display:flex;align-items:center"><span style="width:100%;height:{{ n.cH2 }}px;border-radius:3px;background:{{ n.cBg }};box-shadow:{{ n.cShadow }};position:relative"><sc-if value="{{ n.gate }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;right:-3px;top:-6px;width:1.5px;height:18px;background:var(--color-accent-400)"></span></sc-if></span></span><span style="font-size:9.5px;letter-spacing:-.01em;color:{{ n.lColor }};white-space:nowrap;overflow:visible">{{ n.id }}</span></span></sc-for>
+      </div>
+    </div>
+    <div class="card" style="padding:16px 18px;gap:12px;box-shadow:0 0 0 1px var(--color-accent-700),0 0 24px rgba(145,132,217,.18)">
+      <div style="display:flex;align-items:center;gap:10px"><i class="ph ph-prohibit" style="color:var(--color-accent);font-size:18px"></i><div style="display:flex;flex-direction:column"><span style="font-size:15px;font-weight:500">verify_fix_loop hit its cap — 3 attempts, 1h 12m</span><span style="font-size:12px;color:var(--color-neutral-500)">on.test.run never went clean. The chain did not move; nothing was merged.</span></div></div>
+      <div style="display:grid;grid-template-columns:auto 1fr auto;gap:6px 12px;font-size:12px;padding:8px 10px;border-radius:6px;border:1px solid var(--color-divider)">
+        <span style="color:var(--color-neutral-500)">cycle 1</span><span style="color:var(--color-neutral-300)">2 failing · test_backoff_jitter, test_backoff_cap</span><a href="#" style="text-decoration:none">log</a>
+        <span style="color:var(--color-neutral-500)">cycle 2</span><span style="color:var(--color-neutral-300)">1 failing · test_backoff_cap</span><a href="#" style="text-decoration:none">log</a>
+        <span style="color:var(--color-neutral-500)">cycle 3</span><span style="color:var(--color-neutral-300)">1 failing · test_backoff_cap</span><a href="#" style="text-decoration:none">log</a>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center"><button class="btn btn-primary" style="font-size:13px"><i class="ph ph-chat-text"></i>Steer and retry</button><button class="btn btn-secondary" style="font-size:13px">Open worktree</button><span style="font-size:11px;color:var(--color-neutral-600);margin-left:auto">retry resets the loop counter; steer text carries into cycle 1</span></div>
+    </div>
+    <div style="display:flex;gap:18px;font-size:13px;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px">
+      <span style="padding:6px 2px;color:var(--color-accent);box-shadow:inset 0 -1px 0 var(--color-accent)">Tasks · 3</span><span style="padding:6px 2px;color:var(--color-neutral-500)">Timeline · 18</span><span style="padding:6px 2px;color:var(--color-neutral-500)">Documents · 4</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:2px">
+      <sc-for list="{{ detail.capTasks }}" as="t" hint-placeholder-count="3">
+      <div style="display:grid;grid-template-columns:22px 1fr auto auto;gap:14px;align-items:center;padding:12px 0;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px">
+        <span style="width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:{{ t.color }};border:1px solid {{ t.border }}"><i class="ph {{ t.icon }}"></i></span>
+        <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:14px">{{ t.hook }}</span><span style="font-size:12px;color:var(--color-neutral-500)">{{ t.sub }}</span></div>
+        <span style="font-size:12px;color:{{ t.color }}">{{ t.status }}</span>
+        <a href="#" style="font-size:12px;text-decoration:none">view log</a>
+      </div>
+      </sc-for>
+    </div>
+  </div>
+</div></div>
+
+<div class="dv-opt" id="4c"><div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>paused · steer open, resume carries the note</div>
+<div class="dv-card" style="width:1100px" data-screen-label="4c Detail paused">
+  <div class="nav" style="border-bottom:1px solid var(--color-divider);padding:8px 16px"><a href="#" style="color:var(--color-neutral-400);font-size:13px;display:inline-flex;align-items:center;gap:6px;text-decoration:none"><i class="ph ph-arrow-left"></i>Board</a><span class="nav-brand" style="font-size:16px;margin-left:8px">Kraft</span><button class="btn btn-secondary" style="font-size:13px;padding:5px 10px"><i class="ph ph-magnifying-glass"></i>Search<span style="opacity:.5;font-size:11px;margin-left:4px">⌘K</span></button></div>
+  <div style="padding:28px 40px 32px;display:flex;flex-direction:column;gap:24px;max-width:900px">
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--color-neutral-500)"><span>repo-a</span><span style="font-family:ui-monospace,Menlo,monospace">wi_01HX3K9</span><span>default</span><span class="tag tag-neutral" style="margin-left:auto;gap:5px"><i class="ph ph-pause"></i>paused</span></div>
+      <h2 style="font-size:20px;margin:0;color:var(--color-neutral-300);font-weight:400">Migrate config loader to new schema</h2>
+      <div style="display:flex;align-items:baseline;gap:14px;margin-top:6px"><span style="font-size:32px;line-height:1;font-weight:500;letter-spacing:-.02em">implementation</span><span style="font-size:12px;color:var(--color-neutral-500)">node 5 of 10 · paused 2 min ago by you</span></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;gap:3px;align-items:flex-start">
+        <sc-for list="{{ pausedNodes }}" as="n" hint-placeholder-count="10"><span title="{{ n.id }}" style="flex:1;display:flex;flex-direction:column;gap:7px;min-width:0"><span style="height:14px;display:flex;align-items:center"><span style="width:100%;height:{{ n.cH2 }}px;border-radius:3px;background:{{ n.pBg }};position:relative"><sc-if value="{{ n.gate }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;right:-3px;top:-6px;width:1.5px;height:18px;background:var(--color-accent-400)"></span></sc-if></span></span><span style="font-size:9.5px;letter-spacing:-.01em;color:{{ n.lColor }};white-space:nowrap;overflow:visible">{{ n.id }}</span></span></sc-for>
+      </div>
+    </div>
+    <div class="card elev-sm" style="padding:16px 18px;gap:12px">
+      <div class="field"><label>Steer <span style="opacity:.6">· goes into the next attempt's system prompt, never into the repo</span></label><div class="input" style="min-height:70px;display:flex;align-items:flex-start;color:var(--color-text);font-size:14px;line-height:1.5">Keep the old loader's public signature. Don't touch fixtures yet — port them in a separate commit.<span style="width:1px;height:16px;background:var(--color-accent);margin:3px 0 0 1px;flex:none"></span></div></div>
+      <div style="display:flex;gap:8px;align-items:center"><button class="btn btn-primary" style="font-size:13px"><i class="ph ph-play"></i>Resume with steer</button><button class="btn btn-ghost" style="font-size:13px">Resume without</button><span style="font-size:11px;color:var(--color-neutral-600);margin-left:auto">relaunches on.implementation.start as attempt 2</span></div>
+    </div>
+    <div style="display:flex;gap:18px;font-size:13px;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px">
+      <span style="padding:6px 2px;color:var(--color-accent);box-shadow:inset 0 -1px 0 var(--color-accent)">Tasks · 1</span><span style="padding:6px 2px;color:var(--color-neutral-500)">Timeline · 10</span><span style="padding:6px 2px;color:var(--color-neutral-500)">Documents · 2</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:2px">
+      <sc-for list="{{ detail.pausedTasks }}" as="t" hint-placeholder-count="1">
+      <div style="display:grid;grid-template-columns:22px 1fr auto auto;gap:14px;align-items:center;padding:12px 0;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px">
+        <span style="width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:{{ t.color }};border:1px solid {{ t.border }}"><i class="ph {{ t.icon }}"></i></span>
+        <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:14px">{{ t.hook }}</span><span style="font-size:12px;color:var(--color-neutral-500)">{{ t.sub }}</span></div>
+        <span style="font-size:12px;color:{{ t.color }}">{{ t.status }}</span>
+        <a href="#" style="font-size:12px;text-decoration:none">view log</a>
+      </div>
+      </sc-for>
+    </div>
+  </div>
+</div></div>
+
+<div class="dv-opt" id="4d"><div class="dv-olabel"><a class="dv-oid" href="#4d">4d</a>Timeline tab · grouped by node, newest first</div>
+<div class="dv-card" style="width:1100px" data-screen-label="4d Detail timeline">
+  <div class="nav" style="border-bottom:1px solid var(--color-divider);padding:8px 16px"><a href="#" style="color:var(--color-neutral-400);font-size:13px;display:inline-flex;align-items:center;gap:6px;text-decoration:none"><i class="ph ph-arrow-left"></i>Board</a><span class="nav-brand" style="font-size:16px;margin-left:8px">Kraft</span><button class="btn btn-secondary" style="font-size:13px;padding:5px 10px"><i class="ph ph-magnifying-glass"></i>Search<span style="opacity:.5;font-size:11px;margin-left:4px">⌘K</span></button></div>
+  <div style="padding:28px 40px 32px;display:flex;flex-direction:column;gap:24px;max-width:900px">
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--color-neutral-500)"><span>repo-a</span><span style="font-family:ui-monospace,Menlo,monospace">wi_01HX3K9</span><span>default</span></div>
+      <h2 style="font-size:20px;margin:0;color:var(--color-neutral-300);font-weight:400">Migrate config loader to new schema</h2>
+      <div style="display:flex;align-items:baseline;gap:14px;margin-top:6px"><span style="font-size:32px;line-height:1;font-weight:500;letter-spacing:-.02em">verify</span><span class="tag tag-outline">fix · cycle 2 of 3</span><span style="font-size:12px;color:var(--color-neutral-500)">node 6 of 10 · running 41 min</span></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;gap:3px;align-items:flex-start">
+        <sc-for list="{{ detail.nodes }}" as="n" hint-placeholder-count="10"><span title="{{ n.id }}" style="flex:1;display:flex;flex-direction:column;gap:7px;min-width:0"><span style="height:14px;display:flex;align-items:center"><span style="width:100%;height:{{ n.cH2 }}px;border-radius:3px;background:{{ n.cBg }};box-shadow:{{ n.cShadow }};position:relative;animation:{{ n.cAnim }}"><sc-if value="{{ n.gate }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;right:-3px;top:-6px;width:1.5px;height:18px;background:var(--color-accent-400)"></span></sc-if></span></span><span style="font-size:9.5px;letter-spacing:-.01em;color:{{ n.lColor }};white-space:nowrap;overflow:visible">{{ n.id }}</span></span></sc-for>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center">
+      <button class="btn btn-secondary" style="font-size:13px"><i class="ph ph-pause"></i>Pause</button><button class="btn btn-ghost" style="font-size:13px" disabled><i class="ph ph-chat-text"></i>Steer</button><span style="font-size:12px;color:var(--color-neutral-600);margin-left:auto">3 tasks · 41.2k tokens this node · 138k total</span>
+    </div>
+    <div style="display:flex;gap:18px;font-size:13px;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px">
+      <span style="padding:6px 2px;color:var(--color-neutral-500)">Tasks · 3</span><span style="padding:6px 2px;color:var(--color-accent);box-shadow:inset 0 -1px 0 var(--color-accent)">Timeline · 12</span><span style="padding:6px 2px;color:var(--color-neutral-500)">Documents · 3</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:18px">
+      <sc-for list="{{ timelineGroups }}" as="g" hint-placeholder-count="3">
+      <div style="display:grid;grid-template-columns:140px 1fr;gap:20px;align-items:start">
+        <div style="display:flex;flex-direction:column;gap:2px;padding-top:6px"><span style="font-size:13px;font-weight:500;color:{{ g.color }}">{{ g.node }}</span><span style="font-size:11px;color:var(--color-neutral-600)">{{ g.span }}</span></div>
+        <div style="display:flex;flex-direction:column">
+          <sc-for list="{{ g.events }}" as="e" hint-placeholder-count="3">
+          <div style="display:grid;grid-template-columns:8px 1fr auto;gap:12px;align-items:baseline;padding:7px 0;background:linear-gradient(to right,transparent,color-mix(in srgb,var(--color-text) 8%,transparent) 24px,color-mix(in srgb,var(--color-text) 8%,transparent) calc(100% - 24px),transparent) no-repeat bottom / 100% 1px">
+            <span style="width:7px;height:7px;border-radius:50%;background:{{ e.dot }};align-self:center"></span>
+            <div style="display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;font-size:12px"><span style="font-family:ui-monospace,Menlo,monospace;color:var(--color-neutral-300)">{{ e.type }}</span><sc-if value="{{ e.detail }}" hint-placeholder-val="{{ false }}"><span style="color:var(--color-neutral-500)">{{ e.detail }}</span></sc-if><sc-if value="{{ e.log }}" hint-placeholder-val="{{ false }}"><a href="#" style="font-size:11px;text-decoration:none">view log</a></sc-if></div>
+            <span style="font-size:11px;color:var(--color-neutral-600);font-family:ui-monospace,Menlo,monospace">{{ e.t }}</span>
+          </div>
+          </sc-for>
+        </div>
+      </div>
+      </sc-for>
+    </div>
+  </div>
+</div></div>
+
+<div class="dv-opt" id="4e"><div class="dv-olabel"><a class="dv-oid" href="#4e">4e</a>Documents tab · rows open the document modal (<a class="dv-oid" href="#6a">6a</a>)</div>
+<div class="dv-card" style="width:1100px" data-screen-label="4e Detail documents">
+  <div class="nav" style="border-bottom:1px solid var(--color-divider);padding:8px 16px"><a href="#" style="color:var(--color-neutral-400);font-size:13px;display:inline-flex;align-items:center;gap:6px;text-decoration:none"><i class="ph ph-arrow-left"></i>Board</a><span class="nav-brand" style="font-size:16px;margin-left:8px">Kraft</span><button class="btn btn-secondary" style="font-size:13px;padding:5px 10px"><i class="ph ph-magnifying-glass"></i>Search<span style="opacity:.5;font-size:11px;margin-left:4px">⌘K</span></button></div>
+  <div style="padding:28px 40px 32px;display:flex;flex-direction:column;gap:24px;max-width:900px">
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--color-neutral-500)"><span>repo-a</span><span style="font-family:ui-monospace,Menlo,monospace">wi_01HX3K9</span><span>default</span></div>
+      <h2 style="font-size:20px;margin:0;color:var(--color-neutral-300);font-weight:400">Migrate config loader to new schema</h2>
+      <div style="display:flex;align-items:baseline;gap:14px;margin-top:6px"><span style="font-size:32px;line-height:1;font-weight:500;letter-spacing:-.02em">verify</span><span class="tag tag-outline">fix · cycle 2 of 3</span><span style="font-size:12px;color:var(--color-neutral-500)">node 6 of 10 · running 41 min</span></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;gap:3px;align-items:flex-start">
+        <sc-for list="{{ detail.nodes }}" as="n" hint-placeholder-count="10"><span title="{{ n.id }}" style="flex:1;display:flex;flex-direction:column;gap:7px;min-width:0"><span style="height:14px;display:flex;align-items:center"><span style="width:100%;height:{{ n.cH2 }}px;border-radius:3px;background:{{ n.cBg }};box-shadow:{{ n.cShadow }};position:relative;animation:{{ n.cAnim }}"><sc-if value="{{ n.gate }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;right:-3px;top:-6px;width:1.5px;height:18px;background:var(--color-accent-400)"></span></sc-if></span></span><span style="font-size:9.5px;letter-spacing:-.01em;color:{{ n.lColor }};white-space:nowrap;overflow:visible">{{ n.id }}</span></span></sc-for>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center">
+      <button class="btn btn-secondary" style="font-size:13px"><i class="ph ph-pause"></i>Pause</button><button class="btn btn-ghost" style="font-size:13px" disabled><i class="ph ph-chat-text"></i>Steer</button><span style="font-size:12px;color:var(--color-neutral-600);margin-left:auto">3 tasks · 41.2k tokens this node · 138k total</span>
+    </div>
+    <div style="display:flex;gap:18px;font-size:13px;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px">
+      <span style="padding:6px 2px;color:var(--color-neutral-500)">Tasks · 3</span><span style="padding:6px 2px;color:var(--color-neutral-500)">Timeline · 12</span><span style="padding:6px 2px;color:var(--color-accent);box-shadow:inset 0 -1px 0 var(--color-accent)">Documents · 4</span>
+    </div>
+    <div style="display:flex;flex-direction:column">
+      <sc-for list="{{ docRows }}" as="d" hint-placeholder-count="4">
+      <button style="display:grid;grid-template-columns:20px 1fr 120px 130px auto;gap:14px;align-items:center;padding:11px 4px;border:0;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px;color:inherit;font:inherit;text-align:left;cursor:pointer;border-radius:6px" style-hover="background:color-mix(in srgb,var(--color-text) 4%,transparent)">
+        <i class="ph {{ d.icon }}" style="color:var(--color-accent);font-size:16px"></i>
+        <div style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font-size:14px">{{ d.title }}</span><span style="font-size:11px;color:var(--color-neutral-600);font-family:ui-monospace,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ d.path }}</span></div>
+        <span class="tag tag-neutral" style="font-size:10px;padding:1px 7px;justify-self:start">{{ d.kind }}</span>
+        <span style="font-size:12px;color:var(--color-neutral-500)">{{ d.node }}</span>
+        <span style="font-size:11px;color:var(--color-neutral-600);white-space:nowrap">{{ d.when }}</span>
+      </button>
+      </sc-for>
+      <div style="font-size:12px;color:var(--color-neutral-600);padding:12px 4px 0">Read-only. Written by agents into <span style="font-family:ui-monospace,Menlo,monospace">.engineering/</span>; the index lags a scan behind git.</div>
+    </div>
+  </div>
+</div></div>
+</div>
+</section>
+
+<section class="dv-turn" id="s5">
+<div class="dv-thd"><a class="dv-tid" href="#s5">5</a><span class="dv-tname">Settings · repos and chain templates with writes (future API: repo CRUD, template CRUD, validate-on-save)</span></div>
+<div class="dv-opts">
+
+<div class="dv-opt" id="5a"><div class="dv-olabel"><a class="dv-oid" href="#5a">5a</a>Settings · Repos · connected set, per-repo defaults, add-repo dialog open</div>
+<div class="dv-card" style="width:1100px" data-screen-label="5a Settings repos">
+  <div class="nav" style="border-bottom:1px solid var(--color-divider);padding:8px 16px"><a href="#" style="color:var(--color-neutral-400);font-size:13px;display:inline-flex;align-items:center;gap:6px;text-decoration:none"><i class="ph ph-arrow-left"></i>Board</a><span class="nav-brand" style="font-size:16px;margin-left:8px">Kraft</span><button class="btn btn-secondary" style="font-size:13px;padding:5px 10px"><i class="ph ph-magnifying-glass"></i>Search<span style="opacity:.5;font-size:11px;margin-left:4px">⌘K</span></button></div>
+  <div style="display:grid;grid-template-columns:200px 1fr;min-height:620px;position:relative">
+    <aside style="padding:20px 16px;border-right:1px solid var(--color-divider);display:flex;flex-direction:column;gap:2px;font-size:13px">
+      <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:6px">Settings</div>
+      <span style="padding:5px 8px;border-radius:6px;background:rgba(145,132,217,.12);color:var(--color-accent-300)">Repos</span><span style="padding:5px 8px;color:var(--color-neutral-400)">Chain templates</span><span style="padding:5px 8px;color:var(--color-neutral-400)">Plugins</span><span style="padding:5px 8px;color:var(--color-neutral-400)">Policy</span><span style="padding:5px 8px;color:var(--color-neutral-400)">Access</span>
+      <div style="margin-top:auto;font-size:11px;color:var(--color-neutral-600)">config written to ~/.kraft/config.yaml · versioned</div>
+    </aside>
+    <div style="padding:20px 24px 28px;display:flex;flex-direction:column;gap:18px;max-width:860px">
+      <div style="display:flex;align-items:baseline;gap:12px"><h2 style="font-size:20px;margin:0">Repos</h2><span style="font-size:12px;color:var(--color-neutral-500)">4 connected · hydration hub aggregates all of them</span><button class="btn btn-primary" style="margin-left:auto;font-size:13px;padding:5px 10px"><i class="ph ph-plus"></i>Add repo</button></div>
+      <div style="display:flex;flex-direction:column">
+        <div style="display:grid;grid-template-columns:22px 1fr 110px 150px 110px auto;gap:14px;padding:0 0 6px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-600);background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px"><span></span><span>Repo</span><span>Default chain</span><span>Hub</span><span>Index</span><span></span></div>
+        <sc-for list="{{ settingsRepos }}" as="r" hint-placeholder-count="4">
+        <div style="display:grid;grid-template-columns:22px 1fr 110px 150px 110px auto;gap:14px;align-items:center;padding:11px 0;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px">
+          <span style="width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;color:{{ r.iconColor }};border:1px solid {{ r.iconBorder }}"><i class="ph {{ r.icon }}"></i></span>
+          <div style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font-size:14px">{{ r.name }}</span><span style="font-size:11px;color:var(--color-neutral-600);font-family:ui-monospace,Menlo,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.path }} · submodules: {{ r.subs }}</span></div>
+          <span style="font-size:12px;color:var(--color-neutral-400)">{{ r.tpl }}</span>
+          <span style="font-size:12px;color:{{ r.hubColor }}">{{ r.hub }}</span>
+          <span style="font-size:12px;color:var(--color-neutral-500)">{{ r.idx }}</span>
+          <button class="btn btn-ghost" style="font-size:14px;padding:3px 6px;color:var(--color-neutral-500)" title="more"><i class="ph ph-dots-three"></i></button>
+        </div>
+        </sc-for>
+      </div>
+      <div style="font-size:12px;color:var(--color-neutral-600);line-height:1.5">A repo needs <span style="font-family:ui-monospace,Menlo,monospace">export.auto</span> and <span style="font-family:ui-monospace,Menlo,monospace">export.git-add</span> on in its beads config to appear in the hub; Kraft flags it but does not change repo files.</div>
+    </div>
+    <div class="dialog-backdrop" style="position:absolute;inset:0;border-radius:0 0 8px 0">
+      <div class="dialog" style="width:460px;gap:14px;padding:20px 22px">
+        <div class="dialog-title" style="font-size:18px">Add repo</div>
+        <div class="field"><label>Path</label><div class="input" style="display:flex;align-items:center;font-family:ui-monospace,Menlo,monospace;font-size:13px">~/code/repo-e<span style="width:1px;height:16px;background:var(--color-accent);margin-left:1px"></span></div></div>
+        <div style="display:flex;flex-direction:column;gap:6px;font-size:12px;padding:10px 12px;border-radius:8px;border:1px solid var(--color-divider)">
+          <span style="display:flex;align-items:center;gap:6px;color:var(--color-neutral-300)"><i class="ph ph-check" style="color:var(--color-neutral-400)"></i>git repo · main · 1 submodule (libs/repo-a)</span>
+          <span style="display:flex;align-items:center;gap:6px;color:var(--color-neutral-300)"><i class="ph ph-check" style="color:var(--color-neutral-400)"></i>.beads/ present · export.auto on</span>
+          <span style="display:flex;align-items:center;gap:6px;color:var(--color-neutral-300)"><i class="ph ph-warning-circle" style="color:var(--color-accent)"></i>no .engineering/ yet — created on first spec</span>
+        </div>
+        <div class="field"><label>Default chain template</label><div class="seg"><label class="seg-opt"><input type="radio" name="tpl5a" defaultChecked="{{ true }}">default</label><label class="seg-opt"><input type="radio" name="tpl5a">quick-task</label><label class="seg-opt"><input type="radio" name="tpl5a">hotfix</label></div></div>
+        <div class="field"><label>Test command <span style="opacity:.6">· on.test.run</span></label><div class="input" style="display:flex;align-items:center;font-family:ui-monospace,Menlo,monospace;font-size:13px;color:var(--color-neutral-500)">detected: uv run pytest</div></div>
+        <div class="field"><label>GitLab project <span style="opacity:.6">· on.mr.open / on.ci.poll / on.merge</span></label><div class="input" style="display:flex;align-items:center;font-size:13px;color:var(--color-neutral-500)">from remote: group/repo-e</div></div>
+        <div class="dialog-actions"><button class="btn btn-secondary">Cancel</button><button class="btn btn-primary">Connect</button></div>
+      </div>
+    </div>
+  </div>
+</div></div>
+
+<div class="dv-opt" id="5b"><div class="dv-olabel"><a class="dv-oid" href="#5b">5b</a>Settings · Chain templates · structured editor, live YAML, validator per repo</div>
+<div class="dv-card" style="width:1280px" data-screen-label="5b Settings templates">
+  <div class="nav" style="border-bottom:1px solid var(--color-divider);padding:8px 16px"><a href="#" style="color:var(--color-neutral-400);font-size:13px;display:inline-flex;align-items:center;gap:6px;text-decoration:none"><i class="ph ph-arrow-left"></i>Board</a><span class="nav-brand" style="font-size:16px;margin-left:8px">Kraft</span><button class="btn btn-secondary" style="font-size:13px;padding:5px 10px"><i class="ph ph-magnifying-glass"></i>Search<span style="opacity:.5;font-size:11px;margin-left:4px">⌘K</span></button></div>
+  <div style="display:grid;grid-template-columns:190px 1fr 280px;min-height:700px">
+    <aside style="padding:20px 16px;border-right:1px solid var(--color-divider);display:flex;flex-direction:column;gap:18px;font-size:13px">
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:6px">Settings</div>
+        <span style="padding:5px 8px;color:var(--color-neutral-400)">Repos</span><span style="padding:5px 8px;border-radius:6px;background:rgba(145,132,217,.12);color:var(--color-accent-300)">Chain templates</span><span style="padding:5px 8px;color:var(--color-neutral-400)">Plugins</span><span style="padding:5px 8px;color:var(--color-neutral-400)">Policy</span><span style="padding:5px 8px;color:var(--color-neutral-400)">Access</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:6px">Templates</div>
+        <sc-for list="{{ tplList }}" as="t" hint-placeholder-count="3"><div style="display:flex;flex-direction:column;padding:6px 8px;border-radius:6px;background:{{ t.bg }}"><span style="display:flex;align-items:center;gap:6px;color:{{ t.color }}">{{ t.id }}<sc-if value="{{ t.icon }}" hint-placeholder-val="{{ false }}"><i class="ph {{ t.icon }}" style="font-size:12px;color:var(--color-accent)"></i></sc-if></span><span style="font-size:11px;color:var(--color-neutral-600)">{{ t.sub }}</span></div></sc-for>
+        <button class="btn btn-ghost" style="font-size:12px;justify-content:flex-start;padding:4px 8px"><i class="ph ph-plus"></i>New template</button>
+      </div>
+    </aside>
+    <div style="padding:20px 24px 28px;display:flex;flex-direction:column;gap:16px;min-width:0">
+      <div style="display:flex;align-items:baseline;gap:12px"><h2 style="font-size:20px;margin:0;font-family:ui-monospace,Menlo,monospace;font-weight:500">default</h2><span style="font-size:12px;color:var(--color-neutral-500)">v4 · used by repo-a, repo-b, repo-c · 3 live items keep their materialized copy</span></div>
+      <div style="display:flex;gap:3px;align-items:flex-start">
+        <sc-for list="{{ tplNodes }}" as="n" hint-placeholder-count="10"><span style="flex:1;display:flex;flex-direction:column;min-width:0"><span style="height:14px;display:flex;align-items:center"><span style="width:100%;height:6px;border-radius:3px;background:var(--color-neutral-700);position:relative"><sc-if value="{{ n.hasGate }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;right:-3px;top:-6px;width:1.5px;height:18px;background:var(--color-accent-400)"></span></sc-if></span></span></span></sc-for>
+      </div>
+      <div style="display:flex;flex-direction:column">
+        <sc-for list="{{ tplNodes }}" as="n" hint-placeholder-count="10">
+        <div style="display:grid;grid-template-columns:14px 22px 120px minmax(0,1fr) 170px auto;gap:12px;align-items:center;padding:9px 0;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px" style-hover="background:color-mix(in srgb,var(--color-text) 3%,transparent)">
+          <i class="ph ph-dots-six-vertical" style="color:var(--color-neutral-700);font-size:14px"></i>
+          <span style="font-size:11px;color:var(--color-neutral-600);font-family:ui-monospace,Menlo,monospace">{{ n.n }}</span>
+          <span style="font-size:13px;font-family:ui-monospace,Menlo,monospace">{{ n.id }}</span>
+          <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-width:0">
+            <sc-for list="{{ n.tasks }}" as="k" hint-placeholder-count="1"><span class="tag tag-neutral" style="font-size:10px;padding:1px 7px;font-family:ui-monospace,Menlo,monospace;gap:4px">{{ k.t }}<sc-if value="{{ k.steer }}" hint-placeholder-val="{{ false }}"><i class="ph ph-chat-text" style="font-size:9px;opacity:.6"></i></sc-if></span></sc-for>
+            <sc-if value="{{ n.concurrent }}" hint-placeholder-val="{{ false }}"><span style="font-size:10px;color:var(--color-neutral-600)">concurrent · read-only</span></sc-if>
+                      </div>
+          <div style="display:flex;flex-direction:column;gap:2px;font-size:11px"><sc-if value="{{ n.hasGate }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex;align-items:center;gap:4px;color:var(--color-accent-300)"><i class="ph ph-flag"></i>{{ n.gate }}</span></sc-if><sc-if value="{{ n.hasFix }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex;align-items:center;gap:4px;color:var(--color-neutral-400)"><i class="ph ph-arrow-counter-clockwise"></i>{{ n.fix }} · cap 3</span></sc-if></div>
+          <button class="btn btn-ghost" style="font-size:14px;padding:3px 6px;color:var(--color-neutral-500)" title="more"><i class="ph ph-dots-three"></i></button>
+        </div>
+        </sc-for>
+        <button class="btn btn-ghost" style="font-size:12px;justify-content:flex-start;margin-top:8px;align-self:flex-start"><i class="ph ph-plus"></i>Add node</button>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:auto"><button class="btn btn-primary" style="font-size:13px;white-space:nowrap"><i class="ph ph-check"></i>Save as v5</button><button class="btn btn-secondary" style="font-size:13px;white-space:nowrap">Save as new template</button><button class="btn btn-ghost" style="font-size:13px">Discard</button><span style="font-size:11px;color:var(--color-neutral-600);margin-left:auto">saving writes templates/default.yaml and re-runs the validator</span></div>
+    </div>
+    <aside style="padding:20px 18px;border-left:1px solid var(--color-divider);display:flex;flex-direction:column;gap:18px;min-width:0">
+      <section style="display:flex;flex-direction:column;gap:8px">
+        <h6 style="color:var(--color-neutral-500);margin:0">Validator</h6>
+        <div style="display:flex;flex-direction:column;font-size:12px">
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 0"><i class="ph ph-check" style="color:var(--color-neutral-400)"></i><span>repo-a</span><span style="margin-left:auto;color:var(--color-neutral-500)">resolvable</span></div>
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 0"><i class="ph ph-check" style="color:var(--color-neutral-400)"></i><span>repo-b</span><span style="margin-left:auto;color:var(--color-neutral-500)">resolvable</span></div>
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 0"><i class="ph ph-check" style="color:var(--color-neutral-400)"></i><span>repo-c</span><span style="margin-left:auto;color:var(--color-neutral-500)">resolvable</span></div>
+          <div style="display:flex;flex-direction:column;gap:2px;padding:6px 0"><span style="display:flex;align-items:center;gap:8px"><i class="ph ph-warning-circle" style="color:var(--color-accent)"></i><span>repo-d</span><span style="margin-left:auto;color:var(--color-accent-300)">unresolvable</span></span><span style="color:var(--color-neutral-500);padding-left:22px;font-size:11px">on.review.mr.run unbound — remote-review CLI disabled for this repo</span></div>
+        </div>
+      </section>
+      <section style="display:flex;flex-direction:column;gap:8px;flex:1;min-height:0">
+        <h6 style="color:var(--color-neutral-500);margin:0">YAML</h6>
+        <pre style="margin:0;padding:12px;border-radius:8px;background:var(--color-bg);border:1px solid var(--color-divider);font:11px/1.55 ui-monospace,Menlo,monospace;color:var(--color-neutral-400);overflow:auto;white-space:pre">id: default
+nodes:
+  - id: spec
+    tasks: [on.spec.requested]
+    gate_after: spec_approval
+  - id: plan
+    tasks: [on.plan.requested]
+    gate_after: plan_approval
+  - id: chain_review
+    tasks: [on.chain.review_ready]
+    gate_after: chain_finalized
+  - id: env_setup
+    tasks: [on.env.prepare]
+  - id: implementation
+    tasks: [on.implementation.start]
+  - id: verify
+    tasks: [on.test.run, on.review.local.run]
+    fix_loop: verify_fix_loop
+  - id: open_mr
+    tasks: [on.mr.open]
+  - id: mr_checks
+    tasks: [on.ci.poll, on.review.mr.run]
+    fix_loop: mr_checks_fix_loop
+  - id: human_review
+    tasks: [on.human_review.requested]
+    gate_after: human_review_approval
+  - id: merge
+    tasks: [on.merge]</pre>
+      </section>
+    </aside>
+  </div>
+</div></div>
+
+<div class="dv-opt" id="5c"><div class="dv-olabel"><a class="dv-oid" href="#5c">5c</a>Settings · Plugins · hook → plugin bindings, per-repo enable</div>
+<div class="dv-card" style="width:1100px" data-screen-label="5c Settings plugins">
+  <div class="nav" style="border-bottom:1px solid var(--color-divider);padding:8px 16px"><a href="#" style="color:var(--color-neutral-400);font-size:13px;display:inline-flex;align-items:center;gap:6px;text-decoration:none"><i class="ph ph-arrow-left"></i>Board</a><span class="nav-brand" style="font-size:16px;margin-left:8px">Kraft</span><button class="btn btn-secondary" style="font-size:13px;padding:5px 10px"><i class="ph ph-magnifying-glass"></i>Search<span style="opacity:.5;font-size:11px;margin-left:4px">⌘K</span></button></div>
+  <div style="display:grid;grid-template-columns:200px 1fr;min-height:600px">
+    <aside style="padding:20px 16px;border-right:1px solid var(--color-divider);display:flex;flex-direction:column;gap:2px;font-size:13px">
+      <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:6px">Settings</div>
+      <span style="padding:5px 8px;color:var(--color-neutral-400)">Repos</span><span style="padding:5px 8px;color:var(--color-neutral-400)">Chain templates</span><span style="padding:5px 8px;border-radius:6px;background:rgba(145,132,217,.12);color:var(--color-accent-300)">Plugins</span><span style="padding:5px 8px;color:var(--color-neutral-400)">Policy</span><span style="padding:5px 8px;color:var(--color-neutral-400)">Access</span>
+    </aside>
+    <div style="padding:20px 24px 28px;display:flex;flex-direction:column;gap:18px;min-width:0">
+      <div style="display:flex;align-items:baseline;gap:12px"><h2 style="font-size:20px;margin:0">Plugins</h2><span style="font-size:12px;color:var(--color-neutral-500)">one binding per hook in v1 · a hook disabled for a repo makes any template using it unresolvable there</span></div>
+      <div style="display:flex;flex-direction:column">
+        <div style="display:grid;grid-template-columns:1fr 200px 90px repeat(4,64px);gap:12px;padding:0 0 6px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-600);background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px"><span>Hook → plugin</span><span>Adapter</span><span>Steer</span><sc-for list="{{ repoCols }}" as="c" hint-placeholder-count="4"><span style="text-align:center;letter-spacing:0;text-transform:none;font-size:11px;color:var(--color-neutral-500)">{{ c }}</span></sc-for></div>
+        <sc-for list="{{ hooks }}" as="k" hint-placeholder-count="10">
+        <div style="display:grid;grid-template-columns:1fr 200px 90px repeat(4,64px);gap:12px;align-items:center;padding:9px 0;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px">
+          <div style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font-size:13px;font-family:ui-monospace,Menlo,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ k.hook }}</span><span style="font-size:12px;color:var(--color-neutral-400);display:inline-flex;align-items:center;gap:6px">{{ k.plugin }}<i class="ph ph-caret-down" style="font-size:10px;color:var(--color-neutral-600)"></i></span></div>
+          <span style="font-size:11px;color:var(--color-neutral-500);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ k.adapter }}</span>
+          <span style="font-size:11px;color:{{ k.steerColor }}">{{ k.steerLabel }}</span>
+          <sc-for list="{{ k.en }}" as="e" hint-placeholder-count="4"><span style="display:flex;justify-content:center"><span style="width:30px;height:18px;border-radius:9px;border:1px solid {{ e.border }};background:{{ e.bg }};position:relative;display:inline-block"><span style="position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:{{ e.knobBg }};transform:{{ e.knob }}"></span></span></span></sc-for>
+        </div>
+        </sc-for>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center"><button class="btn btn-primary" style="font-size:13px;white-space:nowrap"><i class="ph ph-check"></i>Save bindings</button><button class="btn btn-ghost" style="font-size:13px">Discard</button><span style="font-size:11px;color:var(--color-neutral-600);margin-left:auto">writes registry.yaml · validator re-runs · affects intake only, live items keep their chain · templates affected: hotfix (repo-d)</span></div>
+      <div style="font-size:12px;color:var(--color-neutral-600);line-height:1.5">Steerable = HeadlessAgentInvocation; today a client table, here it comes from the registry (<span style="font-family:ui-monospace,Menlo,monospace">interactive: true</span>). Codex as an execution worker is listed when its per-invocation context flags are verified.</div>
+    </div>
+  </div>
+</div></div>
+
+<div class="dv-opt" id="5d"><div class="dv-olabel"><a class="dv-oid" href="#5d">5d</a>Settings · Policy · loop caps, wall-clock ceilings, concurrency, cost</div>
+<div class="dv-card" style="width:1100px" data-screen-label="5d Settings policy">
+  <div class="nav" style="border-bottom:1px solid var(--color-divider);padding:8px 16px"><a href="#" style="color:var(--color-neutral-400);font-size:13px;display:inline-flex;align-items:center;gap:6px;text-decoration:none"><i class="ph ph-arrow-left"></i>Board</a><span class="nav-brand" style="font-size:16px;margin-left:8px">Kraft</span><button class="btn btn-secondary" style="font-size:13px;padding:5px 10px"><i class="ph ph-magnifying-glass"></i>Search<span style="opacity:.5;font-size:11px;margin-left:4px">⌘K</span></button></div>
+  <div style="display:grid;grid-template-columns:200px 1fr;min-height:620px">
+    <aside style="padding:20px 16px;border-right:1px solid var(--color-divider);display:flex;flex-direction:column;gap:2px;font-size:13px">
+      <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:6px">Settings</div>
+      <span style="padding:5px 8px;color:var(--color-neutral-400)">Repos</span><span style="padding:5px 8px;color:var(--color-neutral-400)">Chain templates</span><span style="padding:5px 8px;color:var(--color-neutral-400)">Plugins</span><span style="padding:5px 8px;border-radius:6px;background:rgba(145,132,217,.12);color:var(--color-accent-300)">Policy</span><span style="padding:5px 8px;color:var(--color-neutral-400)">Access</span>
+    </aside>
+    <div style="padding:20px 24px 28px;display:flex;flex-direction:column;gap:22px;max-width:820px">
+      <div style="display:flex;align-items:baseline;gap:12px"><h2 style="font-size:20px;margin:0">Policy</h2><span style="font-size:12px;color:var(--color-neutral-500)">every loop stops at attempts <em>or</em> wall-clock, whichever first, then the item goes to needs_human</span></div>
+      <section style="display:flex;flex-direction:column;gap:8px">
+        <h6 style="color:var(--color-neutral-500);margin:0">Caps</h6>
+        <div style="display:flex;flex-direction:column">
+          <div style="display:grid;grid-template-columns:1fr 110px 110px 110px;gap:14px;padding:0 0 6px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-600);background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px"><span>Counter</span><span>Attempts</span><span>Wall-clock</span><span></span></div>
+          <sc-for list="{{ policy }}" as="p" hint-placeholder-count="8">
+          <div style="display:grid;grid-template-columns:1fr 110px 110px 110px;gap:14px;align-items:center;padding:8px 0;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px">
+            <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:13px;font-family:ui-monospace,Menlo,monospace">{{ p.id }}</span><span style="font-size:11px;color:var(--color-neutral-500)">{{ p.what }}</span></div>
+            <div class="input" style="min-height:30px;padding:3px 10px;font-size:13px;display:flex;align-items:center;justify-content:space-between">{{ p.attempts }}<span style="display:flex;flex-direction:column;color:var(--color-neutral-600);font-size:9px;line-height:1"><i class="ph ph-caret-up"></i><i class="ph ph-caret-down"></i></span></div>
+            <div class="input" style="min-height:30px;padding:3px 10px;font-size:13px;display:flex;align-items:center">{{ p.wall }}</div>
+            <sc-if value="{{ p.ph }}" hint-placeholder-val="{{ false }}"><span class="tag tag-outline" style="font-size:10px;padding:1px 7px;border-color:var(--color-divider);color:var(--color-neutral-500);justify-self:start">placeholder</span></sc-if>
+          </div>
+          </sc-for>
+        </div>
+        <div style="font-size:12px;color:var(--color-neutral-600);line-height:1.5">Placeholders are the doc's untuned defaults; the row loses the tag once you save a value. Fix loops trigger on any non-empty findings in v1 — a severity threshold is a later addition.</div>
+      </section>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:28px">
+        <section style="display:flex;flex-direction:column;gap:10px">
+          <h6 style="color:var(--color-neutral-500);margin:0">Concurrency ceilings</h6>
+          <div style="display:grid;grid-template-columns:1fr 70px;gap:8px 14px;align-items:center;font-size:13px">
+            <span>Agent sessions (HeadlessAgentInvocation)</span><div class="input" style="min-height:30px;padding:3px 10px;font-size:13px">3</div>
+            <span>Subprocess tasks</span><div class="input" style="min-height:30px;padding:3px 10px;font-size:13px">4</div>
+            <span>GitLab polls in flight</span><div class="input" style="min-height:30px;padding:3px 10px;font-size:13px">8</div>
+          </div>
+        </section>
+        <section style="display:flex;flex-direction:column;gap:10px">
+          <h6 style="color:var(--color-neutral-500);margin:0">Cost</h6>
+          <div style="display:flex;flex-direction:column;gap:8px;font-size:13px">
+            <div style="display:flex;justify-content:space-between;align-items:center"><span>Log tokens and cost per work item</span><span style="width:30px;height:18px;border-radius:9px;border:1px solid var(--color-accent);background:var(--color-accent);position:relative;display:inline-block"><span style="position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--color-bg);transform:translateX(12px)"></span></span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><span>Soft budget per work item <span style="color:var(--color-neutral-600);font-size:11px">· warns, never halts</span></span><div class="input" style="min-height:30px;padding:3px 10px;font-size:13px;width:90px">$ 15</div></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;color:var(--color-neutral-500)"><span>Hard cap <span style="font-size:11px">· after a track record exists</span></span><span style="font-size:12px">off</span></div>
+          </div>
+        </section>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:auto"><button class="btn btn-primary" style="font-size:13px;white-space:nowrap"><i class="ph ph-check"></i>Save policy</button><button class="btn btn-ghost" style="font-size:13px">Discard</button><span style="font-size:11px;color:var(--color-neutral-600);margin-left:auto">writes policy.yaml · applies to loops that start after save</span></div>
+    </div>
+  </div>
+</div></div>
+
+<div class="dv-opt" id="5e"><div class="dv-olabel"><a class="dv-oid" href="#5e">5e</a>Settings · Access · bind address, password, sessions</div>
+<div class="dv-card" style="width:1100px" data-screen-label="5e Settings access">
+  <div class="nav" style="border-bottom:1px solid var(--color-divider);padding:8px 16px"><a href="#" style="color:var(--color-neutral-400);font-size:13px;display:inline-flex;align-items:center;gap:6px;text-decoration:none"><i class="ph ph-arrow-left"></i>Board</a><span class="nav-brand" style="font-size:16px;margin-left:8px">Kraft</span><button class="btn btn-secondary" style="font-size:13px;padding:5px 10px"><i class="ph ph-magnifying-glass"></i>Search<span style="opacity:.5;font-size:11px;margin-left:4px">⌘K</span></button></div>
+  <div style="display:grid;grid-template-columns:200px 1fr;min-height:520px">
+    <aside style="padding:20px 16px;border-right:1px solid var(--color-divider);display:flex;flex-direction:column;gap:2px;font-size:13px">
+      <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:6px">Settings</div>
+      <span style="padding:5px 8px;color:var(--color-neutral-400)">Repos</span><span style="padding:5px 8px;color:var(--color-neutral-400)">Chain templates</span><span style="padding:5px 8px;color:var(--color-neutral-400)">Plugins</span><span style="padding:5px 8px;color:var(--color-neutral-400)">Policy</span><span style="padding:5px 8px;border-radius:6px;background:rgba(145,132,217,.12);color:var(--color-accent-300)">Access</span>
+    </aside>
+    <div style="padding:20px 24px 28px;display:flex;flex-direction:column;gap:22px;max-width:640px">
+      <div style="display:flex;align-items:baseline;gap:12px"><h2 style="font-size:20px;margin:0">Access</h2><span style="font-size:12px;color:var(--color-neutral-500)">auth is off on localhost and on for anything else</span></div>
+      <section style="display:flex;flex-direction:column;gap:10px">
+        <h6 style="color:var(--color-neutral-500);margin:0">Bind</h6>
+        <div style="display:flex;flex-direction:column;gap:8px"><label class="radio"><input type="radio" name="bind" defaultChecked="{{ true }}"><span class="dot"></span><span>127.0.0.1:8765 <span style="color:var(--color-neutral-500);font-size:12px">· this machine only, no password</span></span></label><label class="radio"><input type="radio" name="bind"><span class="dot"></span><span>0.0.0.0:8765 <span style="color:var(--color-neutral-500);font-size:12px">· LAN, password required — for the phone view</span></span></label></div>
+        <div style="font-size:12px;color:var(--color-neutral-600)">Takes effect on restart. Kraft never binds publicly; use a tunnel if you need remote access.</div>
+      </section>
+      <section style="display:flex;flex-direction:column;gap:10px">
+        <h6 style="color:var(--color-neutral-500);margin:0">Password</h6>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div class="field"><label>New password</label><div class="input" style="min-height:34px"></div></div><div class="field"><label>Session expiry</label><div class="seg" style="width:100%"><label class="seg-opt" style="flex:1;justify-content:center"><input type="radio" name="exp">1d</label><label class="seg-opt" style="flex:1;justify-content:center"><input type="radio" name="exp" defaultChecked="{{ true }}">7d</label><label class="seg-opt" style="flex:1;justify-content:center"><input type="radio" name="exp">30d</label></div></div></div>
+      </section>
+      <section style="display:flex;flex-direction:column;gap:8px">
+        <h6 style="color:var(--color-neutral-500);margin:0">Sessions</h6>
+        <div style="display:flex;flex-direction:column">
+          <sc-for list="{{ sessions }}" as="s" hint-placeholder-count="3">
+          <div style="display:grid;grid-template-columns:1fr 130px 80px auto;gap:14px;align-items:center;padding:9px 0;font-size:13px;background:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent) no-repeat bottom / 100% 1px">
+            <span style="display:inline-flex;align-items:center;gap:8px">{{ s.who }}<sc-if value="{{ s.cur }}" hint-placeholder-val="{{ false }}"><span style="font-size:11px;color:var(--color-accent-300)">current</span></sc-if></span>
+            <span style="font-size:12px;color:var(--color-neutral-500);font-family:ui-monospace,Menlo,monospace">{{ s.ip }}</span>
+            <span style="font-size:12px;color:var(--color-neutral-500)">{{ s.seen }}</span>
+            <button class="btn btn-ghost" style="font-size:14px;padding:3px 6px;color:var(--color-neutral-500)" title="more"><i class="ph ph-dots-three"></i></button>
+          </div>
+          </sc-for>
+        </div>
+      </section>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:auto"><button class="btn btn-primary" style="font-size:13px;white-space:nowrap"><i class="ph ph-check"></i>Save access</button><button class="btn btn-ghost" style="font-size:13px">Discard</button><span style="font-size:11px;color:var(--color-neutral-600);margin-left:auto">password stored as a hash · other sessions stay signed in until expiry or revoke</span></div>
+    </div>
+  </div>
+</div></div>
+
+
+</div>
+<p class="dv-next">Implied API: <span style="font-family:ui-monospace,Menlo,monospace">POST/PATCH/DELETE /repos</span> (with a probe step for .gitmodules, .beads, test command, GitLab remote) · <span style="font-family:ui-monospace,Menlo,monospace">GET/PUT /templates/{id}</span> with validate-on-save returning per-repo resolvability · templates become versioned so live items keep their materialized chain (already true: <span style="font-family:ui-monospace,Menlo,monospace">chain_definition</span> is a copy) · <span style="font-family:ui-monospace,Menlo,monospace">GET/PUT /registry</span> (bindings + per-repo enable, <span style="font-family:ui-monospace,Menlo,monospace">interactive</span> flag) · <span style="font-family:ui-monospace,Menlo,monospace">GET/PUT /policy</span> · <span style="font-family:ui-monospace,Menlo,monospace">GET/PUT /access</span>, <span style="font-family:ui-monospace,Menlo,monospace">GET/DELETE /sessions</span>.</p>
+</section>
+<section class="dv-turn" id="s4">
+<div class="dv-thd"><a class="dv-tid" href="#s4">4</a><span class="dv-tname">Supporting screens</span></div>
+<div class="dv-opts">
+<div class="dv-opt" id="1g"><div class="dv-olabel"><a class="dv-oid" href="#1g">1g</a>New work item · cross-repo disclosure open</div>
+<div class="dv-card" style="width:520px;background:color-mix(in srgb,var(--color-neutral-900) 60%,#0f1019)" data-screen-label="1g Intake modal">
+  <div style="padding:36px 30px">
+    <div class="dialog" style="width:100%;gap:14px;padding:20px 22px">
+      <div class="dialog-title" style="font-size:18px">New work item</div>
+      <div class="field"><label>Repo</label><div class="input" style="display:flex;align-items:center;justify-content:space-between">repo-c<i class="ph ph-caret-down" style="color:var(--color-neutral-500)"></i></div></div>
+      <div class="field"><label>Title</label><div class="input" style="display:flex;align-items:center">Bump submodule pointers after API change<span style="width:1px;height:16px;background:var(--color-accent);margin-left:1px"></span></div></div>
+      <div class="field"><label>Chain template <span style="opacity:.6">· repo default</span></label><div class="seg"><label class="seg-opt"><input type="radio" name="tpl1g" defaultChecked="{{ true }}">default</label><label class="seg-opt"><input type="radio" name="tpl1g">quick-task</label></div></div>
+      <div style="display:flex;flex-direction:column;gap:12px;padding:12px 14px;border-radius:8px;border:1px solid var(--color-divider)">
+        <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--color-neutral-300)"><i class="ph ph-caret-down" style="font-size:12px"></i>Advanced · cross-repo</div>
+        <div class="field"><label>Submodules <span style="opacity:.6">· from .gitmodules</span></label><div style="display:flex;flex-wrap:wrap;gap:6px"><span class="tag tag-accent" style="gap:6px">libs/repo-a<i class="ph ph-x" style="font-size:10px"></i></span><span class="tag tag-accent" style="gap:6px">libs/repo-b<i class="ph ph-x" style="font-size:10px"></i></span><span class="tag tag-outline" style="border-color:var(--color-divider);color:var(--color-neutral-500)">vendor/tooling</span></div></div>
+        <div class="field"><label>Root merge policy</label><div style="display:flex;gap:16px"><label class="radio"><input type="radio" name="rmp" defaultChecked="{{ true }}"><span class="dot"></span>Bump</label><label class="radio"><input type="radio" name="rmp"><span class="dot"></span>Skip</label><label class="radio"><input type="radio" name="rmp"><span class="dot"></span>Bump, no MR</label></div></div>
+      </div>
+      <div class="dialog-actions"><button class="btn btn-secondary">Cancel</button><button class="btn btn-primary">Create</button></div>
+    </div>
+  </div>
+</div></div>
+
+<div class="dv-opt" id="1h"><div class="dv-olabel"><a class="dv-oid" href="#1h">1h</a>Search overlay · artifacts + live bead box</div>
+<div class="dv-card" style="width:760px;background:color-mix(in srgb,var(--color-neutral-900) 60%,#0f1019)" data-screen-label="1h Search">
+  <div style="padding:40px 30px">
+    <div class="dialog elev-lg" style="width:100%;gap:0;padding:0;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--color-divider)"><i class="ph ph-magnifying-glass" style="color:var(--color-neutral-500);font-size:16px"></i><span style="flex:1;font-size:15px">retry policy<span style="display:inline-block;width:1px;height:16px;background:var(--color-accent);vertical-align:-3px;margin-left:1px"></span></span><span class="seg" style="font-size:11px"><label class="seg-opt" style="padding:3px 8px;font-size:11px"><input type="radio" name="mode" defaultChecked="{{ true }}">hybrid</label><label class="seg-opt" style="padding:3px 8px;font-size:11px"><input type="radio" name="mode">fts</label><label class="seg-opt" style="padding:3px 8px;font-size:11px"><input type="radio" name="mode">vector</label></span><span style="font-size:11px;color:var(--color-neutral-600)">esc</span></div>
+      <div style="display:flex;gap:8px;padding:8px 16px;font-size:11px;color:var(--color-neutral-500);border-bottom:1px solid var(--color-divider)"><span class="tag tag-neutral" style="font-size:10px">source: any</span><span class="tag tag-neutral" style="font-size:10px">kind: any</span><span class="tag tag-neutral" style="font-size:10px">repo: any</span><span style="margin-left:auto">8 results · lagging index, not live state</span></div>
+      <div style="display:flex;flex-direction:column;padding:6px 8px">
+        <sc-for list="{{ search }}" as="r" hint-placeholder-count="4">
+        <div style="display:grid;grid-template-columns:1fr auto;gap:2px 12px;padding:10px 10px;background:linear-gradient(to right,transparent,color-mix(in srgb,var(--color-text) 8%,transparent) 24px,color-mix(in srgb,var(--color-text) 8%,transparent) calc(100% - 24px),transparent) no-repeat bottom / 100% 1px" style-hover="background:color-mix(in srgb,var(--color-text) 4%,transparent)">
+          <span style="font-size:14px;font-weight:500">{{ r.title }}</span>
+          <span style="display:flex;gap:6px;align-items:center;font-size:11px;color:var(--color-neutral-500)"><span style="color:var(--color-neutral-400)">{{ r.kind }}</span>·{{ r.repo }}</span>
+          <span style="grid-column:1/-1;font-size:12px;color:var(--color-neutral-500)">{{ r.pre }}<mark style="background:var(--color-accent-800);color:var(--color-accent-100);border-radius:2px;padding:0 2px">{{ r.hit }}</mark>{{ r.post }}</span>
+        </div>
+        </sc-for>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-top:1px solid var(--color-divider);background:color-mix(in srgb,var(--color-bg) 50%,transparent)"><i class="ph ph-circles-three" style="color:var(--color-neutral-500)"></i><span style="font-size:12px;color:var(--color-neutral-500);flex:1">Beads · live via hub</span><span style="font-size:12px;color:var(--color-neutral-400)">repo-a-4f2 · Migrate config loader → <a href="#" style="text-decoration:none">wi_01HX3K9</a></span></div>
+    </div>
+  </div>
+</div></div>
+
+
+<div class="dv-opt" id="1m"><div class="dv-olabel"><a class="dv-oid" href="#1m">1m</a>Login · LAN-bound only</div>
+<div class="dv-card" style="width:520px;height:420px;display:grid;place-items:center;background:radial-gradient(ellipse 60% 50% at 50% 60%,var(--color-section) 0%,transparent 70%),var(--color-bg)" data-screen-label="1m Login">
+  <div style="width:300px;display:flex;flex-direction:column;gap:18px">
+    <div style="display:flex;flex-direction:column;gap:4px"><span style="font-size:22px;font-weight:500">Kraft</span><span style="font-size:12px;color:var(--color-neutral-500)">Bound to 192.168.1.20:8765 — password required off-localhost.</span></div>
+    <div class="field"><label>Password</label><div class="input" style="display:flex;align-items:center;letter-spacing:.2em;color:var(--color-neutral-400)">••••••••••<span style="width:1px;height:16px;background:var(--color-accent);margin-left:2px"></span></div></div>
+    <button class="btn btn-primary btn-block" style="margin:0">Sign in</button>
+    <span style="font-size:11px;color:var(--color-neutral-600);text-align:center">Session cookie · HttpOnly · store survives expiry</span>
+  </div>
+</div></div>
+
+<div class="dv-opt" id="1n"><div class="dv-olabel"><a class="dv-oid" href="#1n">1n</a>Phone status view · same rows, gates actionable</div>
+<div class="dv-card" style="width:390px;border-radius:28px;box-shadow:0 0 0 1px #292b31,0 0 0 8px #0b0c13" data-screen-label="1n Phone">
+  <div style="padding:14px 20px 0;display:flex;justify-content:space-between;font-size:12px;color:var(--color-neutral-400)"><span>9:41</span><span style="display:inline-flex;gap:5px;align-items:center"><i class="ph ph-cell-signal-full"></i><i class="ph ph-wifi-high"></i><i class="ph ph-battery-high"></i></span></div>
+  <div style="padding:16px 20px 28px;display:flex;flex-direction:column;gap:22px">
+    <div style="display:flex;align-items:center;gap:8px"><span style="font-size:20px;font-weight:500">Kraft</span><span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--color-neutral-500);margin-left:auto"><span style="width:6px;height:6px;border-radius:50%;background:var(--color-accent);animation:kpulse 1.8s infinite"></span>live</span></div>
+    <div style="display:flex;flex-direction:column">
+      <div style="display:flex;align-items:baseline;gap:8px;padding-bottom:6px;background:linear-gradient(to right,transparent,var(--color-divider) 24px,var(--color-divider) calc(100% - 24px),transparent) no-repeat bottom / 100% 1px"><span style="font-size:13px;font-weight:500;color:var(--color-accent-300)">Needs you</span><span style="font-size:11px;color:var(--color-neutral-600)">2</span></div>
+      <div style="display:flex;flex-direction:column;gap:10px;padding:12px 0;background:linear-gradient(to right,transparent,var(--color-divider) 24px,var(--color-divider) calc(100% - 24px),transparent) no-repeat bottom / 100% 1px">
+        <div style="display:flex;flex-direction:column;gap:3px"><span style="font-size:15px;font-weight:500;line-height:1.3">Add pagination to list endpoint</span><span style="font-size:11px;color:var(--color-neutral-500)">repo-b · plan · <span style="color:var(--color-accent-300)">plan_approval</span> · 12 min</span></div>
+        <div style="display:flex;gap:8px"><button class="btn btn-primary" style="flex:1;min-height:44px"><i class="ph ph-check"></i>Approve</button><button class="btn btn-secondary" style="flex:1;min-height:44px">Reject…</button></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;padding:12px 0;background:linear-gradient(to right,transparent,var(--color-divider) 24px,var(--color-divider) calc(100% - 24px),transparent) no-repeat bottom / 100% 1px">
+        <div style="display:flex;flex-direction:column;gap:3px"><span style="font-size:15px;font-weight:500;line-height:1.3">Harden retry backoff</span><span style="font-size:11px;color:var(--color-neutral-500)">repo-a · verify · <span style="color:var(--color-accent-300);display:inline-flex;align-items:center;gap:3px"><i class="ph ph-prohibit"></i>capped 3/3</span> · 38 min</span></div>
+        <div style="font-size:12px;color:var(--color-neutral-400)">on.test.run still failing after 3 fix attempts.</div>
+        <button class="btn btn-secondary" style="min-height:44px">Open on desktop</button>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column">
+      <div style="display:flex;align-items:baseline;gap:8px;padding-bottom:6px;background:linear-gradient(to right,transparent,var(--color-divider) 24px,var(--color-divider) calc(100% - 24px),transparent) no-repeat bottom / 100% 1px"><span style="font-size:13px;font-weight:500">Running</span><span style="font-size:11px;color:var(--color-neutral-600)">2</span></div>
+      <sc-for list="{{ phoneRunning }}" as="i" hint-placeholder-count="2">
+      <div style="display:flex;flex-direction:column;gap:8px;padding:12px 0;background:linear-gradient(to right,transparent,var(--color-divider) 24px,var(--color-divider) calc(100% - 24px),transparent) no-repeat bottom / 100% 1px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px"><span style="font-size:14px;font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ i.title }}</span><span style="font-size:11px;color:var(--color-accent-300);white-space:nowrap">{{ i.current }}</span></div>
+        <div style="display:flex;gap:3px;align-items:center;height:8px"><sc-for list="{{ i.nodes }}" as="n" hint-placeholder-count="8"><span style="flex:1;height:{{ n.cH }}px;border-radius:2px;background:{{ n.cBg }};box-shadow:{{ n.cShadow }}"></span></sc-for></div>
+        <div style="font-size:11px;color:var(--color-neutral-500)">{{ i.repo }} · {{ i.meta }}</div>
+      </div>
+      </sc-for>
+    </div>
+  </div>
+</div></div>
+
+</div>
+<p class="dv-next">Try next: "handoff spec" · "wire <a class="dv-oid" href="#2a">2a</a> → <a class="dv-oid" href="#3b">3b</a> into one prototype"</p>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { gate: "idle", note: "", ps: "active", steer: "", repo: "", tpl: "", openIn: true, range: "30d", logFilter: "all", logFollow: true, logCopied: false };
+  componentWillUnmount() { clearTimeout(this._t); }
+  renderVals() {
+    const A = "var(--color-accent)", A3 = "var(--color-accent-300)", A4 = "var(--color-accent-400)", A8 = "var(--color-accent-800)";
+    const N4 = "var(--color-neutral-400)", N5 = "var(--color-neutral-500)", N6 = "var(--color-neutral-600)", N7 = "var(--color-neutral-700)", N8 = "var(--color-neutral-800)", N9 = "var(--color-neutral-900)";
+    const glow = "0 0 10px rgba(145,132,217,.45)";
+    const FULL = [["spec", 1], ["plan", 1], ["chain_review", 1], ["env_setup"], ["implementation"], ["verify", 0, 2], ["open_mr"], ["mr_checks", 0, 2], ["human_review", 1], ["merge"]];
+    const chain = (cur, done, fix, quick) => {
+      const list = quick ? FULL.slice(3) : FULL;
+      return list.map(([id, gate, count], i) => {
+        const isCurrent = id === cur, isDone = done.includes(id);
+        return { id, gate: !!gate, count: count || 0, fix: isCurrent && !!fix, isCurrent, line: i < list.length - 1,
+          grow: isCurrent ? 2 : 1, weight: isCurrent ? 500 : 400, sub: isCurrent ? (fix ? "running · fix cycle 2" : "running") : isDone ? "" : "",
+          icon: isDone ? "ph-check" : isCurrent ? "ph-circle-notch" : "ph-circle",
+          aBorder: isCurrent ? A : isDone ? N8 : N9, aColor: isCurrent ? A3 : isDone ? N4 : N6, aShadow: isCurrent ? glow : "none", aBg: isCurrent ? "rgba(145,132,217,.06)" : "transparent",
+          bSize: isCurrent ? 12 : 9, bBg: isCurrent ? A : isDone ? N5 : "transparent", bBorder: isCurrent ? A : isDone ? N5 : N7, bShadow: isCurrent ? glow : "none", bLine: isDone ? N7 : N8,
+          cH: isCurrent ? 8 : 4, cH2: isCurrent ? 12 : 6, lColor: isCurrent ? A3 : isDone ? N4 : N6, cBg: isCurrent ? A : isDone ? N5 : N8, cShadow: isCurrent ? glow : "none", cAnim: isCurrent ? "kpulse 1.8s infinite" : "none" };
+      });
+    };
+    const tags = { active: ["tag-outline", "active", "ph-circle-notch"], needs_human: ["tag-accent", "needs you", "ph-flag"], completed: ["tag-neutral", "completed", "ph-check"], paused: ["tag-neutral", "paused", "ph-pause"] };
+    const raw = [
+      { repo: "repo-a", title: "Migrate config loader to new schema", status: "active", id: "wi_01HX3K9", template: "default", nodes: chain("verify", ["spec", "plan", "chain_review", "env_setup", "implementation"], true), current: "verify", fix: true, countLabel: "2 tasks", progress: "6 / 10", meta: "fix cycle 2 · 41 min in node", ago: "2m" },
+      { repo: "repo-b", title: "Add pagination to list endpoint", status: "needs_human", id: "wi_01HX3M2", template: "default", nodes: chain("plan", ["spec"]), current: "plan", gateOpen: true, gateName: "plan_approval", progress: "2 / 10", meta: "awaiting plan_approval · 12 min", ago: "12m" },
+      { repo: "repo-a", title: "Harden retry backoff", status: "needs_human", id: "wi_01HX3Q4", template: "quick-task", nodes: chain("verify", ["env_setup", "implementation"], true, true), current: "verify", capped: true, countLabel: "capped out 3/3", progress: "3 / 7", meta: "verify_fix_loop capped 3/3", ago: "38m" },
+      { repo: "repo-c", title: "Bump submodule pointers after API change", status: "active", id: "wi_01HX3P1", template: "default", multi: true, extra: 2, nodes: chain("merge", ["spec", "plan", "chain_review", "env_setup", "implementation", "verify", "open_mr", "mr_checks", "human_review"]), current: "merge", progress: "10 / 10", meta: "merging 2 of 3 repos", ago: "1m" },
+      { repo: "repo-b", title: "Fix flaky retry test", status: "completed", id: "wi_01HX3N7", template: "quick-task", nodes: chain(null, ["env_setup", "implementation", "verify", "open_mr", "mr_checks", "human_review", "merge"], false, true), current: "merged", progress: "7 / 7", meta: "merged yesterday", ago: "1d" },
+    ];
+    const items = raw.map(i => ({ ...i, tagClass: tags[i.status][0], statusLabel: tags[i.status][1], statusIcon: tags[i.status][2] }));
+    const repoFilter = this.state.repo;
+    const tplFilter = this.state.tpl;
+    const filtered = items.filter(i => (!repoFilter || i.repo === repoFilter) && (!tplFilter || i.template === tplFilter));
+    const groups = [["Needs you", "needs_human", A3], ["Running", "active", "var(--color-text)"], ["Done", "completed", N5]].map(([label, st, color]) => {
+      const its = filtered.filter(i => i.status === st);
+      return { label, color, items: its, n: its.length, empty: its.length === 0 };
+    });
+    const repoNames = ["", "repo-a", "repo-b", "repo-c"];
+    const repos = repoNames.map(r => ({ name: r || "All repos", n: r ? items.filter(i => i.repo === r).length : items.length, bg: repoFilter === r ? "rgba(145,132,217,.12)" : "transparent", color: repoFilter === r ? A3 : N4, pick: () => this.setState({ repo: r }) }));
+    const tpls = ["", "default", "quick-task"].map(t => ({ name: t || "All templates", n: t ? items.filter(i => i.template === t).length : items.length, bg: tplFilter === t ? "rgba(145,132,217,.12)" : "transparent", color: tplFilter === t ? A3 : N4, pick: () => this.setState({ tpl: t }) }));
+    const editors = [["VS Code", "ph-code", true], ["Cursor", "ph-cursor", false], ["Zed", "ph-lightning", false], ["Obsidian", "ph-diamond", false], ["System default", "ph-app-window", false]].map(([name, icon, def]) => ({ name, icon, def, defLabel: def ? "default" : "" }));
+    const ranges = ["7d", "30d", "90d", "all"].map(r => ({ name: r, on: this.state.range === r, bg: this.state.range === r ? "rgba(145,132,217,.12)" : "transparent", color: this.state.range === r ? A3 : N4, pick: () => this.setState({ range: r }) }));
+    const kpis = [["Work items", "42", "31 merged · 6 running · 5 cancelled"], ["MRs merged", "38", "across 4 repos"], ["Wall time", "312 h", "7.4 h avg per item"], ["Tokens", "18.4 M", "11.9 M in · 6.5 M out"], ["Cost", "$612", "$14.60 avg per item"], ["Rounds", "96", "fix cycles · 2.3 avg · 4 capped out"]].map(([label, v, sub]) => ({ label, v, sub }));
+    const byNode = [["spec", 42, "18 min", "1.1 M", "$36", "—"], ["plan", 42, "24 min", "1.9 M", "$63", "—"], ["chain_review", 42, "9 min", "0.6 M", "$19", "—"], ["implementation", 40, "2.1 h", "8.2 M", "$271", "—"], ["verify", 40, "1.4 h", "4.7 M", "$156", "96 · 4 capped"], ["mr_checks", 38, "38 min", "1.2 M", "$41", "12"], ["human_review", 38, "1.9 h wait", "0.7 M", "$26", "—"]].map(([node, runs, t, tok, cost, rounds], i) => ({ node, runs, t, tok, cost, rounds, w: [4, 6, 2, 100, 57, 15, 9][i] }));
+    const byRepo = [["repo-a", 18, 16, "9.1 M", "$298"], ["repo-b", 12, 11, "4.6 M", "$152"], ["repo-c", 8, 8, "3.2 M", "$108"], ["repo-d", 4, 3, "1.5 M", "$54"]].map(([repo, items, mrs, tok, cost]) => ({ repo, items, mrs, tok, cost }));
+    const weeks = [3, 5, 4, 7, 6, 9, 8].map((n, i) => ({ n, h: Math.round(n / 9 * 64), label: ["Jul 21", "Jul 28", "Aug 4", "Aug 11", "Aug 18", "Aug 25", "Sep 1"][i], on: i === 6 }));
+
+    const task = (hook, status, sub) => {
+      const m = { running: [A, A, "ph-circle-notch", "tag-accent", "kpulse 1.8s infinite"], done: [N4, N7, "ph-check", "tag-neutral", "none"], failed: ["var(--color-neutral-200)", N5, "ph-x-circle", "tag-neutral", "none"], capped_out: [A3, "var(--color-accent-700)", "ph-prohibit", "tag-outline", "none"], unknown: [N5, N8, "ph-question", "tag-neutral", "none"], paused: [N4, N6, "ph-pause", "tag-neutral", "none"] }[status];
+      return { hook, status, sub, color: m[0], border: m[1], icon: m[2], tagClass: m[3], anim: m[4] };
+    };
+    const events = [
+      ["worker_session_launched", "10:42:11", "", true, A], ["fix_cycle_started", "10:42:10", "cycle 2: on.test.run", false, A4], ["worker_session_completed", "10:31:02", "on.review.local.run · 0 findings", true, N5], ["worker_session_completed", "10:30:48", "on.test.run · exit 1", true, N5], ["worker_session_launched", "10:18:44", "", true, N6], ["node_started", "10:18:44", "verify", false, N6], ["node_completed", "10:18:43", "implementation", false, N7]
+    ].map(([type, t, detail, log, dot]) => ({ type, t, detail, log, dot }));
+    const detail = {
+      nodes: chain("verify", ["spec", "plan", "chain_review", "env_setup", "implementation"], true),
+      tasks: [task("on.test.run", "failed", "repo test command · exit 1 · 2 failing"), task("on.review.local.run", "done", "ponytail-review · 0 findings"), task("on.implementation.start", "running", "fix task · cycle 2 · Claude Code headless · 22.8k tokens")],
+      capTasks: [task("on.test.run", "capped_out", "verify_fix_loop 3/3 · 2 tests still failing after 3 fix attempts"), task("on.review.local.run", "done", "ponytail-review · 0 findings"), task("on.implementation.start", "done", "fix task · cycle 3 · 31.7k tokens")],
+      pausedTasks: [task("on.implementation.start", "paused", "Claude Code headless · attempt 1 killed at 18.4k tokens · awaiting resume")],
+      gateTasks: [task("on.plan.requested", "done", "superpowers: writing-plans · wrote .engineering/plans/config-loader.md")],
+      docs: [{ title: "Spec: config loader", path: ".engineering/specs/config-loader.md", kind: "spec", icon: "ph-file-text" }, { title: "Plan: config loader migration", path: ".engineering/plans/config-loader.md", kind: "plan", icon: "ph-list-checks" }, { title: "Session 2026-09-04 · implementation", path: ".engineering/sessions/2026-09-04-impl.md", kind: "summary", icon: "ph-notebook" }],
+      events,
+    };
+    const mstate = { merged: ["tag-neutral", "ph-check"], mr_open: ["tag-accent", "ph-circle-notch"], pending: ["tag-outline", "ph-circle"], checks_green: ["tag-neutral", "ph-check-circle"], skipped: ["tag-neutral", "ph-minus"] };
+    const multi = {
+      nodes: chain("merge", ["spec", "plan", "chain_review", "env_setup", "implementation", "verify", "open_mr", "mr_checks", "human_review"]).map(n => ({ ...n, sub: n.isCurrent ? "repo 2 of 3 merging" : n.id === "human_review" ? "approved 09:52" : "" })),
+      repos: [["1", "repo-a", "libs/repo-a", "submodule", "merged", "!412"], ["2", "repo-b", "libs/repo-b", "submodule", "mr_open", "!87"], ["3", "repo-c", ".", "root", "pending", "—"]].map(([rank, repo, path, role, state, mr]) => ({ rank, repo, path, role, state, mr, tagClass: mstate[state][0], icon: mstate[state][1], color: state === "mr_open" ? A : state === "pending" ? N5 : N4, border: state === "mr_open" ? A : state === "pending" ? N8 : N7, anim: state === "mr_open" ? "kpulse 1.8s infinite" : "none", rowBg: state === "mr_open" ? "rgba(145,132,217,.06)" : "transparent", rowShadow: state === "mr_open" ? "0 0 0 1px var(--color-accent-800)" : "0 0 0 1px var(--color-neutral-900)" })),
+      docs: [{ title: "Spec: submodule bump", kind: "spec", icon: "ph-file-text" }, { title: "Plan: submodule bump", kind: "plan", icon: "ph-list-checks" }, { title: "Review · human_review", kind: "review", icon: "ph-eye" }],
+      events: [["merge_state_changed", "10:44", "repo-b → mr_open"], ["merge_state_changed", "10:40", "repo-a → merged"], ["node_started", "10:39", "merge"], ["gate_approved", "09:52", "human_review_approval"], ["gate_requested", "09:20", "human_review_approval"], ["node_completed", "09:20", "mr_checks · all green"]].map(([type, t, detail]) => ({ type, t, detail })),
+    };
+    const search = [
+      { title: "Plan: config loader migration", kind: "plan", repo: "repo-a", pre: "…each loader call site keeps its ", hit: "retry policy", post: " untouched until the shim lands…" },
+      { title: "Spec: retry backoff hardening", kind: "spec", repo: "repo-a", pre: "The ", hit: "retry policy", post: " caps attempts and wall-clock, whichever first…" },
+      { title: "Session 2026-09-03 · verify", kind: "summary", repo: "repo-a", pre: "Decided to move the ", hit: "retry", post: " counter out of the plugin and into the core…" },
+      { title: "Review · pagination endpoint", kind: "review", repo: "repo-b", pre: "…finding: cursor ", hit: "retry", post: " loop has no upper bound (severity: medium)…" },
+    ];
+    const psMap = {
+      active: { label: "active", color: A, anim: "kpulse 1.8s infinite", icon: "ph-circle-notch", status: "running", tagClass: "tag-accent", isActive: true },
+      pending: { label: "pause requested", color: N4, anim: "none", icon: "ph-circle-notch", status: "running", tagClass: "tag-accent", isPending: true },
+      paused: { label: "paused", color: N4, anim: "none", icon: "ph-pause", status: "paused", tagClass: "tag-neutral", isPaused: true, showSteer: true, resumeLabel: this.state.steer.trim() ? "Resume with steer" : "Resume", hint: this.state.steer.trim() ? "kills attempt 1, relaunches with your note" : "steer text is optional" },
+    };
+    const pausedNodes = chain("implementation", ["spec", "plan", "chain_review", "env_setup"]).map(n => ({ ...n, pBg: n.isCurrent ? N4 : n.cBg }));
+    const timelineGroups = [
+      { node: "verify", span: "10:18 → now", color: A3, events: [["worker_session_launched", "10:42:11", "on.implementation.start · fix task", true, A], ["fix_cycle_started", "10:42:10", "cycle 2: on.test.run", false, A4], ["worker_session_completed", "10:31:02", "on.review.local.run · 0 findings", true, N5], ["worker_session_completed", "10:30:48", "on.test.run · exit 1 · 2 failing", true, N5], ["worker_session_launched", "10:18:45", "on.review.local.run", true, N6], ["worker_session_launched", "10:18:44", "on.test.run", true, N6], ["node_started", "10:18:44", "", false, N6]] },
+      { node: "implementation", span: "09:24 → 10:18", color: N4, events: [["node_completed", "10:18:43", "", false, N7], ["worker_session_completed", "10:18:40", "on.implementation.start · 96.1k tokens", true, N7], ["worker_session_launched", "09:24:02", "on.implementation.start", true, N7], ["node_started", "09:24:02", "", false, N7]] },
+      { node: "env_setup", span: "09:23", color: N4, events: [["node_completed", "09:24:01", "worktree ready · 0 submodules", false, N7], ["node_started", "09:23:30", "", false, N7]] },
+    ].map(g => ({ ...g, events: g.events.map(([type, t, detail, log, dot]) => ({ type, t, detail, log, dot })) }));
+    const docRows = [
+      ["Session 2026-09-04 · implementation", ".engineering/sessions/2026-09-04T09-24-impl.md", "summary", "implementation", "10:18", "ph-notebook"],
+      ["Plan: config loader migration", ".engineering/plans/config-loader.md", "plan", "plan", "Sep 4, 09:12", "ph-list-checks"],
+      ["Chain review · config loader", ".engineering/reviews/config-loader-chain.md", "review", "chain_review", "Sep 4, 09:20", "ph-eye"],
+      ["Spec: config loader", ".engineering/specs/config-loader.md", "spec", "spec", "Sep 3, 17:40", "ph-file-text"],
+    ].map(([title, path, kind, node, when, icon]) => ({ title, path, kind, node, when, icon }));
+    const settingsRepos = [
+      ["repo-a", "~/code/repo-a", "default", "—", "synced 2 min ago", "312 docs", true],
+      ["repo-b", "~/code/repo-b", "default", "—", "synced 2 min ago", "148 docs", true],
+      ["repo-c", "~/code/repo-c", "default", "libs/repo-a · libs/repo-b · vendor/tooling", "synced 9 min ago", "77 docs", true],
+      ["repo-d", "~/code/repo-d", "quick-task", "—", "export.auto off", "not indexed", false],
+    ].map(([name, path, tpl, subs, hub, idx, ok]) => ({ name, path, tpl, subs, hub, idx, ok, hubColor: ok ? N4 : A3, icon: ok ? "ph-check" : "ph-warning-circle", iconColor: ok ? N4 : A, iconBorder: ok ? N7 : A }));
+    const tplNodes = [
+      ["spec", ["on.spec.requested"], "spec_approval", ""], ["plan", ["on.plan.requested"], "plan_approval", ""], ["chain_review", ["on.chain.review_ready"], "chain_finalized", ""],
+      ["env_setup", ["on.env.prepare"], "", ""], ["implementation", ["on.implementation.start"], "", ""], ["verify", ["on.test.run", "on.review.local.run"], "", "verify_fix_loop"],
+      ["open_mr", ["on.mr.open"], "", ""], ["mr_checks", ["on.ci.poll", "on.review.mr.run"], "", "mr_checks_fix_loop"], ["human_review", ["on.human_review.requested"], "human_review_approval", ""], ["merge", ["on.merge"], "", ""],
+    ].map(([id, tasks, gate, fix], i) => ({ id, n: i + 1, tasks: tasks.map(t => ({ t, steer: ["on.spec.requested", "on.plan.requested", "on.chain.review_ready", "on.implementation.start", "on.test.run", "on.review.local.run"].includes(t) })), gate, hasGate: !!gate, fix, hasFix: !!fix, concurrent: tasks.length > 1, isVerify: id === "verify" }));
+    const tplList = [["default", "10 nodes · 4 gates", true, true], ["quick-task", "7 nodes · 1 gate", false, true], ["hotfix", "5 nodes · on.review.mr.run unbound in repo-d", false, false]].map(([id, sub, sel, ok]) => ({ id, sub, ok, bg: sel ? "rgba(145,132,217,.12)" : "transparent", color: sel ? A3 : ok ? N4 : N5, icon: ok ? "" : "ph-warning-circle" }));
+    const on = (v) => ({ v, bg: v ? A : "transparent", border: v ? A : N7, knob: v ? "translateX(12px)" : "translateX(0)", knobBg: v ? "var(--color-bg)" : N5 });
+    const hooks = [
+      ["on.intake", "beads CLI", "SubprocessAdapter", false, [1, 1, 1, 1]],
+      ["on.spec.requested", "superpowers · brainstorming", "HeadlessAgentInvocation", true, [1, 1, 1, 1]],
+      ["on.plan.requested", "superpowers · writing-plans", "HeadlessAgentInvocation", true, [1, 1, 1, 1]],
+      ["on.chain.review_ready", "chain-review skill", "HeadlessAgentInvocation", true, [1, 1, 1, 1]],
+      ["on.env.prepare", "worktree + selective submodules", "SubprocessAdapter", false, [1, 1, 1, 1]],
+      ["on.implementation.start", "Claude Code · headless", "HeadlessAgentInvocation", true, [1, 1, 1, 1]],
+      ["on.test.run", "repo test command", "HeadlessAgentInvocation · measure", true, [1, 1, 1, 0]],
+      ["on.review.local.run", "ponytail-review", "HeadlessAgentInvocation", true, [1, 1, 1, 1]],
+      ["on.mr.open · on.ci.poll · on.merge", "GitLab API", "HttpClientAdapter", false, [1, 1, 1, 1]],
+      ["on.review.mr.run", "remote-review CLI", "SubprocessAdapter", false, [1, 1, 1, 0]],
+    ].map(([hook, plugin, adapter, steer, en]) => ({ hook, plugin, adapter, steer, steerLabel: steer ? "steerable" : "—", steerColor: steer ? A3 : N6, en: en.map(on) }));
+    const policy = [
+      ["verify_fix_loop", "fix cycles inside verify", 3, "2h", true],
+      ["mr_checks_fix_loop", "fix cycles inside mr_checks", 3, "3h", true],
+      ["spec_approval_reject_loop", "re-invokes after a rejected spec", 2, "—", true],
+      ["plan_approval_reject_loop", "re-invokes after a rejected plan", 2, "—", true],
+      ["chain_finalized_reject_loop", "re-invokes after a rejected chain review", 2, "—", true],
+      ["on.implementation.start", "attempts per invocation", 2, "4h", true],
+      ["on.ci.poll", "poll ceiling per MR", 120, "6h", false],
+      ["on.env.prepare", "attempts", 2, "10m", false],
+    ].map(([id, what, attempts, wall, ph]) => ({ id, what, attempts, wall, ph, phLabel: ph ? "placeholder" : "" }));
+    const sessions = [["this browser", "127.0.0.1", "now", true], ["phone · Safari", "192.168.1.44", "2h ago", false], ["laptop · Firefox", "192.168.1.31", "3d ago", false]].map(([who, ip, seen, cur]) => ({ who, ip, seen, cur }));
+
+    const srcMap = { sys: ["var(--color-neutral-600)", N5], out: [N4, "var(--color-neutral-300)"], agent: ["var(--color-accent-300)", "var(--color-neutral-300)"], tool: ["var(--color-accent-300)", N4] };
+    const rawLog = [["09:42:11.204","sys","worker_session s_7f2a launched · hook on.test.run · cwd .kraft/worktrees/wi_01HX3K9"],["09:42:11.310","sys","$ uv run pytest tests/test_retry.py -q"],["09:42:14.871","out","......F..F                                                          [100%]"],["09:42:14.902","out","FAILED tests/test_retry.py::test_backoff_jitter - assert 0.93 <= 0.9"],["09:42:14.902","out","FAILED tests/test_retry.py::test_backoff_cap - AssertionError: 32.0 != 30.0"],["09:42:14.903","out","2 failed, 8 passed in 3.41s"],["09:42:14.950","sys","exit 1 · classifier: test_failure · 2 failing"],["09:42:15.002","agent","Reading tests/test_retry.py and kraft/retry.py to locate the cap clamp."],["09:42:19.488","agent","The cap is applied before jitter, so jitter can push the delay past max_delay. Moving the clamp after jitter."],["09:42:23.117","tool","Edit kraft/retry.py  +4 -2"],["09:42:23.640","sys","$ uv run pytest tests/test_retry.py -q"],["09:42:26.902","out",".........F                                                          [100%]"],["09:42:26.931","out","FAILED tests/test_retry.py::test_backoff_cap - AssertionError: 30.4 != 30.0"],["09:42:26.940","sys","exit 1 · classifier: test_failure · 1 failing"],["09:42:27.200","agent","Float drift from the jitter multiplier. Rounding the clamped delay to the tick."]];
+    const lf = this.state.logFilter;
+    const logLines = rawLog.filter(([, src]) => lf === "all" || (lf === "agent" ? (src === "agent" || src === "tool") : src === lf)).map(([t, src, text]) => ({ t, src, text, srcColor: srcMap[src][0], color: srcMap[src][1] }));
+    const logFilters = [["all", "all"], ["out", "stdout"], ["agent", "agent"], ["sys", "system"]].map(([k, label]) => ({ label, pick: e => { e.stopPropagation(); this.setState({ logFilter: k }); }, border: lf === k ? "var(--color-accent-700)" : "var(--color-divider)", color: lf === k ? A3 : N5, bg: lf === k ? "rgba(145,132,217,.12)" : "transparent" }));
+    const logFollowing = this.state.logFollow;
+    const followLabel = logFollowing ? "Following" : "Follow", followColor = logFollowing ? A3 : N4;
+    const logCount = logLines.length, logCopyIcon = this.state.logCopied ? "ph-check" : "ph-copy";
+    return {
+      logLines, logFilters, logFollowing, followLabel, followColor, logCount, logCopyIcon, toggleFollow: () => this.setState(s => ({ logFollow: !s.logFollow })),
+      items, groups, repos, tpls, editors, ranges, kpis, byNode, byRepo, weeks, openIn: this.state.openIn, toggleOpenIn: () => this.setState(s => ({ openIn: !s.openIn })), detail, multi, search, settingsRepos, tplNodes, tplList, hooks, policy, sessions,
+      repoCols: ["repo-a", "repo-b", "repo-c", "repo-d"],
+      gateNodes: chain("plan", ["spec"]), capNodes: chain("verify", ["env_setup", "implementation"], false, true), pausedNodes, timelineGroups, docRows,
+      phoneRunning: [items[0], items[3]],
+      gateIdle: this.state.gate === "idle", gateRejecting: this.state.gate === "reject", note: this.state.note, noteEmpty: this.state.note.trim() === "",
+      startReject: () => this.setState({ gate: "reject" }), cancelReject: () => this.setState({ gate: "idle", note: "" }), setNote: e => this.setState({ note: e.target.value }),
+      ps: psMap[this.state.ps], steer: this.state.steer, setSteer: e => this.setState({ steer: e.target.value }),
+      pause: () => { this.setState({ ps: "pending" }); this._t = setTimeout(() => this.setState({ ps: "paused" }), 1400); },
+      resume: () => this.setState({ ps: "active", steer: "" }), reset: () => this.setState({ ps: "active", steer: "" }),
+    };
+  }
+}
+</script>
+</body>
+</html>

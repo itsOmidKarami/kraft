@@ -32,26 +32,4 @@ describe("CurrentNodePanel", () => {
     render(<CurrentNodePanel item={item} sessions={[s({ id: "f", hook_point: "on.implementation.start" })]} />);
     expect(screen.getByTestId("session-f")).toHaveTextContent("fix · cycle 2");
   });
-
-  const gated = {
-    id: "w1",
-    current_node_id: "verify",
-    chain_definition: {
-      template_id: "t",
-      nodes: [
-        { id: "verify", tasks: ["on.test.run"], gate_after: "human_review_approval" },
-        { id: "ship", tasks: ["on.ship"], gate_after: null },
-      ],
-    },
-  } as WorkItem;
-
-  it("renders <Gate> when the current node has a gate and all its sessions are done", () => {
-    render(<CurrentNodePanel item={gated} sessions={[s({ id: "a", status: "done" })]} />);
-    expect(screen.getByText(/human_review_approval/)).toBeInTheDocument();
-  });
-
-  it("does NOT render <Gate> while a current-node session is still running", () => {
-    render(<CurrentNodePanel item={gated} sessions={[s({ id: "a", status: "running" })]} />);
-    expect(screen.queryByText(/human_review_approval/)).not.toBeInTheDocument();
-  });
 });
