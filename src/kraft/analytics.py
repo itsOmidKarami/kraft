@@ -102,6 +102,10 @@ def compute(
         "tokens_in": 0,
         "tokens_out": 0,
         "cost_usd": 0.0,
+        # false once a session has spent tokens without reporting a cost: the sum
+        # is then a floor, and the view says so rather than showing a total that
+        # is quietly too low
+        "cost_complete": True,
         "rounds": 0,
         "capped_out": 0,
     }
@@ -114,7 +118,15 @@ def compute(
     for r in items:
         totals["by_status"][r["status"]] = totals["by_status"].get(r["status"], 0) + 1
         by_repo.setdefault(
-            r["repo"], {"repo": r["repo"], "items": 0, "mrs": 0, "tokens": 0, "cost_usd": 0.0}
+            r["repo"],
+            {
+                "repo": r["repo"],
+                "items": 0,
+                "mrs": 0,
+                "tokens": 0,
+                "cost_usd": 0.0,
+                "cost_complete": True,
+            },
         )["items"] += 1
 
     # ── sessions: tokens, cost, wall time, rounds, caps ──────────────────────
@@ -137,6 +149,7 @@ def compute(
                 "avg_ms": 0,
                 "tokens": 0,
                 "cost_usd": 0.0,
+                "cost_complete": True,
                 "rounds": 0,
                 "capped_out": 0,
             },
@@ -147,6 +160,10 @@ def compute(
         node["tokens"] += tok
         node["cost_usd"] += s["cost_usd"] or 0.0
         node["capped_out"] += 1 if s["status"] == "capped_out" else 0
+        if s["cost_usd"] is None and tok:
+            node["cost_complete"] = False
+            totals["cost_complete"] = False
+            by_repo[repo_of[s["work_item_id"]]]["cost_complete"] = False
         node_rounds.setdefault(s["node_id"], set()).add((s["work_item_id"], s["round"] or 0))
         item_node_rounds.setdefault(s["work_item_id"], set()).add((s["node_id"], s["round"] or 0))
 

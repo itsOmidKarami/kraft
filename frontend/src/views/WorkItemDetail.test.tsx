@@ -101,9 +101,9 @@ describe("WorkItemDetail", () => {
     setup(
       {
         usage: {
-          total: { tokens_in: 130_000, tokens_out: 8_000, cost_usd: 2.41, wall_ms: 0, sessions: 3, rounds: 1, capped_out: 0 },
+          total: { tokens_in: 130_000, tokens_out: 8_000, cost_usd: 2.41, cost_complete: true, wall_ms: 0, sessions: 3, rounds: 1, capped_out: 0 },
           by_node: [
-            { node: "verify", tokens_in: 40_000, tokens_out: 1_200, cost_usd: 1.1, wall_ms: 0, sessions: 1, rounds: 1, capped_out: 0 },
+            { node: "verify", tokens_in: 40_000, tokens_out: 1_200, cost_usd: 1.1, cost_complete: true, wall_ms: 0, sessions: 1, rounds: 1, capped_out: 0 },
           ],
         },
       },

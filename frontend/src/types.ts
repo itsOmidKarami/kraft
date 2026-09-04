@@ -140,6 +140,8 @@ export interface UsageRollup {
   tokens_in: number;
   tokens_out: number;
   cost_usd: number;
+  /** False when a session spent tokens but reported no cost — the sum is a floor. */
+  cost_complete: boolean;
   wall_ms: number;
   sessions: number;
   rounds: number;
@@ -169,6 +171,7 @@ export interface Analytics {
     tokens_in: number;
     tokens_out: number;
     cost_usd: number;
+    cost_complete: boolean;
     rounds: number;
     capped_out: number;
   };
@@ -180,10 +183,18 @@ export interface Analytics {
     avg_ms: number;
     tokens: number;
     cost_usd: number;
+    cost_complete: boolean;
     rounds: number;
     capped_out: number;
   }[];
-  by_repo: { repo: string; items: number; mrs: number; tokens: number; cost_usd: number }[];
+  by_repo: {
+    repo: string;
+    items: number;
+    mrs: number;
+    tokens: number;
+    cost_usd: number;
+    cost_complete: boolean;
+  }[];
 }
 
 /* ── settings (design 5a–5e) ─────────────────────────────────────────────── */
