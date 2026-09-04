@@ -49,7 +49,12 @@ export function tokens(n: number): string {
   return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
 }
 
-/** USD, with enough places to be useful at agent-run scale. */
-export function usd(n: number): string {
-  return n >= 1 ? `$${n.toFixed(2)}` : `$${n.toFixed(3)}`;
+/** USD, with enough places to be useful at agent-run scale.
+ *
+ * `complete: false` marks a sum that is missing an agent's unreported cost —
+ * a floor, not a total. Kraft never invents the difference.
+ */
+export function usd(n: number, complete = true): string {
+  const amount = n >= 1 ? `$${n.toFixed(2)}` : `$${n.toFixed(3)}`;
+  return complete ? amount : `${amount}+`;
 }

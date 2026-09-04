@@ -117,16 +117,6 @@ def fake_templates_dir(tmp_path: Path, agent_command: str) -> Path:
         )
     )
     shutil.copy(_REPO_ROOT / "templates" / "policy.yaml", d / "policy.yaml")
-    # Rates for the fake agent's model, so cost capture is exercised rather than
-    # falling back to the price-everything-at-zero default.
-    (d / "pricing.yaml").write_text(
-        yaml.safe_dump(
-            {
-                "models": {"fake-agent": {"input": 10.0, "output": 100.0}},
-                "default": {"input": 1.0, "output": 2.0},
-            }
-        )
-    )
     return d
 
 

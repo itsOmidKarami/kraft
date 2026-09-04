@@ -66,4 +66,4 @@ fi
 
 # A real agent's final envelope carries its token usage; usage capture parses
 # this line, so the fake has to carry it too or nothing downstream is exercised.
-printf '{"type": "result", "is_error": false, "model": "fake-agent", "usage": {"input_tokens": 1000, "output_tokens": 200, "cache_read_input_tokens": 500}}\n'
+printf '{"type": "result", "is_error": false, "model": "fake-agent", "total_cost_usd": 0.035, "usage": {"input_tokens": 1000, "output_tokens": 200, "cache_read_input_tokens": 500}}\n'

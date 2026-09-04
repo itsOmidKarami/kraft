@@ -35,7 +35,8 @@ function usageLine(item: WorkItem, taskCount: number): string {
       r ? r.tokens_in + r.tokens_out : 0;
     if (node) parts.push(`${tokens(sum(node))} tokens this node`);
     parts.push(`${tokens(sum(u.total))} total`);
-    if (u.total.cost_usd > 0) parts.push(usd(u.total.cost_usd));
+    // only what agents actually reported; a "+" marks a sum still missing some
+    if (u.total.cost_usd > 0) parts.push(usd(u.total.cost_usd, u.total.cost_complete));
   }
   return parts.join(" · ");
 }

@@ -204,8 +204,8 @@ PRIMARY KEY (work_item_id, repo_path)
 ### 4.7 Config in YAML, written by hand *or* by the UI
 
 Plugin registry config (which plugin binds which hook, timeouts, per-repo
-enable/disable), chain template files, per-repo `default_chain_template`, loop
-policy and the per-model `pricing` rates all live in versioned YAML.
+enable/disable), chain template files, per-repo `default_chain_template` and
+loop policy all live in versioned YAML.
 
 **Revised (UI handoff spec §8).** The original rule was "not something the
 runtime mutates" — config was hand-edited only. The Settings screens (`05` §4.7,

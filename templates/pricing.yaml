@@ -1,9 +1,0 @@
-# USD per million tokens, by model. Used only when an agent does not report its
-# own cost; the stored cost can be recomputed from stored tokens if a rate here
-# turns out to be wrong, so nothing has to be re-run to correct a number.
-# Every value is a placeholder until it is checked against a real invoice.
-models:
-  claude-opus-5:   { input: 15.0, output: 75.0 }
-  claude-sonnet-5: { input:  3.0, output: 15.0 }
-  claude-haiku-4-5-20251001: { input: 1.0, output: 5.0 }
-default:           { input:  3.0, output: 15.0 }

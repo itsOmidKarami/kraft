@@ -410,6 +410,11 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
 
     Rounds count *distinct* fix cycles seen on the node, not sessions: a node
     that ran three tasks in one pass has run one round, not three.
+
+    `cost_complete` is false when some session spent tokens but reported no cost
+    — cost comes only from the agent, so a sum over those is a floor, not a
+    total. Treating a missing cost as zero would quietly under-report the bill,
+    which is the one thing a cost figure must not do.
     """
     rows = conn.execute(
         "SELECT node_id, round, tokens_in, tokens_out, cost_usd, wall_ms, status "
@@ -430,11 +435,15 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
                 "sessions": 0,
                 "rounds": 0,
                 "capped_out": 0,
+                "cost_complete": True,
             },
         )
         node["tokens_in"] += r["tokens_in"] or 0
         node["tokens_out"] += r["tokens_out"] or 0
         node["cost_usd"] += r["cost_usd"] or 0.0
+        # a session that spent tokens but reported no cost makes the sum a floor
+        if r["cost_usd"] is None and (r["tokens_in"] or r["tokens_out"]):
+            node["cost_complete"] = False
         node["wall_ms"] += r["wall_ms"] or 0
         node["sessions"] += 1
         node["capped_out"] += 1 if r["status"] == "capped_out" else 0
@@ -450,6 +459,7 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
     # An item's rounds is the deepest a single node had to loop, not the sum:
     # summing would read as "this item retried nine times" for nine clean nodes.
     total["rounds"] = max((n["rounds"] for n in nodes), default=0)
+    total["cost_complete"] = all(n["cost_complete"] for n in nodes)
     return {"total": total, "by_node": sorted(nodes, key=lambda n: n["node"])}
 
 

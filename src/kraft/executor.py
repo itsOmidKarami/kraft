@@ -87,7 +87,6 @@ async def _dispatch(
     *,
     instruction_override: str | None = None,
     round: int = 0,
-    pricing=None,
     steer: Steer | None = None,
 ) -> str:
     binding = registry.hooks[task_hook]
@@ -115,7 +114,6 @@ async def _dispatch(
             task_instruction=(_STEER_PROMPT.format(steer=note) if note else "") + instruction,
             repo_path=work_item_row["repo"],
             cwd=worktree,
-            pricing=pricing,
             **common,
         )
     if kind == "subprocess":
@@ -148,7 +146,6 @@ async def _measure_node(
     worktree,
     *,
     round: int = 0,
-    pricing=None,
     steer: Steer | None = None,
 ) -> tuple[str, list[str], list[BaseException]]:
     await db.write(lambda c, node=node: store.enter_node(c, work_item_id, node["id"]))
@@ -164,7 +161,6 @@ async def _measure_node(
                 registry,
                 worktree,
                 round=round,
-                pricing=pricing,
                 steer=steer,
             )
             for t in tasks
@@ -197,7 +193,6 @@ async def _walk_node(
     worktree,
     *,
     policy: _policy.Policy | None = None,
-    pricing=None,
     steer: Steer | None = None,
 ) -> str:
     key = node.get("fix_loop")
@@ -211,7 +206,6 @@ async def _walk_node(
             row,
             registry,
             worktree,
-            pricing=pricing,
             steer=steer,
         )
         if verdict == "paused":
@@ -242,7 +236,6 @@ async def _walk_node(
             registry,
             worktree,
             round=round,
-            pricing=pricing,
             steer=steer,
         )
         if verdict == "paused":
@@ -287,7 +280,6 @@ async def _walk_node(
             worktree,
             instruction_override=_FIX_PROMPT.format(node_id=node["id"], failed=", ".join(failed)),
             round=count,
-            pricing=pricing,
             steer=steer,
         )
         if fix == "paused":
@@ -323,7 +315,6 @@ async def run(
     bd_cwd: str | None = None,
     start_index: int = 0,
     policy: _policy.Policy | None = None,
-    pricing=None,
     steer: str | None = None,
 ) -> str:
     # the note is good for one agent launch, whichever task gets there first
@@ -350,7 +341,6 @@ async def run(
             registry,
             worktree,
             policy=policy,
-            pricing=pricing,
             # `carried` empties itself on the first agent launch, so the note reaches
             # the next agent to run and no later one
             steer=carried,
@@ -381,7 +371,6 @@ async def _reconcile_current_node(
     adopted,
     *,
     policy: _policy.Policy | None = None,
-    pricing=None,
 ) -> str:
     node_id = node["id"]
     sessions = db.read(
@@ -414,7 +403,6 @@ async def _reconcile_current_node(
                 registry,
                 worktree,
                 policy=policy,
-                pricing=pricing,
             )
             == "ok"
             else "needs_human"
@@ -434,7 +422,6 @@ async def _reconcile_current_node(
                 registry,
                 worktree,
                 policy=policy,
-                pricing=pricing,
             )
             == "ok"
             else "needs_human"
@@ -475,7 +462,6 @@ async def resume(
     adopted: dict,
     bd_cwd: str | None = None,
     policy: _policy.Policy | None = None,
-    pricing=None,
 ) -> str:
     row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
@@ -519,7 +505,6 @@ async def resume(
             worktree,
             adopted,
             policy=policy,
-            pricing=pricing,
         )
         == "needs_human"
     ):
@@ -539,7 +524,6 @@ async def resume(
                 registry,
                 worktree,
                 policy=policy,
-                pricing=pricing,
             )
             == "needs_human"
         ):

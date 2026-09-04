@@ -32,6 +32,8 @@ describe("tokens / usd", () => {
     expect(tokens(1_400_000)).toBe("1.4M");
     expect(usd(2.415)).toBe("$2.42");
     expect(usd(0.0125)).toBe("$0.013");
+    // an incomplete sum is a floor, and says so
+    expect(usd(2.415, false)).toBe("$2.42+");
   });
 });
 

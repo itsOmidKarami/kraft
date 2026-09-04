@@ -415,17 +415,22 @@ def test_work_item_usage_rollup_is_captured_from_the_agent_envelope(tmp_path, mo
 
         usage = client.get(f"/work-items/{wid}").json()["usage"]
         impl = next(n for n in usage["by_node"] if n["node"] == "implementation")
-        # 1000 input + 500 cache-read, 200 output, at 10/100 USD per Mtok
+        # 1000 input + 500 cache-read, 200 output
         assert (impl["tokens_in"], impl["tokens_out"]) == (1500, 200)
-        assert impl["cost_usd"] == pytest.approx(1500 * 10 / 1e6 + 200 * 100 / 1e6)
+        # cost is the agent's own number, carried through untouched
+        assert impl["cost_usd"] == pytest.approx(0.035)
+        assert impl["cost_complete"] is True
         assert impl["wall_ms"] is not None and impl["rounds"] == 1
 
-        # the subprocess and builtin nodes ran but report no tokens
+        # the subprocess and builtin nodes ran but report no tokens — that is not
+        # a hole in the billing, and must not make the total read as a floor
         env = next(n for n in usage["by_node"] if n["node"] == "env_setup")
         assert env["tokens_in"] == 0
+        assert env["cost_complete"] is True
 
         assert usage["total"]["tokens_in"] == impl["tokens_in"]
-        assert usage["total"]["cost_usd"] == pytest.approx(impl["cost_usd"])
+        assert usage["total"]["cost_usd"] == pytest.approx(0.035)
+        assert usage["total"]["cost_complete"] is True
 
 
 def test_cross_repo_intake_records_submodules_and_orders_the_merge(tmp_path, monkeypatch):

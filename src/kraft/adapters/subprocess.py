@@ -98,7 +98,6 @@ async def run_task(
     post_resolve: Callable[[str, Path, int], str] | None = None,
     poll_s: float = 0.05,
     round: int = 0,
-    pricing: _usage.Pricing | None = None,
 ) -> str:
     log_path = run_dirs.logs / f"{session_id}.log"
     result_path = run_dirs.results / f"{session_id}.json"
@@ -173,7 +172,5 @@ async def run_task(
         return "paused"
     summary_ref = read_summary_ref(result_path)
     seen = _usage.read(log_path, result_path)
-    if seen is not None:
-        seen = seen.with_cost(pricing or _usage.DEFAULT_PRICING)
     await db.write(lambda c: store.session_exited(c, session_id, status, summary_ref, seen))
     return status

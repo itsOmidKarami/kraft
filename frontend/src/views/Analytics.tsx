@@ -170,11 +170,13 @@ export function AnalyticsView() {
               />
               <Kpi
                 label="Cost"
-                value={usd(t.cost_usd)}
+                value={usd(t.cost_usd, t.cost_complete)}
                 sub={
-                  t.work_items
-                    ? `${usd(t.cost_usd / t.work_items)} per work item`
-                    : "nothing spent yet"
+                  !t.cost_complete
+                    ? "a floor — some runs reported no cost"
+                    : t.work_items
+                      ? `${usd(t.cost_usd / t.work_items)} per work item`
+                      : "nothing spent yet"
                 }
               />
               <Kpi
@@ -228,7 +230,7 @@ export function AnalyticsView() {
                     <span className="num">{n.runs}</span>
                     <span className="num">{elapsed(n.avg_ms)}</span>
                     <span className="num">{tokens(n.tokens)}</span>
-                    <span className="num strong">{usd(n.cost_usd)}</span>
+                    <span className="num strong">{usd(n.cost_usd, n.cost_complete)}</span>
                     <span className="num">{n.rounds}</span>
                   </div>
                 ))}
@@ -249,11 +251,13 @@ export function AnalyticsView() {
                     <span className="num">{r.items}</span>
                     <span className="num">{r.mrs}</span>
                     <span className="num">{tokens(r.tokens)}</span>
-                    <span className="num strong">{usd(r.cost_usd)}</span>
+                    <span className="num strong">{usd(r.cost_usd, r.cost_complete)}</span>
                   </div>
                 ))}
                 <p className="table-foot">
-                  Rounds are fix cycles. Wall time counts waits on a human separately.
+                  Rounds are fix cycles. Wall time counts waits on a human separately. Cost is
+                  what each agent reported it was billed — Kraft never estimates one, so a
+                  trailing <b>+</b> means some run reported none and the figure is a floor.
                 </p>
               </section>
             </div>
