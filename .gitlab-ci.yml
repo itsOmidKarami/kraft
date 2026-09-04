@@ -31,10 +31,21 @@ cache:
   - git --version && bd version
 
 # Blocking fast feedback: lint + everything except the slow/e2e tiers.
-# Deliberately ungated: it is the cheapest job, and keeping one job unconditional
-# means every MR has a pipeline for `merge_when_pipeline_succeeds` to wait on. A
-# fully path-gated pipeline can produce zero jobs, and auto-merge then never fires.
+# Ungated *on merge requests*: it is the cheapest job, and keeping one job
+# unconditional means every MR has a pipeline for `merge_when_pipeline_succeeds` to
+# wait on — a fully path-gated pipeline can produce zero jobs, and auto-merge then
+# never fires. That guarantee is only needed where something waits on the result, so
+# on the default branch it path-gates like the rest.
 lint-and-test:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - changes:
+        - src/**/*
+        - tests/**/*
+        - templates/**/*
+        - pyproject.toml
+        - uv.lock
+        - .gitlab-ci.yml
   before_script: *py-before-script
   script:
     - uv sync --frozen
@@ -44,12 +55,18 @@ lint-and-test:
   after_script:
     - uv cache prune --ci
 
+# The path gates apply on the default branch too. A merge fires a second pipeline on
+# main, and without gating it re-ran in full what the MR pipeline had just proven —
+# roughly doubling the spend. The main pipeline is still worth keeping: MR pipelines
+# here are detached (they test the source branch, not the merge result, and
+# merged-results pipelines are a paid feature), so main is the only place the merged
+# state is actually tested. Gate it, don't drop it.
+#
 # Blocking, but runs in parallel so it doesn't hold up the fast signal.
 # Subprocess servers, real uvicorn, multi-second sleeps (see pyproject `slow` marker).
 slow-tests:
   needs: []
   rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - changes:
         - src/**/*
         - tests/**/*
@@ -67,7 +84,6 @@ slow-tests:
 frontend:
   image: node:20-bookworm-slim
   rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - changes:
         - frontend/**/*
         - .gitlab-ci.yml
