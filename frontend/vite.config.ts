@@ -4,7 +4,7 @@ import { defineConfig, type ProxyOptions } from "vite";
 
 const API = "http://127.0.0.1:8765";
 const proxy: Record<string, ProxyOptions> = Object.fromEntries(
-  ["/work-items", "/templates", "/health", "/worker-sessions"].map((p) => [
+  ["/work-items", "/templates", "/health", "/worker-sessions", "/search", "/documents", "/index"].map((p) => [
     p,
     { target: API, changeOrigin: true },
   ]),
