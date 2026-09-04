@@ -1,64 +1,195 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../api";
 import { useStore } from "../store";
+import type { WorkItem, WorkerSession } from "../types";
 import { WorkItemDetail } from "./WorkItemDetail";
 
-beforeEach(() => {
+const NODES = [
+  { id: "plan", tasks: ["on.plan.requested"], gate_after: "plan_approval" },
+  { id: "verify", tasks: ["on.test.run"], gate_after: null },
+];
+
+const item = (over: Partial<WorkItem> = {}): WorkItem =>
+  ({
+    id: "w1", title: "T", repo: "/r", status: "active", chain_template: "quick-task",
+    chain_definition: { template_id: "quick-task", nodes: NODES },
+    current_node_id: "verify", bead_id: "B", created_at: "t", updated_at: "t",
+    ...over,
+  }) as WorkItem;
+
+const session = (over: Partial<WorkerSession> = {}): WorkerSession =>
+  ({
+    id: "s1", work_item_id: "w1", node_id: "verify", hook_point: "on.test.run",
+    status: "running", attempt: 1, created_at: "t", exited_at: null, ...over,
+  }) as WorkerSession;
+
+const setup = (over: Partial<WorkItem> = {}, sessions: WorkerSession[] = []) =>
   useStore.setState({
-    workItems: {
-      w1: {
-        id: "w1", title: "T", repo: "/r", status: "active", chain_template: "quick-task",
-        chain_definition: { template_id: "quick-task", nodes: [{ id: "n", tasks: ["a"], gate_after: null }] },
-        current_node_id: "n", bead_id: "B", created_at: "t", updated_at: "t",
-      },
-    },
-    sessionsByItem: { w1: [] },
+    workItems: { w1: item(over) },
+    sessionsByItem: { w1: sessions },
     eventsByItem: { w1: [] },
   } as never);
+
+beforeEach(() => {
+  setup();
+  vi.restoreAllMocks();
   vi.spyOn(useStore.getState(), "hydrateItem").mockResolvedValue(undefined);
-  vi.spyOn(api, "getWorkItemDocuments").mockResolvedValue({
-    work_item_id: "w1",
-    documents: [],
-  });
+  vi.spyOn(api, "getWorkItemDocuments").mockResolvedValue({ work_item_id: "w1", documents: [] });
 });
 
+const renderDetail = () =>
+  render(
+    <MemoryRouter
+      initialEntries={["/work-items/w1"]}
+      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+    >
+      <Routes>
+        <Route path="/work-items/:id" element={<WorkItemDetail />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+
 describe("WorkItemDetail", () => {
-  it("hydrates on mount and renders the stepper", async () => {
-    render(
-      <MemoryRouter
-        initialEntries={["/work-items/w1"]}
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-      >
-        <Routes>
-          <Route path="/work-items/:id" element={<WorkItemDetail />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+  it("hydrates on mount and leads with the current node, not the chain", () => {
+    renderDetail();
     expect(useStore.getState().hydrateItem).toHaveBeenCalledWith("w1");
-    expect(screen.getByTestId("node-n")).toBeInTheDocument();
+    expect(screen.getByText("verify", { selector: ".hero-node" })).toBeInTheDocument();
+    expect(screen.getByText(/node 2 of 2/)).toBeInTheDocument();
+    expect(screen.getByTestId("chain-bar")).toBeInTheDocument();
   });
 
-  it("shows the linked documents panel above the event timeline", async () => {
-    const { container } = render(
-      <MemoryRouter
-        initialEntries={["/work-items/w1"]}
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-      >
-        <Routes>
-          <Route path="/work-items/:id" element={<WorkItemDetail />} />
-        </Routes>
-      </MemoryRouter>,
+  it("tags the work-item status in the meta line", () => {
+    setup({ status: "needs_human" });
+    renderDetail();
+    expect(screen.getByText("needs you")).toHaveClass("tag-accent");
+  });
+
+  it("shows the control row while nothing is waiting on a human", () => {
+    renderDetail();
+    expect(screen.getByRole("button", { name: /pause/i })).toBeInTheDocument();
+  });
+
+  it("replaces the control row with the gate card once the gate is reached", () => {
+    setup(
+      { current_node_id: "plan" },
+      [session({ node_id: "plan", hook_point: "on.plan.requested", status: "done" })],
     );
+    renderDetail();
+    expect(screen.queryByRole("button", { name: /pause/i })).toBeNull();
+    expect(screen.getByText(/plan_approval/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /approve/i })).toBeInTheDocument();
+  });
+
+  it("puts tasks, timeline and documents behind tabs, tasks first", async () => {
+    setup({}, [session()]);
+    renderDetail();
+    const tasks = screen.getByRole("tab", { name: /Tasks/ });
+    expect(tasks).toHaveAttribute("aria-selected", "true");
+    expect(within(tasks).getByText("1")).toBeInTheDocument();
+    expect(screen.getByTestId("session-s1")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("tab", { name: /Documents/ }));
     expect(await screen.findByText(/no linked documents/i)).toBeInTheDocument();
     expect(api.getWorkItemDocuments).toHaveBeenCalledWith("w1");
-    const docs = container.querySelector(".linked-docs");
-    const timeline = container.querySelector(".timeline");
-    expect(docs).not.toBeNull();
-    expect(timeline).not.toBeNull();
-    expect(
-      docs!.compareDocumentPosition(timeline!) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    expect(screen.queryByTestId("session-s1")).toBeNull();
+  });
+
+  it("puts the item's captured usage in the control row", () => {
+    setup(
+      {
+        usage: {
+          total: { tokens_in: 130_000, tokens_out: 8_000, cost_usd: 2.41, wall_ms: 0, sessions: 3, rounds: 1, capped_out: 0 },
+          by_node: [
+            { node: "verify", tokens_in: 40_000, tokens_out: 1_200, cost_usd: 1.1, wall_ms: 0, sessions: 1, rounds: 1, capped_out: 0 },
+          ],
+        },
+      },
+      [session()],
+    );
+    renderDetail();
+    expect(screen.getByText(/41.2k tokens this node/)).toBeInTheDocument();
+    expect(screen.getByText(/138k total/)).toBeInTheDocument();
+    expect(screen.getByText(/\$2\.41/)).toBeInTheDocument();
+  });
+
+  it("holds the Pause button in a pending state until the pause actually lands", async () => {
+    const spy = vi.spyOn(api, "pauseWorkItem").mockResolvedValue({
+      id: "w1",
+      paused_sessions: ["s1"],
+    });
+    setup({}, [session()]);
+    renderDetail();
+    await userEvent.click(screen.getByRole("button", { name: /pause/i }));
+    expect(spy).toHaveBeenCalledWith("w1");
+    const button = screen.getByRole("button", { name: /pausing/i });
+    expect(button).toBeDisabled();
+  });
+
+  it("says why a pause failed instead of leaving the button stuck", async () => {
+    vi.spyOn(api, "pauseWorkItem").mockRejectedValue(new Error("work item is paused"));
+    setup({}, [session()]);
+    renderDetail();
+    await userEvent.click(screen.getByRole("button", { name: /pause/i }));
+    expect(await screen.findByText("work item is paused")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Pause$/ })).toBeEnabled();
+  });
+
+  it("swaps the control row for the paused card, which resumes with or without the note", async () => {
+    const spy = vi.spyOn(api, "resumeWorkItem").mockResolvedValue({
+      id: "w1",
+      node_id: "verify",
+      steer: null,
+    });
+    setup({ status: "paused", pending_steer_context: "keep the signature" }, [
+      session({ status: "paused", attempt: 1 }),
+    ]);
+    renderDetail();
+    expect(screen.queryByRole("button", { name: /^Pause$/ })).toBeNull();
+    expect(screen.getByTestId("paused-card")).toBeInTheDocument();
+    // the note the server already holds is prefilled, not lost
+    expect(screen.getByLabelText(/Steer/)).toHaveValue("keep the signature");
+    expect(screen.getByText(/relaunches on\.test\.run as attempt 2/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /resume with steer/i }));
+    expect(spy).toHaveBeenCalledWith("w1", "keep the signature");
+
+    await userEvent.click(screen.getByRole("button", { name: /resume without/i }));
+    expect(spy).toHaveBeenLastCalledWith("w1", undefined);
+  });
+
+  it("cannot resume with a steer that is not there", () => {
+    setup({ status: "paused" }, [session({ status: "paused" })]);
+    renderDetail();
+    expect(screen.getByRole("button", { name: /resume with steer/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /resume without/i })).toBeEnabled();
+  });
+
+  it("shows the repos panel only on a multi-repo item, deepest submodule first", () => {
+    setup({
+      root_merge_policy: "bump",
+      repos: [
+        { repo: "b", path: "vendor/deep/b", role: "submodule", merge_rank: 1, state: "pending" },
+        { repo: "a", path: "libs/a", role: "submodule", merge_rank: 2, state: "pending" },
+        { repo: "r", path: "/r", role: "root", merge_rank: 3, state: "pending" },
+      ],
+    });
+    const { container } = renderDetail();
+    const rows = [...container.querySelectorAll("[data-repo]")];
+    expect(rows.map((r) => r.getAttribute("data-repo"))).toEqual([
+      "vendor/deep/b",
+      "libs/a",
+      "/r",
+    ]);
+    expect(screen.getByText("+2 submodules")).toBeInTheDocument();
+    expect(screen.getByText(/root_merge_policy/)).toHaveTextContent("bump");
+  });
+
+  it("has no repos panel on a single-repo item", () => {
+    setup({ repos: [] });
+    const { container } = renderDetail();
+    expect(container.querySelector(".repos-panel")).toBeNull();
   });
 });

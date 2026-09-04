@@ -249,3 +249,18 @@ def test_fix_loop_with_no_tasks_quarantines_template(tmp_path):
     ts = templates.load_templates(d, reg)
     assert "emptyloop" in ts.invalid
     assert "fix_loop" in ts.invalid["emptyloop"]
+
+
+def test_config_files_in_the_templates_dir_are_not_read_as_templates(tmp_path):
+    """Settings writes repos.yaml, access.yaml and pricing.yaml next to the chain
+    templates. Reading those as malformed templates is how the whole app ends up
+    reporting degraded health for no reason."""
+    from support.harness import fake_templates_dir
+
+    d = fake_templates_dir(tmp_path, "claude")
+    (d / "repos.yaml").write_text("repos: []\n")
+    (d / "access.yaml").write_text("bind: 127.0.0.1\n")
+    registry = templates.load_registry(d / "registry.yaml")
+    loaded = templates.load_templates(d, registry)
+    assert loaded.invalid == {}
+    assert set(loaded.valid) == {"quick-task", "default"}

@@ -5,7 +5,7 @@ from kraft.adapters import subprocess as _subprocess
 
 
 async def env_setup(
-    db, run_dirs, *, session_id: str, work_item_id: str, node_id: str, repo: str
+    db, run_dirs, *, session_id: str, work_item_id: str, node_id: str, repo: str, round: int = 0
 ) -> str:
     worktree = run_dirs.worktrees / work_item_id
     branch = f"kraft/{work_item_id}"
@@ -21,11 +21,19 @@ async def env_setup(
         hook_point="on.env.prepare",
         cmd=["git", "worktree", "add", str(worktree), "-b", branch],
         cwd=repo,
+        round=round,
     )
 
 
 async def noop(
-    db, run_dirs, *, session_id: str, work_item_id: str, node_id: str, hook_point: str
+    db,
+    run_dirs,
+    *,
+    session_id: str,
+    work_item_id: str,
+    node_id: str,
+    hook_point: str,
+    round: int = 0,
 ) -> str:
     """Placeholder task for a hook with no plugin yet: records a done session, does no work."""
     log_path = run_dirs.logs / f"{session_id}.log"
@@ -40,6 +48,7 @@ async def noop(
             hook_point=hook_point,
             log_path=str(log_path),
             result_path=str(result_path),
+            round=round,
         )
     )
     await db.write(lambda c: store.session_exited(c, session_id, "done"))

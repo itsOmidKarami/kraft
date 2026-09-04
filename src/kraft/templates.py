@@ -6,6 +6,13 @@ from pathlib import Path
 import yaml
 
 _VALID_KINDS = {"builtin", "agent", "subprocess"}
+# Config files that share the templates directory but are not chain templates.
+# One definition: `load_templates` skips them, and the registry save copies the
+# templates around them. Without this, every settings file the UI writes would be
+# read as a malformed template and show up as degraded health.
+CONFIG_FILES = frozenset(
+    {"registry.yaml", "policy.yaml", "pricing.yaml", "repos.yaml", "access.yaml"}
+)
 # The complete gate set. Public because the API validates approve/reject against it
 # and the chain-review skill documents it — a second copy is how those drift apart.
 GATE_NAMES = {"spec_approval", "plan_approval", "chain_finalized", "human_review_approval"}
@@ -62,7 +69,7 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
     invalid: dict[str, str] = {}
 
     for path in sorted(Path(dir).glob("*.yaml")):
-        if path.name in {"registry.yaml", "policy.yaml"}:
+        if path.name in CONFIG_FILES:
             continue
         stem = path.stem
         try:

@@ -21,6 +21,30 @@ _FIX_PROMPT = (
     "pass. Make no unrelated changes. Failing hook points: {failed}"
 )
 
+# A human's note — from the capped card's retry (4b) or a resume after pause (4c) —
+# prepended to the next agent launch. It leads because it is the reason this task is
+# running again.
+_STEER_PROMPT = "A human has steered this run: {steer}\n\n"
+
+
+class Steer:
+    """A steer note, good for exactly one agent launch.
+
+    Both entry points mean the same thing by it — "say this to the next agent you
+    start" — so it is carried down the walk and consumed by whichever dispatch
+    gets there first, rather than each caller guessing which task that will be.
+    """
+
+    def __init__(self, text: str | None = None) -> None:
+        self._text = text or None
+
+    def take(self) -> str | None:
+        text, self._text = self._text, None
+        return text
+
+    def __bool__(self) -> bool:
+        return self._text is not None
+
 
 async def intake(
     db,
@@ -30,6 +54,8 @@ async def intake(
     repo: str,
     template: Template,
     bd_cwd: str | None = None,
+    submodules: list[str] | None = None,
+    root_merge_policy: str = "bump",
 ) -> str:
     work_item_id = uuid.uuid4().hex
     bead_id = await beads.intake(title, cwd=bd_cwd)
@@ -43,6 +69,8 @@ async def intake(
             repo=repo,
             chain_template=template.id,
             chain_definition=chain_definition,
+            submodules=submodules,
+            root_merge_policy=root_merge_policy,
         )
     )
     return work_item_id
@@ -58,6 +86,9 @@ async def _dispatch(
     worktree,
     *,
     instruction_override: str | None = None,
+    round: int = 0,
+    pricing=None,
+    steer: Steer | None = None,
 ) -> str:
     binding = registry.hooks[task_hook]
     session_id = uuid.uuid4().hex
@@ -66,21 +97,25 @@ async def _dispatch(
         session_id=session_id,
         work_item_id=work_item_row["id"],
         node_id=node["id"],
+        round=round,
     )
     if kind == "builtin" and binding.get("handler") == "env_setup":
         return await _builtins.env_setup(db, run_dirs, repo=work_item_row["repo"], **common)
     if kind == "builtin" and binding.get("handler") == "noop":
         return await _builtins.noop(db, run_dirs, hook_point=task_hook, **common)
     if kind == "agent":
+        note = steer.take() if steer else None
+        instruction = instruction_override or work_item_row["title"]
         return await _agent.run_agent_task(
             db,
             run_dirs,
             hook_point=task_hook,
             command=binding["command"],
             title=work_item_row["title"],
-            task_instruction=instruction_override or work_item_row["title"],
+            task_instruction=(_STEER_PROMPT.format(steer=note) if note else "") + instruction,
             repo_path=work_item_row["repo"],
             cwd=worktree,
+            pricing=pricing,
             **common,
         )
     if kind == "subprocess":
@@ -104,14 +139,43 @@ async def _dispatch(
 
 
 async def _measure_node(
-    db, run_dirs, work_item_id, node, row, registry, worktree
+    db,
+    run_dirs,
+    work_item_id,
+    node,
+    row,
+    registry,
+    worktree,
+    *,
+    round: int = 0,
+    pricing=None,
+    steer: Steer | None = None,
 ) -> tuple[str, list[str], list[BaseException]]:
     await db.write(lambda c, node=node: store.enter_node(c, work_item_id, node["id"]))
     tasks = node["tasks"]
     results = await asyncio.gather(
-        *(_dispatch(db, run_dirs, t, node, row, registry, worktree) for t in tasks),
+        *(
+            _dispatch(
+                db,
+                run_dirs,
+                t,
+                node,
+                row,
+                registry,
+                worktree,
+                round=round,
+                pricing=pricing,
+                steer=steer,
+            )
+            for t in tasks
+        ),
         return_exceptions=True,
     )
+    # A pause stops the walk where it stands: the node is neither done nor failed,
+    # and resume relaunches it. It outranks a co-task's failure, which was almost
+    # certainly the same SIGTERM arriving on a different row.
+    if any(r == "paused" for r in results):
+        return "paused", [], []
     failed = [
         tasks[i] for i, r in enumerate(results) if isinstance(r, BaseException) or r == "failed"
     ]
@@ -133,13 +197,25 @@ async def _walk_node(
     worktree,
     *,
     policy: _policy.Policy | None = None,
+    pricing=None,
+    steer: Steer | None = None,
 ) -> str:
     key = node.get("fix_loop")
 
     if not key:
         verdict, failed, excs = await _measure_node(
-            db, run_dirs, work_item_id, node, row, registry, worktree
+            db,
+            run_dirs,
+            work_item_id,
+            node,
+            row,
+            registry,
+            worktree,
+            pricing=pricing,
+            steer=steer,
         )
+        if verdict == "paused":
+            return "paused"
         if verdict == "failed":
             reason = f"task failed in node {node['id']}: {', '.join(failed)}"
             if excs:
@@ -153,10 +229,24 @@ async def _walk_node(
         raise RuntimeError(f"node {node['id']!r} has fix_loop but no policy was provided")
 
     cap = _policy.resolve_cap(policy, key)
+    # `round` is the fix-cycle index every session in this pass is stamped with,
+    # so per-round usage can be read back without joining against the events.
+    round = 0
     while True:
         verdict, failed, _excs = await _measure_node(
-            db, run_dirs, work_item_id, node, row, registry, worktree
+            db,
+            run_dirs,
+            work_item_id,
+            node,
+            row,
+            registry,
+            worktree,
+            round=round,
+            pricing=pricing,
+            steer=steer,
         )
+        if verdict == "paused":
+            return "paused"
         if verdict == "ok":
             await db.write(lambda c: store.complete_node(c, work_item_id, node["id"]))
             return "ok"
@@ -175,8 +265,11 @@ async def _walk_node(
                     c, work_item_id, node["id"], list(node["tasks"])
                 )
             )
+            capped = {"cycles": count - 1, "attempts": cap.attempts}
             await db.write(
-                lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node["id"], reason)
+                lambda c, reason=reason, capped=capped: store.mark_needs_human(
+                    c, work_item_id, node["id"], reason, capped
+                )
             )
             return "needs_human"
 
@@ -184,7 +277,7 @@ async def _walk_node(
         await db.write(
             lambda c, payload=payload: events.append(c, work_item_id, "fix_cycle_started", payload)
         )
-        await _dispatch(
+        fix = await _dispatch(
             db,
             run_dirs,
             "on.implementation.start",
@@ -193,7 +286,13 @@ async def _walk_node(
             registry,
             worktree,
             instruction_override=_FIX_PROMPT.format(node_id=node["id"], failed=", ".join(failed)),
+            round=count,
+            pricing=pricing,
+            steer=steer,
         )
+        if fix == "paused":
+            return "paused"
+        round = count
         # fix task status is not branched on; loop re-measures
 
 
@@ -224,7 +323,11 @@ async def run(
     bd_cwd: str | None = None,
     start_index: int = 0,
     policy: _policy.Policy | None = None,
+    pricing=None,
+    steer: str | None = None,
 ) -> str:
+    # the note is good for one agent launch, whichever task gets there first
+    carried = Steer(steer)
     row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
     )
@@ -239,8 +342,21 @@ async def run(
 
     for node in nodes[start_index:]:
         result = await _walk_node(
-            db, run_dirs, work_item_id, node, row, registry, worktree, policy=policy
+            db,
+            run_dirs,
+            work_item_id,
+            node,
+            row,
+            registry,
+            worktree,
+            policy=policy,
+            pricing=pricing,
+            # `carried` empties itself on the first agent launch, so the note reaches
+            # the next agent to run and no later one
+            steer=carried,
         )
+        if result == "paused":
+            return "paused"
         if result == "needs_human":
             return "needs_human"
         if await _maybe_gate(db, work_item_id, node):
@@ -265,6 +381,7 @@ async def _reconcile_current_node(
     adopted,
     *,
     policy: _policy.Policy | None = None,
+    pricing=None,
 ) -> str:
     node_id = node["id"]
     sessions = db.read(
@@ -289,7 +406,15 @@ async def _reconcile_current_node(
         return (
             "ok"
             if await _walk_node(
-                db, run_dirs, work_item_id, node, row, registry, worktree, policy=policy
+                db,
+                run_dirs,
+                work_item_id,
+                node,
+                row,
+                registry,
+                worktree,
+                policy=policy,
+                pricing=pricing,
             )
             == "ok"
             else "needs_human"
@@ -301,7 +426,15 @@ async def _reconcile_current_node(
         return (
             "ok"
             if await _walk_node(
-                db, run_dirs, work_item_id, node, row, registry, worktree, policy=policy
+                db,
+                run_dirs,
+                work_item_id,
+                node,
+                row,
+                registry,
+                worktree,
+                policy=policy,
+                pricing=pricing,
             )
             == "ok"
             else "needs_human"
@@ -342,6 +475,7 @@ async def resume(
     adopted: dict,
     bd_cwd: str | None = None,
     policy: _policy.Policy | None = None,
+    pricing=None,
 ) -> str:
     row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
@@ -385,6 +519,7 @@ async def resume(
             worktree,
             adopted,
             policy=policy,
+            pricing=pricing,
         )
         == "needs_human"
     ):
@@ -396,7 +531,15 @@ async def resume(
     for node in nodes[start + 1 :]:
         if (
             await _walk_node(
-                db, run_dirs, work_item_id, node, row, registry, worktree, policy=policy
+                db,
+                run_dirs,
+                work_item_id,
+                node,
+                row,
+                registry,
+                worktree,
+                policy=policy,
+                pricing=pricing,
             )
             == "needs_human"
         ):

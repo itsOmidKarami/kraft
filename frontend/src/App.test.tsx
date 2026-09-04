@@ -35,4 +35,11 @@ describe("App", () => {
     await userEvent.click(screen.getByRole("button", { name: /search/i }));
     expect(screen.getByRole("dialog", { name: "Search" })).toBeInTheDocument();
   });
+
+  it("opens intake from the header's primary action", async () => {
+    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "quick-task", nodes: [], gates: 0 }, { id: "default", nodes: [], gates: 0 }]);
+    render(<App />);
+    await userEvent.click(screen.getByRole("button", { name: /new work item/i }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
 });
