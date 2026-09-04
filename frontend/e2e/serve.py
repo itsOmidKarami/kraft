@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import signal
 import subprocess
 import sys
 import tempfile
@@ -29,9 +30,33 @@ import urllib.request
 REPO = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "tests"))
 
-from support.harness import fake_templates_dir, isolated_bd, make_repo  # noqa: E402
+from support.harness import (  # noqa: E402
+    fake_templates_dir,
+    isolated_bd,
+    make_repo_with_engineering,
+)
 
 PORT = os.environ.get("KRAFT_PORT", "8765")
+
+
+def _raise_interrupt(_signum, _frame) -> None:
+    raise KeyboardInterrupt
+
+
+def _terminate(proc: subprocess.Popen) -> None:
+    """Signal the whole process group so detached agent/git children die too."""
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+    except ProcessLookupError, PermissionError:
+        proc.terminate()
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except ProcessLookupError, PermissionError:
+            proc.kill()
+        proc.wait()
 
 
 def main() -> int:
@@ -40,7 +65,18 @@ def main() -> int:
         sys.exit(f"missing {dist}/index.html — run `cd frontend && npm run build` first")
 
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="kraft-e2e-"))
-    repo = make_repo(tmp)
+    # .engineering/ content so the indexer has something to find: the search
+    # overlay spec needs real documents, not just a failing test (Kraft-bj9.6).
+    repo = make_repo_with_engineering(
+        tmp,
+        {
+            ".engineering/specs/ws.md": (
+                "---\ntitle: WS transport design\nowner: omid\n---\n"
+                "reconnect backoff schedule caps at ten seconds\n"
+            ),
+            ".engineering/plans/ui.md": "# UI plan\nboard and detail view\n",
+        },
+    )
     tracker = isolated_bd(tmp)
     templates = fake_templates_dir(
         tmp, f"{sys.executable} {REPO / 'tests' / 'support' / 'fake_agent.py'}"
@@ -54,8 +90,13 @@ def main() -> int:
         "KRAFT_BD_CWD": str(tracker),
         "KRAFT_FRONTEND_DIST": str(dist),
         "KRAFT_FAKE_AGENT": "fix",
+        "KRAFT_INDEX_REPOS": str(repo),
     }
-    proc = subprocess.Popen([sys.executable, "-m", "kraft"], cwd=REPO, env=env)
+    # Own process group: the orchestrator spawns detached agent/git children,
+    # and terminating only the direct child orphans them (Kraft-2ih).
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "kraft"], cwd=REPO, env=env, start_new_session=True
+    )
 
     health = f"http://127.0.0.1:{PORT}/health"
     deadline = time.monotonic() + 30
@@ -69,16 +110,18 @@ def main() -> int:
         except OSError:
             time.sleep(0.3)
     else:
-        proc.kill()
+        _terminate(proc)
         sys.exit("server did not become healthy in 30s")
 
     print(f"\n  server up on http://127.0.0.1:{PORT}  (temp: {tmp})")
     print(f"  KRAFT_E2E_REPO={repo}\n", flush=True)
+    # Ctrl-C sends SIGINT; a CI runner or `kill` sends SIGTERM. Handle both, or
+    # the orchestrator and its detached children outlive this script.
+    signal.signal(signal.SIGTERM, _raise_interrupt)
     try:
         proc.wait()
     except KeyboardInterrupt:
-        proc.terminate()
-        proc.wait()
+        _terminate(proc)
     return 0
 
 

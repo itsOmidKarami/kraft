@@ -90,23 +90,30 @@ INVALID SQL STATEMENT;
         db.SCHEMA_SQL = original_schema
 
 
+def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=()):
+    """Hand-build a pre-current schema: SCHEMA_SQL minus some lines/statements."""
+    schema = "\n".join(
+        ln for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
+    )
+    conn.execute("BEGIN")
+    for stmt in (x.strip() for x in schema.split(";")):
+        if stmt and not any(skip in stmt for skip in skip_stmts):
+            conn.execute(stmt)
+    conn.execute(f"PRAGMA user_version = {version}")
+    conn.commit()
+
+
 def test_migrate_creates_retry_counters(tmp_path):
     conn = db._connect(tmp_path / "orchestrator.db")
     db.migrate(conn)
     assert "retry_counters" in _tables(conn)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
 
 
 def test_migrate_v1_to_v2_adds_retry_counters(tmp_path):
     path = tmp_path / "orchestrator.db"
     conn = db._connect(path)
-    # Build a v1 DB by hand: run every CREATE from SCHEMA_SQL except retry_counters.
-    conn.execute("BEGIN")
-    for stmt in (s.strip() for s in db.SCHEMA_SQL.split(";")):
-        if stmt and "retry_counters" not in stmt:
-            conn.execute(stmt)
-    conn.execute("PRAGMA user_version = 1")
-    conn.commit()
+    _build_old_db(conn, 1, drop_lines=("session_summary_ref",), skip_stmts=("retry_counters",))
     conn.execute(
         "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
         "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
@@ -117,7 +124,7 @@ def test_migrate_v1_to_v2_adds_retry_counters(tmp_path):
 
     conn2 = db._connect(path)
     db.migrate(conn2)
-    assert conn2.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
     assert "retry_counters" in _tables(conn2)
     assert conn2.execute("SELECT count(*) FROM work_items").fetchone()[0] == 1  # data preserved
 
@@ -336,3 +343,44 @@ def test_raising_rollback_still_informs_caller_and_next_db_works(tmp_path, monke
             await fresh.close()
 
     asyncio.run(scenario())
+
+
+def test_migrate_v2_to_v3_adds_session_summary_ref(tmp_path):
+    """A v2 database migrates forward and gains worker_sessions.session_summary_ref."""
+    conn = db._connect(tmp_path / "orchestrator.db")
+    _build_old_db(conn, 2, drop_lines=("session_summary_ref",))
+
+    db.migrate(conn)
+
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(worker_sessions)").fetchall()}
+    assert "session_summary_ref" in cols
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+
+
+def test_migrate_mid_step_failure_rolls_back_whole_run(monkeypatch, tmp_path):
+    """A v1 database has two steps to apply. If the second raises, the first must
+    be rolled back too and user_version must stay where it started — the runner's
+    BEGIN spans the whole range, not one step (Kraft-g5x)."""
+    path = tmp_path / "orchestrator.db"
+    conn = db._connect(path)
+    _build_old_db(conn, 1, drop_lines=("session_summary_ref",), skip_stmts=("retry_counters",))
+    assert "retry_counters" not in _tables(conn)
+
+    broken = dict(db._MIGRATIONS)
+    broken[2] = ["INVALID SQL STATEMENT"]
+    monkeypatch.setattr(db, "_MIGRATIONS", broken)
+
+    with pytest.raises(sqlite3.OperationalError):
+        db.migrate(conn)
+
+    # step 1 (retry_counters) must not have survived the failure of step 2
+    assert "retry_counters" not in _tables(conn)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+
+    # and the database is still migratable once the broken step is gone
+    monkeypatch.undo()
+    db.migrate(conn)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    assert "retry_counters" in _tables(conn)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(worker_sessions)").fetchall()}
+    assert "session_summary_ref" in cols

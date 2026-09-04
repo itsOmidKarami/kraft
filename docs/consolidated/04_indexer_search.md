@@ -189,10 +189,15 @@ front-matter against `worker_sessions` (which has `node_id` and `session_summary
 rather than trusting the file alone — front-matter keeps the linkage
 git-native/portable, the DB join is free corroboration when available.
 
-**Implementation-time check:** `03_plugin_adapters.md` §2's result-file schema
-declares `session_summary_ref: string` but doesn't say where the referenced file
-lives — cross-check against Execution Worker's actual `HeadlessAgentInvocation`
-behavior once built, to confirm it writes to `.engineering/sessions/`.
+**Implementation-time check — settled (Kraft-bj9.7).** `03_plugin_adapters.md` §2's
+result-file schema declares `session_summary_ref: string` but didn't say where the
+referenced file lives. The built `HeadlessAgentInvocation` (`kraft.adapters.agent`)
+injects the work-item / node / hook-point / session id into the system prompt and
+instructs the worker to write `.engineering/sessions/<worker_session_id>.md` with the
+front-matter above, then report that repo-relative path as `session_summary_ref`. The
+adapter parses it into `worker_sessions.session_summary_ref` on session exit (and on
+resolve-from-file after a reattach), so the DB corroboration join in this section is
+available. Ingestion (4B) can rely on both the path convention and the column.
 
 ---
 
@@ -303,10 +308,14 @@ surface (`02` §10.1).
    multiplexer, `work_item_completed` triggers a targeted repo rescan, one startup
    full scan, `POST /index/rescan` escape hatch. No poll loop (§2). Connected-repo
    set = distinct `work_items.repo` ∪ `KRAFT_INDEX_REPOS`.
-4. **Session-summary ingestion + node/task linkage** (Effort 4B, bead Kraft-bj9.2) —
-   blocked on the Execution Worker writing `.engineering/sessions/*.md` +
-   `session_summary_ref`; validates the merge story (§3/§4/§5). Also lands
-   `GET /work-items/{id}/documents` and the `on.env.prepare` piggyback rescan.
+4. ✅ **Session-summary ingestion + node/task linkage** (Effort 4B, bead Kraft-bj9.2) —
+   event-driven off `worker_sessions.session_summary_ref` rather than by git scan,
+   because a live summary sits untracked in the work item's worktree; the scan
+   classifies `.engineering/sessions/` as `session_summary` so merged summaries
+   update the same `(repo, path)` row. Summary reconcile is upsert-only. Also lands
+   `GET /work-items/{id}/documents`, links resolved inline in `/search` and
+   `/documents/{id}`, and the `on.env.prepare` piggyback rescan. See
+   `docs/superpowers/specs/2026-09-04-effort-4b-session-summaries-design.md`.
 5. ✅ **FTS5 `/search` endpoint, text-only** (Effort 4A) — plus `GET /documents/{id}`.
    `mode=fts` only; `mode=vector|hybrid` rejected with 422 until 4C.
 6. **`sqlite-vec` + local embedding + chunking + hybrid ranking** (Effort 4C, bead

@@ -120,7 +120,9 @@ export function SearchOverlay({ onClose }: { onClose: () => void }) {
 
         {body}
       </div>
-      {openDoc && <DocumentModal id={openDoc} onClose={() => setOpenDoc(null)} />}
+      {openDoc && (
+        <DocumentModal id={openDoc} onClose={() => setOpenDoc(null)} onNavigate={onClose} />
+      )}
     </div>
   );
 }

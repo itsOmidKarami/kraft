@@ -8,7 +8,7 @@ from pathlib import Path
 import psutil
 
 from kraft import store
-from kraft.adapters.subprocess import _resolve_result_file
+from kraft.adapters.subprocess import _resolve_result_file, read_summary_ref
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +52,10 @@ async def _adopt(db, session_id: str, pid: int, poll_s: float = 0.5) -> None:
             "SELECT result_path FROM worker_sessions WHERE id = ?", (session_id,)
         ).fetchone()
     )
-    status = _resolve_file(Path(row["result_path"])) or "failed"
-    await db.write(lambda c: store.session_exited(c, session_id, status))
+    result_path = Path(row["result_path"])
+    status = _resolve_file(result_path) or "failed"
+    ref = read_summary_ref(result_path)
+    await db.write(lambda c: store.session_exited(c, session_id, status, ref))
 
 
 async def reattach(db, run_dirs, registry) -> tuple[ReattachSummary, dict[str, asyncio.Task]]:
@@ -90,7 +92,10 @@ async def reattach(db, run_dirs, registry) -> tuple[ReattachSummary, dict[str, a
         status = _resolve_file(Path(r["result_path"]))
         if status is not None:
             await db.write(lambda c, sid=sid: store.session_reattached(c, sid))
-            await db.write(lambda c, sid=sid, status=status: store.session_exited(c, sid, status))
+            ref = read_summary_ref(Path(r["result_path"]))
+            await db.write(
+                lambda c, sid=sid, status=status, ref=ref: store.session_exited(c, sid, status, ref)
+            )
             summary.resolved_from_file.append(sid)
         else:
             await db.write(lambda c, sid=sid: store.session_unknown(c, sid))

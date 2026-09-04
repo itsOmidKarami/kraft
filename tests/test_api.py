@@ -169,6 +169,28 @@ def test_happy_path_via_api(tmp_path, monkeypatch):
         run_dir = Path(client.app.state.run_dirs.base)
         assert "a + b" in (run_dir / "worktrees" / wid / "calc.py").read_text()
 
+        # 4B: each agent session's summary is ingested and linked to the work item
+        impl_session = next(s for s in item["worker_sessions"] if s["node_id"] == "implementation")
+        assert impl_session["session_summary_ref"] == (
+            f".engineering/sessions/{impl_session['id']}.md"
+        )
+        for _ in range(100):
+            docs = client.get(f"/work-items/{wid}/documents").json()["documents"]
+            if docs:
+                break
+            time.sleep(0.05)
+        summaries = [d for d in docs if d["source_kind"] == "session_summary"]
+        assert summaries, f"no session summary linked to {wid}"
+        assert {d["path"] for d in summaries} >= {impl_session["session_summary_ref"]}
+        assert any(d["worker_session_id"] == impl_session["id"] for d in docs)
+
+        # and the summary is searchable, carrying its links inline
+        hits = client.get("/search", params={"q": "fake-claude session"}).json()["results"]
+        assert hits, "session summary not searchable"
+        assert any(
+            ln["work_item_id"] == wid for h in hits for ln in h["links"] if ln["work_item_id"]
+        )
+
         # log endpoint returns the agent's stdout
         impl = next(s for s in item["worker_sessions"] if s["node_id"] == "implementation")
         log = client.get(f"/worker-sessions/{impl['id']}/log")

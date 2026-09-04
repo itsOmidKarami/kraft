@@ -8,10 +8,10 @@ from pathlib import Path
 _SCRIPT = Path(__file__).resolve().parents[1] / "fixtures" / "fake-claude.sh"
 
 
-def _run(cwd, env_extra):
+def _run(cwd, env_extra, ctx="ctx"):
     env = {**os.environ, "KRAFT_RESULT_PATH": str(cwd / "result.json"), **env_extra}
     return subprocess.run(
-        [str(_SCRIPT), "-p", "fix it", "--append-system-prompt", "ctx", "--output-format", "json"],
+        [str(_SCRIPT), "-p", "fix it", "--append-system-prompt", ctx, "--output-format", "json"],
         cwd=cwd,
         env=env,
         capture_output=True,
@@ -48,3 +48,19 @@ def test_slow_mode_delays(tmp_path):
     assert "a + b" in (tmp_path / "calc.py").read_text()
     assert json.loads((tmp_path / "result.json").read_text()) == {"status": "done"}
     assert json.loads(proc.stdout.strip().splitlines()[-1])["is_error"] is False
+
+
+def test_fix_mode_writes_session_summary_from_injected_context(tmp_path):
+    """fake-claude obeys the 04 §6 summary instructions the agent adapter injects."""
+    (tmp_path / "calc.py").write_text("def add(a, b):\n    return a - b\n")
+    ctx = (
+        "Work item: w1\nNode: implementation\n"
+        "Hook point: on.implementation.start\nWorker session: s9\n"
+    )
+    proc = _run(tmp_path, {"KRAFT_FAKE_CLAUDE": "fix"}, ctx=ctx)
+    assert proc.returncode == 0
+    result = json.loads((tmp_path / "result.json").read_text())
+    assert result["session_summary_ref"] == ".engineering/sessions/s9.md"
+    summary = (tmp_path / ".engineering" / "sessions" / "s9.md").read_text()
+    assert "work_item_ids: [w1]" in summary
+    assert "worker_session_id: s9" in summary

@@ -126,7 +126,13 @@ export const useStore = create<State>((set, get) => ({
         case "fix_cycle_started":
           return { ...base, ...patchItem(s, id, (w) => ({ ...w, fixCycle: p.cycle })) };
         case "gate_requested":
-          return { ...base, ...patchItem(s, id, (w) => ({ ...w, pendingGate: p.gate })) };
+          // store.request_gate flips the row to needs_human in the same
+          // transaction that appends this event, so mirror it here — otherwise
+          // the board badge reads "active" until the next hydrate (Kraft-fnx).
+          return {
+            ...base,
+            ...patchItem(s, id, (w) => ({ ...w, pendingGate: p.gate, status: "needs_human" })),
+          };
         case "gate_approved":
           return { ...base, ...patchItem(s, id, (w) => ({ ...w, pendingGate: null, status: "active" })) };
         case "gate_rejected":

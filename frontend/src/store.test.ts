@@ -87,6 +87,9 @@ describe("applyEvent", () => {
     const st = useStore.getState();
     st.applyEvent(ev({ seq: 2, type: "gate_requested", payload: { gate: "spec_approval" } }));
     expect(useStore.getState().workItems.w1.pendingGate).toBe("spec_approval");
+    // store.request_gate sets needs_human in the DB; the client must mirror it,
+    // or the board badge reads "active" while the item waits on a human (Kraft-fnx).
+    expect(useStore.getState().workItems.w1.status).toBe("needs_human");
     st.applyEvent(ev({ seq: 3, type: "gate_approved", payload: { gate: "spec_approval" } }));
     expect(useStore.getState().workItems.w1.pendingGate).toBeNull();
     expect(useStore.getState().workItems.w1.status).toBe("active");
