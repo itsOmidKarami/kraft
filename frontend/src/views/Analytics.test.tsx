@@ -101,7 +101,8 @@ describe("AnalyticsView", () => {
       repo: undefined,
       template: undefined,
     });
-    await userEvent.click(screen.getByRole("button", { name: "/repo-b" }));
+    // the facet reads as the repo's own name; the filter still sends the path
+    await userEvent.click(screen.getByRole("button", { name: "repo-b" }));
     expect(api.getAnalytics).toHaveBeenLastCalledWith({
       range: "7d",
       repo: "/repo-b",

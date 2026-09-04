@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CirclesThree, MagnifyingGlass } from "@phosphor-icons/react";
 import * as api from "../api";
+import { repoName } from "../format";
 import { useStore } from "../store";
 import type { Bead, SearchResult } from "../types";
 import { DocumentModal } from "./DocumentModal";
@@ -80,7 +81,8 @@ export function SearchOverlay({ onClose }: { onClose: () => void }) {
           <button key={r.id} className="search-result" onClick={() => setOpenDoc(r.id)}>
             <span className="search-result-title">{r.title}</span>
             <span className="search-result-where">
-              <span className="search-result-kind">{r.kind ?? r.source_kind}</span>·{r.repo}
+              <span className="search-result-kind">{r.kind ?? r.source_kind}</span>·
+              <span title={r.repo}>{repoName(r.repo)}</span>
             </span>
             <span className="search-result-snippet">
               <Snippet text={r.snippet} />
@@ -135,7 +137,8 @@ export function SearchOverlay({ onClose }: { onClose: () => void }) {
             advanced
           </button>
           <span className="search-count">
-            {results.length} results · lagging index, not live state
+            {results.length} {results.length === 1 ? "result" : "results"} · lagging index, not
+            live state
           </span>
         </div>
 

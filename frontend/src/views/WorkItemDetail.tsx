@@ -9,7 +9,7 @@ import { Gate } from "../components/Gate";
 import { LinkedDocuments } from "../components/LinkedDocuments";
 import { PausedCard } from "../components/PausedCard";
 import { ChainBar, Row, RowState, RowText, StatusGlyph, Tabs } from "../components/ui";
-import { elapsed, tokens, usd } from "../format";
+import { elapsed, repoName, statusWord, tokens, usd } from "../format";
 import { useStore } from "../store";
 import type { KraftEvent, WorkItem } from "../types";
 
@@ -58,17 +58,33 @@ export function WorkItemDetail() {
   // worker_session_paused event rather than pretending it already landed.
   const [pausing, setPausing] = useState(false);
   const [pauseErr, setPauseErr] = useState<string | null>(null);
+  // A failed load must not look like an item with nothing in it: without this,
+  // the screen renders every panel empty and offers the controls for the wrong
+  // state, which is exactly how a shell-cached deep link presented itself.
+  const [loadErr, setLoadErr] = useState<string | null>(null);
 
   useEffect(() => {
     if (item?.status === "paused") setPausing(false);
   }, [item?.status]);
 
   useEffect(() => {
-    hydrateItem(id).catch(() => {});
-    const t = setInterval(() => hydrateItem(id).catch(() => {}), 60_000);
+    const load = () =>
+      hydrateItem(id).then(
+        () => setLoadErr(null),
+        (e) => setLoadErr(e instanceof Error ? e.message : String(e)),
+      );
+    load();
+    const t = setInterval(load, 60_000);
     return () => clearInterval(t);
   }, [id, hydrateItem]);
 
+  if (loadErr && !item) {
+    return (
+      <p className="empty" role="alert">
+        could not load this work item — {loadErr}
+      </p>
+    );
+  }
   if (!item) return <p className="empty">unknown work item</p>;
 
   const nodes = item.chain_definition.nodes;
@@ -92,17 +108,16 @@ export function WorkItemDetail() {
     <div className="detail">
       <div className="detail-head">
         <div className="detail-meta">
-          <span>{item.repo}</span>
+          <span title={item.repo}>{repoName(item.repo)}</span>
           {!!item.repos?.length && (
             <span className="tag tag-neutral tag-tight">
               +{item.repos.length - 1} submodules
             </span>
           )}
-          <code>{item.id}</code>
           <span>{item.chain_template}</span>
-          {item.bead_id && <span>bead {item.bead_id}</span>}
+          {item.bead_id && <code title={`work item ${item.id}`}>{item.bead_id}</code>}
           <span className={`${STATUS_TAG[item.status]} detail-status`}>
-            {item.status === "needs_human" ? "needs you" : item.status}
+            {statusWord(item.status)}
           </span>
         </div>
         <h2 className="detail-title">{item.title}</h2>
@@ -119,7 +134,10 @@ export function WorkItemDetail() {
           )}
           <span className="hero-sub">
             {at >= 0 && `node ${at + 1} of ${nodes.length}`}
-            {runtime && ` · running ${runtime}`}
+            {/* "running 6s" on an item that stopped an hour ago is a lie the
+                clock keeps telling. Only an active item is running; anything
+                else gets the neutral "for", which is true in every state. */}
+            {runtime && (item.status === "active" ? ` · running ${runtime}` : ` · ${runtime}`)}
           </span>
         </div>
       </div>

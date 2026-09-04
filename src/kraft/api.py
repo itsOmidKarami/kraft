@@ -173,7 +173,16 @@ async def _spa_navigation(request: Request, call_next):
         and request.method == "GET"
         and request.headers.get("sec-fetch-dest") == "document"
     ):
-        return FileResponse(dist / "index.html")
+        # The shell is served under every client-side route, including paths that
+        # are also API routes (/work-items/<id>). The browser caches by URL, so
+        # without no-store it answers the SPA's own fetch for that same path with
+        # the cached HTML: `res.json()` throws and the detail screen renders an
+        # empty husk on every deep link and every refresh. `vary` says the same
+        # thing to caches that honour it.
+        return FileResponse(
+            dist / "index.html",
+            headers={"cache-control": "no-store", "vary": "sec-fetch-dest"},
+        )
     return await call_next(request)
 
 

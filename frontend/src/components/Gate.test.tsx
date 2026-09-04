@@ -45,7 +45,9 @@ describe("Gate", () => {
 
   it("the inline variant names the gate and offers the same two actions", async () => {
     render(<Gate item={item} gate="plan_approval" variant="inline" />);
-    expect(screen.getByText("plan_approval")).toBeInTheDocument();
+    // the row reads as a phrase; the raw gate name is the tooltip
+    expect(screen.getByText("approve the plan")).toBeInTheDocument();
+    expect(screen.getByTitle("plan_approval")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /approve/i })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /^reject/i }));
     expect(screen.getByLabelText("reject note")).toBeInTheDocument();

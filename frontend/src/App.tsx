@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { BrowserRouter, Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
-import { ArrowLeft, Gear, MagnifyingGlass, Plus } from "@phosphor-icons/react";
+import { ArrowLeft, MagnifyingGlass, Plus } from "@phosphor-icons/react";
 import * as api from "./api";
 import { ConnBadge } from "./components/ConnBadge";
 import { HealthBadge } from "./components/HealthBadge";
@@ -33,8 +33,8 @@ function Nav({ onSearch, onNew }: { onSearch: () => void; onNew: () => void }) {
       <NavLink to="/analytics" className="nav-link">
         Analytics
       </NavLink>
-      <NavLink to="/settings" className="nav-link" aria-label="Settings">
-        <Gear size={15} />
+      <NavLink to="/settings" className="nav-link">
+        Settings
       </NavLink>
       <button className="btn btn-secondary" onClick={onSearch}>
         <MagnifyingGlass size={14} />
