@@ -69,6 +69,16 @@ describe("Settings · repos (5a)", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "More" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Disconnect" }));
+    // disconnecting has no undo, so the first click arms a confirm rather than
+    // firing; the menu names the repo it is about to drop
+    expect(del).not.toHaveBeenCalled();
+    expect(screen.getByText(/Disconnect repo-a\?/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("menuitem", { name: "Cancel" }));
+    expect(del).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole("menuitem", { name: "Disconnect" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Disconnect" }));
     expect(del).toHaveBeenCalledWith("/repo-a");
   });
 
@@ -203,7 +213,12 @@ describe("Settings · access (5e)", () => {
     renderAt("/settings/access");
     expect(await screen.findByText("Firefox")).toBeInTheDocument();
     expect(screen.getByText("current")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "revoke abc" }));
+    await userEvent.click(screen.getByRole("button", { name: /^session /i }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Revoke" }));
+    // this is the session doing the asking — confirm says so before it lands
+    expect(revoke).not.toHaveBeenCalled();
+    expect(screen.getByText(/signs you out here/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Revoke" }));
     expect(revoke).toHaveBeenCalledWith("abc");
   });
 });

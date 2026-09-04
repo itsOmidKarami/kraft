@@ -448,8 +448,14 @@ def test_spa_catchall_serves_index_when_dist_present(tmp_path, monkeypatch):
         # browser navigation to a path that shadows a real API route (never 404s,
         # so the exception handler can't catch it) -> SPA shell, not raw JSON
         nav = {"sec-fetch-dest": "document"}
-        assert "<title>kraft</title>" in client.get("/work-items", headers=nav).text
+        shell = client.get("/work-items", headers=nav)
+        assert "<title>kraft</title>" in shell.text
         assert "<title>kraft</title>" in client.get("/health", headers=nav).text
+        # The shell is served under URLs that are also API routes, and a browser
+        # caches by URL. Cached, it would answer the SPA's own fetch for the same
+        # path — the detail screen rendered an empty husk on every deep link.
+        assert shell.headers["cache-control"] == "no-store"
+        assert shell.headers["vary"] == "sec-fetch-dest"
         # a script/style/XHR fetch (dest != document) still hits the API
         assert client.get("/health", headers={"sec-fetch-dest": "empty"}).json()["status"]
 

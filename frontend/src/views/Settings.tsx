@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { NavLink, Navigate, Route, Routes, useNavigate } from "react-router-dom";
-import { Check, Plus, WarningCircle, X } from "@phosphor-icons/react";
+import { Check, Plus, WarningCircle } from "@phosphor-icons/react";
 import * as api from "../api";
 import { ago, until } from "../format";
 import { OverflowMenu, Row, RowText, SectionLabel } from "../components/ui";
@@ -231,7 +231,7 @@ function AddRepo({ onClose, onAdded }: { onClose: () => void; onAdded: () => voi
 }
 
 function ReposPage() {
-  const { value, error, reload } = useResource(() => api.getRepos());
+  const { value, error, setError, reload } = useResource(() => api.getRepos());
   const [adding, setAdding] = useState(false);
   const repos = value?.repos ?? [];
 
@@ -259,12 +259,22 @@ function ReposPage() {
               {
                 label: r.enabled ? "Disable" : "Enable",
                 onSelect: () =>
-                  api.patchRepo(r.path, { enabled: !r.enabled }).then(reload).catch(() => {}),
+                  api
+                    .patchRepo(r.path, { enabled: !r.enabled })
+                    .then(reload)
+                    .catch((e) => setError(e instanceof Error ? e.message : String(e))),
               },
               {
                 label: "Disconnect",
                 danger: true,
-                onSelect: () => api.deleteRepo(r.path).then(reload).catch(() => {}),
+                // Nothing undoes this from here — you re-probe and re-add the
+                // repo. Ask before, not after (NN/g: confirm what cannot be undone).
+                confirm: `Disconnect ${r.name}? Work items already running against it keep going.`,
+                onSelect: () =>
+                  api
+                    .deleteRepo(r.path)
+                    .then(reload)
+                    .catch((e) => setError(e instanceof Error ? e.message : String(e))),
               },
             ]}
           />
@@ -526,7 +536,7 @@ function PolicyPage() {
     <>
       <PageHead
         title="Policy"
-        note="every loop stops at attempts or wall-clock, whichever comes first, and the item goes to needs_human"
+        note="every loop stops at attempts or wall-clock, whichever comes first, and the item comes back to you"
       />
       {error && <p className="form-error">{error}</p>}
       <div className="cap-row cap-head">
@@ -699,13 +709,25 @@ function AccessPage() {
                 />
                 <span className="row-sub">seen {ago(s.last_seen_at)}</span>
                 <span className="row-sub">expires {until(s.expires_at)}</span>
-                <button
-                  className="btn btn-ghost"
-                  aria-label={`revoke ${s.id}`}
-                  onClick={() => api.revokeSession(s.id).then(loadSessions).catch(() => {})}
-                >
-                  <X size={13} />
-                </button>
+                <OverflowMenu
+                  label={`session ${s.label ?? s.id}`}
+                  items={[
+                    {
+                      label: "Revoke",
+                      danger: true,
+                      // Revoking the session you are using signs you out of this
+                      // browser on the spot, and there is no undo either way.
+                      confirm: s.current
+                        ? "Revoke this session? It signs you out here."
+                        : `Revoke ${s.label ?? "this session"}? That browser has to sign in again.`,
+                      onSelect: () =>
+                        api
+                          .revokeSession(s.id)
+                          .then(loadSessions)
+                          .catch((e) => setMessage(e instanceof Error ? e.message : String(e))),
+                    },
+                  ]}
+                />
               </Row>
             ))}
           </section>

@@ -1,3 +1,21 @@
+:root {
+  /* Muted body text — labels, hints, counts, footnotes. The neutral ramp's own
+     600 step was doing this job at 4.08:1 on the board ground and 3.52:1 on a
+     card, under the 4.5:1 WCAG 1.4.3 needs for text this size. The ramp is
+     generated on one shared lightness scale (see nocturne.css) so its steps
+     must stay put; this is the text role, lifted just past the threshold on
+     both grounds. Ramp steps keep the borders, fills and glyphs. */
+  --color-text-muted: #888c9c;
+
+  /* Destructive actions. Nocturne is a blurple/neutral system with no danger
+     role, so `[data-danger]` was rendering as a slightly lighter neutral —
+     "Disconnect" looked exactly like "Disable". A confirm step alone is not the
+     signal; the item has to read as dangerous before it is clicked (NN/g:
+     redundant visual signals between consequential and benign options). Rose at
+     the ramp's own lightness, 5.9:1 on a card and 6.8:1 on the board ground. */
+  --color-danger: #e5849a;
+}
+
 /* Kraft's own layer. Every token comes from nocturne.css, which is imported
    first in main.tsx; nothing here declares a colour, font or radius of its own.
    The old pre-Nocturne rules — cards, chips, chain strip, ad-hoc modals — are
@@ -5,7 +23,7 @@
 
 main { min-height: calc(100vh - 45px); }
 
-.empty { font-size: 12px; color: var(--color-neutral-600); padding: 10px 0; }
+.empty { font-size: 12px; color: var(--color-text-muted); padding: 10px 0; }
 .form-error { font-size: 12px; color: var(--color-neutral-200); margin-top: 6px; }
 .field > label { display: flex; align-items: baseline; gap: 4px; }
 
@@ -78,7 +96,7 @@ aside .row, .narrow .row {
 .glyph[data-status="capped_out"] { color: var(--color-accent-300);   border-color: var(--color-accent-700); }
 .glyph[data-status="paused"]     { color: var(--color-neutral-400);  border-color: var(--color-neutral-600); }
 .glyph[data-status="unknown"]    { color: var(--color-neutral-500);  border-color: var(--color-neutral-800); }
-.glyph[data-status="pending"]    { color: var(--color-neutral-600);  border-color: var(--color-neutral-800); }
+.glyph[data-status="pending"]    { color: var(--color-text-muted);  border-color: var(--color-neutral-800); }
 
 /* — chain bar (spec §4) — */
 .chain-bar { display: flex; gap: 3px; align-items: flex-start; min-width: 0; }
@@ -109,7 +127,7 @@ aside .row, .narrow .row {
 }
 .chain-label {
   font-size: 9.5px; letter-spacing: -0.01em; white-space: nowrap;
-  color: var(--color-neutral-600);
+  color: var(--color-text-muted);
 }
 .chain-seg[data-state="done"]    .chain-label { color: var(--color-neutral-400); }
 .chain-seg[data-state="current"] .chain-label,
@@ -124,7 +142,7 @@ aside .row, .narrow .row {
 
 /* — overflow menu — */
 .overflow { position: relative; display: inline-flex; }
-.overflow-btn { color: var(--color-neutral-500); }
+.overflow-btn { color: var(--color-neutral-500); min-width: 24px; min-height: 24px; }
 .overflow-btn:hover { color: var(--color-text); }
 .overflow-menu {
   position: absolute; right: 0; top: calc(100% + 4px); z-index: 20;
@@ -138,7 +156,11 @@ aside .row, .narrow .row {
   background: transparent; color: var(--color-text);
 }
 .overflow-menu button:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
-.overflow-menu button[data-danger] { color: var(--color-neutral-300); }
+.overflow-menu button[data-danger] { color: var(--color-danger); }
+.overflow-confirm {
+  margin: 0; padding: 8px 10px 6px; font-size: 12px; line-height: 1.4;
+  color: var(--color-text-muted); max-width: 240px;
+}
 
 /* — tabs — */
 .tabs {
@@ -158,7 +180,7 @@ aside .row, .narrow .row {
   color: var(--color-text);
   box-shadow: inset 0 -1px 0 var(--color-accent);
 }
-.tab-count { margin-left: 6px; font-size: 11px; color: var(--color-neutral-600); }
+.tab-count { margin-left: 6px; font-size: 11px; color: var(--color-text-muted); }
 
 /* ══ header (design 2a / 4a) ══════════════════════════════════════════════ */
 .app-nav {
@@ -167,10 +189,22 @@ aside .row, .narrow .row {
   border-bottom: 1px solid var(--color-divider);
 }
 .app-nav .nav-brand { font-size: 16px; }
+/* One type treatment across the whole bar. `.nav-back` and `.nav-link` asked
+   for 13px to match the buttons beside them, but Nocturne's `.nav a` (one
+   specificity point higher) silently won and rendered them 14px/400 next to a
+   13px/500 button — four controls in a row, two different typefaces' worth of
+   weight. Scope these to `.app-nav` so the intent applies, and take the
+   buttons' heading weight so the labels read as siblings. */
 .app-nav .btn { font-size: 13px; padding: 5px 10px; }
+.app-nav .nav-back,
+.app-nav .nav-link {
+  font-size: 13px; font-weight: var(--font-heading-weight);
+  font-family: var(--font-heading);
+  display: inline-flex; align-items: center; min-height: 24px;
+}
 .nav-back {
   display: inline-flex; align-items: center; gap: 6px;
-  font-size: 13px; text-decoration: none; color: var(--color-neutral-400);
+  text-decoration: none; color: var(--color-neutral-400);
 }
 .nav-back:hover { color: var(--color-text); }
 .kbd { opacity: 0.5; font-size: 11px; margin-left: 4px; }
@@ -185,7 +219,7 @@ aside .row, .narrow .row {
   font-size: 13px;
 }
 .facet { display: flex; flex-direction: column; gap: 2px; }
-.facet .section-label { margin: 0 0 6px; color: var(--color-neutral-600); }
+.facet .section-label { margin: 0 0 6px; color: var(--color-text-muted); }
 .facet-opt {
   display: flex; justify-content: space-between; align-items: center; gap: 8px;
   padding: 5px 8px; border: 0; border-radius: 6px;
@@ -197,11 +231,11 @@ aside .row, .narrow .row {
   background: color-mix(in srgb, var(--color-accent) 14%, transparent);
   color: var(--color-accent-300);
 }
-.facet-count { font-size: 11px; opacity: 0.6; }
+.facet-count { font-size: 11px; color: var(--color-text-muted); }
 
 .board-foot {
   margin-top: auto;
-  font-size: 11px; color: var(--color-neutral-600);
+  font-size: 11px; color: var(--color-text-muted);
   display: flex; flex-direction: column; gap: 4px;
 }
 .live { display: flex; gap: 6px; align-items: center; }
@@ -223,19 +257,35 @@ aside .row, .narrow .row {
 }
 .group-label { font-size: 13px; font-weight: 500; }
 .group-label[data-tone="accent"] { color: var(--color-accent-300); }
-.group-count { font-size: 11px; color: var(--color-neutral-600); }
-.group-empty { font-size: 12px; color: var(--color-neutral-600); padding: 8px 10px; }
+.group-count { font-size: 11px; color: var(--color-text-muted); }
+.group-empty { font-size: 12px; color: var(--color-text-muted); padding: 8px 10px; }
 .show-all { font-size: 12px; margin-top: 6px; align-self: flex-start; }
 
 .board-row {
   display: grid; grid-template-columns: 1fr 260px 120px;
   gap: 20px; align-items: center;
   padding: 10px; border-radius: 8px;
+  /* The same fading hairline every other list row in the interface carries
+     (spec §2). Without it a row's own gate actions sit as close to the next
+     title as to the one they belong to, and the most consequential control on
+     the board reads as unowned. */
+  background: linear-gradient(to right,
+    transparent, var(--color-divider) 48px,
+    var(--color-divider) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
 }
-.board-row:hover { background: color-mix(in srgb, var(--color-text) 4%, transparent); }
+.board-groups section .board-row:last-child { background-image: none; }
+.board-row:hover {
+  background:
+    linear-gradient(color-mix(in srgb, var(--color-text) 4%, transparent),
+                    color-mix(in srgb, var(--color-text) 4%, transparent)) no-repeat 0 0 / 100% 100%,
+    linear-gradient(to right,
+      transparent, var(--color-divider) 48px,
+      var(--color-divider) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
+}
 .board-row-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .board-row-title {
   font-size: 14px; font-weight: 500; color: var(--color-text); text-decoration: none;
+  display: inline-flex; align-items: center; min-height: 24px;
 }
 .board-row-title:hover { color: var(--color-accent-300); }
 .board-row-meta {
@@ -253,7 +303,7 @@ aside .row, .narrow .row {
 .gate-inline {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px;
 }
-.gate-inline .btn { font-size: 12px; padding: 3px 9px; }
+.gate-inline .btn { font-size: 12px; padding: 3px 9px; min-height: 24px; }
 .gate-name {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 12px; color: var(--color-accent-300);
@@ -288,17 +338,21 @@ aside .row, .narrow .row {
 }
 .detail-meta code { font-family: ui-monospace, Menlo, monospace; }
 .detail-status { margin-left: auto; }
+/* The item's own title is the headline: it is the words the person wrote and
+   the only thing that tells two open items apart. The node is where that work
+   has got to — strong, but subordinate to what the work is. */
 .detail-title {
-  font-size: 20px; margin: 0; font-weight: 400; color: var(--color-neutral-300);
+  font-size: 28px; line-height: 1.15; margin: 0; font-weight: 500;
+  letter-spacing: -0.02em; color: var(--color-text);
 }
 .detail-hero { display: flex; align-items: baseline; gap: 14px; margin-top: 6px; flex-wrap: wrap; }
-.hero-node { font-size: 32px; line-height: 1; font-weight: 500; letter-spacing: -0.02em; }
+.hero-node { font-size: 19px; line-height: 1.2; font-weight: 500; color: var(--color-neutral-300); }
 .hero-sub { font-size: 12px; color: var(--color-neutral-500); }
 
 .control-row { display: flex; gap: 10px; align-items: center; }
 .control-row .btn { font-size: 13px; }
-.control-hint { font-size: 11px; color: var(--color-neutral-600); }
-.control-usage { font-size: 12px; color: var(--color-neutral-600); margin-left: auto; }
+.control-hint { font-size: 11px; color: var(--color-text-muted); }
+.control-usage { font-size: 12px; color: var(--color-text-muted); margin-left: auto; }
 
 .tab-body { display: flex; flex-direction: column; gap: 2px; }
 .row-action { font-size: 12px; }
@@ -309,7 +363,7 @@ aside .row, .narrow .row {
 .timeline-node { display: flex; flex-direction: column; gap: 2px; padding-top: 6px; }
 .timeline-node-name { font-size: 13px; font-weight: 500; color: var(--color-neutral-400); }
 .timeline-node-name[data-age="0"] { color: var(--color-accent-300); }
-.timeline-span { font-size: 11px; color: var(--color-neutral-600); }
+.timeline-span { font-size: 11px; color: var(--color-text-muted); }
 
 .event-row {
   display: grid; grid-template-columns: 8px 1fr auto; gap: 12px;
@@ -333,7 +387,7 @@ aside .row, .narrow .row {
 .event-detail { color: var(--color-neutral-500); }
 .event-log { font-size: 11px; }
 .event-row time {
-  font-size: 11px; color: var(--color-neutral-600);
+  font-size: 11px; color: var(--color-text-muted);
   font-family: ui-monospace, Menlo, monospace;
 }
 
@@ -353,13 +407,13 @@ aside .row, .narrow .row {
 .doc-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .doc-title { font-size: 14px; }
 .doc-path {
-  font-size: 11px; color: var(--color-neutral-600);
+  font-size: 11px; color: var(--color-text-muted);
   font-family: ui-monospace, Menlo, monospace;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .doc-kind { font-size: 10px; padding: 1px 7px; justify-self: start; }
 .doc-node { font-size: 12px; color: var(--color-neutral-500); }
-.doc-foot { font-size: 12px; color: var(--color-neutral-600); padding: 12px 4px 0; }
+.doc-foot { font-size: 12px; color: var(--color-text-muted); padding: 12px 4px 0; }
 .doc-foot code { font-family: ui-monospace, Menlo, monospace; }
 
 /* ══ capped card (design 4b) ══════════════════════════════════════════════ */
@@ -371,9 +425,9 @@ aside .row, .narrow .row {
 .cycle-row { display: contents; }
 .cycle-n { color: var(--color-neutral-500); }
 .cycle-failed { color: var(--color-neutral-300); }
-.cycle-log { font-size: 12px; padding: 0; }
+.cycle-log { font-size: 12px; padding: 0 6px; min-height: 24px; min-width: 24px; }
 .capped-actions { align-items: center; }
-.field-hint { opacity: 0.6; }
+.field-hint { color: var(--color-text-muted); }
 
 /* ══ document modal (design 6a) ═══════════════════════════════════════════ */
 .dialog-backdrop { align-items: flex-start; padding: 44px 24px; z-index: 40; }
@@ -393,7 +447,7 @@ aside .row, .narrow .row {
   font-size: 11px; color: var(--color-neutral-500);
 }
 .doc-modal-path {
-  font-family: ui-monospace, Menlo, monospace; color: var(--color-neutral-600);
+  font-family: ui-monospace, Menlo, monospace; color: var(--color-text-muted);
 }
 .doc-modal-actions { display: flex; gap: 6px; align-items: center; position: relative; }
 .doc-open { font-size: 12px; padding: 4px 10px; white-space: nowrap; }
@@ -413,9 +467,9 @@ aside .row, .narrow .row {
   background: color-mix(in srgb, var(--color-accent) 12%, transparent);
   color: var(--color-accent-300);
 }
-.doc-editor-default { font-size: 10px; color: var(--color-neutral-600); }
+.doc-editor-default { font-size: 10px; color: var(--color-text-muted); }
 .doc-editor-foot {
-  font-size: 11px; color: var(--color-neutral-600);
+  font-size: 11px; color: var(--color-text-muted);
   padding: 8px 8px 4px; margin: 4px 0 0;
   border-top: 1px solid var(--color-divider);
 }
@@ -439,7 +493,7 @@ aside .row, .narrow .row {
   background: var(--color-neutral-900); overflow: auto;
 }
 .doc-modal-body pre code { background: none; padding: 0; }
-.doc-modal-foot { font-size: 12px; color: var(--color-neutral-600); margin: 12px 0 0; }
+.doc-modal-foot { font-size: 12px; color: var(--color-text-muted); margin: 12px 0 0; }
 .doc-modal-note {
   font-size: 11px; color: var(--color-neutral-500);
   margin: 0; padding: 0 22px 14px;
@@ -450,9 +504,11 @@ aside .row, .narrow .row {
   width: 880px; max-width: 100%; padding: 0; gap: 0;
   max-height: calc(100vh - 88px); overflow: hidden;
 }
+/* Same anatomy as .doc-modal-head — icon, name, meta, copy/close — so it takes
+   the same padding. The two had drifted 2px apart. */
 .log-head {
   display: flex; align-items: flex-start; gap: 14px;
-  padding: 16px 22px 12px; border-bottom: 1px solid var(--color-divider);
+  padding: 18px 22px 14px; border-bottom: 1px solid var(--color-divider);
 }
 .log-head .glyph { margin-top: 2px; }
 .log-title { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1; }
@@ -461,7 +517,7 @@ aside .row, .narrow .row {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   font-size: 11px; color: var(--color-neutral-500);
 }
-.log-sid { font-family: ui-monospace, Menlo, monospace; color: var(--color-neutral-600); }
+.log-sid { font-family: ui-monospace, Menlo, monospace; color: var(--color-text-muted); }
 .log-actions { display: flex; gap: 6px; align-items: center; }
 .log-follow { font-size: 12px; padding: 4px 10px; white-space: nowrap; }
 .log-follow[aria-pressed="true"] { color: var(--color-accent); border-color: var(--color-accent); }
@@ -480,7 +536,7 @@ aside .row, .narrow .row {
   border-color: var(--color-accent); color: var(--color-accent-300);
   background: color-mix(in srgb, var(--color-accent) 12%, transparent);
 }
-.log-count { margin-left: auto; font-size: 11px; color: var(--color-neutral-600); }
+.log-count { margin-left: auto; font-size: 11px; color: var(--color-text-muted); }
 
 .log-body {
   padding: 12px 22px 16px; overflow: auto; flex: 1;
@@ -493,17 +549,17 @@ aside .row, .narrow .row {
 .log-line[data-src="agent"] { color: var(--color-neutral-300); }
 .log-line[data-src="sys"] { color: var(--color-neutral-500); }
 .log-t { color: var(--color-neutral-700); }
-.log-src { color: var(--color-neutral-600); }
+.log-src { color: var(--color-text-muted); }
 .log-line[data-src="agent"] .log-src { color: var(--color-accent-300); }
 .log-text { white-space: pre-wrap; word-break: break-word; }
 .log-following {
   display: flex; align-items: center; gap: 8px; padding: 6px 0 0;
-  color: var(--color-neutral-600); font-size: 11px; font-family: var(--font-body);
+  color: var(--color-text-muted); font-size: 11px; font-family: var(--font-body);
 }
 .log-following .live-dot { background: var(--color-accent); animation: kpulse 1.8s infinite; }
 
 /* ══ analytics (design 6b) ════════════════════════════════════════════════ */
-.nav-link { font-size: 13px; text-decoration: none; color: var(--color-neutral-400); }
+.nav-link { text-decoration: none; color: var(--color-neutral-400); }
 .nav-link:hover, .nav-link.active { color: var(--color-accent); }
 
 .analytics-body { padding: 24px 32px 32px; display: flex; flex-direction: column; gap: 30px; }
@@ -518,7 +574,7 @@ aside .row, .narrow .row {
 }
 .kpi-label {
   font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
-  color: var(--color-neutral-600);
+  color: var(--color-text-muted);
 }
 .kpi-value { font-size: 26px; line-height: 1; font-weight: 500; letter-spacing: -0.02em; }
 .kpi-sub { font-size: 11px; color: var(--color-neutral-500); line-height: 1.4; }
@@ -526,7 +582,7 @@ aside .row, .narrow .row {
 .chart { display: flex; flex-direction: column; gap: 10px; }
 .chart-head { display: flex; align-items: baseline; gap: 10px; }
 .chart-title { font-size: 13px; font-weight: 500; }
-.chart-note { font-size: 11px; color: var(--color-neutral-600); }
+.chart-note { font-size: 11px; color: var(--color-text-muted); }
 .bars {
   display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px;
   align-items: end; height: 96px; padding-bottom: 1px;
@@ -545,7 +601,7 @@ aside .row, .narrow .row {
 }
 .bar-col[data-partial] .bar { opacity: 0.6; }
 .bar-labels { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; }
-.bar-labels span { font-size: 10px; color: var(--color-neutral-600); text-align: center; }
+.bar-labels span { font-size: 10px; color: var(--color-text-muted); text-align: center; }
 
 .analytics-tables {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
@@ -564,7 +620,7 @@ aside .row, .narrow .row {
 .node-head, .repo-head {
   padding: 0 0 6px; background: none;
   font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
-  color: var(--color-neutral-600);
+  color: var(--color-text-muted);
 }
 .node-head span:not(:first-child):not(:nth-child(2)),
 .repo-head span:not(:first-child) { text-align: right; }
@@ -576,7 +632,7 @@ aside .row, .narrow .row {
 .num { text-align: right; color: var(--color-neutral-400); }
 .num.strong { color: var(--color-text); }
 .table-foot {
-  font-size: 12px; color: var(--color-neutral-600); padding: 14px 0 0; margin: 0; line-height: 1.5;
+  font-size: 12px; color: var(--color-text-muted); padding: 14px 0 0; margin: 0; line-height: 1.5;
 }
 
 @media (max-width: 900px) {
@@ -598,7 +654,7 @@ aside .row, .narrow .row {
 }
 .search-mode { font-size: 11px; }
 .search-mode .seg-opt { padding: 3px 8px; font-size: 11px; }
-.search-esc { font-size: 11px; color: var(--color-neutral-600); }
+.search-esc { font-size: 11px; color: var(--color-text-muted); }
 
 .search-facets {
   display: flex; gap: 8px; align-items: center;
@@ -647,11 +703,13 @@ aside .row, .narrow .row {
   background: var(--color-accent-800); color: var(--color-accent-100);
   border-radius: 2px; padding: 0 2px;
 }
-.search-hint { padding: 18px 16px; font-size: 12px; color: var(--color-neutral-600); }
+.search-hint { padding: 18px 16px; font-size: 12px; color: var(--color-text-muted); }
 
 /* ══ intake (design 1g) ═══════════════════════════════════════════════════ */
 .intake { width: 460px; max-width: 100%; gap: 14px; padding: 20px 22px; }
-.intake .dialog-title { font-size: 18px; }
+/* Both form dialogs, one size — "Add repo" was inheriting Nocturne's 20px while
+   "New work item" set 18px for itself. */
+.dialog .dialog-title { font-size: 18px; }
 
 /* ══ paused card (design 4c) ══════════════════════════════════════════════ */
 .paused-card { padding: 16px 18px; gap: 12px; }
@@ -668,7 +726,7 @@ aside .row, .narrow .row {
 .login-head { display: flex; flex-direction: column; gap: 4px; }
 .login-brand { font-size: 22px; font-weight: 500; }
 .login-sub { font-size: 12px; color: var(--color-neutral-500); }
-.login-foot { font-size: 11px; color: var(--color-neutral-600); text-align: center; }
+.login-foot { font-size: 11px; color: var(--color-text-muted); text-align: center; }
 
 /* ══ settings (design 5a–5e) ══════════════════════════════════════════════ */
 .settings-body {
@@ -684,7 +742,7 @@ aside .row, .narrow .row {
 .settings-note { font-size: 12px; color: var(--color-neutral-500); }
 .settings-action { margin-left: auto; font-size: 13px; padding: 5px 10px; }
 .settings-foot {
-  font-size: 12px; color: var(--color-neutral-600); line-height: 1.5; margin: 0;
+  font-size: 12px; color: var(--color-text-muted); line-height: 1.5; margin: 0;
 }
 .settings-foot code, .hook-name, .mono, .input.mono {
   font-family: ui-monospace, Menlo, monospace;
@@ -694,7 +752,7 @@ aside .row, .narrow .row {
 
 .save-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .save-row .btn { font-size: 13px; }
-.save-hint { font-size: 11px; color: var(--color-neutral-600); margin-left: auto; }
+.save-hint { font-size: 11px; color: var(--color-text-muted); margin-left: auto; }
 
 .readout { color: var(--color-neutral-500); display: flex; align-items: center; }
 .probe {
@@ -727,12 +785,12 @@ aside .row, .narrow .row {
 .cap-row { grid-template-columns: 1fr 110px 140px; }
 .hook-head, .cap-head {
   padding: 0 0 6px; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
-  color: var(--color-neutral-600);
+  color: var(--color-text-muted);
 }
 .cap-row .input { min-height: 30px; padding: 3px 10px; font-size: 13px; }
 
 .switch {
-  width: 30px; height: 18px; padding: 0; border-radius: 9px; cursor: pointer;
+  width: 38px; height: 24px; padding: 0; border-radius: 12px; cursor: pointer;
   border: 1px solid var(--color-divider); background: transparent; position: relative;
 }
 .switch[aria-checked="true"] {
@@ -740,11 +798,11 @@ aside .row, .narrow .row {
   background: color-mix(in srgb, var(--color-accent) 25%, transparent);
 }
 .switch-knob {
-  position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%;
+  position: absolute; top: 4px; left: 4px; width: 14px; height: 14px; border-radius: 50%;
   background: var(--color-neutral-500); transition: transform 0.12s ease, background 0.12s ease;
 }
 .switch[aria-checked="true"] .switch-knob {
-  transform: translateX(12px); background: var(--color-accent);
+  transform: translateX(14px); background: var(--color-accent);
 }
 
 .access-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -773,7 +831,7 @@ aside .row, .narrow .row {
   .gate-inline .btn, .board-row .btn { min-height: 44px; }
 
   .detail { padding: 16px 12px 24px; }
-  .hero-node { font-size: 24px; }
+  .detail-title { font-size: 22px; }
   .desktop-only { display: none; }
 
   .row, .doc-row, .event-row, .hook-row, .cap-row, .node-row, .repo-row {

@@ -58,3 +58,29 @@ export function usd(n: number, complete = true): string {
   const amount = n >= 1 ? `$${n.toFixed(2)}` : `$${n.toFixed(3)}`;
   return complete ? amount : `${amount}+`;
 }
+
+/** A repo's own name — the last segment of its path.
+ *
+ * The absolute path repeats on every board row, in the detail meta line and in
+ * both analytics filters. It is machine detail: it wraps to two lines on a
+ * phone and buries the title it sits under. Show this, keep the full path in a
+ * `title` attribute wherever it is rendered.
+ */
+export function repoName(path: string): string {
+  return path.replace(/\/+$/, "").split("/").pop() || path;
+}
+
+/** Session and work-item statuses in the words the rest of the UI uses.
+ *
+ * `capped_out` / `needs_human` are database values. The board says "Needs you"
+ * and the detail tag says "needs you", so a row two panels down saying
+ * `needs_human` reads as a different thing to the person looking at it.
+ */
+const STATUS_WORDS: Record<string, string> = {
+  capped_out: "capped out",
+  needs_human: "needs you",
+};
+
+export function statusWord(status: string): string {
+  return STATUS_WORDS[status] ?? status;
+}

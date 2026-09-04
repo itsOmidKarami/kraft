@@ -18,6 +18,7 @@ import {
   Question,
   XCircle,
 } from "@phosphor-icons/react";
+import { statusWord } from "../format";
 import type { SessionStatus, WorkItem } from "../types";
 
 /* — rows ————————————————————————————————————————————————————————————— */
@@ -53,7 +54,7 @@ export function RowText({ title, sub }: { title: ReactNode; sub?: ReactNode }) {
 export function RowState({ status, children }: { status: SessionStatus; children?: ReactNode }) {
   return (
     <span className="row-state" data-status={status}>
-      {children ?? status}
+      {children ?? statusWord(status)}
     </span>
   );
 }
@@ -145,6 +146,10 @@ export interface OverflowItem {
   label: string;
   onSelect: () => void;
   danger?: boolean;
+  /** Ask first. Set this on anything with no undo behind it — the menu swaps to
+   *  a confirm row naming what is about to happen, the same two-step the gate's
+   *  reject uses, rather than firing on the first click. */
+  confirm?: string;
 }
 
 /**
@@ -153,17 +158,22 @@ export interface OverflowItem {
  */
 export function OverflowMenu({ items, label = "More" }: { items: OverflowItem[]; label?: string }) {
   const [open, setOpen] = useState(false);
+  const [pending, setPending] = useState<OverflowItem | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+      if (!ref.current?.contains(e.target as Node)) {
+        setOpen(false);
+        setPending(null);
+      }
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
         setOpen(false);
+        setPending(null);
       }
     };
     document.addEventListener("mousedown", onDown);
@@ -187,19 +197,44 @@ export function OverflowMenu({ items, label = "More" }: { items: OverflowItem[];
       </button>
       {open && (
         <div className="overflow-menu" role="menu">
-          {items.map((it) => (
-            <button
-              key={it.label}
-              role="menuitem"
-              data-danger={it.danger || undefined}
-              onClick={() => {
-                setOpen(false);
-                it.onSelect();
-              }}
-            >
-              {it.label}
-            </button>
-          ))}
+          {pending ? (
+            <>
+              <p className="overflow-confirm">{pending.confirm}</p>
+              <button
+                role="menuitem"
+                data-danger={pending.danger || undefined}
+                onClick={() => {
+                  const it = pending;
+                  setPending(null);
+                  setOpen(false);
+                  it.onSelect();
+                }}
+              >
+                {pending.label}
+              </button>
+              <button role="menuitem" onClick={() => setPending(null)}>
+                Cancel
+              </button>
+            </>
+          ) : (
+            items.map((it) => (
+              <button
+                key={it.label}
+                role="menuitem"
+                data-danger={it.danger || undefined}
+                onClick={() => {
+                  if (it.confirm) {
+                    setPending(it);
+                    return;
+                  }
+                  setOpen(false);
+                  it.onSelect();
+                }}
+              >
+                {it.label}
+              </button>
+            ))
+          )}
         </div>
       )}
     </div>
