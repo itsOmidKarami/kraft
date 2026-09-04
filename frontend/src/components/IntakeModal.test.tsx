@@ -3,9 +3,36 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import * as api from "../api";
+import { useStore } from "../store";
 import { IntakeModal } from "./IntakeModal";
 
 describe("IntakeModal", () => {
+  it("offers the connected repos, and says where to get one when there are none", async () => {
+    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "quick-task", nodes: [], gates: 0 }]);
+    const repos = vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] } as never);
+    useStore.setState({ workItems: {} } as never);
+    render(
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <IntakeModal onClose={() => {}} />
+      </MemoryRouter>,
+    );
+    // a fresh install has no work items either, so the field would otherwise be
+    // an empty box with no hint that a repo has to be connected first
+    expect(await screen.findByText(/connect one in Settings/i)).toBeInTheDocument();
+
+    repos.mockResolvedValue({
+      repos: [{ path: "/connected", enabled: true }],
+    } as never);
+    render(
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <IntakeModal onClose={() => {}} />
+      </MemoryRouter>,
+    );
+    await waitFor(() =>
+      expect(document.querySelector('#intake-repos option[value="/connected"]')).not.toBeNull(),
+    );
+  });
+
   it("submits and shows an inline error on failure", async () => {
     vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "quick-task", nodes: [], gates: 0 }]);
     vi.spyOn(api, "createWorkItem").mockRejectedValue(new Error("repo path does not exist"));

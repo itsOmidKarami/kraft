@@ -61,16 +61,16 @@ describe("Board", () => {
 
   it("filters on the repo facet and clears it when the same facet is clicked again", async () => {
     renderBoard();
-    await userEvent.click(screen.getByRole("button", { name: /\/repo-a/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^repo-a/ }));
     expect(screen.getAllByTestId("board-card")).toHaveLength(1);
-    await userEvent.click(screen.getByRole("button", { name: /\/repo-a/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^repo-a/ }));
     expect(screen.getAllByTestId("board-card")).toHaveLength(2);
   });
 
   it("combines the repo and template facets, and counts each under the other", async () => {
     renderBoard();
     // With /repo-a picked, the template facet only counts that repo's items.
-    await userEvent.click(screen.getByRole("button", { name: /\/repo-a/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^repo-a/ }));
     expect(screen.getByRole("button", { name: /quick-task/ })).toHaveTextContent("1");
     expect(screen.queryByRole("button", { name: /default/ })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: /quick-task/ }));
@@ -95,7 +95,7 @@ describe("Board", () => {
     );
     renderBoard();
     const row = within(group("Needs you")).getByTestId("board-card");
-    expect(within(row).getByText("plan_approval")).toBeInTheDocument();
+    expect(within(row).getByText("approve the plan")).toBeInTheDocument();
     expect(within(row).getByRole("button", { name: /approve/i })).toBeInTheDocument();
   });
 

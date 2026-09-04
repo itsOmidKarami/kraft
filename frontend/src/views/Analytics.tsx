@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import * as api from "../api";
-import { elapsed, tokens, usd } from "../format";
+import { elapsed, repoName, tokens, usd } from "../format";
 import { useStore } from "../store";
 import type { Analytics as Report } from "../types";
 
@@ -82,6 +82,9 @@ function Kpi({ label, value, sub }: { label: string; value: string; sub: string 
 }
 
 const uniq = (xs: string[]) => [...new Set(xs)].sort().map((x) => ({ id: x, name: x }));
+/** Repo facets key on the full path but read as the repo's own name. */
+const uniqRepos = (xs: string[]) =>
+  [...new Set(xs)].sort().map((x) => ({ id: x, name: repoName(x) }));
 
 export function AnalyticsView() {
   const items = useStore((s) => Object.values(s.workItems));
@@ -92,6 +95,7 @@ export function AnalyticsView() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // the report itself has its own error path; this only fills the facets
     useStore.getState().bootstrap().catch(() => {});
   }, []);
 
@@ -122,7 +126,7 @@ export function AnalyticsView() {
     <div className="board analytics">
       <aside className="board-sidebar">
         <Facet label="Range" rows={RANGES} value={range} onPick={(v) => setRange(v ?? "all")} />
-        <Facet label="Repos" rows={uniq(items.map((i) => i.repo))} value={repo} onPick={setRepo} />
+        <Facet label="Repos" rows={uniqRepos(items.map((i) => i.repo))} value={repo} onPick={setRepo} />
         <Facet
           label="Template"
           rows={uniq(items.map((i) => i.chain_template))}
@@ -191,6 +195,10 @@ export function AnalyticsView() {
                 <span className="chart-title">Merged per week</span>
                 <span className="chart-note">this week is partial</span>
               </div>
+              {weeks.every((w) => w.n === 0) ? (
+                <p className="empty chart-empty">no merge requests merged in this range</p>
+              ) : (
+                <>
               <div className="bars">
                 {weeks.map((w) => (
                   <div key={w.label} className="bar-col" data-partial={w.partial || undefined}>
@@ -207,6 +215,8 @@ export function AnalyticsView() {
                   <span key={w.label}>{w.label}</span>
                 ))}
               </div>
+                </>
+              )}
             </section>
 
             <div className="analytics-tables">
@@ -247,7 +257,7 @@ export function AnalyticsView() {
                 </div>
                 {report.by_repo.map((r) => (
                   <div key={r.repo} className="repo-row" data-repo={r.repo}>
-                    <span>{r.repo}</span>
+                    <span title={r.repo}>{repoName(r.repo)}</span>
                     <span className="num">{r.items}</span>
                     <span className="num">{r.mrs}</span>
                     <span className="num">{tokens(r.tokens)}</span>

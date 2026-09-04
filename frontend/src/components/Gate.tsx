@@ -99,9 +99,12 @@ export function Gate({
       <div className="gate-inline" data-gate={gate}>
         {!rejecting ? (
           <>
-            <span className="gate-name">
+            {/* The board has room for a phrase, not a paragraph: the same
+                prompt without its trailing clause. One source, not a second
+                map of labels to keep in step. */}
+            <span className="gate-name" title={gate}>
               <Flag size={13} />
-              {gate}
+              {(PROMPTS[gate] ?? "approve to continue").replace(/ to continue$/, "")}
             </span>
             {approve}
             {startReject}
@@ -119,10 +122,14 @@ export function Gate({
       <div className="attention-head">
         <Flag size={18} className="attention-glyph" />
         <div className="attention-text">
-          <span className="attention-title">
-            {gate} — {PROMPTS[gate] ?? "approve to continue"}
+          {/* The sentence is what the person acts on; the gate's own name is
+              the identifier behind it, so it follows in the meta line rather
+              than leading the headline. */}
+          <span className="attention-title">{PROMPTS[gate] ?? "approve to continue"}</span>
+          <span className="attention-sub">
+            <code>{gate}</code>
+            {sub != null && <> · {sub}</>}
           </span>
-          {sub != null && <span className="attention-sub">{sub}</span>}
         </div>
       </div>
       {artifact}
