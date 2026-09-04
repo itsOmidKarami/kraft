@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 
+import pytest
 from support.harness import make_repo_with_engineering
 
 from kraft.db import Database
@@ -297,6 +298,159 @@ def test_links_resolved_in_search_and_document_and_by_work_item(tmp_path):
             assert ix.documents_for_work_item("nope") == []
         finally:
             conn.close()
+            await state.close()
+
+    asyncio.run(scenario())
+
+
+# ---- 4C: fusion + vector/hybrid modes ----
+
+
+def test_rrf_fuses_ranks_and_rewards_agreement():
+    from kraft.index.service import rrf
+
+    fts = ["a", "b", "c"]
+    vec = ["b", "a", "d"]
+    scores = rrf(fts, vec, k=60)
+    # b is 2nd + 1st, a is 1st + 2nd -> tie; both beat singletons c and d
+    assert scores["a"] == pytest.approx(scores["b"])
+    assert scores["a"] > scores["c"] > 0
+    assert "d" in scores
+
+
+def test_rrf_keeps_documents_present_in_only_one_list():
+    from kraft.index.service import rrf
+
+    scores = rrf(["only_fts"], [], k=60)
+    assert set(scores) == {"only_fts"}
+
+
+class _StubEmbedder:
+    """Deterministic 384-d vectors: identical text embeds identically."""
+
+    model_name = "stub-model"
+
+    def __init__(self, available=True):
+        self._available = available
+        self.reason = None if available else "stub unavailable"
+
+    def available(self):
+        return self._available
+
+    def _vec(self, text):
+        v = [0.0] * 384
+        for i, ch in enumerate(text.lower().encode()[:384]):
+            v[i] = ch / 255.0
+        return v
+
+    def try_encode(self, texts):
+        return [self._vec(t) for t in texts] if self._available else None
+
+    def encode(self, texts):
+        if not self._available:
+            raise RuntimeError(self.reason)
+        return [self._vec(t) for t in texts]
+
+
+def _indexed(tmp_path, state, embedder):
+    repo = make_repo_with_engineering(
+        tmp_path,
+        {
+            ".engineering/specs/ws.md": "# WS\nreconnect backoff schedule caps\n",
+            ".engineering/plans/ui.md": "# UI plan\nboard and detail view\n",
+        },
+    )
+    ix = Indexer(conn_for(tmp_path), state, repos_env=str(repo))
+    ix._embedder = embedder
+    return repo, ix
+
+
+def conn_for(tmp_path):
+    return index_db.open_index(tmp_path / "index.db")
+
+
+def test_vector_mode_without_an_embedder_is_refused(tmp_path):
+    async def scenario():
+        state = await Database.open(tmp_path / "state.db")
+        try:
+            repo, ix = _indexed(tmp_path, state, _StubEmbedder(available=False))
+            await ix.startup_scan()
+            with pytest.raises(RuntimeError):
+                ix.search("reconnect", mode="vector")
+        finally:
+            await state.close()
+
+    asyncio.run(scenario())
+
+
+def test_hybrid_without_an_embedder_degrades_to_fts(tmp_path):
+    async def scenario():
+        state = await Database.open(tmp_path / "state.db")
+        try:
+            repo, ix = _indexed(tmp_path, state, _StubEmbedder(available=False))
+            await ix.startup_scan()
+            hits, served = ix.search_with_mode("reconnect", mode="hybrid")
+            assert served == "fts"
+            assert [h["path"] for h in hits] == [".engineering/specs/ws.md"]
+        finally:
+            await state.close()
+
+    asyncio.run(scenario())
+
+
+def test_vector_search_finds_documents_and_respects_filters(tmp_path):
+    async def scenario():
+        state = await Database.open(tmp_path / "state.db")
+        try:
+            repo, ix = _indexed(tmp_path, state, _StubEmbedder())
+            await ix.startup_scan()
+
+            hits = ix.search("reconnect backoff schedule caps", mode="vector")
+            assert hits, "vector search returned nothing"
+            assert any(h["path"] == ".engineering/specs/ws.md" for h in hits)
+
+            # the filters must apply to the vector leg, not only to FTS
+            assert ix.search("reconnect backoff schedule caps", mode="vector", kind="plans") == [
+                h for h in ix.search("reconnect backoff schedule caps", mode="vector", kind="plans")
+            ]
+            assert all(
+                h["kind"] == "plans"
+                for h in ix.search("board and detail view", mode="vector", kind="plans")
+            )
+            assert ix.search("board", mode="vector", repo="/nope") == []
+        finally:
+            await state.close()
+
+    asyncio.run(scenario())
+
+
+def test_hybrid_returns_results_from_both_legs(tmp_path):
+    async def scenario():
+        state = await Database.open(tmp_path / "state.db")
+        try:
+            repo, ix = _indexed(tmp_path, state, _StubEmbedder())
+            await ix.startup_scan()
+            hits, served = ix.search_with_mode("reconnect backoff schedule caps", mode="hybrid")
+            assert served == "hybrid"
+            assert any(h["path"] == ".engineering/specs/ws.md" for h in hits)
+            assert all("links" in h for h in hits)
+        finally:
+            await state.close()
+
+    asyncio.run(scenario())
+
+
+def test_health_reports_embeddings(tmp_path):
+    async def scenario():
+        state = await Database.open(tmp_path / "state.db")
+        try:
+            repo, ix = _indexed(tmp_path, state, _StubEmbedder())
+            await ix.startup_scan()
+            emb = ix.health()["embeddings"]
+            assert emb["available"] is True
+            assert emb["model"]
+            assert emb["chunks"] > 0
+        finally:
             await state.close()
 
     asyncio.run(scenario())

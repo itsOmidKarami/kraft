@@ -19,6 +19,7 @@ test("create a work item and watch it complete", async ({ page }) => {
 
   // Navigated to the detail route.
   await expect(page.locator(".detail h2")).toHaveText("make the failing test pass");
+  const wid = new URL(page.url()).pathname.split("/").pop()!;
 
   // WorkItemDetail has no work-item status badge; the terminal signal on this
   // route is the work_item_completed row in the EventTimeline.
@@ -36,7 +37,11 @@ test("create a work item and watch it complete", async ({ page }) => {
   await expect(viewer.getByText("session_summary")).toBeVisible();
   await viewer.getByRole("button", { name: /close/i }).click();
 
-  // Back on the Board, the card's status badge reads "completed".
+  // Back on the Board, this item's card reads "completed". Scoped by id: the
+  // board accumulates cards across runs against a shared server, so a bare
+  // ".board-card" locator is a strict-mode violation waiting to happen.
   await page.goto("/");
-  await expect(page.locator('.board-card [data-status="completed"]')).toBeVisible();
+  await expect(
+    page.locator(`.board-card a[href="/work-items/${wid}"] [data-status="completed"]`),
+  ).toBeVisible();
 });
