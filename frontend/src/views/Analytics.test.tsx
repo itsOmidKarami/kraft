@@ -16,16 +16,18 @@ const report: Analytics = {
     human_wait_ms: 12 * 3_600_000,
     tokens_in: 1_200_000,
     tokens_out: 200_000,
-    cost_usd: 18.0,
+    cost_usd: 18.0, cost_complete: true,
     rounds: 5,
     capped_out: 2,
   },
   weekly_merged: [{ week_start: "2026-08-31", n: 4 }],
   by_node: [
-    { node: "implementation", runs: 9, wall_ms: 900_000, avg_ms: 100_000, tokens: 1_000_000, cost_usd: 15, rounds: 5, capped_out: 2 },
-    { node: "verify", runs: 12, wall_ms: 120_000, avg_ms: 10_000, tokens: 400_000, cost_usd: 3, rounds: 5, capped_out: 0 },
+    { node: "implementation", runs: 9, wall_ms: 900_000, avg_ms: 100_000, tokens: 1_000_000, cost_usd: 15, cost_complete: true, rounds: 5, capped_out: 2 },
+    { node: "verify", runs: 12, wall_ms: 120_000, avg_ms: 10_000, tokens: 400_000, cost_usd: 3, cost_complete: true, rounds: 5, capped_out: 0 },
   ],
-  by_repo: [{ repo: "/repo-a", items: 9, mrs: 4, tokens: 1_400_000, cost_usd: 18 }],
+  by_repo: [
+    { repo: "/repo-a", items: 9, mrs: 4, tokens: 1_400_000, cost_usd: 18, cost_complete: true },
+  ],
 };
 
 const wi = (over: Partial<WorkItem>): WorkItem =>
@@ -111,5 +113,18 @@ describe("AnalyticsView", () => {
     vi.spyOn(api, "getAnalytics").mockRejectedValue(new Error("unknown range"));
     renderView();
     expect(await screen.findByText(/unknown range/)).toHaveClass("form-error");
+  });
+
+  it("marks a cost that is only a floor, and never dresses it up as a total", async () => {
+    vi.spyOn(api, "getAnalytics").mockResolvedValue({
+      ...report,
+      totals: { ...report.totals, cost_complete: false },
+      by_node: report.by_node.map((n) => ({ ...n, cost_complete: false })),
+    });
+    renderView();
+    await screen.findAllByText("$18.00+");
+    expect(screen.getByText("a floor — some runs reported no cost")).toBeInTheDocument();
+    // and no invented per-item average alongside it
+    expect(screen.queryByText(/per work item/)).toBeNull();
   });
 });

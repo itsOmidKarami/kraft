@@ -252,9 +252,9 @@ def test_fix_loop_with_no_tasks_quarantines_template(tmp_path):
 
 
 def test_config_files_in_the_templates_dir_are_not_read_as_templates(tmp_path):
-    """Settings writes repos.yaml, access.yaml and pricing.yaml next to the chain
-    templates. Reading those as malformed templates is how the whole app ends up
-    reporting degraded health for no reason."""
+    """Settings writes repos.yaml and access.yaml next to the chain templates.
+    Reading those as malformed templates is how the whole app ends up reporting
+    degraded health for no reason."""
     from support.harness import fake_templates_dir
 
     d = fake_templates_dir(tmp_path, "claude")

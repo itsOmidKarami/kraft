@@ -187,3 +187,26 @@ def test_endpoint_serves_it_and_rejects_a_bad_range(tmp_path, monkeypatch):
         assert set(body) == {"totals", "weekly_merged", "by_node", "by_repo"}
         assert body["totals"]["work_items"] == 0
         assert client.get("/analytics?range=nope").status_code == 400
+
+
+def test_an_unpriced_session_makes_the_cost_a_floor_not_a_total(conn):
+    """Kraft stores only the cost an agent reported. A session with tokens and no
+    cost leaves the sum short, and every level of the report says so."""
+    conn.execute(
+        "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, log_path, "
+        "result_path, status, attempt, created_at, round, tokens_in, tokens_out, "
+        "cost_usd, wall_ms) VALUES ('s9', 'w1', 'verify', 'on.verify', 'l', 'r', "
+        "'done', 1, ?, 0, 5000, 500, NULL, 1000)",
+        (_at(1),),
+    )
+    conn.commit()
+
+    a = analytics.compute(conn, range_="7d", now=NOW)
+    assert a["totals"]["cost_complete"] is False
+    assert a["totals"]["tokens_in"] == 1000 + 500 + 10 + 200 + 5000  # tokens still exact
+    verify = next(n for n in a["by_node"] if n["node"] == "verify")
+    assert verify["cost_complete"] is False
+    merge = next(n for n in a["by_node"] if n["node"] == "merge")
+    assert merge["cost_complete"] is True
+    repo_a = next(r for r in a["by_repo"] if r["repo"] == "/a")
+    assert repo_a["cost_complete"] is False
