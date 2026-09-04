@@ -236,32 +236,30 @@ def test_the_password_is_stored_only_as_a_scrypt_hash(client, templates_dir):
 
 
 def test_the_configured_bind_is_what_the_server_starts_on(tmp_path, monkeypatch, templates_dir):
-    from kraft.__main__ import _bind
+    from kraft.cli import _bind
 
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates_dir))
     monkeypatch.delenv("KRAFT_PORT", raising=False)
     monkeypatch.delenv("KRAFT_HOST", raising=False)
     config.save_access(
         templates_dir / "access.yaml",
         {"bind": "0.0.0.0", "port": 9100, "password_hash": "scrypt$aa$bb"},
     )
-    assert _bind() == ("0.0.0.0", 9100)
+    assert _bind(templates_dir) == ("0.0.0.0", 9100)
     monkeypatch.setenv("KRAFT_PORT", "1234")
-    assert _bind() == ("0.0.0.0", 1234)
+    assert _bind(templates_dir) == ("0.0.0.0", 1234)
 
 
 def test_an_unprotected_lan_bind_refuses_to_start(tmp_path, monkeypatch, templates_dir):
     """The dangerous configuration is a non-loopback bind with no password. The
     API keeps working without one so the first password *can* be set; the process
     refuses to come up on the wire in that state."""
-    from kraft.__main__ import _bind
+    from kraft.cli import _bind
 
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates_dir))
     monkeypatch.delenv("KRAFT_PORT", raising=False)
     monkeypatch.delenv("KRAFT_HOST", raising=False)
     config.save_access(templates_dir / "access.yaml", {"bind": "0.0.0.0", "port": 8765})
     with pytest.raises(SystemExit, match="no password is set"):
-        _bind()
+        _bind(templates_dir)
 
 
 def test_an_atomic_write_leaves_no_half_file_behind(tmp_path):
