@@ -145,7 +145,7 @@ def test_approving_all_four_gates_completes_chain(tmp_path):
     asyncio.run(scenario())
 
 
-def test_reject_is_terminal(tmp_path):
+def test_reject_records_the_note_and_reopen_flips_the_row(tmp_path):
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
 
@@ -165,15 +165,27 @@ def test_reject_is_terminal(tmp_path):
             await executor.run(
                 database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
             )
-            await database.write(
-                lambda c: store.reject_gate(c, wid, "spec_approval", "not specific enough")
-            )
-            row = database.read(
+            status = lambda: database.read(  # noqa: E731
                 lambda c: c.execute("SELECT status FROM work_items WHERE id=?", (wid,)).fetchone()
+            )["status"]
+
+            # a terminal reject leaves the item stopped where it is
+            await database.write(
+                lambda c: store.reject_gate(
+                    c, wid, "spec_approval", "not specific enough", reopen=False
+                )
             )
-            assert row["status"] == "needs_human"
+            assert status() == "needs_human"
+
+            # a re-planning reject hands the node back to the executor
+            await database.write(
+                lambda c: store.reject_gate(
+                    c, wid, "spec_approval", "not specific enough", reopen=True
+                )
+            )
+            assert status() == "active"
             rej = _payloads(database, wid, "gate_rejected")
-            assert rej == [{"gate": "spec_approval", "note": "not specific enough"}]
+            assert rej == [{"gate": "spec_approval", "note": "not specific enough"}] * 2
             assert "gate_approved" not in _events(database, wid)
         finally:
             await database.close()

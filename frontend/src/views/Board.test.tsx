@@ -90,7 +90,9 @@ describe("Board", () => {
   });
 
   it("offers the gate inline on a needs-you row, naming the current node's gate", () => {
-    setItems(wi({ id: "w3", status: "needs_human", current_node_id: "plan" }));
+    setItems(
+      wi({ id: "w3", status: "needs_human", current_node_id: "plan", pending_gate: "plan_approval" }),
+    );
     renderBoard();
     const row = within(group("Needs you")).getByTestId("board-card");
     expect(within(row).getByText("plan_approval")).toBeInTheDocument();

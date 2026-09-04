@@ -174,12 +174,12 @@ export const useStore = create<State>((set, get) => ({
           // the board badge reads "active" until the next hydrate (Kraft-fnx).
           return {
             ...base,
-            ...patchItem(s, id, (w) => ({ ...w, pendingGate: p.gate, status: "needs_human" })),
+            ...patchItem(s, id, (w) => ({ ...w, pending_gate: p.gate, status: "needs_human" })),
           };
         case "gate_approved":
-          return { ...base, ...patchItem(s, id, (w) => ({ ...w, pendingGate: null, status: "active" })) };
+          return { ...base, ...patchItem(s, id, (w) => ({ ...w, pending_gate: null, status: "active" })) };
         case "gate_rejected":
-          return { ...base, ...patchItem(s, id, (w) => ({ ...w, pendingGate: null, rejectNote: p.note })) };
+          return { ...base, ...patchItem(s, id, (w) => ({ ...w, pending_gate: null, rejectNote: p.note })) };
         case "pause_requested":
           return { ...base, ...patchItem(s, id, (w) => ({ ...w, status: "paused" })) };
         case "worker_session_paused": {

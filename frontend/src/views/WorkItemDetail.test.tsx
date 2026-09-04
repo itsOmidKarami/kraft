@@ -74,7 +74,7 @@ describe("WorkItemDetail", () => {
 
   it("replaces the control row with the gate card once the gate is reached", () => {
     setup(
-      { current_node_id: "plan" },
+      { current_node_id: "plan", pending_gate: "plan_approval" },
       [session({ node_id: "plan", hook_point: "on.plan.requested", status: "done" })],
     );
     renderDetail();
