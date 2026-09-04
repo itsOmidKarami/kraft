@@ -11,10 +11,26 @@ from pathlib import Path
 from kraft import events
 from kraft.events import _now
 from kraft.index import ingest
+from kraft.index.embed import Embedder
 
 logger = logging.getLogger(__name__)
 
 _SCAN_FANOUT = 4
+
+# Reciprocal rank fusion. BM25 is unbounded and negative, cosine distance is
+# 0..2 — blending those scores directly needs normalisation that is fragile at
+# small corpus sizes. RRF only needs the ranks. k=60 is the value from the
+# original paper and 04 §10's placeholder weight (equal) is simply no weight.
+RRF_K = 60
+
+
+def rrf(*ranked_lists: list[str], k: int = RRF_K) -> dict[str, float]:
+    """Fuse ranked id lists into {id: score}, higher is better."""
+    scores: dict[str, float] = {}
+    for ids in ranked_lists:
+        for rank, doc_id in enumerate(ids, start=1):
+            scores[doc_id] = scores.get(doc_id, 0.0) + 1.0 / (k + rank)
+    return scores
 
 
 class Indexer:
@@ -31,6 +47,7 @@ class Indexer:
         self._repos_env = (
             repos_env if repos_env is not None else os.environ.get("KRAFT_INDEX_REPOS")
         )
+        self._embedder = Embedder()
         self._last_scan_at: str | None = None
         self._repos_scanned: int = 0
         self._errors: list[str] = []
@@ -58,7 +75,7 @@ class Indexer:
         # ponytail: reconcile writes run on the event loop against the single
         # index connection. Fine while ingestion is small and low-QPS; move
         # behind a writer queue if a large-repo scan ever stalls the loop.
-        return ingest.reconcile(self._conn, repo, scanned)
+        return ingest.reconcile(self._conn, repo, scanned, embedder=self._embedder)
 
     async def rescan_all(self) -> dict[str, ingest.ReconcileStats]:
         repos = self.repos()
@@ -154,7 +171,7 @@ class Indexer:
         )
         self._conn.execute("BEGIN")
         try:
-            ingest.upsert_document(self._conn, row["repo"], doc, _now())
+            ingest.upsert_document(self._conn, row["repo"], doc, _now(), self._embedder)
             self._conn.commit()
         except BaseException:
             self._conn.rollback()
@@ -261,7 +278,133 @@ class Indexer:
         ).fetchall()
         return [{k: r[k] for k in r.keys()} for r in rows]
 
+    def _filter_sql(self, source_kind, kind, repo) -> tuple[str, list]:
+        clauses, params = [], []
+        if source_kind:
+            clauses.append("AND d.source_kind = ?")
+            params.append(source_kind)
+        if kind:
+            clauses.append("AND d.kind = ?")
+            params.append(kind)
+        if repo:
+            clauses.append("AND d.repo = ?")
+            params.append(repo)
+        return " ".join(clauses), params
+
+    def _vector_ids(
+        self, q: str, *, source_kind=None, kind=None, repo=None, limit: int = 20
+    ) -> tuple[list[str], dict[str, str]]:
+        """Document ids by nearest chunk, plus each document's best chunk text
+        (used as the snippet, since a vector hit has no FTS snippet)."""
+        vectors = self._embedder.encode([q])
+        if not vectors:
+            return [], {}
+        blob = ingest._serialize(vectors[0])
+        where, params = self._filter_sql(source_kind, kind, repo)
+        # Over-fetch chunks: several may belong to one document, and the filters
+        # are applied after the KNN, so ask for more than `limit` documents.
+        rows = self._conn.execute(
+            "SELECT c.document_id AS id, c.chunk_text, v.distance "
+            "FROM document_vectors v "
+            "JOIN document_chunks c ON c.id = v.chunk_id "
+            "JOIN documents d ON d.id = c.document_id "
+            f"WHERE v.embedding MATCH ? AND k = ? {where} "
+            "ORDER BY v.distance",
+            [blob, max(limit * 5, 50), *params],
+        ).fetchall()
+        ordered: list[str] = []
+        snippets: dict[str, str] = {}
+        for r in rows:
+            if r["id"] in snippets:
+                continue
+            ordered.append(r["id"])
+            snippets[r["id"]] = r["chunk_text"][:200]
+            if len(ordered) >= limit:
+                break
+        return ordered, snippets
+
     def search(
+        self,
+        q: str,
+        *,
+        source_kind: str | None = None,
+        kind: str | None = None,
+        repo: str | None = None,
+        limit: int = 20,
+        mode: str = "fts",
+    ) -> list[dict]:
+        return self.search_with_mode(
+            q, source_kind=source_kind, kind=kind, repo=repo, limit=limit, mode=mode
+        )[0]
+
+    def search_with_mode(
+        self,
+        q: str,
+        *,
+        source_kind: str | None = None,
+        kind: str | None = None,
+        repo: str | None = None,
+        limit: int = 20,
+        mode: str = "hybrid",
+    ) -> tuple[list[dict], str]:
+        """Returns (results, mode actually served).
+
+        An explicit vector request with no embedder raises: answering it with
+        text ranking would misrepresent what was searched. A hybrid request
+        degrades to fts and says so (4C design §2).
+        """
+        if mode not in ("fts", "vector", "hybrid"):
+            raise ValueError(f"unknown mode: {mode}")
+        has_embedder = self._embedder.available()
+        if mode == "vector" and not has_embedder:
+            raise RuntimeError(self._embedder.reason or "embeddings unavailable")
+        if mode == "hybrid" and not has_embedder:
+            mode = "fts"
+
+        filters = {"source_kind": source_kind, "kind": kind, "repo": repo}
+        if mode == "fts":
+            return self._fts(q, limit=limit, **filters), "fts"
+
+        vec_ids, snippets = self._vector_ids(q, limit=limit, **filters)
+        if mode == "vector":
+            return self._hydrate(vec_ids, snippets), "vector"
+
+        fts_rows = self._fts(q, limit=limit, **filters)
+        fused = rrf([r["id"] for r in fts_rows], vec_ids)
+        by_id = {r["id"]: r for r in fts_rows}
+        ordered = sorted(fused, key=lambda i: -fused[i])[:limit]
+        missing = [i for i in ordered if i not in by_id]
+        by_id.update({r["id"]: r for r in self._hydrate(missing, snippets)})
+        return [by_id[i] for i in ordered if i in by_id], "hybrid"
+
+    def _hydrate(self, doc_ids: list[str], snippets: dict[str, str]) -> list[dict]:
+        """Build result dicts for documents found by the vector leg only."""
+        if not doc_ids:
+            return []
+        placeholders = ",".join("?" * len(doc_ids))
+        rows = self._conn.execute(
+            f"SELECT id, repo, kind, source_kind, title, path FROM documents "
+            f"WHERE id IN ({placeholders})",
+            doc_ids,
+        ).fetchall()
+        links = self._links_for([r["id"] for r in rows])
+        by_id = {
+            r["id"]: {
+                "id": r["id"],
+                "repo": r["repo"],
+                "kind": r["kind"],
+                "source_kind": r["source_kind"],
+                "title": r["title"],
+                "path": r["path"],
+                "snippet": snippets.get(r["id"], ""),
+                "score": None,
+                "links": links[r["id"]],
+            }
+            for r in rows
+        }
+        return [by_id[i] for i in doc_ids if i in by_id]
+
+    def _fts(
         self,
         q: str,
         *,
@@ -335,9 +478,17 @@ class Indexer:
 
     def health(self) -> dict:
         n = self._conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+        chunks = self._conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0]
+        available = self._embedder.available()
         return {
             "last_scan_at": self._last_scan_at,
             "repos_scanned": self._repos_scanned,
             "documents": n,
+            "embeddings": {
+                "available": available,
+                "model": self._embedder.model_name,
+                "chunks": chunks,
+                "reason": None if available else self._embedder.reason,
+            },
             "errors": list(self._errors),
         }

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import struct
 import subprocess
 import uuid
 from dataclasses import dataclass
@@ -11,6 +12,7 @@ from pathlib import Path
 import yaml
 
 from kraft.events import _now
+from kraft.index.chunk import chunk_markdown
 
 _FRONT_MATTER = re.compile(r"\A---\n(.*?)\n---\n?", re.DOTALL)
 _ATX_HEADING = re.compile(r"^\s*#\s+(.+?)\s*$", re.MULTILINE)
@@ -180,12 +182,63 @@ def replace_links(conn, document_id: str, links) -> None:
         )
 
 
-def upsert_document(conn, repo: str, doc: ScannedDoc, now: str) -> str:
+def _drop_chunks(conn, document_id: str) -> None:
+    """documents -> document_chunks cascades, but vec0 rows do not."""
+    for r in conn.execute(
+        "SELECT id FROM document_chunks WHERE document_id=?", (document_id,)
+    ).fetchall():
+        conn.execute("DELETE FROM document_vectors WHERE chunk_id=?", (r["id"],))
+    conn.execute("DELETE FROM document_chunks WHERE document_id=?", (document_id,))
+
+
+def _serialize(vector) -> bytes:
+    """vec0 takes float32 little-endian blobs."""
+    return struct.pack(f"<{len(vector)}f", *vector)
+
+
+def replace_chunks(conn, document_id: str, text: str, embedder=None) -> int:
+    """Rewrite a document's chunks (and their vectors) whole. Returns the count.
+
+    vec0 has no foreign keys, so its rows are deleted explicitly here rather
+    than by cascade. An embedder that returns None (model missing or broken)
+    leaves the chunks in place without vectors — losing text search because a
+    model would not load is never the right trade (4C design §5).
+    """
+    old = [
+        r["id"]
+        for r in conn.execute(
+            "SELECT id FROM document_chunks WHERE document_id=?", (document_id,)
+        ).fetchall()
+    ]
+    for chunk_id in old:
+        conn.execute("DELETE FROM document_vectors WHERE chunk_id=?", (chunk_id,))
+    conn.execute("DELETE FROM document_chunks WHERE document_id=?", (document_id,))
+
+    chunks = chunk_markdown(text)
+    if not chunks:
+        return 0
+    ids = [uuid.uuid4().hex for _ in chunks]
+    conn.executemany(
+        "INSERT INTO document_chunks (id, document_id, chunk_index, chunk_text) VALUES (?,?,?,?)",
+        [(cid, document_id, i, c) for i, (cid, c) in enumerate(zip(ids, chunks, strict=True))],
+    )
+    if embedder is not None:
+        vectors = embedder.try_encode(chunks)
+        if vectors:
+            conn.executemany(
+                "INSERT INTO document_vectors (chunk_id, embedding) VALUES (?,?)",
+                [(cid, _serialize(v)) for cid, v in zip(ids, vectors, strict=True)],
+            )
+    return len(chunks)
+
+
+def upsert_document(conn, repo: str, doc: ScannedDoc, now: str, embedder=None) -> str:
     """Insert or update one document keyed on (repo, path), replacing its links.
     Shared by the git scan and the event-driven summary path."""
     row = conn.execute(
-        "SELECT id FROM documents WHERE repo=? AND path=?", (repo, doc.path)
+        "SELECT id, content_hash FROM documents WHERE repo=? AND path=?", (repo, doc.path)
     ).fetchone()
+    content_changed = row is None or row["content_hash"] != doc.content_hash
     if row is None:
         doc_id = uuid.uuid4().hex
         conn.execute(
@@ -226,6 +279,9 @@ def upsert_document(conn, repo: str, doc: ScannedDoc, now: str) -> str:
             ),
         )
     replace_links(conn, doc_id, doc.links)
+    # Re-embedding unchanged text is the main avoidable cost in ingestion.
+    if content_changed:
+        replace_chunks(conn, doc_id, doc.content, embedder)
     return doc_id
 
 
@@ -235,6 +291,7 @@ def reconcile(
     scanned: list[ScannedDoc],
     *,
     now: str | None = None,
+    embedder=None,
 ) -> ReconcileStats:
     now = now or _now()
     summaries = [d for d in scanned if d.source_kind == "session_summary"]
@@ -284,12 +341,13 @@ def reconcile(
             ren += 1
 
         for p in new_paths:
-            upsert_document(conn, repo, by_path[p], now)
+            upsert_document(conn, repo, by_path[p], now, embedder)
             ins += 1
 
         for src in gone_paths:
             if src in consumed:
                 continue
+            _drop_chunks(conn, existing[src][0])
             conn.execute("DELETE FROM documents WHERE id=?", (existing[src][0],))
             dele += 1
 
@@ -312,6 +370,7 @@ def reconcile(
                     ),
                 )
                 replace_links(conn, existing[p][0], d.links)
+                replace_chunks(conn, existing[p][0], d.content, embedder)
                 upd += 1
 
         # 04 §5 as amended by the 4B design: the summary bucket is upsert-only.
@@ -321,7 +380,7 @@ def reconcile(
             existed = conn.execute(
                 "SELECT 1 FROM documents WHERE repo=? AND path=?", (repo, d.path)
             ).fetchone()
-            upsert_document(conn, repo, d, now)
+            upsert_document(conn, repo, d, now, embedder)
             if existed is None:
                 ins += 1
             else:

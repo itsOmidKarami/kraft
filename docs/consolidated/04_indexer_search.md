@@ -291,9 +291,21 @@ surface (`02` §10.1).
 
 ## 10. Open Questions / Placeholders
 
-- Exact local embedding model choice.
-- Chunking size/overlap defaults.
-- Hybrid-search fusion weights — tune once there's real usage.
+All three original placeholders were settled by Effort 4C
+(`docs/superpowers/specs/2026-09-04-effort-4c-vector-hybrid-search-design.md`);
+each remains cheap to revisit, since embeddings live in their own table and a
+model change is an index rebuild, not a migration.
+
+- ~~Exact local embedding model choice.~~ **`BAAI/bge-small-en-v1.5`** (384-dim)
+  via `fastembed` + `onnxruntime`, chosen over `sentence-transformers` to avoid a
+  torch dependency. Ships as the optional `vector` extra: without it FTS still
+  works, `hybrid` degrades to `fts`, and an explicit `mode=vector` is refused.
+- ~~Chunking size/overlap defaults.~~ **Heading-aware, then 1200 characters with
+  200 of overlap** (`kraft.index.chunk.CHUNK_SIZE` / `CHUNK_OVERLAP`).
+- ~~Hybrid-search fusion weights.~~ **Reciprocal rank fusion, k=60, equal
+  weights** (`kraft.index.service.RRF_K`). RRF needs no score normalisation
+  between BM25 and cosine distance, which is what made weighted blending
+  fragile. Still worth tuning once there is real usage.
 
 ---
 
@@ -318,9 +330,15 @@ surface (`02` §10.1).
    `docs/superpowers/specs/2026-09-04-effort-4b-session-summaries-design.md`.
 5. ✅ **FTS5 `/search` endpoint, text-only** (Effort 4A) — plus `GET /documents/{id}`.
    `mode=fts` only; `mode=vector|hybrid` rejected with 422 until 4C.
-6. **`sqlite-vec` + local embedding + chunking + hybrid ranking** (Effort 4C, bead
-   Kraft-bj9.3) — the optional half from `01` §11, last since it's the piece most
-   likely to need iteration.
+6. ✅ **`sqlite-vec` + local embedding + chunking + hybrid ranking** (Effort 4C,
+   bead Kraft-bj9.3) — the optional half from `01` §11. Vectors live in the same
+   SQLite file as FTS5 (`document_chunks` + a `vec0` `document_vectors` table),
+   embeddings come from a local ONNX model behind the optional `vector` extra,
+   and `/search` fuses the two legs with RRF. `mode` now defaults to `hybrid`
+   and the response echoes the mode actually served, so an instance without the
+   extra answers with `fts` rather than failing.
+
+**Component 3 is complete.**
 
 ---
 

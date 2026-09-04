@@ -49,8 +49,12 @@ test("the advanced kind filter narrows results", async ({ page }) => {
   await expect(resultTitled(page, "UI plan")).toBeVisible();
 
   await overlay.getByRole("button", { name: /advanced/i }).click();
+
+  // The filter's guarantee is that nothing outside the kind comes back — not
+  // that there are no results. Search defaults to hybrid, and the vector leg
+  // legitimately surfaces a semantically near spec for this query.
   await overlay.getByLabel("kind", { exact: true }).fill("specs");
-  await expect(overlay.getByText(/no matches/i)).toBeVisible();
+  await expect(resultTitled(page, "UI plan")).toBeHidden();
 
   await overlay.getByLabel("kind", { exact: true }).fill("plans");
   await expect(resultTitled(page, "UI plan")).toBeVisible();
