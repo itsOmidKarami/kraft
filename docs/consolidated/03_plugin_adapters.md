@@ -151,17 +151,32 @@ loop (`02` §7.2), not a branch in the chain.
 - **Hook:** `on.chain.review_ready` → `on.chain.finalized`, `gate_after:
   chain_finalized` (`01` §3.5). Fires once, immediately after plan approval, only
   when the loaded chain has a plan node.
-- **Output schema (proposed, unconfirmed):**
+- **Output schema:**
   ```
   { status: "ready_for_approval" | "error",
-    revised_chain_nodes: [Node, ...] }
+    revised_chain_nodes: [Node, ...],
+    rationale: string }
   ```
-  `revised_chain_nodes` covers only the not-yet-executed portion of the chain; the
-  orchestrator splices it into `work_items.chain_definition` on approval (`02` §4).
+  `revised_chain_nodes` covers only the not-yet-executed portion of the chain, and
+  carries it in full — it is a replacement tail, not a diff; the orchestrator splices
+  it into `work_items.chain_definition` on approval (`02` §4). `Node` is the
+  materialized shape `{ id, tasks, gate_after, fix_loop }` (`02` §12).
   Mirrors Planning's `*_artifact_ref` shape — same adapter family.
+
+  `rationale` was added when the skill was written: `chain_finalized` is a human
+  gate, and a chain diff arriving with no stated reason makes that gate decorative.
+  It also gives the skill somewhere to report a change it judged necessary but could
+  not express — the needed hook not being registered for the repo — instead of
+  silently approximating it with a different task.
 - Gate rejection (`chain_finalized`) re-invokes `on.chain.review_ready` via the
   coordinator, note injected (`02` §7.2 entry point B).
-- **Skill name/content:** TBD (§10).
+- **Skill:** `chain-review`, authored at `skills/chain-review/SKILL.md`. It sits
+  beside `templates/` because it is a product artifact injected into the headless
+  session, not guidance for agents working on Kraft itself (`.agents/skills/`).
+- **Allowed hook set is injected, not assumed.** The adapter passes the hook points
+  registered *and enabled for the target repo* — a hook can be globally registered
+  and disabled per repo (`02` §12, resolution tier). Without it the skill has no way
+  to know which tasks it may compose and would invent hook names.
 
 ---
 
@@ -412,8 +427,6 @@ isn't.
   when built (§5).
 - Codex per-invocation system-prompt/MCP-config equivalent — unverified; blocks Codex
   work specifically (§7).
-- Chain Review skill: name and actual content — new authored work, not yet started
-  (§3a).
 - Output schema field names throughout are draft — not yet cross-checked against what
   the Indexer or UI will actually consume.
 - Findings severity threshold for the fix loop — v1 loops on any non-empty
@@ -436,8 +449,10 @@ isn't.
    deterministic; natural to build alongside it.
 4. **Planning** — near-zero marginal cost once (1) exists; two hook bindings, config
    only.
-5. **Chain Review** — same marginal-cost logic as Planning, but blocked on the skill
-   itself being written first (new content work, not adapter work).
+5. **Chain Review** — same marginal-cost logic as Planning. The skill it depends on
+   is written (`skills/chain-review/SKILL.md`), so this is adapter wiring only:
+   bind `on.chain.review_ready`, inject the skill plus the repo's enabled hook set,
+   and validate the returned tail before splicing.
 6. **Review** — ponytail-review reuses (1)'s machinery directly; remote-review CLI is
    new SubprocessAdapter usage plus a `Finding{}` translation shim.
 7. **CI/MR (GitLab)** — the one genuinely new adapter kind (HttpClientAdapter); stands
@@ -477,3 +492,9 @@ and `orchestrator_core_addendum_v1.md` §8 folded in.
   list) is what shipped.
 - Original §10's parked fix-loop discussion and §11's "left alone for now" list are
   reflected as resolved above; remaining genuine placeholders retained in §10.
+- **§3a Chain Review** — skill name and location resolved: `chain-review`, authored at
+  `skills/chain-review/SKILL.md` (Kraft-nk7). The output schema loses its "proposed,
+  unconfirmed" label and gains `rationale`, and the adapter's obligation to inject the
+  repo's *enabled* hook set is stated. §10's "Chain Review skill: name and actual
+  content" placeholder is retired; §11 step 5 is no longer blocked and is now adapter
+  wiring only.
