@@ -31,7 +31,7 @@ from kraft.adapters import beads as beads_mod
 from kraft.db import Database
 from kraft.index import db as index_db
 from kraft.index.service import Indexer
-from kraft.paths import RunDirs
+from kraft.paths import BUNDLED, RunDirs, default_run_dir, default_templates_dir
 from kraft.templates import (
     CONFIG_FILES,
     GATE_NAMES,
@@ -43,9 +43,7 @@ from kraft.ws import Broadcaster
 
 logger = logging.getLogger(__name__)
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-TEMPLATES_DIR = _REPO_ROOT / "templates"
-DEFAULT_FRONTEND_DIST = _REPO_ROOT / "frontend" / "dist"
+DEFAULT_FRONTEND_DIST = BUNDLED / "web"
 
 
 async def _guard(db, wid: str, coro) -> None:
@@ -69,11 +67,11 @@ def _bd_cwd() -> str | None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.tasks = {}
-    run_dirs = RunDirs(Path(os.environ.get("KRAFT_RUN_DIR", ".kraft-run"))).ensure()
+    run_dirs = RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())).ensure()
     database = await Database.open(run_dirs.db)
     # Read the templates dir at startup, not import time, so tests (and reloads)
     # that set KRAFT_TEMPLATES_DIR after import still take effect.
-    templates_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or TEMPLATES_DIR)
+    templates_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
     registry = load_registry(templates_dir / "registry.yaml")
     templates = load_templates(templates_dir, registry)
 
