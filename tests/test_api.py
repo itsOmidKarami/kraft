@@ -399,3 +399,70 @@ def test_spa_catchall_404s_when_dist_absent(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
         assert client.get("/some/spa/route").status_code == 404
         assert client.get("/health").status_code == 200
+
+
+def test_work_item_usage_rollup_is_captured_from_the_agent_envelope(tmp_path, monkeypatch):
+    """The whole capture path in one go: the agent reports tokens on its final
+    envelope, the adapter prices and stores them, and GET /work-items/{id}
+    rolls them up per node and per item."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/work-items",
+            json={"repo": str(repo), "title": "make it pass", "chain_template": "quick-task"},
+        ).json()["id"]
+        _poll_events(client, wid, "work_item_completed", timeout=120)
+
+        usage = client.get(f"/work-items/{wid}").json()["usage"]
+        impl = next(n for n in usage["by_node"] if n["node"] == "implementation")
+        # 1000 input + 500 cache-read, 200 output, at 10/100 USD per Mtok
+        assert (impl["tokens_in"], impl["tokens_out"]) == (1500, 200)
+        assert impl["cost_usd"] == pytest.approx(1500 * 10 / 1e6 + 200 * 100 / 1e6)
+        assert impl["wall_ms"] is not None and impl["rounds"] == 1
+
+        # the subprocess and builtin nodes ran but report no tokens
+        env = next(n for n in usage["by_node"] if n["node"] == "env_setup")
+        assert env["tokens_in"] == 0
+
+        assert usage["total"]["tokens_in"] == impl["tokens_in"]
+        assert usage["total"]["cost_usd"] == pytest.approx(impl["cost_usd"])
+
+
+def test_cross_repo_intake_records_submodules_and_orders_the_merge(tmp_path, monkeypatch):
+    """Design 1g's cross-repo disclosure and 3a's repos panel: the submodules
+    chosen at intake come back ordered deepest-first, because a submodule has to
+    merge before the parent that points at it."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/work-items",
+            json={
+                "repo": str(repo),
+                "title": "bump the pointers",
+                "chain_template": "quick-task",
+                "submodules": ["libs/a", "vendor/deep/b"],
+                "root_merge_policy": "skip",
+            },
+        ).json()["id"]
+        body = client.get(f"/work-items/{wid}").json()
+        assert [r["path"] for r in body["repos"]] == ["vendor/deep/b", "libs/a", str(repo)]
+        assert [r["role"] for r in body["repos"]] == ["submodule", "submodule", "root"]
+        assert [r["merge_rank"] for r in body["repos"]] == [1, 2, 3]
+        assert all(r["state"] == "pending" for r in body["repos"])
+        assert body["root_merge_policy"] == "skip"
+
+        bad = client.post(
+            "/work-items",
+            json={"repo": str(repo), "title": "x", "root_merge_policy": "nonsense"},
+        )
+        assert bad.status_code == 422
+
+
+def test_a_single_repo_item_has_no_repos_panel(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/work-items",
+            json={"repo": str(repo), "title": "solo", "chain_template": "quick-task"},
+        ).json()["id"]
+        assert client.get(f"/work-items/{wid}").json()["repos"] == []

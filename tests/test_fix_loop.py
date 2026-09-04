@@ -255,3 +255,77 @@ def test_fix_loop_wall_clock_breach(tmp_path, monkeypatch):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_retry_after_cap_clears_the_budget_and_steers_cycle_one(tmp_path, monkeypatch):
+    """4b: a capped loop is stopped for good until a human retries it. The retry
+    starts a fresh budget and the human's note leads the first fix cycle."""
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    prompts = tmp_path / "prompts.txt"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompts))
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = _registry()
+            pol = _make_policy(tmp_path, attempts=2)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="never fixed",
+                repo=str(repo),
+                template=_fixloop_template(),
+                bd_cwd=str(tracker),
+            )
+            # an agent that fixes nothing burns the whole budget
+            monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+            assert (
+                await executor.run(
+                    database,
+                    rd,
+                    work_item_id=wid,
+                    registry=registry,
+                    bd_cwd=str(tracker),
+                    policy=pol,
+                )
+                == "needs_human"
+            )
+            assert (
+                database.read(lambda c: store.read_counter(c, wid, "verify_fix_loop")) is not None
+            )
+
+            # a human retries with a note, and this time the agent fixes the code
+            monkeypatch.setenv("KRAFT_FAKE_AGENT", "fix")
+            await database.write(
+                lambda c: store.retry_after_cap(
+                    c, wid, "verify", "verify_fix_loop", "the sign is flipped"
+                )
+            )
+            assert database.read(lambda c: store.read_counter(c, wid, "verify_fix_loop")) is None
+            result = await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+                start_index=1,
+                steer="the sign is flipped",
+            )
+            assert result == "completed"
+            return _types(database, wid)
+        finally:
+            await database.close()
+
+    types = asyncio.run(scenario())
+    assert "work_item_retried" in types
+    assert types[-1] == "work_item_completed"
+
+    sent = [p for p in prompts.read_text().split("\n\x00\n") if p.strip()]
+    steered = [p for p in sent if "the sign is flipped" in p]
+    # exactly one: the steer leads cycle 1 of the retry and is not repeated after
+    assert len(steered) == 1
+    assert steered[0].startswith("A human has steered this run:")
+    assert "Fix the code so they pass" in steered[0]

@@ -7,6 +7,15 @@ set -eu
 
 mode="${KRAFT_FAKE_CLAUDE:-fix}"
 
+# Test seam: record the -p instruction so a test can assert what was actually asked.
+if [ -n "${KRAFT_FAKE_CLAUDE_PROMPT_LOG:-}" ]; then
+  prev=""
+  for arg in "$@"; do
+    if [ "$prev" = "-p" ]; then printf '%s\n\000\n' "$arg" >> "$KRAFT_FAKE_CLAUDE_PROMPT_LOG"; break; fi
+    prev="$arg"
+  done
+fi
+
 if [ "$mode" = "slow" ]; then
   sleep "${KRAFT_FAKE_CLAUDE_DELAY:-10}"
   mode="fix"
@@ -55,4 +64,6 @@ if [ -n "${KRAFT_RESULT_PATH:-}" ]; then
   mv "$rtmp" "$KRAFT_RESULT_PATH"
 fi
 
-printf '{"type": "result", "is_error": false}\n'
+# A real agent's final envelope carries its token usage; usage capture parses
+# this line, so the fake has to carry it too or nothing downstream is exercised.
+printf '{"type": "result", "is_error": false, "model": "fake-agent", "usage": {"input_tokens": 1000, "output_tokens": 200, "cache_read_input_tokens": 500}}\n'

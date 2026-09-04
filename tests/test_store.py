@@ -198,6 +198,7 @@ def test_session_lifecycle(tmp_path):
                 "session_id": "s1",
                 "node_id": "env_setup",
                 "hook_point": "on.env.prepare",
+                "round": 0,
             }
 
             await database.write(lambda c: store.session_running(c, "s1", 4321, 111.5))
@@ -211,6 +212,9 @@ def test_session_lifecycle(tmp_path):
                 "session_id": "s1",
                 "node_id": "env_setup",
                 "hook_point": "on.env.prepare",
+                # the round rides both session events: the client merges them, and
+                # without it here the merge would reset a fix cycle to round 0
+                "round": 0,
                 "pid": 4321,
             }
 
@@ -360,6 +364,7 @@ def test_create_session_announces_the_session(tmp_path):
                 "session_id": "s9",
                 "node_id": "chain_review",
                 "hook_point": "on.chain.review_ready",
+                "round": 0,
             }
         finally:
             await database.close()

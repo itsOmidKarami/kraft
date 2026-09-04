@@ -32,7 +32,7 @@ test("Ctrl-K opens search, a hit opens the document viewer", async ({ page }) =>
   await resultTitled(page, "WS transport design").click();
   const viewer = page.getByRole("dialog", { name: "document" });
   await expect(viewer).toBeVisible();
-  await expect(viewer.locator(".doc-body")).toContainText("reconnect backoff schedule caps");
+  await expect(viewer.locator(".doc-modal-body")).toContainText("reconnect backoff schedule caps");
   await expect(viewer.getByText(".engineering/specs/ws.md")).toBeVisible();
 
   await viewer.getByRole("button", { name: /close/i }).click();

@@ -43,7 +43,21 @@ def _write_summary(fields: dict[str, str]) -> str | None:
     return ref
 
 
+def _record_prompt(argv: list[str]) -> None:
+    """Append the -p instruction to KRAFT_FAKE_AGENT_PROMPT_LOG, so a test can
+    assert on what the executor actually asked the agent to do."""
+    dest = os.environ.get("KRAFT_FAKE_AGENT_PROMPT_LOG")
+    if not dest:
+        return
+    for i, a in enumerate(argv):
+        if a == "-p" and i + 1 < len(argv):
+            with open(dest, "a") as fh:
+                fh.write(argv[i + 1] + "\n\x00\n")
+            return
+
+
 def main() -> int:
+    _record_prompt(sys.argv)
     mode = os.environ.get("KRAFT_FAKE_AGENT", "fix")
     if mode == "fix":
         calc = pathlib.Path("calc.py")
@@ -55,7 +69,14 @@ def main() -> int:
         if ref:
             result["session_summary_ref"] = ref
         pathlib.Path(result_path).write_text(json.dumps(result))
-    envelope = {"type": "result", "is_error": mode == "error"}
+    # A real agent's final envelope carries its token usage; usage capture reads
+    # this line, so the fake carries it too.
+    envelope = {
+        "type": "result",
+        "is_error": mode == "error",
+        "model": "fake-agent",
+        "usage": {"input_tokens": 1000, "output_tokens": 200, "cache_read_input_tokens": 500},
+    }
     print(json.dumps(envelope))
     return 0
 
