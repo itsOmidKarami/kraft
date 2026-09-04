@@ -238,7 +238,7 @@ frontend/
   (`05` §1).
 - Plain CSS in `styles.css` + co-located class names. No component library.
 - Dev proxy: `vite.config.ts` proxies `/work-items`, `/templates`, `/health`,
-  `/worker-sessions`, `/ws` to `http://127.0.0.1:8000` so `npm run dev` talks to a
+  `/worker-sessions`, `/ws` to `http://127.0.0.1:8765` so `npm run dev` talks to a
   locally-running orchestrator.
 
 ### 3.2 Store (`store.ts`, Zustand)
@@ -279,7 +279,7 @@ type State = {
   | `fix_cycle_started` | `workItems[id].fixCycle = payload.cycle` (badge) |
   | `work_item_needs_human` | `workItems[id].status = 'needs_human'` |
   | `work_item_completed` | `workItems[id].status = 'completed'` |
-  | `gate_requested` | `workItems[id].pendingGate = payload.gate` |
+  | `gate_requested` | `workItems[id].pendingGate = payload.gate`, `status = 'needs_human'` |
   | `gate_approved` | `workItems[id].pendingGate = null`; `status = 'active'` |
   | `gate_rejected` | `workItems[id].pendingGate = null`; keep `payload.note` on the item for display |
 

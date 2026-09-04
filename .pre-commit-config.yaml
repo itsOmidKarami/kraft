@@ -5,13 +5,16 @@ exclude: '^(\.beads/|\.claude/|uv\.lock$|docs/)'
 
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.9.6
+    # Keep in step with the `ruff` floor in pyproject.toml: an older ruff here
+    # does not know PEP 758 (py3.14 unparenthesized `except A, B:`) and fails
+    # valid source the project formatter just produced.
+    rev: v0.16.6
     hooks:
       - id: ruff
         args: [--fix]
       - id: ruff-format
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer

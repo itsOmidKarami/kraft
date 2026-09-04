@@ -56,8 +56,11 @@ frontend:
     - npm run build
     - npm test
 
-# Manual / non-blocking, mirroring the gated Python e2e (pytest -m "not e2e").
+# Manual / non-blocking, the browser counterpart to the gated Python e2e
+# (`pytest -m e2e`, KRAFT_E2E=1) — the blocking job runs `-m "not e2e"`.
 # Needs a live orchestrator + a browser, so it stays out of the blocking gate.
+# The image tag and frontend/package.json's exact "@playwright/test" pin must
+# move together: the image ships only the browsers its own version expects.
 frontend-e2e:
   image: mcr.microsoft.com/playwright:v1.62.1-noble
   when: manual

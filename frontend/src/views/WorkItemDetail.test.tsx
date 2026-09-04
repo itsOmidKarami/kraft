@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as api from "../api";
 import { useStore } from "../store";
 import { WorkItemDetail } from "./WorkItemDetail";
 
@@ -17,6 +18,10 @@ beforeEach(() => {
     eventsByItem: { w1: [] },
   } as never);
   vi.spyOn(useStore.getState(), "hydrateItem").mockResolvedValue(undefined);
+  vi.spyOn(api, "getWorkItemDocuments").mockResolvedValue({
+    work_item_id: "w1",
+    documents: [],
+  });
 });
 
 describe("WorkItemDetail", () => {
@@ -33,5 +38,27 @@ describe("WorkItemDetail", () => {
     );
     expect(useStore.getState().hydrateItem).toHaveBeenCalledWith("w1");
     expect(screen.getByTestId("node-n")).toBeInTheDocument();
+  });
+
+  it("shows the linked documents panel above the event timeline", async () => {
+    const { container } = render(
+      <MemoryRouter
+        initialEntries={["/work-items/w1"]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <Routes>
+          <Route path="/work-items/:id" element={<WorkItemDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText(/no linked documents/i)).toBeInTheDocument();
+    expect(api.getWorkItemDocuments).toHaveBeenCalledWith("w1");
+    const docs = container.querySelector(".linked-docs");
+    const timeline = container.querySelector(".timeline");
+    expect(docs).not.toBeNull();
+    expect(timeline).not.toBeNull();
+    expect(
+      docs!.compareDocumentPosition(timeline!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });

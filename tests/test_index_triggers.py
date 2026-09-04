@@ -81,3 +81,111 @@ def test_startup_scan_picks_up_preexisting_file(tmp_path):
             await state.close()
 
     asyncio.run(scenario())
+
+
+def _seed_item(state, repo, wid="w1"):
+    return state.write(
+        lambda c: c.execute(
+            "INSERT INTO work_items (id, bead_id, title, repo, chain_template, "
+            "chain_definition, status, created_at, updated_at) VALUES "
+            "(?,'b1','t',?,'quick-task','{}','active','now','now')",
+            (wid, str(repo)),
+        )
+    )
+
+
+def test_session_exit_with_ref_ingests_summary(tmp_path):
+    from kraft import store
+    from kraft.paths import RunDirs
+
+    async def scenario():
+        state = await Database.open(tmp_path / "state.db")
+        conn = index_db.open_index(tmp_path / "index.db")
+        try:
+            repo = make_repo_with_engineering(tmp_path, {".engineering/specs/a.md": "# A\nx\n"})
+            await _seed_item(state, repo)
+            rd = RunDirs(tmp_path / "run").ensure()
+            sessions = rd.worktrees / "w1" / ".engineering" / "sessions"
+            sessions.mkdir(parents=True)
+            (sessions / "s1.md").write_text("# Session\nrewired the drain\n")
+
+            ix = Indexer(conn, state, repos_env="", run_dirs=rd)
+            await ix.start()
+            state.set_on_commit(ix.notify)
+            try:
+                await state.write(
+                    lambda c: store.create_session(
+                        c,
+                        id="s1",
+                        work_item_id="w1",
+                        node_id="implementation",
+                        hook_point="on.implementation.start",
+                        log_path="/dev/null",
+                        result_path="/dev/null",
+                    )
+                )
+                await state.write(
+                    lambda c: store.session_exited(c, "s1", "done", ".engineering/sessions/s1.md")
+                )
+                for _ in range(50):
+                    if ix.search("drain"):
+                        break
+                    await asyncio.sleep(0.1)
+                assert [h["path"] for h in ix.search("drain")] == [".engineering/sessions/s1.md"]
+            finally:
+                state.set_on_commit(None)
+                await ix.stop()
+        finally:
+            conn.close()
+            await state.close()
+
+    asyncio.run(scenario())
+
+
+def test_env_prepare_session_start_triggers_repo_rescan(tmp_path):
+    from kraft import store
+    from kraft.paths import RunDirs
+
+    async def scenario():
+        state = await Database.open(tmp_path / "state.db")
+        conn = index_db.open_index(tmp_path / "index.db")
+        try:
+            repo = make_repo_with_engineering(tmp_path, {".engineering/specs/a.md": "# A\nseed\n"})
+            await _seed_item(state, repo)
+            ix = Indexer(conn, state, repos_env="", run_dirs=RunDirs(tmp_path / "run").ensure())
+            await ix.startup_scan()
+            await ix.start()
+            state.set_on_commit(ix.notify)
+            try:
+                (repo / ".engineering/specs/b.md").write_text("# B\npiggyback content\n")
+                subprocess.run(
+                    ["git", "-C", str(repo), "add", "-A"], check=True, capture_output=True
+                )
+                subprocess.run(
+                    ["git", "-C", str(repo), "commit", "-m", "b"], check=True, capture_output=True
+                )
+                await state.write(
+                    lambda c: store.create_session(
+                        c,
+                        id="s-env",
+                        work_item_id="w1",
+                        node_id="env_setup",
+                        hook_point="on.env.prepare",
+                        log_path="/dev/null",
+                        result_path="/dev/null",
+                    )
+                )
+                await state.write(lambda c: store.session_running(c, "s-env", 1234, 1.0))
+                for _ in range(50):
+                    if ix.search("piggyback"):
+                        break
+                    await asyncio.sleep(0.1)
+                assert ix.search("piggyback")
+            finally:
+                state.set_on_commit(None)
+                await ix.stop()
+        finally:
+            conn.close()
+            await state.close()
+
+    asyncio.run(scenario())

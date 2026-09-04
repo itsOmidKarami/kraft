@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import shlex
 import signal
 
 from kraft import db, events, store
@@ -226,6 +227,67 @@ def test_post_resolve_can_downgrade(tmp_path):
                 lambda c: c.execute("SELECT status FROM worker_sessions WHERE id='s-pr'").fetchone()
             )
             assert row["status"] == "failed"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_run_task_persists_session_summary_ref(tmp_path):
+    """03 §3: session_summary_ref from the result file lands on the session row."""
+
+    async def scenario():
+        rd = RunDirs(tmp_path).ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database)
+            result = json.dumps(
+                {"status": "done", "session_summary_ref": ".engineering/sessions/s1.md"}
+            )
+            await sp.run_task(
+                database,
+                rd,
+                session_id="s1",
+                work_item_id="w1",
+                node_id="verify",
+                hook_point="on.test.run",
+                cmd=["sh", "-c", f'printf %s {shlex.quote(result)} > "$KRAFT_RESULT_PATH"'],
+                cwd=tmp_path,
+            )
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT session_summary_ref FROM worker_sessions WHERE id='s1'"
+                ).fetchone()
+            )
+            assert row["session_summary_ref"] == ".engineering/sessions/s1.md"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_run_task_without_summary_ref_leaves_column_null(tmp_path):
+    async def scenario():
+        rd = RunDirs(tmp_path).ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database)
+            await sp.run_task(
+                database,
+                rd,
+                session_id="s2",
+                work_item_id="w1",
+                node_id="verify",
+                hook_point="on.test.run",
+                cmd=["true"],
+                cwd=tmp_path,
+            )
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT session_summary_ref FROM worker_sessions WHERE id='s2'"
+                ).fetchone()
+            )
+            assert row["session_summary_ref"] is None
         finally:
             await database.close()
 

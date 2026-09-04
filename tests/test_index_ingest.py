@@ -171,3 +171,149 @@ def test_reconcile_delete_removes_row_and_fts(conn, tmp_path):
     assert (s.inserted, s.updated, s.renamed, s.deleted) == (0, 0, 0, 1)
     assert set(_rows(conn, str(repo))) == {".engineering/specs/a.md"}
     assert conn.execute("SELECT COUNT(*) FROM documents_fts").fetchone()[0] == 1
+
+
+# ---- source_kind_for / links_from_front_matter ----
+
+
+def test_source_kind_for_sessions_folder():
+    assert ingest.source_kind_for(".engineering/sessions/s1.md") == "session_summary"
+    assert ingest.source_kind_for(".engineering/specs/a.md") == "artifact"
+    assert ingest.source_kind_for("README.md") == "artifact"
+
+
+def test_links_from_front_matter_full():
+    links = ingest.links_from_front_matter(
+        {
+            "work_item_ids": ["w1", "w2"],
+            "node_id": "verify",
+            "hook_point": "on.test.run",
+            "worker_session_id": "s1",
+        }
+    )
+    assert [x.work_item_id for x in links if x.work_item_id] == ["w1", "w2"]
+    session_rows = [x for x in links if x.worker_session_id]
+    assert len(session_rows) == 1
+    assert session_rows[0].node_id == "verify"
+    assert session_rows[0].hook_point == "on.test.run"
+    assert session_rows[0].work_item_id is None
+
+
+def test_links_from_front_matter_scalar_work_item_id():
+    links = ingest.links_from_front_matter({"work_item_ids": "w1"})
+    assert [x.work_item_id for x in links] == ["w1"]
+
+
+def test_links_from_front_matter_ignores_malformed():
+    assert ingest.links_from_front_matter({}) == []
+    assert ingest.links_from_front_matter({"work_item_ids": [None, 3, "w1"]}) == [
+        ingest.LinkRow(work_item_id="w1")
+    ]
+    assert ingest.links_from_front_matter({"node_id": 7}) == []
+
+
+def test_scan_repo_classifies_sessions(tmp_path):
+    repo = make_repo_with_engineering(
+        tmp_path,
+        {
+            ".engineering/specs/a.md": "# A\nspec body\n",
+            ".engineering/sessions/s1.md": (
+                "---\nwork_item_ids: [w1]\nnode_id: verify\n"
+                "hook_point: on.test.run\nworker_session_id: s1\n---\nsummary body\n"
+            ),
+        },
+    )
+    by_path = {d.path: d for d in ingest.scan_repo(repo)}
+    assert by_path[".engineering/specs/a.md"].source_kind == "artifact"
+    assert by_path[".engineering/specs/a.md"].links == ()
+    summary = by_path[".engineering/sessions/s1.md"]
+    assert summary.source_kind == "session_summary"
+    assert summary.kind == "sessions"
+    assert [x.work_item_id for x in summary.links if x.work_item_id] == ["w1"]
+
+
+def _all_docs(conn):
+    return {r["path"]: r for r in conn.execute("SELECT * FROM documents ORDER BY path").fetchall()}
+
+
+def _summary(path, content_hash, links=(), title="S1"):
+    return ingest.ScannedDoc(
+        path=path,
+        kind="sessions",
+        title=title,
+        content="summary",
+        content_hash=content_hash,
+        metadata={},
+        source_created_at=None,
+        source_updated_at=None,
+        source_kind="session_summary",
+        links=links,
+    )
+
+
+def _artifact(path, content_hash, title="A"):
+    return ingest.ScannedDoc(
+        path=path,
+        kind="specs",
+        title=title,
+        content="spec",
+        content_hash=content_hash,
+        metadata={},
+        source_created_at=None,
+        source_updated_at=None,
+    )
+
+
+def test_reconcile_writes_links_for_summaries_only(conn):
+    scanned = [
+        _artifact(".engineering/specs/a.md", "h1"),
+        _summary(
+            ".engineering/sessions/s1.md",
+            "h2",
+            links=(
+                ingest.LinkRow(work_item_id="w1"),
+                ingest.LinkRow(node_id="verify", hook_point="on.test.run", worker_session_id="s1"),
+            ),
+        ),
+    ]
+    stats = ingest.reconcile(conn, "/r", scanned)
+    assert stats.inserted == 2
+    docs = _all_docs(conn)
+    assert docs[".engineering/sessions/s1.md"]["source_kind"] == "session_summary"
+    assert docs[".engineering/specs/a.md"]["source_kind"] == "artifact"
+    rows = conn.execute(
+        "SELECT work_item_id, node_id FROM document_links WHERE document_id=? "
+        "ORDER BY COALESCE(work_item_id, '')",
+        (docs[".engineering/sessions/s1.md"]["id"],),
+    ).fetchall()
+    assert [(r["work_item_id"], r["node_id"]) for r in rows] == [(None, "verify"), ("w1", None)]
+    assert (
+        conn.execute(
+            "SELECT COUNT(*) FROM document_links WHERE document_id=?",
+            (docs[".engineering/specs/a.md"]["id"],),
+        ).fetchone()[0]
+        == 0
+    )
+
+
+def test_reconcile_never_deletes_summaries_but_still_deletes_artifacts(conn):
+    ingest.reconcile(
+        conn,
+        "/r",
+        [_artifact(".engineering/specs/a.md", "h1"), _summary(".engineering/sessions/s1.md", "h2")],
+    )
+    stats = ingest.reconcile(conn, "/r", [])
+    assert stats.deleted == 1  # the artifact only
+    assert set(_all_docs(conn)) == {".engineering/sessions/s1.md"}
+
+
+def test_reconcile_summary_update_replaces_links(conn):
+    p = ".engineering/sessions/s1.md"
+    ingest.reconcile(conn, "/r", [_summary(p, "h1", links=(ingest.LinkRow(work_item_id="w1"),))])
+    ingest.reconcile(conn, "/r", [_summary(p, "h2", links=(ingest.LinkRow(work_item_id="w2"),))])
+    doc_id = _all_docs(conn)[p]["id"]
+    rows = conn.execute(
+        "SELECT work_item_id FROM document_links WHERE document_id=?", (doc_id,)
+    ).fetchall()
+    assert [r["work_item_id"] for r in rows] == ["w2"]
+    assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1
