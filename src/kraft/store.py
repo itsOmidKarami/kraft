@@ -178,6 +178,18 @@ def create_session(
         "VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, 'pending', 1, ?, NULL)",
         (id, work_item_id, node_id, hook_point, log_path, result_path, _now()),
     )
+    # Announce the session here, where every session is born, rather than in
+    # session_running — only the subprocess adapter calls that, so a builtin hook
+    # (create_session -> session_exited) never told the SPA the session existed.
+    # worker_session_exited carries no node_id/hook_point, so the client could not
+    # build the row from it either: it saw no session for the current node, inferred
+    # no gate was awaiting, and rendered no Approve button until a reload (Kraft-dce).
+    events.append(
+        conn,
+        work_item_id,
+        "worker_session_created",
+        {"session_id": id, "node_id": node_id, "hook_point": hook_point},
+    )
 
 
 def session_running(conn: sqlite3.Connection, session_id, pid, pid_start_time) -> None:
