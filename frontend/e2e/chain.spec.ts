@@ -26,6 +26,16 @@ test("create a work item and watch it complete", async ({ page }) => {
     timeout: 100_000,
   });
 
+  // 4B/4B-UI: the agent's session summary is ingested and linked to this item,
+  // and the panel renders it. Proof of the whole path in a browser.
+  const docs = page.locator(".linked-docs");
+  await expect(docs.getByText(/\.engineering\/sessions\//)).toBeVisible({ timeout: 30_000 });
+  await docs.getByRole("button").first().click();
+  const viewer = page.getByRole("dialog", { name: "document" });
+  await expect(viewer).toBeVisible();
+  await expect(viewer.getByText("session_summary")).toBeVisible();
+  await viewer.getByRole("button", { name: /close/i }).click();
+
   // Back on the Board, the card's status badge reads "completed".
   await page.goto("/");
   await expect(page.locator('.board-card [data-status="completed"]')).toBeVisible();

@@ -58,12 +58,19 @@ nodes:
 GATE_NAMES = {"spec_approval", "plan_approval", "chain_finalized", "human_review_approval"}
 
 
+def test_policy_yaml_is_not_scanned_as_a_template():
+    """policy.yaml sits in the templates dir but is not a chain template, so it
+    must not surface as an invalid one and degrade /health (Kraft-2ih)."""
+    reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
+    ts = templates.load_templates(TEMPLATES_DIR, reg)
+    assert "policy" not in ts.invalid
+    assert "policy" not in ts.valid
+
+
 def test_shipped_default_yaml_is_the_ten_node_chain():
     reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
     ts = templates.load_templates(TEMPLATES_DIR, reg)
     assert "default" in ts.valid, ts.invalid
-    # policy.yaml lives in the templates dir but is not a chain template
-    assert "policy" not in ts.invalid
     nodes = ts.valid["default"].nodes
     assert [n["id"] for n in nodes] == [
         "spec",

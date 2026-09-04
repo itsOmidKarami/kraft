@@ -15,6 +15,16 @@ from kraft.events import _now
 _FRONT_MATTER = re.compile(r"\A---\n(.*?)\n---\n?", re.DOTALL)
 _ATX_HEADING = re.compile(r"^\s*#\s+(.+?)\s*$", re.MULTILINE)
 
+SESSIONS_DIR = ".engineering/sessions"
+
+
+@dataclass(frozen=True)
+class LinkRow:
+    work_item_id: str | None = None
+    node_id: str | None = None
+    hook_point: str | None = None
+    worker_session_id: str | None = None
+
 
 @dataclass(frozen=True)
 class ScannedDoc:
@@ -26,6 +36,8 @@ class ScannedDoc:
     metadata: dict
     source_created_at: str | None
     source_updated_at: str | None
+    source_kind: str = "artifact"
+    links: tuple[LinkRow, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -69,6 +81,32 @@ def derive_title(path: str, front_matter: dict, body: str) -> str:
     return m.group(1).strip() if m else Path(path).stem
 
 
+def source_kind_for(path: str) -> str:
+    """04 §6: everything under .engineering/sessions/ is a session summary."""
+    return "session_summary" if path.startswith(f"{SESSIONS_DIR}/") else "artifact"
+
+
+def _str_or_none(value) -> str | None:
+    return value.strip() or None if isinstance(value, str) else None
+
+
+def links_from_front_matter(fm: dict) -> list[LinkRow]:
+    """Linkage rows described by a summary's front-matter (04 §6). One row per
+    work item, plus one carrying the node/hook/session triple."""
+    raw = fm.get("work_item_ids")
+    if isinstance(raw, str):
+        raw = [raw]
+    elif not isinstance(raw, list):
+        raw = []
+    links = [LinkRow(work_item_id=w) for w in (_str_or_none(x) for x in raw) if w]
+    node = _str_or_none(fm.get("node_id"))
+    hook = _str_or_none(fm.get("hook_point"))
+    session = _str_or_none(fm.get("worker_session_id"))
+    if node or hook or session:
+        links.append(LinkRow(node_id=node, hook_point=hook, worker_session_id=session))
+    return links
+
+
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
 
@@ -98,6 +136,7 @@ def scan_repo(repo: Path) -> list[ScannedDoc]:
             continue
         fm, body = split_front_matter(text)
         created, updated = _timestamps(repo, rel)
+        source_kind = source_kind_for(rel)
         docs.append(
             ScannedDoc(
                 path=rel,
@@ -108,6 +147,10 @@ def scan_repo(repo: Path) -> list[ScannedDoc]:
                 metadata={k: v for k, v in fm.items() if k not in ("title", "kind")},
                 source_created_at=created,
                 source_updated_at=updated,
+                source_kind=source_kind,
+                links=(
+                    tuple(links_from_front_matter(fm)) if source_kind == "session_summary" else ()
+                ),
             )
         )
     return docs
@@ -119,15 +162,84 @@ def _meta_json(metadata: dict) -> str:
     return json.dumps(metadata, sort_keys=True, default=str)
 
 
+def replace_links(conn, document_id: str, links) -> None:
+    """Idempotent: a document's link set is rewritten whole, never appended to."""
+    conn.execute("DELETE FROM document_links WHERE document_id=?", (document_id,))
+    for link in links:
+        conn.execute(
+            "INSERT INTO document_links (id, document_id, work_item_id, node_id, "
+            "hook_point, worker_session_id) VALUES (?,?,?,?,?,?)",
+            (
+                uuid.uuid4().hex,
+                document_id,
+                link.work_item_id,
+                link.node_id,
+                link.hook_point,
+                link.worker_session_id,
+            ),
+        )
+
+
+def upsert_document(conn, repo: str, doc: ScannedDoc, now: str) -> str:
+    """Insert or update one document keyed on (repo, path), replacing its links.
+    Shared by the git scan and the event-driven summary path."""
+    row = conn.execute(
+        "SELECT id FROM documents WHERE repo=? AND path=?", (repo, doc.path)
+    ).fetchone()
+    if row is None:
+        doc_id = uuid.uuid4().hex
+        conn.execute(
+            "INSERT INTO documents (id, repo, source_kind, kind, title, path, content, "
+            "content_hash, metadata_json, source_created_at, source_updated_at, indexed_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                doc_id,
+                repo,
+                doc.source_kind,
+                doc.kind,
+                doc.title,
+                doc.path,
+                doc.content,
+                doc.content_hash,
+                _meta_json(doc.metadata),
+                doc.source_created_at,
+                doc.source_updated_at,
+                now,
+            ),
+        )
+    else:
+        doc_id = row["id"]
+        conn.execute(
+            "UPDATE documents SET source_kind=?, kind=?, title=?, content=?, content_hash=?, "
+            "metadata_json=?, source_created_at=?, source_updated_at=?, indexed_at=? WHERE id=?",
+            (
+                doc.source_kind,
+                doc.kind,
+                doc.title,
+                doc.content,
+                doc.content_hash,
+                _meta_json(doc.metadata),
+                doc.source_created_at,
+                doc.source_updated_at,
+                now,
+                doc_id,
+            ),
+        )
+    replace_links(conn, doc_id, doc.links)
+    return doc_id
+
+
 def reconcile(
     conn,
     repo: str,
     scanned: list[ScannedDoc],
     *,
-    source_kind: str = "artifact",
     now: str | None = None,
 ) -> ReconcileStats:
     now = now or _now()
+    summaries = [d for d in scanned if d.source_kind == "session_summary"]
+    scanned = [d for d in scanned if d.source_kind == "artifact"]
+    source_kind = "artifact"
     existing = {
         r["path"]: (r["id"], r["content_hash"])
         for r in conn.execute(
@@ -166,31 +278,13 @@ def reconcile(
                     existing[src][0],
                 ),
             )
+            replace_links(conn, existing[src][0], d.links)
             consumed.add(src)
             new_paths.remove(p)
             ren += 1
 
         for p in new_paths:
-            d = by_path[p]
-            conn.execute(
-                "INSERT INTO documents (id, repo, source_kind, kind, title, path, content, "
-                "content_hash, metadata_json, source_created_at, source_updated_at, indexed_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                (
-                    uuid.uuid4().hex,
-                    repo,
-                    source_kind,
-                    d.kind,
-                    d.title,
-                    d.path,
-                    d.content,
-                    d.content_hash,
-                    _meta_json(d.metadata),
-                    d.source_created_at,
-                    d.source_updated_at,
-                    now,
-                ),
-            )
+            upsert_document(conn, repo, by_path[p], now)
             ins += 1
 
         for src in gone_paths:
@@ -217,6 +311,20 @@ def reconcile(
                         existing[p][0],
                     ),
                 )
+                replace_links(conn, existing[p][0], d.links)
+                upd += 1
+
+        # 04 §5 as amended by the 4B design: the summary bucket is upsert-only.
+        # A live summary sits in a worktree, so every scan of the source repo
+        # would otherwise "miss" it and delete it.
+        for d in summaries:
+            existed = conn.execute(
+                "SELECT 1 FROM documents WHERE repo=? AND path=?", (repo, d.path)
+            ).fetchone()
+            upsert_document(conn, repo, d, now)
+            if existed is None:
+                ins += 1
+            else:
                 upd += 1
         conn.commit()
     except BaseException:

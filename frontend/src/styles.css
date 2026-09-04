@@ -286,3 +286,41 @@ mark {
   padding: 12px;
   font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+
+.linked-docs ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.linked-doc {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.linked-doc:hover {
+  background: rgba(127, 127, 127, 0.12);
+}
+
+.linked-doc-title {
+  font-weight: 600;
+}
+
+.doc-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.event-detail {
+  color: #555;
+  font-style: italic;
+}

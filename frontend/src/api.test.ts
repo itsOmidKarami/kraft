@@ -14,9 +14,11 @@ function mockFetch(status: number, body: unknown) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("api", () => {
-  it("listWorkItems returns items + cursor", async () => {
-    vi.stubGlobal("fetch", mockFetch(200, { items: [], cursor: 7 }));
+  it("listWorkItems GETs /work-items and returns items + cursor", async () => {
+    const f = mockFetch(200, { items: [], cursor: 7 });
+    vi.stubGlobal("fetch", f);
     expect(await api.listWorkItems()).toEqual({ items: [], cursor: 7 });
+    expect(f).toHaveBeenCalledWith("/work-items", expect.anything());
   });
 
   it("createWorkItem posts JSON and returns the id", async () => {
@@ -28,6 +30,9 @@ describe("api", () => {
       "/work-items",
       expect.objectContaining({ method: "POST" }),
     );
+    const init = f.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(init.body as string)).toEqual({ repo: "/r", title: "t" });
+    expect(init.headers).toMatchObject({ "content-type": "application/json" });
   });
 
   it("throws with the server detail on non-2xx", async () => {
@@ -75,5 +80,13 @@ describe("api", () => {
   it("search surfaces the 422 detail from a bad FTS query", async () => {
     vi.stubGlobal("fetch", mockFetch(422, { detail: 'bad search query: near "x"' }));
     await expect(api.search({ q: '"x' })).rejects.toThrow(/bad search query/);
+  });
+
+  it("getWorkItemDocuments fetches the work item's documents", async () => {
+    const f = mockFetch(200, { work_item_id: "w1", documents: [] });
+    vi.stubGlobal("fetch", f);
+    const body = await api.getWorkItemDocuments("w1");
+    expect(body.work_item_id).toBe("w1");
+    expect(f).toHaveBeenCalledWith("/work-items/w1/documents", expect.anything());
   });
 });

@@ -30,6 +30,18 @@ def _resolve_result_file(path: Path) -> str | None:
     return status if status in ("done", "failed") else "failed"
 
 
+def read_summary_ref(path: Path) -> str | None:
+    """`session_summary_ref` from a result file, or None (03 §3)."""
+    try:
+        data = json.loads(path.read_text())
+    except OSError, json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    ref = data.get("session_summary_ref")
+    return ref if isinstance(ref, str) and ref else None
+
+
 def _resolve(result_path: Path, returncode: int) -> str:
     file_status = _resolve_result_file(result_path)
     if file_status is not None:
@@ -100,5 +112,6 @@ async def run_task(
     status = _resolve(result_path, returncode)
     if post_resolve is not None:
         status = post_resolve(status, log_path, returncode)
-    await db.write(lambda c: store.session_exited(c, session_id, status))
+    summary_ref = read_summary_ref(result_path)
+    await db.write(lambda c: store.session_exited(c, session_id, status, summary_ref))
     return status

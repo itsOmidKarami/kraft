@@ -18,9 +18,41 @@ if [ "$mode" = "fix" ] && [ -f calc.py ]; then
   sed 's/a - b/a + b/' calc.py > "$tmp" && mv "$tmp" calc.py
 fi
 
+# The agent adapter injects the work-item/node/session linkage into the system
+# prompt and asks for a session summary (04 §6). Obey it when those fields are
+# present, so integration tests exercise the real ingestion inputs.
+ctx=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--append-system-prompt" ] && [ "$#" -gt 1 ]; then ctx="$2"; fi
+  shift
+done
+field() { printf '%s\n' "$ctx" | sed -n "s/^$1: //p" | head -1; }
+
+summary_ref=""
+session="$(field 'Worker session')"
+if [ -n "$session" ]; then
+  summary_ref=".engineering/sessions/${session}.md"
+  mkdir -p .engineering/sessions
+  cat > "$summary_ref" <<EOF
+---
+work_item_ids: [$(field 'Work item')]
+node_id: $(field 'Node')
+hook_point: $(field 'Hook point')
+worker_session_id: ${session}
+---
+
+fake-claude session
+EOF
+fi
+
 if [ -n "${KRAFT_RESULT_PATH:-}" ]; then
   rtmp="$(mktemp)"
-  printf '{"status": "done"}' > "$rtmp" && mv "$rtmp" "$KRAFT_RESULT_PATH"
+  if [ -n "$summary_ref" ]; then
+    printf '{"status": "done", "session_summary_ref": "%s"}' "$summary_ref" > "$rtmp"
+  else
+    printf '{"status": "done"}' > "$rtmp"
+  fi
+  mv "$rtmp" "$KRAFT_RESULT_PATH"
 fi
 
 printf '{"type": "result", "is_error": false}\n'

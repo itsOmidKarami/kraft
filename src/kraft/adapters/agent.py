@@ -10,7 +10,23 @@ _CTX = (
     "You are working on a Kraft work item.\n"
     "Title: {title}\n"
     "Task: {task_instruction}\n"
-    "Repo: {repo_path}"
+    "Repo: {repo_path}\n"
+    "Work item: {work_item_id}\n"
+    "Node: {node_id}\n"
+    "Hook point: {hook_point}\n"
+    "Worker session: {session_id}\n"
+    "\n"
+    "When you are done, write a short session summary to "
+    ".engineering/sessions/{session_id}.md under the repo, starting with YAML "
+    "front-matter carrying exactly these keys and values:\n"
+    "---\n"
+    "work_item_ids: [{work_item_id}]\n"
+    "node_id: {node_id}\n"
+    "hook_point: {hook_point}\n"
+    "worker_session_id: {session_id}\n"
+    "---\n"
+    'Then write that path, relative to the repo root, as "session_summary_ref" '
+    "in the JSON result file at $KRAFT_RESULT_PATH."
 )
 
 
@@ -44,7 +60,15 @@ async def run_agent_task(
     repo_path: str,
     cwd,
 ) -> str:
-    ctx = _CTX.format(title=title, task_instruction=task_instruction, repo_path=repo_path)
+    ctx = _CTX.format(
+        title=title,
+        task_instruction=task_instruction,
+        repo_path=repo_path,
+        work_item_id=work_item_id,
+        node_id=node_id,
+        hook_point=hook_point,
+        session_id=session_id,
+    )
     cmd = [
         *shlex.split(command),
         "-p",

@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -51,6 +51,7 @@ CREATE TABLE worker_sessions (
   status         TEXT NOT NULL CHECK (status IN
                    ('pending', 'running', 'done', 'failed', 'capped_out', 'paused', 'unknown')),
   attempt        INTEGER NOT NULL DEFAULT 1,
+  session_summary_ref TEXT,
   created_at     TEXT NOT NULL,
   exited_at      TEXT
 );
@@ -82,6 +83,7 @@ _MIGRATIONS: dict[int, list[str]] = {
   PRIMARY KEY (work_item_id, key)
 )"""
     ],
+    2: ["ALTER TABLE worker_sessions ADD COLUMN session_summary_ref TEXT"],
 }
 
 

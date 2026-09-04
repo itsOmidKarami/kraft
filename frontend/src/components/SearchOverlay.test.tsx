@@ -1,5 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../api";
 import { useStore } from "../store";
@@ -87,5 +88,30 @@ describe("SearchOverlay", () => {
     await userEvent.click(within(docDialog).getByRole("button", { name: /close/i }));
     expect(await screen.findByText("WS transport design")).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "document" })).toBeNull();
+  });
+
+  it("following a document breadcrumb closes the whole search stack", async () => {
+    vi.spyOn(api, "search").mockResolvedValue({ query: "r", mode: "fts", results: [hit] });
+    vi.spyOn(api, "getDocument").mockResolvedValue({
+      ...hit,
+      content: "# body\nfull text here",
+      metadata: {},
+      source_created_at: null,
+      source_updated_at: null,
+      indexed_at: "t",
+      links: [
+        { work_item_id: "w1", node_id: null, hook_point: null, worker_session_id: null },
+      ],
+    });
+    const onClose = vi.fn();
+    render(
+      <MemoryRouter>
+        <SearchOverlay onClose={onClose} />
+      </MemoryRouter>,
+    );
+    await userEvent.type(screen.getByRole("searchbox"), "reconnect");
+    await userEvent.click(await screen.findByText("WS transport design"));
+    await userEvent.click(await screen.findByRole("link", { name: "w1" }));
+    expect(onClose).toHaveBeenCalled();
   });
 });
