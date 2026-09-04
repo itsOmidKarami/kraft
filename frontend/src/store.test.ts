@@ -103,22 +103,22 @@ describe("applyEvent", () => {
     expect(after.eventsByItem.w1).toHaveLength(1);
   });
 
-  it("gate_requested / gate_approved toggle pendingGate", () => {
+  it("gate_requested / gate_approved toggle pending_gate", () => {
     const st = useStore.getState();
     st.applyEvent(ev({ seq: 2, type: "gate_requested", payload: { gate: "spec_approval" } }));
-    expect(useStore.getState().workItems.w1.pendingGate).toBe("spec_approval");
+    expect(useStore.getState().workItems.w1.pending_gate).toBe("spec_approval");
     // store.request_gate sets needs_human in the DB; the client must mirror it,
     // or the board badge reads "active" while the item waits on a human (Kraft-fnx).
     expect(useStore.getState().workItems.w1.status).toBe("needs_human");
     st.applyEvent(ev({ seq: 3, type: "gate_approved", payload: { gate: "spec_approval" } }));
-    expect(useStore.getState().workItems.w1.pendingGate).toBeNull();
+    expect(useStore.getState().workItems.w1.pending_gate).toBeNull();
     expect(useStore.getState().workItems.w1.status).toBe("active");
   });
 
   it("gate_rejected keeps the note", () => {
     useStore.getState().applyEvent(ev({ type: "gate_rejected", payload: { gate: "spec_approval", note: "nope" } }));
     expect(useStore.getState().workItems.w1.rejectNote).toBe("nope");
-    expect(useStore.getState().workItems.w1.pendingGate).toBeNull();
+    expect(useStore.getState().workItems.w1.pending_gate).toBeNull();
   });
 
   it("fix_cycle_started sets the badge", () => {

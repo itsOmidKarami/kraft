@@ -365,9 +365,22 @@ async def list_work_items(request: Request):
     def _read(c):
         rows = c.execute("SELECT * FROM work_items ORDER BY created_at").fetchall()
         cursor = c.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()[0]
-        return rows, cursor
+        # The latest gate_* event per item, in one pass — the board renders a gate
+        # prompt per row and must not offer Approve on a rejected gate.
+        gates = c.execute(
+            "SELECT work_item_id, type, payload FROM events WHERE seq IN ("
+            "  SELECT MAX(seq) FROM events"
+            "  WHERE type IN ('gate_requested', 'gate_approved', 'gate_rejected')"
+            "  GROUP BY work_item_id)"
+        ).fetchall()
+        return rows, cursor, gates
 
-    rows, cursor = st.db.read(_read)
+    rows, cursor, gate_rows = st.db.read(_read)
+    pending = {
+        g["work_item_id"]: json.loads(g["payload"])["gate"]
+        for g in gate_rows
+        if g["type"] == "gate_requested"
+    }
     items = [
         {
             "id": r["id"],
@@ -380,6 +393,7 @@ async def list_work_items(request: Request):
             "bead_id": r["bead_id"],
             "created_at": r["created_at"],
             "updated_at": r["updated_at"],
+            "pending_gate": pending.get(r["id"]),
         }
         for r in rows
     ]
@@ -412,6 +426,10 @@ async def get_work_item(wid: str, request: Request):
         "repos": store.repos_for(row, _completed_nodes(st, wid)),
         # local-only: the checkout the agents are editing, for "Open worktree"
         "worktree_path": str(st.run_dirs.worktrees / wid),
+        # The gate actually waiting on a person. Inferring it client-side from
+        # "the node has a gate_after and its sessions are done" cannot see a
+        # rejection, and offers Approve on a gate the API will 409 (Kraft).
+        "pending_gate": _pending_gate(st, wid),
     }
 
 
@@ -460,15 +478,80 @@ async def approve_gate(wid: str, gate: str, request: Request):
     return {k: v for k, v in dict(_work_item_row(st, wid)).items()}
 
 
+#: `human_review_approval` sits at the end of the chain with nothing to loop back
+#: to, so rejecting it stops the item (design 01 §7.2). Every other gate re-runs
+#: its producer node with the note injected — "reject and re-plan".
+TERMINAL_REJECT_GATES = {"human_review_approval"}
+
+
 @app.post("/work-items/{wid}/gates/{gate}/reject")
 async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
+    """Reject a gate and put the chain back to work (02 §7.2, backward motion).
+
+    Without the re-run below a rejection is a dead end: the gate stops being
+    pending, the node has no fix loop to retry and the item is not running, so
+    approve/retry/pause/resume all 409 and the work item is stranded.
+    """
     st = request.app.state
-    _work_item_row(st, wid)
+    row = _work_item_row(st, wid)
     if gate not in GATE_NAMES:
         raise HTTPException(404, f"unknown gate {gate!r}")
     if _pending_gate(st, wid) != gate:
         raise HTTPException(409, f"gate {gate!r} is not pending")
-    await st.db.write(lambda c: store.reject_gate(c, wid, gate, body.note))
+
+    chain = json.loads(row["chain_definition"])
+    node_id = chain["nodes"][_gate_node_index(chain, gate)]["id"]
+    key = f"{gate}_reject_loop"
+    replan = gate not in TERMINAL_REJECT_GATES
+    if replan:
+        if st.invalid_policy:
+            # Same posture as intake (§9): a re-run we cannot bound is not started.
+            raise HTTPException(
+                503, f"policy config invalid, refusing work: {'; '.join(st.invalid_policy)}"
+            )
+        # Same counter machinery as a fix loop: rejections are bounded, and the
+        # cap is snapshotted on first fire rather than re-resolved per attempt.
+        cap = policy_mod.resolve_cap(st.policy, key)
+        count, started_at, cap = await st.db.write(
+            lambda c, cap=cap: store.bump_counter(c, wid, key, cap)
+        )
+        replan = (
+            policy_mod.check(count=count, started_at=started_at, cap=cap, now=executor._now())
+            == "ok"
+        )
+
+    await st.db.write(lambda c: store.reject_gate(c, wid, gate, body.note, reopen=replan))
+    if not replan:
+        if gate not in TERMINAL_REJECT_GATES:
+            await st.db.write(
+                lambda c: store.mark_needs_human(
+                    c,
+                    wid,
+                    node_id,
+                    f"{key} exhausted after {count - 1} rejection(s)",
+                    {"cycles": count - 1, "attempts": cap.attempts},
+                )
+            )
+        return {k: v for k, v in dict(_work_item_row(st, wid)).items()}
+
+    _spawn(
+        request.app,
+        wid,
+        _guard(
+            st.db,
+            wid,
+            executor.run(
+                st.db,
+                st.run_dirs,
+                work_item_id=wid,
+                registry=st.registry,
+                bd_cwd=_bd_cwd(),
+                start_index=_gate_node_index(chain, gate),
+                policy=st.policy,
+                steer=body.note,
+            ),
+        ),
+    )
     return {k: v for k, v in dict(_work_item_row(st, wid)).items()}
 
 
@@ -923,11 +1006,26 @@ class RepoPatch(BaseModel):
     enabled: bool | None = None
 
 
+def _connected(repos: list[dict], path: str) -> dict | None:
+    """Find a connected repo by path.
+
+    `POST /repos` stores git's `--show-toplevel`, which resolves symlinks (on
+    macOS /var -> /private/var), so the path a client added with is not always
+    the path stored. Match either, or a caller cannot patch or delete the repo
+    it just connected.
+    """
+    entry = next((r for r in repos if r["path"] == path), None)
+    if entry is not None:
+        return entry
+    resolved = str(Path(path).expanduser().resolve())
+    return next((r for r in repos if r["path"] == resolved), None)
+
+
 @app.patch("/repos")
 async def update_repo(body: RepoPatch, request: Request, path: str):
     st = request.app.state
     repos = config_mod.load_repos(_repos_path(st))
-    entry = next((r for r in repos if r["path"] == path), None)
+    entry = _connected(repos, path)
     if entry is None:
         raise HTTPException(404, f"{path} is not connected")
     entry.update({k: v for k, v in body.model_dump().items() if v is not None})
@@ -939,9 +1037,10 @@ async def update_repo(body: RepoPatch, request: Request, path: str):
 async def remove_repo(request: Request, path: str):
     st = request.app.state
     repos = config_mod.load_repos(_repos_path(st))
-    kept = [r for r in repos if r["path"] != path]
-    if len(kept) == len(repos):
+    entry = _connected(repos, path)
+    if entry is None:
         raise HTTPException(404, f"{path} is not connected")
+    kept = [r for r in repos if r["path"] != entry["path"]]
     config_mod.save_repos(_repos_path(st), kept)
 
 
