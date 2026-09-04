@@ -317,3 +317,87 @@ def test_reconcile_summary_update_replaces_links(conn):
     ).fetchall()
     assert [r["work_item_id"] for r in rows] == ["w2"]
     assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1
+
+
+def _chunk_rows(conn, doc_id):
+    return conn.execute(
+        "SELECT chunk_index, chunk_text FROM document_chunks WHERE document_id=? "
+        "ORDER BY chunk_index",
+        (doc_id,),
+    ).fetchall()
+
+
+def test_reconcile_writes_chunks(conn):
+    ingest.reconcile(conn, "/r", [_artifact(".engineering/specs/a.md", "h1")])
+    doc_id = _all_docs(conn)[".engineering/specs/a.md"]["id"]
+    rows = _chunk_rows(conn, doc_id)
+    assert len(rows) == 1
+    assert rows[0]["chunk_text"] == "spec"
+
+
+def test_changed_content_replaces_chunks(conn):
+    p = ".engineering/specs/a.md"
+    ingest.reconcile(conn, "/r", [_artifact(p, "h1")])
+    doc_id = _all_docs(conn)[p]["id"]
+    changed = ingest.ScannedDoc(
+        path=p,
+        kind="specs",
+        title="A",
+        content="# One\n\nfirst\n\n# Two\n\nsecond\n",
+        content_hash="h2",
+        metadata={},
+        source_created_at=None,
+        source_updated_at=None,
+    )
+    ingest.reconcile(conn, "/r", [changed])
+    rows = _chunk_rows(conn, doc_id)
+    assert len(rows) == 2
+    assert [r["chunk_index"] for r in rows] == [0, 1]
+    assert "first" in rows[0]["chunk_text"]
+
+
+def test_deleting_a_document_leaves_no_chunks_or_vectors(conn):
+    ingest.reconcile(conn, "/r", [_artifact(".engineering/specs/a.md", "h1")])
+    doc_id = _all_docs(conn)[".engineering/specs/a.md"]["id"]
+    chunk_id = _chunk_rows(conn, doc_id)[0]["chunk_index"] is not None
+    assert chunk_id
+    ingest.reconcile(conn, "/r", [])
+    assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM document_vectors").fetchone()[0] == 0
+
+
+def test_chunks_written_without_an_embedder_and_no_vectors(conn):
+    ingest.reconcile(conn, "/r", [_artifact(".engineering/specs/a.md", "h1")], embedder=None)
+    assert conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM document_vectors").fetchone()[0] == 0
+
+
+def test_vectors_written_when_an_embedder_is_supplied(conn):
+    class FakeEmbedder:
+        def try_encode(self, texts):
+            return [[0.1] * 384 for _ in texts]
+
+    ingest.reconcile(
+        conn, "/r", [_artifact(".engineering/specs/a.md", "h1")], embedder=FakeEmbedder()
+    )
+    doc_id = _all_docs(conn)[".engineering/specs/a.md"]["id"]
+    n = conn.execute(
+        "SELECT COUNT(*) FROM document_vectors WHERE chunk_id IN "
+        "(SELECT id FROM document_chunks WHERE document_id=?)",
+        (doc_id,),
+    ).fetchone()[0]
+    assert n == 1
+
+
+def test_embedder_failure_still_keeps_the_document_and_chunks(conn):
+    class BrokenEmbedder:
+        def try_encode(self, texts):
+            return None  # model unavailable
+
+    ingest.reconcile(
+        conn, "/r", [_artifact(".engineering/specs/a.md", "h1")], embedder=BrokenEmbedder()
+    )
+    assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM document_vectors").fetchone()[0] == 0

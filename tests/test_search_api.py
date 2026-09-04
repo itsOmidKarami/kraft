@@ -38,7 +38,9 @@ def test_search_documents_and_rescan(tmp_path, monkeypatch):
         },
     )
     with _client(tmp_path, monkeypatch, index_repos=str(repo)) as client:
-        body = client.get("/search", params={"q": "reconnect backoff"}).json()
+        # pin the mode: this case is about FTS ranking, and whether the vector
+        # extra is installed differs between a dev machine and CI.
+        body = client.get("/search", params={"q": "reconnect backoff", "mode": "fts"}).json()
         assert body["mode"] == "fts"
         assert [h["path"] for h in body["results"]] == [".engineering/specs/ws.md"]
         hit = body["results"][0]
@@ -47,9 +49,19 @@ def test_search_documents_and_rescan(tmp_path, monkeypatch):
         assert "[reconnect]" in hit["snippet"]
         assert hit["links"] == []
 
-        assert client.get("/search", params={"q": "board", "kind": "plans"}).json()["results"]
-        assert not client.get("/search", params={"q": "board", "kind": "specs"}).json()["results"]
-        assert not client.get("/search", params={"q": "board", "repo": "/nope"}).json()["results"]
+        # Filters, under exact matching. Pinned to fts on purpose: the vector leg
+        # is fuzzy, so "no results" is not a meaningful assertion under hybrid —
+        # a semantically near document is a correct hit there.
+        fts = {"mode": "fts"}
+        assert client.get("/search", params={"q": "board", "kind": "plans", **fts}).json()[
+            "results"
+        ]
+        assert not client.get("/search", params={"q": "board", "kind": "specs", **fts}).json()[
+            "results"
+        ]
+        assert not client.get("/search", params={"q": "board", "repo": "/nope", **fts}).json()[
+            "results"
+        ]
 
         doc = client.get(f"/documents/{hit['id']}").json()
         assert doc["content"] == "reconnect backoff schedule caps at ten seconds\n"
@@ -69,7 +81,12 @@ def test_search_validation(tmp_path, monkeypatch):
         assert client.get("/search", params={"q": ""}).status_code == 422
         assert client.get("/search").status_code == 422
         assert client.get("/search", params={"q": "  "}).status_code == 422
-        assert client.get("/search", params={"q": "x", "mode": "vector"}).status_code == 422
+        # mode=vector is refused only where embeddings are unavailable; with the
+        # 'vector' extra installed it is a legitimate request.
+        available = client.get("/health").json()["index"]["embeddings"]["available"]
+        vector_status = client.get("/search", params={"q": "x", "mode": "vector"}).status_code
+        assert vector_status == (200 if available else 422)
+        assert client.get("/search", params={"q": "x", "mode": "nope"}).status_code == 422
         # Kraft-bj9.4: an unparseable query is retried as a literal phrase, not a 422
         r = client.get("/search", params={"q": '"unterminated'})
         assert r.status_code == 200
@@ -93,7 +110,16 @@ def test_rescan_unknown_repo_404(tmp_path, monkeypatch):
 def test_health_has_index_block(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
         h = client.get("/health").json()
-        assert set(h["index"]) == {"last_scan_at", "repos_scanned", "documents", "errors"}
+        assert set(h["index"]) == {
+            "last_scan_at",
+            "repos_scanned",
+            "documents",
+            "errors",
+            "embeddings",
+        }
+        emb = h["index"]["embeddings"]
+        assert set(emb) == {"available", "model", "chunks", "reason"}
+        assert isinstance(emb["available"], bool)
 
 
 def test_work_item_documents_endpoint(tmp_path, monkeypatch):
@@ -104,3 +130,29 @@ def test_work_item_documents_endpoint(tmp_path, monkeypatch):
         r = client.get(f"/work-items/{wid}/documents")
         assert r.status_code == 200
         assert r.json() == {"work_item_id": wid, "documents": []}
+
+
+def test_search_modes_without_embeddings(tmp_path, monkeypatch):
+    """4C: hybrid is the default and degrades to fts; explicit vector 422s."""
+    repo = make_repo_with_engineering(
+        tmp_path, {".engineering/specs/ws.md": "# WS\nreconnect backoff schedule\n"}
+    )
+    with _client(tmp_path, monkeypatch, index_repos=str(repo)) as client:
+        # no mode -> hybrid requested, fts served on an instance without the extra
+        body = client.get("/search", params={"q": "reconnect"}).json()
+        assert body["mode"] in ("fts", "hybrid")
+        assert [h["path"] for h in body["results"]] == [".engineering/specs/ws.md"]
+
+        r = client.get("/search", params={"q": "reconnect", "mode": "hybrid"})
+        assert r.status_code == 200
+
+        r = client.get("/search", params={"q": "reconnect", "mode": "nonsense"})
+        assert r.status_code == 422
+
+        available = client.get("/health").json()["index"]["embeddings"]["available"]
+        r = client.get("/search", params={"q": "reconnect", "mode": "vector"})
+        if available:
+            assert r.status_code == 200
+        else:
+            assert r.status_code == 422
+            assert "vector" in r.json()["detail"]

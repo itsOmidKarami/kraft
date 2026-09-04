@@ -367,21 +367,25 @@ async def search(
     source_kind: str | None = None,
     kind: str | None = None,
     repo: str | None = None,
-    mode: str = "fts",
+    mode: str = "hybrid",
     limit: int = 20,
 ):
     if not q.strip():
         raise HTTPException(422, "q is required")
-    if mode != "fts":
-        raise HTTPException(422, "only mode=fts is supported in this build")
     limit = max(1, min(limit, 100))
     try:
-        results = request.app.state.indexer.search(
-            q, source_kind=source_kind, kind=kind, repo=repo, limit=limit
+        results, served = request.app.state.indexer.search_with_mode(
+            q, source_kind=source_kind, kind=kind, repo=repo, limit=limit, mode=mode
         )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except RuntimeError as exc:
+        # An explicit mode=vector on an instance with no embedder. `mode` echoes
+        # what was actually served, so hybrid quietly degrades instead (04 §9).
+        raise HTTPException(422, str(exc)) from exc
     except sqlite3.OperationalError as exc:
         raise HTTPException(422, f"bad search query: {exc}") from exc
-    return {"query": q, "mode": mode, "results": results}
+    return {"query": q, "mode": served, "results": results}
 
 
 @app.get("/documents/{doc_id}")

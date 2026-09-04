@@ -4,9 +4,11 @@ import logging
 import sqlite3
 from pathlib import Path
 
+import sqlite_vec
+
 logger = logging.getLogger(__name__)
 
-INDEX_SCHEMA_VERSION = 1
+INDEX_SCHEMA_VERSION = 2
 
 INDEX_SCHEMA_SQL = """
 CREATE TABLE documents (
@@ -57,17 +59,54 @@ CREATE TABLE document_links (
 
 CREATE INDEX idx_document_links_work_item ON document_links(work_item_id);
 CREATE INDEX idx_document_links_document ON document_links(document_id);
+
+CREATE TABLE document_chunks (
+  id           TEXT PRIMARY KEY,
+  document_id  TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  chunk_index  INTEGER NOT NULL,
+  chunk_text   TEXT NOT NULL,
+  UNIQUE (document_id, chunk_index)
+);
+
+CREATE INDEX idx_document_chunks_document ON document_chunks(document_id);
+
+-- vec0 carries no foreign keys, so rows here are deleted explicitly alongside
+-- their chunks (04 §7 / 4C design §3). float[384] matches embed.DIMENSIONS; a
+-- model with a different width means an INDEX_SCHEMA_VERSION bump and a rebuild.
+CREATE VIRTUAL TABLE document_vectors USING vec0(
+  chunk_id TEXT PRIMARY KEY,
+  embedding float[384]
+);
 """
 
-# ponytail: empty until 4B/4C add tables. Additive DDL only; a data-losing
-# reshape just bumps INDEX_SCHEMA_VERSION and lets open_index() rebuild the
-# file (the index is disposable — 04 §1/§5).
-_MIGRATIONS: dict[int, list[str]] = {}
+# Additive DDL only; a data-losing reshape just bumps INDEX_SCHEMA_VERSION and
+# lets open_index() rebuild the file (the index is disposable — 04 §1/§5).
+_MIGRATIONS: dict[int, list[str]] = {
+    1: [
+        """CREATE TABLE document_chunks (
+  id           TEXT PRIMARY KEY,
+  document_id  TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  chunk_index  INTEGER NOT NULL,
+  chunk_text   TEXT NOT NULL,
+  UNIQUE (document_id, chunk_index)
+)""",
+        "CREATE INDEX idx_document_chunks_document ON document_chunks(document_id)",
+        """CREATE VIRTUAL TABLE document_vectors USING vec0(
+  chunk_id TEXT PRIMARY KEY,
+  embedding float[384]
+)""",
+    ],
+}
 
 
 def connect(path: str | Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
+    # vec0 DDL fails unless the extension is loaded on this very connection —
+    # including inside _create_all on a brand new file.
+    conn.enable_load_extension(True)
+    sqlite_vec.load(conn)
+    conn.enable_load_extension(False)
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA synchronous = NORMAL")
