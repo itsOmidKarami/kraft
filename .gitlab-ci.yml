@@ -13,17 +13,32 @@ cache:
   paths:
     - .uv-cache
 
+# `git` + `bd` aren't in the slim image; both test jobs need them.
+.py-before-script: &py-before-script
+  - apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl
+  - curl -fsSL "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_amd64.tar.gz" | tar -xz -C /usr/local/bin bd
+  - git config --global user.email ci@kraft.invalid && git config --global user.name "Kraft CI"
+  - git --version && bd version
+
+# Blocking fast feedback: lint + everything except the slow/e2e tiers.
 lint-and-test:
-  before_script:
-    - apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl
-    - curl -fsSL "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_amd64.tar.gz" | tar -xz -C /usr/local/bin bd
-    - git config --global user.email ci@kraft.invalid && git config --global user.name "Kraft CI"
-    - git --version && bd version
+  before_script: *py-before-script
   script:
     - uv sync --frozen
     - uv run ruff check .
     - uv run ruff format --check .
-    - uv run pytest -m "not e2e"
+    - uv run pytest -m "not e2e and not slow"
+  after_script:
+    - uv cache prune --ci
+
+# Blocking, but runs in parallel so it doesn't hold up the fast signal.
+# Subprocess servers, real uvicorn, multi-second sleeps (see pyproject `slow` marker).
+slow-tests:
+  needs: []
+  before_script: *py-before-script
+  script:
+    - uv sync --frozen
+    - uv run pytest -m "slow"
   after_script:
     - uv cache prune --ci
 
