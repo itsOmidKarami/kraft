@@ -222,8 +222,12 @@ If the loaded chain has no plan node, chain review does not fire. Ad hoc pause/s
 - **No re-entry**, meaning `current_node_id` never moves backward to an earlier node.
   A node re-running its own tasks under a bounded counter (§9, backward-motion) is
   explicitly permitted and is *not* re-entry.
-- No on-the-spot chain composition — templates are hand-authored files, selected by
-  id at intake only. No raw-YAML-at-runtime, no UI-composition workflow.
+- ~~No on-the-spot chain composition~~ — **lifted** (UI handoff spec §8). Templates
+  are still files selected by id at intake, and a live work item still runs the
+  `chain_definition` it materialized at intake. What is now allowed is editing those
+  files from Settings → Chain templates (design 5b): a structured editor over the
+  same YAML, validated per repo on save. Still excluded: composing a chain at
+  intake time, and raw YAML executed straight from a request.
 - No planner agent generating chains. If template selection turns out too coarse,
   that is the natural opening for a planner later — proposing a chain in this same
   YAML shape for approval, not a different mechanism.

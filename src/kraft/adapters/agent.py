@@ -59,6 +59,8 @@ async def run_agent_task(
     task_instruction: str,
     repo_path: str,
     cwd,
+    round: int = 0,
+    pricing=None,
 ) -> str:
     ctx = _CTX.format(
         title=title,
@@ -88,4 +90,6 @@ async def run_agent_task(
         cmd=cmd,
         cwd=cwd,
         post_resolve=_envelope_is_error,
+        round=round,
+        pricing=pricing,
     )

@@ -87,4 +87,51 @@ describe("DocumentModal", () => {
     expect(await screen.findByText("verify")).toBeInTheDocument();
     expect(screen.queryByRole("link")).toBeNull();
   });
+
+  it("renders markdown rather than the raw source", async () => {
+    vi.spyOn(api, "getDocument").mockResolvedValue(doc);
+    const { container } = wrap(<DocumentModal id="d1" onClose={() => {}} />);
+    await screen.findByText(/reconnect backoff/);
+    expect(container.querySelector(".doc-modal-body h1")).toHaveTextContent("WS transport");
+  });
+
+  it("opens in the chosen editor and remembers it as the default", async () => {
+    vi.spyOn(api, "getDocument").mockResolvedValue(doc);
+    const spy = vi.spyOn(api, "openDocument").mockResolvedValue({
+      document_id: "d1", path: "/r/.engineering/specs/ws.md", editor: "zed",
+    });
+    wrap(<DocumentModal id="d1" onClose={() => {}} />);
+    await screen.findByText(/reconnect backoff/);
+
+    await userEvent.click(screen.getByRole("button", { name: /choose editor/i }));
+    await userEvent.click(screen.getByRole("menuitem", { name: /Zed/ }));
+    expect(spy).toHaveBeenCalledWith("d1", "zed");
+    // the button now leads with that editor
+    expect(screen.getByRole("button", { name: /Open in Zed/ })).toBeInTheDocument();
+  });
+
+  it("hands the path to the viewer's machine when the server cannot launch anything", async () => {
+    vi.spyOn(api, "getDocument").mockResolvedValue(doc);
+    vi.spyOn(api, "openDocument").mockRejectedValue(new Error("no editor available"));
+    wrap(<DocumentModal id="d1" onClose={() => {}} />);
+    await screen.findByText(/reconnect backoff/);
+    // jsdom refuses to navigate, so stand in for the location it would go to
+    const location = { href: "" };
+    Object.defineProperty(window, "location", { value: location, writable: true });
+
+    await userEvent.click(screen.getByRole("button", { name: /^Open in/ }));
+    expect(location.href).toBe("vscode://file//r/.engineering/specs/ws.md");
+    expect(await screen.findByText(/could not launch an editor/)).toBeInTheDocument();
+  });
+
+  it("copies the document's absolute path", async () => {
+    vi.spyOn(api, "getDocument").mockResolvedValue(doc);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    wrap(<DocumentModal id="d1" onClose={() => {}} />);
+    await screen.findByText(/reconnect backoff/);
+    await userEvent.click(screen.getByRole("button", { name: /copy path/i }));
+    expect(writeText).toHaveBeenCalledWith("/r/.engineering/specs/ws.md");
+    expect(await screen.findByText("path copied")).toBeInTheDocument();
+  });
 });

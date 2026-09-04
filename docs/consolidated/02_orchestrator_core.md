@@ -201,11 +201,24 @@ PRIMARY KEY (work_item_id, repo_path)
 
 `id`, `token_hash`, `created_at`, `expires_at`, `revoked_at`.
 
-### 4.7 Config, not DB
+### 4.7 Config in YAML, written by hand *or* by the UI
 
 Plugin registry config (which plugin binds which hook, timeouts, per-repo
-enable/disable), chain template files, and per-repo `default_chain_template` all live
-in hand-edited, versioned YAML — not something the runtime mutates.
+enable/disable), chain template files, per-repo `default_chain_template`, loop
+policy and the per-model `pricing` rates all live in versioned YAML.
+
+**Revised (UI handoff spec §8).** The original rule was "not something the
+runtime mutates" — config was hand-edited only. The Settings screens (`05` §4.7,
+design 5a–5e) reverse that: the UI writes those same YAML files through
+`GET/PUT /repos`, `/templates/{id}`, `/registry`, `/policy` and `/access`.
+
+What does *not* change is where the truth lives. The UI is an editor for files
+git tracks, not a front end for a config table — so a change is still reviewable,
+diffable and revertible, and an operator editing the file by hand remains a
+first-class path. A write validates before it lands (the chain validator re-runs
+on any template or registry save) and takes effect on the same terms a hand edit
+does: caps apply to loops that start after the save, a registry change affects
+intake only, a bind-address change waits for a restart.
 
 ---
 

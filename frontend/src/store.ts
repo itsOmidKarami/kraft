@@ -58,6 +58,14 @@ export const useStore = create<State>((set, get) => ({
     ];
     const fixEv = [...evs].reverse().find((e) => e.type === "fix_cycle_started");
     const fixCycle = fixEv ? (fixEv.payload.cycle as number) : undefined;
+    // The cap numbers ride work_item_needs_human; a later node_started clears them.
+    const stopEv = [...evs]
+      .reverse()
+      .find((e) => e.type === "work_item_needs_human" || e.type === "node_started");
+    const cappedOut =
+      (stopEv?.type === "work_item_needs_human"
+        ? (stopEv.payload.capped as WorkItem["cappedOut"])
+        : null) ?? null;
     set((s) => ({
       workItems: {
         ...s.workItems,
@@ -65,6 +73,7 @@ export const useStore = create<State>((set, get) => ({
           ...s.workItems[id],
           ...item,
           completedNodes,
+          cappedOut,
           ...(fixCycle !== undefined ? { fixCycle } : {}),
         },
       },
@@ -88,7 +97,10 @@ export const useStore = create<State>((set, get) => ({
           if (!s.workItems[id]) queueMicrotask(() => { get().hydrateItem(id).catch(() => {}); });
           return base;
         case "node_started":
-          return { ...base, ...patchItem(s, id, (w) => ({ ...w, current_node_id: p.node_id })) };
+          return {
+            ...base,
+            ...patchItem(s, id, (w) => ({ ...w, current_node_id: p.node_id, cappedOut: null })),
+          };
         case "node_completed":
           return {
             ...base,
@@ -105,40 +117,52 @@ export const useStore = create<State>((set, get) => ({
         case "worker_session_created": {
           const rows = s.sessionsByItem[id] ?? [];
           const row: WorkerSession = {
+            ...blankSession(id, ev.created_at),
             id: p.session_id,
-            work_item_id: id,
             node_id: p.node_id,
             hook_point: p.hook_point,
             status: "pending",
-            attempt: 1,
-            created_at: ev.created_at,
-            exited_at: null,
+            round: p.round ?? 0,
           };
           return { ...base, sessionsByItem: { ...s.sessionsByItem, [id]: upsert(rows, row) } };
         }
         case "worker_session_started": {
           const rows = s.sessionsByItem[id] ?? [];
           const row: WorkerSession = {
+            ...blankSession(id, ev.created_at),
             id: p.session_id,
-            work_item_id: id,
             node_id: p.node_id,
             hook_point: p.hook_point,
             status: "running",
-            attempt: 1,
-            created_at: ev.created_at,
-            exited_at: null,
+            round: p.round ?? 0,
+            started_at: ev.created_at,
           };
+          // upsert merges this over the created row; `round` is carried on both
+          // events so the merge cannot reset a fix cycle's session to round 0
           return { ...base, sessionsByItem: { ...s.sessionsByItem, [id]: upsert(rows, row) } };
         }
         case "worker_session_exited":
         case "session_unknown": {
           const rows = s.sessionsByItem[id] ?? [];
           const status = ev.type === "session_unknown" ? "unknown" : p.status;
+          // worker_session_exited also carries the usage captured on the way out
+          const patch =
+            ev.type === "worker_session_exited"
+              ? {
+                  status,
+                  exited_at: ev.created_at,
+                  wall_ms: p.wall_ms ?? null,
+                  model: p.model ?? null,
+                  tokens_in: p.tokens_in ?? null,
+                  tokens_out: p.tokens_out ?? null,
+                  cost_usd: p.cost_usd ?? null,
+                }
+              : { status };
           return {
             ...base,
             sessionsByItem: {
               ...s.sessionsByItem,
-              [id]: rows.map((r) => (r.id === p.session_id ? { ...r, status } : r)),
+              [id]: rows.map((r) => (r.id === p.session_id ? { ...r, ...patch } : r)),
             },
           };
         }
@@ -156,8 +180,45 @@ export const useStore = create<State>((set, get) => ({
           return { ...base, ...patchItem(s, id, (w) => ({ ...w, pendingGate: null, status: "active" })) };
         case "gate_rejected":
           return { ...base, ...patchItem(s, id, (w) => ({ ...w, pendingGate: null, rejectNote: p.note })) };
+        case "pause_requested":
+          return { ...base, ...patchItem(s, id, (w) => ({ ...w, status: "paused" })) };
+        case "worker_session_paused": {
+          const rows = s.sessionsByItem[id] ?? [];
+          return {
+            ...base,
+            sessionsByItem: {
+              ...s.sessionsByItem,
+              [id]: rows.map((r) =>
+                r.id === p.session_id ? { ...r, status: "paused" as const } : r,
+              ),
+            },
+          };
+        }
+        case "steer_context_set":
+          return {
+            ...base,
+            ...patchItem(s, id, (w) => ({ ...w, pending_steer_context: p.steer })),
+          };
+        case "work_item_resumed":
+        case "work_item_retried":
+          return {
+            ...base,
+            ...patchItem(s, id, (w) => ({
+              ...w,
+              status: "active",
+              pending_steer_context: null,
+              cappedOut: null,
+            })),
+          };
         case "work_item_needs_human":
-          return { ...base, ...patchItem(s, id, (w) => ({ ...w, status: "needs_human" })) };
+          return {
+            ...base,
+            ...patchItem(s, id, (w) => ({
+              ...w,
+              status: "needs_human",
+              cappedOut: (p.capped as WorkItem["cappedOut"]) ?? null,
+            })),
+          };
         case "work_item_completed":
           return { ...base, ...patchItem(s, id, (w) => ({ ...w, status: "completed" })) };
         default:
@@ -166,6 +227,36 @@ export const useStore = create<State>((set, get) => ({
     });
   },
 }));
+
+/** The columns an event does not carry; the next hydrate fills them in. */
+function blankSession(workItemId: string, createdAt: string): WorkerSession {
+  return {
+    id: "",
+    work_item_id: workItemId,
+    node_id: "",
+    hook_point: "",
+    status: "pending",
+    attempt: 1,
+    round: 0,
+    created_at: createdAt,
+    started_at: null,
+    exited_at: null,
+    tokens_in: null,
+    tokens_out: null,
+    cost_usd: null,
+    wall_ms: null,
+    model: null,
+  };
+}
+
+/** A session by id, whichever work item it belongs to — the log modal has only the id. */
+export function findSession(sid: string): WorkerSession | undefined {
+  for (const rows of Object.values(useStore.getState().sessionsByItem)) {
+    const hit = rows.find((r) => r.id === sid);
+    if (hit) return hit;
+  }
+  return undefined;
+}
 
 function upsert(rows: WorkerSession[], row: WorkerSession): WorkerSession[] {
   const i = rows.findIndex((r) => r.id === row.id);

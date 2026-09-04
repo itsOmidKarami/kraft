@@ -11,7 +11,6 @@ test("create a work item and watch it complete", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: /new work item/i }).click();
 
-  // Scope to the modal: the Board toolbar also has an aria-label="repo" control.
   const modal = page.getByRole("dialog", { name: "New work item" });
   await modal.getByLabel("repo").fill(REPO);
   await modal.getByLabel("title").fill("make the failing test pass");
@@ -22,26 +21,33 @@ test("create a work item and watch it complete", async ({ page }) => {
   const wid = new URL(page.url()).pathname.split("/").pop()!;
 
   // WorkItemDetail has no work-item status badge; the terminal signal on this
-  // route is the work_item_completed row in the EventTimeline.
+  // route is the work_item_completed row in the timeline, which is behind its own
+  // tab on the redesigned detail screen.
+  await page.getByRole("tab", { name: /Timeline/ }).click();
   await expect(page.locator('[data-type="work_item_completed"]')).toBeVisible({
     timeout: 100_000,
   });
 
   // 4B/4B-UI: the agent's session summary is ingested and linked to this item,
-  // and the panel renders it. Proof of the whole path in a browser.
+  // and the panel renders it. Proof of the whole path in a browser. Documents
+  // live behind a tab on the redesigned detail screen.
+  await page.getByRole("tab", { name: /Documents/ }).click();
   const docs = page.locator(".linked-docs");
   await expect(docs.getByText(/\.engineering\/sessions\//)).toBeVisible({ timeout: 30_000 });
   await docs.getByRole("button").first().click();
   const viewer = page.getByRole("dialog", { name: "document" });
   await expect(viewer).toBeVisible();
-  await expect(viewer.getByText("session_summary")).toBeVisible();
+  // the modal's meta line carries the document's kind, falling back to its source
+  await expect(viewer.getByText("sessions", { exact: true })).toBeVisible();
   await viewer.getByRole("button", { name: /close/i }).click();
 
-  // Back on the Board, this item's card reads "completed". Scoped by id: the
-  // board accumulates cards across runs against a shared server, so a bare
-  // ".board-card" locator is a strict-mode violation waiting to happen.
+  // Back on the Board, this item has moved into the Done group — the redesigned
+  // board conveys status by grouping, not by a per-row badge. Scoped by id: the
+  // board accumulates rows across runs against a shared server, so a bare
+  // ".board-row" locator is a strict-mode violation waiting to happen.
   await page.goto("/");
-  await expect(
-    page.locator(`.board-card a[href="/work-items/${wid}"] [data-status="completed"]`),
-  ).toBeVisible();
+  const done = page.locator("section", {
+    has: page.locator('.group-label:text-is("Done")'),
+  });
+  await expect(done.locator(`.board-row a[href="/work-items/${wid}"]`)).toBeVisible();
 });
