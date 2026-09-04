@@ -6,7 +6,9 @@ from pathlib import Path
 import yaml
 
 _VALID_KINDS = {"builtin", "agent", "subprocess"}
-_GATE_NAMES = {"spec_approval", "plan_approval", "chain_finalized", "human_review_approval"}
+# The complete gate set. Public because the API validates approve/reject against it
+# and the chain-review skill documents it — a second copy is how those drift apart.
+GATE_NAMES = {"spec_approval", "plan_approval", "chain_finalized", "human_review_approval"}
 
 
 class RegistryError(Exception):
@@ -97,7 +99,7 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
             {
                 n["gate_after"]
                 for n in nodes
-                if n.get("gate_after") is not None and n["gate_after"] not in _GATE_NAMES
+                if n.get("gate_after") is not None and n["gate_after"] not in GATE_NAMES
             }
         )
         if bad_gates:
