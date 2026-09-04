@@ -7,13 +7,22 @@ task produce them:
 
 * the agent envelope an agent CLI writes as the last line of its log
   (Claude Code with ``--output-format json``: ``usage.input_tokens`` and
-  friends, ``total_cost_usd``, ``duration_ms``, ``modelUsage``);
+  friends, ``total_cost_usd``, ``model``);
 * a ``usage`` block in the result file any adapter may write at
   ``$KRAFT_RESULT_PATH``.
 
-Cost is stored, not derived at read time, but the *rates* live in a YAML file
-so a wrong rate can be corrected and the numbers recomputed later without
-re-running any work.
+**Cost is only ever the agent's own number.** Kraft used to carry a per-model
+rate table and multiply tokens by it when an agent reported no cost. That is
+gone: the agent knows what it was billed and Kraft does not, so a computed
+figure would be a guess wearing the same font as a fact — and every consumer
+of these numbers is someone deciding whether a run was worth it. A session with
+tokens and no reported cost stores ``cost_usd = NULL``, and the rollups say so
+rather than counting it as zero.
+
+Tokens are different: they are measured, they are reported by everything that
+has any, and they are what a rate table would have been applied to anyway. If
+per-model pricing is ever wanted, it belongs in one place over the stored
+token counts, not smeared across every session row at write time.
 """
 
 from __future__ import annotations
@@ -22,72 +31,14 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-import yaml
-
 
 @dataclass(frozen=True)
 class Usage:
     tokens_in: int = 0
     tokens_out: int = 0
+    #: None means "this agent did not report a cost", never "it was free".
     cost_usd: float | None = None
     model: str | None = None
-
-    def with_cost(self, pricing: Pricing) -> Usage:
-        """Fill in cost from the rate table when the agent did not report one."""
-        if self.cost_usd is not None:
-            return self
-        return Usage(self.tokens_in, self.tokens_out, pricing.cost(self), self.model)
-
-
-@dataclass(frozen=True)
-class Rate:
-    """USD per million tokens."""
-
-    input: float
-    output: float
-
-
-@dataclass(frozen=True)
-class Pricing:
-    models: dict[str, Rate]
-    default: Rate
-
-    def cost(self, u: Usage) -> float:
-        rate = self.models.get(u.model or "", self.default)
-        return (u.tokens_in * rate.input + u.tokens_out * rate.output) / 1_000_000
-
-
-DEFAULT_PRICING = Pricing(models={}, default=Rate(input=0.0, output=0.0))
-
-
-def _rate(raw: object) -> Rate | None:
-    if not isinstance(raw, dict):
-        return None
-    try:
-        return Rate(input=float(raw["input"]), output=float(raw["output"]))
-    except KeyError, TypeError, ValueError:
-        return None
-
-
-def load_pricing(path: str | Path) -> Pricing:
-    """Rates from YAML. A missing or unreadable file prices everything at zero.
-
-    Deliberately lenient: a bad rate table must never stop work from running,
-    it only makes the cost column wrong until the file is fixed.
-    """
-    try:
-        data = yaml.safe_load(Path(path).read_text())
-    except OSError, yaml.YAMLError:
-        return DEFAULT_PRICING
-    if not isinstance(data, dict):
-        return DEFAULT_PRICING
-    raw_models = data.get("models")
-    models = (
-        {str(k): r for k, v in raw_models.items() if (r := _rate(v)) is not None}
-        if isinstance(raw_models, dict)
-        else {}
-    )
-    return Pricing(models=models, default=_rate(data.get("default")) or Rate(0.0, 0.0))
 
 
 def _int(v: object) -> int:

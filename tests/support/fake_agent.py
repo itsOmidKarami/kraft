@@ -75,6 +75,8 @@ def main() -> int:
         "type": "result",
         "is_error": mode == "error",
         "model": "fake-agent",
+        # a real agent CLI reports what it was billed; Kraft never computes it
+        "total_cost_usd": 0.035,
         "usage": {"input_tokens": 1000, "output_tokens": 200, "cache_read_input_tokens": 500},
     }
     print(json.dumps(envelope))

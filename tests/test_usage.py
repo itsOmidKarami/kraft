@@ -1,4 +1,4 @@
-"""Usage capture: parsing, pricing, and the per-node / per-item rollups."""
+"""Usage capture: parsing, and the per-node / per-item rollups."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import json
 import pytest
 
 from kraft import db, store, usage
-from kraft.usage import Pricing, Rate, Usage
+from kraft.usage import Usage
 
 # ── parsing ──────────────────────────────────────────────────────────────────
 
@@ -69,48 +69,24 @@ def test_read_survives_missing_and_unparseable_files(tmp_path):
     assert usage.read(tmp_path / "bad.log", tmp_path / "bad.json") is None
 
 
-# ── pricing ──────────────────────────────────────────────────────────────────
+# ── cost is the agent's, never Kraft's ───────────────────────────────────────
 
 
-def test_cost_uses_the_model_rate_then_the_default(tmp_path):
-    p = tmp_path / "pricing.yaml"
-    p.write_text(
-        "models:\n  m1: { input: 10.0, output: 30.0 }\ndefault: { input: 1.0, output: 2.0 }\n"
+def test_a_reported_cost_is_kept_as_reported():
+    u = usage.from_envelope(
+        {"usage": {"input_tokens": 10, "output_tokens": 5}, "total_cost_usd": 0.42}
     )
-    pricing = usage.load_pricing(p)
-    assert pricing.cost(Usage(1_000_000, 1_000_000, None, "m1")) == 40.0
-    assert pricing.cost(Usage(1_000_000, 1_000_000, None, "unknown")) == 3.0
+    assert u.cost_usd == 0.42
 
 
-def test_a_reported_cost_is_never_overwritten_by_the_rate_table():
-    pricing = Pricing(models={}, default=Rate(1000.0, 1000.0))
-    assert Usage(10, 10, 0.42, "m").with_cost(pricing).cost_usd == 0.42
-
-
-def test_an_unreadable_rate_table_prices_at_zero_rather_than_raising(tmp_path):
-    """load_pricing runs in the app's lifespan, so anything it raises stops the
-    server — a hand-edited rate table must never be able to do that."""
-    bad = tmp_path / "pricing.yaml"
-    bad.write_text("[not, a, mapping]")
-    assert usage.load_pricing(bad).cost(Usage(1_000_000, 1_000_000)) == 0.0
-    assert usage.load_pricing(tmp_path / "missing.yaml") is usage.DEFAULT_PRICING
-
-    # `models:` as a list, a scalar, or with a junk entry among good ones
-    bad.write_text("models: [a, b]\ndefault: { input: 1.0, output: 2.0 }\n")
-    assert usage.load_pricing(bad).cost(Usage(1_000_000, 0)) == 1.0
-    bad.write_text("models: nope\ndefault: { input: 1.0, output: 2.0 }\n")
-    assert usage.load_pricing(bad).models == {}
-    bad.write_text(
-        "models:\n  ok: { input: 5.0, output: 5.0 }\n  junk: 3\n"
-        "default: { input: 1.0, output: 2.0 }\n"
-    )
-    priced = usage.load_pricing(bad)
-    assert set(priced.models) == {"ok"}
-
-
-def test_the_shipped_rate_table_parses():
-    pricing = usage.load_pricing("templates/pricing.yaml")
-    assert pricing.models and pricing.default.input > 0
+def test_tokens_without_a_reported_cost_stay_unpriced():
+    """Kraft has no rate table any more, on purpose: the agent knows what it was
+    billed and Kraft does not, so an unreported cost is None — never a guess and
+    never a zero."""
+    u = usage.from_envelope({"usage": {"input_tokens": 1_000_000, "output_tokens": 1_000_000}})
+    assert u.tokens_in == 1_000_000
+    assert u.cost_usd is None
+    assert not hasattr(usage, "load_pricing")
 
 
 # ── persistence and rollups ──────────────────────────────────────────────────
@@ -213,4 +189,44 @@ def test_rollup_of_an_item_with_no_sessions_is_empty_not_an_error(tmp_path):
         "sessions": 0,
         "capped_out": 0,
         "rounds": 0,
+        # nothing ran, so nothing is missing
+        "cost_complete": True,
     }
+
+
+def test_a_session_with_tokens_and_no_cost_marks_the_rollup_incomplete(tmp_path):
+    """Summing an unreported cost as zero would quietly under-report the bill —
+    the one thing a cost figure must not do. The rollup says the sum is a floor."""
+
+    async def scenario():
+        database = await db.Database.open(tmp_path / "orchestrator.db")
+        try:
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at) VALUES "
+                    "('w','t','/r','quick-task','{}','active','now','now')"
+                )
+            )
+            await database.write(
+                lambda c: _session(c, "priced", "verify", u=Usage(100, 10, 0.5, "m"))
+            )
+            # tokens, but the agent reported no cost
+            await database.write(
+                lambda c: _session(c, "unpriced", "verify", u=Usage(900, 90, None, "m"))
+            )
+            # no tokens at all — a subprocess task, not a gap in the billing
+            await database.write(lambda c: _session(c, "free", "env_setup"))
+            return database.read(lambda c: store.usage_rollup(c, "w"))
+        finally:
+            await database.close()
+
+    rollup = asyncio.run(scenario())
+    verify = next(n for n in rollup["by_node"] if n["node"] == "verify")
+    env = next(n for n in rollup["by_node"] if n["node"] == "env_setup")
+
+    assert verify["cost_usd"] == pytest.approx(0.5)  # the floor, not a guess
+    assert verify["cost_complete"] is False
+    assert verify["tokens_in"] == 1000  # tokens are still fully counted
+    assert env["cost_complete"] is True  # a task with no tokens owes nothing
+    assert rollup["total"]["cost_complete"] is False

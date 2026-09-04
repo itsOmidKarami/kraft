@@ -27,7 +27,6 @@ from kraft import config as config_mod
 from kraft import events, executor, reattach, store
 from kraft import logs as logs_mod
 from kraft import policy as policy_mod
-from kraft import usage as usage_mod
 from kraft.adapters import beads as beads_mod
 from kraft.db import Database
 from kraft.index import db as index_db
@@ -78,10 +77,6 @@ async def lifespan(app: FastAPI):
     registry = load_registry(templates_dir / "registry.yaml")
     templates = load_templates(templates_dir, registry)
 
-    # Rates only; a missing or malformed file prices work at zero rather than
-    # stopping it (kraft.usage.load_pricing).
-    pricing = usage_mod.load_pricing(templates_dir / "pricing.yaml")
-
     # Config the Settings screens edit. Read once here and re-read on every save,
     # so a hand edit and a UI edit are the same operation to the rest of the app.
     access = config_mod.load_access(templates_dir / "access.yaml")
@@ -110,7 +105,6 @@ async def lifespan(app: FastAPI):
                     adopted=adopted,
                     bd_cwd=_bd_cwd(),
                     policy=policy_obj,
-                    pricing=pricing,
                 ),
             ),
         )
@@ -120,7 +114,6 @@ async def lifespan(app: FastAPI):
     app.state.registry = registry
     app.state.templates = templates
     app.state.policy = policy_obj
-    app.state.pricing = pricing
     app.state.templates_dir = templates_dir
     app.state.access = access
     # What the server is really listening on. __main__ reads access.yaml for this,
@@ -305,7 +298,6 @@ async def create_work_item(body: NewWorkItem, request: Request):
                 registry=st.registry,
                 bd_cwd=_bd_cwd(),
                 policy=st.policy,
-                pricing=st.pricing,
             ),
         ),
     )
@@ -464,7 +456,6 @@ async def approve_gate(wid: str, gate: str, request: Request):
                 bd_cwd=_bd_cwd(),
                 start_index=start,
                 policy=st.policy,
-                pricing=st.pricing,
             ),
         ),
     )
@@ -560,7 +551,6 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
                 bd_cwd=_bd_cwd(),
                 start_index=start,
                 policy=st.policy,
-                pricing=st.pricing,
                 steer=steer,
             ),
         ),
@@ -620,7 +610,6 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                 bd_cwd=_bd_cwd(),
                 start_index=start,
                 policy=st.policy,
-                pricing=st.pricing,
                 steer=steer,
             ),
         ),
