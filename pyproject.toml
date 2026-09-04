@@ -30,7 +30,7 @@ where = ["src"]
 testpaths = ["tests"]
 markers = [
     "e2e: end-to-end tests needing a real claude binary (Chunk C)",
-    "slow: tests that take tens of seconds (reattach/shutdown)",
+    "slow: excluded from the blocking PR gate; run in the parallel slow-tests CI job (subprocess servers, real uvicorn, multi-second sleeps)",
 ]
 
 [tool.ruff]
