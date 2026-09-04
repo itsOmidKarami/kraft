@@ -25,12 +25,20 @@ dev = [
     "httpx>=0.28.1",
 ]
 
+[project.scripts]
+kraft = "kraft.cli:main"
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# Built SPA and default config, copied in by `just install`. Absent from a plain
+# checkout, so a build that skips that recipe ships an API with no UI.
+[tool.setuptools.package-data]
+kraft = ["_bundled/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

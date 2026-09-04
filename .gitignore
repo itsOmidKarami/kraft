@@ -10,6 +10,8 @@
 # Python build artifacts
 __pycache__/
 *.egg-info/
+dist/
+build/
 *.pyc
 .venv/
 .pytest_cache/
@@ -31,3 +33,7 @@ frontend/test-results/
 # versioned on purpose; this one holds a password hash and a bind address that
 # are per-machine, so it stays local.
 templates/access.yaml
+
+# Dev instance home (`just dev`) and the build outputs `just install` copies in
+.dev/
+src/kraft/_bundled/

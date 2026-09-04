@@ -16,6 +16,18 @@ if [ -n "${KRAFT_FAKE_CLAUDE_PROMPT_LOG:-}" ]; then
   done
 fi
 
+# Per-invocation failure. KRAFT_FAKE_CLAUDE is per-server, so it cannot make one
+# work item fail while its neighbours succeed; the instruction can. The seed
+# script puts KRAFT_FAIL in a work item title to drive the needs_human path.
+for arg in "$@"; do
+  case "$arg" in
+    *KRAFT_FAIL*) printf 'fake-claude: asked to fail\n' >&2; exit 3 ;;
+    # break: the title reaches this script twice (-p and --append-system-prompt),
+    # and sleeping once per copy doubles the delay the seed script waits on.
+    *KRAFT_SLOW*) sleep "${KRAFT_FAKE_CLAUDE_DELAY:-15}"; break ;;
+  esac
+done
+
 if [ "$mode" = "slow" ]; then
   sleep "${KRAFT_FAKE_CLAUDE_DELAY:-10}"
   mode="fix"
