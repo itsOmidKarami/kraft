@@ -77,11 +77,12 @@ def load_registry(path: str | Path, *, steering_dir: Path | None = None) -> Regi
 
         agent_only = ("profile", "model", "deny_tools", "steering")
         if kind == "agent":
+            profiles = _agent_profiles()
             profile = binding.get("profile", "claude")
-            if profile not in _agent_profiles():
+            if profile not in profiles:
                 raise RegistryError(
                     f"{path.name}: hook {hook!r} has unknown profile {profile!r}; "
-                    f"known: {sorted(_agent_profiles())}"
+                    f"known: {sorted(profiles)}"
                 )
             if binding.get("model") is not None and not isinstance(binding["model"], str):
                 raise RegistryError(f"{path.name}: hook {hook!r} 'model' must be a string")
@@ -102,6 +103,26 @@ def load_registry(path: str | Path, *, steering_dir: Path | None = None) -> Regi
                         f"{path.name}: hook {hook!r} is kind {kind!r}; {key!r} applies "
                         "only to an agent hook"
                     )
+
+        # Last, so the agent-only keys keep their own sharper message above: a
+        # key nobody reads is a setting that silently does nothing — a
+        # `deny_tool:` typo denies no tool and fails nowhere, the same failure
+        # an unknown *profile* is already rejected for.
+        known = {"kind", "handler"} if kind == "builtin" else {"kind", "command"}
+        # `interactive` is UI-facing rather than dispatch-facing (02 §13): the
+        # registry round-trips it through Settings today, ahead of the screen
+        # that will read it.
+        known |= {"interactive"}
+        if kind == "agent":
+            known |= set(agent_only)
+        if "interactive" in binding and not isinstance(binding["interactive"], bool):
+            raise RegistryError(f"{path.name}: hook {hook!r} 'interactive' must be a boolean")
+        unknown = sorted(set(binding) - known)
+        if unknown:
+            raise RegistryError(
+                f"{path.name}: hook {hook!r} has unknown key(s) {unknown}; "
+                f"a {kind} hook takes {sorted(known)}"
+            )
     return Registry(hooks=data["hooks"])
 
 

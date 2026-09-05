@@ -84,16 +84,22 @@ def validate(steering_dir: Path, names: list[str], *, where: str) -> None:
 def read(steering_dir: Path, names: list[str]) -> tuple[str, ...]:
     """Bodies for `names`, in order. Called at dispatch, after `validate`.
 
-    Assumes `validate` already passed for these names — it does no checking
-    of its own. A file deleted, chmod'd, corrupted, or grown past the budget
-    between validation (config load) and this call (dispatch) surfaces as a
-    raw `FileNotFoundError`/`OSError`/`UnicodeDecodeError`, not as a
-    `SteeringError`: a caller that only catches `SteeringError` around
-    dispatch will miss it.
+    Assumes `validate` already passed for these names — it does no checking of
+    its own. A file deleted, chmod'd or corrupted between validation (config
+    load) and this call (dispatch) is reported as a `SteeringError` naming the
+    file, so a caller catching `SteeringError` around dispatch sees it as the
+    steering problem it is rather than as a bare `FileNotFoundError` (Kraft-fza).
 
     The budget is a different story: this function does not measure it, but
     `resolve_invocation` re-checks the total over the concatenation it
     assembles, on every dispatch. A file that grew past the budget after
     `validate` ran is therefore still caught — at launch rather than at save.
     """
-    return tuple(_path(steering_dir, n, "steering").read_text() for n in names)
+    bodies: list[str] = []
+    for name in names:
+        path = _path(steering_dir, name, "steering")
+        try:
+            bodies.append(path.read_text())
+        except (OSError, ValueError) as exc:
+            raise SteeringError(f"steering: cannot read {name!r} at {path}: {exc}") from exc
+    return tuple(bodies)

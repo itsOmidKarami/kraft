@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 import shutil
 from pathlib import Path
 
 from kraft import store
 from kraft.adapters import subprocess as _subprocess
 from kraft.config import git_read
+
+logger = logging.getLogger(__name__)
 
 
 def _copy_attachments(repo: Path, worktree: Path, attachments: list[dict]) -> None:
@@ -57,6 +60,11 @@ async def env_setup(
     head = git_read(Path(repo), "rev-parse", "HEAD")
     if head:
         await db.write(lambda c: store.set_base_ref(c, work_item_id, head))
+    else:
+        # Without a base_ref the diff endpoint answers "no diff available" for
+        # the rest of the item's life; the reason belongs in the log rather
+        # than in a reviewer's guesswork.
+        logger.warning("no base_ref for %s: rev-parse HEAD failed in %s", work_item_id, repo)
     status = await _subprocess.run_task(
         db,
         run_dirs,

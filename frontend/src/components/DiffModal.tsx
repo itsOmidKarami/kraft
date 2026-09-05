@@ -66,8 +66,15 @@ export function DiffModal({
 
         {err && <p className="form-error">{err}</p>}
 
+        {/* Two different empty states: no base_ref was ever pinned (nothing to
+            diff against) versus a pinned base the worktree matches (a real,
+            answerable "nothing changed yet"). */}
         {diff && diff.diff === "" && diff.untracked.length === 0 && (
-          <p className="empty">No diff available for this work item yet.</p>
+          <p className="empty">
+            {diff.base_ref
+              ? "No changes yet — the worktree matches the base commit."
+              : "No diff available for this work item yet."}
+          </p>
         )}
 
         {diff && diff.files.length > 0 && (

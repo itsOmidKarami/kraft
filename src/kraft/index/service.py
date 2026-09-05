@@ -8,6 +8,7 @@ import os
 import sqlite3
 from pathlib import Path
 
+from kraft import config as config_mod
 from kraft import events
 from kraft.events import _now
 from kraft.index import ingest
@@ -39,11 +40,18 @@ class Indexer:
     targeted repo rescans on `work_item_completed`."""
 
     def __init__(
-        self, index_conn, state_db, *, repos_env: str | None = None, run_dirs=None
+        self,
+        index_conn,
+        state_db,
+        *,
+        repos_env: str | None = None,
+        run_dirs=None,
+        repos_path: Path | None = None,
     ) -> None:
         self._conn = index_conn
         self._state = state_db
         self._run_dirs = run_dirs
+        self._repos_path = repos_path
         self._repos_env = (
             repos_env if repos_env is not None else os.environ.get("KRAFT_INDEX_REPOS")
         )
@@ -66,7 +74,25 @@ class Indexer:
         }
         if self._repos_env:
             seen.update(p for p in self._repos_env.split(os.pathsep) if p)
+        seen.update(self._connected_repos())
         return sorted(p for p in seen if Path(p).is_dir())
+
+    def _connected_repos(self) -> list[str]:
+        """Repos connected through Settings (`repos.yaml`), read live because
+        that file is edited by the Settings screens while Kraft runs.
+
+        Degrades like `api._launch` rather than raising: a malformed file must
+        not take down a scan of the repos that are still fine. Steering is not
+        validated here — indexing has nothing to do with steering files.
+        """
+        if self._repos_path is None:
+            return []
+        try:
+            repos = config_mod.load_repos(self._repos_path, validate_steering=False)
+        except (config_mod.ConfigError, OSError) as exc:
+            logger.warning("repo config unreadable, indexing without it: %s", exc)
+            return []
+        return [r["path"] for r in repos]
 
     # ---- ingestion ----
 
@@ -76,6 +102,12 @@ class Indexer:
         # index connection. Fine while ingestion is small and low-QPS; move
         # behind a writer queue if a large-repo scan ever stalls the loop.
         return ingest.reconcile(self._conn, repo, scanned, embedder=self._embedder)
+
+    def purge_repo(self, repo: str) -> ingest.ReconcileStats:
+        """Drop every indexed document for `repo` — a disconnected repo must
+        stop answering searches. Reconciling against an empty scan is the same
+        delete path a vanished file already takes."""
+        return ingest.reconcile(self._conn, repo, [], embedder=self._embedder)
 
     async def rescan_all(self) -> dict[str, ingest.ReconcileStats]:
         repos = self.repos()
