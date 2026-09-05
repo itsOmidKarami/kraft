@@ -14,7 +14,7 @@ import yaml
 from fastapi.testclient import TestClient
 from support.harness import fake_templates_dir, isolated_bd, make_repo
 
-from kraft import config
+from kraft import auth, config
 
 
 def _client(tmp_path, monkeypatch, templates_dir, *, host: str | None = None):
@@ -395,3 +395,38 @@ def test_a_failed_write_does_not_sign_everyone_out(tmp_path, monkeypatch, templa
         # session itself is what must survive)
         assert [s["id"] for s in client.get("/sessions").json()["sessions"]] == before
         assert client.get("/work-items").status_code == 200
+
+
+def test_a_bearer_token_authenticates_where_a_cookie_would(tmp_path, monkeypatch, templates_dir):
+    """`kraft mcp` has no cookie jar. The token file is its credential (design §5)."""
+    with _client(tmp_path, monkeypatch, templates_dir, host="0.0.0.0") as client:
+        assert (
+            client.put("/access", json={"bind": "0.0.0.0", "password": "hunter2"}).status_code
+            == 200
+        )
+        client.cookies.clear()
+        assert client.get("/work-items").status_code == 401
+
+        token = auth.read_mcp_token(tmp_path / "run")
+        assert token, "serving should have created the token file"
+        assert (
+            client.get("/work-items", headers={"Authorization": f"Bearer {token}"}).status_code
+            == 200
+        )
+        assert (
+            client.get("/work-items", headers={"Authorization": "Bearer wrong"}).status_code == 401
+        )
+        # a bare token without the scheme is not a credential
+        assert client.get("/work-items", headers={"Authorization": token}).status_code == 401
+
+
+def test_a_document_navigation_cannot_slip_past_the_bearer_check(
+    tmp_path, monkeypatch, templates_dir
+):
+    """The SPA-shell branch runs first, so it must not become an auth bypass for
+    JSON: with no dist configured there is no shell, and the request still 401s."""
+    with _client(tmp_path, monkeypatch, templates_dir, host="0.0.0.0") as client:
+        client.put("/access", json={"bind": "0.0.0.0", "password": "hunter2"})
+        client.cookies.clear()
+        r = client.get("/work-items", headers={"sec-fetch-dest": "document"})
+        assert r.status_code == 401
