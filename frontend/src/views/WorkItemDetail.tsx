@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { ChatText, Pause, Prohibit } from "@phosphor-icons/react";
+import { ChatText, FolderOpen, Pause, Prohibit } from "@phosphor-icons/react";
 import * as api from "../api";
 import { CappedCard } from "../components/CappedCard";
 import { CurrentNodePanel } from "../components/CurrentNodePanel";
@@ -13,6 +13,13 @@ import { ChainBar, Row, RowState, RowText, StatusGlyph, Tabs } from "../componen
 import { elapsed, repoName, statusWord, tokens, usd } from "../format";
 import { useStore } from "../store";
 import type { KraftEvent, WorkItem } from "../types";
+
+/** Whether this browser is on the machine Kraft runs on. Loopback is the one
+ * origin that cannot be remote, and the worktree path only means something to
+ * a machine that has it — so "Open worktree" is offered here and nowhere else. */
+function onServerMachine(): boolean {
+  return ["localhost", "127.0.0.1", "[::1]", "::1"].includes(window.location.hostname);
+}
 
 /** How long the current node has been running, from its last node_started. */
 function nodeRuntime(events: KraftEvent[], nodeId: string | null): string | null {
@@ -123,6 +130,8 @@ export function WorkItemDetail() {
   // state, which is exactly how a shell-cached deep link presented itself.
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [showDiff, setShowDiff] = useState(false);
+  const [worktreeErr, setWorktreeErr] = useState<string | null>(null);
+  const local = onServerMachine();
 
   useEffect(() => {
     if (item?.status === "paused") setPausing(false);
@@ -311,13 +320,32 @@ export function WorkItemDetail() {
         </div>
       )}
 
-      {/* Reachable at any status/gate: the one review path the Gate artifact
-          doesn't already cover for `human_review_approval`. */}
-      {gate !== "human_review_approval" && (
+      {/* "Review changes" is reachable at any status/gate: the one review path
+          the Gate artifact doesn't already cover for `human_review_approval`.
+          "Open worktree" sits next to it (sub-project A spec §4) and only on
+          the server's own machine — the path is a local one. */}
+      {(gate !== "human_review_approval" || local) && (
         <div className="control-row">
-          <button className="btn btn-secondary" onClick={() => setShowDiff(true)}>
-            Review changes
-          </button>
+          {gate !== "human_review_approval" && (
+            <button className="btn btn-secondary" onClick={() => setShowDiff(true)}>
+              Review changes
+            </button>
+          )}
+          {local && (
+            <button
+              className="btn btn-ghost"
+              onClick={() =>
+                api.openWorktree(item.id).then(
+                  () => setWorktreeErr(null),
+                  (e) => setWorktreeErr(e instanceof Error ? e.message : String(e)),
+                )
+              }
+            >
+              <FolderOpen size={14} />
+              Open worktree
+            </button>
+          )}
+          {worktreeErr && <span className="control-hint">{worktreeErr}</span>}
         </div>
       )}
 

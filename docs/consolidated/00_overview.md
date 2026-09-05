@@ -113,7 +113,7 @@ deliberate, surfaced outcome.
 | **`root_merge_policy`** | `bump` / `skip` / `bump_no_mr` — whether and how the superproject's submodule pointers are updated once submodule MRs merge. |
 | **`needs_human`** | Work-item status covering both a scheduled-gate wait and a cap breach — a clear "stopped, waiting on you" state, never a silent failure. |
 | **`capped_out`** | Worker-session terminal status: this task hit its retry/wall-clock cap while siblings ran to completion. Distinct from `failed`. |
-| **Context-injection boundary** | The rule that process/steering context reaches agents only via per-invocation system-prompt / MCP config, never via `CLAUDE.md`, `AGENTS.md`, or any repo file. |
+| **Context-injection boundary** | The rule that process/steering context reaches agents only via per-invocation system-prompt / MCP config, never via `CLAUDE.md`, `AGENTS.md`, or any repo file. The rule governs the *channel*, not the existence of standards: authored steering files under `$KRAFT_HOME/templates/steering/` are Kraft-owned and injected through the system prompt, which is why they are allowed where a repo file is not (`kraft/steering.py`). |
 
 ---
 

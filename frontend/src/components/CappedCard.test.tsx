@@ -64,6 +64,27 @@ describe("CappedCard", () => {
     expect(screen.getByText(/on\.test\.run never went clean/)).toBeInTheDocument();
   });
 
+  it("calls a crash a crash, not a loop that needs a steer (Kraft-esc)", () => {
+    render(
+      <CappedCard
+        item={
+          {
+            ...item,
+            cappedOut: undefined,
+            stop_reason: "executor crashed: RuntimeError('boom')",
+          } as WorkItem
+        }
+        sessions={sessions}
+        events={events}
+      />,
+    );
+    expect(screen.getByText(/Kraft crashed while running this node/)).toBeInTheDocument();
+    expect(screen.queryByText(/needs a steer/)).toBeNull();
+    expect(screen.getByText(/RuntimeError/)).toBeInTheDocument();
+    // still the one way forward, crash or not
+    expect(screen.getByRole("button", { name: /steer and retry/i })).toBeInTheDocument();
+  });
+
   it("traces every cycle and links each to the session that measured it", async () => {
     renderCard();
     const rows = screen.getAllByText(/^cycle \d$/);

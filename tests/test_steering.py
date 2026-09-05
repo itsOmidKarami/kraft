@@ -74,3 +74,13 @@ def test_validate_accepts_a_total_exactly_at_the_budget(tmp_path):
     body = "x" * (steering.MAX_BYTES - steering._OVERHEAD)
     d = _dir(tmp_path, {"a": body})
     steering.validate(d, ["a"], where="x")
+
+
+def test_read_reports_a_file_deleted_after_validation_as_a_steering_error(tmp_path):
+    """Kraft-fza: validate runs at config load, read runs at dispatch, and the
+    file can go away in between. The dispatch path catches SteeringError, so a
+    bare FileNotFoundError would arrive as an unrelated crash."""
+    d = _dir(tmp_path, {"a": "alpha"})
+    (d / "a.md").unlink()
+    with pytest.raises(steering.SteeringError, match="cannot read 'a'"):
+        steering.read(d, ["a"])

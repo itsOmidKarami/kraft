@@ -787,6 +787,56 @@ def test_concerns_reach_the_detail_payload(tmp_path, monkeypatch):
         assert body["concerns"] == ["untested path"]
 
 
+def test_stop_reason_reaches_the_detail_payload(tmp_path, monkeypatch):
+    """Kraft-esc: the screen has to tell a loop escalation from a crash that
+    happened to stop the item on a fix-loop node, and the reason is the only
+    thing that distinguishes them."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/work-items",
+            json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+        ).json()["id"]
+        assert client.get(f"/work-items/{wid}").json()["stop_reason"] is None
+
+        _seed_events(
+            client,
+            wid,
+            [{"node_id": "verify", "reason": "executor crashed: RuntimeError('boom')"}],
+            event_type="work_item_needs_human",
+        )
+        body = client.get(f"/work-items/{wid}").json()
+        assert body["stop_reason"] == "executor crashed: RuntimeError('boom')"
+
+
+def test_concerns_stop_at_the_gate_that_answered_them(tmp_path, monkeypatch):
+    """Kraft-ub2: a concern belongs to the *next* gate. Once a gate is resolved,
+    concerns raised before it must not be re-posed at every later gate — only
+    what a session reported since then."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/work-items",
+            json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+        ).json()["id"]
+        _seed_events(
+            client,
+            wid,
+            [{"session_id": "s1", "status": "done_with_concerns", "concerns": "old worry"}],
+            event_type="worker_session_exited",
+        )
+        _seed_events(client, wid, [{"gate": "spec_approval"}], event_type="gate_approved")
+        assert client.get(f"/work-items/{wid}").json()["concerns"] == []
+
+        _seed_events(
+            client,
+            wid,
+            [{"session_id": "s2", "status": "done_with_concerns", "concerns": "new worry"}],
+            event_type="worker_session_exited",
+        )
+        assert client.get(f"/work-items/{wid}").json()["concerns"] == ["new worry"]
+
+
 def test_needs_context_question_reaches_the_detail_payload(tmp_path, monkeypatch):
     """The agent's question, end to end: fake-claude writes it to the result
     file, the executor folds it into the `needs_context: <question>` reason

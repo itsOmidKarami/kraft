@@ -122,6 +122,23 @@ def test_load_registry_ok(tmp_path):
     assert set(reg.hooks) == {"on.env.prepare", "on.implementation.start", "on.test.run"}
 
 
+def test_load_registry_rejects_an_unknown_key(tmp_path):
+    """A misspelt key would configure nothing and fail nowhere — the same
+    failure an unknown profile is already rejected for (Kraft-fza)."""
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.x: { kind: agent, command: claude, deny_tool: Bash }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="deny_tool"):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+    # and the agent-only keys stay rejected on other kinds, by their own message
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.x: { kind: subprocess, command: [pytest], model: opus }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="only to an agent hook"):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
 @pytest.mark.parametrize(
     "body",
     [

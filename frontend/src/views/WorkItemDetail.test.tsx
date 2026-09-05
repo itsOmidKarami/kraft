@@ -212,6 +212,23 @@ describe("WorkItemDetail", () => {
     expect(button.closest(".desktop-only")).toBeNull();
   });
 
+  it("opens the worktree from the control row (Kraft-kmq)", async () => {
+    const spy = vi
+      .spyOn(api, "openWorktree")
+      .mockResolvedValue({ path: "/run/worktrees/w1", editor: "code" });
+    renderDetail();
+    // jsdom serves the app from localhost, i.e. the server's own machine.
+    await userEvent.click(screen.getByRole("button", { name: /open worktree/i }));
+    expect(spy).toHaveBeenCalledWith("w1");
+  });
+
+  it("says so when the server cannot open the worktree", async () => {
+    vi.spyOn(api, "openWorktree").mockRejectedValue(new Error("no worktree yet"));
+    renderDetail();
+    await userEvent.click(screen.getByRole("button", { name: /open worktree/i }));
+    expect(await screen.findByText("no worktree yet")).toBeInTheDocument();
+  });
+
   it("offers a diff from the control row too, reachable from a phone", () => {
     renderDetail();
     const button = screen.getByRole("button", { name: /review changes/i });
