@@ -112,7 +112,7 @@ describe("IntakeModal", () => {
     const probe = vi.spyOn(api, "probeRepo").mockResolvedValue({
       path: "/r", name: "r", branch: "main", submodules: [], has_beads: true,
       beads_export_auto: true, beads_export_git_add: true, has_engineering: true,
-      test_command: null, gitlab_project: null,
+      test_command: null, forge: null, project: null,
     });
     render(
       <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -129,7 +129,7 @@ describe("IntakeModal", () => {
     vi.spyOn(api, "probeRepo").mockResolvedValue({
       path: "/r", name: "r", branch: "main", submodules: ["libs/a", "libs/b"],
       has_beads: true, beads_export_auto: true, beads_export_git_add: true,
-      has_engineering: true, test_command: null, gitlab_project: null,
+      has_engineering: true, test_command: null, forge: null, project: null,
     });
     const create = vi.spyOn(api, "createWorkItem").mockResolvedValue({ id: "w9" });
     render(

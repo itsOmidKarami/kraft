@@ -330,6 +330,19 @@ def create_session(
     )
 
 
+def sessions_for_round(
+    conn: sqlite3.Connection, work_item_id: str, node_id: str, round: int
+) -> list[sqlite3.Row]:
+    """Every session this node ran in one fix cycle — the round's result files."""
+    return list(
+        conn.execute(
+            "SELECT * FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
+            "AND round = ? ORDER BY created_at",
+            (work_item_id, node_id, round),
+        )
+    )
+
+
 def session_running(conn: sqlite3.Connection, session_id, pid, pid_start_time) -> None:
     # `status != 'paused'`: a pause that landed while this session was still
     # pending must not be undone by the launch finishing.
@@ -526,6 +539,19 @@ def set_steer(conn: sqlite3.Connection, work_item_id: str, text: str) -> None:
         (text, _now(), work_item_id),
     )
     events.append(conn, work_item_id, "steer_context_set", {"steer": text})
+
+
+def set_base_ref(conn: sqlite3.Connection, work_item_id: str, sha: str) -> None:
+    """Pin the commit a work item's diff is measured against.
+
+    Written once, when the worktree is created. A merge-base recomputed later
+    moves when the default branch moves, and a diff that changes under an
+    unchanged work item is worse than no diff.
+    """
+    conn.execute(
+        "UPDATE work_items SET base_ref = ?, updated_at = ? WHERE id = ?",
+        (sha, _now(), work_item_id),
+    )
 
 
 def take_steer(conn: sqlite3.Connection, work_item_id: str) -> str | None:

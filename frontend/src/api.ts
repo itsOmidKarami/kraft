@@ -17,6 +17,7 @@ import type {
   TemplateSummary,
   TemplateValidation,
   WorkItem,
+  WorkItemDiff,
   WorkItemDocument,
   WorkerSession,
 } from "./types";
@@ -141,6 +142,9 @@ export const getWorkItemDocuments = (id: string) =>
   req<{ work_item_id: string; documents: WorkItemDocument[] }>(
     `/work-items/${encodeURIComponent(id)}/documents`,
   );
+
+export const getWorkItemDiff = (id: string) =>
+  req<WorkItemDiff>(`/work-items/${id}/diff`);
 
 /* ── settings (design 5a–5e) ─────────────────────────────────────────────── */
 

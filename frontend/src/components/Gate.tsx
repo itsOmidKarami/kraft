@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { Check, Flag } from "@phosphor-icons/react";
 import * as api from "../api";
-import type { WorkItem } from "../types";
+import type { Finding, WorkItem } from "../types";
 
 /**
  * The gate prompt, in the two places a gate is offered: the board's inline row
@@ -29,6 +30,7 @@ export function Gate({
   variant = "card",
   sub,
   artifact,
+  deferred,
 }: {
   item: WorkItem;
   gate: string;
@@ -37,6 +39,8 @@ export function Gate({
   sub?: ReactNode;
   /** The one linked artifact the decision is about (the plan, the spec, the MR). */
   artifact?: ReactNode;
+  /** Findings that never entered the fix loop — the human triages them here. */
+  deferred?: Finding[];
 }) {
   const [rejecting, setRejecting] = useState(false);
   const [note, setNote] = useState("");
@@ -95,6 +99,24 @@ export function Gate({
   );
 
   if (variant === "inline") {
+    // The board's inline row has nowhere to show the deferred-minor-findings
+    // roll-up (detail-only, see WorkItem.deferred_findings) — approving here
+    // would be the blind approval spec §2 calls a silent discard. Route
+    // through the detail view instead of rendering Approve at all, rather
+    // than fetching a count for every gated row just to badge it.
+    if (gate === "human_review_approval") {
+      return (
+        <div className="gate-inline" data-gate={gate}>
+          <span className="gate-name" title={gate}>
+            <Flag size={13} />
+            approve the merge request
+          </span>
+          <Link className="btn btn-secondary" to={`/work-items/${item.id}`}>
+            Review to approve
+          </Link>
+        </div>
+      );
+    }
     return (
       <div className="gate-inline" data-gate={gate}>
         {!rejecting ? (
@@ -133,6 +155,17 @@ export function Gate({
         </div>
       </div>
       {artifact}
+      {deferred && deferred.length > 0 && (
+        <ul className="gate-deferred">
+          {deferred.map((f) => (
+            <li key={`${f.source_plugin}:${f.file}:${f.message}`}>
+              <span className="field-hint">{f.severity}</span>{" "}
+              <span className="mono">{f.file ? `${f.file}:${f.line ?? "?"}` : "—"}</span>{" "}
+              {f.message}
+            </li>
+          ))}
+        </ul>
+      )}
       {!rejecting ? (
         <div className="gate-actions">
           {approve}

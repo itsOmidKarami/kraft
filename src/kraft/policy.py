@@ -6,9 +6,14 @@ from pathlib import Path
 
 import yaml
 
+from kraft.findings import SEVERITIES
+
 
 class PolicyError(Exception):
     pass
+
+
+DEFAULT_LOOP_SEVERITIES = frozenset({"critical", "important"})
 
 
 @dataclass(frozen=True)
@@ -21,6 +26,7 @@ class Cap:
 class Policy:
     loops: dict[str, Cap]
     default: Cap
+    loop_severities: frozenset[str] = DEFAULT_LOOP_SEVERITIES
 
 
 def _cap(name: str, raw: object) -> Cap:
@@ -50,7 +56,22 @@ def load_policy(path: str | Path) -> Policy:
     if not isinstance(loops_raw, dict):
         raise PolicyError(f"{path.name}: 'loops' must be a mapping")
     loops = {k: _cap(f"loops.{k}", v) for k, v in loops_raw.items()}
-    return Policy(loops=loops, default=_cap("default", data["default"]))
+    findings_raw = data.get("findings") or {}
+    if not isinstance(findings_raw, dict):
+        raise PolicyError(f"{path.name}: 'findings' must be a mapping")
+    sev_raw = findings_raw.get("loop_severities")
+    if sev_raw is None:
+        severities = DEFAULT_LOOP_SEVERITIES
+    else:
+        if not isinstance(sev_raw, list):
+            raise PolicyError(f"{path.name}: 'findings.loop_severities' must be a list")
+        unknown = [s for s in sev_raw if s not in SEVERITIES]
+        if unknown:
+            raise PolicyError(
+                f"{path.name}: unknown severity {unknown[0]!r}; expected one of {SEVERITIES}"
+            )
+        severities = frozenset(sev_raw)
+    return Policy(loops=loops, default=_cap("default", data["default"]), loop_severities=severities)
 
 
 def resolve_cap(policy: Policy, key: str) -> Cap:

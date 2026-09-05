@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import time
 from pathlib import Path
 
@@ -12,6 +13,8 @@ from support.harness import (
     make_repo,
     make_repo_with_engineering,
 )
+
+from kraft import events
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
@@ -56,6 +59,20 @@ def _await_gate(client, wid, gate, timeout=30):
             return item
         time.sleep(0.2)
     raise AssertionError(f"{gate} never became pending; item={item.get('pending_gate')!r}")
+
+
+def _seed_events(client, wid, payloads):
+    """Write `findings_measured` events directly — no orchestration needed to
+    test a read path. `Database` exposes only an async `write`, so this opens
+    its own sqlite3 connection to the run directory's database."""
+    db_path = Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        for payload in payloads:
+            events.append(conn, wid, "findings_measured", payload)
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def test_health_ok_and_degraded(tmp_path, monkeypatch):
@@ -706,3 +723,32 @@ def test_intake_accepts_an_uncommitted_attachment(tmp_path, monkeypatch):
             },
         )
         assert r.status_code == 201, r.text
+
+
+def test_deferred_minor_findings_reach_the_detail_payload(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/work-items",
+            json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+        ).json()["id"]
+        nit = {
+            "severity": "minor",
+            "message": "naming nit",
+            "file": "a.py",
+            "line": 3,
+            "source_plugin": "fake",
+        }
+        real = {
+            "severity": "important",
+            "message": "real",
+            "file": "a.py",
+            "line": 9,
+            "source_plugin": "fake",
+        }
+        payload = {"node_id": "review", "cycle": 0, "findings": [nit, real], "fingerprints": []}
+        # twice: the roll-up must deduplicate by fingerprint
+        _seed_events(client, wid, [payload, payload])
+
+        body = client.get(f"/work-items/{wid}").json()
+        assert [f["message"] for f in body["deferred_findings"]] == ["naming nit"]

@@ -1,0 +1,201 @@
+"""GET /work-items/{wid}/diff — the review surface at a human gate.
+
+The pair that matters here is empty-vs-broken: a reviewer who cannot tell an
+empty diff from a failed one approves unreviewed code.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import sqlite3
+import subprocess
+import time
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+from support.harness import fake_templates_dir, isolated_bd, make_repo
+
+from kraft.paths import RunDirs
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
+
+
+def _write(path, text):
+    path.write_text(text)
+
+
+def _make_client(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))))
+    monkeypatch.setenv(
+        "KRAFT_FRONTEND_DIST", os.environ.get("KRAFT_FRONTEND_DIST") or str(tmp_path / "no-dist")
+    )
+    import kraft.api as api
+
+    return TestClient(api.app)
+
+
+def _wait_for_completion(client, wid, timeout=120):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        evs = client.get(f"/work-items/{wid}/events").json()
+        if any(e["type"] == "work_item_completed" for e in evs):
+            return
+        time.sleep(0.2)
+    raise AssertionError("work item never completed")
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    with _make_client(tmp_path, monkeypatch) as c:
+        yield c
+
+
+@pytest.fixture
+def seeded_item(client, tmp_path):
+    """A completed quick-task work item with a real worktree and a stamped base_ref.
+
+    The real chain leaves two artifacts behind that carry no review signal: the
+    `verify` node's `python -m pytest` run drops a `.pytest_cache/`, and the
+    agent adapter writes a `.engineering/sessions/*.md` summary per session (04
+    §6). The cache dir is pure noise, so it is swept here; the session summary
+    is real, untracked content and is left for the endpoint to report.
+    """
+    repo = make_repo(tmp_path)
+    wid = client.post(
+        "/work-items",
+        json={"repo": str(repo), "title": "make it pass", "chain_template": "quick-task"},
+    ).json()["id"]
+    _wait_for_completion(client, wid)
+    worktree = Path(client.get(f"/work-items/{wid}").json()["worktree_path"])
+    shutil.rmtree(worktree / ".pytest_cache", ignore_errors=True)
+    return wid
+
+
+@pytest.fixture
+def worktree(client, seeded_item):
+    return Path(client.get(f"/work-items/{seeded_item}").json()["worktree_path"])
+
+
+@pytest.fixture
+def item_without_base_ref(client, seeded_item, tmp_path):
+    """`seeded_item`, but with base_ref cleared: the null-base_ref state."""
+    db_path = RunDirs(tmp_path / "run").db
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("UPDATE work_items SET base_ref = NULL WHERE id = ?", (seeded_item,))
+    conn.commit()
+    conn.close()
+    return seeded_item
+
+
+def test_diff_shows_committed_and_uncommitted_changes(client, seeded_item, worktree):
+    _write(worktree / "calc.py", "committed\n")
+    subprocess.run(["git", "add", "-A"], cwd=worktree, check=True)
+    subprocess.run(["git", "commit", "-m", "c"], cwd=worktree, check=True)
+    _write(worktree / "calc.py", "committed\nuncommitted\n")
+
+    body = client.get(f"/work-items/{seeded_item}/diff").json()
+    assert "committed" in body["diff"]
+    assert "uncommitted" in body["diff"]
+    # not files[0]: the real chain's own session summary (.engineering/...) is
+    # also a genuine tracked change here, and sorts before "calc.py".
+    assert "calc.py" in {f["path"] for f in body["files"]}
+    assert body["truncated"] is False
+
+
+def test_diff_lists_untracked_without_adding_them(client, seeded_item, worktree):
+    _write(worktree / "new_file.py", "x = 1\n")
+    body = client.get(f"/work-items/{seeded_item}/diff").json()
+    # not equality: the real agent's own .engineering/sessions/*.md summary is
+    # also legitimately untracked at this point.
+    assert "new_file.py" in body["untracked"]
+    assert "new_file.py" not in body["diff"]
+    staged = subprocess.run(
+        ["git", "diff", "--cached", "--name-only"], cwd=worktree, capture_output=True, text=True
+    )
+    assert staged.stdout.strip() == ""  # read-only: nothing was staged
+
+
+def test_diff_lists_untracked_files_inside_a_new_directory(client, seeded_item, worktree):
+    # `git status --porcelain` collapses an entirely-new directory to one
+    # `?? sub/` line unless asked for `-uall`; a new module directory must
+    # show every file it added, not one path standing in for both.
+    (worktree / "sub").mkdir()
+    _write(worktree / "sub" / "a.py", "a = 1\n")
+    _write(worktree / "sub" / "b.py", "b = 1\n")
+    body = client.get(f"/work-items/{seeded_item}/diff").json()
+    assert "sub/a.py" in body["untracked"]
+    assert "sub/b.py" in body["untracked"]
+    assert "sub/" not in body["untracked"]
+
+
+def test_diff_with_null_base_ref_is_empty_not_an_error(client, item_without_base_ref):
+    r = client.get(f"/work-items/{item_without_base_ref}/diff")
+    assert r.status_code == 200
+    assert r.json()["base_ref"] is None
+    assert r.json()["diff"] == ""
+
+
+def test_diff_404s_on_unknown_work_item(client):
+    assert client.get("/work-items/nope/diff").status_code == 404
+
+
+def test_diff_404s_when_the_worktree_is_gone(client, seeded_item, worktree):
+    shutil.rmtree(worktree)
+    assert client.get(f"/work-items/{seeded_item}/diff").status_code == 404
+
+
+def test_diff_500s_when_git_fails_rather_than_returning_empty(client, seeded_item, worktree):
+    # A worktree whose git metadata is broken: present on disk, unusable to git.
+    (worktree / ".git").unlink()
+    (worktree / ".git").mkdir()
+    r = client.get(f"/work-items/{seeded_item}/diff")
+    assert r.status_code == 500
+    assert r.json().get("detail")
+
+
+def test_diff_truncates_at_a_file_boundary(client, seeded_item, worktree, monkeypatch):
+    import kraft.api as api_mod
+
+    monkeypatch.setattr(api_mod, "DIFF_MAX_BYTES", 200)
+    for i in range(20):
+        _write(worktree / f"f{i}.py", "x = 1\n" * 100)
+    subprocess.run(["git", "add", "-A"], cwd=worktree, check=True)
+
+    body = client.get(f"/work-items/{seeded_item}/diff").json()
+    assert body["truncated"] is True
+    # the file list is never truncated: all 20 new files are accounted for,
+    # alongside the real chain's own calc.py and .engineering changes.
+    paths = {f["path"] for f in body["files"]}
+    assert {f"f{i}.py" for i in range(20)} <= paths
+    assert not body["diff"].rstrip().endswith("x = 1")  # cut between files, not mid-hunk
+
+
+def test_truncate_bounds_a_single_file_bigger_than_the_cap():
+    # `kept` is empty on the very first chunk regardless of its size, so a
+    # lone oversized file must not be returned whole just because there was
+    # no earlier chunk to compare it against.
+    from kraft.api import _truncate_at_file_boundary
+
+    diff = "diff --git a/big.bin b/big.bin\n" + ("x" * 50 + "\n") * 20
+    assert len(diff.encode()) > 200
+
+    result, truncated = _truncate_at_file_boundary(diff, 200)
+    assert truncated is True
+    assert len(result.encode()) <= 200
+
+
+def test_diff_degrades_gracefully_when_base_ref_is_null_and_worktree_is_gone(
+    client, item_without_base_ref, worktree
+):
+    # The null-base_ref population is exactly the pre-migration items, which
+    # are also the likeliest to have had their worktree cleaned up: this must
+    # still read as "no diff", not a 404.
+    shutil.rmtree(worktree)
+    r = client.get(f"/work-items/{item_without_base_ref}/diff")
+    assert r.status_code == 200
+    assert r.json()["base_ref"] is None

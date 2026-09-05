@@ -5,6 +5,7 @@ from pathlib import Path
 
 from kraft import store
 from kraft.adapters import subprocess as _subprocess
+from kraft.config import git_read
 
 
 def _copy_attachments(repo: Path, worktree: Path, attachments: list[dict]) -> None:
@@ -51,6 +52,11 @@ async def env_setup(
         # idempotent: a prior (crashed) run already created the worktree, and
         # with it any attachment copies.
         return "done"
+    # Pin the base *before* the worktree exists, so the early return above
+    # guarantees a crashed-and-retried run never re-pins to a moved HEAD.
+    head = git_read(Path(repo), "rev-parse", "HEAD")
+    if head:
+        await db.write(lambda c: store.set_base_ref(c, work_item_id, head))
     status = await _subprocess.run_task(
         db,
         run_dirs,
