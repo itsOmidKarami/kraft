@@ -37,7 +37,10 @@ def read_yaml(path: str | Path, default: dict | None = None) -> dict:
         return dict(default or {})
     try:
         data = yaml.safe_load(path.read_text())
-    except (OSError, yaml.YAMLError) as exc:
+    # ValueError covers the UnicodeDecodeError `read_text()` raises on a file
+    # with invalid bytes: not an OSError, and not a yaml.YAMLError, so without
+    # it a broken config crashes startup instead of being reported as broken.
+    except (OSError, ValueError, yaml.YAMLError) as exc:
         raise ConfigError(f"{path.name}: cannot read/parse: {exc}") from exc
     if data is None:
         return dict(default or {})
@@ -259,3 +262,19 @@ def load_access(path: str | Path) -> dict:
 
 def save_access(path: str | Path, access: dict) -> None:
     write_yaml(path, {k: access.get(k, v) for k, v in ACCESS_DEFAULT.items()})
+
+
+# ── auto-intake ──────────────────────────────────────────────────────────────
+
+INTAKE_DEFAULT: dict = {
+    "enabled": False,
+    "interval_s": 300,
+    "max_concurrent": 1,
+    "repos": [],
+    "priority_ceiling": 2,
+}
+
+
+def load_intake(path: str | Path) -> dict:
+    """`intake.yaml`, with every missing key defaulted. A missing file is off."""
+    return {**INTAKE_DEFAULT, **read_yaml(path, INTAKE_DEFAULT)}

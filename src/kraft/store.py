@@ -153,13 +153,22 @@ def complete_node(conn: sqlite3.Connection, work_item_id, node_id) -> None:
 
 
 def mark_needs_human(
-    conn: sqlite3.Connection, work_item_id, node_id, reason, capped: dict | None = None
+    conn: sqlite3.Connection,
+    work_item_id,
+    node_id,
+    reason,
+    capped: dict | None = None,
+    budget: dict | None = None,
 ) -> None:
     """`capped` carries {cycles, attempts} when a loop cap is what stopped the item.
 
     The UI shows capped-out as a glyph *plus* the words "capped n/n", and the
     board never fetches sessions per row — so the numbers have to ride the
     event rather than be re-derived client-side.
+
+    `budget` carries {scope, spent_usd, cap_usd} when a spend cap is what stopped
+    the item: the card shows the figures and the board never fetches sessions per
+    row, so the numbers ride the event for the same reason.
     """
     conn.execute(
         "UPDATE work_items SET status = 'needs_human', updated_at = ? WHERE id = ?",
@@ -168,6 +177,8 @@ def mark_needs_human(
     payload = {"node_id": node_id, "reason": reason}
     if capped is not None:
         payload["capped"] = capped
+    if budget is not None:
+        payload["budget"] = budget
     events.append(conn, work_item_id, "work_item_needs_human", payload)
 
 
@@ -594,3 +605,46 @@ def resume_work_item(conn: sqlite3.Connection, work_item_id: str, steer: str | N
         (_now(), work_item_id),
     )
     events.append(conn, work_item_id, "work_item_resumed", {"steer": steer})
+
+
+def local_midnight_utc(now: datetime | None = None) -> str:
+    """Midnight of `now`'s own day, in `now`'s own zone, as a UTC ISO string.
+
+    "Daily" means the operator's day, not UTC's — a cap that rolls over at 5pm
+    local is a cap nobody can reason about. Normalized to UTC on the way out so
+    it compares as a string against the `created_at` values `_now()` writes.
+
+    ponytail: the offset is the one in force *now*, not the one in force at
+    midnight, so on a DST-transition day the window starts an hour early or
+    late. A spend cap does not care; if something here ever does, resolve the
+    offset at the midnight instant instead.
+    """
+    now = now or datetime.now().astimezone()
+    return now.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC).isoformat()
+
+
+def budget_spend(
+    conn: sqlite3.Connection, work_item_id: str, *, since: str | None = None
+) -> tuple[float, float]:
+    """`(spent on this work item, spent instance-wide since `since`)`, in dollars.
+
+    A query, not a counter: `worker_sessions.cost_usd` is already the source of
+    truth and a parallel counter is a second thing to get wrong. A NULL
+    `cost_usd` — a session still running, or a subprocess or builtin task that
+    has no cost — contributes zero, so this is a floor on in-flight spend by
+    construction.
+    """
+    item = conn.execute(
+        "SELECT COALESCE(SUM(cost_usd), 0.0) FROM worker_sessions WHERE work_item_id = ?",
+        (work_item_id,),
+    ).fetchone()[0]
+    if since is None:
+        daily = conn.execute("SELECT COALESCE(SUM(cost_usd), 0.0) FROM worker_sessions").fetchone()[
+            0
+        ]
+    else:
+        daily = conn.execute(
+            "SELECT COALESCE(SUM(cost_usd), 0.0) FROM worker_sessions WHERE created_at >= ?",
+            (since,),
+        ).fetchone()[0]
+    return float(item), float(daily)

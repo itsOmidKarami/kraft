@@ -53,3 +53,32 @@ def test_search_degrades_when_bd_is_missing(tmp_path, monkeypatch):
     not a 500 out of GET /beads/search."""
     monkeypatch.setenv("PATH", str(tmp_path / "empty"))
     assert asyncio.run(beads.search("anything")) == []
+
+
+def test_ready_returns_open_beads_with_int_priorities(tmp_path):
+    repo = isolated_bd(tmp_path)
+    bid = asyncio.run(beads.intake("pick me up", cwd=str(repo)))
+    rows = asyncio.run(beads.ready(cwd=str(repo)))
+    row = next(r for r in rows if r["id"] == bid)
+    assert isinstance(row["priority"], int)
+    assert row["title"] == "pick me up"
+
+
+def test_ready_is_best_effort_on_a_directory_with_no_beads(tmp_path):
+    """A poller that raises kills its own task; an empty list is the honest answer."""
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert asyncio.run(beads.ready(cwd=str(plain))) == []
+
+
+def test_ready_is_best_effort_when_bd_emits_undecodable_bytes(tmp_path, monkeypatch):
+    """`subprocess.run(text=True)` decodes stdout as UTF-8 and raises
+    `UnicodeDecodeError` on bytes that are not; the poller's caller must still
+    get a list."""
+    stub_dir = tmp_path / "bin"
+    stub_dir.mkdir()
+    bd = stub_dir / "bd"
+    bd.write_text('#!/bin/sh\nprintf "[\\377\\376]"\n')
+    bd.chmod(0o755)
+    monkeypatch.setenv("PATH", str(stub_dir))
+    assert asyncio.run(beads.ready(cwd=str(tmp_path))) == []

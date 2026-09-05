@@ -9,3 +9,11 @@ default:             { attempts: 3, wall_clock_s: 3600 }
 # discard, so they are rendered there, not merely stored.
 findings:
   loop_severities: [critical, important]
+
+# Spend caps, in dollars, both off by default. A cap refuses to START the next
+# agent task; it cannot interrupt one that is already running, because the agent
+# CLI only reports its cost when the session exits. Overshoot is bounded by the
+# cost of one task, not by the cap.
+budget:
+  work_item_usd: null   # per work item, across every loop in its chain
+  daily_usd: null       # every work item on this instance, since local midnight

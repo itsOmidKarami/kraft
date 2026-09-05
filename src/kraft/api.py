@@ -27,6 +27,7 @@ from kraft import analytics as analytics_mod
 from kraft import auth as auth_mod
 from kraft import config as config_mod
 from kraft import events, executor, findings, reattach, store
+from kraft import intake as intake_mod
 from kraft import logs as logs_mod
 from kraft import policy as policy_mod
 from kraft.adapters import beads as beads_mod
@@ -92,6 +93,13 @@ async def lifespan(app: FastAPI):
     # Config the Settings screens edit. Read once here and re-read on every save,
     # so a hand edit and a UI edit are the same operation to the rest of the app.
     access = config_mod.load_access(templates_dir / "access.yaml")
+    # No Settings screen edits this file by design, so a hand-edit typo has no UI
+    # to fix it from. Degrade to the default — off — instead of refusing to boot.
+    try:
+        app.state.intake = config_mod.load_intake(templates_dir / "intake.yaml")
+    except config_mod.ConfigError as exc:
+        logger.warning("intake.yaml is unreadable, auto-intake stays off: %s", exc)
+        app.state.intake = dict(config_mod.INTAKE_DEFAULT)
 
     policy_obj = None
     invalid_policy: list[str] = []
@@ -159,6 +167,15 @@ async def lifespan(app: FastAPI):
     await broadcaster.start()
     database.set_on_commit(lambda: (broadcaster.notify(), indexer.notify()))
     app.state.broadcaster = broadcaster
+    # Off by default costs nothing at all: no task, no timer, no tick. On
+    # `app.state` as well as in a local because that is the only way a test can
+    # tell "no poller was created" from "a poller was created and did nothing" —
+    # deleting the condition would otherwise leave every test green while a
+    # disabled instance grew a live timer.
+    intake_task = (
+        asyncio.ensure_future(intake_mod.poller(app)) if app.state.intake["enabled"] else None
+    )
+    app.state.intake_task = intake_task
     try:
         yield
     finally:
@@ -166,6 +183,11 @@ async def lifespan(app: FastAPI):
         await broadcaster.stop()
         await indexer.stop()
         index_conn.close()
+        # Before the work item tasks, so a tick in flight cannot _spawn one
+        # into the list that is about to be cancelled.
+        if intake_task is not None:
+            intake_task.cancel()
+            await asyncio.gather(intake_task, return_exceptions=True)
         tasks = list(app.state.tasks.values())
         for task in tasks:
             task.cancel()
@@ -1503,6 +1525,7 @@ class PolicyBody(BaseModel):
     loops: dict
     default: dict
     findings: dict | None = None
+    budget: dict | None = None
 
 
 @app.get("/policy")
@@ -1519,6 +1542,8 @@ async def put_policy(body: PolicyBody, request: Request):
     data = {"loops": body.loops, "default": body.default}
     if body.findings is not None:
         data["findings"] = body.findings
+    if body.budget is not None:
+        data["budget"] = body.budget
     with tempfile.TemporaryDirectory() as tmp:
         candidate = Path(tmp) / "policy.yaml"
         candidate.write_text(yaml.safe_dump(data))
