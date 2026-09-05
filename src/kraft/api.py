@@ -409,6 +409,39 @@ def _pending_gate(st, wid: str) -> str | None:
     return None
 
 
+#: The event types that bound a `work_item_needs_human` stop, newest wins —
+#: the same shape of boundary `_pending_gate` models. A stop needs one because
+#: `store.request_gate` also sets status 'needs_human' while appending no
+#: `work_item_needs_human`: without this set a first-match scan reads an
+#: answered-and-resumed stop, or a pending gate, as a live one forever.
+_STOP_BOUNDARY = (
+    "work_item_needs_human",
+    "gate_requested",
+    "gate_rejected",
+    "work_item_resumed",
+    "work_item_retried",
+    "work_item_completed",
+)
+
+
+def _stop_reason(st, wid: str) -> str | None:
+    """The reason of the stop the item is *currently* sitting on, or None if
+    anything in `_STOP_BOUNDARY` superseded it."""
+    for e in reversed(st.db.read(lambda c: events.read_after(c, 0, wid))):
+        if e["type"] in _STOP_BOUNDARY:
+            return e["payload"]["reason"] if e["type"] == "work_item_needs_human" else None
+    return None
+
+
+def _needs_context_stop(st, wid: str) -> bool:
+    """True iff the item's current stop is a `needs_context` — a
+    `work_item_needs_human` reason of the form `needs_context: <question>`
+    (executor._needs_context_question). Answerable via /steer and /resume the
+    same as a pause, unlike any other needs_human reason."""
+    reason = _stop_reason(st, wid)
+    return reason is not None and reason.startswith("needs_context:")
+
+
 def _gate_node_index(chain: dict, gate: str) -> int:
     return next(i for i, n in enumerate(chain["nodes"]) if n.get("gate_after") == gate)
 
@@ -502,6 +535,35 @@ def _deferred_findings(st, wid: str) -> list[dict]:
     return list(seen.values())
 
 
+def _concerns(st, wid: str) -> list[str]:
+    """`done_with_concerns` text from every session that reported one, oldest
+    first — the same shape of thing as `_deferred_findings` (something a
+    machine noticed and owes a human before approval), read from the event log
+    `adapters.subprocess.run_task` stamps at session exit, never from
+    `result_path` on disk.
+    """
+    return [
+        e["payload"]["concerns"]
+        for e in st.db.read(lambda c: events.read_after(c, 0, wid))
+        if e["type"] == "worker_session_exited" and e["payload"].get("concerns")
+    ]
+
+
+def _needs_context_question(st, wid: str) -> str | None:
+    """The agent's question, straight from the `needs_context: <question>`
+    reason `_needs_context_stop` already trusts — not a scan of
+    `worker_session_exited.question` events, which has no boundary at the
+    triggering stop: a later needs_context whose result file omitted the
+    field would otherwise resurface an earlier, already-answered question
+    instead of falling through to `executor._needs_context_question`'s own
+    `"(no question given)"` guard, which the reason string always carries.
+    """
+    reason = _stop_reason(st, wid)
+    if reason is None or not reason.startswith("needs_context:"):
+        return None
+    return reason.removeprefix("needs_context: ")
+
+
 @app.get("/work-items/{wid}")
 async def get_work_item(wid: str, request: Request):
     st = request.app.state
@@ -526,6 +588,8 @@ async def get_work_item(wid: str, request: Request):
         # rejection, and offers Approve on a gate the API will 409 (Kraft).
         "pending_gate": _pending_gate(st, wid),
         "deferred_findings": _deferred_findings(st, wid),
+        "concerns": _concerns(st, wid),
+        "needs_context_question": _needs_context_question(st, wid),
     }
 
 
@@ -786,7 +850,9 @@ async def pause_work_item(wid: str, request: Request):
 async def steer_work_item(wid: str, body: Steer, request: Request):
     st = request.app.state
     row = _work_item_row(st, wid)
-    if row["status"] != "paused":
+    if row["status"] != "paused" and not (
+        row["status"] == "needs_human" and _needs_context_stop(st, wid)
+    ):
         raise HTTPException(409, "work item is not paused")
     text = body.text.strip()
     if not text:
@@ -800,7 +866,9 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
     """Relaunch the paused node, carrying the steer into the next agent launch."""
     st = request.app.state
     row = _work_item_row(st, wid)
-    if row["status"] != "paused":
+    if row["status"] != "paused" and not (
+        row["status"] == "needs_human" and _needs_context_stop(st, wid)
+    ):
         raise HTTPException(409, "work item is not paused")
     if body.steer and body.steer.strip():
         await st.db.write(lambda c: store.set_steer(c, wid, body.steer.strip()))

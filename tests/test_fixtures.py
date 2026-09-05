@@ -50,6 +50,48 @@ def test_slow_mode_delays(tmp_path):
     assert json.loads(proc.stdout.strip().splitlines()[-1])["is_error"] is False
 
 
+def test_status_defaults_to_done(tmp_path):
+    """No knob set: every existing caller must see today's behaviour unchanged."""
+    (tmp_path / "calc.py").write_text("def add(a, b):\n    return a - b\n")
+    proc = _run(tmp_path, {"KRAFT_FAKE_CLAUDE": "fix"})
+    assert proc.returncode == 0
+    assert json.loads((tmp_path / "result.json").read_text()) == {"status": "done"}
+
+
+def test_status_knob_reports_done_with_concerns_and_the_concerns_text(tmp_path):
+    (tmp_path / "calc.py").write_text("def add(a, b):\n    return a - b\n")
+    proc = _run(
+        tmp_path,
+        {
+            "KRAFT_FAKE_CLAUDE": "noop",
+            "KRAFT_FAKE_CLAUDE_STATUS": "done_with_concerns",
+            "KRAFT_FAKE_CLAUDE_CONCERNS": "tests were flaky",
+        },
+    )
+    assert proc.returncode == 0
+    assert json.loads((tmp_path / "result.json").read_text()) == {
+        "status": "done_with_concerns",
+        "concerns": "tests were flaky",
+    }
+
+
+def test_status_knob_reports_needs_context_and_the_question_text(tmp_path):
+    (tmp_path / "calc.py").write_text("def add(a, b):\n    return a - b\n")
+    proc = _run(
+        tmp_path,
+        {
+            "KRAFT_FAKE_CLAUDE": "noop",
+            "KRAFT_FAKE_CLAUDE_STATUS": "needs_context",
+            "KRAFT_FAKE_CLAUDE_QUESTION": "which repo?",
+        },
+    )
+    assert proc.returncode == 0
+    assert json.loads((tmp_path / "result.json").read_text()) == {
+        "status": "needs_context",
+        "question": "which repo?",
+    }
+
+
 def test_fix_mode_writes_session_summary_from_injected_context(tmp_path):
     """fake-claude obeys the 04 §6 summary instructions the agent adapter injects."""
     (tmp_path / "calc.py").write_text("def add(a, b):\n    return a - b\n")

@@ -31,6 +31,7 @@ export function Gate({
   sub,
   artifact,
   deferred,
+  concerns,
 }: {
   item: WorkItem;
   gate: string;
@@ -41,6 +42,9 @@ export function Gate({
   artifact?: ReactNode;
   /** Findings that never entered the fix loop — the human triages them here. */
   deferred?: Finding[];
+  /** `done_with_concerns` text from sessions along the way — same shape of
+   *  thing as `deferred`, so it shares the one panel rather than a second. */
+  concerns?: string[];
 }) {
   const [rejecting, setRejecting] = useState(false);
   const [note, setNote] = useState("");
@@ -155,9 +159,14 @@ export function Gate({
         </div>
       </div>
       {artifact}
-      {deferred && deferred.length > 0 && (
+      {((deferred && deferred.length > 0) || (concerns && concerns.length > 0)) && (
         <ul className="gate-deferred">
-          {deferred.map((f) => (
+          {concerns?.map((c, i) => (
+            <li key={`concern:${i}`}>
+              <span className="field-hint">concern</span> {c}
+            </li>
+          ))}
+          {deferred?.map((f) => (
             <li key={`${f.source_plugin}:${f.file}:${f.message}`}>
               <span className="field-hint">{f.severity}</span>{" "}
               <span className="mono">{f.file ? `${f.file}:${f.line ?? "?"}` : "—"}</span>{" "}

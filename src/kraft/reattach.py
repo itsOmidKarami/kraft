@@ -8,7 +8,12 @@ from pathlib import Path
 import psutil
 
 from kraft import store
-from kraft.adapters.subprocess import _resolve_result_file, read_summary_ref
+from kraft.adapters.subprocess import (
+    _resolve_result_file,
+    read_concerns,
+    read_question,
+    read_summary_ref,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +49,23 @@ def _identity_ok(pid: int, pid_start_time) -> bool:
         return False
 
 
+async def _exit_from_file(db, session_id: str, result_path: Path, status: str) -> None:
+    """Record a session exit from what it left on disk, carrying every field
+    `adapters.subprocess.run_task` carries — `concerns` and `question` reach the
+    gate and the needs_context stop only through this event, so a restart that
+    dropped them would lose what the worker reported."""
+    await db.write(
+        lambda c: store.session_exited(
+            c,
+            session_id,
+            status,
+            read_summary_ref(result_path),
+            concerns=read_concerns(result_path),
+            question=read_question(result_path),
+        )
+    )
+
+
 async def _adopt(db, session_id: str, pid: int, poll_s: float = 0.5) -> None:
     while _pid_alive(pid):
         await asyncio.sleep(poll_s)
@@ -53,9 +75,7 @@ async def _adopt(db, session_id: str, pid: int, poll_s: float = 0.5) -> None:
         ).fetchone()
     )
     result_path = Path(row["result_path"])
-    status = _resolve_file(result_path) or "failed"
-    ref = read_summary_ref(result_path)
-    await db.write(lambda c: store.session_exited(c, session_id, status, ref))
+    await _exit_from_file(db, session_id, result_path, _resolve_file(result_path) or "failed")
 
 
 async def reattach(db, run_dirs, registry) -> tuple[ReattachSummary, dict[str, asyncio.Task]]:
@@ -92,10 +112,7 @@ async def reattach(db, run_dirs, registry) -> tuple[ReattachSummary, dict[str, a
         status = _resolve_file(Path(r["result_path"]))
         if status is not None:
             await db.write(lambda c, sid=sid: store.session_reattached(c, sid))
-            ref = read_summary_ref(Path(r["result_path"]))
-            await db.write(
-                lambda c, sid=sid, status=status, ref=ref: store.session_exited(c, sid, status, ref)
-            )
+            await _exit_from_file(db, sid, Path(r["result_path"]), status)
             summary.resolved_from_file.append(sid)
         else:
             await db.write(lambda c, sid=sid: store.session_unknown(c, sid))

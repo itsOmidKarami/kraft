@@ -18,6 +18,10 @@ function detailOf(e: KraftEvent): string | null {
   const p = e.payload as Record<string, unknown>;
   if (e.type === "gate_rejected" && typeof p.note === "string") return p.note;
   if (e.type === "work_item_needs_human" && typeof p.reason === "string") return p.reason;
+  // Concerns reach the UI only through the gate panel, so a chain with no
+  // review gate stored them and showed them nowhere; the timeline is the one
+  // surface every chain has.
+  if (e.type === "worker_session_exited" && typeof p.concerns === "string") return p.concerns;
   if (e.type === "fix_cycle_started" && Array.isArray(p.failed_tasks)) {
     return `cycle ${p.cycle}: ${(p.failed_tasks as string[]).join(", ")}`;
   }

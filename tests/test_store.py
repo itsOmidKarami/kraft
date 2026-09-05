@@ -144,6 +144,101 @@ def test_mark_sessions_capped_out_scoped_to_measuring_hook_points(tmp_path):
     asyncio.run(scenario())
 
 
+def test_done_with_concerns_is_not_capped_out_by_a_sibling_breach(tmp_path):
+    """A `done_with_concerns` session on a capping node keeps its status and text;
+    only the still-pending sibling that actually breached becomes capped_out."""
+
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await _mk_item(database)
+            for sid, hook in (("concerns", "on.test.run"), ("pending", "on.test.run")):
+                await database.write(
+                    lambda c, sid=sid, hook=hook: store.create_session(
+                        c,
+                        id=sid,
+                        work_item_id="w1",
+                        node_id="verify",
+                        hook_point=hook,
+                        log_path="/l",
+                        result_path="/r",
+                    )
+                )
+            await database.write(
+                lambda c: store.session_exited(c, "concerns", "done_with_concerns")
+            )
+            await database.write(
+                lambda c: store.mark_sessions_capped_out(c, "w1", "verify", ["on.test.run"])
+            )
+            rows = database.read(
+                lambda c: c.execute(
+                    "SELECT id, status FROM worker_sessions WHERE work_item_id='w1'"
+                ).fetchall()
+            )
+            status = {r["id"]: r["status"] for r in rows}
+            assert status == {"concerns": "done_with_concerns", "pending": "capped_out"}
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_session_exited_carries_concerns_and_question_on_the_event(tmp_path):
+    """The result file's free text is the only channel these two fields have —
+    there is no `concerns` column (Task 1's migration deliberately adds none) —
+    so `session_exited` must stamp them onto `worker_session_exited` itself,
+    where `GET /work-items/{wid}` can read them back without touching disk."""
+
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await _mk_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s-concerns",
+                    work_item_id="w1",
+                    node_id="verify",
+                    hook_point="on.test.run",
+                    log_path="/l",
+                    result_path="/r",
+                )
+            )
+            await database.write(
+                lambda c: store.session_exited(
+                    c, "s-concerns", "done_with_concerns", concerns="the retry path is untested"
+                )
+            )
+            ev = database.read(lambda c: events.read_after(c, 0, "w1"))[-1]
+            assert ev["type"] == "worker_session_exited"
+            assert ev["payload"]["concerns"] == "the retry path is untested"
+            assert "question" not in ev["payload"]
+
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s-question",
+                    work_item_id="w1",
+                    node_id="verify",
+                    hook_point="on.test.run",
+                    log_path="/l",
+                    result_path="/r",
+                )
+            )
+            await database.write(
+                lambda c: store.session_exited(
+                    c, "s-question", "needs_context", question="which branch is the target?"
+                )
+            )
+            ev2 = database.read(lambda c: events.read_after(c, 0, "w1"))[-1]
+            assert ev2["payload"]["question"] == "which branch is the target?"
+            assert "concerns" not in ev2["payload"]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 def test_mark_needs_human_and_completed(tmp_path):
     async def scenario():
         database = await _open(tmp_path)
