@@ -14,6 +14,8 @@ import psutil
 from kraft import logs, store
 from kraft import usage as _usage
 
+_AGENT_STATUSES = ("done", "failed", "done_with_concerns", "needs_context")
+
 
 def _resolve_result_file(path: Path) -> str | None:
     """Status from a result file alone, or None if it's missing/empty."""
@@ -21,7 +23,10 @@ def _resolve_result_file(path: Path) -> str | None:
         return None
     try:
         raw = path.read_text().strip()
-    except OSError:
+    except OSError, UnicodeDecodeError:
+        # UnicodeDecodeError is a ValueError, not an OSError: a plugin that died
+        # mid-write leaves bytes that are not valid UTF-8, and reading them must
+        # fail the session rather than escape as a raw traceback.
         return "failed"
     if not raw:
         return None
@@ -30,19 +35,42 @@ def _resolve_result_file(path: Path) -> str | None:
     except json.JSONDecodeError:
         return "failed"
     status = data.get("status") if isinstance(data, dict) else None
-    return status if status in ("done", "failed") else "failed"
+    # An unrecognized status still resolves to failed: an agent inventing a status
+    # is a broken agent, and guessing at its intent is worse than failing the session.
+    return status if status in _AGENT_STATUSES else "failed"
+
+
+def _read_str_field(path: Path, key: str) -> str | None:
+    """A string `key` from a result file's JSON, or None if it's missing/unreadable.
+
+    Catches OSError, ValueError rather than json.JSONDecodeError alone: a
+    non-UTF-8 result file raises UnicodeDecodeError from read_text(), which is a
+    ValueError, not caught by `except OSError`. That exact clause has been wrong
+    three times in this codebase already.
+    """
+    try:
+        data = json.loads(path.read_text())
+    except OSError, ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    value = data.get(key)
+    return value if isinstance(value, str) and value else None
 
 
 def read_summary_ref(path: Path) -> str | None:
     """`session_summary_ref` from a result file, or None (03 §3)."""
-    try:
-        data = json.loads(path.read_text())
-    except OSError, json.JSONDecodeError:
-        return None
-    if not isinstance(data, dict):
-        return None
-    ref = data.get("session_summary_ref")
-    return ref if isinstance(ref, str) and ref else None
+    return _read_str_field(path, "session_summary_ref")
+
+
+def read_concerns(path: Path) -> str | None:
+    """`concerns` from a `done_with_concerns` result file, or None."""
+    return _read_str_field(path, "concerns")
+
+
+def read_question(path: Path) -> str | None:
+    """`question` from a `needs_context` result file, or None."""
+    return _read_str_field(path, "question")
 
 
 def _watch_log(
@@ -171,6 +199,15 @@ async def run_task(
     if await db.write(lambda c: store.session_status(c, session_id)) == "paused":
         return "paused"
     summary_ref = read_summary_ref(result_path)
+    # Read unconditionally, same as summary_ref: each returns None when the
+    # result file doesn't carry that field, so a "failed" or "done" exit here
+    # costs nothing extra.
+    concerns = read_concerns(result_path)
+    question = read_question(result_path)
     seen = _usage.read(log_path, result_path)
-    await db.write(lambda c: store.session_exited(c, session_id, status, summary_ref, seen))
+    await db.write(
+        lambda c: store.session_exited(
+            c, session_id, status, summary_ref, seen, concerns=concerns, question=question
+        )
+    )
     return status

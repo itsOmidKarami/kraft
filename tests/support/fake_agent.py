@@ -5,6 +5,14 @@ CWD is the worktree. Mode via KRAFT_FAKE_AGENT: fix (default) | noop | error.
 Obeys the session-summary instructions in the injected context (03 §3, 04 §6):
 reads the linkage fields back out of the prompt, writes
 .engineering/sessions/<session>.md, and reports session_summary_ref.
+
+The reported `status` defaults to "done". KRAFT_FAKE_AGENT_STATUS overrides it
+for every invocation; KRAFT_FAKE_AGENT_CONCERNS / KRAFT_FAKE_AGENT_QUESTION set
+the field that goes with `done_with_concerns` / `needs_context`. For per-cycle
+scripting, KRAFT_FAKE_AGENT_PLAN points at a JSON file the same shape as
+tests/support/fake_reviewer.py's plan: a list of per-invocation
+`{"status": ..., "concerns": ..., "question": ...}` entries (a plan entry wins
+over the single-shot env vars when both are set).
 """
 
 import json
@@ -56,6 +64,22 @@ def _record_prompt(argv: list[str]) -> None:
             return
 
 
+def _plan_entry() -> dict:
+    """Per-invocation `{"status": ..., "concerns": ..., "question": ...}` from
+    KRAFT_FAKE_AGENT_PLAN, following tests/support/fake_reviewer.py's mechanism:
+    a JSON list of responses plus a sidecar invocation counter, because
+    run_task passes no round number into the child. Empty dict if unset."""
+    plan_env = os.environ.get("KRAFT_FAKE_AGENT_PLAN")
+    if not plan_env:
+        return {}
+    plan_path = pathlib.Path(plan_env)
+    plan = json.loads(plan_path.read_text())
+    counter = plan_path.with_suffix(".count")
+    n = int(counter.read_text()) if counter.exists() else 0
+    counter.write_text(str(n + 1))
+    return plan[min(n, len(plan) - 1)]
+
+
 def _record_argv(argv: list[str]) -> None:
     """Append the full argv (JSON, one line) to KRAFT_FAKE_AGENT_ARGV_LOG, so a
     test can assert on flags -p doesn't cover, like --model."""
@@ -76,7 +100,18 @@ def main() -> int:
     result_path = os.environ.get("KRAFT_RESULT_PATH")
     if mode != "error" and result_path:
         ref = _write_summary(_ctx_fields(sys.argv))
-        result = {"status": "done"}
+        entry = _plan_entry()
+        # KRAFT_FAKE_AGENT_STATUS/_CONCERNS/_QUESTION are the single-shot knobs;
+        # a plan entry (per invocation) overrides them when present. Default
+        # stays "done" so every test that sets neither is unaffected.
+        status = entry.get("status") or os.environ.get("KRAFT_FAKE_AGENT_STATUS", "done")
+        result = {"status": status}
+        concerns = entry.get("concerns") or os.environ.get("KRAFT_FAKE_AGENT_CONCERNS")
+        if concerns:
+            result["concerns"] = concerns
+        question = entry.get("question") or os.environ.get("KRAFT_FAKE_AGENT_QUESTION")
+        if question:
+            result["question"] = question
         if ref:
             result["session_summary_ref"] = ref
         # Lets a test pin that the fix task's own result never leaks into the

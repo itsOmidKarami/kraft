@@ -34,6 +34,12 @@ _FIX_REPEAT_NOTE = (
     "still reports it. Do not repeat the same approach."
 )
 
+#: Handed to fix cycle N > 1: cycle N-1's own result file, by path, not by
+#: content -- pasting the file costs tokens on every cycle of every work item,
+#: and the agent can already read a path itself (spec §4).
+_FIX_PREVIOUS_RESULT = "\n\nYour previous attempt's result file is at {result_path}."
+_FIX_PREVIOUS_SUMMARY = " Its session summary is at {summary_ref}."
+
 
 def _format_findings(found: list[_findings.Finding], repeats: set[str]) -> str:
     lines = []
@@ -48,6 +54,11 @@ def _format_findings(found: list[_findings.Finding], repeats: set[str]) -> str:
 # prepended to the next agent launch. It leads because it is the reason this task is
 # running again.
 _STEER_PROMPT = "A human has steered this run: {steer}\n\n"
+
+#: Statuses that let the chain advance. `done_with_concerns` is deliberately
+#: here: the agent finished the work — its doubts are information for the human
+#: at the next gate, not a control-flow change.
+_ADVANCING = ("done", "done_with_concerns")
 
 # What an agent is told about documents attached at intake. It follows the title
 # because the title is the task and these are how it was already decided.
@@ -258,7 +269,9 @@ async def _measure_node(
     if any(r == "paused" for r in results):
         return "paused", [], []
     failed = [
-        tasks[i] for i, r in enumerate(results) if isinstance(r, BaseException) or r == "failed"
+        tasks[i]
+        for i, r in enumerate(results)
+        if isinstance(r, BaseException) or r in ("failed", "needs_context")
     ]
     excs = [r for r in results if isinstance(r, BaseException)]
     for exc in excs:
@@ -290,6 +303,67 @@ def _collect_findings(db, work_item_id: str, node: dict, round: int):
             reported.add(hook)
         found.extend(parsed)
     return found, reported
+
+
+def _needs_context_question(db, work_item_id: str, node: dict, round: int) -> str | None:
+    """The question from a `needs_context` row in this round, or None.
+
+    Same latest-row-per-hook-point read as `_collect_findings` (a resume or
+    `/retry` re-enters at round 0 with stale rows still sitting there, so a
+    first-match scan could re-stop the item on a historical row forever) but
+    deliberately NOT its `row["hook_point"] in node["tasks"]` filter: the fix
+    task (`on.implementation.start`) is dispatched with this same round, and
+    including it is exactly how a fix task's own `needs_context` is meant to
+    surface, one iteration later.
+    """
+    rows = db.read(lambda c: store.sessions_for_round(c, work_item_id, node["id"], round))
+    latest: dict[str, sqlite3.Row] = {}
+    for row in rows:
+        latest[row["hook_point"]] = row  # ordered by created_at, so last wins
+    for row in latest.values():
+        if row["status"] == "needs_context":
+            return _subprocess.read_question(Path(row["result_path"])) or "(no question given)"
+    return None
+
+
+def _previous_fix_session(db, work_item_id: str, node_id: str) -> sqlite3.Row | None:
+    """The most recently dispatched fix task for this node, or None if none
+    has run yet.
+
+    Deliberately NOT scoped to a `round` passed in by the caller: `round` is
+    `_walk_node`'s own local counter, reset to 0 on every fresh entry into that
+    function -- a resume/crash-recovery re-entry, or a `/retry` that deletes
+    the `retry_counters` row so the next `bump_counter` restarts at 1 -- while
+    the persisted `worker_sessions` rows from before that re-entry are still in
+    the table. A lookup keyed on the caller's local round can collide with an
+    abandoned attempt that happens to land on the same round number after a
+    retry (worse than nothing: it hands over a plausible-looking file from a
+    cycle that was already exhausted), or, on a fresh round-0 re-entry, miss
+    every previous attempt outright. Ordering by `created_at` and taking the
+    last row sidesteps both: whichever fix task actually ran most recently for
+    this node is always the right one to hand forward, regardless of what
+    round it or the caller's local counter think they're at.
+    """
+    rows = db.read(
+        lambda c: c.execute(
+            "SELECT * FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
+            "AND hook_point = 'on.implementation.start' ORDER BY created_at",
+            (work_item_id, node_id),
+        ).fetchall()
+    )
+    return rows[-1] if rows else None
+
+
+def _previous_attempt_note(previous_fix: sqlite3.Row | None) -> str:
+    """The fix-prompt addendum for `_previous_fix_session`'s return, or "" if
+    there was no previous attempt. A plain function so the no-summary branch
+    is testable without driving a session through the executor."""
+    if previous_fix is None:
+        return ""
+    note = _FIX_PREVIOUS_RESULT.format(result_path=previous_fix["result_path"])
+    if previous_fix["session_summary_ref"]:
+        note += _FIX_PREVIOUS_SUMMARY.format(summary_ref=previous_fix["session_summary_ref"])
+    return note
 
 
 def _previous_fingerprints(db, work_item_id: str, node_id: str) -> list[str] | None:
@@ -351,9 +425,13 @@ async def _walk_node(
         if verdict == "paused":
             return "paused"
         if verdict == "failed":
-            reason = f"task failed in node {node['id']}: {', '.join(failed)}"
-            if excs:
-                reason += f" ({', '.join(repr(e) for e in excs)})"
+            question = _needs_context_question(db, work_item_id, node, round=0)
+            if question is not None:
+                reason = f"needs_context: {question}"
+            else:
+                reason = f"task failed in node {node['id']}: {', '.join(failed)}"
+                if excs:
+                    reason += f" ({', '.join(repr(e) for e in excs)})"
             await db.write(lambda c: store.mark_needs_human(c, work_item_id, node["id"], reason))
             return "needs_human"
         await db.write(lambda c: store.complete_node(c, work_item_id, node["id"]))
@@ -409,6 +487,19 @@ async def _walk_node(
             await db.write(lambda c: store.complete_node(c, work_item_id, node["id"]))
             return "ok"
 
+        # Checked before bump_counter, not after: the counter is bumped to
+        # dispatch the fix task, so only a *measuring* task's needs_context can
+        # land here without ever consuming a cycle. A needs_context from the
+        # fix task itself surfaces on the next iteration's measure, at which
+        # point the cycle it belongs to has already been bumped.
+        question = _needs_context_question(db, work_item_id, node, round)
+        if question is not None:
+            reason = f"needs_context: {question}"
+            await db.write(
+                lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node["id"], reason)
+            )
+            return "needs_human"
+
         # bump_counter returns the cap snapshotted on the row (spec §2.C: written
         # once at first fire, not re-resolved per attempt). Across a restart with
         # an edited policy.yaml, `cap` here is the freshly-resolved one; the row's
@@ -450,6 +541,7 @@ async def _walk_node(
             instruction += _FIX_FINDINGS.format(findings=_format_findings(eligible, repeats))
             if repeats & set(prints):
                 instruction += _FIX_REPEAT_NOTE
+        instruction += _previous_attempt_note(_previous_fix_session(db, work_item_id, node["id"]))
         fix = await _dispatch(
             db,
             run_dirs,
@@ -628,7 +720,7 @@ async def _reconcile_current_node(
     # node (fewer sessions than tasks, none failed) -> needs_human, no partial
     # re-dispatch. Upgrade with per-task session reconciliation if multi-task
     # nodes ship.
-    if len(final) == len(node["tasks"]) and all(r["status"] == "done" for r in final):
+    if len(final) == len(node["tasks"]) and all(r["status"] in _ADVANCING for r in final):
         await db.write(lambda c: store.complete_node(c, work_item_id, node_id))
         return "ok"
     await db.write(

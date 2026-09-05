@@ -71,6 +71,28 @@ describe("Gate", () => {
     expect(container.querySelector(".gate-deferred")).toBeNull();
   });
 
+  it("shows concerns at the review gate, in the same panel as deferred findings", () => {
+    render(
+      <Gate
+        item={item}
+        gate="human_review_approval"
+        deferred={deferred}
+        concerns={["the retry path is untested"]}
+      />,
+    );
+    expect(screen.getByText(/the retry path is untested/)).toBeInTheDocument();
+    expect(screen.getByText(/naming nit/)).toBeInTheDocument();
+    // one panel, not two competing ones
+    expect(document.querySelectorAll(".gate-deferred")).toHaveLength(1);
+  });
+
+  it("renders no list when there are no findings and no concerns", () => {
+    const { container } = render(
+      <Gate item={item} gate="human_review_approval" deferred={[]} concerns={[]} />,
+    );
+    expect(container.querySelector(".gate-deferred")).toBeNull();
+  });
+
   it("suppresses Approve inline for human_review_approval and links to the detail view instead", () => {
     render(
       <MemoryRouter>

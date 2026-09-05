@@ -47,6 +47,71 @@ def test_resolve_non_empty_non_conforming_file_is_failed(tmp_path):
     assert _resolve(nondict, 0) == "failed"
 
 
+def test_result_file_can_report_done_with_concerns(tmp_path):
+    from kraft.adapters.subprocess import _resolve
+
+    path = tmp_path / "result.json"
+    path.write_text(json.dumps({"status": "done_with_concerns", "concerns": "untested path"}))
+    assert _resolve(path, 0) == "done_with_concerns"
+
+
+def test_result_file_can_report_needs_context(tmp_path):
+    from kraft.adapters.subprocess import _resolve
+
+    path = tmp_path / "result.json"
+    path.write_text(json.dumps({"status": "needs_context", "question": "which branch?"}))
+    assert _resolve(path, 0) == "needs_context"
+
+
+def test_unknown_status_still_resolves_to_failed(tmp_path):
+    """Regression guard — passes before this task too."""
+    from kraft.adapters.subprocess import _resolve
+
+    path = tmp_path / "result.json"
+    path.write_text(json.dumps({"status": "made_up_status"}))
+    assert _resolve(path, 0) == "failed"
+
+
+def test_read_concerns_and_read_question(tmp_path):
+    concerns_path = tmp_path / "concerns.json"
+    concerns_path.write_text(
+        json.dumps({"status": "done_with_concerns", "concerns": "the retry path is untested"})
+    )
+    assert sp.read_concerns(concerns_path) == "the retry path is untested"
+    assert sp.read_question(concerns_path) is None
+
+    question_path = tmp_path / "question.json"
+    question_path.write_text(
+        json.dumps({"status": "needs_context", "question": "which branch should the MR target?"})
+    )
+    assert sp.read_question(question_path) == "which branch should the MR target?"
+    assert sp.read_concerns(question_path) is None
+
+
+def test_the_field_readers_tolerate_a_broken_file(tmp_path):
+    """Missing file, non-JSON, non-mapping, absent key, and non-UTF-8 bytes.
+
+    UnicodeDecodeError is a ValueError, so `except OSError` does not catch it.
+    That exact clause has been wrong three times in this codebase already.
+    """
+    missing = tmp_path / "missing.json"
+    non_json = tmp_path / "bad.json"
+    non_json.write_text("not json")
+    non_mapping = tmp_path / "list.json"
+    non_mapping.write_text("[1, 2, 3]")
+    absent_key = tmp_path / "absent.json"
+    absent_key.write_text(json.dumps({"status": "done"}))
+    non_utf8 = tmp_path / "binary.json"
+    non_utf8.write_bytes(b"\xff\xfe\x00\x01")
+
+    for reader in (sp.read_summary_ref, sp.read_concerns, sp.read_question):
+        assert reader(missing) is None
+        assert reader(non_json) is None
+        assert reader(non_mapping) is None
+        assert reader(absent_key) is None
+        assert reader(non_utf8) is None
+
+
 async def _seed(database, wid="w1", node="verify"):
     await database.write(
         lambda c: store.create_work_item(
@@ -89,6 +154,63 @@ def test_run_task_result_file_wins(tmp_path):
             assert row["exited_at"] is not None
             types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, "w1"))]
             assert types[-2:] == ["worker_session_started", "worker_session_exited"]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_run_task_stamps_concerns_and_question_onto_the_exit_event(tmp_path):
+    """`run_task` reads `read_concerns`/`read_question` off the result file the
+    same way it already reads `read_summary_ref`, and carries them on
+    `worker_session_exited` — the only channel this text has, since the
+    migration adds no `concerns` column."""
+
+    async def scenario():
+        rd = RunDirs(tmp_path).ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database)
+            status = await sp.run_task(
+                database,
+                rd,
+                session_id="s-concerns",
+                work_item_id="w1",
+                node_id="verify",
+                hook_point="on.test.run",
+                cmd=[
+                    "sh",
+                    "-c",
+                    'printf \'{"status":"done_with_concerns","concerns":"untested retry path"}\''
+                    ' > "$KRAFT_RESULT_PATH"; exit 0',
+                ],
+                cwd=tmp_path,
+            )
+            assert status == "done_with_concerns"
+            ev = database.read(lambda c: events.read_after(c, 0, "w1"))[-1]
+            assert ev["type"] == "worker_session_exited"
+            assert ev["payload"]["concerns"] == "untested retry path"
+            assert "question" not in ev["payload"]
+
+            status2 = await sp.run_task(
+                database,
+                rd,
+                session_id="s-question",
+                work_item_id="w1",
+                node_id="verify",
+                hook_point="on.test.run",
+                cmd=[
+                    "sh",
+                    "-c",
+                    'printf \'{"status":"needs_context","question":"which branch?"}\''
+                    ' > "$KRAFT_RESULT_PATH"; exit 0',
+                ],
+                cwd=tmp_path,
+            )
+            assert status2 == "needs_context"
+            ev2 = database.read(lambda c: events.read_after(c, 0, "w1"))[-1]
+            assert ev2["payload"]["question"] == "which branch?"
+            assert "concerns" not in ev2["payload"]
         finally:
             await database.close()
 
@@ -292,3 +414,17 @@ def test_run_task_without_summary_ref_leaves_column_null(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_resolve_result_file_survives_non_utf8_bytes(tmp_path):
+    """A plugin that died mid-write leaves bytes that are not valid UTF-8.
+
+    UnicodeDecodeError is a ValueError, so `except OSError` alone misses it and
+    the session's own status read takes the process down. Same clause has been
+    wrong four times in this codebase.
+    """
+    from kraft.adapters.subprocess import _resolve_result_file
+
+    p = tmp_path / "r.json"
+    p.write_bytes(b"\xff\xfe\x00binary")
+    assert _resolve_result_file(p) == "failed"

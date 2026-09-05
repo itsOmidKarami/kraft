@@ -248,4 +248,81 @@ describe("WorkItemDetail", () => {
     const button = screen.getByRole("button", { name: /review changes/i });
     expect(button.closest(".desktop-only")).toBeNull();
   });
+
+  it("shows the agent's question and an answer box on a needs_context stop", async () => {
+    const spy = vi.spyOn(api, "resumeWorkItem").mockResolvedValue({
+      id: "w1",
+      node_id: "verify",
+      steer: "use postgres",
+    });
+    setup({
+      status: "needs_human",
+      needs_context_question: "which database should this target?",
+    });
+    renderDetail();
+    // not the old dead end: no hard-disabled Steer button, no gate card
+    expect(screen.queryByRole("button", { name: /^Steer$/ })).toBeNull();
+    expect(screen.getByText(/which database should this target\?/)).toBeInTheDocument();
+
+    const answer = screen.getByRole("button", { name: /answer/i });
+    expect(answer).toBeDisabled();
+    await userEvent.type(screen.getByLabelText(/answer/i), "use postgres");
+    expect(answer).toBeEnabled();
+    await userEvent.click(answer);
+    expect(spy).toHaveBeenCalledWith("w1", "use postgres");
+  });
+
+  it("answers a needs_context stop before falling to CappedCard, even on a fix-loop node", () => {
+    setup({
+      status: "needs_human",
+      needs_context_question: "which branch is the target?",
+      chain_definition: {
+        template_id: "quick-task",
+        nodes: [
+          NODES[0],
+          { id: "verify", tasks: ["on.test.run"], gate_after: null, fix_loop: "verify_fix_loop" },
+        ],
+      },
+    });
+    renderDetail();
+    expect(screen.getByTestId("needs-context-card")).toBeInTheDocument();
+    expect(screen.queryByTestId("capped-card")).toBeNull();
+  });
+
+  it("shows concerns at the review gate", () => {
+    setup({
+      status: "needs_human",
+      pending_gate: "human_review_approval",
+      concerns: ["the retry path is untested"],
+    });
+    renderDetail();
+    expect(screen.getByText(/the retry path is untested/)).toBeInTheDocument();
+  });
+
+  it("shows concerns at any gate, not only the review gate", () => {
+    // Spec §2 puts concerns at the next gate the item reaches. Binding the
+    // condition to `human_review_approval` is equivalent only while
+    // `on.implementation.start` is the sole `kind: agent` hook — and
+    // registry.yaml is operator-editable from Settings.
+    setup({
+      status: "needs_human",
+      pending_gate: "spec_approval",
+      concerns: ["the spec contradicts the chain template"],
+    });
+    renderDetail();
+    expect(screen.getByText(/the spec contradicts the chain template/)).toBeInTheDocument();
+  });
+
+  it("renders the gate card even while a stale needs_context question is held", () => {
+    // human_review_approval is the one gate the Board refuses to approve
+    // inline, so a suppressed gate card leaves no approve affordance anywhere.
+    setup({
+      status: "needs_human",
+      pending_gate: "human_review_approval",
+      needs_context_question: "which database?",
+    });
+    renderDetail();
+    expect(screen.queryByTestId("needs-context-card")).toBeNull();
+    expect(screen.getByText(/Review changes/)).toBeInTheDocument();
+  });
 });

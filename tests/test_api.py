@@ -61,15 +61,26 @@ def _await_gate(client, wid, gate, timeout=30):
     raise AssertionError(f"{gate} never became pending; item={item.get('pending_gate')!r}")
 
 
-def _seed_events(client, wid, payloads):
-    """Write `findings_measured` events directly — no orchestration needed to
-    test a read path. `Database` exposes only an async `write`, so this opens
-    its own sqlite3 connection to the run directory's database."""
+def _wait_for_status(client, wid, status, timeout=30):
+    deadline = time.monotonic() + timeout
+    body = {}
+    while time.monotonic() < deadline:
+        body = client.get(f"/work-items/{wid}").json()
+        if body["status"] == status:
+            return body
+        time.sleep(0.15)
+    raise AssertionError(f"status never became {status!r}; last body={body}")
+
+
+def _seed_events(client, wid, payloads, event_type="findings_measured"):
+    """Write events directly — no orchestration needed to test a read path.
+    `Database` exposes only an async `write`, so this opens its own sqlite3
+    connection to the run directory's database."""
     db_path = Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"
     conn = sqlite3.connect(db_path)
     try:
         for payload in payloads:
-            events.append(conn, wid, "findings_measured", payload)
+            events.append(conn, wid, event_type, payload)
         conn.commit()
     finally:
         conn.close()
@@ -752,3 +763,68 @@ def test_deferred_minor_findings_reach_the_detail_payload(tmp_path, monkeypatch)
 
         body = client.get(f"/work-items/{wid}").json()
         assert [f["message"] for f in body["deferred_findings"]] == ["naming nit"]
+
+
+def test_concerns_reach_the_detail_payload(tmp_path, monkeypatch):
+    """`done_with_concerns` text rides `worker_session_exited` (written by
+    adapters.subprocess.run_task at session exit) — read from the event log,
+    the same shape as `deferred_findings`, one entry per session that reported
+    a concern."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/work-items",
+            json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+        ).json()["id"]
+        _seed_events(
+            client,
+            wid,
+            [{"session_id": "s1", "status": "done_with_concerns", "concerns": "untested path"}],
+            event_type="worker_session_exited",
+        )
+
+        body = client.get(f"/work-items/{wid}").json()
+        assert body["concerns"] == ["untested path"]
+
+
+def test_needs_context_question_reaches_the_detail_payload(tmp_path, monkeypatch):
+    """The agent's question, end to end: fake-claude writes it to the result
+    file, the executor folds it into the `needs_context: <question>` reason
+    on `work_item_needs_human`, and the detail endpoint reads it back from
+    that reason — without ever reading `result_path` off disk itself."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_STATUS", "needs_context")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_QUESTION", "which repo does this target?")
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/work-items",
+            json={"repo": str(repo), "title": "needs a decision", "chain_template": "quick-task"},
+        ).json()["id"]
+        body = _wait_for_status(client, wid, "needs_human")
+        assert body["needs_context_question"] == "which repo does this target?"
+
+
+def test_needs_context_question_does_not_resurface_a_stale_answer(tmp_path, monkeypatch):
+    """A second `needs_context` stop whose result file omitted `question`
+    (the fallback executor._needs_context_question uses is folded into the
+    reason as `"(no question given)"`) must show that fallback, not an
+    earlier stop's already-answered question — the bug an unbounded scan of
+    `worker_session_exited.question` events would have produced."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/work-items",
+            json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+        ).json()["id"]
+        _seed_events(
+            client,
+            wid,
+            [
+                {"node_id": "implementation", "reason": "needs_context: which db?"},
+                {"node_id": "implementation", "reason": "needs_context: (no question given)"},
+            ],
+            event_type="work_item_needs_human",
+        )
+
+        body = client.get(f"/work-items/{wid}").json()
+        assert body["needs_context_question"] == "(no question given)"
