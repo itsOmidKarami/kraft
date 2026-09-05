@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import shlex
 from pathlib import Path
+from typing import NamedTuple
 
+from kraft import steering as _steering
 from kraft.adapters import subprocess as _subprocess
 
 _CTX = (
@@ -28,6 +30,92 @@ _CTX = (
     'Then write that path, relative to the repo root, as "session_summary_ref" '
     "in the JSON result file at $KRAFT_RESULT_PATH."
 )
+
+
+class Profile(NamedTuple):
+    """How one agent CLI spells the options Kraft names neutrally.
+
+    A fact about a CLI, not user configuration — a user editing this is a user
+    reporting a bug. It exists so `registry.yaml` can say `model:` rather than
+    `--model`, which is what stops one vendor's flags leaking into the config an
+    operator edits by hand.
+    """
+
+    prompt: tuple[str, ...]
+    system_prompt: tuple[str, ...]
+    output_json: tuple[str, ...]
+    model: tuple[str, ...]
+    deny_tools: tuple[str, ...]
+
+
+PROFILES: dict[str, Profile] = {
+    "claude": Profile(
+        prompt=("-p",),
+        system_prompt=("--append-system-prompt",),
+        output_json=("--output-format", "json"),
+        model=("--model",),
+        # The CLI polices itself at Kraft's request, not a sandbox: this flag does
+        # not stop the agent running a shell that ignores it, only tools the CLI
+        # itself dispatches. The real blast-radius containment is the per-item
+        # worktree (spec §3) — deny_tools is defense in depth on top of it.
+        deny_tools=("--disallowed-tools",),
+    ),
+}
+
+
+class Invocation(NamedTuple):
+    command: str
+    profile: str
+    model: str | None
+    deny_tools: tuple[str, ...]
+    steering_texts: tuple[str, ...]
+
+
+def resolve_invocation(
+    binding: dict, repo_entry: dict | None, steering_dir: Path | None
+) -> Invocation:
+    """Fold a hook binding and a repo entry into one launch.
+
+    Precedence lives here and only here. Spelling it out at each call site is how
+    three features that touch the same twenty lines end up disagreeing.
+    """
+    repo = repo_entry or {}
+    deny: list[str] = []
+    for name in (*repo.get("deny_tools", ()), *binding.get("deny_tools", ())):
+        if name not in deny:
+            deny.append(name)
+    names = [*repo.get("steering", ()), *binding.get("steering", ())]
+    if names and steering_dir is None:
+        # A configured `steering:` key evaporating silently is worse than a
+        # raise — unreachable in production (every real caller resolves a
+        # steering_dir), but a caller that passes None with names configured
+        # has a bug worth surfacing, not a launch worth degrading quietly.
+        raise _steering.SteeringError(
+            f"resolve_invocation: steering {names!r} configured but no steering_dir was given"
+        )
+    # repo first, then hook: the wider context before the narrower one, and
+    # fixed rather than merged cleverly — a reader debugging a prompt has to
+    # be able to predict what the agent saw.
+    steering_texts = _steering.read(steering_dir, names) if names else ()
+    if steering_texts:
+        # `steering.validate` (config load) checked repos.yaml's names and the
+        # hook's names as two separate lists, each against the budget on its
+        # own — two individually-valid lists can still blow the shared budget
+        # once combined here, which is the only place the real concatenation
+        # exists. Re-check it here, over what run_agent_task actually injects.
+        total = _steering.assembled_bytes(steering_texts)
+        if total > _steering.MAX_BYTES:
+            raise _steering.SteeringError(
+                f"resolve_invocation: steering {names!r} totals {total} bytes combined, "
+                f"over the {_steering.MAX_BYTES} byte budget"
+            )
+    return Invocation(
+        command=binding["command"],
+        profile=binding.get("profile", "claude"),
+        model=binding.get("model") or repo.get("default_model"),
+        deny_tools=tuple(deny),
+        steering_texts=steering_texts,
+    )
 
 
 def _envelope_is_error(_base_status: str, log_path: Path, _returncode: int) -> str:
@@ -60,6 +148,10 @@ async def run_agent_task(
     repo_path: str,
     cwd,
     round: int = 0,
+    profile: str = "claude",
+    model: str | None = None,
+    deny_tools: tuple[str, ...] = (),
+    steering_texts: tuple[str, ...] = (),
 ) -> str:
     ctx = _CTX.format(
         title=title,
@@ -70,15 +162,33 @@ async def run_agent_task(
         hook_point=hook_point,
         session_id=session_id,
     )
+    if steering_texts:
+        # The context-injection boundary (00_overview.md glossary) bans
+        # CLAUDE.md, AGENTS.md and any repo file as a context channel. That
+        # rule governs the *channel*: this is the sanctioned one — the
+        # per-invocation system prompt — carrying files Kraft owns under
+        # $KRAFT_HOME/templates/steering/. Kraft reads nothing from inside
+        # the target repo to build this. Written here because a future
+        # reader finding a steering feature beside a rule banning steering
+        # files would otherwise assume the rule was forgotten.
+        ctx += _steering.HEADING + "\n\n".join(steering_texts)
+    try:
+        prof = PROFILES[profile]
+    except KeyError:
+        raise ValueError(f"unknown agent profile {profile!r}; known: {sorted(PROFILES)}") from None
+
     cmd = [
         *shlex.split(command),
-        "-p",
+        *prof.prompt,
         task_instruction,
-        "--append-system-prompt",
+        *prof.system_prompt,
         ctx,
-        "--output-format",
-        "json",
+        *prof.output_json,
     ]
+    if model:
+        cmd += [*prof.model, model]
+    if deny_tools:
+        cmd += [*prof.deny_tools, ",".join(deny_tools)]
     return await _subprocess.run_task(
         db,
         run_dirs,

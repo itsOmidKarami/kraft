@@ -398,3 +398,130 @@ def test_dispatch_puts_the_attachment_note_after_the_title(tmp_path, monkeypatch
     assert prompt.startswith(title)
     assert prompt.index("Spec: .engineering/specs/a.md") > prompt.index(title)
     assert prompt.rstrip().endswith("Do not re-plan.")
+
+
+# --- launch context: repo config reaches the agent launch -------------------
+
+
+def _argv_lines(path: Path) -> list[list[str]]:
+    return [json.loads(ln) for ln in path.read_text().splitlines() if ln.strip()]
+
+
+def test_repo_default_model_reaches_the_agent_launch(tmp_path, monkeypatch):
+    """`executor.run` -> `_walk_node` -> `_measure_node` -> `_dispatch` must carry
+    the launch context all the way to `run_agent_task`, or a repo's configured
+    default_model silently never reaches the agent."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    argv_log = tmp_path / "argv.jsonl"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_ARGV_LOG", str(argv_log))
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="make the failing test pass",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            launch = executor.LaunchContext(
+                repo_entry={"default_model": "haiku"}, steering_dir=None
+            )
+            result = await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=launch,
+            )
+            assert result == "completed"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+    argvs = _argv_lines(argv_log)
+    assert len(argvs) == 1  # quick-task's only agent dispatch is implementation
+    assert argvs[0][-2:] == ["--model", "haiku"]
+
+
+def test_fix_cycle_dispatch_gets_the_same_launch_context(tmp_path, monkeypatch):
+    """The fix cycle's `_dispatch` (executor.py's fix-cycle call site) is separate
+    from the measuring `_dispatch` inside `_measure_node` — missing it means the
+    fix agent silently runs on a different model than the one that measured."""
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "fix")
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    argv_log = tmp_path / "argv.jsonl"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_ARGV_LOG", str(argv_log))
+
+    from kraft import policy
+    from kraft.templates import Registry
+
+    registry_base = fake_registry(sys.executable, _FAKE_AGENT)
+    registry = Registry(
+        hooks={
+            **registry_base.hooks,
+            # verify's own task fails every cycle without ever calling the fake
+            # agent, so the only agent launch in this run is the fix cycle's.
+            "on.test.run": {"kind": "subprocess", "command": [sys.executable, "-c", "exit(1)"]},
+        }
+    )
+    tmpl = Template(
+        id="fixloop",
+        nodes=[
+            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None, "fix_loop": None},
+            {
+                "id": "verify",
+                "tasks": ["on.test.run"],
+                "gate_after": None,
+                "fix_loop": "verify_fix_loop",
+            },
+        ],
+    )
+    pol_path = tmp_path / "policy.yaml"
+    pol_path.write_text(
+        "loops:\n  verify_fix_loop: { attempts: 1, wall_clock_s: 3600 }\n"
+        "default: { attempts: 1, wall_clock_s: 3600 }\n"
+    )
+    pol = policy.load_policy(pol_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="fix cycle model",
+                repo=str(repo),
+                template=tmpl,
+                bd_cwd=str(tracker),
+            )
+            launch = executor.LaunchContext(
+                repo_entry={"default_model": "haiku"}, steering_dir=None
+            )
+            await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+                launch=launch,
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+    argvs = _argv_lines(argv_log)
+    assert len(argvs) == 1  # only the fix cycle ever launches the fake agent
+    assert argvs[0][-2:] == ["--model", "haiku"]

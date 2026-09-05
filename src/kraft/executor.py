@@ -5,7 +5,8 @@ import json
 import logging
 import sqlite3
 import uuid
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
+from pathlib import Path
 
 from kraft import builtins as _builtins
 from kraft import events, store
@@ -54,6 +55,21 @@ _ATTACHMENT_PROMPT = (
     "\n\n{lines}\nFollow the documents above; they are the agreed spec and plan "
     "for this work item. Do not re-plan."
 )
+
+
+@dataclass(frozen=True)
+class LaunchContext:
+    """The repo config an agent dispatch resolves against.
+
+    `None` on either field means "nothing configured", not "look elsewhere" —
+    `agent.resolve_invocation` already treats a missing repo entry and a missing
+    steering dir as empty. Threaded keyword-only, `launch: LaunchContext | None
+    = None`, from `api.py` down through every walk/resume path so a work item's
+    repo config reaches its agent launches, including reattach and the fix cycle.
+    """
+
+    repo_entry: dict | None
+    steering_dir: Path | None
 
 
 class Steer:
@@ -137,6 +153,7 @@ async def _dispatch(
     instruction_override: str | None = None,
     round: int = 0,
     steer: Steer | None = None,
+    launch: LaunchContext | None = None,
 ) -> str:
     binding = registry.hooks[task_hook]
     session_id = uuid.uuid4().hex
@@ -162,11 +179,20 @@ async def _dispatch(
         instruction = instruction_override or (
             work_item_row["title"] + _attachment_note(_attachments(work_item_row))
         )
+        inv = _agent.resolve_invocation(
+            binding,
+            launch.repo_entry if launch else None,
+            launch.steering_dir if launch else None,
+        )
         return await _agent.run_agent_task(
             db,
             run_dirs,
             hook_point=task_hook,
-            command=binding["command"],
+            command=inv.command,
+            profile=inv.profile,
+            model=inv.model,
+            deny_tools=inv.deny_tools,
+            steering_texts=inv.steering_texts,
             title=work_item_row["title"],
             task_instruction=(_STEER_PROMPT.format(steer=note) if note else "") + instruction,
             repo_path=work_item_row["repo"],
@@ -204,6 +230,7 @@ async def _measure_node(
     *,
     round: int = 0,
     steer: Steer | None = None,
+    launch: LaunchContext | None = None,
 ) -> tuple[str, list[str], list[BaseException]]:
     await db.write(lambda c, node=node: store.enter_node(c, work_item_id, node["id"]))
     tasks = node["tasks"]
@@ -219,6 +246,7 @@ async def _measure_node(
                 worktree,
                 round=round,
                 steer=steer,
+                launch=launch,
             )
             for t in tasks
         ),
@@ -304,6 +332,7 @@ async def _walk_node(
     *,
     policy: _policy.Policy | None = None,
     steer: Steer | None = None,
+    launch: LaunchContext | None = None,
 ) -> str:
     key = node.get("fix_loop")
 
@@ -317,6 +346,7 @@ async def _walk_node(
             registry,
             worktree,
             steer=steer,
+            launch=launch,
         )
         if verdict == "paused":
             return "paused"
@@ -347,6 +377,7 @@ async def _walk_node(
             worktree,
             round=round,
             steer=steer,
+            launch=launch,
         )
         if verdict == "paused":
             return "paused"
@@ -430,6 +461,7 @@ async def _walk_node(
             instruction_override=instruction,
             round=count,
             steer=steer,
+            launch=launch,
         )
         if fix == "paused":
             return "paused"
@@ -465,6 +497,7 @@ async def run(
     start_index: int = 0,
     policy: _policy.Policy | None = None,
     steer: str | None = None,
+    launch: LaunchContext | None = None,
 ) -> str:
     # the note is good for one agent launch, whichever task gets there first
     carried = Steer(steer)
@@ -493,6 +526,7 @@ async def run(
             # `carried` empties itself on the first agent launch, so the note reaches
             # the next agent to run and no later one
             steer=carried,
+            launch=launch,
         )
         if result == "paused":
             return "paused"
@@ -520,6 +554,7 @@ async def _reconcile_current_node(
     adopted,
     *,
     policy: _policy.Policy | None = None,
+    launch: LaunchContext | None = None,
 ) -> str:
     node_id = node["id"]
     sessions = db.read(
@@ -552,6 +587,7 @@ async def _reconcile_current_node(
                 registry,
                 worktree,
                 policy=policy,
+                launch=launch,
             )
             == "ok"
             else "needs_human"
@@ -571,6 +607,7 @@ async def _reconcile_current_node(
                 registry,
                 worktree,
                 policy=policy,
+                launch=launch,
             )
             == "ok"
             else "needs_human"
@@ -611,6 +648,7 @@ async def resume(
     adopted: dict,
     bd_cwd: str | None = None,
     policy: _policy.Policy | None = None,
+    launch: LaunchContext | None = None,
 ) -> str:
     row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
@@ -654,6 +692,7 @@ async def resume(
             worktree,
             adopted,
             policy=policy,
+            launch=launch,
         )
         == "needs_human"
     ):
@@ -673,6 +712,7 @@ async def resume(
                 registry,
                 worktree,
                 policy=policy,
+                launch=launch,
             )
             == "needs_human"
         ):

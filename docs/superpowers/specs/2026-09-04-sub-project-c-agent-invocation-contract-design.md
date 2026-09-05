@@ -179,9 +179,18 @@ writes `CLAUDE.md`, `AGENTS.md`, or anything else inside the target repo. A
 future reader finding a steering feature next to a rule banning steering files
 will assume the rule was forgotten unless the distinction is written down.
 
-Total budget for injected steering is capped (8 KB) with a load-time error above
-it. An oversized system prompt degrades every launch quietly and costs money on
-each one.
+Total budget for injected steering is capped (8 KB). An oversized system prompt
+degrades every launch quietly and costs money on each one.
+
+**Where the cap is enforced, and the gap that leaves.** Each source is validated
+where it is saved — `repos.yaml`'s names against its own budget, a hook's names
+against theirs — so a typo or a missing file is still caught at save. But the
+*union* of a repo's steering and a hook's steering is only assembled at dispatch,
+so that is where the combined total is checked. Two individually-valid configs
+can therefore each save cleanly and only fail the first time that repo is paired
+with that hook, landing the item on `needs_human`. Enforcing it at save would
+mean validating every repo against every hook on every write; the cross product
+is not worth it for a cap that exists to stop a slow bleed.
 
 ## 5. Precedence, in one place
 
