@@ -276,7 +276,45 @@ class Indexer:
             "WHERE l.work_item_id = ? ORDER BY d.path",
             (work_item_id,),
         ).fetchall()
-        return [{k: r[k] for k in r.keys()} for r in rows]
+        docs = [{**{k: r[k] for k in r.keys()}, "attachment_kind": None} for r in rows]
+        seen = {d["document_id"] for d in docs}
+        return docs + [
+            d for d in self._attachment_docs(work_item_id) if d["document_id"] not in seen
+        ]
+
+    def _attachment_docs(self, work_item_id: str) -> list[dict]:
+        """Intake attachments (Kraft-dgh), joined at read time rather than stored
+        as document_links: `upsert_document` rewrites a document's links whole on
+        every rescan, so a stored row would not survive one."""
+        row = self._state.read(
+            lambda c: c.execute(
+                "SELECT repo, attachments FROM work_items WHERE id = ?", (work_item_id,)
+            ).fetchone()
+        )
+        if row is None or not row["attachments"]:
+            return []
+        out = []
+        for attachment in json.loads(row["attachments"]):
+            doc = self._conn.execute(
+                "SELECT id AS document_id, repo, title, kind, source_kind, path "
+                "FROM documents WHERE repo = ? AND path = ?",
+                (row["repo"], attachment["path"]),
+            ).fetchone()
+            if doc is None:
+                # Not indexed yet: scan_repo lists via `git ls-files`, so an
+                # uncommitted attachment appears here only once it is committed
+                # and rescanned. The timeline event names it meanwhile.
+                continue
+            out.append(
+                {
+                    **{k: doc[k] for k in doc.keys()},
+                    "node_id": None,
+                    "hook_point": None,
+                    "worker_session_id": None,
+                    "attachment_kind": attachment["kind"],
+                }
+            )
+        return out
 
     def _filter_sql(self, source_kind, kind, repo) -> tuple[str, list]:
         clauses, params = [], []

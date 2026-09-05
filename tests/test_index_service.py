@@ -303,6 +303,64 @@ def test_links_resolved_in_search_and_document_and_by_work_item(tmp_path):
     asyncio.run(scenario())
 
 
+def test_documents_for_work_item_includes_intake_attachments(tmp_path):
+    async def scenario():
+        state = await Database.open(tmp_path / "state.db")
+        conn = index_db.open_index(tmp_path / "index.db")
+        try:
+            repo = make_repo_with_engineering(
+                tmp_path, {".engineering/plans/p.md": "# Plan\nbody\n"}
+            )
+            await state.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, bead_id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at, attachments) VALUES "
+                    "(?, 'b1', 't', ?, 'default', '{}', 'active', 'now', 'now', ?)",
+                    ("w1", str(repo), '[{"kind": "plan", "path": ".engineering/plans/p.md"}]'),
+                )
+            )
+            ix = Indexer(conn, state, repos_env=str(repo))
+            await ix.rescan_repo(str(repo))
+            docs = ix.documents_for_work_item("w1")
+            assert [d["path"] for d in docs] == [".engineering/plans/p.md"]
+            assert docs[0]["attachment_kind"] == "plan"
+        finally:
+            conn.close()
+            await state.close()
+
+    asyncio.run(scenario())
+
+
+def test_documents_for_work_item_survives_a_rescan(tmp_path):
+    """Attachments are joined at read time, so re-ingesting the document — which
+    rewrites its document_links wholesale — cannot drop them."""
+
+    async def scenario():
+        state = await Database.open(tmp_path / "state.db")
+        conn = index_db.open_index(tmp_path / "index.db")
+        try:
+            repo = make_repo_with_engineering(
+                tmp_path, {".engineering/plans/p.md": "# Plan\nbody\n"}
+            )
+            await state.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, bead_id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at, attachments) VALUES "
+                    "(?, 'b1', 't', ?, 'default', '{}', 'active', 'now', 'now', ?)",
+                    ("w1", str(repo), '[{"kind": "plan", "path": ".engineering/plans/p.md"}]'),
+                )
+            )
+            ix = Indexer(conn, state, repos_env=str(repo))
+            await ix.rescan_repo(str(repo))
+            await ix.rescan_repo(str(repo))
+            assert len(ix.documents_for_work_item("w1")) == 1
+        finally:
+            conn.close()
+            await state.close()
+
+    asyncio.run(scenario())
+
+
 # ---- 4C: fusion + vector/hybrid modes ----
 
 

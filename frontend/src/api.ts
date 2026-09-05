@@ -66,6 +66,7 @@ export const createWorkItem = (body: {
   chain_template?: string;
   submodules?: string[];
   root_merge_policy?: string;
+  attachments?: { kind: "spec" | "plan"; path: string }[];
 }) => req<{ id: string }>("/work-items", json("POST", body));
 
 export const approveGate = (id: string, gate: string) =>
@@ -122,12 +123,14 @@ export const search = (params: {
   kind?: string;
   repo?: string;
   mode?: string;
+  limit?: number;
 }) => {
   const qs = new URLSearchParams({ q: params.q });
   if (params.mode) qs.set("mode", params.mode);
   if (params.source_kind) qs.set("source_kind", params.source_kind);
   if (params.kind) qs.set("kind", params.kind);
   if (params.repo) qs.set("repo", params.repo);
+  if (params.limit) qs.set("limit", String(params.limit));
   return req<SearchResponse>(`/search?${qs}`);
 };
 

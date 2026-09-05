@@ -892,4 +892,13 @@ aside .row, .narrow .row {
 .submodules { display: flex; flex-wrap: wrap; gap: 6px; }
 .submodules .tag { gap: 6px; cursor: pointer; font: inherit; font-size: 11px; }
 .tag-off { border-color: var(--color-divider); color: var(--color-neutral-500); }
+
+/* intake from existing artifacts (design task 7) */
+.attachment-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.attachment-hit {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 8px; border-radius: 6px; border: 1px solid var(--color-divider);
+  background: transparent; color: inherit; font: inherit; font-size: 11px; cursor: pointer;
+}
+.chain-preview { margin-top: 4px; }
 .policy-radios { display: flex; gap: 16px; flex-wrap: wrap; }

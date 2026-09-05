@@ -288,3 +288,113 @@ def test_run_unknown_hook_in_registry_is_needs_human(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_attachment_note_lists_kinds_and_paths():
+    note = executor._attachment_note(
+        [
+            {"kind": "spec", "path": ".engineering/specs/a.md"},
+            {"kind": "plan", "path": ".engineering/plans/a.md"},
+        ]
+    )
+    assert "Spec: .engineering/specs/a.md" in note
+    assert "Plan: .engineering/plans/a.md" in note
+    assert "do not re-plan" in note.lower()
+
+
+def test_attachment_note_is_empty_without_attachments():
+    assert executor._attachment_note([]) == ""
+
+
+def test_attachments_reads_a_row_without_the_column():
+    # Rows built by older fixtures have no 'attachments' key; that must not raise.
+    class Row(dict):
+        def keys(self):
+            return super().keys()
+
+    assert executor._attachments(Row(title="t")) == []
+    assert executor._attachments(Row(attachments=None)) == []
+    assert executor._attachments(Row(attachments='[{"kind": "plan", "path": "p.md"}]')) == [
+        {"kind": "plan", "path": "p.md"}
+    ]
+
+
+def test_intake_with_a_plan_attachment_drops_the_plan_node(tmp_path):
+    template = Template(
+        id="default",
+        nodes=[
+            {"id": "spec", "tasks": ["on.spec.requested"], "gate_after": "spec_approval"},
+            {"id": "plan", "tasks": ["on.plan.requested"], "gate_after": "plan_approval"},
+            {"id": "implementation", "tasks": ["on.implementation.start"], "gate_after": None},
+        ],
+    )
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(tmp_path),
+                template=template,
+                bd_cwd=str(isolated_bd(tmp_path)),
+                attachments=[{"kind": "plan", "path": ".engineering/plans/p.md"}],
+            )
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT chain_definition, attachments FROM work_items WHERE id = ?", (wid,)
+                ).fetchone()
+            )
+            chain = json.loads(row["chain_definition"])
+            assert [n["id"] for n in chain["nodes"]] == ["spec", "implementation"]
+            assert json.loads(row["attachments"])[0]["kind"] == "plan"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_dispatch_puts_the_attachment_note_after_the_title(tmp_path, monkeypatch):
+    """Unit tests on _attachment_note/_attachments alone don't prove _dispatch
+    composes them correctly (wrong order, or dropping the note entirely, would
+    still pass those). This drives a real agent launch and reads back the exact
+    prompt sent, the way test_fix_loop asserts steer-note ordering."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    prompts = tmp_path / "prompts.txt"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompts))
+    title = "make the failing test pass"
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database,
+                rd,
+                title=title,
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+                attachments=[{"kind": "spec", "path": ".engineering/specs/a.md"}],
+            )
+            result = await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+            assert result == "completed"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+    sent = [p for p in prompts.read_text().split("\n\x00\n") if p.strip()]
+    # quick-task's only agent dispatch is the implementation node.
+    assert len(sent) == 1
+    prompt = sent[0]
+    assert prompt.startswith(title)
+    assert prompt.index("Spec: .engineering/specs/a.md") > prompt.index(title)
+    assert prompt.rstrip().endswith("Do not re-plan.")
