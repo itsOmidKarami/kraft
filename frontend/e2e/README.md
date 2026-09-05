@@ -8,6 +8,7 @@ Four specs, all against one running orchestrator:
 | `lifecycle.spec.ts` | the human-in-the-loop controls: gate approve, gate reject → re-plan, pause / steer / resume |
 | `regression.spec.ts` | every Settings page (repos, templates, plugins, policy, access), Analytics, the search overlay |
 | `search.spec.ts` | the search overlay in detail: filters, document viewer, Escape handling |
+| `phone.visual.spec.ts` | sub-project B's phone contract at a 390x844 viewport: the board, the gate, the reject textarea's 16px floor (under it, mobile Safari zooms on focus and never zooms back), and the diff viewer wrapping a **real** diff. Writes screenshots to `frontend/e2e-shots/`. jsdom has no viewport, so the unit tests can only assert class boundaries and stylesheet source order — this is the only place the media queries are real |
 | `attachments.visual.spec.ts` | intake from an existing spec/plan: the type-to-search picker, the struck-through chain preview, the `from spec+plan` badge, the "attached at intake" tag. Writes screenshots to `frontend/e2e-shots/` (gitignored) — it asserts little and is meant to be looked at |
 
 `lifecycle.spec.ts` slows the implementation hook through `PUT /registry` so
