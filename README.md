@@ -40,13 +40,20 @@ Kraft can also be driven from a coding-agent session over MCP, so work can be
 filed, read, and unblocked without switching to the browser.
 
 ```bash
-kraft init          # register the MCP server for your user, install the skill
+kraft init          # register the MCP server for your user, install the skills
 kraft init --repo   # or write .mcp.json + .claude/skills/ into this repo
 ```
 
 User scope shells out to `claude mcp add` rather than editing `~/.claude.json`
 itself — that file is large, shared, agent-owned state. If `claude` is not on
 `PATH`, `kraft init` prints the command for you to run instead of guessing.
+
+The skills install as a plugin, so they namespace: `/kraft:handoff` to file work
+after a spec and plan are agreed, `/kraft:board` to see what is running or
+blocked, `/kraft:gates` to approve, reject, or steer. That is a plain directory
+tree under `.claude/skills/kraft/` with a `.claude-plugin/plugin.json` — nothing
+is registered in Claude Code's managed state, and uninstalling is `rm -rf` on the
+directory. It works the same at user and repo scope.
 
 Nine tools, over the same local HTTP API the browser uses:
 
