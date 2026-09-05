@@ -157,4 +157,101 @@ describe("IntakeModal", () => {
       }),
     );
   });
+
+  it("searches the chosen repo's artifacts and submits the picked plan", async () => {
+    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "quick-task", nodes: [], gates: 0 }]);
+    vi.spyOn(api, "search").mockResolvedValue({
+      query: "auth",
+      mode: "hybrid",
+      results: [
+        {
+          id: "d1",
+          repo: "/repo",
+          kind: "plans",
+          source_kind: "artifact",
+          title: "Auth plan",
+          path: ".engineering/plans/auth.md",
+          snippet: "",
+          score: 1,
+          links: [],
+        },
+      ],
+    } as never);
+    const create = vi.spyOn(api, "createWorkItem").mockResolvedValue({ id: "w1" });
+    render(
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <IntakeModal onClose={() => {}} />
+      </MemoryRouter>,
+    );
+
+    await userEvent.type(screen.getByLabelText("repo"), "/repo");
+    await userEvent.type(screen.getByLabelText("title"), "t");
+    await userEvent.type(screen.getByLabelText("existing plan"), "auth");
+    await userEvent.click(await screen.findByText("Auth plan"));
+    await userEvent.click(screen.getByRole("button", { name: /create/i }));
+
+    await waitFor(() =>
+      expect(api.search).toHaveBeenCalledWith(
+        expect.objectContaining({ repo: "/repo", kind: "plans", source_kind: "artifact" }),
+      ),
+    );
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          attachments: [{ kind: "plan", path: ".engineering/plans/auth.md" }],
+        }),
+      ),
+    );
+  });
+
+  it("shows a chain preview with the nodes an attachment removes struck through", async () => {
+    vi.spyOn(api, "getTemplates").mockResolvedValue([
+      {
+        id: "default",
+        gates: 2,
+        nodes: [
+          { id: "spec", tasks: ["on.spec.requested"], gate_after: "spec_approval" },
+          { id: "plan", tasks: ["on.plan.requested"], gate_after: "plan_approval" },
+          { id: "implementation", tasks: ["on.implementation.start"], gate_after: null },
+        ],
+      },
+    ]);
+    render(
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <IntakeModal onClose={() => {}} />
+      </MemoryRouter>,
+    );
+
+    await userEvent.type(screen.getByLabelText("repo"), "/repo");
+    await userEvent.type(screen.getByLabelText("title"), "t");
+    await userEvent.type(screen.getByLabelText("spec path"), ".engineering/specs/x.md");
+
+    const struckSpec = await screen.findByText("spec", { selector: "s" });
+    expect(struckSpec).toBeInTheDocument();
+    expect(screen.getByText("plan").tagName).not.toBe("S");
+    expect(screen.getByText("implementation").tagName).not.toBe("S");
+  });
+
+  it("accepts a path typed by hand for a document that is not indexed", async () => {
+    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "quick-task", nodes: [], gates: 0 }]);
+    const create = vi.spyOn(api, "createWorkItem").mockResolvedValue({ id: "w1" });
+    render(
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <IntakeModal onClose={() => {}} />
+      </MemoryRouter>,
+    );
+
+    await userEvent.type(screen.getByLabelText("repo"), "/repo");
+    await userEvent.type(screen.getByLabelText("title"), "t");
+    await userEvent.type(screen.getByLabelText("spec path"), ".engineering/specs/x.md");
+    await userEvent.click(screen.getByRole("button", { name: /create/i }));
+
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          attachments: [{ kind: "spec", path: ".engineering/specs/x.md" }],
+        }),
+      ),
+    );
+  });
 });

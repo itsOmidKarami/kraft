@@ -167,6 +167,11 @@ function BoardRow({ item }: { item: WorkItem }) {
       <ChainBar item={item} size="sm" />
       <div className="board-row-current">
         {item.current_node_id}
+        {item.attachments?.length ? (
+          <span className="tag tag-outline">
+            from {item.attachments.map((a) => a.kind).join("+")}
+          </span>
+        ) : null}
         {item.fixCycle != null && (
           <span className="tag tag-outline tag-tight">fix·{item.fixCycle}</span>
         )}

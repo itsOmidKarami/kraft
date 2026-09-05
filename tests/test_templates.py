@@ -5,6 +5,7 @@ import pytest
 import yaml
 
 from kraft import templates
+from kraft.templates import ATTACHMENT_GATES, GATE_NAMES, Template, materialize
 
 TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 
@@ -264,3 +265,50 @@ def test_config_files_in_the_templates_dir_are_not_read_as_templates(tmp_path):
     loaded = templates.load_templates(d, registry)
     assert loaded.invalid == {}
     assert set(loaded.valid) == {"quick-task", "default"}
+
+
+def test_materialize_drops_nodes_whose_gate_is_satisfied():
+    template = Template(
+        id="t",
+        nodes=[
+            {"id": "spec", "tasks": ["on.spec.requested"], "gate_after": "spec_approval"},
+            {"id": "plan", "tasks": ["on.plan.requested"], "gate_after": "plan_approval"},
+            {"id": "implementation", "tasks": ["on.implementation.start"], "gate_after": None},
+        ],
+    )
+    out = materialize(template, satisfied_gates=frozenset({"spec_approval", "plan_approval"}))
+    assert [n["id"] for n in out["nodes"]] == ["implementation"]
+
+
+def test_materialize_keys_on_the_gate_not_the_node_id():
+    # A custom template may name the node anything; the gate is the vocabulary.
+    template = Template(
+        id="t",
+        nodes=[
+            {"id": "write-the-plan", "tasks": ["on.plan.requested"], "gate_after": "plan_approval"},
+            {"id": "implementation", "tasks": ["on.implementation.start"], "gate_after": None},
+        ],
+    )
+    out = materialize(template, satisfied_gates=frozenset({"plan_approval"}))
+    assert [n["id"] for n in out["nodes"]] == ["implementation"]
+
+
+def test_materialize_without_satisfied_gates_is_unchanged():
+    template = Template(
+        id="t",
+        nodes=[{"id": "spec", "tasks": ["on.spec.requested"], "gate_after": "spec_approval"}],
+    )
+    assert [n["id"] for n in materialize(template)["nodes"]] == ["spec"]
+
+
+def test_materialize_on_a_template_without_those_gates_is_a_noop():
+    template = Template(
+        id="quick",
+        nodes=[{"id": "implementation", "tasks": ["on.implementation.start"], "gate_after": None}],
+    )
+    out = materialize(template, satisfied_gates=frozenset({"plan_approval"}))
+    assert [n["id"] for n in out["nodes"]] == ["implementation"]
+
+
+def test_attachment_gates_are_real_gate_names():
+    assert set(ATTACHMENT_GATES.values()) <= GATE_NAMES

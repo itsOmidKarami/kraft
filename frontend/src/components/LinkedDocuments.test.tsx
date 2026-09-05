@@ -15,6 +15,7 @@ const doc = {
   node_id: "implementation",
   hook_point: "on.implementation.start",
   worker_session_id: "s1",
+  attachment_kind: null,
 };
 
 const wrap = (ui: React.ReactNode) => render(<MemoryRouter>{ui}</MemoryRouter>);
@@ -32,6 +33,16 @@ describe("LinkedDocuments", () => {
     expect(screen.getByText(".engineering/sessions/s1.md")).toBeInTheDocument();
     expect(screen.getByText("sessions")).toBeInTheDocument();
     expect(screen.getByText("implementation")).toBeInTheDocument();
+    expect(screen.queryByText("attached at intake")).not.toBeInTheDocument();
+  });
+
+  it("tags a document attached at intake", async () => {
+    vi.spyOn(api, "getWorkItemDocuments").mockResolvedValue({
+      work_item_id: "w1",
+      documents: [{ ...doc, attachment_kind: "plan" }],
+    });
+    wrap(<LinkedDocuments workItemId="w1" eventCount={0} />);
+    expect(await screen.findByText("attached at intake")).toBeInTheDocument();
   });
 
   it("shows a quiet empty state when nothing is linked yet", async () => {

@@ -12,6 +12,12 @@ export interface ChainDefinition {
 
 export type WorkItemStatus = "active" | "needs_human" | "completed" | "paused";
 
+export interface WorkItemAttachment {
+  kind: "spec" | "plan";
+  /** Repo-relative path, normalized by the server. */
+  path: string;
+}
+
 export interface WorkItem {
   id: string;
   title: string;
@@ -38,6 +44,8 @@ export interface WorkItem {
   usage?: WorkItemUsage;
   /** Empty on a single-repo item; ordered deepest submodule first. */
   repos?: RepoRow[];
+  /** Documents attached at intake; the gates they satisfy are absent from the chain. */
+  attachments?: WorkItemAttachment[];
   root_merge_policy?: string | null;
   worktree_path?: string;
 }
@@ -103,6 +111,8 @@ export interface WorkItemDocument {
   node_id: string | null;
   hook_point: string | null;
   worker_session_id: string | null;
+  /** Set when this row is an intake attachment rather than an agent-written link. */
+  attachment_kind: "spec" | "plan" | null;
 }
 
 export interface SearchResult {
