@@ -72,7 +72,9 @@ def _normalize_forge(repo: dict) -> None:
     in a migration that would rewrite a file the user owns.
     """
     legacy = repo.pop("gitlab_project", None)
-    if repo.get("forge") is None and legacy:
+    # Both `forge` and `project` must be absent: a hand-edited half-migrated
+    # entry carrying an explicit `project` beside the legacy key keeps its own.
+    if repo.get("forge") is None and repo.get("project") is None and legacy:
         repo["forge"] = "gitlab"
         repo["project"] = legacy
     repo.setdefault("forge", None)
@@ -123,13 +125,20 @@ def save_repos(path: str | Path, repos: list[dict]) -> None:
     write_yaml(path, {"repos": repos})
 
 
-def git_read(cwd: Path, *args: str) -> str | None:
+def git_read(cwd: Path, *args: str, expected_failure: bool = False) -> str | None:
     """One read-only git command, or None if git says no. Never raises.
 
     `--no-optional-locks`: a plain `git status`/`diff` still touches
     `.git/index`'s mtime (refreshing stat data), which collides with an
     `index.lock` an agent is holding mid-run. This flag skips that refresh;
     content reads are unaffected, only the lock-taking side effect is.
+
+    `expected_failure` drops the non-zero exit to debug for lookups whose
+    failure the caller already handles — `remote get-url origin` on a repo with
+    no origin is a normal probe outcome, not a fault, and warning on it puts a
+    line in the log (and in test output) for every origin-less repo. The
+    warning itself stays: it exists so a broken worktree cannot produce a 500
+    whose cause is recorded nowhere.
     """
     cmd = ["git", "--no-optional-locks", *args]
     try:
@@ -138,7 +147,8 @@ def git_read(cwd: Path, *args: str) -> str | None:
         logger.warning("git_read could not run %s in %s: %s", cmd, cwd, exc)
         return None
     if out.returncode != 0:
-        logger.warning("git_read %s in %s failed: %s", cmd, cwd, out.stderr.strip())
+        log = logger.debug if expected_failure else logger.warning
+        log("git_read %s in %s failed: %s", cmd, cwd, out.stderr.strip())
         return None
     return out.stdout.strip()
 
@@ -180,7 +190,7 @@ def probe_repo(path: str | Path) -> dict:
     p = Path(path).expanduser()
     if not p.is_dir():
         raise ConfigError(f"{p} is not a directory")
-    toplevel = git_read(p, "rev-parse", "--show-toplevel")
+    toplevel = git_read(p, "rev-parse", "--show-toplevel", expected_failure=True)
     if toplevel is None:
         raise ConfigError(f"{p} is not a git repository")
     root = Path(toplevel)
@@ -190,19 +200,22 @@ def probe_repo(path: str | Path) -> dict:
     if gitmodules.is_file():
         parser = ConfigParser()
         try:
-            # .gitmodules is INI-shaped: [submodule "libs/x"] with a path key
+            # .gitmodules is INI-shaped: [submodule "libs/x"] with a path key.
+            # ValueError covers read_text()'s UnicodeDecodeError: this read is
+            # best-effort, so a .gitmodules that is not UTF-8 degrades to no
+            # submodules rather than failing the whole probe.
             parser.read_string(gitmodules.read_text())
             submodules = sorted(
                 parser.get(s, "path") for s in parser.sections() if parser.has_option(s, "path")
             )
-        except ConfigParserError, OSError:
+        except ConfigParserError, OSError, ValueError:
             submodules = []
 
     beads = root / ".beads"
     beads_config = read_yaml(beads / "config.yaml", {}) if beads.is_dir() else {}
     export = beads_config.get("export") or {}
 
-    remote = git_read(root, "remote", "get-url", "origin") or ""
+    remote = git_read(root, "remote", "get-url", "origin", expected_failure=True) or ""
     forge, project = _detect_forge(remote)
 
     test_command = next((cmd for marker, cmd in _TEST_COMMANDS if (root / marker).is_file()), None)
