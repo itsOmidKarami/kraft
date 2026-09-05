@@ -48,6 +48,8 @@ export interface WorkItem {
   attachments?: WorkItemAttachment[];
   root_merge_policy?: string | null;
   worktree_path?: string;
+  /** why the item is stopped, from the `work_item_needs_human` it sits on */
+  stop_reason?: string | null;
   /** Minor findings that never entered the fix loop; only on the detail endpoint. */
   deferred_findings?: Finding[];
   /** `done_with_concerns` text from every session that reported one; only on the detail endpoint. */

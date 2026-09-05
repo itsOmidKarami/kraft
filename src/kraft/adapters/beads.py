@@ -48,14 +48,24 @@ async def search(q: str, *, cwd: str | None = None, limit: int = 5) -> list[dict
 
     Live, not indexed: the search overlay's own results are a lagging shadow of
     the repo, and this footer strip is the one line in it that is not.
+
+    `--status all` because a completed work item closes its bead: without it the
+    finished work is exactly what the strip cannot find (Kraft-evm). Callers get
+    the status per row and can say so.
+
+    Best-effort by contract: no `bd` on PATH is a missing footer strip, not a
+    500 on the search route (Kraft-9m4).
     """
-    proc = await asyncio.to_thread(
-        subprocess.run,
-        ["bd", "search", q, "--json"],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        proc = await asyncio.to_thread(
+            subprocess.run,
+            ["bd", "search", q, "--json", "--status", "all"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+        )
+    except OSError, ValueError:
+        return []
     if proc.returncode != 0 or "[" not in proc.stdout:
         return []
     try:

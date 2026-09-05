@@ -188,6 +188,8 @@ export function SearchOverlay({ onClose }: { onClose: () => void }) {
             beads.slice(0, 2).map((b) => (
               <span key={b.id} className="bead-hit">
                 <code>{b.id}</code> {b.title}
+                {/* closed beads are searchable (Kraft-evm), so say which are */}
+                {b.status === "closed" && <span className="tag tag-neutral">closed</span>}
               </span>
             ))
           )}

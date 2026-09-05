@@ -117,14 +117,15 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
                 return new
         return ln
 
-    schema = "\n".join(
-        rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
-    )
-    # tables introduced after `version` were not there yet
+    # columns and tables introduced after `version` were not there yet — decided
+    # before the schema is built, or the drop never reaches it
     if version < 6:
         skip_stmts = (*skip_stmts, "auth_sessions")
     if version < 7:
         drop_lines = (*drop_lines, "submodules", "root_merge_policy", "-- cross-repo")
+    schema = "\n".join(
+        rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
+    )
     conn.execute("BEGIN")
     for stmt in (x.strip() for x in schema.split(";")):
         if stmt and not any(skip in stmt for skip in skip_stmts):

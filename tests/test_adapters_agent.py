@@ -598,6 +598,16 @@ def test_no_model_anywhere_leaves_it_unset():
     assert inv.model is None
 
 
+def test_command_and_profile_vary_independently():
+    """Spec §6: the profile says how a CLI is spoken to, the command says which
+    binary is spoken to — one hook can change either without the other."""
+    same_profile = agent.resolve_invocation({"command": "claude-next"}, None, None)
+    assert (same_profile.command, same_profile.profile) == ("claude-next", "claude")
+
+    same_command = agent.resolve_invocation({"command": "claude", "profile": "claude"}, None, None)
+    assert (same_command.command, same_command.profile) == ("claude", "claude")
+
+
 def test_deny_tools_union_repo_first_deduplicated():
     inv = agent.resolve_invocation(
         {"command": "c", "deny_tools": ["WebFetch", "Bash"]},

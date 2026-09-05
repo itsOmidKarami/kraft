@@ -512,3 +512,51 @@ def test_health_reports_embeddings(tmp_path):
             await state.close()
 
     asyncio.run(scenario())
+
+
+def test_repos_includes_connected_repos_with_no_work_items(tmp_path):
+    """Kraft-38w: a repo connected through Settings is indexable on first use,
+    before any work item exists for it."""
+
+    async def scenario():
+        state = await Database.open(tmp_path / "state.db")
+        conn = index_db.open_index(tmp_path / "index.db")
+        try:
+            repo = make_repo_with_engineering(
+                tmp_path, {".engineering/specs/c.md": "# C\nz\n"}, "c"
+            )
+            repos_yaml = tmp_path / "repos.yaml"
+            repos_yaml.write_text(f"repos:\n  - path: {repo}\n    name: c\n")
+            ix = Indexer(conn, state, repos_env="", repos_path=repos_yaml)
+            assert ix.repos() == [str(repo)]
+
+            # ... and a malformed file degrades to the other sources.
+            repos_yaml.write_text("repos: nope\n")
+            await _seed_work_item(state, str(repo), "w-c")
+            assert ix.repos() == [str(repo)]
+        finally:
+            conn.close()
+            await state.close()
+
+    asyncio.run(scenario())
+
+
+def test_purge_repo_drops_its_documents(tmp_path):
+    async def scenario():
+        state = await Database.open(tmp_path / "state.db")
+        conn = index_db.open_index(tmp_path / "index.db")
+        try:
+            repo = make_repo_with_engineering(
+                tmp_path, {".engineering/specs/d.md": "# D\nharpoon rigging\n"}, "d"
+            )
+            ix = Indexer(conn, state, repos_env=str(repo))
+            await ix.startup_scan()
+            assert ix.search("harpoon rigging")
+
+            ix.purge_repo(str(repo))
+            assert ix.search("harpoon rigging") == []
+        finally:
+            conn.close()
+            await state.close()
+
+    asyncio.run(scenario())

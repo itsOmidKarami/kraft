@@ -156,3 +156,28 @@ def test_search_modes_without_embeddings(tmp_path, monkeypatch):
         else:
             assert r.status_code == 422
             assert "vector" in r.json()["detail"]
+
+
+def test_connecting_a_repo_indexes_it_immediately(tmp_path, monkeypatch):
+    """Kraft-38w: connect a repo through Settings and its documents are
+    searchable at once — no work item for it, no restart."""
+    repo = make_repo_with_engineering(
+        tmp_path, {".engineering/specs/keel.md": "# Keel\nlaminated oak keel\n"}, "keel"
+    )
+    with _client(tmp_path, monkeypatch, index_repos="") as client:
+        assert not client.get("/search", params={"q": "laminated oak", "mode": "fts"}).json()[
+            "results"
+        ]
+        assert client.post("/index/rescan", params={"repo": str(repo)}).status_code == 404
+
+        assert client.post("/repos", json={"path": str(repo)}).status_code == 201
+
+        assert client.post("/index/rescan", params={"repo": str(repo)}).status_code == 200
+        hits = client.get("/search", params={"q": "laminated oak", "mode": "fts"}).json()["results"]
+        assert [h["path"] for h in hits] == [".engineering/specs/keel.md"]
+
+        # Disconnecting takes its documents back out of search.
+        assert client.delete("/repos", params={"path": str(repo)}).status_code == 204
+        assert not client.get("/search", params={"q": "laminated oak", "mode": "fts"}).json()[
+            "results"
+        ]

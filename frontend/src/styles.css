@@ -437,7 +437,9 @@ aside .row, .narrow .row {
 
 /* ══ document modal (design 6a) ═══════════════════════════════════════════ */
 .dialog-backdrop { align-items: flex-start; padding: 44px 24px; z-index: 40; }
-.doc-modal {
+/* .diff-modal is the same shell — same width, same overflow handling — so it
+   shares the rule rather than repeating it 470 lines further down. */
+.doc-modal, .diff-modal {
   width: 820px; max-width: 100%; padding: 0; gap: 0;
   max-height: calc(100vh - 88px); overflow: hidden;
 }
@@ -848,7 +850,7 @@ aside .row, .narrow .row {
   .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .template-editor, .access-grid { grid-template-columns: 1fr; }
   .dialog-backdrop { padding: 12px; align-items: flex-start; }
-  .doc-modal, .log-modal { max-height: calc(100vh - 24px); }
+  .doc-modal, .diff-modal, .log-modal { max-height: calc(100vh - 24px); }
   .doc-editor-menu { right: 0; }
 }
 
@@ -909,8 +911,6 @@ aside .row, .narrow .row {
 .chain-preview { margin-top: 4px; }
 .policy-radios { display: flex; gap: 16px; flex-wrap: wrap; }
 
-.diff-modal { width: 820px; max-width: 100%; padding: 0; gap: 0;
-              max-height: calc(100vh - 88px); overflow: hidden; }
 .diff-modal-head {
   display: flex; align-items: center; gap: 12px;
   padding: 14px 22px; border-bottom: 1px solid var(--color-divider);
