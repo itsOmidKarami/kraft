@@ -264,6 +264,47 @@ def save_access(path: str | Path, access: dict) -> None:
     write_yaml(path, {k: access.get(k, v) for k, v in ACCESS_DEFAULT.items()})
 
 
+# ── notify ───────────────────────────────────────────────────────────────────
+
+#: `templates/notify.yaml`. Not bundled and not seeded, for `access.yaml`'s
+#: reason: it holds a secret and a hostname that belong to one machine. A
+#: missing file reads as this, and the first `PUT /notify` creates it.
+NOTIFY_DEFAULT: dict = {
+    "enabled": False,
+    "url": None,
+    "base_url": None,
+    "events": ["gate_requested", "work_item_needs_human"],
+}
+
+
+def load_notify(path: str | Path) -> dict:
+    try:
+        overrides = read_yaml(path, {})
+    except ConfigError as exc:
+        # notify.yaml holds a webhook URL. read_yaml's ConfigError message embeds
+        # the underlying exception, which for a YAML/decode error quotes the
+        # offending source line verbatim -- for this file that line is the
+        # secret. Every other config file wants that parser detail back; only
+        # this one gets a sanitized message instead, and `from None` drops the
+        # chained original (and its embedded token) out of any traceback.
+        #
+        # An OSError (permission denied, e.g.) carries no file content -- its
+        # `strerror` is a libc message -- so it is safe to surface, and doing
+        # so keeps "the file is unreadable" from being misreported as "the
+        # file is not valid YAML".
+        cause = exc.__cause__
+        if isinstance(cause, OSError):
+            raise ConfigError(f"notify.yaml: cannot be read: {cause.strerror}") from None
+        raise ConfigError("notify.yaml: not valid YAML") from None
+    return {**NOTIFY_DEFAULT, "events": list(NOTIFY_DEFAULT["events"]), **overrides}
+
+
+def save_notify(path: str | Path, notify: dict) -> None:
+    """Written 0600 — `write_yaml` stages through `mkstemp`, which creates at
+    0600, and `os.replace` carries that mode onto the target."""
+    write_yaml(path, {k: notify.get(k, v) for k, v in NOTIFY_DEFAULT.items()})
+
+
 # ── auto-intake ──────────────────────────────────────────────────────────────
 
 INTAKE_DEFAULT: dict = {

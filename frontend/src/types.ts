@@ -313,6 +313,15 @@ export interface Access {
   auth_required: boolean;
 }
 
+/** `GET /notify`. The webhook URL is deliberately absent — the server never
+ *  sends it back, so there is nothing here to accidentally render. */
+export interface Notify {
+  enabled: boolean;
+  url_set: boolean;
+  base_url: string | null;
+  events: string[];
+}
+
 export interface AuthSession {
   id: string;
   label: string | null;

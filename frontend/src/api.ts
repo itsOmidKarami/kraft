@@ -9,6 +9,7 @@ import type {
   LogLine,
   SessionStatus,
   HookBinding,
+  Notify,
   Policy,
   Repo,
   RepoProbe,
@@ -184,6 +185,14 @@ export const putAccess = (body: {
   password?: string;
   session_expiry_days?: number;
 }) => req<Access>("/access", json("PUT", body));
+
+export const getNotify = () => req<Notify>("/notify");
+export const putNotify = (body: {
+  enabled?: boolean;
+  url?: string;
+  base_url?: string;
+  events?: string[];
+}) => req<Notify>("/notify", json("PUT", body));
 
 export const getAuthSessions = () => req<{ sessions: AuthSession[] }>("/sessions");
 export const revokeSession = (id: string) =>
