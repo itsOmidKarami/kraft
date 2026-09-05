@@ -134,4 +134,18 @@ describe("DocumentModal", () => {
     expect(writeText).toHaveBeenCalledWith("/r/.engineering/specs/ws.md");
     expect(await screen.findByText("path copied")).toBeInTheDocument();
   });
+
+  it("hides the editor-launch controls off-desktop but keeps copy path", async () => {
+    vi.spyOn(api, "getDocument").mockResolvedValue(doc);
+    wrap(<DocumentModal id="d1" onClose={() => {}} />);
+    // Launching an editor is meaningless on a phone: the server-side launch has
+    // no window to open there, and the vscode:// fallback has nothing to handle
+    // it. Copying the path still works everywhere.
+    const open = await screen.findByRole("button", { name: /open in/i });
+    expect(open.closest(".desktop-only")).not.toBeNull();
+    expect(screen.getByRole("button", { name: /choose editor/i }).closest(".desktop-only"))
+      .not.toBeNull();
+    expect(screen.getByTitle("Copy path").closest(".desktop-only")).toBeNull();
+    expect(screen.getByTitle("Close · Esc").closest(".desktop-only")).toBeNull();
+  });
 });

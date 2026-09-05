@@ -13,7 +13,14 @@ _VALID_KINDS = {"builtin", "agent", "subprocess"}
 # templates around them. Without this, every settings file the UI writes would be
 # read as a malformed template and show up as degraded health.
 CONFIG_FILES = frozenset(
-    {"registry.yaml", "policy.yaml", "repos.yaml", "access.yaml", "intake.yaml"}
+    {
+        "registry.yaml",
+        "policy.yaml",
+        "repos.yaml",
+        "access.yaml",
+        "notify.yaml",
+        "intake.yaml",
+    }
 )
 # The complete gate set. Public because the API validates approve/reject against it
 # and the chain-review skill documents it — a second copy is how those drift apart.

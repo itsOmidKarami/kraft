@@ -29,6 +29,7 @@ from kraft import config as config_mod
 from kraft import events, executor, findings, reattach, store
 from kraft import intake as intake_mod
 from kraft import logs as logs_mod
+from kraft import notify as notify_mod
 from kraft import policy as policy_mod
 from kraft.adapters import beads as beads_mod
 from kraft.db import Database
@@ -108,6 +109,19 @@ async def lifespan(app: FastAPI):
     except policy_mod.PolicyError as exc:
         invalid_policy = [str(exc)]
 
+    # Snapshot before reattach spawns anything. A resumed executor task starts
+    # running at its first `await` -- some time after this line, but well
+    # before `notifier.start()` below (which comes after `startup_scan`, an
+    # unbounded scan on a large index). A `MAX(seq)` read taken there instead
+    # would land past whatever a just-resumed work item already emitted, and
+    # the notifier would never see it: not "late", gone. This snapshot is
+    # taken here, before reattach, and handed straight through to
+    # `notifier.start()` so the notifier's own cursor can never be later than
+    # the first event a resumed task might produce.
+    notify_cursor = database.read(
+        lambda c: c.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()[0]
+    )
+
     summary, adopted = await reattach.reattach(database, run_dirs, registry)
     app.state.tasks.update(adopted)
     for wid in summary.resumed_work_items:
@@ -165,8 +179,17 @@ async def lifespan(app: FastAPI):
 
     broadcaster = Broadcaster(database)
     await broadcaster.start()
-    database.set_on_commit(lambda: (broadcaster.notify(), indexer.notify()))
+    # Third subscriber on the same fan-out. Its sends are detached tasks, so a
+    # hanging webhook cannot stall the WebSocket or the indexer behind it.
+    notifier = notify_mod.Notifier(
+        database,
+        templates_dir / "notify.yaml",
+        fallback_base_url=f"http://{app.state.bound_host}:{access['port']}",
+    )
+    await notifier.start(cursor=notify_cursor)
+    database.set_on_commit(lambda: (broadcaster.notify(), indexer.notify(), notifier.notify()))
     app.state.broadcaster = broadcaster
+    app.state.notifier = notifier
     # Off by default costs nothing at all: no task, no timer, no tick. On
     # `app.state` as well as in a local because that is the only way a test can
     # tell "no poller was created" from "a poller was created and did nothing" —
@@ -181,6 +204,7 @@ async def lifespan(app: FastAPI):
     finally:
         database.set_on_commit(None)
         await broadcaster.stop()
+        await notifier.stop()
         await indexer.stop()
         index_conn.close()
         # Before the work item tasks, so a tick in flight cannot _spawn one
@@ -1599,6 +1623,78 @@ async def put_access(body: AccessBody, request: Request):
     if body.password:
         await st.db.write(auth_mod.revoke_all)
     return await get_access(request)
+
+
+class NotifyBody(BaseModel):
+    enabled: bool | None = None
+    #: Omitted leaves the stored secret alone — editing the event list must not
+    #: require re-entering a token the UI is never allowed to show back. `""`
+    #: is the explicit clear.
+    url: str | None = None
+    base_url: str | None = None
+    events: list[str] | None = None
+
+
+def _notify_view(notify_cfg: dict) -> dict:
+    """What `/notify` is allowed to say. The URL is not in it: a settings screen
+    that renders the value back into the DOM puts the token in the browser, in
+    screenshots, and in any future session recording."""
+    return {
+        "enabled": bool(notify_cfg["enabled"]),
+        "url_set": bool(notify_cfg["url"]),
+        "base_url": notify_cfg["base_url"],
+        "events": notify_cfg["events"],
+    }
+
+
+def _checked_url(value: str, field: str) -> str:
+    scheme = urlsplit(value).scheme
+    if scheme not in ("http", "https"):
+        raise HTTPException(422, f"{field} must be an http or https URL")
+    return value
+
+
+@app.get("/notify")
+async def get_notify(request: Request):
+    # Reads straight off disk. `st.notifier` holds its own copy of this file in
+    # memory and only refreshes it on `reload()` (called by `put_notify` below,
+    # and at startup) -- so a hand edit to notify.yaml shows up here right away
+    # but does not change what the running notifier actually does until the
+    # next PUT or a restart. That is a knowing divergence from this module's
+    # docstring claim that a hand edit and a UI edit are the same operation;
+    # closing it means a file watcher, which this task does not build.
+    st = request.app.state
+    return _notify_view(config_mod.load_notify(st.templates_dir / "notify.yaml"))
+
+
+@app.put("/notify")
+async def put_notify(body: NotifyBody, request: Request):
+    st = request.app.state
+    path = st.templates_dir / "notify.yaml"
+    cfg = config_mod.load_notify(path)
+    if body.enabled is not None:
+        cfg["enabled"] = body.enabled
+    if body.url is not None:
+        cfg["url"] = _checked_url(body.url, "url") if body.url else None
+        # Clearing the URL is how an operator revokes a leaked token. It must
+        # not just fail the invariant below -- it must disable, same as
+        # "Clear URL"'s own hint claims. This is the only path back to a valid
+        # state once the URL is gone, so force it rather than reject it.
+        if not cfg["url"]:
+            cfg["enabled"] = False
+    if body.base_url is not None:
+        cfg["base_url"] = _checked_url(body.base_url, "base_url") if body.base_url else None
+    if body.events is not None:
+        cfg["events"] = body.events
+    # Enabled with nowhere to send is a setting that looks armed and is not.
+    # Kept as a belt-and-braces check: the branch above already makes it
+    # unreachable for the "clear the URL" path, but not for "enable with no
+    # URL ever set" (body.url is None and cfg["url"] was already empty).
+    if cfg["enabled"] and not cfg["url"]:
+        raise HTTPException(422, "set a webhook URL before enabling notifications")
+    config_mod.save_notify(path, cfg)
+    st.notifier.reload()
+    return _notify_view(cfg)
 
 
 class Login(BaseModel):

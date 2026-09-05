@@ -3,6 +3,10 @@
 Date: 2026-09-04
 Beads: Kraft-8mu.4 (parent Kraft-8mu); blocked by Kraft-8mu.2
 
+**Amended 2026-09-05**, before implementation, against the merged tree. Sub-projects
+D, A, F and C have all landed since this was written. Every amendment is marked
+`[amended]`; the rest of the document stands as approved.
+
 ## Problem
 
 Kraft's central promise is that a run stops and waits for a human. Nothing tells
@@ -35,7 +39,7 @@ during its own implementation, instead of desktop-first and then retrofitted.
 
 ## 1. Where it hooks in
 
-`api.py:147` already fans every database commit out to two subscribers:
+`api.py:156` already fans every database commit out to two subscribers:
 
 ```python
 database.set_on_commit(lambda: (broadcaster.notify(), indexer.notify()))
@@ -73,6 +77,22 @@ where Kraft is blocked on the human and will make no further progress.
 the glossary. Where both it and `gate_requested` fire for the same transition,
 the notifier sends one message, keyed on `work_item_id` within a short window.
 
+**[amended]** In the merged tree the two types are disjoint at the source:
+`store.request_gate` emits only `gate_requested`, `store.mark_needs_human` only
+`work_item_needs_human`, and no caller invokes both. The coalescing window is
+kept anyway — `POST /gates/{gate}/reject` writes `reject_gate` and then, when
+the reject loop is exhausted, `mark_needs_human` in the same second, on an item
+that had just been notified about. One window, one message, keyed on
+`work_item_id`.
+
+**Corrected after implementation:** the sentence above originally claimed the
+test asserts that reject-exhaustion path rather than a synthetic double-append.
+It does not, and it should not. Reaching that path needs a human to reject a
+gate within `COALESCE_SECONDS` (10s) of the gate opening, which does not happen
+— so the "real" test would be a test for an unreachable sequence. The shipped
+test appends the two events directly, which is the honest way to exercise a
+window whose only observable behaviour is the coalescing itself.
+
 The event list is configurable, but the shipped default is these two.
 
 ## 3. Delivery
@@ -100,12 +120,24 @@ and the indexer share.
 
 ## 4. The phone UI
 
-`styles.css` holds three `@media` queries in total; `nocturne.css` holds none.
-The responsive work is real but bounded, because only two screens matter:
+**[amended]** This section was written against a tree where `styles.css` held
+three `@media` queries and no phone rule. It now holds a real design-1n phone
+block at `max-width: 640px` covering the nav, the board grid and sidebar, the
+detail screen, 44px touch targets on gate and board buttons, and a
+`.desktop-only` / `.phone-only` pair that `WorkItemDetail.tsx` already uses to
+hide steer/retry/pause off-desktop and show "Open on desktop to steer or retry".
+The board and the detail shell are therefore **done**. What is *not* done is the
+one thing this sub-project was blocked on `Kraft-8mu.2` for, plus one control:
 
-- **The board** — read which items need you.
-- **The gate** — `Gate.tsx`, both variants, plus whatever `Kraft-8mu.2` adds to
-  the `artifact` slot.
+- **The diff viewer** — `DiffModal.tsx` / `.diff-modal`. Landed with `Kraft-8mu.2`
+  after this spec was written, and it is desktop-shaped: an 820px dialog whose
+  `.diff-body > div` is `white-space: pre`, inside a `.dialog-backdrop` the phone
+  block only pads. It is reached from the gate's `artifact` slot for
+  `human_review_approval` — i.e. it is on the exact path a notification links to.
+- **The reject textarea** in `Gate.tsx`, per the bullet below.
+
+The board and gate needed no further work beyond confirming both at a phone
+viewport; the responsive budget goes to the diff viewer instead.
 
 Everything a notification links to must work on a phone; nothing else has to.
 Settings edits YAML, Analytics is a dense table, and the log viewer is a wall of
@@ -118,6 +150,16 @@ Two existing behaviours need attention rather than layout:
   construction. Both must be hidden, not merely broken, when the browser is not
   on the server's machine. The diff viewer from `Kraft-8mu.2` is what replaces
   the first of them remotely.
+
+  **[amended]** `open-worktree` needs nothing: `api.openWorktree` survives in
+  `api.ts` but no component calls it, so there is no button to hide. Its
+  replacement, "Review changes" → `DiffModal`, is already unconditional in
+  `WorkItemDetail.tsx`. `DocumentModal`'s editor menu is not broken either — it
+  already falls back to a `vscode://file/...` URL the *viewer's* machine
+  honours. That fallback is meaningless on a phone, so the menu is hidden by the
+  existing `.desktop-only` class and "Copy path" stays. No new server capability
+  flag: a browser on a loopback origin is on the server's machine, which is a
+  `window.location.hostname` test, not an API field.
 - The reject textarea in `Gate.tsx` is the one place a phone user types. It gets
   the layout attention.
 
@@ -129,8 +171,26 @@ a Settings screen like every other file there:
 ```yaml
 enabled: false
 url: null
+base_url: null
 events: [gate_requested, work_item_needs_human]
 ```
+
+**[amended]** `base_url` was missing from the original and the payload cannot be
+built without it. §3 requires "a URL to the item", and the server does not know
+its own reachable address: `access.yaml` holds a *bind*, which is `0.0.0.0` in
+exactly the LAN configuration this feature exists for, and `http://0.0.0.0:8765`
+is not a link anyone can tap. `base_url` is the operator's answer to "what do I
+type into my phone" — a LAN IP or a tunnel hostname. Unset, it falls back to
+`http://{bind}:{port}`, which is correct on loopback and honestly useless off it;
+the Settings screen says so rather than pretending. It is not a secret and is
+returned by `GET /notify` in full.
+
+`notify.yaml` is not bundled and not seeded, for `access.yaml`'s reason
+(`cli.py:seed_home` deletes that one from the staged copy): it holds a secret and
+a hostname that belong to one machine. A missing file reads as the defaults
+above, and the first `PUT /notify` creates it. `templates.CONFIG_FILES` gains
+`notify.yaml` so `load_templates` does not read it as a malformed chain template
+and degrade `/health`.
 
 Separate from `access.yaml` because that file governs how Kraft is reached and
 this governs how Kraft reaches out.
@@ -162,8 +222,16 @@ Consequences, all of which the implementation must honour:
   existing WS test harness
 - `GET /notify` never returns the URL; a `PUT` omitting `url` preserves it
 - the URL appears in no log file or event payload after a failed send
-- frontend: board and gate render usably at a phone viewport; local-only actions
-  are absent when the server reports it cannot act on them
+- frontend: the diff viewer renders usably at a phone viewport, and the reject
+  textarea in `Gate.tsx` is reachable and typable there
+- frontend: `DocumentModal`'s editor-launch menu is inside a `.desktop-only`
+  wrapper while "Copy path" is not
+
+**[amended]** "board and gate render usably at a phone viewport" is dropped as a
+new test: `WorkItemDetail.test.tsx` already asserts the `.desktop-only` boundary
+for the controls, and jsdom has no viewport to assert a media query against —
+the existing class-boundary assertions are the testable form of that claim, and
+the diff viewer gets the same treatment rather than a new kind of test.
 
 ## Acceptance
 

@@ -153,40 +153,46 @@ export function DocumentModal({
             )}
           </div>
           <div className="doc-modal-actions" ref={menuRef}>
-            <button
-              className="btn btn-primary doc-open"
-              disabled={!doc}
-              onClick={() => openIn(current.id)}
-            >
-              <ArrowSquareOut size={13} />
-              Open in {current.name}
-            </button>
-            <button
-              className="btn btn-primary doc-open-more"
-              aria-label="Choose editor"
-              aria-expanded={menu}
-              disabled={!doc}
-              onClick={() => setMenu((v) => !v)}
-            >
-              <CaretDown size={12} />
-            </button>
+            {/* Launching an editor needs a window on one machine or the other.
+                A phone has neither the server's desktop nor a vscode:// handler,
+                so the whole launch affordance goes; Copy path is the fallback
+                that works from anywhere. */}
+            <div className="desktop-only">
+              <button
+                className="btn btn-primary doc-open"
+                disabled={!doc}
+                onClick={() => openIn(current.id)}
+              >
+                <ArrowSquareOut size={13} />
+                Open in {current.name}
+              </button>
+              <button
+                className="btn btn-primary doc-open-more"
+                aria-label="Choose editor"
+                aria-expanded={menu}
+                disabled={!doc}
+                onClick={() => setMenu((v) => !v)}
+              >
+                <CaretDown size={12} />
+              </button>
+              {menu && (
+                <div className="doc-editor-menu card elev-lg" role="menu">
+                  {EDITORS.map((e) => (
+                    <button key={e.name} role="menuitem" onClick={() => openIn(e.id)}>
+                      {e.name}
+                      {e.id === current.id && <span className="doc-editor-default">default</span>}
+                    </button>
+                  ))}
+                  <p className="doc-editor-foot">Default editor is set in Settings → General.</p>
+                </div>
+              )}
+            </div>
             <button className="btn btn-icon btn-ghost" title="Copy path" onClick={copyPath}>
               <Copy size={14} />
             </button>
             <button className="btn btn-icon btn-ghost" title="Close · Esc" onClick={onClose}>
               <X size={14} />
             </button>
-            {menu && (
-              <div className="doc-editor-menu card elev-lg" role="menu">
-                {EDITORS.map((e) => (
-                  <button key={e.name} role="menuitem" onClick={() => openIn(e.id)}>
-                    {e.name}
-                    {e.id === current.id && <span className="doc-editor-default">default</span>}
-                  </button>
-                ))}
-                <p className="doc-editor-foot">Default editor is set in Settings → General.</p>
-              </div>
-            )}
           </div>
         </header>
 
