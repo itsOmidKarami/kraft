@@ -121,6 +121,11 @@ export function WorkItemDetail() {
           </span>
         </div>
         <h2 className="detail-title">{item.title}</h2>
+        {item.attachments?.length ? (
+          <span className="tag tag-outline">
+            from {item.attachments.map((a) => a.kind).join("+")}
+          </span>
+        ) : null}
         <div className="detail-hero">
           <span className="hero-node">{item.current_node_id ?? "—"}</span>
           {item.fixCycle != null && (

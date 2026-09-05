@@ -14,6 +14,10 @@ CONFIG_FILES = frozenset({"registry.yaml", "policy.yaml", "repos.yaml", "access.
 # The complete gate set. Public because the API validates approve/reject against it
 # and the chain-review skill documents it — a second copy is how those drift apart.
 GATE_NAMES = {"spec_approval", "plan_approval", "chain_finalized", "human_review_approval"}
+#: What an intake attachment stands in for (Kraft-dgh). Keyed on the gate rather
+#: than the node id: gate names are a validated closed vocabulary, node ids are
+#: free text a custom template chooses.
+ATTACHMENT_GATES = {"spec": "spec_approval", "plan": "plan_approval"}
 
 
 class RegistryError(Exception):
@@ -144,7 +148,10 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
     return TemplateSet(valid=valid, invalid=invalid)
 
 
-def materialize(template: Template) -> dict:
+def materialize(template: Template, *, satisfied_gates: frozenset[str] = frozenset()) -> dict:
+    """The template's nodes, minus any whose gate an intake attachment already
+    satisfies — the item genuinely has no spec node, rather than one skipped at
+    runtime (Kraft-dgh)."""
     return {
         "template_id": template.id,
         "nodes": [
@@ -155,5 +162,6 @@ def materialize(template: Template) -> dict:
                 "fix_loop": n.get("fix_loop"),
             }
             for n in template.nodes
+            if n.get("gate_after") not in satisfied_gates
         ],
     }

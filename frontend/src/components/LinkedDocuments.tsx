@@ -66,6 +66,9 @@ export function LinkedDocuments({
               <span className="doc-path">{d.path}</span>
             </span>
             <span className="tag tag-neutral doc-kind">{d.kind ?? d.source_kind}</span>
+            {d.attachment_kind && (
+              <span className="tag tag-outline doc-attached">attached at intake</span>
+            )}
             <span className="doc-node">{d.node_id}</span>
           </button>
         );

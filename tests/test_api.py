@@ -6,7 +6,12 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from support.harness import fake_templates_dir, isolated_bd, make_repo
+from support.harness import (
+    fake_templates_dir,
+    isolated_bd,
+    make_repo,
+    make_repo_with_engineering,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
@@ -554,3 +559,150 @@ def test_a_single_repo_item_has_no_repos_panel(tmp_path, monkeypatch):
             json={"repo": str(repo), "title": "solo", "chain_template": "quick-task"},
         ).json()["id"]
         assert client.get(f"/work-items/{wid}").json()["repos"] == []
+
+
+def test_intake_with_a_plan_attachment_trims_the_chain_and_reports_it(tmp_path, monkeypatch):
+    repo = make_repo_with_engineering(tmp_path, {".engineering/plans/p.md": "# plan\n"})
+    with _client(tmp_path, monkeypatch) as client:
+        r = client.post(
+            "/work-items",
+            json={
+                "title": "t",
+                "repo": str(repo),
+                "chain_template": "default",
+                "attachments": [{"kind": "plan", "path": ".engineering/plans/p.md"}],
+            },
+        )
+        assert r.status_code == 201, r.text
+        wid = r.json()["id"]
+        item = client.get(f"/work-items/{wid}").json()
+        assert item["attachments"] == [{"kind": "plan", "path": ".engineering/plans/p.md"}]
+        assert "plan_approval" not in [n["gate_after"] for n in item["chain_definition"]["nodes"]]
+        listed = next(i for i in client.get("/work-items").json()["items"] if i["id"] == wid)
+        assert listed["attachments"] == [{"kind": "plan", "path": ".engineering/plans/p.md"}]
+
+
+def test_intake_with_a_plan_attachment_never_runs_the_plan_node(tmp_path, monkeypatch):
+    """The trimmed node must be absent from the run, not merely from the
+    chain_definition the UI reads (see the _trims_the_chain_and_reports_it
+    test above for that check)."""
+    repo = make_repo_with_engineering(tmp_path, {".engineering/plans/p.md": "# plan\n"})
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/work-items",
+            json={
+                "title": "t",
+                "repo": str(repo),
+                "chain_template": "default",
+                "attachments": [{"kind": "plan", "path": ".engineering/plans/p.md"}],
+            },
+        ).json()["id"]
+        _await_gate(client, wid, "spec_approval")
+        client.post(f"/work-items/{wid}/gates/spec_approval/approve")
+        events = _poll_events(client, wid, "node_started", count=2)
+        started = [e["payload"]["node_id"] for e in events if e["type"] == "node_started"]
+        assert "plan" not in started
+        assert "chain_review" in started
+
+
+def test_intake_rejects_a_traversing_attachment_path(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        r = client.post(
+            "/work-items",
+            json={
+                "title": "t",
+                "repo": str(repo),
+                "attachments": [{"kind": "plan", "path": "../outside.md"}],
+            },
+        )
+        assert r.status_code == 422
+        assert "escapes" in r.text
+
+
+def test_intake_rejects_an_absolute_attachment_path(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    # Absolute and outside the repo, but real — proves rejection is about
+    # location, not existence (an absolute path to a missing file would 422
+    # for the wrong reason).
+    outside = tmp_path / "outside.md"
+    outside.write_text("# outside\n")
+    with _client(tmp_path, monkeypatch) as client:
+        r = client.post(
+            "/work-items",
+            json={
+                "title": "t",
+                "repo": str(repo),
+                "attachments": [{"kind": "plan", "path": str(outside)}],
+            },
+        )
+        assert r.status_code == 422
+        assert "escapes" in r.text
+
+
+def test_intake_rejects_a_symlink_that_escapes_the_repo(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    outside = tmp_path / "outside.md"
+    outside.write_text("# outside\n")
+    # The only thing that makes this path escape is the symlink target; the
+    # path string itself is repo-relative, so this fails only if .resolve()
+    # actually follows the symlink before the is_relative_to check.
+    escape = repo / ".engineering" / "plans" / "escape.md"
+    escape.parent.mkdir(parents=True)
+    escape.symlink_to(outside)
+    with _client(tmp_path, monkeypatch) as client:
+        r = client.post(
+            "/work-items",
+            json={
+                "title": "t",
+                "repo": str(repo),
+                "attachments": [{"kind": "plan", "path": ".engineering/plans/escape.md"}],
+            },
+        )
+        assert r.status_code == 422
+        assert "escapes" in r.text
+
+
+def test_intake_rejects_a_missing_attachment_and_a_duplicate_kind(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        missing = client.post(
+            "/work-items",
+            json={
+                "title": "t",
+                "repo": str(repo),
+                "attachments": [{"kind": "plan", "path": ".engineering/plans/nope.md"}],
+            },
+        )
+        assert missing.status_code == 422
+        (repo / ".engineering" / "plans").mkdir(parents=True)
+        (repo / ".engineering" / "plans" / "p.md").write_text("# p\n")
+        dupe = client.post(
+            "/work-items",
+            json={
+                "title": "t",
+                "repo": str(repo),
+                "attachments": [
+                    {"kind": "plan", "path": ".engineering/plans/p.md"},
+                    {"kind": "plan", "path": ".engineering/plans/p.md"},
+                ],
+            },
+        )
+        assert dupe.status_code == 422
+
+
+def test_intake_accepts_an_uncommitted_attachment(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    plan = repo / ".engineering" / "plans" / "p.md"
+    plan.parent.mkdir(parents=True)
+    plan.write_text("# uncommitted\n")
+    with _client(tmp_path, monkeypatch) as client:
+        r = client.post(
+            "/work-items",
+            json={
+                "title": "t",
+                "repo": str(repo),
+                "attachments": [{"kind": "plan", "path": ".engineering/plans/p.md"}],
+            },
+        )
+        assert r.status_code == 201, r.text

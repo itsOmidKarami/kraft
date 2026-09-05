@@ -13,6 +13,7 @@ import tempfile
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlsplit
 
 import yaml
@@ -253,6 +254,12 @@ async def _authenticate(request: Request, call_next):
     return await call_next(request)
 
 
+class Attachment(BaseModel):
+    kind: Literal["spec", "plan"]
+    #: repo-relative; validated and normalized server-side before it is stored
+    path: str
+
+
 class NewWorkItem(BaseModel):
     title: str
     repo: str
@@ -261,6 +268,28 @@ class NewWorkItem(BaseModel):
     #: repo's .gitmodules, and what happens to the root pointer when they land
     submodules: list[str] = []
     root_merge_policy: str = "bump"
+    #: spec/plan documents that already exist — they trim the gates they satisfy
+    attachments: list[Attachment] = []
+
+
+def _validated_attachments(repo: str, attachments: list[Attachment]) -> list[dict]:
+    """Trust boundary: `path` comes from a browser and is used to read a file and
+    to write into a worktree. Resolve under the repo and reject any escape."""
+    kinds = [a.kind for a in attachments]
+    if len(set(kinds)) != len(kinds):
+        raise HTTPException(422, "at most one attachment per kind")
+    root = Path(repo).resolve()
+    out = []
+    for a in attachments:
+        target = (root / a.path).resolve()
+        if not target.is_relative_to(root):
+            raise HTTPException(422, f"attachment path escapes the repo: {a.path}")
+        # Working tree, not HEAD: a document written minutes ago is legal input,
+        # and env_setup copies it into the worktree.
+        if not target.is_file():
+            raise HTTPException(422, f"attachment not found: {a.path}")
+        out.append({"kind": a.kind, "path": str(target.relative_to(root))})
+    return out
 
 
 @app.post("/work-items", status_code=201)
@@ -278,6 +307,7 @@ async def create_work_item(body: NewWorkItem, request: Request):
         raise HTTPException(422, f"unknown root_merge_policy {body.root_merge_policy!r}")
     if not Path(body.repo).is_dir():
         raise HTTPException(422, f"repo path does not exist: {body.repo}")
+    attachments = _validated_attachments(body.repo, body.attachments)
     try:
         wid = await executor.intake(
             st.db,
@@ -288,6 +318,7 @@ async def create_work_item(body: NewWorkItem, request: Request):
             bd_cwd=_bd_cwd(),
             submodules=body.submodules,
             root_merge_policy=body.root_merge_policy,
+            attachments=attachments,
         )
     except Exception as exc:  # noqa: BLE001 -- beads.intake raises several unrelated types
         raise HTTPException(502, f"bd intake failed: {exc}") from exc
@@ -403,6 +434,7 @@ async def list_work_items(request: Request):
             "created_at": r["created_at"],
             "updated_at": r["updated_at"],
             "pending_gate": pending.get(r["id"]),
+            "attachments": json.loads(r["attachments"]) if r["attachments"] else [],
         }
         for r in rows
     ]
@@ -429,6 +461,7 @@ async def get_work_item(wid: str, request: Request):
     return {
         **{k: row[k] for k in row.keys()},
         "chain_definition": json.loads(row["chain_definition"]),
+        "attachments": json.loads(row["attachments"]) if row["attachments"] else [],
         "worker_sessions": [{k: s[k] for k in s.keys()} for s in sessions],
         "usage": st.db.read(lambda c: store.usage_rollup(c, wid)),
         # empty on a single-repo item; the detail's repos panel is multi-repo only

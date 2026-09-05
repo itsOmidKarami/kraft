@@ -462,3 +462,14 @@ def test_migrate_v4_to_v5_rebuilds_work_items_for_the_paused_status(tmp_path):
     assert "pending_steer_context" in cols
     # the events FK still points somewhere real after the drop/rename
     assert conn2.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_migration_7_adds_attachments_column(tmp_path):
+    conn = db._connect(tmp_path / "s.db")
+    db.migrate(conn)
+    conn.execute("PRAGMA user_version = 7")
+    conn.execute("ALTER TABLE work_items DROP COLUMN attachments")
+    db.migrate(conn)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(work_items)")}
+    assert "attachments" in cols
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
