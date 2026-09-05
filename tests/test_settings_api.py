@@ -99,6 +99,26 @@ def test_repo_crud_round_trips_through_the_yaml(tmp_path, client, templates_dir)
     assert client.delete(f"/repos?path={path}").status_code == 404
 
 
+def test_add_repo_stores_probed_forge(client, tmp_path):
+    repo = make_repo(tmp_path, name="ghrepo")
+    _set_origin(repo, "git@github.com:owner/repo.git")
+    r = client.post("/repos", json={"path": str(repo)})
+    assert r.status_code == 201
+    assert r.json()["forge"] == "github"
+    assert r.json()["project"] == "owner/repo"
+    assert "gitlab_project" not in r.json()
+
+
+def test_patch_repo_overrides_forge(client, tmp_path):
+    repo = make_repo(tmp_path, name="patchrepo")
+    client.post("/repos", json={"path": str(repo)})
+    r = client.patch(f"/repos?path={repo}", json={"forge": "gitea", "project": "t/r"})
+    assert r.status_code == 200
+    (entry,) = [x for x in client.get("/repos").json()["repos"] if x["path"] == str(repo.resolve())]
+    assert entry["forge"] == "gitea"
+    assert entry["project"] == "t/r"
+
+
 # ── templates (5b) ───────────────────────────────────────────────────────────
 
 
@@ -172,6 +192,24 @@ def test_policy_put_rejects_a_cap_that_would_not_load(client, templates_dir):
     bad = {"loops": {}, "default": {"attempts": 0, "wall_clock_s": 1}}
     assert client.put("/policy", json=bad).status_code == 422
     assert client.get("/policy").json()["default"]["attempts"] == 3
+
+
+def test_saving_the_policy_preserves_the_findings_block(client, templates_dir):
+    """A save from the policy screen must not silently erase a block it does not edit."""
+    (templates_dir / "policy.yaml").write_text(
+        "loops:\n  verify_fix_loop: { attempts: 3, wall_clock_s: 3600 }\n"
+        "default: { attempts: 3, wall_clock_s: 3600 }\n"
+        "findings:\n  loop_severities: [critical]\n"
+    )
+    body = client.get("/policy").json()
+    assert body["findings"]["loop_severities"] == ["critical"]
+
+    body["loops"]["verify_fix_loop"]["attempts"] = 5
+    assert client.put("/policy", json=body).status_code == 200
+
+    on_disk = yaml.safe_load((templates_dir / "policy.yaml").read_text())
+    assert on_disk["findings"]["loop_severities"] == ["critical"]
+    assert on_disk["loops"]["verify_fix_loop"]["attempts"] == 5
 
 
 # ── access + auth (5e, 1m) ───────────────────────────────────────────────────
@@ -288,8 +326,63 @@ def test_probe_survives_a_repo_with_no_git_remote(tmp_path):
     repo = make_repo(tmp_path)
     subprocess.run(["git", "remote", "remove", "origin"], cwd=repo, capture_output=True)
     probed = config.probe_repo(repo)
-    assert probed["gitlab_project"] is None
+    assert probed["forge"] is None
+    assert probed["project"] is None
+    assert "gitlab_project" not in probed
     assert Path(probed["path"]) == repo.resolve()
+
+
+def _set_origin(repo, url):
+    subprocess.run(["git", "remote", "add", "origin", url], cwd=repo, check=True)
+
+
+def test_probe_detects_no_forge_without_remote(tmp_path):
+    repo = make_repo(tmp_path)
+    probed = config.probe_repo(repo)
+    assert probed["forge"] is None
+    assert probed["project"] is None
+    assert "gitlab_project" not in probed
+
+
+def test_probe_detects_gitlab_ssh(tmp_path):
+    repo = make_repo(tmp_path)
+    _set_origin(repo, "git@gitlab.com:group/repo.git")
+    probed = config.probe_repo(repo)
+    assert probed["forge"] == "gitlab"
+    assert probed["project"] == "group/repo"
+
+
+def test_probe_detects_gitlab_https(tmp_path):
+    repo = make_repo(tmp_path)
+    _set_origin(repo, "https://gitlab.com/group/sub/repo.git")
+    probed = config.probe_repo(repo)
+    assert probed["forge"] == "gitlab"
+    assert probed["project"] == "group/sub/repo"
+
+
+def test_probe_detects_github_ssh(tmp_path):
+    repo = make_repo(tmp_path)
+    _set_origin(repo, "git@github.com:owner/repo.git")
+    probed = config.probe_repo(repo)
+    assert probed["forge"] == "github"
+    assert probed["project"] == "owner/repo"
+
+
+def test_probe_detects_github_https(tmp_path):
+    repo = make_repo(tmp_path)
+    _set_origin(repo, "https://github.com/owner/repo")
+    probed = config.probe_repo(repo)
+    assert probed["forge"] == "github"
+    assert probed["project"] == "owner/repo"
+
+
+def test_probe_unknown_host_is_not_an_error(tmp_path):
+    repo = make_repo(tmp_path)
+    _set_origin(repo, "git@git.example.com:team/repo.git")
+    probed = config.probe_repo(repo)
+    assert probed["forge"] is None
+    assert probed["project"] is None
+    assert probed["name"] == "sample"
 
 
 def test_the_spa_bundle_loads_before_a_session_exists(tmp_path, monkeypatch, templates_dir):
@@ -430,3 +523,55 @@ def test_a_document_navigation_cannot_slip_past_the_bearer_check(
         client.cookies.clear()
         r = client.get("/work-items", headers={"sec-fetch-dest": "document"})
         assert r.status_code == 401
+
+
+def test_load_repos_reads_legacy_gitlab_project(tmp_path):
+    path = tmp_path / "repos.yaml"
+    config.write_yaml(path, {"repos": [{"path": "/r", "gitlab_project": "group/repo"}]})
+    (repo,) = config.load_repos(path)
+    assert repo["forge"] == "gitlab"
+    assert repo["project"] == "group/repo"
+    assert "gitlab_project" not in repo
+
+
+def test_load_repos_passes_through_new_shape(tmp_path):
+    path = tmp_path / "repos.yaml"
+    config.write_yaml(path, {"repos": [{"path": "/r", "forge": "github", "project": "o/r"}]})
+    (repo,) = config.load_repos(path)
+    assert repo["forge"] == "github"
+    assert repo["project"] == "o/r"
+
+
+def test_load_repos_new_shape_wins_over_legacy(tmp_path):
+    path = tmp_path / "repos.yaml"
+    config.write_yaml(
+        path,
+        {"repos": [{"path": "/r", "forge": "github", "project": "o/r", "gitlab_project": "g/r"}]},
+    )
+    (repo,) = config.load_repos(path)
+    assert repo["forge"] == "github"
+    assert repo["project"] == "o/r"
+    assert "gitlab_project" not in repo
+
+
+def test_load_repos_defaults_both_to_none(tmp_path):
+    path = tmp_path / "repos.yaml"
+    config.write_yaml(path, {"repos": [{"path": "/r"}]})
+    (repo,) = config.load_repos(path)
+    assert repo["forge"] is None
+    assert repo["project"] is None
+
+
+def test_load_repos_keeps_unknown_forge(tmp_path):
+    path = tmp_path / "repos.yaml"
+    config.write_yaml(path, {"repos": [{"path": "/r", "forge": "gitea", "project": "t/r"}]})
+    (repo,) = config.load_repos(path)
+    assert repo["forge"] == "gitea"
+
+
+def test_save_repos_round_trip_drops_legacy_key(tmp_path):
+    path = tmp_path / "repos.yaml"
+    config.write_yaml(path, {"repos": [{"path": "/r", "gitlab_project": "group/repo"}]})
+    config.save_repos(path, config.load_repos(path))
+    assert "gitlab_project" not in path.read_text()
+    assert "forge: gitlab" in path.read_text()

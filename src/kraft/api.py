@@ -26,7 +26,7 @@ from starlette.websockets import WebSocketDisconnect
 from kraft import analytics as analytics_mod
 from kraft import auth as auth_mod
 from kraft import config as config_mod
-from kraft import events, executor, reattach, store
+from kraft import events, executor, findings, reattach, store
 from kraft import logs as logs_mod
 from kraft import policy as policy_mod
 from kraft.adapters import beads as beads_mod
@@ -46,6 +46,10 @@ from kraft.ws import Broadcaster
 logger = logging.getLogger(__name__)
 
 DEFAULT_FRONTEND_DIST = BUNDLED / "web"
+
+#: Diff bodies larger than this are cut at a file boundary. Protects the
+#: browser; not a user decision, so not policy.
+DIFF_MAX_BYTES = 1_000_000
 
 
 async def _guard(db, wid: str, coro) -> None:
@@ -470,6 +474,24 @@ def _completed_nodes(st, wid: str) -> set[str]:
     }
 
 
+def _deferred_findings(st, wid: str) -> list[dict]:
+    """Findings that never entered the loop, for the human at the gate.
+
+    A roll-up nobody reads is a silent discard, so these are rendered at the
+    gate rather than merely recorded.
+    """
+    loop_severities = getattr(st.policy, "loop_severities", policy_mod.DEFAULT_LOOP_SEVERITIES)
+    seen: dict[str, dict] = {}
+    for e in st.db.read(lambda c: events.read_after(c, 0, wid)):
+        if e["type"] != "findings_measured":
+            continue
+        for raw in e["payload"].get("findings", []):
+            if raw.get("severity") in loop_severities:
+                continue
+            seen.setdefault(findings.from_payload(raw).fingerprint, raw)
+    return list(seen.values())
+
+
 @app.get("/work-items/{wid}")
 async def get_work_item(wid: str, request: Request):
     st = request.app.state
@@ -493,6 +515,7 @@ async def get_work_item(wid: str, request: Request):
         # "the node has a gate_after and its sessions are done" cannot see a
         # rejection, and offers Approve on a gate the API will 409 (Kraft).
         "pending_gate": _pending_gate(st, wid),
+        "deferred_findings": _deferred_findings(st, wid),
     }
 
 
@@ -508,6 +531,99 @@ async def get_work_item_documents(wid: str, request: Request):
     st = request.app.state
     _work_item_row(st, wid)  # 404s on an unknown work item
     return {"work_item_id": wid, "documents": st.indexer.documents_for_work_item(wid)}
+
+
+def _truncate_at_file_boundary(diff: str, limit: int) -> tuple[str, bool]:
+    """Cut a unified diff to `limit` bytes on a `diff --git` boundary.
+
+    A single file bigger than `limit` has no boundary to cut at — the whole
+    first chunk is kept unconditionally so at least one file always survives
+    truncation. That file is then cut at the last newline that fits, so a
+    committed lockfile or vendored blob doesn't come back whole.
+    """
+    if len(diff.encode()) <= limit:
+        return diff, False
+    kept: list[str] = []
+    size = 0
+    for chunk in diff.split("\ndiff --git ")[:1] + [
+        "\ndiff --git " + c for c in diff.split("\ndiff --git ")[1:]
+    ]:
+        if size + len(chunk.encode()) > limit and kept:
+            break
+        kept.append(chunk)
+        size += len(chunk.encode())
+    result = "".join(kept)
+    encoded = result.encode()
+    if len(kept) == 1 and len(encoded) > limit:
+        cut = encoded[:limit].rfind(b"\n")
+        encoded = encoded[: cut if cut != -1 else limit]
+        result = encoded.decode(errors="ignore")
+    return result, True
+
+
+@app.get("/work-items/{wid}/diff")
+async def get_work_item_diff(wid: str, request: Request):
+    """The changes an agent made, for a reviewer with no filesystem access.
+
+    Diffs the working tree against `base_ref`, not `base_ref...HEAD`: an agent
+    that wrote files without committing them is the normal mid-chain state, and
+    a committed-only diff would show an empty change set while the work sat on
+    disk.
+    """
+    st = request.app.state
+    row = _work_item_row(st, wid)  # 404s on an unknown work item
+    base = row["base_ref"]
+    if not base:
+        # Pre-migration items (and any future template with no env_setup node)
+        # never got a base_ref stamped, and are also the likeliest to have had
+        # their worktree cleaned up since — check this before the worktree, so
+        # that combination degrades to "no diff" rather than a 404.
+        return {
+            "work_item_id": wid,
+            "base_ref": None,
+            "files": [],
+            "diff": "",
+            "untracked": [],
+            "truncated": False,
+        }
+    worktree = st.run_dirs.worktrees / wid
+    if not worktree.is_dir():
+        raise HTTPException(404, "this work item has no worktree yet")
+
+    body = config_mod.git_read(worktree, "diff", base)
+    numstat = config_mod.git_read(worktree, "diff", "--numstat", base)
+    status = config_mod.git_read(worktree, "status", "--porcelain", "-uall")
+    if body is None or numstat is None or status is None:
+        # None means git itself failed (and git_read has already logged the
+        # command and stderr). Returning an empty diff here would be
+        # indistinguishable from "no changes" to the human approving the gate,
+        # and the worktree path is a server filesystem detail a remote
+        # reviewer's browser has no business seeing.
+        raise HTTPException(500, "git could not read this work item's worktree")
+
+    files = []
+    for line in numstat.splitlines():
+        parts = line.split("\t")
+        if len(parts) == 3:
+            ins, dels, path = parts
+            files.append(
+                {
+                    "path": path,
+                    "insertions": int(ins) if ins.isdigit() else 0,
+                    "deletions": int(dels) if dels.isdigit() else 0,
+                }
+            )
+
+    untracked = [ln[3:] for ln in status.splitlines() if ln.startswith("?? ")]
+    diff, truncated = _truncate_at_file_boundary(body, DIFF_MAX_BYTES)
+    return {
+        "work_item_id": wid,
+        "base_ref": base,
+        "files": files,
+        "diff": diff,
+        "untracked": untracked,
+        "truncated": truncated,
+    }
 
 
 @app.post("/work-items/{wid}/gates/{gate}/approve")
@@ -1011,7 +1127,8 @@ class RepoBody(BaseModel):
     name: str | None = None
     default_chain_template: str | None = None
     test_command: str | None = None
-    gitlab_project: str | None = None
+    forge: str | None = None
+    project: str | None = None
     enabled: bool = True
 
 
@@ -1053,7 +1170,8 @@ async def add_repo(body: RepoBody, request: Request):
         "name": body.name or probed["name"],
         "default_chain_template": body.default_chain_template or "default",
         "test_command": body.test_command or probed["test_command"],
-        "gitlab_project": body.gitlab_project or probed["gitlab_project"],
+        "forge": body.forge or probed["forge"],
+        "project": body.project or probed["project"],
         "enabled": body.enabled,
     }
     repos.append(entry)
@@ -1065,7 +1183,8 @@ class RepoPatch(BaseModel):
     name: str | None = None
     default_chain_template: str | None = None
     test_command: str | None = None
-    gitlab_project: str | None = None
+    forge: str | None = None
+    project: str | None = None
     enabled: bool | None = None
 
 
@@ -1217,6 +1336,7 @@ async def put_registry(body: RegistryBody, request: Request):
 class PolicyBody(BaseModel):
     loops: dict
     default: dict
+    findings: dict | None = None
 
 
 @app.get("/policy")
@@ -1231,6 +1351,8 @@ async def put_policy(body: PolicyBody, request: Request):
     keeps the cap it snapshotted at first fire (`02` §2.C)."""
     st = request.app.state
     data = {"loops": body.loops, "default": body.default}
+    if body.findings is not None:
+        data["findings"] = body.findings
     with tempfile.TemporaryDirectory() as tmp:
         candidate = Path(tmp) / "policy.yaml"
         candidate.write_text(yaml.safe_dump(data))

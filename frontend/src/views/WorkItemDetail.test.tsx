@@ -192,4 +192,60 @@ describe("WorkItemDetail", () => {
     const { container } = renderDetail();
     expect(container.querySelector(".repos-panel")).toBeNull();
   });
+
+  it("offers a diff at the human review gate, reachable from a phone", async () => {
+    setup({ status: "needs_human", pending_gate: "human_review_approval" });
+    renderDetail();
+    const button = await screen.findByRole("button", { name: /review changes/i });
+    expect(button).toBeInTheDocument();
+    // The whole point: unlike "Open worktree", this must survive on a device
+    // with no filesystem, so it must not be inside a desktop-only wrapper.
+    expect(button.closest(".desktop-only")).toBeNull();
+  });
+
+  it("does not double up the review button inside the spec gate's artifact slot", async () => {
+    setup({ status: "needs_human", pending_gate: "spec_approval" });
+    renderDetail();
+    // one button, from the hoisted row below the gate — not a second copy
+    // inside Gate's artifact slot, which spec_approval doesn't use.
+    const button = await screen.findByRole("button", { name: /review changes/i });
+    expect(button.closest(".desktop-only")).toBeNull();
+  });
+
+  it("offers a diff from the control row too, reachable from a phone", () => {
+    renderDetail();
+    const button = screen.getByRole("button", { name: /review changes/i });
+    expect(button.closest(".desktop-only")).toBeNull();
+  });
+
+  it("offers a working retry control on a no-progress stop with no capped payload", async () => {
+    const spy = vi.spyOn(api, "retryWorkItem").mockResolvedValue({
+      id: "w1",
+      node_id: "verify",
+      loop: "verify_fix_loop",
+      steer: null,
+    });
+    setup({
+      status: "needs_human",
+      chain_definition: {
+        template_id: "quick-task",
+        nodes: [
+          NODES[0],
+          { id: "verify", tasks: ["on.test.run"], gate_after: null, fix_loop: "verify_fix_loop" },
+        ],
+      },
+    });
+    renderDetail();
+    expect(screen.queryByRole("button", { name: /^Pause$/ })).toBeNull();
+    const button = await screen.findByRole("button", { name: /steer and retry/i });
+    await userEvent.click(button);
+    expect(spy).toHaveBeenCalledWith("w1", undefined);
+  });
+
+  it("offers a diff while paused, not just while active", () => {
+    setup({ status: "paused" }, [session({ status: "paused" })]);
+    renderDetail();
+    const button = screen.getByRole("button", { name: /review changes/i });
+    expect(button.closest(".desktop-only")).toBeNull();
+  });
 });
