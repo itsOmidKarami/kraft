@@ -1,0 +1,216 @@
+"""Kraft-m2q: REPEAT marking and no-progress escalation read the same
+measurement but ask different questions of it.
+
+`_last_measurement` used to be `_previous_fingerprints`, which returned None
+unless a fix cycle had followed the measurement. That gate is right for
+escalation and wrong for REPEAT marking, which only needs "was this finding in
+the last measurement" -- so on the first fix cycle after a steered `POST /retry`
+the finding that caused the stop was dispatched with no REPEAT tag and no repeat
+note, which spec §5 calls the part that matters more than the findings
+themselves.
+
+Kept out of tests/test_findings_loop.py, which is sub-project F's
+backward-compatibility guarantee and stays unedited.
+"""
+
+import asyncio
+import json
+import sys
+import tempfile
+from pathlib import Path
+
+from support.harness import fake_registry, isolated_bd, make_repo
+
+from kraft import db, events, executor, policy, store
+from kraft.paths import RunDirs
+from kraft.templates import Registry, Template
+
+
+def _seed(tmp_path, seq):
+    """Run `seq` as (event_type, payload) against one work item, then return
+    `_last_measurement` for node 'verify'."""
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="w1",
+                    bead_id="B-1",
+                    title="t",
+                    repo=str(repo),
+                    chain_template="quick-task",
+                    chain_definition=json.dumps({"template_id": "quick-task", "nodes": []}),
+                )
+            )
+            for etype, payload in seq:
+                await database.write(lambda c, e=etype, p=payload: events.append(c, "w1", e, p))
+            return executor._last_measurement(database, "w1", "verify")
+        finally:
+            await database.close()
+
+    return asyncio.run(scenario())
+
+
+_MEASURED = ("findings_measured", {"node_id": "verify", "cycle": 0, "fingerprints": ["fp1"]})
+_FIXED = ("fix_cycle_started", {"node_id": "verify", "cycle": 1})
+
+
+def test_a_measurement_with_no_fix_after_it_still_yields_its_fingerprints(tmp_path):
+    """The REPEAT half. Pre-fix this returned None, so the first fix cycle after
+    a steered retry lost the tag on the very finding that caused the stop."""
+    prints, fix_ran = _seed(tmp_path, [_MEASURED])
+    assert prints == ["fp1"]
+    assert fix_ran is False
+
+
+def test_a_fix_after_the_measurement_is_reported(tmp_path):
+    prints, fix_ran = _seed(tmp_path, [_MEASURED, _FIXED])
+    assert prints == ["fp1"]
+    assert fix_ran is True
+
+
+def test_a_fix_before_the_measurement_does_not_count(tmp_path):
+    """Order matters: escalation needs a fix that ran *since* the measurement."""
+    prints, fix_ran = _seed(tmp_path, [_FIXED, _MEASURED])
+    assert prints == ["fp1"]
+    assert fix_ran is False
+
+
+def test_another_node_s_events_are_ignored(tmp_path):
+    other = ("findings_measured", {"node_id": "elsewhere", "fingerprints": ["nope"]})
+    prints, fix_ran = _seed(tmp_path, [_MEASURED, other])
+    assert prints == ["fp1"]
+
+
+def test_nothing_measured_yet(tmp_path):
+    assert _seed(tmp_path, []) == (None, False)
+
+
+# --- the behavioural half: REPEAT on the first fix cycle after a steered retry ---
+#
+# Mirrors tests/test_findings_loop.py::test_retry_after_no_progress_dispatches_a_
+# fix_instead_of_re_escalating, which pins that the retry reaches a fix at all.
+# This pins what that fix is *told*. Rebuilt here rather than extended there,
+# because that file is sub-project F's backward-compatibility guarantee.
+
+_FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
+_FAKE_REVIEWER = Path(__file__).parent / "support" / "fake_reviewer.py"
+
+
+def _registry():
+    base = fake_registry(sys.executable, _FAKE_AGENT)
+    hooks = dict(base.hooks)
+    hooks["on.review.local.run"] = {
+        "kind": "subprocess",
+        "command": [sys.executable, str(_FAKE_REVIEWER)],
+    }
+    return Registry(hooks=hooks)
+
+
+def _template() -> Template:
+    return Template(
+        id="findings",
+        nodes=[
+            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None, "fix_loop": None},
+            {
+                "id": "review",
+                "tasks": ["on.review.local.run"],
+                "gate_after": None,
+                "fix_loop": "verify_fix_loop",
+            },
+        ],
+    )
+
+
+def _policy(tmp_path, *, attempts=5) -> policy.Policy:
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        f"loops:\n  verify_fix_loop: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
+        f"default: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
+    )
+    return policy.load_policy(p)
+
+
+_UNFIXED = {
+    "severity": "critical",
+    "message": "unfixed",
+    "file": "a.py",
+    "line": 3,
+    "source_plugin": "fake",
+}
+
+
+def test_the_fix_after_a_steered_retry_still_marks_the_finding_repeat(tmp_path, monkeypatch):
+    """The reported symptom. A no-progress stop, a `POST /retry`, and then the
+    first fix cycle of the re-entered loop: the finding that caused the stop was
+    in the last measurement, so it must carry REPEAT.
+
+    It does NOT carry the repeat *note* here -- see the sibling test.
+    """
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")  # never patches the code
+    log = tmp_path / "prompts.log"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(log))
+    call_dir = Path(tempfile.mkdtemp(dir=tmp_path))
+    plan = call_dir / "review-plan.json"
+    # Cycle 0 fails; cycle 1 re-measures unchanged code and escalates on
+    # no_progress. A third invocation (the retry's re-measurement) clamps to the
+    # last entry and reports the same finding again.
+    plan.write_text(json.dumps([{"status": "failed", "findings": [_UNFIXED]}] * 2))
+    monkeypatch.setenv("KRAFT_FAKE_REVIEW_PLAN", str(plan))
+    tracker = isolated_bd(call_dir)
+    repo = make_repo(call_dir)
+
+    async def scenario():
+        rd = RunDirs(call_dir / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry, pol = _registry(), _policy(call_dir)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="review me",
+                repo=str(repo),
+                template=_template(),
+                bd_cwd=str(tracker),
+            )
+            first = await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+            )
+            assert first == "needs_human"
+            evts = database.read(lambda c: events.read_after(c, 0, wid))
+            stops = [e for e in evts if e["type"] == "work_item_needs_human"]
+            reason = stops[-1]["payload"]["reason"]
+            assert reason.startswith("no_progress:")
+
+            before = len(_prompts(log))
+            await database.write(
+                lambda c: store.retry_after_cap(c, wid, "review", "verify_fix_loop", None)
+            )
+            await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+                start_index=1,
+            )
+            return before
+        finally:
+            await database.close()
+
+    before = asyncio.run(scenario())
+    post_retry = _prompts(log)[before:]
+    assert post_retry, "the steered retry dispatched no fix at all"
+    assert "REPEAT" in post_retry[0]
+    assert "you attempted this on an earlier cycle" not in post_retry[0]
+
+
+def _prompts(log):
+    if not log.is_file():
+        return []
+    return [p for p in log.read_text().split("\n\x00\n") if p.strip()]

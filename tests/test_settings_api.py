@@ -403,9 +403,17 @@ def test_a_broken_config_file_raises_rather_than_reading_as_empty(tmp_path):
     assert config.load_repos(tmp_path / "missing.yaml") == []
 
 
-def test_probe_survives_a_repo_with_no_git_remote(tmp_path):
+def _set_origin(repo, url):
+    subprocess.run(["git", "remote", "add", "origin", url], cwd=repo, check=True)
+
+
+def test_probe_survives_a_repo_whose_remote_was_removed(tmp_path):
+    """Distinct from test_probe_detects_no_forge_without_remote: make_repo never
+    adds an origin, so without this the `git remote remove` was a silent no-op
+    and both tests exercised the same never-had-a-remote state."""
     repo = make_repo(tmp_path)
-    subprocess.run(["git", "remote", "remove", "origin"], cwd=repo, capture_output=True)
+    _set_origin(repo, "git@gitlab.com:group/repo.git")
+    subprocess.run(["git", "remote", "remove", "origin"], cwd=repo, check=True)
     probed = config.probe_repo(repo)
     assert probed["forge"] is None
     assert probed["project"] is None
@@ -413,8 +421,51 @@ def test_probe_survives_a_repo_with_no_git_remote(tmp_path):
     assert Path(probed["path"]) == repo.resolve()
 
 
-def _set_origin(repo, url):
-    subprocess.run(["git", "remote", "add", "origin", url], cwd=repo, check=True)
+def test_probe_survives_a_gitmodules_that_is_not_utf8(tmp_path):
+    """`.gitmodules` is read best-effort — a repo whose submodule list cannot be
+    parsed still probes, with no submodules. read_text() raises UnicodeDecodeError,
+    a ValueError, which `except OSError` does not catch."""
+    repo = make_repo(tmp_path)
+    (repo / ".gitmodules").write_bytes(b'[submodule "\xff\xfe libs/x"]\n\tpath = libs/x\n')
+    assert config.probe_repo(repo)["submodules"] == []
+
+
+def test_an_expected_git_failure_logs_at_debug(caplog):
+    """`remote get-url origin` failing is a normal probe outcome — _detect_forge
+    returns (None, None) and the probe succeeds — so it must not warn. git_read's
+    warning stays for failures no caller handles."""
+    import logging
+
+    with caplog.at_level(logging.DEBUG, logger="kraft.config"):
+        assert (
+            config.git_read(Path.cwd(), "remote", "get-url", "nope", expected_failure=True) is None
+        )
+    assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
+    assert any(r.levelno == logging.DEBUG for r in caplog.records)
+
+
+def test_an_unhandled_git_failure_still_warns(caplog):
+    import logging
+
+    with caplog.at_level(logging.DEBUG, logger="kraft.config"):
+        assert config.git_read(Path.cwd(), "remote", "get-url", "nope") is None
+    assert [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def test_an_explicit_project_survives_a_legacy_key_beside_it():
+    """A hand-edited half-migrated entry: `project` set, `forge` absent, and the
+    pre-rename `gitlab_project` still present. The explicit value wins."""
+    repo = {"path": "/r", "project": "group/kept", "gitlab_project": "group/legacy"}
+    config._normalize_forge(repo)
+    assert repo["project"] == "group/kept"
+    assert repo["forge"] is None
+    assert "gitlab_project" not in repo
+
+
+def test_the_legacy_key_still_migrates_when_nothing_else_is_set():
+    repo = {"path": "/r", "gitlab_project": "group/legacy"}
+    config._normalize_forge(repo)
+    assert repo == {"path": "/r", "forge": "gitlab", "project": "group/legacy"}
 
 
 def test_probe_detects_no_forge_without_remote(tmp_path):

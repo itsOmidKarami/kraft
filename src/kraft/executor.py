@@ -366,24 +366,26 @@ def _previous_attempt_note(previous_fix: sqlite3.Row | None) -> str:
     return note
 
 
-def _previous_fingerprints(db, work_item_id: str, node_id: str) -> list[str] | None:
-    """The last `findings_measured` fingerprints it is safe to compare against for
-    no-progress escalation, or None if there is nothing comparable yet.
+def _last_measurement(db, work_item_id: str, node_id: str) -> tuple[list[str] | None, bool]:
+    """This node's most recent `findings_measured` fingerprints, and whether a
+    `fix_cycle_started` for the node followed it.
 
     Read from the event log rather than carried in a local: `_reconcile_current_node`
     re-enters `_walk_node` after a crash or a resume with the counter intact, and a
     loop holding its history in the stack frame forgets everything it has seen —
     on exactly the path that motivates escalation.
 
-    Only returned when a `fix_cycle_started` for this node appears *after* that
-    measurement. Spec §4's "no progress" means a fix cycle ran and changed
-    nothing — not merely that the same code was measured twice in a row. A
-    `POST /retry` on a no-progress stop (or a crash/resume between the escalating
-    findings_measured and the fix it never got to dispatch) re-enters at round 0
-    and measures before it fixes; without this guard, a deterministic reviewer
-    seeing unchanged code would report the same fingerprints and the loop would
-    escalate straight back to needs_human without ever giving the steered retry
-    a chance to run.
+    The two return values answer two different questions, which is why they are
+    not collapsed into one. REPEAT marking asks only "was this finding in the
+    last measurement", so it uses the fingerprints unconditionally. No-progress
+    escalation additionally requires the fix flag: spec §4's "no progress" means
+    a fix cycle ran and changed nothing — not merely that the same code was
+    measured twice in a row. A `POST /retry` on a no-progress stop (or a
+    crash/resume between the escalating findings_measured and the fix it never
+    got to dispatch) re-enters at round 0 and measures before it fixes; without
+    the flag, a deterministic reviewer seeing unchanged code would report the
+    same fingerprints and the loop would escalate straight back to needs_human
+    without ever giving the steered retry a chance to run.
     """
     evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
     fix_seen = False
@@ -391,8 +393,8 @@ def _previous_fingerprints(db, work_item_id: str, node_id: str) -> list[str] | N
         if e["type"] == "fix_cycle_started" and e["payload"].get("node_id") == node_id:
             fix_seen = True
         elif e["type"] == "findings_measured" and e["payload"].get("node_id") == node_id:
-            return e["payload"].get("fingerprints") if fix_seen else None
-    return None
+            return e["payload"].get("fingerprints"), fix_seen
+    return None, False
 
 
 async def _walk_node(
@@ -460,7 +462,7 @@ async def _walk_node(
         if verdict == "paused":
             return "paused"
 
-        previous_prints = _previous_fingerprints(db, work_item_id, node["id"])
+        previous_prints, fix_ran = _last_measurement(db, work_item_id, node["id"])
         found, reported = _collect_findings(db, work_item_id, node, round)
         eligible = [f for f in found if f.severity in policy.loop_severities]
         prints = sorted({f.fingerprint for f in eligible})
@@ -522,7 +524,7 @@ async def _walk_node(
             )
             return "needs_human"
 
-        if prints and prints == previous_prints:
+        if prints and fix_ran and prints == previous_prints:
             reason = f"no_progress: {len(prints)} finding(s) unchanged across cycle {count - 1}"
             # Deliberately NOT mark_sessions_capped_out: these sessions did not
             # cap out, and only a real cap breach may claim they did.
@@ -539,7 +541,12 @@ async def _walk_node(
         if eligible:
             repeats = set(previous_prints or [])
             instruction += _FIX_FINDINGS.format(findings=_format_findings(eligible, repeats))
-            if repeats & set(prints):
+            # The tag is unconditional -- "this finding was in the last
+            # measurement" is true either way -- but the note claims an earlier
+            # attempt was made, which is false on the crash/resume path where
+            # the measurement was recorded and the process died before any
+            # fix_cycle_started.
+            if fix_ran and repeats & set(prints):
                 instruction += _FIX_REPEAT_NOTE
         instruction += _previous_attempt_note(_previous_fix_session(db, work_item_id, node["id"]))
         fix = await _dispatch(
