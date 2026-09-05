@@ -6,7 +6,11 @@ assertions check the file as well as the response.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -14,7 +18,11 @@ import yaml
 from fastapi.testclient import TestClient
 from support.harness import fake_templates_dir, isolated_bd, make_repo
 
-from kraft import auth, config
+from kraft import auth, config, events, store
+from kraft import db as kdb
+from kraft.paths import RunDirs
+
+_FAKE_AGENT = Path(__file__).resolve().parents[0] / "support" / "fake_agent.py"
 
 
 def _client(tmp_path, monkeypatch, templates_dir, *, host: str | None = None):
@@ -99,6 +107,57 @@ def test_repo_crud_round_trips_through_the_yaml(tmp_path, client, templates_dir)
     assert client.delete(f"/repos?path={path}").status_code == 404
 
 
+def test_add_repo_round_trips_default_model_and_steering(tmp_path, client, templates_dir):
+    (templates_dir / "steering").mkdir()
+    (templates_dir / "steering" / "house-style.md").write_text("# House style\nBe direct.\n")
+    repo = make_repo(tmp_path)
+    created = client.post(
+        "/repos",
+        json={
+            "path": str(repo),
+            "default_model": "anything-at-all",
+            "deny_tools": ["WebFetch"],
+            "steering": ["house-style"],
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    on_disk = yaml.safe_load((templates_dir / "repos.yaml").read_text())
+    assert on_disk["repos"][0]["default_model"] == "anything-at-all"
+    assert on_disk["repos"][0]["deny_tools"] == ["WebFetch"]
+    assert on_disk["repos"][0]["steering"] == ["house-style"]
+
+    fetched = client.get("/repos").json()["repos"][0]
+    assert fetched["default_model"] == "anything-at-all"
+    assert fetched["steering"] == ["house-style"]
+
+
+def test_add_repo_with_a_missing_steering_name_is_refused(tmp_path, client, templates_dir):
+    """Regression guard (task-3 fix round 1): the write side must validate
+    before persisting, or a bad POST bricks every later GET /repos."""
+    repos_yaml = templates_dir / "repos.yaml"
+    assert not repos_yaml.exists()
+    repo = make_repo(tmp_path)
+    r = client.post("/repos", json={"path": str(repo), "steering": ["does-not-exist"]})
+    assert 400 <= r.status_code < 500, r.text
+    # a rejected write never got persisted
+    assert not repos_yaml.exists()
+    assert client.get("/repos").json()["repos"] == []
+
+
+def test_patch_repo_with_a_missing_steering_name_is_refused(tmp_path, client, templates_dir):
+    repo = make_repo(tmp_path)
+    client.post("/repos", json={"path": str(repo)})
+    before = (templates_dir / "repos.yaml").read_text()
+
+    r = client.patch(f"/repos?path={repo}", json={"steering": ["does-not-exist"]})
+    assert 400 <= r.status_code < 500, r.text
+    assert (templates_dir / "repos.yaml").read_text() == before
+
+    (entry,) = client.get("/repos").json()["repos"]
+    assert entry["steering"] == []
+
+
 def test_add_repo_stores_probed_forge(client, tmp_path):
     repo = make_repo(tmp_path, name="ghrepo")
     _set_origin(repo, "git@github.com:owner/repo.git")
@@ -175,6 +234,28 @@ def test_registry_carries_the_interactive_flag(client):
     hooks["on.implementation.start"]["interactive"] = True
     assert client.put("/registry", json={"hooks": hooks}).status_code == 200
     assert client.get("/registry").json()["hooks"]["on.implementation.start"]["interactive"] is True
+
+
+def test_put_registry_validates_steering_against_the_real_templates_dir(client, templates_dir):
+    """Regression guard: `put_registry` validates the candidate against
+    `st.templates_dir / "steering"`, not the empty scratch dir it writes the
+    candidate registry into — that would 422 every save naming a real file."""
+    (templates_dir / "steering").mkdir()
+    (templates_dir / "steering" / "house-style.md").write_text("# House style\nBe direct.\n")
+    hooks = client.get("/registry").json()["hooks"]
+    hooks["on.implementation.start"]["steering"] = ["house-style"]
+    r = client.put("/registry", json={"hooks": hooks})
+    assert r.status_code == 200, r.text
+    assert client.get("/registry").json()["hooks"]["on.implementation.start"]["steering"] == [
+        "house-style"
+    ]
+
+
+def test_get_put_registry_round_trip_is_byte_identical(client, templates_dir):
+    before = (templates_dir / "registry.yaml").read_text()
+    hooks = client.get("/registry").json()["hooks"]
+    assert client.put("/registry", json={"hooks": hooks}).status_code == 200
+    assert (templates_dir / "registry.yaml").read_text() == before
 
 
 # ── policy (5d) ──────────────────────────────────────────────────────────────
@@ -569,9 +650,187 @@ def test_load_repos_keeps_unknown_forge(tmp_path):
     assert repo["forge"] == "gitea"
 
 
+def test_load_repos_rejects_a_missing_steering_file(tmp_path):
+    path = tmp_path / "repos.yaml"
+    config.write_yaml(path, {"repos": [{"path": "/r", "steering": ["missing"]}]})
+    with pytest.raises(config.ConfigError):
+        config.load_repos(path)
+
+
 def test_save_repos_round_trip_drops_legacy_key(tmp_path):
     path = tmp_path / "repos.yaml"
     config.write_yaml(path, {"repos": [{"path": "/r", "gitlab_project": "group/repo"}]})
     config.save_repos(path, config.load_repos(path))
     assert "gitlab_project" not in path.read_text()
     assert "forge: gitlab" in path.read_text()
+
+
+# ── `_launch` degrades on a broken repos.yaml instead of crashing (review r1) ──
+
+_GATED_CHAIN = {
+    "nodes": [
+        {
+            "id": "review",
+            "tasks": ["on.human_review.requested"],
+            "gate_after": "human_review_approval",
+        },
+    ]
+}
+
+
+def _seed_active_work_item(
+    run_dir: Path, *, wid: str, node_id: str, gate: str | None = None
+) -> None:
+    """Write a work item straight into a fresh run_dir's DB, bypassing the API,
+    so it is already there — 'active', at `node_id` — before a server ever
+    boots against this `run_dir` and its own `lifespan` runs reattach."""
+    rd = RunDirs(run_dir).ensure()
+
+    async def seed():
+        database = await kdb.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id=wid,
+                    bead_id="B-1",
+                    title="t",
+                    repo="/r",
+                    chain_template="quick-task",
+                    chain_definition=json.dumps(_GATED_CHAIN),
+                    status="active",
+                )
+            )
+            await database.write(lambda c: store.load_chain(c, wid, node_id))
+            if gate:
+                await database.write(
+                    lambda c: events.append(
+                        c, wid, "gate_requested", {"gate": gate, "node_id": node_id}
+                    )
+                )
+        finally:
+            await database.close()
+
+    asyncio.run(seed())
+
+
+def _broken_repos_yaml(templates_dir: Path) -> None:
+    """A repo naming a steering file that does not exist — an operator's hand
+    edit, or a steering file deleted after the fact. Written directly, bypassing
+    `POST /repos`'s own validation, which would refuse this on the way in."""
+    (templates_dir / "repos.yaml").write_text(
+        yaml.safe_dump({"repos": [{"path": "/r", "steering": ["deleted"]}]})
+    )
+
+
+def test_a_broken_repos_yaml_does_not_prevent_startup(tmp_path, monkeypatch):
+    """`_launch` runs on the reattach path too: `lifespan` calls it for every
+    work item still 'active' at boot (crash recovery). A malformed repos.yaml,
+    or a steering file an operator deleted, must degrade — like `invalid_policy`
+    already does for a bad policy.yaml — not crash the whole server and lock the
+    operator out of the Settings UI that would let them fix it."""
+    templates_dir = fake_templates_dir(tmp_path, "claude")
+    _broken_repos_yaml(templates_dir)
+    run_dir = tmp_path / "run"
+    _seed_active_work_item(run_dir, wid="w-active", node_id="review")
+
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
+    monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates_dir))
+    monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "no-dist"))
+    import kraft.api as api
+
+    with TestClient(api.app) as client:  # must not raise
+        assert client.get("/health").status_code == 200
+
+
+def test_a_broken_repos_yaml_does_not_500_the_approve_path(tmp_path, monkeypatch):
+    """Same broken repos.yaml, through a request instead of startup:
+    `approve_gate` builds `_launch(st, row['repo'])` eagerly while constructing
+    the `executor.run` coroutine — outside `_guard`'s try/except. It must
+    degrade, not 500."""
+    templates_dir = fake_templates_dir(tmp_path, "claude")
+    _broken_repos_yaml(templates_dir)
+    run_dir = tmp_path / "run"
+    _seed_active_work_item(run_dir, wid="w-gated", node_id="review", gate="human_review_approval")
+
+    with _client(tmp_path, monkeypatch, templates_dir) as client:
+        r = client.post("/work-items/w-gated/gates/human_review_approval/approve")
+        assert r.status_code == 200
+
+
+def test_connected_repos_default_model_reaches_the_agent_launch(tmp_path, monkeypatch):
+    """Pins the `_connected` wiring the executor tests bypass by constructing
+    `LaunchContext` by hand: connect a repo through the real API (its path
+    round-trips through git's symlink-resolving `--show-toplevel`, the whole
+    reason `_connected` exists over `r["path"] == repo`), then post a work item
+    against the same, unresolved path and check `--model` reaches the agent."""
+    templates_dir = fake_templates_dir(tmp_path, f"{sys.executable} {_FAKE_AGENT}")
+    argv_log = tmp_path / "argv.jsonl"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_ARGV_LOG", str(argv_log))
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    repo = make_repo(tmp_path)
+
+    with _client(tmp_path, monkeypatch, templates_dir) as client:
+        added = client.post("/repos", json={"path": str(repo), "default_model": "haiku"})
+        assert added.status_code == 201
+
+        wid = client.post("/work-items", json={"title": "x", "repo": str(repo)}).json()["id"]
+
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline and not argv_log.exists():
+            time.sleep(0.2)
+        assert argv_log.exists(), f"agent never launched for {wid}"
+
+    argv = json.loads(argv_log.read_text().splitlines()[0])
+    assert argv[-2:] == ["--model", "haiku"]
+
+
+def test_connected_repos_steering_reaches_the_agent_launch(tmp_path, monkeypatch):
+    """The `_launch` -> `resolve_invocation` seam for steering, not just
+    `--model`: connect a repo with `steering: ["house"]` through the real API,
+    post a work item, and check the house body reaches the agent's
+    `--append-system-prompt`. Both executor launch tests pass `steering_dir=None`
+    and never exercise this join; this is the sibling that does."""
+    templates_dir = fake_templates_dir(tmp_path, f"{sys.executable} {_FAKE_AGENT}")
+    (templates_dir / "steering").mkdir()
+    (templates_dir / "steering" / "house.md").write_text("Prefer tabs over spaces.")
+    argv_log = tmp_path / "argv.jsonl"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_ARGV_LOG", str(argv_log))
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    repo = make_repo(tmp_path)
+
+    with _client(tmp_path, monkeypatch, templates_dir) as client:
+        added = client.post("/repos", json={"path": str(repo), "steering": ["house"]})
+        assert added.status_code == 201, added.text
+
+        wid = client.post("/work-items", json={"title": "x", "repo": str(repo)}).json()["id"]
+
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline and not argv_log.exists():
+            time.sleep(0.2)
+        assert argv_log.exists(), f"agent never launched for {wid}"
+
+    argv = json.loads(argv_log.read_text().splitlines()[0])
+    prompt = argv[argv.index("--append-system-prompt") + 1]
+    assert "Prefer tabs over spaces." in prompt
+
+
+def test_get_repos_with_a_deleted_steering_file_does_not_lock_out_the_screen(tmp_path, monkeypatch):
+    """A steering file deleted after the fact (an operator's `rm`, since there is
+    no Settings screen for steering files) must not 422 the only screen that
+    could fix it. `GET /repos` reads without steering validation and returns the
+    entry as-is; `PATCH /repos` clearing the bad name must succeed too — that is
+    how an operator actually recovers, short of hand-editing the YAML."""
+    templates_dir = fake_templates_dir(tmp_path, "claude")
+    _broken_repos_yaml(templates_dir)
+
+    with _client(tmp_path, monkeypatch, templates_dir) as client:
+        got = client.get("/repos")
+        assert got.status_code == 200
+        assert got.json()["repos"][0]["steering"] == ["deleted"]
+
+        patched = client.patch("/repos?path=/r", json={"steering": []})
+        assert patched.status_code == 200
+        assert patched.json()["steering"] == []
+        assert client.get("/repos").json()["repos"][0]["steering"] == []

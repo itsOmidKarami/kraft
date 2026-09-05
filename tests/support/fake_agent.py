@@ -56,8 +56,19 @@ def _record_prompt(argv: list[str]) -> None:
             return
 
 
+def _record_argv(argv: list[str]) -> None:
+    """Append the full argv (JSON, one line) to KRAFT_FAKE_AGENT_ARGV_LOG, so a
+    test can assert on flags -p doesn't cover, like --model."""
+    dest = os.environ.get("KRAFT_FAKE_AGENT_ARGV_LOG")
+    if not dest:
+        return
+    with open(dest, "a") as fh:
+        fh.write(json.dumps(argv[1:]) + "\n")
+
+
 def main() -> int:
     _record_prompt(sys.argv)
+    _record_argv(sys.argv)
     mode = os.environ.get("KRAFT_FAKE_AGENT", "fix")
     if mode == "fix":
         calc = pathlib.Path("calc.py")

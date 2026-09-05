@@ -21,6 +21,8 @@ from pathlib import Path
 
 import yaml
 
+from kraft import steering as _steering
+
 logger = logging.getLogger(__name__)
 
 
@@ -77,7 +79,23 @@ def _normalize_forge(repo: dict) -> None:
     repo.setdefault("project", None)
 
 
-def load_repos(path: str | Path) -> list[dict]:
+def load_repos(
+    path: str | Path, *, steering_dir: Path | None = None, validate_steering: bool = True
+) -> list[dict]:
+    """Parse `repos.yaml`, or raise `ConfigError`.
+
+    `validate_steering` defaults on for direct/library callers, but the API's
+    read routes (`GET /repos`, `PATCH`/`DELETE /repos`, template validation)
+    pass it off: a steering file deleted after the fact must not 422 the very
+    screens an operator would use to fix it (the only escape otherwise is
+    hand-editing YAML — there is no Settings screen for steering files). The
+    write path stays strict: `_validate_repos` loads the candidate with
+    `validate_steering=True` (the default) before it is ever saved, and
+    `_launch`/`run_agent_task` already tolerate a steering name whose file is
+    gone by the time it is actually read.
+    """
+    path = Path(path)
+    steering_dir = steering_dir if steering_dir is not None else path.parent / "steering"
     data = read_yaml(path, REPOS_DEFAULT)
     repos = data.get("repos") or []
     if not isinstance(repos, list) or not all(isinstance(r, dict) for r in repos):
@@ -86,6 +104,18 @@ def load_repos(path: str | Path) -> list[dict]:
         if not isinstance(r.get("path"), str) or not r["path"]:
             raise ConfigError("repos.yaml: every repo needs a string 'path'")
         _normalize_forge(r)
+        r.setdefault("default_model", None)
+        if r.get("default_model") is not None and not isinstance(r["default_model"], str):
+            raise ConfigError("repos.yaml: 'default_model' must be a string")
+        for key in ("deny_tools", "steering"):
+            v = r.setdefault(key, [])
+            if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+                raise ConfigError(f"repos.yaml: {key!r} must be a list of strings")
+        if validate_steering:
+            try:
+                _steering.validate(steering_dir, r.get("steering", []), where="repos.yaml")
+            except _steering.SteeringError as exc:
+                raise ConfigError(str(exc)) from exc
     return repos
 
 

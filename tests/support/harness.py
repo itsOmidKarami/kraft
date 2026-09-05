@@ -92,7 +92,14 @@ def fake_templates_dir(tmp_path: Path, agent_command: str) -> Path:
     d.mkdir(parents=True, exist_ok=True)
     shutil.copy(_REPO_ROOT / "templates" / "quick-task.yaml", d / "quick-task.yaml")
     shutil.copy(_REPO_ROOT / "templates" / "default.yaml", d / "default.yaml")
-    noop = {"kind": "builtin", "handler": "noop"}
+
+    def noop() -> dict:
+        # A fresh dict per call, not one shared object: `yaml.safe_dump` aliases
+        # repeated *identical objects* with `&id001`/`*id001` anchors, which would
+        # make a GET/PUT round trip through JSON (which de-aliases) an unrelated
+        # byte diff rather than a real one.
+        return {"kind": "builtin", "handler": "noop"}
+
     (d / "registry.yaml").write_text(
         yaml.safe_dump(
             {
@@ -103,15 +110,15 @@ def fake_templates_dir(tmp_path: Path, agent_command: str) -> Path:
                         "kind": "subprocess",
                         "command": ["python", "-m", "pytest", "-q"],
                     },
-                    "on.spec.requested": noop,
-                    "on.plan.requested": noop,
-                    "on.chain.review_ready": noop,
-                    "on.review.local.run": noop,
-                    "on.mr.open": noop,
-                    "on.ci.poll": noop,
-                    "on.review.mr.run": noop,
-                    "on.human_review.requested": noop,
-                    "on.merge": noop,
+                    "on.spec.requested": noop(),
+                    "on.plan.requested": noop(),
+                    "on.chain.review_ready": noop(),
+                    "on.review.local.run": noop(),
+                    "on.mr.open": noop(),
+                    "on.ci.poll": noop(),
+                    "on.review.mr.run": noop(),
+                    "on.human_review.requested": noop(),
+                    "on.merge": noop(),
                 }
             }
         )

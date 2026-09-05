@@ -138,6 +138,82 @@ def test_load_registry_rejects_bad_bindings(tmp_path, body):
         templates.load_registry(tmp_path / "registry.yaml")
 
 
+# ── new agent-hook keys: profile, model, deny_tools, steering ──────────────────
+
+
+def test_agent_hook_without_new_keys_loads_exactly_as_before(tmp_path):
+    d = _dir(tmp_path, **{"registry.yaml": REGISTRY_YAML})
+    reg = templates.load_registry(d / "registry.yaml")
+    assert reg.hooks["on.implementation.start"] == {"kind": "agent", "command": "claude"}
+
+
+def test_load_registry_rejects_unknown_profile(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.x: { kind: agent, command: claude, profile: nope }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="nope") as exc_info:
+        templates.load_registry(tmp_path / "registry.yaml")
+    assert "claude" in str(exc_info.value)
+
+
+def test_load_registry_rejects_non_string_model(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.x: { kind: agent, command: claude, model: 3 }\n"
+    )
+    with pytest.raises(templates.RegistryError):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_load_registry_accepts_any_model_string(tmp_path):
+    """Kraft has no model list; an unknown-looking model string is not its job to reject."""
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.x: { kind: agent, command: claude, model: anything-at-all }\n"
+    )
+    reg = templates.load_registry(tmp_path / "registry.yaml")
+    assert reg.hooks["on.x"]["model"] == "anything-at-all"
+
+
+def test_load_registry_rejects_deny_tools_not_a_list(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.x: { kind: agent, command: claude, deny_tools: WebFetch }\n"
+    )
+    with pytest.raises(templates.RegistryError):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_load_registry_rejects_steering_naming_a_missing_file(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.x: { kind: agent, command: claude, steering: [missing] }\n"
+    )
+    with pytest.raises(templates.RegistryError):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_load_registry_does_not_mutate_the_binding(tmp_path):
+    """Regression guard: `GET /registry` hands out this exact dict and Settings
+    -> Plugins PUTs it back unedited. Any key load_registry writes into it gets
+    inlined into the operator's config on the next save."""
+    (tmp_path / "steering").mkdir()
+    (tmp_path / "steering" / "house-style.md").write_text("# House style\nBe direct.\n")
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.x: { kind: agent, command: claude, steering: [house-style] }\n"
+    )
+    reg = templates.load_registry(tmp_path / "registry.yaml")
+    binding = reg.hooks["on.x"]
+    assert binding == {"kind": "agent", "command": "claude", "steering": ["house-style"]}
+    assert "steering_texts" not in binding
+    assert binding["steering"] == ["house-style"]
+    assert "profile" not in binding
+
+
+def test_load_registry_rejects_model_on_a_subprocess_hook(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.x: { kind: subprocess, command: [pytest], model: claude-x }\n"
+    )
+    with pytest.raises(templates.RegistryError):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
 def test_unknown_hook_quarantines_only_that_template(tmp_path):
     d = _dir(
         tmp_path,

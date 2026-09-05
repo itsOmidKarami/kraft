@@ -82,6 +82,10 @@ async def lifespan(app: FastAPI):
     # Read the templates dir at startup, not import time, so tests (and reloads)
     # that set KRAFT_TEMPLATES_DIR after import still take effect.
     templates_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    # Set on app.state now (not after reattach below, where it lived before) so
+    # `_launch` — which reads st.templates_dir — can build a launch context for
+    # a reattached work item's resume.
+    app.state.templates_dir = templates_dir
     registry = load_registry(templates_dir / "registry.yaml")
     templates = load_templates(templates_dir, registry)
 
@@ -99,6 +103,11 @@ async def lifespan(app: FastAPI):
     summary, adopted = await reattach.reattach(database, run_dirs, registry)
     app.state.tasks.update(adopted)
     for wid in summary.resumed_work_items:
+        repo_row = database.read(
+            lambda c, wid=wid: c.execute(
+                "SELECT repo FROM work_items WHERE id = ?", (wid,)
+            ).fetchone()
+        )
         _spawn(
             app,
             wid,
@@ -113,6 +122,7 @@ async def lifespan(app: FastAPI):
                     adopted=adopted,
                     bd_cwd=_bd_cwd(),
                     policy=policy_obj,
+                    launch=_launch(app.state, repo_row["repo"]) if repo_row else None,
                 ),
             ),
         )
@@ -122,7 +132,6 @@ async def lifespan(app: FastAPI):
     app.state.registry = registry
     app.state.templates = templates
     app.state.policy = policy_obj
-    app.state.templates_dir = templates_dir
     app.state.access = access
     # What the server is really listening on. __main__ reads access.yaml for this,
     # so they normally agree — until someone saves a new bind and has not restarted.
@@ -361,6 +370,7 @@ async def create_work_item(body: NewWorkItem, request: Request):
                 registry=st.registry,
                 bd_cwd=_bd_cwd(),
                 policy=st.policy,
+                launch=_launch(st, body.repo),
             ),
         ),
     )
@@ -651,6 +661,7 @@ async def approve_gate(wid: str, gate: str, request: Request):
                 bd_cwd=_bd_cwd(),
                 start_index=start,
                 policy=st.policy,
+                launch=_launch(st, row["repo"]),
             ),
         ),
     )
@@ -728,6 +739,7 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
                 start_index=_gate_node_index(chain, gate),
                 policy=st.policy,
                 steer=body.note,
+                launch=_launch(st, row["repo"]),
             ),
         ),
     )
@@ -812,6 +824,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
                 start_index=start,
                 policy=st.policy,
                 steer=steer,
+                launch=_launch(st, row["repo"]),
             ),
         ),
     )
@@ -871,6 +884,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                 start_index=start,
                 policy=st.policy,
                 steer=steer,
+                launch=_launch(st, row["repo"]),
             ),
         ),
     )
@@ -1130,6 +1144,9 @@ class RepoBody(BaseModel):
     forge: str | None = None
     project: str | None = None
     enabled: bool = True
+    default_model: str | None = None
+    deny_tools: list[str] | None = None
+    steering: list[str] | None = None
 
 
 class ProbeBody(BaseModel):
@@ -1140,10 +1157,29 @@ def _repos_path(st) -> Path:
     return st.templates_dir / "repos.yaml"
 
 
+def _validate_repos(st, repos: list[dict]) -> None:
+    """Write `repos` to a scratch file and run the real loader over it.
+
+    Mirrors `put_registry`: the write side must reject exactly what the read
+    side would later choke on, or a bad `POST`/`PATCH` persists and every
+    subsequent `GET /repos` 500s until an operator hand-edits the file.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        candidate = Path(tmp) / "repos.yaml"
+        candidate.write_text(yaml.safe_dump({"repos": repos}))
+        try:
+            config_mod.load_repos(candidate, steering_dir=st.templates_dir / "steering")
+        except config_mod.ConfigError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+
 @app.get("/repos")
 async def list_repos(request: Request):
     st = request.app.state
-    return {"repos": config_mod.load_repos(_repos_path(st))}
+    # No steering validation on the read path (config.load_repos): a steering
+    # file deleted out from under an entry must not 422 the screen that would
+    # let an operator clear it. See `config.load_repos`'s docstring.
+    return {"repos": config_mod.load_repos(_repos_path(st), validate_steering=False)}
 
 
 @app.post("/repos/probe")
@@ -1162,7 +1198,7 @@ async def add_repo(body: RepoBody, request: Request):
         probed = config_mod.probe_repo(body.path)
     except config_mod.ConfigError as exc:
         raise HTTPException(400, str(exc)) from exc
-    repos = config_mod.load_repos(_repos_path(st))
+    repos = config_mod.load_repos(_repos_path(st), validate_steering=False)
     if any(r["path"] == probed["path"] for r in repos):
         raise HTTPException(409, f"{probed['path']} is already connected")
     entry = {
@@ -1173,8 +1209,12 @@ async def add_repo(body: RepoBody, request: Request):
         "forge": body.forge or probed["forge"],
         "project": body.project or probed["project"],
         "enabled": body.enabled,
+        "default_model": body.default_model,
+        "deny_tools": body.deny_tools or [],
+        "steering": body.steering or [],
     }
     repos.append(entry)
+    _validate_repos(st, repos)
     config_mod.save_repos(_repos_path(st), repos)
     return entry
 
@@ -1186,6 +1226,9 @@ class RepoPatch(BaseModel):
     forge: str | None = None
     project: str | None = None
     enabled: bool | None = None
+    default_model: str | None = None
+    deny_tools: list[str] | None = None
+    steering: list[str] | None = None
 
 
 def _connected(repos: list[dict], path: str) -> dict | None:
@@ -1203,14 +1246,41 @@ def _connected(repos: list[dict], path: str) -> dict | None:
     return next((r for r in repos if r["path"] == resolved), None)
 
 
+def _launch(st, repo: str) -> executor.LaunchContext:
+    """The repo config for one agent dispatch, degrading like `invalid_policy`
+    rather than raising: a malformed `repos.yaml` must not crash `lifespan` on
+    reattach (locking an operator out of the Settings UI that would let them
+    fix it) or 500 the approve/reject/resume/retry routes — the agent launches
+    without repo-level model/steering, which is today's behaviour anyway.
+
+    Steering is deliberately *not* validated here (`validate_steering=False`):
+    a name whose file has since been deleted must still let the repo entry
+    load normally, model/deny_tools intact, rather than losing them along with
+    everything else. The dispatch that actually reads that steering file is
+    what surfaces the problem — `steering.read`'s docstring covers the raw
+    FileNotFoundError/OSError that reaches `_guard` from there — needs_human
+    for that one launch, not a crash."""
+    steering_dir = st.templates_dir / "steering"
+    try:
+        repos = config_mod.load_repos(_repos_path(st), validate_steering=False)
+    except config_mod.ConfigError as exc:
+        logger.warning("repo config invalid, launching without it: %s", exc)
+        return executor.LaunchContext(repo_entry=None, steering_dir=steering_dir)
+    return executor.LaunchContext(
+        repo_entry=_connected(repos, repo),
+        steering_dir=steering_dir,
+    )
+
+
 @app.patch("/repos")
 async def update_repo(body: RepoPatch, request: Request, path: str):
     st = request.app.state
-    repos = config_mod.load_repos(_repos_path(st))
+    repos = config_mod.load_repos(_repos_path(st), validate_steering=False)
     entry = _connected(repos, path)
     if entry is None:
         raise HTTPException(404, f"{path} is not connected")
     entry.update({k: v for k, v in body.model_dump().items() if v is not None})
+    _validate_repos(st, repos)
     config_mod.save_repos(_repos_path(st), repos)
     return entry
 
@@ -1218,7 +1288,7 @@ async def update_repo(body: RepoPatch, request: Request, path: str):
 @app.delete("/repos", status_code=204)
 async def remove_repo(request: Request, path: str):
     st = request.app.state
-    repos = config_mod.load_repos(_repos_path(st))
+    repos = config_mod.load_repos(_repos_path(st), validate_steering=False)
     entry = _connected(repos, path)
     if entry is None:
         raise HTTPException(404, f"{path} is not connected")
@@ -1266,7 +1336,7 @@ def _validate_template(st, tid: str, nodes: list[dict]) -> dict:
         (scratch / f"{tid}.yaml").write_text(yaml.safe_dump({"id": tid, "nodes": nodes}))
         result = load_templates(scratch, st.registry)
     hooks = {t for n in nodes for t in (n.get("tasks") or [])}
-    repos = config_mod.load_repos(_repos_path(st))
+    repos = config_mod.load_repos(_repos_path(st), validate_steering=False)
     return {
         "id": tid,
         "valid": tid in result.valid,
@@ -1321,7 +1391,7 @@ async def put_registry(body: RegistryBody, request: Request):
         candidate = Path(tmp) / "registry.yaml"
         candidate.write_text(yaml.safe_dump({"hooks": body.hooks}))
         try:
-            registry = load_registry(candidate)
+            registry = load_registry(candidate, steering_dir=st.templates_dir / "steering")
         except RegistryError as exc:
             raise HTTPException(422, str(exc)) from exc
         for src in st.templates_dir.glob("*.yaml"):
@@ -1491,6 +1561,21 @@ async def spa(path: str, request: Request):
     if dist.resolve() in candidate.parents and candidate.is_file():
         return FileResponse(candidate)
     return FileResponse(dist / "index.html")
+
+
+@app.exception_handler(config_mod.ConfigError)
+async def _bad_config_file(request: Request, exc: config_mod.ConfigError) -> JSONResponse:
+    """A legible 422 for any `load_repos`/`load_registry`/etc. caller that does
+    not catch `ConfigError` itself. `templates/` is a plain directory an
+    operator can hand-edit, and the message already names the file and what is
+    wrong with it — a global backstop is the fix, not a guard at each call
+    site, because the next caller of `load_repos` would just inherit the same
+    trap a per-route `try/except` does nothing to close.
+
+    A route that already catches `ConfigError` and raises its own 4xx
+    (`_validate_repos`, `probe_repo`, `_launch`) never reaches this handler —
+    only an *uncaught* `ConfigError` does."""
+    return JSONResponse({"detail": str(exc)}, status_code=422)
 
 
 @app.exception_handler(404)
