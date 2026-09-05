@@ -293,6 +293,45 @@ def test_saving_the_policy_preserves_the_findings_block(client, templates_dir):
     assert on_disk["loops"]["verify_fix_loop"]["attempts"] == 5
 
 
+def test_put_policy_persists_the_budget_block(client):
+    body = {
+        "loops": {},
+        "default": {"attempts": 3, "wall_clock_s": 3600},
+        "budget": {"work_item_usd": 20.0, "daily_usd": None},
+    }
+    assert client.put("/policy", json=body).status_code == 200
+    assert client.get("/policy").json()["budget"] == {"work_item_usd": 20.0, "daily_usd": None}
+
+
+def test_put_policy_rejects_a_negative_budget(client):
+    body = {
+        "loops": {},
+        "default": {"attempts": 3, "wall_clock_s": 3600},
+        "budget": {"work_item_usd": -5},
+    }
+    assert client.put("/policy", json=body).status_code == 422
+
+
+def test_put_policy_without_a_budget_key_still_works(client):
+    """Backward compatibility: an older UI build PUTs no budget."""
+    body = {"loops": {}, "default": {"attempts": 3, "wall_clock_s": 3600}}
+    assert client.put("/policy", json=body).status_code == 200
+
+
+def test_saving_the_policy_preserves_the_budget_block(client, templates_dir):
+    """A save from the policy screen must not silently erase a block it does not edit."""
+    (templates_dir / "policy.yaml").write_text(
+        "loops: {}\ndefault: { attempts: 3, wall_clock_s: 3600 }\n"
+        "budget:\n  work_item_usd: 20.0\n  daily_usd: null\n"
+    )
+    body = client.get("/policy").json()
+    assert body["budget"]["work_item_usd"] == 20.0
+    body["default"]["attempts"] = 5
+    assert client.put("/policy", json=body).status_code == 200
+    on_disk = yaml.safe_load((templates_dir / "policy.yaml").read_text())
+    assert on_disk["budget"]["work_item_usd"] == 20.0
+
+
 # ── access + auth (5e, 1m) ───────────────────────────────────────────────────
 
 

@@ -101,3 +101,70 @@ def test_loop_severities_must_be_a_list(tmp_path):
     )
     with pytest.raises(policy.PolicyError):
         policy.load_policy(p)
+
+
+def test_budget_defaults_to_disabled_when_absent(tmp_path):
+    p = tmp_path / "policy.yaml"
+    p.write_text("loops: {}\ndefault: { attempts: 3, wall_clock_s: 3600 }\n")
+    pol = policy.load_policy(p)
+    assert pol.budget.work_item_usd is None
+    assert pol.budget.daily_usd is None
+
+
+def test_budget_reads_both_caps(tmp_path):
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        "loops: {}\ndefault: { attempts: 3, wall_clock_s: 3600 }\n"
+        "budget:\n  work_item_usd: 20.0\n  daily_usd: 100\n"
+    )
+    pol = policy.load_policy(p)
+    assert pol.budget.work_item_usd == 20.0
+    # an int in the YAML is a legal dollar figure and becomes a float
+    assert pol.budget.daily_usd == 100.0
+
+
+def test_explicit_null_is_disabled_not_zero(tmp_path):
+    """`null` means "no cap". Reading it as 0.0 would block every launch."""
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        "loops: {}\ndefault: { attempts: 3, wall_clock_s: 3600 }\n"
+        "budget:\n  work_item_usd: null\n  daily_usd: null\n"
+    )
+    assert policy.load_policy(p).budget == policy.Budget()
+
+
+def test_negative_budget_is_rejected_at_load(tmp_path):
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        "loops: {}\ndefault: { attempts: 3, wall_clock_s: 3600 }\nbudget:\n  work_item_usd: -1\n"
+    )
+    with pytest.raises(policy.PolicyError, match="work_item_usd"):
+        policy.load_policy(p)
+
+
+def test_non_numeric_budget_is_rejected_at_load(tmp_path):
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        'loops: {}\ndefault: { attempts: 3, wall_clock_s: 3600 }\nbudget:\n  daily_usd: "lots"\n'
+    )
+    with pytest.raises(policy.PolicyError, match="daily_usd"):
+        policy.load_policy(p)
+
+
+def test_budget_true_is_rejected_because_bool_is_an_int(tmp_path):
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        "loops: {}\ndefault: { attempts: 3, wall_clock_s: 3600 }\nbudget:\n  daily_usd: true\n"
+    )
+    with pytest.raises(policy.PolicyError, match="daily_usd"):
+        policy.load_policy(p)
+
+
+def test_a_policy_file_with_invalid_bytes_is_bad_config_not_a_crash(tmp_path):
+    """`read_text()` raises `UnicodeDecodeError` — a `ValueError`, not an
+    `OSError` and not a `yaml.YAMLError`. `lifespan` catches only `PolicyError`,
+    so anything else escaping here refuses to boot the server."""
+    p = tmp_path / "policy.yaml"
+    p.write_bytes(b"default: { attempts: 3 }\nbudget: \xff\xfe\n")
+    with pytest.raises(policy.PolicyError):
+        policy.load_policy(p)

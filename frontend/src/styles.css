@@ -791,6 +791,7 @@ aside .row, .narrow .row {
 }
 .hook-row { grid-template-columns: 1fr 240px 60px; }
 .cap-row { grid-template-columns: 1fr 110px 140px; }
+.budget-row { grid-template-columns: 1fr 140px; }
 .hook-head, .cap-head {
   padding: 0 0 6px; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--color-text-muted);

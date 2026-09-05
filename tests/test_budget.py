@@ -1,0 +1,355 @@
+"""A budget cap refuses the next agent launch (sub-project E §1-§3).
+
+It cannot interrupt a running agent: cost only exists once the session exits.
+Everything here tests the refusal of a *subsequent* launch.
+"""
+
+import asyncio
+import sys
+import uuid
+from pathlib import Path
+
+from support.harness import fake_registry, isolated_bd, make_repo
+
+from kraft import db, events, executor, policy, store
+from kraft.paths import RunDirs
+from kraft.templates import Template
+
+_FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
+
+
+def _registry():
+    return fake_registry(sys.executable, _FAKE_AGENT)
+
+
+def _template() -> Template:
+    """env_setup (builtin), then one agent task and one subprocess task in the
+    same node — which is what makes "the agent is blocked and the subprocess is
+    not" observable."""
+    return Template(
+        id="budget",
+        nodes=[
+            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None, "fix_loop": None},
+            {
+                "id": "work",
+                "tasks": ["on.implementation.start", "on.test.run"],
+                "gate_after": None,
+                "fix_loop": None,
+            },
+        ],
+    )
+
+
+def _fixloop_template() -> Template:
+    """A fix_loop node measured by a subprocess only, so the node always reaches
+    the fix-cycle agent dispatch — the one budget-gated launch a fix_loop has."""
+    return Template(
+        id="budget-fixloop",
+        nodes=[
+            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None, "fix_loop": None},
+            {
+                "id": "verify",
+                "tasks": ["on.test.run"],
+                "gate_after": None,
+                "fix_loop": "verify_fix_loop",
+            },
+        ],
+    )
+
+
+def _policy(*, work_item_usd=None, daily_usd=None) -> policy.Policy:
+    return policy.Policy(
+        loops={},
+        default=policy.Cap(attempts=3, wall_clock_s=3600),
+        budget=policy.Budget(work_item_usd=work_item_usd, daily_usd=daily_usd),
+    )
+
+
+async def _spend(database, wid: str, usd: float) -> None:
+    """Record a finished session that cost `usd`, as usage capture would have."""
+    sid = uuid.uuid4().hex
+    await database.write(
+        lambda c: store.create_session(
+            c,
+            id=sid,
+            work_item_id=wid,
+            node_id="prior",
+            hook_point="on.implementation.start",
+            log_path="/tmp/l",
+            result_path="/tmp/r",
+        )
+    )
+    await database.write(
+        lambda c: c.execute(
+            "UPDATE worker_sessions SET cost_usd = ?, status = 'done' WHERE id = ?", (usd, sid)
+        )
+    )
+
+
+def _needs_human_payload(database, wid):
+    evts = database.read(lambda c: events.read_after(c, 0, wid))
+    return next(e["payload"] for e in reversed(evts) if e["type"] == "work_item_needs_human")
+
+
+def _budget_stopped(database, wid) -> bool:
+    """True iff any escalation for this item blamed a spend cap."""
+    evts = database.read(lambda c: events.read_after(c, 0, wid))
+    return any("budget" in e["payload"] for e in evts if e["type"] == "work_item_needs_human")
+
+
+def _hook_points(database, wid, node_id) -> list[str]:
+    rows = database.read(
+        lambda c: c.execute(
+            "SELECT hook_point FROM worker_sessions WHERE work_item_id = ? AND node_id = ?",
+            (wid, node_id),
+        ).fetchall()
+    )
+    return [r["hook_point"] for r in rows]
+
+
+def _status(database, wid) -> str:
+    return database.read(
+        lambda c: c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()
+    )["status"]
+
+
+async def _intake(database, rd, tracker, repo, template=None):
+    return await executor.intake(
+        database,
+        rd,
+        title="budgeted work",
+        repo=str(repo),
+        template=template or _template(),
+        bd_cwd=str(tracker),
+    )
+
+
+async def _run(database, rd, tracker, wid, pol):
+    return await executor.run(
+        database,
+        rd,
+        work_item_id=wid,
+        registry=_registry(),
+        bd_cwd=str(tracker),
+        policy=pol,
+    )
+
+
+def test_under_the_cap_the_agent_launches(tmp_path, monkeypatch):
+    """$5 spent against a $20 cap runs normally."""
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "fix")
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await _intake(database, rd, tracker, repo)
+            await _spend(database, wid, 3.0)
+            await _spend(database, wid, 2.0)
+            await _run(database, rd, tracker, wid, _policy(work_item_usd=20.0))
+            assert not _budget_stopped(database, wid)
+            assert "on.implementation.start" in _hook_points(database, wid, "work")
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_over_the_cap_refuses_the_next_launch(tmp_path, monkeypatch):
+    """$25 spent against a $20 cap stops the item with a budget reason."""
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "fix")
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await _intake(database, rd, tracker, repo)
+            await _spend(database, wid, 25.0)
+            result = await _run(database, rd, tracker, wid, _policy(work_item_usd=20.0))
+            assert result == "needs_human"
+            assert _status(database, wid) == "needs_human"
+            payload = _needs_human_payload(database, wid)
+            assert payload["budget"] == {
+                "scope": "work_item",
+                "spent_usd": 25.0,
+                "cap_usd": 20.0,
+            }
+            assert "budget" in payload["reason"] and "20" in payload["reason"]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_a_null_cap_never_blocks(tmp_path, monkeypatch):
+    """$1000 spent with both caps null runs anyway."""
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "fix")
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await _intake(database, rd, tracker, repo)
+            await _spend(database, wid, 1000.0)
+            await _run(database, rd, tracker, wid, _policy())
+            assert not _budget_stopped(database, wid)
+            assert "on.implementation.start" in _hook_points(database, wid, "work")
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_the_subprocess_task_in_the_same_node_still_runs(tmp_path, monkeypatch):
+    """The agent is refused; `on.test.run` in the same node has a session row.
+
+    Budget-blocking a subprocess would strand the item mid-node for no saving.
+    """
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "fix")
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await _intake(database, rd, tracker, repo)
+            await _spend(database, wid, 25.0)
+            await _run(database, rd, tracker, wid, _policy(work_item_usd=20.0))
+            hooks = _hook_points(database, wid, "work")
+            assert "on.test.run" in hooks
+            assert "on.implementation.start" not in hooks
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_the_daily_cap_stops_an_item_that_has_spent_nothing(tmp_path, monkeypatch):
+    """Another item's spend today breaches the daily cap for this one."""
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "fix")
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await _intake(database, rd, tracker, repo)
+            other = uuid.uuid4().hex
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id=other,
+                    bead_id="TEST-other",
+                    title="somebody else's expensive item",
+                    repo=str(repo),
+                    chain_template="budget",
+                    chain_definition="{}",
+                )
+            )
+            await _spend(database, other, 150.0)
+            result = await _run(database, rd, tracker, wid, _policy(daily_usd=100.0))
+            assert result == "needs_human"
+            payload = _needs_human_payload(database, wid)
+            assert payload["budget"] == {"scope": "daily", "spent_usd": 150.0, "cap_usd": 100.0}
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_yesterdays_spend_does_not_count_against_todays_daily_cap(tmp_path, monkeypatch):
+    """Rollover at local midnight."""
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "fix")
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await _intake(database, rd, tracker, repo)
+            await _spend(database, wid, 150.0)
+            await database.write(
+                lambda c: c.execute(
+                    "UPDATE worker_sessions SET created_at = '2020-01-01T00:00:00+00:00'"
+                )
+            )
+            await _run(database, rd, tracker, wid, _policy(daily_usd=100.0))
+            assert not _budget_stopped(database, wid)
+            assert "on.implementation.start" in _hook_points(database, wid, "work")
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_a_fix_cycle_refused_for_budget_costs_no_attempt(tmp_path, monkeypatch):
+    """The refusal happens before the counter bump and before `fix_cycle_started`.
+
+    The fix agent is a fix_loop's only budget-gated launch, so if the check sat
+    only inside `_dispatch` the item would spend an attempt — and log a cycle —
+    for an agent that never ran, and a later retry would read that phantom cycle
+    back as "no progress".
+    """
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "fix")
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await _intake(database, rd, tracker, repo, _fixloop_template())
+            await _spend(database, wid, 25.0)
+            result = await _run(database, rd, tracker, wid, _policy(work_item_usd=20.0))
+            assert result == "needs_human"
+            payload = _needs_human_payload(database, wid)
+            assert payload["budget"]["scope"] == "work_item"
+            # the measuring subprocess ran (it costs nothing); the fix agent did not
+            assert _hook_points(database, wid, "verify") == ["on.test.run"]
+            assert database.read(lambda c: store.read_counter(c, wid, "verify_fix_loop")) is None
+            types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, wid))]
+            assert "fix_cycle_started" not in types
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_a_co_task_exception_is_logged_even_when_budget_wins(monkeypatch, caplog):
+    """The BUDGET rung returns early, so the traceback of a co-task that raised in
+    the same node is the only record that it ever happened. Precedence is still
+    budget over that failure (amendment A3) — but the log line is not optional.
+    """
+
+    class _NoopDb:
+        async def write(self, fn):
+            return None
+
+    async def dispatch(db, run_dirs, task, node, row, registry, worktree, **kw):
+        if task == "on.test.run":
+            raise RuntimeError("co-task blew up")
+        return executor.BUDGET
+
+    monkeypatch.setattr(executor, "_dispatch", dispatch)
+    node = {
+        "id": "work",
+        "tasks": ["on.implementation.start", "on.test.run"],
+        "gate_after": None,
+        "fix_loop": None,
+    }
+    with caplog.at_level("ERROR", logger="kraft.executor"):
+        verdict, failed, excs = asyncio.run(
+            executor._measure_node(_NoopDb(), None, "w1", node, None, None, None)
+        )
+    assert verdict == executor.BUDGET
+    assert failed == [] and excs == []
+    assert "co-task blew up" in caplog.text

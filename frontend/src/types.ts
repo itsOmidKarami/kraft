@@ -40,6 +40,8 @@ export interface WorkItem {
   completedNodes?: string[];
   /** Set when a loop cap is what stopped the item — the board shows "capped n/n". */
   cappedOut?: { cycles: number; attempts: number } | null;
+  /** Set when a spend cap is what stopped the item (sub-project E §3). */
+  budget?: { scope: "work_item" | "daily"; spent_usd: number; cap_usd: number } | null;
   /** Only on the detail endpoint, not the list. */
   usage?: WorkItemUsage;
   /** Empty on a single-repo item; ordered deepest submodule first. */
@@ -300,6 +302,7 @@ export interface Policy {
   loops: Record<string, Cap>;
   default: Cap;
   findings?: { loop_severities?: string[] };
+  budget?: { work_item_usd: number | null; daily_usd: number | null };
 }
 
 export interface Access {
