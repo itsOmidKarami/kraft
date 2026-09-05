@@ -5,6 +5,8 @@ from pathlib import Path
 
 import yaml
 
+from kraft import steering as _steering
+
 _VALID_KINDS = {"builtin", "agent", "subprocess"}
 # Config files that share the templates directory but are not chain templates.
 # One definition: `load_templates` skips them, and the registry save copies the
@@ -41,8 +43,17 @@ class TemplateSet:
     invalid: dict
 
 
-def load_registry(path: str | Path) -> Registry:
+def _agent_profiles() -> dict:
+    # Function-local: a config loader that imports the adapter layer at module
+    # scope invites a cycle later, even though there is none today.
+    from kraft.adapters.agent import PROFILES
+
+    return PROFILES
+
+
+def load_registry(path: str | Path, *, steering_dir: Path | None = None) -> Registry:
     path = Path(path)
+    steering_dir = steering_dir if steering_dir is not None else path.parent / "steering"
     data = yaml.safe_load(path.read_text())
     if not isinstance(data, dict) or not isinstance(data.get("hooks"), dict):
         raise RegistryError(f"{path.name}: expected a top-level 'hooks' mapping")
@@ -63,6 +74,34 @@ def load_registry(path: str | Path) -> Registry:
             raise RegistryError(
                 f"{path.name}: subprocess hook {hook!r} needs a list-of-strings 'command'"
             )
+
+        agent_only = ("profile", "model", "deny_tools", "steering")
+        if kind == "agent":
+            profile = binding.get("profile", "claude")
+            if profile not in _agent_profiles():
+                raise RegistryError(
+                    f"{path.name}: hook {hook!r} has unknown profile {profile!r}; "
+                    f"known: {sorted(_agent_profiles())}"
+                )
+            if binding.get("model") is not None and not isinstance(binding["model"], str):
+                raise RegistryError(f"{path.name}: hook {hook!r} 'model' must be a string")
+            for key in ("deny_tools", "steering"):
+                v = binding.get(key, [])
+                if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+                    raise RegistryError(
+                        f"{path.name}: hook {hook!r} {key!r} must be a list of strings"
+                    )
+            try:
+                _steering.validate(steering_dir, binding.get("steering", []), where=path.name)
+            except _steering.SteeringError as exc:
+                raise RegistryError(str(exc)) from exc
+        else:
+            for key in agent_only:
+                if key in binding:
+                    raise RegistryError(
+                        f"{path.name}: hook {hook!r} is kind {kind!r}; {key!r} applies "
+                        "only to an agent hook"
+                    )
     return Registry(hooks=data["hooks"])
 
 
