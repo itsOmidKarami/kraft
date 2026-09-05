@@ -38,6 +38,7 @@ def create_work_item(
     submodules: list[str] | None = None,
     root_merge_policy: str | None = None,
     attachments: list[dict] | None = None,
+    status: str = "active",
 ) -> None:
     """`submodules` are the cross-repo paths chosen at intake (06, design 1g).
 
@@ -53,7 +54,7 @@ def create_work_item(
         "INSERT INTO work_items (id, bead_id, title, repo, chain_template, "
         "chain_definition, current_node_id, status, created_at, updated_at, "
         "submodules, root_merge_policy, attachments) "
-        "VALUES (?, ?, ?, ?, ?, ?, NULL, 'active', ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)",
         (
             id,
             bead_id,
@@ -61,6 +62,7 @@ def create_work_item(
             repo,
             chain_template,
             chain_definition,
+            status,
             now,
             now,
             json.dumps(submodules) if submodules else None,

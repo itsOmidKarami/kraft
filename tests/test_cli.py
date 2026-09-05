@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from kraft import cli, paths
 
 
@@ -79,3 +81,17 @@ def test_seed_home_leaves_no_half_seeded_home_behind(monkeypatch, tmp_path):
     monkeypatch.setattr(Path, "rename", real_rename)
     assert cli.seed_home(home) is True
     assert (home / "registry.yaml").exists()
+
+
+def test_bare_kraft_still_serves(monkeypatch):
+    served = []
+    monkeypatch.setattr(cli, "_serve", lambda: served.append(True))
+    cli.main([])
+    assert served == [True]
+
+
+def test_unknown_subcommand_exits_with_a_usable_message(monkeypatch):
+    monkeypatch.setattr(cli, "_serve", lambda: pytest.fail("must not serve"))
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["wat"])
+    assert "wat" in str(exc.value)

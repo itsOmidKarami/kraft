@@ -34,6 +34,43 @@ on `127.0.0.1`. The process refuses to start on a LAN address without one.
 
 `KRAFT_HOME=~/kraft-other kraft` gives you a second, fully separate instance.
 
+## Use it from an agent session
+
+Kraft can also be driven from a coding-agent session over MCP, so work can be
+filed, read, and unblocked without switching to the browser.
+
+```bash
+kraft init          # register the MCP server for your user, install the skill
+kraft init --repo   # or write .mcp.json + .claude/skills/ into this repo
+```
+
+User scope shells out to `claude mcp add` rather than editing `~/.claude.json`
+itself — that file is large, shared, agent-owned state. If `claude` is not on
+`PATH`, `kraft init` prints the command for you to run instead of guessing.
+
+Nine tools, over the same local HTTP API the browser uses:
+
+| | |
+|---|---|
+| read | `list_work_items`, `get_work_item`, `search` |
+| write | `create_work_item`, `ensure_repo` |
+| act | `approve_gate`, `reject_gate`, `pause_work_item`, `resume_work_item` |
+
+Two rules are enforced in code, not in prose:
+
+**An agent cannot start work.** Everything an agent creates lands paused, and the
+board shows it as *Waiting to start* with a single Start button. Nothing spends
+tokens until a person clicks it.
+
+**A worker cannot act on itself.** Sessions Kraft starts carry
+`KRAFT_WORK_ITEM_ID`, and any attempt to approve, reject, pause, or resume the
+work item running that session is refused before a request is sent. A gate is
+where a human decides; an agent approving its own would make the gate decorative.
+
+`kraft mcp` runs the server on stdio, and every tool is also a `kraft` subcommand,
+so hooks and non-MCP agents get the same surface. Design:
+[`docs/superpowers/specs/2026-09-05-agent-integration-design.md`](docs/superpowers/specs/2026-09-05-agent-integration-design.md).
+
 ## Develop
 
 ```bash

@@ -1,0 +1,7 @@
+repos:
+- path: /private/tmp/kraft-smoke
+  name: kraft-smoke
+  default_chain_template: default
+  test_command: null
+  gitlab_project: null
+  enabled: true

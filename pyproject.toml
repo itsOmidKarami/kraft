@@ -10,6 +10,13 @@ dependencies = [
     "uvicorn>=0.52.4",
     "websockets>=15",
     "sqlite-vec>=0.1.9",
+    # client.py imports these at runtime, not just under test. httpx was a dev
+    # dependency until the agent surface existed; a `kraft mcp` installed from a
+    # wheel has no dev group to fall back on.
+    "httpx>=0.28.1",
+    # mcp 2.x: FastMCP was renamed MCPServer and list_tools() became sync, so
+    # this is a floor on the API kraft/mcp.py actually uses, not just on bugfixes.
+    "mcp>=2",
 ]
 
 [project.optional-dependencies]
@@ -22,7 +29,6 @@ dev = [
     "pytest>=8",
     "ruff>=0.16.6",  # PEP 758 aware; keep .pre-commit-config.yaml rev in step
     "pre-commit>=4",
-    "httpx>=0.28.1",
 ]
 
 [project.scripts]

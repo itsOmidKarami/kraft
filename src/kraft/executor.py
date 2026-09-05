@@ -64,6 +64,7 @@ async def intake(
     submodules: list[str] | None = None,
     root_merge_policy: str = "bump",
     attachments: list[dict] | None = None,
+    status: str = "active",
 ) -> str:
     work_item_id = uuid.uuid4().hex
     bead_id = await beads.intake(title, cwd=bd_cwd)
@@ -81,6 +82,7 @@ async def intake(
             submodules=submodules,
             root_merge_policy=root_merge_policy,
             attachments=attachments,
+            status=status,
         )
     )
     return work_item_id
