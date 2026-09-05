@@ -27,6 +27,12 @@ def _bundle(monkeypatch, tmp_path) -> Path:
     bundled.mkdir(parents=True)
     (bundled / "registry.yaml").write_text("hooks: {}\n")
     (bundled / "access.yaml").write_text("bind: 0.0.0.0\n")
+    # A local checkout should never have a live notify.yaml here, but nothing
+    # stops `just install`'s `cp -R templates ...` from copying one if one
+    # exists (e.g. KRAFT_TEMPLATES_DIR pointed at a checkout mid-dev). Put one
+    # in the bundle so seed_home is proven to strip it, not just to never have
+    # been given one.
+    (bundled / "notify.yaml").write_text("url: https://hook.invalid/t0ken\n")
     monkeypatch.setattr(cli, "BUNDLED", tmp_path / "_bundled")
     return bundled
 
@@ -39,6 +45,8 @@ def test_seed_home_copies_the_bundle_once(monkeypatch, tmp_path):
     assert (home / "registry.yaml").read_text() == "hooks: {}\n"
     # per-machine, holds a password hash: never shipped in the bundle
     assert not (home / "access.yaml").exists()
+    # per-machine, usually holds a bearer token in the URL: never shipped either
+    assert not (home / "notify.yaml").exists()
 
 
 def test_seed_home_never_overwrites_an_edited_config(monkeypatch, tmp_path):

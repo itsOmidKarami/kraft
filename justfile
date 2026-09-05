@@ -72,8 +72,12 @@ install:
     mkdir -p src/kraft/_bundled
     cp -R frontend/dist src/kraft/_bundled/web
     cp -R templates src/kraft/_bundled/templates
-    # never ship a local access.yaml: it holds this machine's password hash
+    # never ship a local access.yaml or notify.yaml: one holds this machine's
+    # password hash, the other a webhook URL that usually embeds a bearer
+    # token. `cp -R` does not know either is secret -- `.gitignore` only keeps
+    # them out of the commit, not out of the wheel or the homes it seeds.
     rm -f src/kraft/_bundled/templates/access.yaml
+    rm -f src/kraft/_bundled/templates/notify.yaml
     uv tool install --from . kraft --force
     @echo "installed. run: kraft"
 

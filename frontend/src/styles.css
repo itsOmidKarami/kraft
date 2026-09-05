@@ -460,6 +460,12 @@ aside .row, .narrow .row {
 .doc-modal-actions { display: flex; gap: 6px; align-items: center; position: relative; }
 .doc-open { font-size: 12px; padding: 4px 10px; white-space: nowrap; }
 .doc-open-more { font-size: 12px; padding: 4px 6px; }
+/* The wrapper only exists to be hidden on a phone, so it may only lay itself
+   out where it is actually shown — an unguarded `display: flex` here outranks
+   `.desktop-only { display: none }` and the hiding never happens. */
+@media (min-width: 641px) {
+  .doc-modal-actions > .desktop-only { display: flex; align-items: center; gap: 6px; }
+}
 
 .doc-editor-menu {
   position: absolute; top: 34px; right: 72px; width: 220px; z-index: 2;
@@ -853,6 +859,12 @@ aside .row, .narrow .row {
   .dialog-backdrop { padding: 12px; align-items: flex-start; }
   .doc-modal, .diff-modal, .log-modal { max-height: calc(100vh - 24px); }
   .doc-editor-menu { right: 0; }
+
+  /* the one place a phone user types. 16px is not a taste call: mobile Safari
+     zooms the viewport on focus for any input under 16px and does not zoom back
+     out, which strands the reader mid-rejection. */
+  .gate-reject textarea.input { font-size: 16px; min-height: 96px; }
+  .gate-reject .btn { min-height: 44px; }
 }
 
 /* the two halves of the phone rule (design 1n) */
@@ -934,3 +946,25 @@ aside .row, .narrow .row {
 .diff-untracked ul { list-style: none; margin: 0; padding: 0;
                      display: flex; flex-direction: column; gap: 4px; }
 .diff-untracked li { font-size: 12px; color: var(--color-neutral-400); }
+
+/* the diff viewer (Kraft-8mu.2) is the screen a notification links into, so
+   it is the one modal that has to survive a 390px viewport. This duplicates
+   the `@media (max-width: 640px)` selector from the main phone block above
+   (design 1n) rather than living there: the rules it overrides — .diff-modal,
+   .diff-body, .diff-files, .diff-untracked — are declared unconditionally
+   further down the file than that block, so a same-specificity override
+   placed up there would lose the cascade to these later base rules. Moving
+   this block back up next to the rest of the phone rules would silently
+   disable it again. */
+@media (max-width: 640px) {
+  .diff-modal { max-height: calc(100vh - 24px); width: 100%; }
+  .diff-modal-head, .diff-files, .diff-body, .diff-untracked {
+    padding-left: 12px; padding-right: 12px;
+  }
+  .diff-body { font-size: 11px; }
+  /* `pre` sends a 200-column hunk off the side of the phone with no way back.
+     `pre-wrap` keeps the leading space that makes a diff readable and wraps the
+     overflow; `anywhere` handles a minified line with no break opportunity. */
+  .diff-body > div { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .diff-files li { flex-wrap: wrap; }
+}

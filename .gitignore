@@ -30,10 +30,14 @@ frontend/playwright-report/
 frontend/test-results/
 frontend/e2e-shots/
 
-# Written by Settings → Access. Everything else the Settings screens write is
-# versioned on purpose; this one holds a password hash and a bind address that
-# are per-machine, so it stays local.
+# Written by Settings → Access and Settings → Notify. Everything else the
+# Settings screens write is versioned on purpose; these hold a password hash,
+# a bind address, and a webhook URL that are per-machine, so they stay local.
 templates/access.yaml
+templates/notify.yaml
+
+# Subagent-driven-development scratch: ledgers, briefs, review packages.
+.superpowers/
 
 # Dev instance home (`just dev`) and the build outputs `just install` copies in
 .dev/
