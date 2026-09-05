@@ -1,18 +1,57 @@
 from __future__ import annotations
 
+import shutil
+from pathlib import Path
+
 from kraft import store
 from kraft.adapters import subprocess as _subprocess
 
 
+def _copy_attachments(repo: Path, worktree: Path, attachments: list[dict]) -> None:
+    """Intake attachments that are not committed do not exist in a fresh
+    worktree (`git worktree add` branches from HEAD), so copy them in. A
+    committed one arrived through git and is left exactly as git wrote it.
+
+    The path was validated against the *repo's* working tree, not this
+    worktree (checked out from HEAD, possibly a different tree). If HEAD has
+    a symlink here, `dest.exists()` follows it, which for a dangling symlink
+    reports False and `shutil.copyfile` would then write through it to
+    wherever it points. So a symlinked destination, dangling or not, is
+    always skipped, and the resolved destination must stay inside the
+    worktree."""
+    worktree_root = worktree.resolve()
+    for attachment in attachments:
+        dest = worktree / attachment["path"]
+        src = repo / attachment["path"]
+        if dest.is_symlink():
+            continue
+        resolved = dest.resolve()
+        if resolved != worktree_root and worktree_root not in resolved.parents:
+            continue
+        if dest.exists() or not src.is_file():
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dest)
+
+
 async def env_setup(
-    db, run_dirs, *, session_id: str, work_item_id: str, node_id: str, repo: str, round: int = 0
+    db,
+    run_dirs,
+    *,
+    session_id: str,
+    work_item_id: str,
+    node_id: str,
+    repo: str,
+    round: int = 0,
+    attachments: list[dict] | None = None,
 ) -> str:
     worktree = run_dirs.worktrees / work_item_id
     branch = f"kraft/{work_item_id}"
     if worktree.is_dir():
-        # idempotent: a prior (crashed) run already created the worktree.
+        # idempotent: a prior (crashed) run already created the worktree, and
+        # with it any attachment copies.
         return "done"
-    return await _subprocess.run_task(
+    status = await _subprocess.run_task(
         db,
         run_dirs,
         session_id=session_id,
@@ -23,6 +62,9 @@ async def env_setup(
         cwd=repo,
         round=round,
     )
+    if status == "done":
+        _copy_attachments(Path(repo), worktree, attachments or [])
+    return status
 
 
 async def noop(

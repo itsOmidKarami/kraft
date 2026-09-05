@@ -37,18 +37,23 @@ def create_work_item(
     chain_definition,
     submodules: list[str] | None = None,
     root_merge_policy: str | None = None,
+    attachments: list[dict] | None = None,
 ) -> None:
     """`submodules` are the cross-repo paths chosen at intake (06, design 1g).
 
     They are stored as JSON rather than a side table: they are chosen once, never
     queried across items, and belong to this item as much as its chain does.
+
+    `attachments` are the spec/plan documents chosen at intake (Kraft-dgh),
+    stored as JSON for the same reason `submodules` is: chosen once, never
+    queried across items.
     """
     now = _now()
     conn.execute(
         "INSERT INTO work_items (id, bead_id, title, repo, chain_template, "
         "chain_definition, current_node_id, status, created_at, updated_at, "
-        "submodules, root_merge_policy) "
-        "VALUES (?, ?, ?, ?, ?, ?, NULL, 'active', ?, ?, ?, ?)",
+        "submodules, root_merge_policy, attachments) "
+        "VALUES (?, ?, ?, ?, ?, ?, NULL, 'active', ?, ?, ?, ?, ?)",
         (
             id,
             bead_id,
@@ -60,6 +65,7 @@ def create_work_item(
             now,
             json.dumps(submodules) if submodules else None,
             root_merge_policy if submodules else None,
+            json.dumps(attachments) if attachments else None,
         ),
     )
     events.append(
@@ -68,6 +74,10 @@ def create_work_item(
         "work_item_created",
         {"title": title, "repo": repo, "chain_template": chain_template},
     )
+    if attachments:
+        # Its own event, not a field on work_item_created: the timeline has to
+        # explain why this item's chain has no spec node.
+        events.append(conn, id, "work_item_attachments", {"attachments": attachments})
 
 
 #: Root merge policies (design 1g). What happens to the root repo's submodule

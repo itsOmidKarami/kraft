@@ -113,4 +113,15 @@ describe("Board", () => {
     expect(within(group("Needs you")).getByText("Paused item")).toBeInTheDocument();
     expect(within(group("Running")).queryAllByTestId("board-card")).toHaveLength(0);
   });
+
+  it("marks an item that started from existing documents", () => {
+    setItems(
+      wi({
+        id: "w1",
+        attachments: [{ kind: "plan", path: ".engineering/plans/p.md" }],
+      }),
+    );
+    renderBoard();
+    expect(screen.getByText("from plan")).toBeInTheDocument();
+  });
 });

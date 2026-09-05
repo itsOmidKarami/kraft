@@ -3,6 +3,7 @@ import { CaretDown, CaretRight, X } from "@phosphor-icons/react";
 import { Link, useNavigate } from "react-router-dom";
 import * as api from "../api";
 import { useStore } from "../store";
+import type { SearchResult, TemplateSummary } from "../types";
 import { useModal } from "../useModal";
 
 /**
@@ -17,6 +18,13 @@ const MERGE_POLICIES = [
   { id: "skip", label: "Skip" },
   { id: "bump_no_mr", label: "Bump, no MR" },
 ];
+
+// The gate each kind satisfies documents why picking one skips a chain phase;
+// the server is the one that actually trims the chain.
+const KINDS = [
+  { kind: "spec" as const, docKind: "specs", gate: "spec_approval", label: "spec" },
+  { kind: "plan" as const, docKind: "plans", gate: "plan_approval", label: "plan" },
+];
 export function IntakeModal({ onClose }: { onClose: () => void }) {
   const nav = useNavigate();
   // Design 5.1 says this field offers the connected-repo set. Reading it off
@@ -28,6 +36,9 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
   const [connected, setConnected] = useState<string[]>([]);
   const knownRepos = [...new Set([...connected, ...itemRepos])];
   const [templates, setTemplates] = useState<string[]>(["quick-task"]);
+  // GET /templates already returns each template's nodes (§8 chain preview
+  // needs them); kept alongside the id list rather than re-fetched per pick.
+  const [templateSummaries, setTemplateSummaries] = useState<TemplateSummary[]>([]);
   const [repo, setRepo] = useState("");
   const [title, setTitle] = useState("");
   const [tpl, setTpl] = useState("quick-task");
@@ -37,6 +48,11 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
   const [available, setAvailable] = useState<string[]>([]);
   const [picked, setPicked] = useState<string[]>([]);
   const [mergePolicy, setMergePolicy] = useState("bump");
+  // Intake from existing artifacts (design task 7): kind -> the path that will
+  // actually be attached, kind -> the search box's typed text, and kind -> its hits.
+  const [attachPath, setAttachPath] = useState<Record<string, string>>({});
+  const [query, setQuery] = useState<Record<string, string>>({});
+  const [hits, setHits] = useState<Record<string, SearchResult[]>>({});
   const ref = useModal<HTMLFormElement>(onClose);
 
   useEffect(() => {
@@ -46,6 +62,7 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
         const ids = ts.map((t) => t.id);
         if (!ids.length) return;
         setTemplates(ids);
+        setTemplateSummaries(ts);
         // The optimistic "quick-task" default is a guess made before this
         // answered. If the server does not offer it, the segmented control falls
         // back to its first option while state still says quick-task — and we
@@ -75,6 +92,37 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
     return () => clearTimeout(t);
   }, [repo]);
 
+  // Type-to-search per kind: GET /search requires a non-empty q, so this only
+  // fires once a repo is entered and a character is typed for that kind.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      KINDS.forEach(({ kind, docKind }) => {
+        const q = (query[kind] ?? "").trim();
+        if (!repo.trim() || !q) {
+          setHits((h) => ({ ...h, [kind]: [] }));
+          return;
+        }
+        api
+          .search({ q, repo, kind: docKind, source_kind: "artifact", limit: 5 })
+          .then((r) => setHits((h) => ({ ...h, [kind]: r.results })))
+          .catch(() => setHits((h) => ({ ...h, [kind]: [] })));
+      });
+    }, 300);
+    return () => clearTimeout(t);
+  }, [repo, query]);
+
+  const attachments = KINDS.filter(({ kind }) => attachPath[kind]?.trim()).map(({ kind }) => ({
+    kind,
+    path: attachPath[kind].trim(),
+  }));
+  // §8: attaching a kind is the statement that its gate is satisfied, so the
+  // node carrying that gate_after drops out of the chain — same rule as
+  // `templates.materialize` on the server, applied here only to preview it.
+  const satisfiedGates = new Set(
+    KINDS.filter(({ kind }) => attachPath[kind]?.trim()).map(({ gate }) => gate),
+  );
+  const selectedNodes = templateSummaries.find((t) => t.id === tpl)?.nodes ?? [];
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -85,6 +133,7 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
         title,
         ...(tpl === "quick-task" ? {} : { chain_template: tpl }),
         ...(picked.length ? { submodules: picked, root_merge_policy: mergePolicy } : {}),
+        ...(attachments.length ? { attachments } : {}),
       });
       onClose();
       nav(`/work-items/${id}`);
@@ -137,6 +186,43 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
 
         <div className="field">
           <label>
+            Start from existing <span className="field-hint">· skips the phases these cover</span>
+          </label>
+          {KINDS.map(({ kind, label }) => (
+            <div key={kind} className="attachment-row">
+              <input
+                className="input"
+                aria-label={`existing ${label}`}
+                placeholder={`search ${label}s in this repo`}
+                value={query[kind] ?? ""}
+                onChange={(e) => setQuery((q) => ({ ...q, [kind]: e.target.value }))}
+              />
+              <input
+                className="input"
+                aria-label={`${label} path`}
+                placeholder="or a repo-relative path"
+                value={attachPath[kind] ?? ""}
+                onChange={(e) => setAttachPath((p) => ({ ...p, [kind]: e.target.value }))}
+              />
+              {(hits[kind] ?? []).map((h) => (
+                <button
+                  type="button"
+                  key={h.id}
+                  className="attachment-hit"
+                  onClick={() => {
+                    setAttachPath((p) => ({ ...p, [kind]: h.path }));
+                    setQuery((q) => ({ ...q, [kind]: "" }));
+                  }}
+                >
+                  {h.title} <span className="field-hint">{h.path}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+
+        <div className="field">
+          <label>
             Chain template <span className="field-hint">· repo default</span>
           </label>
           <div className="seg" role="radiogroup" aria-label="template">
@@ -153,6 +239,19 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
               </label>
             ))}
           </div>
+          {attachments.length > 0 && selectedNodes.length > 0 && (
+            <p className="field-hint chain-preview">
+              {selectedNodes.map((n, i) => {
+                const struck = n.gate_after != null && satisfiedGates.has(n.gate_after);
+                return (
+                  <span key={n.id}>
+                    {i > 0 && " → "}
+                    {struck ? <s>{n.id}</s> : <span>{n.id}</span>}
+                  </span>
+                );
+              })}
+            </p>
+          )}
         </div>
 
         {available.length > 0 && (

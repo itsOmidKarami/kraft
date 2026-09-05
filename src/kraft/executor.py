@@ -12,7 +12,7 @@ from kraft.adapters import agent as _agent
 from kraft.adapters import beads
 from kraft.adapters import subprocess as _subprocess
 from kraft.store import _now as _now  # test seam for wall-clock checks
-from kraft.templates import Registry, Template, materialize
+from kraft.templates import ATTACHMENT_GATES, Registry, Template, materialize
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +25,13 @@ _FIX_PROMPT = (
 # prepended to the next agent launch. It leads because it is the reason this task is
 # running again.
 _STEER_PROMPT = "A human has steered this run: {steer}\n\n"
+
+# What an agent is told about documents attached at intake. It follows the title
+# because the title is the task and these are how it was already decided.
+_ATTACHMENT_PROMPT = (
+    "\n\n{lines}\nFollow the documents above; they are the agreed spec and plan "
+    "for this work item. Do not re-plan."
+)
 
 
 class Steer:
@@ -56,10 +63,12 @@ async def intake(
     bd_cwd: str | None = None,
     submodules: list[str] | None = None,
     root_merge_policy: str = "bump",
+    attachments: list[dict] | None = None,
 ) -> str:
     work_item_id = uuid.uuid4().hex
     bead_id = await beads.intake(title, cwd=bd_cwd)
-    chain_definition = json.dumps(materialize(template))
+    satisfied = frozenset(ATTACHMENT_GATES[a["kind"]] for a in attachments or [])
+    chain_definition = json.dumps(materialize(template, satisfied_gates=satisfied))
     await db.write(
         lambda c: store.create_work_item(
             c,
@@ -71,9 +80,25 @@ async def intake(
             chain_definition=chain_definition,
             submodules=submodules,
             root_merge_policy=root_merge_policy,
+            attachments=attachments,
         )
     )
     return work_item_id
+
+
+def _attachments(work_item_row) -> list[dict]:
+    """The row's intake attachments, tolerating a row that predates the column."""
+    if "attachments" not in work_item_row.keys():
+        return []
+    raw = work_item_row["attachments"]
+    return json.loads(raw) if raw else []
+
+
+def _attachment_note(attachments: list[dict]) -> str:
+    if not attachments:
+        return ""
+    lines = "\n".join(f"{a['kind'].capitalize()}: {a['path']}" for a in attachments)
+    return _ATTACHMENT_PROMPT.format(lines=lines)
 
 
 async def _dispatch(
@@ -99,12 +124,20 @@ async def _dispatch(
         round=round,
     )
     if kind == "builtin" and binding.get("handler") == "env_setup":
-        return await _builtins.env_setup(db, run_dirs, repo=work_item_row["repo"], **common)
+        return await _builtins.env_setup(
+            db,
+            run_dirs,
+            repo=work_item_row["repo"],
+            attachments=_attachments(work_item_row),
+            **common,
+        )
     if kind == "builtin" and binding.get("handler") == "noop":
         return await _builtins.noop(db, run_dirs, hook_point=task_hook, **common)
     if kind == "agent":
         note = steer.take() if steer else None
-        instruction = instruction_override or work_item_row["title"]
+        instruction = instruction_override or (
+            work_item_row["title"] + _attachment_note(_attachments(work_item_row))
+        )
         return await _agent.run_agent_task(
             db,
             run_dirs,

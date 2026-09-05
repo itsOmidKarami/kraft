@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -32,6 +32,8 @@ CREATE TABLE work_items (
   -- root repo's pointer once they merge
   submodules       TEXT,
   root_merge_policy TEXT,
+  -- documents attached at intake (Kraft-dgh): [{"kind": "spec"|"plan", "path": ...}]
+  attachments      TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
@@ -155,6 +157,7 @@ SELECT id, bead_id, title, repo, chain_template, chain_definition, current_node_
   expires_at   TEXT NOT NULL
 )""",
     ],
+    7: ["ALTER TABLE work_items ADD COLUMN attachments TEXT"],
 }
 
 

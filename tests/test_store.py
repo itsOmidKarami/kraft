@@ -370,3 +370,40 @@ def test_create_session_announces_the_session(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_create_work_item_stores_attachments_and_events_them(tmp_path):
+    conn = db._connect(tmp_path / "s.db")
+    db.migrate(conn)
+    store.create_work_item(
+        conn,
+        id="w1",
+        bead_id="B",
+        title="t",
+        repo="/repo",
+        chain_template="default",
+        chain_definition="{}",
+        attachments=[{"kind": "plan", "path": ".engineering/plans/p.md"}],
+    )
+    row = conn.execute("SELECT attachments FROM work_items WHERE id='w1'").fetchone()
+    assert json.loads(row["attachments"]) == [{"kind": "plan", "path": ".engineering/plans/p.md"}]
+    types = [e["type"] for e in events.read_after(conn, 0, "w1")]
+    assert "work_item_attachments" in types
+
+
+def test_create_work_item_without_attachments_stores_null(tmp_path):
+    conn = db._connect(tmp_path / "s.db")
+    db.migrate(conn)
+    store.create_work_item(
+        conn,
+        id="w1",
+        bead_id="B",
+        title="t",
+        repo="/repo",
+        chain_template="default",
+        chain_definition="{}",
+    )
+    row = conn.execute("SELECT attachments FROM work_items WHERE id='w1'").fetchone()
+    assert row["attachments"] is None
+    types = [e["type"] for e in events.read_after(conn, 0, "w1")]
+    assert "work_item_attachments" not in types
