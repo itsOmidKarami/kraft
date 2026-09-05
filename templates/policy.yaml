@@ -3,3 +3,9 @@
 loops:
   verify_fix_loop:   { attempts: 3, wall_clock_s: 3600 }
 default:             { attempts: 3, wall_clock_s: 3600 }
+
+# Which finding severities burn a fix cycle. Minor findings are recorded and
+# shown at the human_review gate instead — a roll-up nobody reads is a silent
+# discard, so they are rendered there, not merely stored.
+findings:
+  loop_severities: [critical, important]

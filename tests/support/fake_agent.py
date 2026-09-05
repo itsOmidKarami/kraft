@@ -68,6 +68,19 @@ def main() -> int:
         result = {"status": "done"}
         if ref:
             result["session_summary_ref"] = ref
+        # Lets a test pin that the fix task's own result never leaks into the
+        # next cycle's findings (KRAFT_FAKE_AGENT_FINDING sets the message).
+        finding = os.environ.get("KRAFT_FAKE_AGENT_FINDING")
+        if finding:
+            result["findings"] = [
+                {
+                    "severity": "critical",
+                    "message": finding,
+                    "file": "fixagent.py",
+                    "line": 1,
+                    "source_plugin": "fake-agent",
+                }
+            ]
         pathlib.Path(result_path).write_text(json.dumps(result))
     # A real agent's final envelope carries its token usage; usage capture reads
     # this line, so the fake carries it too.

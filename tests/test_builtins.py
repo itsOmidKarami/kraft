@@ -221,3 +221,89 @@ def test_noop_creates_done_session_with_log(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_env_setup_stamps_base_ref(tmp_path):
+    repo = make_repo(tmp_path)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True
+    ).stdout.strip()
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="w1",
+                    bead_id="B",
+                    title="t",
+                    repo=str(repo),
+                    chain_template="quick-task",
+                    chain_definition="{}",
+                )
+            )
+            await kraft_builtins.env_setup(
+                database,
+                rd,
+                session_id="s1",
+                work_item_id="w1",
+                node_id="env_setup",
+                repo=str(repo),
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT base_ref FROM work_items WHERE id='w1'").fetchone()
+            )
+            assert row["base_ref"] == head
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_env_setup_does_not_restamp_on_reentry(tmp_path):
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="w1",
+                    bead_id="B",
+                    title="t",
+                    repo=str(repo),
+                    chain_template="quick-task",
+                    chain_definition="{}",
+                )
+            )
+            await kraft_builtins.env_setup(
+                database,
+                rd,
+                session_id="s1",
+                work_item_id="w1",
+                node_id="env_setup",
+                repo=str(repo),
+            )
+            await database.write(lambda c: store.set_base_ref(c, "w1", "PINNED"))
+            # second call returns early: the worktree already exists
+            status = await kraft_builtins.env_setup(
+                database,
+                rd,
+                session_id="s2",
+                work_item_id="w1",
+                node_id="env_setup",
+                repo=str(repo),
+            )
+            assert status == "done"
+            row = database.read(
+                lambda c: c.execute("SELECT base_ref FROM work_items WHERE id='w1'").fetchone()
+            )
+            assert row["base_ref"] == "PINNED"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())

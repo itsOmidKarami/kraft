@@ -59,3 +59,45 @@ def test_check_wall_clock_breach():
     past = "2026-09-02T00:01:00+00:00"
     assert policy.check(count=1, started_at=started, cap=cap, now=within) == "ok"
     assert policy.check(count=1, started_at=started, cap=cap, now=past) == "breached"
+
+
+def test_loop_severities_default(tmp_path):
+    p = tmp_path / "policy.yaml"
+    p.write_text("default: {attempts: 3, wall_clock_s: 60}\n")
+    assert policy.load_policy(p).loop_severities == frozenset({"critical", "important"})
+
+
+def test_loop_severities_configured(tmp_path):
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        "default: {attempts: 3, wall_clock_s: 60}\nfindings: {loop_severities: [critical]}\n"
+    )
+    assert policy.load_policy(p).loop_severities == frozenset({"critical"})
+
+
+def test_loop_severities_all_three_restores_old_behaviour(tmp_path):
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        "default: {attempts: 3, wall_clock_s: 60}\n"
+        "findings: {loop_severities: [critical, important, minor]}\n"
+    )
+    assert policy.load_policy(p).loop_severities == frozenset({"critical", "important", "minor"})
+
+
+def test_unknown_severity_is_rejected(tmp_path):
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        "default: {attempts: 3, wall_clock_s: 60}\n"
+        "findings: {loop_severities: [critical, urgent]}\n"
+    )
+    with pytest.raises(policy.PolicyError, match="urgent"):
+        policy.load_policy(p)
+
+
+def test_loop_severities_must_be_a_list(tmp_path):
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        "default: {attempts: 3, wall_clock_s: 60}\nfindings: {loop_severities: critical}\n"
+    )
+    with pytest.raises(policy.PolicyError):
+        policy.load_policy(p)

@@ -3,10 +3,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sqlite3
 import uuid
+from dataclasses import asdict
 
 from kraft import builtins as _builtins
 from kraft import events, store
+from kraft import findings as _findings
 from kraft import policy as _policy
 from kraft.adapters import agent as _agent
 from kraft.adapters import beads
@@ -20,6 +23,25 @@ _FIX_PROMPT = (
     "The checks in node {node_id} failed for this work item. Fix the code so they "
     "pass. Make no unrelated changes. Failing hook points: {failed}"
 )
+
+#: Appended when the failures came with structured findings. Repeats lead: an
+#: agent told it already tried and the reviewer disagreed behaves differently
+#: from one seeing the finding fresh.
+_FIX_FINDINGS = "\n\nFindings to fix:\n{findings}"
+_FIX_REPEAT_NOTE = (
+    "\n\nMarked REPEAT above: you attempted this on an earlier cycle and the check "
+    "still reports it. Do not repeat the same approach."
+)
+
+
+def _format_findings(found: list[_findings.Finding], repeats: set[str]) -> str:
+    lines = []
+    for f in found:
+        where = f"{f.file}:{f.line}" if f.file and f.line else (f.file or "—")
+        tag = "REPEAT " if f.fingerprint in repeats else ""
+        lines.append(f"- {tag}[{f.severity}] {where} — {f.message} ({f.source_plugin})")
+    return "\n".join(lines)
+
 
 # A human's note — from the capped card's retry (4b) or a resume after pause (4c) —
 # prepended to the next agent launch. It leads because it is the reason this task is
@@ -218,6 +240,59 @@ async def _measure_node(
     return "ok", [], []
 
 
+def _collect_findings(db, work_item_id: str, node: dict, round: int):
+    """(findings, hook points that reported at least one) for one cycle.
+
+    Only the node's own measuring tasks: the fix task is dispatched with
+    `round=count` and the next measuring pass runs at that same round, so an
+    unfiltered query folds the fix agent's result file into the cycle. Only the
+    most recent row per hook point, because a resume can re-enter this node with
+    `round` reset while stale rows sit at the same number.
+    """
+    rows = db.read(lambda c: store.sessions_for_round(c, work_item_id, node["id"], round))
+    latest: dict[str, sqlite3.Row] = {}
+    for row in rows:
+        if row["hook_point"] in node["tasks"]:
+            latest[row["hook_point"]] = row  # ordered by created_at, so last wins
+    found: list[_findings.Finding] = []
+    reported: set[str] = set()
+    for hook, row in latest.items():
+        parsed = _findings.parse(row["result_path"])
+        if parsed:
+            reported.add(hook)
+        found.extend(parsed)
+    return found, reported
+
+
+def _previous_fingerprints(db, work_item_id: str, node_id: str) -> list[str] | None:
+    """The last `findings_measured` fingerprints it is safe to compare against for
+    no-progress escalation, or None if there is nothing comparable yet.
+
+    Read from the event log rather than carried in a local: `_reconcile_current_node`
+    re-enters `_walk_node` after a crash or a resume with the counter intact, and a
+    loop holding its history in the stack frame forgets everything it has seen —
+    on exactly the path that motivates escalation.
+
+    Only returned when a `fix_cycle_started` for this node appears *after* that
+    measurement. Spec §4's "no progress" means a fix cycle ran and changed
+    nothing — not merely that the same code was measured twice in a row. A
+    `POST /retry` on a no-progress stop (or a crash/resume between the escalating
+    findings_measured and the fix it never got to dispatch) re-enters at round 0
+    and measures before it fixes; without this guard, a deterministic reviewer
+    seeing unchanged code would report the same fingerprints and the loop would
+    escalate straight back to needs_human without ever giving the steered retry
+    a chance to run.
+    """
+    evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
+    fix_seen = False
+    for e in reversed(evts):
+        if e["type"] == "fix_cycle_started" and e["payload"].get("node_id") == node_id:
+            fix_seen = True
+        elif e["type"] == "findings_measured" and e["payload"].get("node_id") == node_id:
+            return e["payload"].get("fingerprints") if fix_seen else None
+    return None
+
+
 async def _walk_node(
     db,
     run_dirs,
@@ -275,7 +350,31 @@ async def _walk_node(
         )
         if verdict == "paused":
             return "paused"
-        if verdict == "ok":
+
+        previous_prints = _previous_fingerprints(db, work_item_id, node["id"])
+        found, reported = _collect_findings(db, work_item_id, node, round)
+        eligible = [f for f in found if f.severity in policy.loop_severities]
+        prints = sorted({f.fingerprint for f in eligible})
+        await db.write(
+            lambda c, r=round, found=found, prints=prints: events.append(
+                c,
+                work_item_id,
+                "findings_measured",
+                {
+                    "node_id": node["id"],
+                    "cycle": r,
+                    "findings": [asdict(f) for f in found],
+                    "fingerprints": prints,
+                },
+            )
+        )
+
+        # A failed task that produced no findings at all is still non-clean: the
+        # findings list refines *why* a task failed, it does not define failure.
+        blind_failures = [t for t in failed if t not in reported]
+        enters_loop = bool(eligible) or bool(blind_failures)
+
+        if verdict == "ok" or not enters_loop:
             await db.write(lambda c: store.complete_node(c, work_item_id, node["id"]))
             return "ok"
 
@@ -301,10 +400,25 @@ async def _walk_node(
             )
             return "needs_human"
 
+        if prints and prints == previous_prints:
+            reason = f"no_progress: {len(prints)} finding(s) unchanged across cycle {count - 1}"
+            # Deliberately NOT mark_sessions_capped_out: these sessions did not
+            # cap out, and only a real cap breach may claim they did.
+            await db.write(
+                lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node["id"], reason)
+            )
+            return "needs_human"
+
         payload = {"node_id": node["id"], "cycle": count, "failed_tasks": failed}
         await db.write(
             lambda c, payload=payload: events.append(c, work_item_id, "fix_cycle_started", payload)
         )
+        instruction = _FIX_PROMPT.format(node_id=node["id"], failed=", ".join(failed))
+        if eligible:
+            repeats = set(previous_prints or [])
+            instruction += _FIX_FINDINGS.format(findings=_format_findings(eligible, repeats))
+            if repeats & set(prints):
+                instruction += _FIX_REPEAT_NOTE
         fix = await _dispatch(
             db,
             run_dirs,
@@ -313,7 +427,7 @@ async def _walk_node(
             row,
             registry,
             worktree,
-            instruction_override=_FIX_PROMPT.format(node_id=node["id"], failed=", ".join(failed)),
+            instruction_override=instruction,
             round=count,
             steer=steer,
         )

@@ -407,3 +407,74 @@ def test_create_work_item_without_attachments_stores_null(tmp_path):
     assert row["attachments"] is None
     types = [e["type"] for e in events.read_after(conn, 0, "w1")]
     assert "work_item_attachments" not in types
+
+
+def test_set_base_ref(tmp_path):
+    conn = db._connect(tmp_path / "s.db")
+    db.migrate(conn)
+    store.create_work_item(
+        conn,
+        id="w1",
+        bead_id="B",
+        title="t",
+        repo="/r",
+        chain_template="quick-task",
+        chain_definition="{}",
+    )
+    assert conn.execute("SELECT base_ref FROM work_items WHERE id='w1'").fetchone()[0] is None
+    store.set_base_ref(conn, "w1", "abc123")
+    assert conn.execute("SELECT base_ref FROM work_items WHERE id='w1'").fetchone()[0] == "abc123"
+
+
+def test_sessions_for_round_filters_by_node_and_round(tmp_path):
+    conn = db._connect(tmp_path / "s.db")
+    db.migrate(conn)
+    store.create_work_item(
+        conn,
+        id="w1",
+        bead_id="B",
+        title="t",
+        repo="/r",
+        chain_template="default",
+        chain_definition="{}",
+    )
+    # A second work item at the same (node_id, round) proves the work_item_id
+    # filter actually does something — every other seeded session shares "w1", so
+    # dropping "AND work_item_id = ?" from the query would still pass.
+    store.create_work_item(
+        conn,
+        id="w2",
+        bead_id="B2",
+        title="t2",
+        repo="/r",
+        chain_template="default",
+        chain_definition="{}",
+    )
+    store.create_session(
+        conn,
+        id="other",
+        work_item_id="w2",
+        node_id="verify",
+        hook_point="on.test.run",
+        log_path="/l/other",
+        result_path="/r/other",
+        round=0,
+    )
+    for sid, node, rnd in [
+        ("s1", "verify", 0),
+        ("s2", "verify", 0),
+        ("s3", "verify", 1),
+        ("s4", "merge", 0),
+    ]:
+        store.create_session(
+            conn,
+            id=sid,
+            work_item_id="w1",
+            node_id=node,
+            hook_point="on.test.run",
+            log_path=f"/l/{sid}",
+            result_path=f"/r/{sid}",
+            round=rnd,
+        )
+    got = [r["id"] for r in store.sessions_for_round(conn, "w1", "verify", 0)]
+    assert got == ["s1", "s2"]

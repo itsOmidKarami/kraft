@@ -172,6 +172,11 @@ export const useStore = create<State>((set, get) => ({
           // store.request_gate flips the row to needs_human in the same
           // transaction that appends this event, so mirror it here — otherwise
           // the board badge reads "active" until the next hydrate (Kraft-fnx).
+          // Also re-hydrate: `deferred_findings` is detail-only and otherwise
+          // only refreshes on the 60s poll, so a detail view already open when
+          // the review node finishes would offer Approve beside a stale
+          // (possibly empty) roll-up.
+          queueMicrotask(() => get().hydrateItem(id).catch(() => {}));
           return {
             ...base,
             ...patchItem(s, id, (w) => ({ ...w, pending_gate: p.gate, status: "needs_human" })),

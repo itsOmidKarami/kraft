@@ -11,6 +11,7 @@ load.
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import tempfile
@@ -19,6 +20,8 @@ from configparser import Error as ConfigParserError
 from pathlib import Path
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 
 class ConfigError(Exception):
@@ -59,6 +62,21 @@ def write_yaml(path: str | Path, data: dict) -> None:
 REPOS_DEFAULT: dict = {"repos": []}
 
 
+def _normalize_forge(repo: dict) -> None:
+    """Read a pre-forge repos.yaml entry in place.
+
+    `templates/` is seeded once and never overwritten, so compatibility for the
+    `gitlab_project` -> `forge`/`project` rename lives in the reader rather than
+    in a migration that would rewrite a file the user owns.
+    """
+    legacy = repo.pop("gitlab_project", None)
+    if repo.get("forge") is None and legacy:
+        repo["forge"] = "gitlab"
+        repo["project"] = legacy
+    repo.setdefault("forge", None)
+    repo.setdefault("project", None)
+
+
 def load_repos(path: str | Path) -> list[dict]:
     data = read_yaml(path, REPOS_DEFAULT)
     repos = data.get("repos") or []
@@ -67,6 +85,7 @@ def load_repos(path: str | Path) -> list[dict]:
     for r in repos:
         if not isinstance(r.get("path"), str) or not r["path"]:
             raise ConfigError("repos.yaml: every repo needs a string 'path'")
+        _normalize_forge(r)
     return repos
 
 
@@ -74,15 +93,24 @@ def save_repos(path: str | Path, repos: list[dict]) -> None:
     write_yaml(path, {"repos": repos})
 
 
-def _git(cwd: Path, *args: str) -> str | None:
-    """One read-only git command, or None if git says no. Never raises."""
+def git_read(cwd: Path, *args: str) -> str | None:
+    """One read-only git command, or None if git says no. Never raises.
+
+    `--no-optional-locks`: a plain `git status`/`diff` still touches
+    `.git/index`'s mtime (refreshing stat data), which collides with an
+    `index.lock` an agent is holding mid-run. This flag skips that refresh;
+    content reads are unaffected, only the lock-taking side effect is.
+    """
+    cmd = ["git", "--no-optional-locks", *args]
     try:
-        out = subprocess.run(
-            ["git", *args], cwd=str(cwd), capture_output=True, text=True, timeout=10
-        )
-    except OSError, subprocess.SubprocessError:
+        out = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("git_read could not run %s in %s: %s", cmd, cwd, exc)
         return None
-    return out.stdout.strip() if out.returncode == 0 else None
+    if out.returncode != 0:
+        logger.warning("git_read %s in %s failed: %s", cmd, cwd, out.stderr.strip())
+        return None
+    return out.stdout.strip()
 
 
 #: Test commands to look for, in the order a repo is most likely to want them.
@@ -92,6 +120,24 @@ _TEST_COMMANDS = [
     ("Cargo.toml", "cargo test"),
     ("go.mod", "go test ./..."),
 ]
+
+
+#: Hostnames Kraft can recognize in an origin URL. Self-hosted instances have
+#: arbitrary hostnames and no read-only signal, so they are set by hand in
+#: repos.yaml instead.
+_FORGES = {
+    "gitlab.com": "gitlab",
+    "github.com": "github",
+}
+
+
+def _detect_forge(remote: str) -> tuple[str | None, str | None]:
+    """(forge, project) from an origin URL, or (None, None). Never raises."""
+    for host, forge in _FORGES.items():
+        if host in remote:
+            tail = remote.split(host, 1)[-1].lstrip(":/")
+            return forge, (tail.removesuffix(".git") or None)
+    return None, None
 
 
 def probe_repo(path: str | Path) -> dict:
@@ -104,7 +150,7 @@ def probe_repo(path: str | Path) -> dict:
     p = Path(path).expanduser()
     if not p.is_dir():
         raise ConfigError(f"{p} is not a directory")
-    toplevel = _git(p, "rev-parse", "--show-toplevel")
+    toplevel = git_read(p, "rev-parse", "--show-toplevel")
     if toplevel is None:
         raise ConfigError(f"{p} is not a git repository")
     root = Path(toplevel)
@@ -126,26 +172,23 @@ def probe_repo(path: str | Path) -> dict:
     beads_config = read_yaml(beads / "config.yaml", {}) if beads.is_dir() else {}
     export = beads_config.get("export") or {}
 
-    remote = _git(root, "remote", "get-url", "origin") or ""
-    gitlab_project = None
-    if "gitlab" in remote:
-        # git@gitlab.com:group/repo.git  or  https://gitlab.com/group/repo.git
-        tail = remote.split("gitlab.com", 1)[-1].lstrip(":/")
-        gitlab_project = tail.removesuffix(".git") or None
+    remote = git_read(root, "remote", "get-url", "origin") or ""
+    forge, project = _detect_forge(remote)
 
     test_command = next((cmd for marker, cmd in _TEST_COMMANDS if (root / marker).is_file()), None)
 
     return {
         "path": str(root),
         "name": root.name,
-        "branch": _git(root, "rev-parse", "--abbrev-ref", "HEAD"),
+        "branch": git_read(root, "rev-parse", "--abbrev-ref", "HEAD"),
         "submodules": submodules,
         "has_beads": beads.is_dir(),
         "beads_export_auto": bool(export.get("auto")),
         "beads_export_git_add": bool(export.get("git-add")),
         "has_engineering": (root / ".engineering").is_dir(),
         "test_command": test_command,
-        "gitlab_project": gitlab_project,
+        "forge": forge,
+        "project": project,
     }
 
 

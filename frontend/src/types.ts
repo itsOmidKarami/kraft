@@ -48,6 +48,16 @@ export interface WorkItem {
   attachments?: WorkItemAttachment[];
   root_merge_policy?: string | null;
   worktree_path?: string;
+  /** Minor findings that never entered the fix loop; only on the detail endpoint. */
+  deferred_findings?: Finding[];
+}
+
+export interface Finding {
+  severity: string;
+  message: string;
+  file: string | null;
+  line: number | null;
+  source_plugin: string;
 }
 
 export type SessionStatus =
@@ -113,6 +123,15 @@ export interface WorkItemDocument {
   worker_session_id: string | null;
   /** Set when this row is an intake attachment rather than an agent-written link. */
   attachment_kind: "spec" | "plan" | null;
+}
+
+export interface WorkItemDiff {
+  work_item_id: string;
+  base_ref: string | null;
+  files: { path: string; insertions: number; deletions: number }[];
+  diff: string;
+  untracked: string[];
+  truncated: boolean;
 }
 
 export interface SearchResult {
@@ -216,7 +235,8 @@ export interface Repo {
   name: string;
   default_chain_template: string;
   test_command: string | null;
-  gitlab_project: string | null;
+  forge: string | null;
+  project: string | null;
   enabled: boolean;
 }
 
@@ -230,7 +250,8 @@ export interface RepoProbe {
   beads_export_git_add: boolean;
   has_engineering: boolean;
   test_command: string | null;
-  gitlab_project: string | null;
+  forge: string | null;
+  project: string | null;
 }
 
 export interface TemplateNode {
@@ -269,6 +290,7 @@ export interface Cap {
 export interface Policy {
   loops: Record<string, Cap>;
   default: Cap;
+  findings?: { loop_severities?: string[] };
 }
 
 export interface Access {
