@@ -23,6 +23,9 @@ export function PausedCard({
     (s) => s.node_id === item.current_node_id && s.status === "paused",
   );
   const attempt = paused.length ? paused[0].attempt + 1 : 2;
+  // An agent-created item (design §6 rule 1) is paused without ever having run:
+  // no sessions, no current node. "Resume attempt 2" would be false in every word.
+  const neverStarted = item.current_node_id === null;
 
   const resume = async (withSteer: boolean) => {
     setBusy(true);
@@ -35,6 +38,25 @@ export function PausedCard({
       setBusy(false);
     }
   };
+
+  if (neverStarted) {
+    // No steer box: steer is context carried into the next attempt of something
+    // already tried, and there is no previous attempt to steer away from.
+    return (
+      <div className="card elev-sm paused-card" data-testid="paused-card">
+        <p className="field-hint">
+          Waiting to start · created by an agent, so nothing runs until you say so
+        </p>
+        <div className="gate-actions capped-actions">
+          <button className="btn btn-primary" disabled={busy} onClick={() => resume(false)}>
+            <Play size={14} />
+            Start
+          </button>
+        </div>
+        {err && <p className="form-error">{err}</p>}
+      </div>
+    );
+  }
 
   return (
     <div className="card elev-sm paused-card" data-testid="paused-card">

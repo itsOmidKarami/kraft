@@ -88,6 +88,12 @@ async def run_agent_task(
         hook_point=hook_point,
         cmd=cmd,
         cwd=cwd,
+        # Identity, not configuration. `client.resolve_context()` keys `origin`
+        # on KRAFT_WORK_ITEM_ID, and `origin` is the whole of the design §6 rule
+        # 2 guard: without this a worker in its own worktree reads as a human and
+        # may approve its own gate. Deliberately no MCP config here — that would
+        # make this adapter vendor-aware, against conceptual model §1.2.
+        env={"KRAFT_WORK_ITEM_ID": work_item_id, "KRAFT_SESSION_ID": session_id},
         post_resolve=_envelope_is_error,
         round=round,
     )

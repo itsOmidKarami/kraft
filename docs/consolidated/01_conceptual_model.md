@@ -33,6 +33,13 @@ piece has its own component document.
    injected per-invocation (system prompt, MCP config) into agent sessions the
    orchestrator itself starts. It is never written into `AGENTS.md`, `CLAUDE.md`, or
    any other ambient, repo-owned file.
+
+   This governs what Kraft's *executor* injects into sessions it starts: that
+   context is per-invocation and is never persisted to a repo-owned file. Files a
+   human explicitly opts into by running `kraft init --repo` are that human's
+   choice, not Kraft leaking its process into a repo — the distinction is ambient
+   versus opted-into. See
+   `docs/superpowers/specs/2026-09-05-agent-integration-design.md` §8.1.
 5. **Bounded autonomy.** Every fix/retry loop has an attempt cap and a wall-clock cap,
    enforced by the core, not by individual plugins. Hitting a cap halts the loop and
    escalates to the human with the full trace, rather than looping forever or failing

@@ -19,9 +19,11 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import os
 import secrets
 import sqlite3
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 COOKIE = "kraft_session"
 
@@ -127,3 +129,33 @@ def revoke_session(conn: sqlite3.Connection, session_id: str) -> int:
 def revoke_all(conn: sqlite3.Connection) -> int:
     """Used when the password changes: every old session dies with it."""
     return conn.execute("DELETE FROM auth_sessions").rowcount
+
+
+MCP_TOKEN_FILE = "mcp-token"
+
+
+def read_mcp_token(run_dir: str | Path) -> str | None:
+    """The token on disk, or None. Whitespace-only counts as absent."""
+    try:
+        token = (Path(run_dir) / MCP_TOKEN_FILE).read_text().strip()
+    except OSError:
+        return None
+    return token or None
+
+
+def ensure_mcp_token(run_dir: str | Path) -> str:
+    """The bearer credential for non-browser clients (design §5).
+
+    Created once and kept: regenerating per serve would silently break an MCP
+    client registered against the old value. Opened 0600 rather than chmod'd
+    after the write, so the secret is never briefly world-readable.
+    """
+    existing = read_mcp_token(run_dir)
+    if existing:
+        return existing
+    token = new_token()
+    path = Path(run_dir) / MCP_TOKEN_FILE
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as handle:
+        handle.write(token)
+    return token

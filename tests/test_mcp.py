@@ -1,0 +1,85 @@
+"""The MCP front door. Registration is checked in-process; the transport is
+checked against a real process, because an in-process check cannot see a missing
+transport dependency (the lesson from tests/test_ws.py)."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from kraft import mcp
+
+
+def _tools():
+    return asyncio.run(mcp.build().list_tools())
+
+
+def test_the_tools_are_registered():
+    assert {t.name for t in _tools()} == {
+        "list_work_items",
+        "get_work_item",
+        "search",
+        "create_work_item",
+        "ensure_repo",
+        "approve_gate",
+        "reject_gate",
+        "pause_work_item",
+        "resume_work_item",
+    }
+
+
+def test_no_standalone_steer_tool_is_exposed():
+    """`/steer` 409s unless the item is already paused, so the one moment an
+    agent would reach for it is the one moment it fails. pause() then
+    resume(steer=...) is the honest surface (design §9 phase 3)."""
+    assert "steer" not in {t.name for t in _tools()}
+
+
+def test_create_work_item_tells_the_agent_it_will_not_run():
+    """An agent that thinks create means start will file work and walk away."""
+    create = next(t for t in _tools() if t.name == "create_work_item")
+    assert "paused" in create.description.lower()
+
+
+def test_every_tool_has_a_description_an_agent_can_act_on():
+    """The docstring is what an agent reads to decide whether to call the tool.
+    A one-word description is a tool that never gets used correctly."""
+    for tool in _tools():
+        assert tool.description and len(tool.description) > 30, tool.name
+
+
+@pytest.mark.slow
+def test_kraft_mcp_starts_over_real_stdio(tmp_path):
+    """`kraft mcp` answers an MCP initialize on stdin/stdout as a real process."""
+    env = {**os.environ, "KRAFT_HOME": str(tmp_path / "home")}
+    request = (
+        json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "0"},
+                },
+            }
+        )
+        + "\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-m", "kraft", "mcp"],
+        input=request,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=Path(__file__).resolve().parents[1],
+    )
+    assert '"serverInfo"' in proc.stdout, proc.stderr
