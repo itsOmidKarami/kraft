@@ -22,7 +22,12 @@ def seed_home(templates_dir: Path) -> bool:
 
     Only ever creates. An upgrade must not overwrite a policy the operator
     edited, and `access.yaml` is never bundled — it holds a password hash and a
-    bind address that belong to one machine.
+    bind address that belong to one machine. `notify.yaml` is never bundled
+    either, for the same reason: it usually holds a webhook URL with a bearer
+    token embedded, and that belongs to one machine too. Reachable today by
+    anyone who points `KRAFT_TEMPLATES_DIR` at a checkout with a live
+    notify.yaml and runs `just install` -- if either file ever slips into
+    `BUNDLED / "templates"`, it must still not reach a seeded home.
     """
     if templates_dir.exists():
         return False
@@ -38,6 +43,7 @@ def seed_home(templates_dir: Path) -> bool:
     shutil.rmtree(staging, ignore_errors=True)
     shutil.copytree(BUNDLED / "templates", staging)
     (staging / "access.yaml").unlink(missing_ok=True)
+    (staging / "notify.yaml").unlink(missing_ok=True)
     staging.rename(templates_dir)
     return True
 
