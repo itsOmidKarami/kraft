@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from support.harness import fake_registry, isolated_bd, make_repo
 
-from kraft import db, events, executor
+from kraft import db, events, executor, store
 from kraft.paths import RunDirs
 from kraft.templates import Template, load_registry, load_templates
 
@@ -142,6 +142,119 @@ def test_run_happy_path_completes_and_closes_bead(tmp_path, monkeypatch):
             assert types[-1] == "work_item_completed"
             assert types.count("node_started") == 3
             assert types.count("node_completed") == 3
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_done_with_concerns_advances_the_chain(tmp_path, monkeypatch):
+    """An agent reporting `done_with_concerns` is not a failure: the chain keeps
+    walking exactly as it would for `done`."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_STATUS", "done_with_concerns")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_CONCERNS", "tests pass but the API contract feels off")
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="make the failing test pass",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            result = await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+            assert result == "completed"
+
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT status, bead_id FROM work_items WHERE id = ?", (wid,)
+                ).fetchone()
+            )
+            assert row["status"] == "completed"
+
+            impl_session = database.read(
+                lambda c: c.execute(
+                    "SELECT status FROM worker_sessions "
+                    "WHERE work_item_id = ? AND node_id = 'implementation'",
+                    (wid,),
+                ).fetchone()
+            )
+            assert impl_session["status"] == "done_with_concerns"
+
+            types = _events(database, wid)
+            assert types[-1] == "work_item_completed"
+            assert types.count("node_completed") == 3
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_reconcile_accepts_a_done_with_concerns_session(tmp_path):
+    """A resume over a node whose only session ended `done_with_concerns` must
+    advance the chain, not report 'did not resolve cleanly'."""
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            from kraft.templates import Registry
+
+            registry = Registry(
+                hooks={
+                    "on.env.prepare": {"kind": "builtin", "handler": "env_setup"},
+                    "on.implementation.start": {"kind": "agent", "command": "unused"},
+                    "on.test.run": {"kind": "subprocess", "command": ["true"]},
+                }
+            )
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            (rd.worktrees / wid).mkdir(parents=True, exist_ok=True)
+            await database.write(lambda c: store.load_chain(c, wid, "implementation"))
+            await database.write(lambda c: store.enter_node(c, wid, "implementation"))
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s-impl",
+                    work_item_id=wid,
+                    node_id="implementation",
+                    hook_point="on.implementation.start",
+                    log_path="/l",
+                    result_path="/r",
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "s-impl", "done_with_concerns"))
+            result = await executor.resume(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                adopted={},
+                bd_cwd=str(tracker),
+            )
+            assert result == "completed"
+            row = database.read(
+                lambda c: c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+            assert row["status"] == "completed"
         finally:
             await database.close()
 

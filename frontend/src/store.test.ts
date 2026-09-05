@@ -136,6 +136,42 @@ describe("applyEvent", () => {
     expect(useStore.getState().workItems.w1.status).toBe("needs_human");
   });
 
+  it("work_item_needs_human carries the needs_context question off the live stream", () => {
+    // Without this the question arrived only on the next hydrate: the status
+    // flipped, no answer box rendered, and on a chain with no fix-loop node the
+    // control row's Steer is hard-disabled — a stop with no way to answer it.
+    useStore.getState().applyEvent(
+      ev({
+        type: "work_item_needs_human",
+        payload: { node_id: "verify", reason: "needs_context: which database?" },
+      }),
+    );
+    expect(useStore.getState().workItems.w1.needs_context_question).toBe("which database?");
+  });
+
+  it("a needs_human stop of any other kind carries no question", () => {
+    useStore.getState().applyEvent(
+      ev({ type: "work_item_needs_human", payload: { node_id: "verify", reason: "capped out" } }),
+    );
+    expect(useStore.getState().workItems.w1.needs_context_question).toBeNull();
+  });
+
+  it.each(["work_item_resumed", "work_item_retried", "node_started"])(
+    "%s clears a stale question",
+    (type) => {
+      // The field is sticky otherwise: a later, unrelated stop re-renders the
+      // old question, and its Answer button posts a /resume the API 409s.
+      useStore.getState().applyEvent(
+        ev({
+          type: "work_item_needs_human",
+          payload: { node_id: "verify", reason: "needs_context: which database?" },
+        }),
+      );
+      useStore.getState().applyEvent(ev({ type, payload: { node_id: "verify" } }));
+      expect(useStore.getState().workItems.w1.needs_context_question).toBeNull();
+    },
+  );
+
   it("unknown type is stored in the timeline, no throw", () => {
     expect(() =>
       useStore.getState().applyEvent(ev({ type: "some_future_event", payload: {} })),

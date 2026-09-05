@@ -70,6 +70,13 @@ so this follows the table-rebuild pattern already in `_MIGRATIONS[4]`.
 `_resolve_result_file` widens its accepted set to match. Anything still
 unrecognized stays `failed` — the existing conservative default is correct.
 
+**The agent has to be told these exist.** `adapters/agent.py`'s injected context
+describes the session-summary contract and nothing else — the word `status`
+appears in it only as `session_summary_ref`. A status vocabulary no agent knows
+about is inert, so the same context that already explains how to write a session
+summary gains a short paragraph naming the four statuses and the two optional
+fields, and §5's one-question-per-stop instruction goes there too.
+
 Result-file fields, both optional and both free text:
 
 ```json
@@ -102,28 +109,49 @@ destroy information the human wanted.
 **Progression:** stop. `work_items.status = needs_human`, reason
 `needs_context: <question>`.
 
-The machinery this needs already exists and is why the status is cheap. Kraft's
-pause/steer/resume path is exactly a human answering a stopped agent:
+The *transaction* already exists — a human types something, the next launch
+carries it — but the claim that it "reuses the resume path unchanged" was wrong,
+and a plan review caught it before any code was written:
 
-- `POST /work-items/{wid}/steer` stores `pending_steer_context`
-- `POST /work-items/{wid}/resume` takes it with `take_steer` and passes it into
-  the next launch, where `_STEER_PROMPT` prepends it — *"A human has steered this
-  run: …"*
+- `POST /work-items/{wid}/steer` and `POST /work-items/{wid}/resume` both
+  `409` unless `work_items.status == "paused"` (`api.py:790`, `api.py:803`).
+- A `needs_context` stop sets `needs_human`, not `paused`.
+- `POST /retry` refuses any node without a `fix_loop` (`api.py:864`).
 
-So `needs_context` reuses the resume path unchanged. The only new work is the UI:
-the attention card shows the agent's question and the steer box answers it, which
-is a different label on `PausedCard`'s existing control, not a new control.
+So as originally specified, a `needs_context` stop on a plain node was a **dead
+end**: no API and no UI could un-stick it. The status would have been a way to
+strand a work item.
+
+**The fix is to widen the two guards, not to add an endpoint.** Both currently
+mean "you may only steer something that is stopped and waiting for you", and
+they express it as `paused` because that was the only such state when they were
+written. A `needs_context` stop is precisely that state under a different name.
+They become: `paused`, or `needs_human` whose reason is a `needs_context`.
+
+Nothing else about the transaction changes — `set_steer`, `take_steer` and the
+prepend into the next launch are all reused as-is.
+
+The UI half is real work, not a relabel: `PausedCard` renders only for
+`status === "paused"`, and a `needs_human` item without a fix loop falls through
+to a control row whose Steer button is hard-disabled. The answer box has to be
+rendered for this state, not renamed.
 
 `_STEER_PROMPT`'s wording is worth a second look here — "A human has steered this
 run" reads oddly as the answer to a question the agent asked. A variant that
 leads with the question keeps the prompt honest about which of the two situations
 produced it.
 
-**Not a fix cycle.** A `needs_context` fix task inside a `fix_loop` node stops the
-item rather than counting a cycle: the loop's cap exists to bound *attempts at
-the work*, and an agent that never had the information did not attempt it. This
-is the same carve-out `02` §7.2 already makes for `plan_diverged`, which
-preserves the counter across the guidance gate.
+**Not a fix cycle.** A `needs_context` measuring task stops the item rather than
+counting a cycle: the loop's cap exists to bound *attempts at the work*, and an
+agent that never had the information did not attempt it.
+
+Two corrections to how this was first written. `02` §7.2 makes the same carve-out
+for `plan_diverged`, but that is documented, not implemented — `grep -rn
+plan_diverged src/kraft/` finds nothing — so it is a precedent in prose only and
+there is no code to copy. And the counter is bumped *before* the fix task is
+dispatched, so a `needs_context` returned by the fix task cannot avoid consuming
+the cycle it is already inside; the carve-out is only meaningful for a
+`needs_context` from a **measuring** task, which is where the check must sit.
 
 ## 4. Carrying the previous attempt forward
 

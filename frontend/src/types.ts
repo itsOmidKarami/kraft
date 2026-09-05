@@ -50,6 +50,11 @@ export interface WorkItem {
   worktree_path?: string;
   /** Minor findings that never entered the fix loop; only on the detail endpoint. */
   deferred_findings?: Finding[];
+  /** `done_with_concerns` text from every session that reported one; only on the detail endpoint. */
+  concerns?: string[];
+  /** The agent's question, set only while a `needs_human` stop is answerable
+   *  as a `needs_context` one; only on the detail endpoint. */
+  needs_context_question?: string | null;
 }
 
 export interface Finding {
@@ -64,6 +69,8 @@ export type SessionStatus =
   | "pending"
   | "running"
   | "done"
+  | "done_with_concerns"
+  | "needs_context"
   | "failed"
   | "capped_out"
   | "paused"
