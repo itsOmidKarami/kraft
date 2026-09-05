@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from pathlib import Path
 
 import uvicorn
@@ -55,10 +56,36 @@ def _bind(templates_dir: Path) -> tuple[str, int]:
     return host, port
 
 
-def main() -> None:
+def _serve() -> None:
     templates_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
     if seed_home(templates_dir):
         print(f"kraft: seeded default config in {templates_dir}")
     host, port = _bind(templates_dir)
     print(f"kraft: http://{host}:{port}")
     uvicorn.run("kraft.api:app", host=host, port=port, log_level="warning")
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Bare `kraft` serves, as it always has. Subcommands are the agent surface.
+
+    argparse is deliberately not used: serving must stay the zero-argument
+    default, and one string compare is the whole dispatch.
+    """
+    args = sys.argv[1:] if argv is None else list(argv)
+    if not args:
+        _serve()
+        return
+    if args[0] == "mcp":
+        from kraft.mcp import serve_stdio
+
+        serve_stdio()
+        return
+    if args[0] == "init":
+        from kraft.init import install
+
+        for path in install(repo_scope="--repo" in args[1:]):
+            print(f"kraft: wrote {path}")
+        return
+    raise SystemExit(
+        f"kraft: unknown command {args[0]!r} (try `kraft`, `kraft mcp`, or `kraft init`)"
+    )

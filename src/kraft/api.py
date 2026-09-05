@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
 import os
@@ -69,6 +70,10 @@ def _bd_cwd() -> str | None:
 async def lifespan(app: FastAPI):
     app.state.tasks = {}
     run_dirs = RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())).ensure()
+    # The credential a non-browser client (kraft mcp, kraft <verb>) presents when
+    # auth is on at all. Created once and kept, so a registered MCP client keeps
+    # working across restarts.
+    app.state.mcp_token = auth_mod.ensure_mcp_token(run_dirs.base)
     database = await Database.open(run_dirs.db)
     # Read the templates dir at startup, not import time, so tests (and reloads)
     # that set KRAFT_TEMPLATES_DIR after import still take effect.
@@ -246,6 +251,13 @@ async def _authenticate(request: Request, call_next):
         and dist is not None
     ):
         return FileResponse(dist / "index.html")
+    # After the SPA-shell branch on purpose: that branch answers any GET claiming
+    # `sec-fetch-dest: document`, so a bearer check ahead of it would leave that
+    # path reachable, and one inside it would hand an MCP client HTML not JSON.
+    bearer = request.headers.get("authorization", "")
+    expected = getattr(app.state, "mcp_token", None)
+    if expected and bearer.startswith("Bearer ") and hmac.compare_digest(bearer[7:], expected):
+        return await call_next(request)
     token = request.cookies.get(auth_mod.COOKIE)
     if not token or not await app.state.db.write(
         lambda c, token=token: auth_mod.touch_session(c, token)
@@ -270,6 +282,9 @@ class NewWorkItem(BaseModel):
     root_merge_policy: str = "bump"
     #: spec/plan documents that already exist — they trim the gates they satisfy
     attachments: list[Attachment] = []
+    #: False creates the item without running it (design §6 rule 1). An agent
+    #: cannot spend tokens unattended; a human starts it from the board.
+    autostart: bool = True
 
 
 def _validated_attachments(repo: str, attachments: list[Attachment]) -> list[dict]:
@@ -319,9 +334,15 @@ async def create_work_item(body: NewWorkItem, request: Request):
             submodules=body.submodules,
             root_merge_policy=body.root_merge_policy,
             attachments=attachments,
+            status="active" if body.autostart else "paused",
         )
     except Exception as exc:  # noqa: BLE001 -- beads.intake raises several unrelated types
         raise HTTPException(502, f"bd intake failed: {exc}") from exc
+
+    if not body.autostart:
+        # Created, not started. `/resume` begins it at node zero, because a NULL
+        # current_node_id falls through that handler's `next(..., 0)` default.
+        return {"id": wid, "status": "paused"}
 
     _spawn(
         request.app,
