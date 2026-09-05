@@ -66,6 +66,10 @@ export const useStore = create<State>((set, get) => ({
       (stopEv?.type === "work_item_needs_human"
         ? (stopEv.payload.capped as WorkItem["cappedOut"])
         : null) ?? null;
+    const budget =
+      (stopEv?.type === "work_item_needs_human"
+        ? (stopEv.payload.budget as WorkItem["budget"])
+        : null) ?? null;
     set((s) => ({
       workItems: {
         ...s.workItems,
@@ -74,6 +78,7 @@ export const useStore = create<State>((set, get) => ({
           ...item,
           completedNodes,
           cappedOut,
+          budget,
           ...(fixCycle !== undefined ? { fixCycle } : {}),
         },
       },
@@ -104,6 +109,7 @@ export const useStore = create<State>((set, get) => ({
               current_node_id: p.node_id,
               cappedOut: null,
               needs_context_question: null,
+              budget: null,
             })),
           };
         case "node_completed":
@@ -219,6 +225,7 @@ export const useStore = create<State>((set, get) => ({
               pending_steer_context: null,
               cappedOut: null,
               needs_context_question: null,
+              budget: null,
             })),
           };
         case "work_item_needs_human":
@@ -229,6 +236,7 @@ export const useStore = create<State>((set, get) => ({
               status: "needs_human",
               cappedOut: (p.capped as WorkItem["cappedOut"]) ?? null,
               needs_context_question: questionOf(p.reason as string | undefined),
+              budget: (p.budget as WorkItem["budget"]) ?? null,
             })),
           };
         case "work_item_completed":

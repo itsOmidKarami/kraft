@@ -518,6 +518,17 @@ function PolicyPage() {
     });
   };
 
+  const setBudget = (field: "work_item_usd" | "daily_usd", raw: string) => {
+    if (!policy) return;
+    // "" is the operator clearing the cap, which is null — not 0, which would
+    // block every launch.
+    const n = raw.trim() === "" ? null : Number(raw);
+    setDraft({
+      ...policy,
+      budget: { work_item_usd: null, daily_usd: null, ...policy.budget, [field]: n },
+    });
+  };
+
   const save = async () => {
     if (!draft) return;
     setBusy(true);
@@ -542,7 +553,7 @@ function PolicyPage() {
     <>
       <PageHead
         title="Policy"
-        note="every loop stops at attempts or wall-clock, whichever comes first, and the item comes back to you"
+        note="every loop stops at attempts or wall-clock, whichever comes first; a spend budget stops the next agent task the same way — the item comes back to you"
       />
       {error && <p className="form-error">{error}</p>}
       <div className="cap-row cap-head">
@@ -571,6 +582,36 @@ function PolicyPage() {
           />
         </div>
       ))}
+      <SectionLabel>Budget</SectionLabel>
+      <div className="cap-row budget-row" data-budget="work_item_usd">
+        <span className="hook-name">Per work item ($)</span>
+        <input
+          className="input"
+          type="number"
+          min={0}
+          step="0.01"
+          aria-label="work item budget"
+          value={policy?.budget?.work_item_usd ?? ""}
+          onChange={(e) => setBudget("work_item_usd", e.target.value)}
+        />
+      </div>
+      <div className="cap-row budget-row" data-budget="daily_usd">
+        <span className="hook-name">Per day ($)</span>
+        <input
+          className="input"
+          type="number"
+          min={0}
+          step="0.01"
+          aria-label="daily budget"
+          value={policy?.budget?.daily_usd ?? ""}
+          onChange={(e) => setBudget("daily_usd", e.target.value)}
+        />
+      </div>
+      <p className="settings-note">
+        Blank is no cap. A cap refuses to start the next agent task; it cannot stop
+        one already running, because an agent only reports its cost when its session
+        ends. Expect to overshoot by up to the cost of one task.
+      </p>
       <SaveRow
         onSave={save}
         onDiscard={() => setDraft(null)}

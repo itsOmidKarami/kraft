@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { ChatText, FolderOpen, Pause, Prohibit } from "@phosphor-icons/react";
 import * as api from "../api";
+import { BudgetCard } from "../components/BudgetCard";
 import { CappedCard } from "../components/CappedCard";
 import { CurrentNodePanel } from "../components/CurrentNodePanel";
 import { DiffModal } from "../components/DiffModal";
@@ -268,6 +269,16 @@ export function WorkItemDetail() {
       {item.status === "needs_human" && item.needs_context_question && !gate ? (
         <div className="desktop-only">
           <NeedsContextCard item={item} />
+        </div>
+      ) : /* Then budget: a spend cap stopped the item before it launched
+             anything, and `strandedInFixLoop` below would otherwise claim a
+             fix loop needs a steer when no fix agent ever ran. The two are
+             mutually exclusive in practice — a budget stop's reason is never
+             a needs_context question — so this order only decides which card
+             wins if that ever stops being true. */
+      item.budget ? (
+        <div className="desktop-only">
+          <BudgetCard item={item} />
         </div>
       ) : item.cappedOut || strandedInFixLoop ? (
         <div className="desktop-only">

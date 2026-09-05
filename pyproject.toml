@@ -51,6 +51,7 @@ testpaths = ["tests"]
 markers = [
     "e2e: end-to-end tests needing a real claude binary (Chunk C)",
     "slow: excluded from the blocking PR gate; run in the parallel slow-tests CI job (subprocess servers, real uvicorn, multi-second sleeps)",
+    "real_executor: opts a test out of a suite-level executor stub; it drives the real executor and real subprocesses",
 ]
 
 [tool.ruff]
