@@ -26,7 +26,10 @@ cache:
 # `git` + `bd` aren't in the slim image; both test jobs need them.
 .py-before-script: &py-before-script
   - apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl
-  - curl -fsSL "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_amd64.tar.gz" | tar -xz -C /usr/local/bin bd
+  # Arch-aware so the same config runs on a self-hosted arm64 runner. GitLab's
+  # shared runners are x86_64, where this resolves to amd64 exactly as before.
+  - case "$(uname -m)" in aarch64|arm64) BD_ARCH=arm64 ;; *) BD_ARCH=amd64 ;; esac
+  - curl -fsSL "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz" | tar -xz -C /usr/local/bin bd
   - git config --global user.email ci@kraft.invalid && git config --global user.name "Kraft CI"
   - git --version && bd version
 
@@ -110,7 +113,10 @@ frontend-e2e:
   allow_failure: true
   before_script:
     - apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl python3
-    - curl -fsSL "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_amd64.tar.gz" | tar -xz -C /usr/local/bin bd
+    # Arch-aware so the same config runs on a self-hosted arm64 runner. GitLab's
+    # shared runners are x86_64, where this resolves to amd64 exactly as before.
+    - case "$(uname -m)" in aarch64|arm64) BD_ARCH=arm64 ;; *) BD_ARCH=amd64 ;; esac
+    - curl -fsSL "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz" | tar -xz -C /usr/local/bin bd
     - curl -LsSf https://astral.sh/uv/install.sh | sh
     - export PATH="$HOME/.local/bin:$PATH"
     - git config --global user.email ci@kraft.invalid && git config --global user.name "Kraft CI"
