@@ -107,6 +107,21 @@ def test_diff_shows_committed_and_uncommitted_changes(client, seeded_item, workt
     assert body["truncated"] is False
 
 
+def test_diff_keeps_a_trailing_blank_context_line(client, seeded_item, worktree):
+    """git_read strips, which is right for `rev-parse` and wrong for a diff: a
+    hunk whose last line is blank would lose it to the strip, and the reviewer
+    would read a change one line shorter than it is."""
+    _write(worktree / "calc.py", "first\n\n")
+    subprocess.run(["git", "add", "-A"], cwd=worktree, check=True)
+    subprocess.run(["git", "commit", "-m", "blank tail"], cwd=worktree, check=True)
+    _write(worktree / "calc.py", "changed\n\n")
+
+    body = client.get(f"/work-items/{seeded_item}/diff").json()["diff"]
+    # the blank line the agent added is the last line of the hunk: stripped, it
+    # would arrive as a bare "+"
+    assert body.endswith("+changed\n+\n"), repr(body[-40:])
+
+
 def test_diff_lists_untracked_without_adding_them(client, seeded_item, worktree):
     _write(worktree / "new_file.py", "x = 1\n")
     body = client.get(f"/work-items/{seeded_item}/diff").json()

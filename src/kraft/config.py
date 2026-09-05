@@ -125,7 +125,9 @@ def save_repos(path: str | Path, repos: list[dict]) -> None:
     write_yaml(path, {"repos": repos})
 
 
-def git_read(cwd: Path, *args: str, expected_failure: bool = False) -> str | None:
+def git_read(
+    cwd: Path, *args: str, expected_failure: bool = False, strip: bool = True
+) -> str | None:
     """One read-only git command, or None if git says no. Never raises.
 
     `--no-optional-locks`: a plain `git status`/`diff` still touches
@@ -139,6 +141,10 @@ def git_read(cwd: Path, *args: str, expected_failure: bool = False) -> str | Non
     line in the log (and in test output) for every origin-less repo. The
     warning itself stays: it exists so a broken worktree cannot produce a 500
     whose cause is recorded nowhere.
+
+    `strip=False` for the callers that read *content* rather than a scalar: a
+    diff body ending in a blank context line loses that line to the strip, and
+    git_read is a diff transport now as well as a `rev-parse` reader.
     """
     cmd = ["git", "--no-optional-locks", *args]
     try:
@@ -150,7 +156,7 @@ def git_read(cwd: Path, *args: str, expected_failure: bool = False) -> str | Non
         log = logger.debug if expected_failure else logger.warning
         log("git_read %s in %s failed: %s", cmd, cwd, out.stderr.strip())
         return None
-    return out.stdout.strip()
+    return out.stdout.strip() if strip else out.stdout
 
 
 #: Test commands to look for, in the order a repo is most likely to want them.

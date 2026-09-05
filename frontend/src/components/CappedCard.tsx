@@ -70,6 +70,10 @@ export function CappedCard({
   const rows = cycles(events, sessions, item.current_node_id);
   const span = loopSpan(events, item.current_node_id);
   const failedHooks = [...new Set(rows.flatMap((c) => c.failed))];
+  // `_guard`'s crash handler stops the item wherever it stood, which may be a
+  // fix-loop node — the same shape as a `no_progress` escalation. The reason
+  // string is what tells them apart (Kraft-esc); retry is still the way out.
+  const crashed = item.stop_reason?.startsWith("executor crashed:") ?? false;
 
   const retry = async () => {
     setBusy(true);
@@ -90,12 +94,20 @@ export function CappedCard({
         <Prohibit size={18} className="attention-glyph" />
         <div className="attention-text">
           <span className="attention-title">
-            {node?.fix_loop ?? "the loop"} {item.cappedOut ? "hit its cap" : "needs a steer"}
-            {item.cappedOut && ` — ${item.cappedOut.attempts} attempts`}
-            {span && `, ${span}`}
+            {crashed ? (
+              "Kraft crashed while running this node"
+            ) : (
+              <>
+                {node?.fix_loop ?? "the loop"} {item.cappedOut ? "hit its cap" : "needs a steer"}
+                {item.cappedOut && ` — ${item.cappedOut.attempts} attempts`}
+                {span && `, ${span}`}
+              </>
+            )}
           </span>
           <span className="attention-sub">
-            {failedHooks.length > 0 && `${failedHooks.join(", ")} never went clean. `}
+            {crashed
+              ? `${item.stop_reason} `
+              : failedHooks.length > 0 && `${failedHooks.join(", ")} never went clean. `}
             The chain did not move; nothing was merged.
           </span>
         </div>

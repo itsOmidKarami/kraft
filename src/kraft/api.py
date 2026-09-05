@@ -144,7 +144,11 @@ async def lifespan(app: FastAPI):
 
     index_conn = index_db.open_index(run_dirs.index_db)
     indexer = Indexer(
-        index_conn, database, repos_env=os.environ.get("KRAFT_INDEX_REPOS"), run_dirs=run_dirs
+        index_conn,
+        database,
+        repos_env=os.environ.get("KRAFT_INDEX_REPOS"),
+        run_dirs=run_dirs,
+        repos_path=templates_dir / "repos.yaml",
     )
     await indexer.startup_scan()  # 04 §2: once, before live event handling
     await indexer.start()
@@ -541,12 +545,21 @@ def _concerns(st, wid: str) -> list[str]:
     machine noticed and owes a human before approval), read from the event log
     `adapters.subprocess.run_task` stamps at session exit, never from
     `result_path` on disk.
+
+    Bounded at the last resolved gate, the way `_stop_reason` is: spec §2 puts a
+    concern at the *next* gate, and the detail screen now passes concerns to
+    every gate rather than only `human_review_approval`. Without a boundary one
+    concern would be re-posed at every later gate the item reaches, long after
+    the human who approved that gate already answered for it (Kraft-ub2).
     """
-    return [
-        e["payload"]["concerns"]
-        for e in st.db.read(lambda c: events.read_after(c, 0, wid))
-        if e["type"] == "worker_session_exited" and e["payload"].get("concerns")
-    ]
+    out: list[str] = []
+    for e in reversed(st.db.read(lambda c: events.read_after(c, 0, wid))):
+        if e["type"] in ("gate_approved", "gate_rejected"):
+            break
+        if e["type"] == "worker_session_exited" and e["payload"].get("concerns"):
+            out.append(e["payload"]["concerns"])
+    out.reverse()  # oldest first
+    return out
 
 
 def _needs_context_question(st, wid: str) -> str | None:
@@ -587,6 +600,9 @@ async def get_work_item(wid: str, request: Request):
         # "the node has a gate_after and its sessions are done" cannot see a
         # rejection, and offers Approve on a gate the API will 409 (Kraft).
         "pending_gate": _pending_gate(st, wid),
+        # Why the item is stopped, when it is: the detail screen has to tell a
+        # loop escalation from an unrelated crash on the same node (Kraft-esc).
+        "stop_reason": _stop_reason(st, wid),
         "deferred_findings": _deferred_findings(st, wid),
         "concerns": _concerns(st, wid),
         "needs_context_question": _needs_context_question(st, wid),
@@ -664,7 +680,8 @@ async def get_work_item_diff(wid: str, request: Request):
     if not worktree.is_dir():
         raise HTTPException(404, "this work item has no worktree yet")
 
-    body = config_mod.git_read(worktree, "diff", base)
+    # strip=False: a diff whose last line is blank context is still that diff
+    body = config_mod.git_read(worktree, "diff", base, strip=False)
     numstat = config_mod.git_read(worktree, "diff", "--numstat", base)
     status = config_mod.git_read(worktree, "status", "--porcelain", "-uall")
     if body is None or numstat is None or status is None:
@@ -1284,6 +1301,14 @@ async def add_repo(body: RepoBody, request: Request):
     repos.append(entry)
     _validate_repos(st, repos)
     config_mod.save_repos(_repos_path(st), repos)
+    # Index it now: a repo connected mid-session would otherwise stay invisible
+    # to search (and to the intake picker) until the next restart. The scan is
+    # `git ls-files .engineering/` — cheap enough to await. A scan failure must
+    # not fail a connect that is already saved.
+    try:
+        await st.indexer.rescan_repo(entry["path"])
+    except Exception:  # noqa: BLE001 -- scan_repo touches git and the filesystem
+        logger.exception("index scan failed for newly connected repo %s", entry["path"])
     return entry
 
 
@@ -1325,9 +1350,9 @@ def _launch(st, repo: str) -> executor.LaunchContext:
     a name whose file has since been deleted must still let the repo entry
     load normally, model/deny_tools intact, rather than losing them along with
     everything else. The dispatch that actually reads that steering file is
-    what surfaces the problem — `steering.read`'s docstring covers the raw
-    FileNotFoundError/OSError that reaches `_guard` from there — needs_human
-    for that one launch, not a crash."""
+    what surfaces the problem — `steering.read` raises `SteeringError` naming
+    the file, and it reaches `_guard` from there — needs_human for that one
+    launch, not a crash."""
     steering_dir = st.templates_dir / "steering"
     try:
         repos = config_mod.load_repos(_repos_path(st), validate_steering=False)
@@ -1362,6 +1387,9 @@ async def remove_repo(request: Request, path: str):
         raise HTTPException(404, f"{path} is not connected")
     kept = [r for r in repos if r["path"] != entry["path"]]
     config_mod.save_repos(_repos_path(st), kept)
+    # Mirror of the connect-time scan. A repo with work items stays in
+    # `Indexer.repos()` and is simply re-ingested by the next rescan.
+    st.indexer.purge_repo(entry["path"])
 
 
 class TemplateBody(BaseModel):
