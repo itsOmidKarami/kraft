@@ -28,6 +28,7 @@ frontend/node_modules/
 frontend/dist/
 frontend/playwright-report/
 frontend/test-results/
+frontend/e2e-shots/
 
 # Written by Settings → Access. Everything else the Settings screens write is
 # versioned on purpose; this one holds a password hash and a bind address that
