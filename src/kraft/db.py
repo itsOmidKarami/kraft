@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -34,6 +34,8 @@ CREATE TABLE work_items (
   root_merge_policy TEXT,
   -- documents attached at intake (Kraft-dgh): [{"kind": "spec"|"plan", "path": ...}]
   attachments      TEXT,
+  -- the commit a work item's diff is measured against (Kraft-8mu.2)
+  base_ref         TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
@@ -158,6 +160,7 @@ SELECT id, bead_id, title, repo, chain_template, chain_definition, current_node_
 )""",
     ],
     7: ["ALTER TABLE work_items ADD COLUMN attachments TEXT"],
+    8: ["ALTER TABLE work_items ADD COLUMN base_ref TEXT"],
 }
 
 

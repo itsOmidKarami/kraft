@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import * as api from "../api";
 import { Gate } from "./Gate";
@@ -51,5 +52,35 @@ describe("Gate", () => {
     expect(screen.getByRole("button", { name: /approve/i })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /^reject/i }));
     expect(screen.getByLabelText("reject note")).toBeInTheDocument();
+  });
+
+  const deferred = [
+    { severity: "minor", message: "naming nit", file: "a.py", line: 3, source_plugin: "fake" },
+  ];
+
+  it("lists deferred minor findings at the gate", () => {
+    render(<Gate item={item} gate="human_review_approval" deferred={deferred} />);
+    expect(screen.getByText(/naming nit/)).toBeInTheDocument();
+    expect(screen.getByText(/a\.py:3/)).toBeInTheDocument();
+  });
+
+  it("renders no list when there are none", () => {
+    const { container } = render(
+      <Gate item={item} gate="human_review_approval" deferred={[]} />,
+    );
+    expect(container.querySelector(".gate-deferred")).toBeNull();
+  });
+
+  it("suppresses Approve inline for human_review_approval and links to the detail view instead", () => {
+    render(
+      <MemoryRouter>
+        <Gate item={item} gate="human_review_approval" variant="inline" />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole("button", { name: /approve/i })).toBeNull();
+    expect(screen.getByRole("link", { name: /review to approve/i })).toHaveAttribute(
+      "href",
+      "/work-items/w1",
+    );
   });
 });

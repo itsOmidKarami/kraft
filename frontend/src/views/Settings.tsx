@@ -211,9 +211,15 @@ function AddRepo({ onClose, onAdded }: { onClose: () => void; onAdded: () => voi
         </div>
         <div className="field">
           <label>
-            GitLab project <span className="field-hint">· on.mr.open / on.ci.poll / on.merge</span>
+            Forge project <span className="field-hint">· on.mr.open / on.ci.poll / on.merge</span>
           </label>
-          <div className="input readout">{probe?.gitlab_project ?? "no GitLab remote"}</div>
+          <div className="input readout">
+            {probe?.forge
+              ? probe.project
+                ? `${probe.forge} · ${probe.project}`
+                : probe.forge
+              : "no forge remote detected"}
+          </div>
         </div>
 
         {error && <p className="form-error">{error}</p>}

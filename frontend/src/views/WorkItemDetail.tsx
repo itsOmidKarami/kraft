@@ -4,6 +4,7 @@ import { ChatText, Pause, Prohibit } from "@phosphor-icons/react";
 import * as api from "../api";
 import { CappedCard } from "../components/CappedCard";
 import { CurrentNodePanel } from "../components/CurrentNodePanel";
+import { DiffModal } from "../components/DiffModal";
 import { EventTimeline } from "../components/EventTimeline";
 import { Gate } from "../components/Gate";
 import { LinkedDocuments } from "../components/LinkedDocuments";
@@ -62,6 +63,7 @@ export function WorkItemDetail() {
   // the screen renders every panel empty and offers the controls for the wrong
   // state, which is exactly how a shell-cached deep link presented itself.
   const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [showDiff, setShowDiff] = useState(false);
 
   useEffect(() => {
     if (item?.status === "paused") setPausing(false);
@@ -89,9 +91,16 @@ export function WorkItemDetail() {
 
   const nodes = item.chain_definition.nodes;
   const at = nodes.findIndex((n) => n.id === item.current_node_id);
+  const currentNode = at >= 0 ? nodes[at] : undefined;
   const runtime = nodeRuntime(events, item.current_node_id);
   const gate = item.pending_gate ?? null;
   const nodeSessions = sessions.filter((s) => s.node_id === item.current_node_id);
+  // A `no_progress` escalation stops the item exactly like a cap breach, but
+  // with `capped: null` (Kraft's own executor deliberately never fakes a cap
+  // it did not hit). Gate on the status + fix_loop, not on cappedOut alone,
+  // or the retry control disappears for the one stop where a human's steer
+  // is the only way to unstick the item.
+  const strandedInFixLoop = !gate && item.status === "needs_human" && !!currentNode?.fix_loop;
 
   const pause = async () => {
     setPausing(true);
@@ -181,7 +190,7 @@ export function WorkItemDetail() {
           thing that is waiting on a person. Everything else is read-only here. */}
       {!gate && <p className="phone-only open-on-desktop">Open on desktop to steer or retry.</p>}
 
-      {item.cappedOut ? (
+      {item.cappedOut || strandedInFixLoop ? (
         <div className="desktop-only">
           <CappedCard item={item} sessions={sessions} events={events} />
         </div>
@@ -194,6 +203,14 @@ export function WorkItemDetail() {
           item={item}
           gate={gate}
           sub={`${nodeSessions.map((s) => s.hook_point).join(", ")} completed clean`}
+          artifact={
+            gate === "human_review_approval" ? (
+              <button className="btn btn-secondary" onClick={() => setShowDiff(true)}>
+                Review changes
+              </button>
+            ) : undefined
+          }
+          deferred={gate === "human_review_approval" ? item.deferred_findings : undefined}
         />
       ) : (
         <div className="control-row desktop-only">
@@ -218,6 +235,18 @@ export function WorkItemDetail() {
           <span className="control-usage">{usageLine(item, nodeSessions.length)}</span>
         </div>
       )}
+
+      {/* Reachable at any status/gate: the one review path the Gate artifact
+          doesn't already cover for `human_review_approval`. */}
+      {gate !== "human_review_approval" && (
+        <div className="control-row">
+          <button className="btn btn-secondary" onClick={() => setShowDiff(true)}>
+            Review changes
+          </button>
+        </div>
+      )}
+
+      {showDiff && <DiffModal workItemId={item.id} onClose={() => setShowDiff(false)} />}
 
       <Tabs
         value={tab}

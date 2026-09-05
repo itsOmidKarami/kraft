@@ -159,6 +159,13 @@ describe("applyEvent", () => {
     expect(spy).toHaveBeenCalledWith("w2");
   });
 
+  it("gate_requested re-hydrates so a stale deferred_findings roll-up isn't left showing", async () => {
+    const spy = vi.spyOn(useStore.getState(), "hydrateItem").mockResolvedValue(undefined);
+    useStore.getState().applyEvent(ev({ type: "gate_requested", payload: { gate: "human_review_approval" } }));
+    await new Promise((r) => setTimeout(r));
+    expect(spy).toHaveBeenCalledWith("w1");
+  });
+
   it("lastSeq never goes backward", () => {
     const st = useStore.getState();
     st.applyEvent(ev({ seq: 10 }));

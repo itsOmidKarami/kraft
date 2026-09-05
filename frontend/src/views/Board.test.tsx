@@ -99,6 +99,22 @@ describe("Board", () => {
     expect(within(row).getByRole("button", { name: /approve/i })).toBeInTheDocument();
   });
 
+  it("does not offer a blind Approve for human_review_approval, only a link to the detail view", () => {
+    setItems(
+      wi({
+        id: "w6",
+        status: "needs_human",
+        current_node_id: "verify",
+        pending_gate: "human_review_approval",
+      }),
+    );
+    renderBoard();
+    const row = within(group("Needs you")).getByTestId("board-card");
+    expect(within(row).queryByRole("button", { name: /approve/i })).toBeNull();
+    const link = within(row).getByRole("link", { name: /review to approve/i });
+    expect(link).toHaveAttribute("href", "/work-items/w6");
+  });
+
   it("spells out the cap on a capped-out row", () => {
     setItems(
       wi({ id: "w4", status: "needs_human", cappedOut: { cycles: 3, attempts: 3 } }),

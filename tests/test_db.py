@@ -468,8 +468,49 @@ def test_migration_7_adds_attachments_column(tmp_path):
     conn = db._connect(tmp_path / "s.db")
     db.migrate(conn)
     conn.execute("PRAGMA user_version = 7")
+    # Both columns the 7 -> 9 steps add, or migrate() re-adds one that exists.
     conn.execute("ALTER TABLE work_items DROP COLUMN attachments")
+    conn.execute("ALTER TABLE work_items DROP COLUMN base_ref")
     db.migrate(conn)
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(work_items)")}
     assert "attachments" in cols
     assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+
+
+def test_migrate_v8_to_v9_adds_base_ref(tmp_path):
+    """The base_ref migration adds the column via ALTER TABLE, and pre-existing rows
+    survive with their other values intact.
+
+    Keyed v8 -> v9: origin/main's `attachments` migration took key 7 first, so
+    base_ref renumbered to 8 when the two branches merged."""
+    path = tmp_path / "orchestrator.db"
+    conn = db._connect(path)
+    _build_old_db(conn, 8, drop_lines=("base_ref",))
+    conn.execute(
+        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
+        "'active','now','now')"
+    )
+    conn.commit()
+    conn.close()
+
+    conn2 = db._connect(path)
+    db.migrate(conn2)
+    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    cols = {r["name"] for r in conn2.execute("PRAGMA table_info(work_items)")}
+    assert "base_ref" in cols
+    assert conn2.execute("SELECT count(*) FROM work_items").fetchone()[0] == 1
+    row = conn2.execute("SELECT id, title, status FROM work_items WHERE id='w1'").fetchone()
+    assert row["id"] == "w1"
+    assert row["title"] == "t"
+    assert row["status"] == "active"
+
+
+def test_migration_adds_base_ref(tmp_path):
+    path = tmp_path / "m.db"
+    conn = db._connect(path)
+    db.migrate(conn)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(work_items)")}
+    assert "base_ref" in cols
+    (version,) = conn.execute("PRAGMA user_version").fetchone()
+    assert version == db.SCHEMA_VERSION

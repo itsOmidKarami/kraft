@@ -6,10 +6,12 @@ import type { KraftEvent, WorkItem, WorkerSession } from "../types";
 import { LogModal } from "./LogModal";
 
 /**
- * The capped-out attention card (design 4b). It replaces the control row when a
- * fix loop has burned its budget: what the loop was, how long it ran, what each
- * cycle left failing, and the one way forward — a steer note that leads cycle 1
- * of the retry.
+ * The stranded-fix-loop attention card (design 4b). It replaces the control row
+ * when a fix loop has stopped needing a human — either it burned its cap
+ * (`item.cappedOut` set) or the loop-eligible findings stopped changing between
+ * cycles (`no_progress`, `cappedOut` absent): what the loop was, how long it
+ * ran, what each cycle left failing, and the one way forward — a steer note
+ * that leads cycle 1 of the retry.
  */
 
 interface Cycle {
@@ -88,7 +90,7 @@ export function CappedCard({
         <Prohibit size={18} className="attention-glyph" />
         <div className="attention-text">
           <span className="attention-title">
-            {node?.fix_loop ?? "the loop"} hit its cap
+            {node?.fix_loop ?? "the loop"} {item.cappedOut ? "hit its cap" : "needs a steer"}
             {item.cappedOut && ` — ${item.cappedOut.attempts} attempts`}
             {span && `, ${span}`}
           </span>
