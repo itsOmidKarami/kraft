@@ -863,6 +863,13 @@ aside .row, .narrow .row {
   /* the one place a phone user types. 16px is not a taste call: mobile Safari
      zooms the viewport on focus for any input under 16px and does not zoom back
      out, which strands the reader mid-rejection. */
+  /* Ten nodes across 390px leaves ~39px per label, and `.chain-label` is
+     `nowrap` — so the names paint straight over each other into a smear that a
+     box-overlap check cannot see. Nothing is lost by dropping them here: the
+     detail hero right above already names the current node and counts the rest
+     ("spec · node 1 of 10"), and the segments still show progress. */
+  .chain-bar.lg .chain-label { display: none; }
+
   .gate-reject textarea.input { font-size: 16px; min-height: 96px; }
   .gate-reject .btn { min-height: 44px; }
 }
@@ -967,4 +974,8 @@ aside .row, .narrow .row {
      overflow; `anywhere` handles a minified line with no break opportunity. */
   .diff-body > div { white-space: pre-wrap; overflow-wrap: anywhere; }
   .diff-files li { flex-wrap: wrap; }
+  /* Session paths are far longer than 390px and the modal clips them, so
+     nothing overflows by scrollWidth — the path is just silently cut in half.
+     `anywhere` breaks it mid-token, which for a path is the only place to. */
+  .diff-untracked li { overflow-wrap: anywhere; }
 }
