@@ -93,6 +93,41 @@ def test_intake_bead_failure_writes_no_row(tmp_path):
     asyncio.run(scenario())
 
 
+def test_intake_adopts_a_given_bead_instead_of_filing_a_new_one(tmp_path, monkeypatch):
+    """Auto-intake starts a bead that already exists. Filing a duplicate of it on
+    every pickup is the failure this parameter exists to prevent."""
+    called = False
+
+    async def boom(*a, **kw):
+        nonlocal called
+        called = True
+        raise AssertionError("bd create must not run when a bead_id is given")
+
+    monkeypatch.setattr("kraft.executor.beads.intake", boom)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="adopted work",
+                repo="/some/repo",
+                template=_quick_task(),
+                bead_id="TEST-abc",
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+            assert row["bead_id"] == "TEST-abc"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    assert called is False
+
+
 def _events(database, wid):
     return [e["type"] for e in database.read(lambda c: events.read_after(c, 0, wid))]
 

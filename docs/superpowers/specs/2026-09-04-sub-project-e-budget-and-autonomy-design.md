@@ -163,3 +163,143 @@ even though only `C` blocks this formally.
 - With auto-intake enabled, a P3 bead becomes a running work item without a
   human, and stops at its first gate.
 - `just test`, `just test-ui`, `just lint` pass.
+
+---
+
+## Amendments, 2026-09-05 — reality after `C` landed
+
+Re-read against the merged tree at `ae2619f`. Sub-project `C` (agent invocation
+contract) is in; `Kraft-8mu.3` is closed. Nine things this spec assumed have
+moved, or were never true.
+
+### A1. No schema migration. At all.
+
+Everything a budget needs is already stored: `worker_sessions.cost_usd`
+(`db.py` schema, added by `_MIGRATIONS[3]`) and `work_items.bead_id`. Both caps
+are `SUM` queries and auto-intake's "already has a work item" test is a
+`bead_id` lookup. `SCHEMA_VERSION` stays where sub-project `G` leaves it and
+`_MIGRATIONS` gains no key. This is a hard constraint on the plan, not a
+preference: `G` is bumping 9 → 10 concurrently.
+
+### A2. §2's "the check runs in `policy.py`" is imprecise
+
+`policy.py` is pure and does no I/O — `load_policy` reads one YAML file and
+`check()` is arithmetic. The budget splits three ways along the seams that
+already exist:
+
+- `policy.Budget` + parsing of the `budget:` block, in `policy.py`.
+- `store.budget_spend(conn, work_item_id, since)` — the two `SUM(cost_usd)`
+  queries, in `store.py` with every other query.
+- the call, in `executor._dispatch`, on the `kind == "agent"` branch. That is
+  what makes "an agent-kind task is blocked and a subprocess task in the same
+  node is not" true by construction rather than by a filter someone has to
+  remember.
+
+**Amended in implementation:** an earlier draft of this section said "and
+nowhere else", and the shipped code has three call sites, not one. The other two
+do not weaken the invariant:
+
+- `executor._walk_node`, immediately before `store.bump_counter` in the fix
+  loop. The `_dispatch` check alone fires too late there — the counter is
+  bumped and `fix_cycle_started` appended before the fix task is dispatched, so
+  a refusal would spend a fix-loop attempt and leave a phantom cycle for an
+  agent that never ran, which `_last_measurement` then reads back as "no
+  progress". It guards a fix *agent* dispatch, so subprocess tasks are still
+  never blocked. The `_dispatch` check stays as the backstop.
+- `intake._daily_breached`, for the poller, per A10 below. No task is being
+  dispatched there at all — it decides whether to file a work item.
+
+### A3. A breach needs a verdict that survives `_measure_node`
+
+`_dispatch` returns a status string; `_measure_node` folds those into
+`("ok"|"failed"|"paused", failed, excs)`; `_walk_node` maps that to
+`needs_human`. A budget breach that returns `"failed"` is indistinguishable
+from a task that ran and failed, and would be reported as one.
+
+So `_dispatch` returns a new `"budget"` verdict, `_measure_node` gains a
+precedence rung — **paused > budget > failed** — and both of `_walk_node`'s
+branches, plus the fix-cycle `_dispatch` call site inside the loop, map it to
+`needs_human` with a budget reason. Precedence: a pause is a human's
+instruction and outranks everything; a budget breach outranks a co-task's
+failure because the agent never ran and its "failure" is not evidence of
+anything.
+
+### A4. `POST /retry` cannot be the budget card's action, and §3 overstated it
+
+`retry_work_item` (`api.py:849`) raises 409 unless the current node has a
+`fix_loop`. A budget breach can land on **any** agent-kind node. §3's "offers
+the same clear-and-re-run action" is therefore only available on a fix-loop
+node.
+
+Amended: the budget card states the spend, the cap and which cap, and points at
+Settings → Policy. It renders the retry control **only** when the current node
+has a fix loop — the same condition `WorkItemDetail.strandedInFixLoop` already
+computes. On any other node the item is stopped exactly as a
+`task failed in node X` stop is stopped today, which is a pre-existing product
+limit and not this sub-project's to fix.
+
+### A5. A separate `BudgetCard`, not a case inside `CappedCard`
+
+§3 says `CappedCard.tsx` gains a case. `CappedCard` is a fix-loop artifact end
+to end: it builds a cycle trace from `fix_cycle_started` events, measures the
+loop's span, and its one action is a steer note that "goes into cycle 1 of the
+retry". A budget breach has no cycles, no loop span, and its steer text is not
+the point. A `budget` case would be a second component wearing the first one's
+name.
+
+`BudgetCard.tsx` instead, reusing the `.attention-card` markup and CSS.
+`WorkItemDetail` gains a branch **before** the `cappedOut || strandedInFixLoop`
+one, so a budget breach inside a fix loop reads as a budget breach.
+
+### A6. Auto-intake must adopt an existing bead, and `executor.intake` cannot
+
+`executor.intake` calls `beads.intake(title)` unconditionally, which runs
+`bd create` and files a **new** bead. Auto-intake starting a bead from
+`bd ready` would file a duplicate of it on every pickup.
+
+`executor.intake` gains `bead_id: str | None = None`: given, it is adopted and
+`bd create` is not run. Nothing else changes.
+
+Note in passing: manual intake's beads land in `KRAFT_BD_CWD`, a single tracker
+for the instance, while an auto-intaken bead lives in its own repo's `.beads`.
+The `bead_id` string is stored as-is either way; nothing in Kraft resolves a
+bead id back to a workspace, so the two coexist. `beads.complete` runs against
+`KRAFT_BD_CWD` and so would fail to close an auto-intaken bead — filed as a
+follow-up bead, not fixed here.
+
+### A7. `bd ready` has no adapter
+
+`adapters/beads.py` has `intake`, `complete` and `search`. §4 needs a fourth:
+`ready(cwd) -> list[dict]`, a `bd ready --json` passthrough shaped like
+`search` — best-effort, returning `[]` on a non-zero exit or unparseable
+output, because a poller that raises kills its own task.
+
+Verified against the real CLI: `bd ready --json` prints a JSON array whose
+objects carry `id`, `title`, `status`, `priority` (**int, 0–4**), `issue_type`.
+So `priority_ceiling: 2` keeps rows with `priority >= 2` — the inversion §4
+calls out, in the direction the data actually goes.
+
+### A8. `intake.yaml` must be declared a config file
+
+`templates.CONFIG_FILES` is the set of files in `templates/` that
+`load_templates` skips. A new `intake.yaml` that is not in it is read as a
+malformed chain template and shows up as degraded instance health. Add it there
+and to the packaged `templates/` (which `cli.seed_home` copies into
+`$KRAFT_HOME` on first run, and `just install` bundles).
+
+### A9. No Settings screen for auto-intake; there is one for budget
+
+§4 specifies a file and no UI, and this amendment does not invent one:
+`intake.yaml` is hand-edited and read at startup, so enabling the poller needs
+a restart. Filed as a follow-up bead.
+
+The budget **does** get UI, because §1 requires it to: "the Settings screen says
+it in the field's help text". Settings → Policy gains the two fields and the
+one-task-overshoot sentence.
+
+### A10. What auto-intake means by "a budget cap is currently breached"
+
+§4 says the poller refuses to start anything while a budget is breached. Only
+`daily_usd` can be evaluated before an item exists — `work_item_usd` is
+per-item and a candidate has no spend. So: the poller checks the daily cap
+only, and the per-item cap does its own work at that item's first dispatch.

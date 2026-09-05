@@ -114,9 +114,12 @@ async def intake(
     root_merge_policy: str = "bump",
     attachments: list[dict] | None = None,
     status: str = "active",
+    bead_id: str | None = None,
 ) -> str:
     work_item_id = uuid.uuid4().hex
-    bead_id = await beads.intake(title, cwd=bd_cwd)
+    # An auto-intaken bead already exists; filing a second one for the same work
+    # is the duplicate this parameter prevents.
+    bead_id = bead_id or await beads.intake(title, cwd=bd_cwd)
     satisfied = frozenset(ATTACHMENT_GATES[a["kind"]] for a in attachments or [])
     chain_definition = json.dumps(materialize(template, satisfied_gates=satisfied))
     await db.write(
@@ -152,6 +155,55 @@ def _attachment_note(attachments: list[dict]) -> str:
     return _ATTACHMENT_PROMPT.format(lines=lines)
 
 
+#: `_dispatch` returned without launching because a spend cap was already over.
+#: It is not "failed" — the agent never ran, so nothing about it failed — and it
+#: outranks a co-task's failure for exactly that reason.
+BUDGET = "budget"
+
+
+def _budget_breach(db, work_item_id: str, budget: _policy.Budget) -> dict | None:
+    """The breached cap, or None. Evaluated fresh: it is a query, not a counter.
+
+    A breach refuses the *next* launch. It cannot stop a running agent — cost is
+    only known once that agent's session has exited (`usage.read_envelope`) — so
+    the overshoot is bounded by the cost of one task, not by the cap.
+    """
+    if budget.work_item_usd is None and budget.daily_usd is None:
+        return None
+    since = store.local_midnight_utc() if budget.daily_usd is not None else None
+    item_usd, daily_usd = db.read(lambda c: store.budget_spend(c, work_item_id, since=since))
+    if budget.work_item_usd is not None and item_usd >= budget.work_item_usd:
+        return {"scope": "work_item", "spent_usd": item_usd, "cap_usd": budget.work_item_usd}
+    if budget.daily_usd is not None and daily_usd >= budget.daily_usd:
+        return {"scope": "daily", "spent_usd": daily_usd, "cap_usd": budget.daily_usd}
+    return None
+
+
+def _budget_reason(breach: dict) -> str:
+    where = "this work item" if breach["scope"] == "work_item" else "today, across every work item"
+    return (
+        f"budget cap reached: ${breach['spent_usd']:.2f} spent on {where}, "
+        f"cap ${breach['cap_usd']:.2f}. Nothing new was started; a running agent "
+        "was not interrupted."
+    )
+
+
+async def _stop_for_budget(db, work_item_id: str, node: dict, budget: _policy.Budget) -> str:
+    # The fallback cannot fire in practice — sums only grow between the dispatch
+    # that returned BUDGET and here — but a None would crash the escalation path
+    # rather than stop the item, which is the wrong failure.
+    breach = _budget_breach(db, work_item_id, budget) or {
+        "scope": "work_item",
+        "spent_usd": 0.0,
+        "cap_usd": 0.0,
+    }
+    reason = _budget_reason(breach)
+    await db.write(
+        lambda c: store.mark_needs_human(c, work_item_id, node["id"], reason, None, breach)
+    )
+    return "needs_human"
+
+
 async def _dispatch(
     db,
     run_dirs,
@@ -165,6 +217,7 @@ async def _dispatch(
     round: int = 0,
     steer: Steer | None = None,
     launch: LaunchContext | None = None,
+    budget: _policy.Budget = _policy.NO_BUDGET,
 ) -> str:
     binding = registry.hooks[task_hook]
     session_id = uuid.uuid4().hex
@@ -186,6 +239,10 @@ async def _dispatch(
     if kind == "builtin" and binding.get("handler") == "noop":
         return await _builtins.noop(db, run_dirs, hook_point=task_hook, **common)
     if kind == "agent":
+        # Only agent tasks. A subprocess or builtin costs nothing, and stopping
+        # `on.test.run` for a budget would strand the item mid-node for no saving.
+        if _budget_breach(db, work_item_row["id"], budget) is not None:
+            return BUDGET
         note = steer.take() if steer else None
         instruction = instruction_override or (
             work_item_row["title"] + _attachment_note(_attachments(work_item_row))
@@ -242,6 +299,7 @@ async def _measure_node(
     round: int = 0,
     steer: Steer | None = None,
     launch: LaunchContext | None = None,
+    budget: _policy.Budget = _policy.NO_BUDGET,
 ) -> tuple[str, list[str], list[BaseException]]:
     await db.write(lambda c, node=node: store.enter_node(c, work_item_id, node["id"]))
     tasks = node["tasks"]
@@ -258,6 +316,7 @@ async def _measure_node(
                 round=round,
                 steer=steer,
                 launch=launch,
+                budget=budget,
             )
             for t in tasks
         ),
@@ -268,14 +327,21 @@ async def _measure_node(
     # certainly the same SIGTERM arriving on a different row.
     if any(r == "paused" for r in results):
         return "paused", [], []
+    # Logged before the BUDGET rung returns: a co-task can raise in the same node
+    # as a budget-refused agent, and that traceback is the only record of it.
+    excs = [r for r in results if isinstance(r, BaseException)]
+    for exc in excs:
+        logger.error("measuring task raised in node %s: %r", node["id"], exc)
+    # paused > budget > failed. A pause is a human's instruction and outranks
+    # everything. A budget breach outranks a co-task's failure because the agent
+    # never ran, so its "failure" is not evidence about the code.
+    if any(r == BUDGET for r in results):
+        return BUDGET, [], []
     failed = [
         tasks[i]
         for i, r in enumerate(results)
         if isinstance(r, BaseException) or r in ("failed", "needs_context")
     ]
-    excs = [r for r in results if isinstance(r, BaseException)]
-    for exc in excs:
-        logger.error("measuring task raised in node %s: %r", node["id"], exc)
     if failed:
         return "failed", failed, excs
     return "ok", [], []
@@ -411,6 +477,9 @@ async def _walk_node(
     launch: LaunchContext | None = None,
 ) -> str:
     key = node.get("fix_loop")
+    # Derived here rather than passed in: every caller already hands us the
+    # policy, so no call site can forget the cap and silently lose it.
+    budget = policy.budget if policy else _policy.NO_BUDGET
 
     if not key:
         verdict, failed, excs = await _measure_node(
@@ -423,9 +492,12 @@ async def _walk_node(
             worktree,
             steer=steer,
             launch=launch,
+            budget=budget,
         )
         if verdict == "paused":
             return "paused"
+        if verdict == BUDGET:
+            return await _stop_for_budget(db, work_item_id, node, budget)
         if verdict == "failed":
             question = _needs_context_question(db, work_item_id, node, round=0)
             if question is not None:
@@ -458,9 +530,12 @@ async def _walk_node(
             round=round,
             steer=steer,
             launch=launch,
+            budget=budget,
         )
         if verdict == "paused":
             return "paused"
+        if verdict == BUDGET:
+            return await _stop_for_budget(db, work_item_id, node, budget)
 
         previous_prints, fix_ran = _last_measurement(db, work_item_id, node["id"])
         found, reported = _collect_findings(db, work_item_id, node, round)
@@ -501,6 +576,19 @@ async def _walk_node(
                 lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node["id"], reason)
             )
             return "needs_human"
+
+        # Also ahead of the counter bump and the `fix_cycle_started` event: a
+        # refused launch must not spend a fix-loop attempt or leave a cycle in
+        # the log for an agent that never ran. The check inside `_dispatch`
+        # stays as the backstop for any future agent task reached by another
+        # path.
+        #
+        # After needs_context, not before: a question a task actually asked is
+        # the more useful thing to hand a human, and raising the cap would not
+        # answer it. Either order prevents the phantom bump, which is the part
+        # that matters; only the reason on the card differs.
+        if _budget_breach(db, work_item_id, budget) is not None:
+            return await _stop_for_budget(db, work_item_id, node, budget)
 
         # bump_counter returns the cap snapshotted on the row (spec §2.C: written
         # once at first fire, not re-resolved per attempt). Across a restart with
@@ -561,9 +649,12 @@ async def _walk_node(
             round=count,
             steer=steer,
             launch=launch,
+            budget=budget,
         )
         if fix == "paused":
             return "paused"
+        if fix == BUDGET:
+            return await _stop_for_budget(db, work_item_id, node, budget)
         round = count
         # fix task status is not branched on; loop re-measures
 

@@ -1,0 +1,12 @@
+# Autonomous pickup from `bd ready`. Off by default, and read at startup — a
+# change here takes effect on the next restart.
+#
+# An auto-started work item passes NO gate automatically. It runs to its first
+# gate and stops for a human exactly as a typed-in one does. Auto-intake removes
+# the typing, not the judgement.
+enabled: false
+interval_s: 300
+max_concurrent: 1
+repos: []              # empty means every enabled repo in repos.yaml
+priority_ceiling: 2    # only P2 and below start unattended: the highest-priority
+                       # work is what a human should be looking at

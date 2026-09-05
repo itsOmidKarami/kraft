@@ -23,10 +23,28 @@ class Cap:
 
 
 @dataclass(frozen=True)
+class Budget:
+    """Spend caps, in dollars. `None` is "no cap", never "zero".
+
+    Not a field on `Cap`: a `Cap` is per-loop and is snapshotted per
+    `(work_item_id, key)` row in `retry_counters`, while a budget is per work
+    item and per day and spans every loop in the chain.
+    """
+
+    work_item_usd: float | None = None
+    daily_usd: float | None = None
+
+
+#: What a caller with no policy at all evaluates against.
+NO_BUDGET = Budget()
+
+
+@dataclass(frozen=True)
 class Policy:
     loops: dict[str, Cap]
     default: Cap
     loop_severities: frozenset[str] = DEFAULT_LOOP_SEVERITIES
+    budget: Budget = NO_BUDGET
 
 
 def _cap(name: str, raw: object) -> Cap:
@@ -44,11 +62,32 @@ def _cap(name: str, raw: object) -> Cap:
     return Cap(attempts=attempts, wall_clock_s=wall_clock_s)
 
 
+def _usd(name: str, raw: object) -> float | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, int | float) or isinstance(raw, bool) or raw < 0:
+        raise PolicyError(f"{name}: must be a non-negative number of dollars, or null")
+    return float(raw)
+
+
+def _budget(name: str, raw: object) -> Budget:
+    if raw is None:
+        return NO_BUDGET
+    if not isinstance(raw, dict):
+        raise PolicyError(f"{name}: expected a mapping")
+    return Budget(
+        work_item_usd=_usd(f"{name}.work_item_usd", raw.get("work_item_usd")),
+        daily_usd=_usd(f"{name}.daily_usd", raw.get("daily_usd")),
+    )
+
+
 def load_policy(path: str | Path) -> Policy:
     path = Path(path)
     try:
+        # ValueError covers UnicodeDecodeError: a policy file with one invalid
+        # byte is bad config, not a crash three frames up in `lifespan`.
         data = yaml.safe_load(path.read_text())
-    except (OSError, yaml.YAMLError) as exc:
+    except (OSError, ValueError, yaml.YAMLError) as exc:
         raise PolicyError(f"{path.name}: cannot read/parse: {exc}") from exc
     if not isinstance(data, dict) or "default" not in data:
         raise PolicyError(f"{path.name}: expected a mapping with a 'default' cap")
@@ -71,7 +110,13 @@ def load_policy(path: str | Path) -> Policy:
                 f"{path.name}: unknown severity {unknown[0]!r}; expected one of {SEVERITIES}"
             )
         severities = frozenset(sev_raw)
-    return Policy(loops=loops, default=_cap("default", data["default"]), loop_severities=severities)
+    budget = _budget(f"{path.name}: 'budget'", data.get("budget"))
+    return Policy(
+        loops=loops,
+        default=_cap("default", data["default"]),
+        loop_severities=severities,
+        budget=budget,
+    )
 
 
 def resolve_cap(policy: Policy, key: str) -> Cap:
