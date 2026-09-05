@@ -28,7 +28,16 @@ _CTX = (
     "worker_session_id: {session_id}\n"
     "---\n"
     'Then write that path, relative to the repo root, as "session_summary_ref" '
-    "in the JSON result file at $KRAFT_RESULT_PATH."
+    "in the JSON result file at $KRAFT_RESULT_PATH.\n"
+    "\n"
+    'Report how it went as "status" in that same result file: "done" if you '
+    'finished the work; "done_with_concerns" if you finished it but have '
+    'doubts about correctness, with why in a "concerns" field; "failed" if you '
+    'could not complete the task; or "needs_context" if you were missing '
+    'information nobody gave you, with what you need in a "question" field. '
+    "needs_context stops this run and costs a full relaunch to pick it back "
+    "up, so if you are missing more than one fact, ask for all of them in "
+    "that one question rather than stopping once per fact."
 )
 
 

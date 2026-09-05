@@ -34,6 +34,22 @@ describe("EventTimeline", () => {
     expect(screen.getByText("cap reached")).toBeInTheDocument();
   });
 
+  it("surfaces a worker's concerns, the one surface every chain has", () => {
+    // The gate panel is the only other place concerns render, so on a chain
+    // with no review gate they were stored and shown nowhere.
+    render(
+      <EventTimeline
+        events={[
+          ev({
+            type: "worker_session_exited",
+            payload: { status: "done_with_concerns", concerns: "the migration is untested" },
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("the migration is untested")).toBeInTheDocument();
+  });
+
   it("surfaces the failed tasks that opened a fix cycle", () => {
     render(
       <EventTimeline

@@ -41,6 +41,65 @@ function usageLine(item: WorkItem, taskCount: number): string {
   return parts.join(" · ");
 }
 
+/**
+ * The needs_context answer card — a `needs_human` stop whose reason is an
+ * agent's question, answerable the same way a pause is (spec §3). Unlike
+ * `PausedCard` this state has no prior session to prefill a note from and no
+ * "attempt N" to relaunch: just the question and a required answer.
+ */
+function NeedsContextCard({ item }: { item: WorkItem }) {
+  const [answer, setAnswer] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const submit = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.resumeWorkItem(item.id, answer.trim());
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card attention-card" data-testid="needs-context-card">
+      <div className="attention-head">
+        <ChatText size={18} className="attention-glyph" />
+        <div className="attention-text">
+          <span className="attention-title">{item.needs_context_question}</span>
+          <span className="attention-sub">the agent stopped to ask this before continuing</span>
+        </div>
+      </div>
+      <div className="field">
+        <label htmlFor="needs-context-answer">
+          Answer{" "}
+          <span className="field-hint">· goes into the next attempt's system prompt</span>
+        </label>
+        <textarea
+          id="needs-context-answer"
+          className="input"
+          value={answer}
+          onChange={(e) => setAnswer(e.target.value)}
+        />
+      </div>
+      <div className="gate-actions capped-actions">
+        <button
+          className="btn btn-primary"
+          disabled={busy || answer.trim() === ""}
+          onClick={submit}
+        >
+          <ChatText size={14} />
+          Answer
+        </button>
+      </div>
+      {err && <p className="form-error">{err}</p>}
+    </div>
+  );
+}
+
 const STATUS_TAG: Record<WorkItem["status"], string> = {
   active: "tag tag-outline",
   completed: "tag tag-neutral",
@@ -190,7 +249,18 @@ export function WorkItemDetail() {
           thing that is waiting on a person. Everything else is read-only here. */}
       {!gate && <p className="phone-only open-on-desktop">Open on desktop to steer or retry.</p>}
 
-      {item.cappedOut || strandedInFixLoop ? (
+      {/* Checked first: a `needs_context` stop is answerable through /resume
+          regardless of the current node's shape, and `strandedInFixLoop`
+          below fires for *any* needs_human on a fix-loop node — including
+          this one, since `mark_needs_human` never sets `capped` for a
+          needs_context reason. Routing it through CappedCard's "Steer and
+          retry" would go through /retry instead, which resets the loop
+          counter and discards fix-loop progress spec §3 says must survive. */}
+      {item.status === "needs_human" && item.needs_context_question && !gate ? (
+        <div className="desktop-only">
+          <NeedsContextCard item={item} />
+        </div>
+      ) : item.cappedOut || strandedInFixLoop ? (
         <div className="desktop-only">
           <CappedCard item={item} sessions={sessions} events={events} />
         </div>
@@ -211,6 +281,11 @@ export function WorkItemDetail() {
             ) : undefined
           }
           deferred={gate === "human_review_approval" ? item.deferred_findings : undefined}
+          // Not gate-specific, unlike `deferred`: spec §2 puts concerns at the
+          // next gate the item reaches, whatever that gate is. Only
+          // `on.implementation.start` is bound to `kind: agent` in the shipped
+          // registry.yaml, but that file is operator-editable from Settings.
+          concerns={item.concerns}
         />
       ) : (
         <div className="control-row desktop-only">

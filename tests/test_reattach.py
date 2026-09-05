@@ -195,3 +195,46 @@ def test_live_pid_matching_identity_is_adopted(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_resolved_from_file_carries_concerns_and_question(tmp_path):
+    """A session resolved from its result file after a restart must reach
+    `worker_session_exited` with the same payload `adapters.subprocess.run_task`
+    would have stamped — the concerns roll-up at the gate and the
+    needs_context question both read that event, so dropping the fields here
+    silently loses what the worker reported."""
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed_item(database)
+            (rd.results / "s1.json").write_text(
+                '{"status": "done_with_concerns", "concerns": "the migration is untested",'
+                ' "question": "which db?"}'
+            )
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="implementation",
+                    hook_point="on.implementation.start",
+                    log_path=str(rd.logs / "s1.log"),
+                    result_path=str(rd.results / "s1.json"),
+                )
+            )
+            await database.write(lambda c: store.session_running(c, "s1", 2_000_000_000, 123.0))
+            summary, _ = await reattach.reattach(database, rd, _REG)
+            assert summary.resolved_from_file == ["s1"]
+            exited = [
+                e
+                for e in database.read(lambda c: events.read_after(c, 0, "w1"))
+                if e["type"] == "worker_session_exited"
+            ]
+            assert exited[-1]["payload"]["concerns"] == "the migration is untested"
+            assert exited[-1]["payload"]["question"] == "which db?"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())

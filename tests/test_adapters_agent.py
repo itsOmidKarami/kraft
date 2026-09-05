@@ -9,9 +9,11 @@ from support.harness import make_repo
 
 from kraft import db, steering, store
 from kraft.adapters import agent
+from kraft.adapters.subprocess import read_concerns, read_question
 from kraft.paths import RunDirs
 
 _FAKE = Path(__file__).parent / "support" / "fake_agent.py"
+_FAKE_CLAUDE = Path(__file__).resolve().parents[1] / "fixtures" / "fake-claude.sh"
 
 
 async def _seed(database, repo):
@@ -135,6 +137,251 @@ def test_agent_writes_session_summary_and_ref_lands_in_db(tmp_path, monkeypatch)
     asyncio.run(scenario())
 
 
+def test_agent_status_knob_reports_done_with_concerns(tmp_path, monkeypatch):
+    """The fake's KRAFT_FAKE_AGENT_STATUS knob round-trips through the real
+    result-file resolution path (kraft.adapters.subprocess._resolve_result_file),
+    landing on worker_sessions.status -- not asserted against the raw JSON the
+    fake wrote, which would pass even if nothing downstream read it."""
+    repo = make_repo(tmp_path)
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_STATUS", "done_with_concerns")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_CONCERNS", "tests were flaky")
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database, repo)
+            status = await agent.run_agent_task(
+                database,
+                rd,
+                session_id="s4",
+                work_item_id="w1",
+                node_id="implementation",
+                hook_point="on.implementation.start",
+                command=f"{sys.executable} {_FAKE}",
+                title="t",
+                task_instruction="t",
+                repo_path=str(repo),
+                cwd=repo,
+            )
+            assert status == "done_with_concerns"
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT status, result_path FROM worker_sessions WHERE id='s4'"
+                ).fetchone()
+            )
+            assert row["status"] == "done_with_concerns"
+            assert read_concerns(Path(row["result_path"])) == "tests were flaky"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_agent_status_knob_reports_needs_context(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_STATUS", "needs_context")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_QUESTION", "which repo?")
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database, repo)
+            status = await agent.run_agent_task(
+                database,
+                rd,
+                session_id="s5",
+                work_item_id="w1",
+                node_id="implementation",
+                hook_point="on.implementation.start",
+                command=f"{sys.executable} {_FAKE}",
+                title="t",
+                task_instruction="t",
+                repo_path=str(repo),
+                cwd=repo,
+            )
+            assert status == "needs_context"
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT status, result_path FROM worker_sessions WHERE id='s5'"
+                ).fetchone()
+            )
+            assert row["status"] == "needs_context"
+            assert read_question(Path(row["result_path"])) == "which repo?"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_agent_plan_scripts_status_per_invocation(tmp_path, monkeypatch):
+    """KRAFT_FAKE_AGENT_PLAN drives two launches to two different statuses from
+    one process's worth of env -- the mechanism Sub-project F's fake reviewer
+    established, reused rather than reinvented here."""
+    repo = make_repo(tmp_path)
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    plan = tmp_path / "agent-plan.json"
+    plan.write_text(
+        json.dumps(
+            [
+                {"status": "done_with_concerns", "concerns": "first pass"},
+                {"status": "needs_context", "question": "second pass"},
+            ]
+        )
+    )
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_PLAN", str(plan))
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database, repo)
+            first = await agent.run_agent_task(
+                database,
+                rd,
+                session_id="s6",
+                work_item_id="w1",
+                node_id="implementation",
+                hook_point="on.implementation.start",
+                command=f"{sys.executable} {_FAKE}",
+                title="t",
+                task_instruction="t",
+                repo_path=str(repo),
+                cwd=repo,
+            )
+            second = await agent.run_agent_task(
+                database,
+                rd,
+                session_id="s7",
+                work_item_id="w1",
+                node_id="implementation",
+                hook_point="on.implementation.start",
+                command=f"{sys.executable} {_FAKE}",
+                title="t",
+                task_instruction="t",
+                repo_path=str(repo),
+                cwd=repo,
+            )
+            return first, second
+        finally:
+            await database.close()
+
+    first, second = asyncio.run(scenario())
+    assert first == "done_with_concerns"
+    assert second == "needs_context"
+
+
+def test_fake_claude_status_knob_reports_done_with_concerns(tmp_path, monkeypatch):
+    """Same proof as the Python fake, against fixtures/fake-claude.sh -- the
+    dev-instance stand-in, a different shape (bash, exit 3 on failure)."""
+    repo = make_repo(tmp_path)
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "noop")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_STATUS", "done_with_concerns")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_CONCERNS", "tests were flaky")
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database, repo)
+            status = await agent.run_agent_task(
+                database,
+                rd,
+                session_id="s10",
+                work_item_id="w1",
+                node_id="implementation",
+                hook_point="on.implementation.start",
+                command=str(_FAKE_CLAUDE),
+                title="t",
+                task_instruction="t",
+                repo_path=str(repo),
+                cwd=repo,
+            )
+            assert status == "done_with_concerns"
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT status, result_path FROM worker_sessions WHERE id='s10'"
+                ).fetchone()
+            )
+            assert row["status"] == "done_with_concerns"
+            assert read_concerns(Path(row["result_path"])) == "tests were flaky"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_fake_claude_status_knob_reports_needs_context(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "noop")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_STATUS", "needs_context")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_QUESTION", "which repo?")
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database, repo)
+            status = await agent.run_agent_task(
+                database,
+                rd,
+                session_id="s11",
+                work_item_id="w1",
+                node_id="implementation",
+                hook_point="on.implementation.start",
+                command=str(_FAKE_CLAUDE),
+                title="t",
+                task_instruction="t",
+                repo_path=str(repo),
+                cwd=repo,
+            )
+            assert status == "needs_context"
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT status, result_path FROM worker_sessions WHERE id='s11'"
+                ).fetchone()
+            )
+            assert row["status"] == "needs_context"
+            assert read_question(Path(row["result_path"])) == "which repo?"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_fake_claude_status_defaults_to_done(tmp_path, monkeypatch):
+    """No knob set: today's callers (e.g. test_autostart.py) are unaffected."""
+    repo = make_repo(tmp_path)
+    monkeypatch.delenv("KRAFT_FAKE_CLAUDE_STATUS", raising=False)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database, repo)
+            status = await agent.run_agent_task(
+                database,
+                rd,
+                session_id="s12",
+                work_item_id="w1",
+                node_id="implementation",
+                hook_point="on.implementation.start",
+                command=str(_FAKE_CLAUDE),
+                title="t",
+                task_instruction="t",
+                repo_path=str(repo),
+                cwd=repo,
+            )
+            assert status == "done"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 def _capture_cmd(monkeypatch):
     """The command line `run_agent_task` would have run."""
     seen = {}
@@ -164,6 +411,24 @@ def _run(**overrides):
     )
     kwargs.update(overrides)
     return asyncio.run(agent.run_agent_task(**kwargs))
+
+
+def test_the_injected_context_names_the_statuses_and_fields():
+    """Sub-project G §1: the injected context is the only channel that tells an
+    agent the status vocabulary exists, so it has to name all four statuses and
+    both optional result-file fields, not just the ones the session-summary
+    contract already mentions (`needs_context` appeared only as
+    `session_summary_ref` before this)."""
+    ctx = agent._CTX
+    for token in ("done", "done_with_concerns", "failed", "needs_context", "concerns", "question"):
+        assert token in ctx
+
+
+def test_the_context_asks_for_one_question_per_stop():
+    """Spec §5: needs_context costs a full stop and relaunch, so an agent that
+    needs three facts must ask for all three at once rather than stopping three
+    times."""
+    assert "ask for all of them in that one question" in agent._CTX
 
 
 def test_default_profile_reproduces_todays_command_line(monkeypatch):

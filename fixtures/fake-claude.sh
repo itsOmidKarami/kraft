@@ -2,10 +2,14 @@
 # Stand-in for `claude` headless. Invoked as:
 #   fake-claude.sh -p <instr> --append-system-prompt <ctx> --output-format json
 # CWD is the worktree. Modes via KRAFT_FAKE_CLAUDE: fix (default) | noop | slow.
+# The reported status defaults to "done"; KRAFT_FAKE_CLAUDE_STATUS overrides it,
+# and KRAFT_FAKE_CLAUDE_CONCERNS / KRAFT_FAKE_CLAUDE_QUESTION set the field that
+# goes with done_with_concerns / needs_context.
 # Always writes $KRAFT_RESULT_PATH so an adopted session can resolve after a restart.
 set -eu
 
 mode="${KRAFT_FAKE_CLAUDE:-fix}"
+status="${KRAFT_FAKE_CLAUDE_STATUS:-done}"
 
 # Test seam: record the -p instruction so a test can assert what was actually asked.
 if [ -n "${KRAFT_FAKE_CLAUDE_PROMPT_LOG:-}" ]; then
@@ -68,11 +72,22 @@ fi
 
 if [ -n "${KRAFT_RESULT_PATH:-}" ]; then
   rtmp="$(mktemp)"
-  if [ -n "$summary_ref" ]; then
-    printf '{"status": "done", "session_summary_ref": "%s"}' "$summary_ref" > "$rtmp"
-  else
-    printf '{"status": "done"}' > "$rtmp"
+  # ponytail: no JSON-string escaping on these values, same as the pre-existing
+  # summary_ref line below -- test-controlled inputs only. Add escaping (or a
+  # `python -c` json.dumps helper) if a caller ever needs a quote/backslash in
+  # KRAFT_FAKE_CLAUDE_CONCERNS/_QUESTION.
+  json="{\"status\": \"$status\""
+  if [ -n "${KRAFT_FAKE_CLAUDE_CONCERNS:-}" ]; then
+    json="$json, \"concerns\": \"${KRAFT_FAKE_CLAUDE_CONCERNS}\""
   fi
+  if [ -n "${KRAFT_FAKE_CLAUDE_QUESTION:-}" ]; then
+    json="$json, \"question\": \"${KRAFT_FAKE_CLAUDE_QUESTION}\""
+  fi
+  if [ -n "$summary_ref" ]; then
+    json="$json, \"session_summary_ref\": \"${summary_ref}\""
+  fi
+  json="$json}"
+  printf '%s' "$json" > "$rtmp"
   mv "$rtmp" "$KRAFT_RESULT_PATH"
 fi
 

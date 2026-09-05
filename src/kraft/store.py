@@ -245,14 +245,16 @@ def mark_sessions_capped_out(
     conn: sqlite3.Connection, work_item_id: str, node_id: str, hook_points: list[str]
 ) -> None:
     # On breach every *measuring* task in the node becomes capped_out (02 §7.2) —
-    # including one that ended 'failed' on the final cycle. A 'done' co-task
-    # (a clean noop review) is left as-is. Scoped to the node's measuring hook
-    # points so the fix task's own session (on.implementation.start) is not
-    # mislabelled as a capped-out measurement.
+    # including one that ended 'failed' on the final cycle. A 'done' or
+    # 'done_with_concerns' co-task (a clean, or clean-with-doubts, noop review)
+    # is left as-is: the agent finished, and a cap breach elsewhere in the node
+    # is not license to overwrite its status or lose its concerns text. Scoped
+    # to the node's measuring hook points so the fix task's own session
+    # (on.implementation.start) is not mislabelled as a capped-out measurement.
     placeholders = ",".join("?" * len(hook_points))
     where = (
         f"work_item_id = ? AND node_id = ? AND hook_point IN ({placeholders}) "
-        f"AND status NOT IN ('done', 'capped_out')"
+        f"AND status NOT IN ('done', 'done_with_concerns', 'capped_out')"
     )
     args = (work_item_id, node_id, *hook_points)
     capped = conn.execute(f"SELECT id FROM worker_sessions WHERE {where}", args).fetchall()
@@ -370,8 +372,20 @@ def session_running(conn: sqlite3.Connection, session_id, pid, pid_start_time) -
 
 
 def session_exited(
-    conn: sqlite3.Connection, session_id, status, summary_ref=None, usage: Usage | None = None
+    conn: sqlite3.Connection,
+    session_id,
+    status,
+    summary_ref=None,
+    usage: Usage | None = None,
+    *,
+    concerns: str | None = None,
+    question: str | None = None,
 ) -> None:
+    """`concerns` (`done_with_concerns`) and `question` (`needs_context`) are
+    free text with no column of their own (Task 1's migration deliberately adds
+    none) — this event is the only place they are recorded, so a human-review
+    gate or a needs_context stop can read them back without a per-request file
+    read (`adapters.subprocess.read_concerns`/`read_question` off disk)."""
     now = _now()
     row = conn.execute(
         "SELECT work_item_id, started_at, created_at, status FROM worker_sessions WHERE id = ?",
@@ -393,6 +407,10 @@ def session_exited(
     # a session that waited behind a lock did not spend that time working.
     wall_ms = _span_ms(row["started_at"] or row["created_at"], now)
     payload = {"session_id": session_id, "status": status, "wall_ms": wall_ms}
+    if concerns:
+        payload["concerns"] = concerns
+    if question:
+        payload["question"] = question
     if usage is not None:
         conn.execute(
             "UPDATE worker_sessions SET model = ?, tokens_in = ?, tokens_out = ?, "

@@ -99,7 +99,12 @@ export const useStore = create<State>((set, get) => ({
         case "node_started":
           return {
             ...base,
-            ...patchItem(s, id, (w) => ({ ...w, current_node_id: p.node_id, cappedOut: null })),
+            ...patchItem(s, id, (w) => ({
+              ...w,
+              current_node_id: p.node_id,
+              cappedOut: null,
+              needs_context_question: null,
+            })),
           };
         case "node_completed":
           return {
@@ -213,6 +218,7 @@ export const useStore = create<State>((set, get) => ({
               status: "active",
               pending_steer_context: null,
               cappedOut: null,
+              needs_context_question: null,
             })),
           };
         case "work_item_needs_human":
@@ -222,6 +228,7 @@ export const useStore = create<State>((set, get) => ({
               ...w,
               status: "needs_human",
               cappedOut: (p.capped as WorkItem["cappedOut"]) ?? null,
+              needs_context_question: questionOf(p.reason as string | undefined),
             })),
           };
         case "work_item_completed":
@@ -232,6 +239,18 @@ export const useStore = create<State>((set, get) => ({
     });
   },
 }));
+
+/**
+ * The question inside a `work_item_needs_human` reason, or null for a stop of
+ * any other kind. Without this the SPA learns a needs_context stop only from
+ * the next hydrate: the live stream flips the status, no question and no answer
+ * box appear, and on a chain with no fix-loop node the control row's Steer is
+ * hard-disabled -- the exact dead end the needs_context status exists to remove.
+ */
+function questionOf(reason: string | undefined): string | null {
+  if (!reason?.startsWith("needs_context:")) return null;
+  return reason.slice("needs_context:".length).trim();
+}
 
 /** The columns an event does not carry; the next hydrate fills them in. */
 function blankSession(workItemId: string, createdAt: string): WorkerSession {

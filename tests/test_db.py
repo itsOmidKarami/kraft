@@ -212,6 +212,28 @@ def test_status_check_constraints(tmp_path):
         conn.execute("UPDATE work_items SET status = 'bogus' WHERE id = 'w1'")
 
 
+def test_worker_sessions_status_check_constraint(tmp_path):
+    """Nothing in test_status_check_constraints touches worker_sessions, so its
+    CHECK could be dropped entirely and the suite would not notice."""
+    conn = db._connect(tmp_path / "orchestrator.db")
+    db.migrate(conn)
+    conn.execute(
+        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+        "status, created_at, updated_at) VALUES ('w1', 't', '/r', 'quick-task', '{}', "
+        "'active', 'now', 'now')"
+    )
+    conn.execute(
+        "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, log_path, "
+        "result_path, status, created_at) VALUES ('s1', 'w1', 'verify', 'on.test.run', "
+        "'/l', '/r', 'pending', 'now')"
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("UPDATE worker_sessions SET status = 'bogus' WHERE id = 's1'")
+    # and the two new statuses this task adds are accepted
+    conn.execute("UPDATE worker_sessions SET status = 'done_with_concerns' WHERE id = 's1'")
+    conn.execute("UPDATE worker_sessions SET status = 'needs_context' WHERE id = 's1'")
+
+
 def test_write_commits_on_success(tmp_path):
     async def scenario():
         database = await db.Database.open(tmp_path / "orchestrator.db")
@@ -504,6 +526,76 @@ def test_migrate_v8_to_v9_adds_base_ref(tmp_path):
     assert row["id"] == "w1"
     assert row["title"] == "t"
     assert row["status"] == "active"
+
+
+def test_migrate_v9_to_v10_widens_worker_sessions_status(tmp_path):
+    """v9's worker_sessions CHECK has no 'done_with_concerns'/'needs_context'; SQLite
+    cannot alter a constraint, so the table is rebuilt. Every column has to survive
+    the rebuild, and the status index has to come back too."""
+    path = tmp_path / "orchestrator.db"
+    conn = db._connect(path)
+    _build_old_db(
+        conn,
+        9,
+        replace=(
+            (
+                "status         TEXT NOT NULL CHECK (status IN",
+                "  status         TEXT NOT NULL CHECK (status IN "
+                "('pending', 'running', 'done', 'failed', 'capped_out', 'paused', 'unknown')),",
+            ),
+            ("'unknown',", ""),
+            ("done_with_concerns", ""),
+        ),
+    )
+    conn.execute(
+        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
+        "'active','now','now')"
+    )
+    conn.execute(
+        "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, pid, "
+        "pid_start_time, log_path, result_path, status, attempt, session_summary_ref, "
+        "created_at, started_at, round, model, tokens_in, tokens_out, cost_usd, "
+        "wall_ms, exited_at) VALUES ('s1', 'w1', 'verify', 'on.test.run', 123, 456.7, "
+        "'/l', '/r', 'unknown', 2, '.engineering/sessions/s1.md', 'now', 'started', "
+        "3, 'claude', 10, 20, 0.5, 1000, 'exited')"
+    )
+    conn.commit()
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("UPDATE worker_sessions SET status = 'done_with_concerns' WHERE id = 's1'")
+    conn.close()
+
+    conn2 = db._connect(path)
+    db.migrate(conn2)
+    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+
+    row = conn2.execute("SELECT * FROM worker_sessions WHERE id = 's1'").fetchone()
+    assert row["work_item_id"] == "w1"
+    assert row["node_id"] == "verify"
+    assert row["hook_point"] == "on.test.run"
+    assert row["pid"] == 123
+    assert row["pid_start_time"] == 456.7
+    assert row["log_path"] == "/l"
+    assert row["result_path"] == "/r"
+    assert row["status"] == "unknown"
+    assert row["attempt"] == 2
+    assert row["session_summary_ref"] == ".engineering/sessions/s1.md"
+    assert row["created_at"] == "now"
+    assert row["started_at"] == "started"
+    assert row["round"] == 3
+    assert row["model"] == "claude"
+    assert row["tokens_in"] == 10
+    assert row["tokens_out"] == 20
+    assert row["cost_usd"] == 0.5
+    assert row["wall_ms"] == 1000
+    assert row["exited_at"] == "exited"
+
+    # both new statuses are now accepted by the rebuilt CHECK
+    conn2.execute("UPDATE worker_sessions SET status = 'done_with_concerns' WHERE id = 's1'")
+    conn2.execute("UPDATE worker_sessions SET status = 'needs_context' WHERE id = 's1'")
+
+    index_names = {r[0] for r in conn2.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+    assert "idx_worker_sessions_status" in index_names
 
 
 def test_migration_adds_base_ref(tmp_path):

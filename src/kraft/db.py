@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -60,7 +60,8 @@ CREATE TABLE worker_sessions (
   log_path       TEXT NOT NULL,
   result_path    TEXT NOT NULL,
   status         TEXT NOT NULL CHECK (status IN
-                   ('pending', 'running', 'done', 'failed', 'capped_out', 'paused', 'unknown')),
+                   ('pending', 'running', 'done', 'failed', 'capped_out', 'paused', 'unknown',
+                    'done_with_concerns', 'needs_context')),
   attempt        INTEGER NOT NULL DEFAULT 1,
   session_summary_ref TEXT,
   created_at     TEXT NOT NULL,
@@ -161,6 +162,45 @@ SELECT id, bead_id, title, repo, chain_template, chain_definition, current_node_
     ],
     7: ["ALTER TABLE work_items ADD COLUMN attachments TEXT"],
     8: ["ALTER TABLE work_items ADD COLUMN base_ref TEXT"],
+    # 'done_with_concerns' and 'needs_context' join the status CHECK, and SQLite
+    # cannot alter a constraint — so worker_sessions is rebuilt the same 12-step way.
+    9: [
+        """CREATE TABLE worker_sessions_new (
+  id             TEXT PRIMARY KEY,
+  work_item_id   TEXT NOT NULL REFERENCES work_items(id),
+  node_id        TEXT NOT NULL,
+  hook_point     TEXT NOT NULL,
+  pid            INTEGER,
+  pid_start_time REAL,
+  log_path       TEXT NOT NULL,
+  result_path    TEXT NOT NULL,
+  status         TEXT NOT NULL CHECK (status IN
+                   ('pending', 'running', 'done', 'failed', 'capped_out', 'paused', 'unknown',
+                    'done_with_concerns', 'needs_context')),
+  attempt        INTEGER NOT NULL DEFAULT 1,
+  session_summary_ref TEXT,
+  created_at     TEXT NOT NULL,
+  started_at     TEXT,
+  round          INTEGER NOT NULL DEFAULT 0,
+  model          TEXT,
+  tokens_in      INTEGER,
+  tokens_out     INTEGER,
+  cost_usd       REAL,
+  wall_ms        INTEGER,
+  exited_at      TEXT
+)""",
+        """INSERT INTO worker_sessions_new (id, work_item_id, node_id, hook_point, pid,
+  pid_start_time, log_path, result_path, status, attempt, session_summary_ref,
+  created_at, started_at, round, model, tokens_in, tokens_out, cost_usd, wall_ms,
+  exited_at)
+SELECT id, work_item_id, node_id, hook_point, pid, pid_start_time, log_path,
+       result_path, status, attempt, session_summary_ref, created_at, started_at,
+       round, model, tokens_in, tokens_out, cost_usd, wall_ms, exited_at
+FROM worker_sessions""",
+        "DROP TABLE worker_sessions",
+        "ALTER TABLE worker_sessions_new RENAME TO worker_sessions",
+        "CREATE INDEX idx_worker_sessions_status ON worker_sessions(status)",
+    ],
 }
 
 

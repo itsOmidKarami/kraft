@@ -10,12 +10,14 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Check,
+  ChatText,
   Circle,
   CircleNotch,
   DotsThree,
   Pause,
   Prohibit,
   Question,
+  WarningCircle,
   XCircle,
 } from "@phosphor-icons/react";
 import { statusWord } from "../format";
@@ -64,6 +66,8 @@ export function RowState({ status, children }: { status: SessionStatus; children
 const GLYPHS: Record<SessionStatus, typeof Check> = {
   running: CircleNotch,
   done: Check,
+  done_with_concerns: WarningCircle,
+  needs_context: ChatText,
   failed: XCircle,
   capped_out: Prohibit,
   paused: Pause,
