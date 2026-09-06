@@ -13,13 +13,15 @@ import sys
 import time
 from pathlib import Path
 
+import httpx
 import pytest
 import yaml
 from fastapi.testclient import TestClient
 from support.harness import fake_templates_dir, isolated_bd, make_repo
 
-from kraft import auth, config, events, store
+from kraft import auth, config, events, steering, store
 from kraft import db as kdb
+from kraft import intake as intake_mod
 from kraft.paths import RunDirs
 
 _FAKE_AGENT = Path(__file__).resolve().parents[0] / "support" / "fake_agent.py"
@@ -924,3 +926,189 @@ def test_get_repos_with_a_deleted_steering_file_does_not_lock_out_the_screen(tmp
         assert patched.status_code == 200
         assert patched.json()["steering"] == []
         assert client.get("/repos").json()["repos"][0]["steering"] == []
+
+
+def test_get_intake_returns_the_defaults_when_no_file_was_written(client):
+    body = client.get("/intake").json()
+    assert body["enabled"] is False
+    assert body["interval_s"] == config.INTAKE_DEFAULT["interval_s"]
+
+
+def test_put_intake_persists_and_applies_without_a_restart(client, templates_dir):
+    """The poller task is replaced, not just the dict it reads: `interval_s` is
+    read once at task start, so a live poller would keep the old interval."""
+    app = client.app
+    assert app.state.intake_task is None
+
+    saved = client.put(
+        "/intake",
+        json={
+            "enabled": True,
+            "interval_s": 60,
+            "max_concurrent": 2,
+            "priority_ceiling": 3,
+            "repos": ["/repo-a"],
+        },
+    )
+    assert saved.status_code == 200
+    assert app.state.intake["interval_s"] == 60
+    assert app.state.intake_task is not None
+    assert yaml.safe_load((templates_dir / "intake.yaml").read_text())["max_concurrent"] == 2
+    assert client.get("/intake").json()["repos"] == ["/repo-a"]
+
+    # and turning it back off stops the poller rather than leaving a live timer
+    client.put(
+        "/intake",
+        json={
+            "enabled": False,
+            "interval_s": 60,
+            "max_concurrent": 2,
+            "priority_ceiling": 3,
+            "repos": [],
+        },
+    )
+    assert app.state.intake_task is None
+
+
+@pytest.mark.parametrize(
+    "over",
+    [
+        {"interval_s": 5},  # below the floor the poller would clamp to anyway
+        {"max_concurrent": 0},
+        {"priority_ceiling": 5},
+        {"priority_ceiling": -1},
+    ],
+)
+def test_put_intake_rejects_a_setting_the_poller_would_not_honour(client, over):
+    body = {
+        "enabled": True,
+        "interval_s": 60,
+        "max_concurrent": 1,
+        "priority_ceiling": 2,
+        "repos": [],
+        **over,
+    }
+    assert client.put("/intake", json=body).status_code == 422
+
+
+def _steering_dir(templates_dir):
+    d = templates_dir / "steering"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def test_steering_list_reports_sizes_against_the_injection_budget(client, templates_dir):
+    (_steering_dir(templates_dir) / "house-style.md").write_text("prefer stdlib\n")
+    body = client.get("/steering").json()
+    assert body["max_bytes"] == steering.MAX_BYTES
+    assert body["files"] == [{"name": "house-style", "bytes": len(b"prefer stdlib\n")}]
+
+
+def test_steering_round_trips_a_body(client, templates_dir):
+    assert client.put("/steering/house-style", json={"body": "prefer stdlib\n"}).status_code == 200
+    assert client.get("/steering/house-style").json()["body"] == "prefer stdlib\n"
+    assert (templates_dir / "steering" / "house-style.md").read_text() == "prefer stdlib\n"
+
+
+def test_steering_rejects_a_name_that_is_not_a_bare_file_name(client):
+    """Kraft never reads a steering file from outside its own templates
+    directory, so the editor cannot be the way one gets written there."""
+    # a backslash and a leading dot both survive URL routing as one path
+    # segment, unlike "../", which the router normalises away before we see it
+    assert client.put("/steering/..\\escape", json={"body": "x"}).status_code == 400
+    assert client.put("/steering/.hidden", json={"body": "x"}).status_code == 400
+    assert client.get("/steering/.hidden").status_code == 400
+
+
+def test_steering_get_404s_on_a_file_that_is_not_there(client):
+    assert client.get("/steering/nope").status_code == 404
+
+
+def test_a_body_over_the_injection_budget_is_refused_and_rolled_back(client, templates_dir):
+    """Names resolve at config-load time, so an oversized body breaks a launch
+    nowhere near this screen — the save has to fail here instead."""
+    (_steering_dir(templates_dir) / "big.md").write_text("small\n")
+    registry = yaml.safe_load((templates_dir / "registry.yaml").read_text())
+    registry["hooks"]["on.implementation.start"]["steering"] = ["big"]
+    (templates_dir / "registry.yaml").write_text(yaml.safe_dump(registry))
+    client.put("/registry", json={"hooks": registry["hooks"]})
+
+    resp = client.put("/steering/big", json={"body": "x" * (steering.MAX_BYTES + 1)})
+    assert resp.status_code == 422
+    # the file on disk is the one that still loads, not the one that was refused
+    assert (templates_dir / "steering" / "big.md").read_text() == "small\n"
+
+
+def test_deleting_a_steering_file_a_hook_still_names_is_refused(client, templates_dir):
+    (_steering_dir(templates_dir) / "house-style.md").write_text("prefer stdlib\n")
+    registry = yaml.safe_load((templates_dir / "registry.yaml").read_text())
+    registry["hooks"]["on.implementation.start"]["steering"] = ["house-style"]
+    (templates_dir / "registry.yaml").write_text(yaml.safe_dump(registry))
+    client.put("/registry", json={"hooks": registry["hooks"]})
+
+    assert client.delete("/steering/house-style").status_code == 422
+    assert (templates_dir / "steering" / "house-style.md").is_file()
+
+
+def test_deleting_a_steering_file_nothing_names_succeeds(client, templates_dir):
+    (_steering_dir(templates_dir) / "orphan.md").write_text("unused\n")
+    assert client.delete("/steering/orphan").status_code == 200
+    assert not (templates_dir / "steering" / "orphan.md").exists()
+    assert client.get("/steering").json()["files"] == []
+
+
+def test_two_overlapping_intake_saves_leave_exactly_one_live_poller(client):
+    """The swap awaits the old task's cancellation, so without a lock both
+    savers read the same old task, both start a poller, and only the last
+    assignment is reachable. The other ticks on past shutdown -- lifespan
+    cancels `app.state.intake_task` and nothing else -- and two pollers reading
+    `_known_beads` before either inserts can double-start the same bead.
+    """
+    app = client.app
+    body = {
+        "enabled": True,
+        "interval_s": 60,
+        "max_concurrent": 1,
+        "priority_ceiling": 2,
+        "repos": [],
+    }
+    started: list[asyncio.Task] = []
+
+    async def never_returning_poller(_app):
+        started.append(asyncio.current_task())
+        # cancellation is the only way out, which is exactly what the swap owes
+        # every poller it retires
+        await asyncio.Event().wait()
+
+    async def scenario():
+        app.state.intake = dict(config.INTAKE_DEFAULT)
+        app.state.intake_task = None
+        app.state.intake_lock = asyncio.Lock()
+        monkey = intake_mod.poller
+        intake_mod.poller = never_returning_poller
+        try:
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://kraft") as ac:
+                # A poller has to already be live, or neither save reaches the
+                # `await` that opens the window and the race cannot show.
+                assert (await ac.put("/intake", json=body)).status_code == 200
+                assert app.state.intake_task is not None
+                a, b = await asyncio.gather(
+                    ac.put("/intake", json=body), ac.put("/intake", json=body)
+                )
+            assert (a.status_code, b.status_code) == (200, 200)
+            # let any cancellation delivered above actually land
+            await asyncio.sleep(0)
+            live = app.state.intake_task
+            orphans = [t for t in started if t is not live and not t.done()]
+            assert orphans == [], f"{len(orphans)} poller(s) left running unreachably"
+            assert live is not None and not live.done()
+            live.cancel()
+            await asyncio.gather(live, return_exceptions=True)
+        finally:
+            intake_mod.poller = monkey
+            # These tasks belong to this loop, not the fixture's; leaving one on
+            # app.state would have lifespan shutdown gather it from the wrong one.
+            app.state.intake_task = None
+
+    asyncio.run(scenario())

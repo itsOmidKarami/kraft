@@ -9,10 +9,12 @@ import type {
   Access,
   AuthSession,
   HookBinding,
+  Intake,
   Notify,
   Policy,
   Repo,
   RepoProbe,
+  SteeringList,
   TemplateSummary,
   TemplateValidation,
 } from "../types";
@@ -27,7 +29,9 @@ const PAGES = [
   { to: "repos", label: "Repos" },
   { to: "templates", label: "Chain templates" },
   { to: "plugins", label: "Plugins" },
+  { to: "steering", label: "Steering" },
   { to: "policy", label: "Policy" },
+  { to: "intake", label: "Auto-intake" },
   { to: "notify", label: "Notifications" },
   { to: "access", label: "Access" },
 ];
@@ -345,7 +349,7 @@ function TemplatesPage() {
     setMessage(null);
     try {
       await api.putTemplate(current.id, parsed);
-      reload();
+      await reload();
       setMessage("saved");
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e));
@@ -451,7 +455,7 @@ function PluginsPage() {
     try {
       const { invalid_templates } = await api.putRegistry(draft);
       setDraft(null);
-      reload();
+      await reload();
       const broken = Object.keys(invalid_templates);
       setMessage(broken.length ? `saved · now unresolvable: ${broken.join(", ")}` : "saved");
     } catch (e) {
@@ -504,6 +508,300 @@ function PluginsPage() {
   );
 }
 
+/* ── 5d-bis auto-intake ───────────────────────────────────────────────────── */
+
+function IntakePage() {
+  const { value, error, reload } = useResource(() => api.getIntake());
+  const [draft, setDraft] = useState<Intake | null>(null);
+  const [repos, setRepos] = useState<Repo[]>([]);
+  const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const intake = draft ?? value;
+  const dirty = draft !== null;
+
+  useEffect(() => {
+    api
+      .getRepos()
+      .then((r) => setRepos(r.repos))
+      .catch(() => setRepos([]));
+  }, []);
+
+  const set = <K extends keyof Intake>(field: K, v: Intake[K]) => {
+    if (!intake) return;
+    setDraft({ ...intake, [field]: v });
+  };
+
+  const save = async () => {
+    if (!draft) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      await api.putIntake(draft);
+      setDraft(null);
+      await reload();
+      setMessage("saved");
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <PageHead
+        title="Auto-intake"
+        note="polls the beads hub for ready work and starts it unattended — only chains with a gate, and never past the daily budget"
+      />
+      {error && <p className="form-error">{error}</p>}
+      {intake && (
+        <>
+          <section className="settings-section">
+            <h6>Poller</h6>
+            <div className="save-row">
+              <button
+                className="switch"
+                role="switch"
+                aria-label="Auto-intake"
+                aria-checked={intake.enabled}
+                disabled={busy}
+                onClick={() => set("enabled", !intake.enabled)}
+              >
+                <span className="switch-knob" />
+              </button>
+              <span className="save-hint">
+                {intake.enabled
+                  ? "on — Kraft picks up ready beads on its own"
+                  : "off — work starts only when you start it"}
+              </span>
+            </div>
+            <div className="cap-row" data-intake="interval_s">
+              <span className="hook-name">Poll every (s)</span>
+              <input
+                className="input"
+                type="number"
+                min={30}
+                aria-label="poll interval"
+                value={intake.interval_s}
+                onChange={(e) => set("interval_s", Number(e.target.value))}
+              />
+              <span className="row-sub">30s floor</span>
+            </div>
+            <div className="cap-row" data-intake="max_concurrent">
+              <span className="hook-name">Max concurrent items</span>
+              <input
+                className="input"
+                type="number"
+                min={1}
+                aria-label="max concurrent"
+                value={intake.max_concurrent}
+                onChange={(e) => set("max_concurrent", Number(e.target.value))}
+              />
+              <span className="row-sub">counts every active item, not only auto-started ones</span>
+            </div>
+            <div className="cap-row" data-intake="priority_ceiling">
+              <span className="hook-name">Priority ceiling</span>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                max={4}
+                aria-label="priority ceiling"
+                value={intake.priority_ceiling}
+                onChange={(e) => set("priority_ceiling", Number(e.target.value))}
+              />
+              <span className="row-sub">
+                P{intake.priority_ceiling} and below — the highest-priority work is what a human
+                should be looking at
+              </span>
+            </div>
+          </section>
+
+          <section className="settings-section">
+            <h6>Repos</h6>
+            {repos.length === 0 && <p className="empty">no repos configured</p>}
+            {repos.map((r) => (
+              <label key={r.path} className="radio">
+                <input
+                  type="checkbox"
+                  checked={intake.repos.includes(r.path)}
+                  onChange={(e) =>
+                    set(
+                      "repos",
+                      e.target.checked
+                        ? [...intake.repos, r.path]
+                        : intake.repos.filter((p) => p !== r.path),
+                    )
+                  }
+                />
+                <span className="dot" />
+                <span>
+                  {r.name} <span className="row-sub">· {r.path}</span>
+                </span>
+              </label>
+            ))}
+            <p className="settings-foot">
+              An empty list means every enabled repo. An epic is never auto-started: it is a
+              container for work, not work.
+            </p>
+          </section>
+
+          <SaveRow
+            onSave={save}
+            onDiscard={() => setDraft(null)}
+            busy={busy}
+            dirty={dirty}
+            message={message}
+            hint="writes intake.yaml · the poller restarts on save, so a change applies without a reboot"
+          />
+        </>
+      )}
+    </>
+  );
+}
+
+/* ── 5c-bis steering ──────────────────────────────────────────────────────── */
+
+function SteeringPage() {
+  const { value, error, reload } = useResource(() => api.getSteering());
+  const [selected, setSelected] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [loaded, setLoaded] = useState("");
+  const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const list: SteeringList = value ?? { files: [], max_bytes: 0 };
+
+  // The body is fetched per file rather than shipped with the list: the list is
+  // a picker, and every body at once is the injection budget over the wire on
+  // every page load.
+  useEffect(() => {
+    if (selected === null) return;
+    api
+      .getSteeringFile(selected)
+      .then((f) => {
+        setDraft(f.body);
+        setLoaded(f.body);
+      })
+      .catch(() => {
+        setDraft("");
+        setLoaded("");
+      });
+  }, [selected]);
+
+  const create = () => {
+    const name = window.prompt("New steering file (a bare name, no extension)");
+    if (!name) return;
+    setSelected(name);
+    setDraft("");
+    setLoaded("");
+    setMessage(null);
+  };
+
+  const save = async () => {
+    if (selected === null) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      await api.putSteeringFile(selected, draft);
+      setLoaded(draft);
+      await reload();
+      setMessage("saved");
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    if (selected === null) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      await api.deleteSteeringFile(selected);
+      setSelected(null);
+      await reload();
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const used = list.files.reduce((n, f) => n + (f.bytes ?? 0), 0);
+
+  return (
+    <>
+      <PageHead
+        title="Steering"
+        note="Kraft-owned standards injected through the system prompt — never CLAUDE.md, never a file inside the target repo"
+        action={
+          <button className="btn btn-secondary" onClick={create}>
+            <Plus size={14} />
+            New
+          </button>
+        }
+      />
+      {error && <p className="form-error">{error}</p>}
+      <div className="template-editor">
+        <div className="template-list">
+          <SectionLabel>Files</SectionLabel>
+          {list.files.map((f) => (
+            <button
+              key={f.name}
+              className="facet-opt"
+              aria-pressed={f.name === selected}
+              onClick={() => setSelected(f.name)}
+            >
+              {f.name}
+              <span className="facet-count">
+                {f.bytes === null ? "unreadable" : `${f.bytes} B`}
+              </span>
+            </button>
+          ))}
+          {list.files.length === 0 && <p className="empty">no steering files yet</p>}
+        </div>
+        <div className="template-draft">
+          {selected === null ? (
+            <p className="empty">pick a file, or make one</p>
+          ) : (
+            <>
+              <label className="field-hint" htmlFor="steering-body">
+                {selected}.md · a hook or repo names this file, and the assembled block is
+                re-checked against the budget on save
+              </label>
+              <textarea
+                id="steering-body"
+                aria-label="steering body"
+                className="input mono template-yaml"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+              />
+              <div className="save-row">
+                <button
+                  className="btn btn-primary"
+                  disabled={busy || draft === loaded}
+                  onClick={save}
+                >
+                  <Check size={14} />
+                  Save
+                </button>
+                <button className="btn btn-ghost" disabled={busy} onClick={remove}>
+                  Delete
+                </button>
+                <span className="save-hint">
+                  {message ??
+                    `${used} of ${list.max_bytes} B used across every steering file`}
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 /* ── 5d policy ────────────────────────────────────────────────────────────── */
 
 function PolicyPage() {
@@ -544,7 +842,7 @@ function PolicyPage() {
     try {
       await api.putPolicy(draft);
       setDraft(null);
-      reload();
+      await reload();
       setMessage("saved");
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e));
@@ -830,12 +1128,16 @@ function AccessPage() {
   const access: Access | null = value;
 
   const loadSessions = useCallback(() => {
-    api
+    return api
       .getAuthSessions()
       .then((r) => setSessions(r.sessions))
       .catch(() => setSessions([]));
   }, []);
-  useEffect(loadSessions, [loadSessions]);
+  // wrapped for the same reason `useResource` wraps `reload`: `useEffect` reads a
+  // returned promise as a cleanup function.
+  useEffect(() => {
+    void loadSessions();
+  }, [loadSessions]);
 
   const put = async (body: Parameters<typeof api.putAccess>[0]) => {
     setBusy(true);
@@ -843,8 +1145,9 @@ function AccessPage() {
     try {
       await api.putAccess(body);
       setPassword("");
-      reload();
-      loadSessions();
+      // `busy` must mean "settled": clearing it before the re-fetch lands
+      // re-enables the controls while the page still renders pre-save state.
+      await Promise.all([reload(), loadSessions()]);
       setMessage("saved");
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e));
@@ -1007,7 +1310,9 @@ export function Settings() {
           <Route path="repos" element={<ReposPage />} />
           <Route path="templates" element={<TemplatesPage />} />
           <Route path="plugins" element={<PluginsPage />} />
+          <Route path="steering" element={<SteeringPage />} />
           <Route path="policy" element={<PolicyPage />} />
+          <Route path="intake" element={<IntakePage />} />
           <Route path="notify" element={<NotifyPage />} />
           <Route path="access" element={<AccessPage />} />
         </Routes>

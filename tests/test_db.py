@@ -123,6 +123,8 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         skip_stmts = (*skip_stmts, "auth_sessions")
     if version < 7:
         drop_lines = (*drop_lines, "submodules", "root_merge_policy", "-- cross-repo")
+    if version < 11:
+        drop_lines = (*drop_lines, "bead_cwd")
     schema = "\n".join(
         rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
     )
@@ -491,9 +493,10 @@ def test_migration_7_adds_attachments_column(tmp_path):
     conn = db._connect(tmp_path / "s.db")
     db.migrate(conn)
     conn.execute("PRAGMA user_version = 7")
-    # Both columns the 7 -> 9 steps add, or migrate() re-adds one that exists.
+    # Every column the 7 -> 11 steps add, or migrate() re-adds one that exists.
     conn.execute("ALTER TABLE work_items DROP COLUMN attachments")
     conn.execute("ALTER TABLE work_items DROP COLUMN base_ref")
+    conn.execute("ALTER TABLE work_items DROP COLUMN bead_cwd")
     db.migrate(conn)
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(work_items)")}
     assert "attachments" in cols
@@ -607,3 +610,27 @@ def test_migration_adds_base_ref(tmp_path):
     assert "base_ref" in cols
     (version,) = conn.execute("PRAGMA user_version").fetchone()
     assert version == db.SCHEMA_VERSION
+
+
+def test_migrate_v10_to_v11_adds_bead_cwd(tmp_path):
+    """An auto-intaken bead lives in its own repo's `.beads`, not the
+    instance-wide `KRAFT_BD_CWD`, so closing it needs a per-item workspace
+    (Kraft-8mu.5.2). Pre-existing rows survive with NULL, meaning KRAFT_BD_CWD."""
+    path = tmp_path / "orchestrator.db"
+    conn = db._connect(path)
+    _build_old_db(conn, 10)
+    conn.execute(
+        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
+        "'active','now','now')"
+    )
+    conn.commit()
+    conn.close()
+
+    conn2 = db._connect(path)
+    db.migrate(conn2)
+    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    cols = {r["name"] for r in conn2.execute("PRAGMA table_info(work_items)")}
+    assert "bead_cwd" in cols
+    row = conn2.execute("SELECT id, bead_cwd FROM work_items WHERE id='w1'").fetchone()
+    assert row["bead_cwd"] is None
