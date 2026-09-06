@@ -70,9 +70,13 @@ def _bd_template() -> Path:
     return _bd_template_dir
 
 
-def isolated_bd(tmp_path: Path) -> Path:
-    """A throwaway git repo with its own beads workspace. Return the repo path."""
-    repo = tmp_path / "tracker"
+def isolated_bd(tmp_path: Path, name: str = "tracker") -> Path:
+    """A throwaway git repo with its own beads workspace. Return the repo path.
+
+    `name` distinguishes a second workspace in the same `tmp_path` — an
+    auto-intaken bead lives in its own repo's `.beads`, not the instance-wide
+    tracker (Kraft-8mu.5.2)."""
+    repo = tmp_path / name
     shutil.copytree(_bd_template(), repo)
     return repo
 

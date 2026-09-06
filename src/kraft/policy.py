@@ -20,6 +20,10 @@ DEFAULT_LOOP_SEVERITIES = frozenset({"critical", "important"})
 class Cap:
     attempts: int
     wall_clock_s: int
+    #: Fix cycles past this one launch on the hook's `escalate_model` instead of
+    #: its `model` (sub-project G spec 6). `None` is "never escalate", which is
+    #: the behaviour of every policy.yaml written before this existed.
+    escalate_after: int | None = None
 
 
 @dataclass(frozen=True)
@@ -59,7 +63,14 @@ def _cap(name: str, raw: object) -> Cap:
         raise PolicyError(f"{name}: 'attempts' must be a positive int")
     if not isinstance(wall_clock_s, int) or isinstance(wall_clock_s, bool) or wall_clock_s < 1:
         raise PolicyError(f"{name}: 'wall_clock_s' must be a positive int")
-    return Cap(attempts=attempts, wall_clock_s=wall_clock_s)
+    escalate_after = raw.get("escalate_after")
+    if escalate_after is not None and (
+        not isinstance(escalate_after, int)
+        or isinstance(escalate_after, bool)
+        or escalate_after < 1
+    ):
+        raise PolicyError(f"{name}: 'escalate_after' must be a positive int, or absent")
+    return Cap(attempts=attempts, wall_clock_s=wall_clock_s, escalate_after=escalate_after)
 
 
 def _usd(name: str, raw: object) -> float | None:

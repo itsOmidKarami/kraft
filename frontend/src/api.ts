@@ -5,9 +5,11 @@ import type {
   Bead,
   DocumentDetail,
   Health,
+  Intake,
   KraftEvent,
   LogLine,
   SessionStatus,
+  SteeringList,
   HookBinding,
   Notify,
   Policy,
@@ -177,6 +179,20 @@ export const putRegistry = (hooks: Record<string, HookBinding>) =>
 
 export const getPolicy = () => req<Policy>("/policy");
 export const putPolicy = (policy: Policy) => req<Policy>("/policy", json("PUT", policy));
+
+export const getSteering = () => req<SteeringList>("/steering");
+export const getSteeringFile = (name: string) =>
+  req<{ name: string; body: string }>(`/steering/${encodeURIComponent(name)}`);
+export const putSteeringFile = (name: string, body: string) =>
+  req<{ name: string; body: string }>(
+    `/steering/${encodeURIComponent(name)}`,
+    json("PUT", { body }),
+  );
+export const deleteSteeringFile = (name: string) =>
+  req<{ deleted: string }>(`/steering/${encodeURIComponent(name)}`, { method: "DELETE" });
+
+export const getIntake = () => req<Intake>("/intake");
+export const putIntake = (intake: Intake) => req<Intake>("/intake", json("PUT", intake));
 
 export const getAccess = () => req<Access>("/access");
 export const putAccess = (body: {

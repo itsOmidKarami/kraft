@@ -526,3 +526,27 @@ def test_a_repos_filter_that_matches_nothing_says_so(tmp_path, caplog):
         assert "matched no configured repo" in caplog.text
 
     _run(lambda: _stub(tmp_path, repos=["~/code/nowhere"]), body)
+
+
+def test_an_auto_intaken_bead_records_the_repo_as_its_bd_workspace(tmp_path, monkeypatch):
+    """The bead is adopted from the repo's own `.beads`, never filed into the
+    instance-wide `KRAFT_BD_CWD`, so closing it has to happen there (Kraft-8mu.5.2).
+
+    Asserted on the poller's own path: passing `bead_cwd` straight to
+    `executor.intake` proves the plumbing but not that this caller uses it.
+    """
+    monkeypatch.setattr(
+        intake_mod.beads, "ready", _ready([{"id": "B-1", "title": "pick me up", "priority": 3}])
+    )
+
+    async def body(app):
+        started = await intake_mod.tick(app)
+        assert len(started) == 1
+        row = app.state.db.read(
+            lambda c: c.execute(
+                "SELECT repo, bead_cwd FROM work_items WHERE id = ?", (started[0],)
+            ).fetchone()
+        )
+        assert row["bead_cwd"] == row["repo"]
+
+    _run(lambda: _stub(tmp_path), body)

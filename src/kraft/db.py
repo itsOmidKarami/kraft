@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -36,6 +36,10 @@ CREATE TABLE work_items (
   attachments      TEXT,
   -- the commit a work item's diff is measured against (Kraft-8mu.2)
   base_ref         TEXT,
+  -- the bd workspace this item's bead lives in, when it is not the instance-wide
+  -- KRAFT_BD_CWD: an auto-intaken bead is adopted from its own repo's .beads
+  -- and can only be closed there (Kraft-8mu.5.2). NULL means KRAFT_BD_CWD.
+  bead_cwd         TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
@@ -162,6 +166,7 @@ SELECT id, bead_id, title, repo, chain_template, chain_definition, current_node_
     ],
     7: ["ALTER TABLE work_items ADD COLUMN attachments TEXT"],
     8: ["ALTER TABLE work_items ADD COLUMN base_ref TEXT"],
+    10: ["ALTER TABLE work_items ADD COLUMN bead_cwd TEXT"],
     # 'done_with_concerns' and 'needs_context' join the status CHECK, and SQLite
     # cannot alter a constraint — so worker_sessions is rebuilt the same 12-step way.
     9: [
