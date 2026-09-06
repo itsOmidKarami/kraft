@@ -656,3 +656,25 @@ def test_combined_repo_and_hook_steering_over_budget_raises(tmp_path):
             {"steering": ["repo-note"]},
             tmp_path,
         )
+
+
+def test_escalate_picks_the_escalate_model():
+    """Precedence lives in resolve_invocation and only there (spec §6): a fix
+    cycle past `escalate_after` asks for the bump, it does not name a model."""
+    binding = {"command": "c", "model": "sonnet", "escalate_model": "opus"}
+    assert agent.resolve_invocation(binding, {}, None).model == "sonnet"
+    assert agent.resolve_invocation(binding, {}, None, escalate=True).model == "opus"
+
+
+def test_escalate_falls_back_to_the_ordinary_model_when_none_is_configured():
+    binding = {"command": "c", "model": "sonnet"}
+    assert agent.resolve_invocation(binding, {}, None, escalate=True).model == "sonnet"
+
+
+def test_escalate_falls_back_to_the_repo_default_when_the_hook_names_neither():
+    assert (
+        agent.resolve_invocation(
+            {"command": "c"}, {"default_model": "haiku"}, None, escalate=True
+        ).model
+        == "haiku"
+    )

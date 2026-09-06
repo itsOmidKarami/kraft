@@ -12,6 +12,7 @@ from kraft import builtins as _builtins
 from kraft import events, store
 from kraft import findings as _findings
 from kraft import policy as _policy
+from kraft import review as _review
 from kraft.adapters import agent as _agent
 from kraft.adapters import beads
 from kraft.adapters import subprocess as _subprocess
@@ -115,6 +116,7 @@ async def intake(
     attachments: list[dict] | None = None,
     status: str = "active",
     bead_id: str | None = None,
+    bead_cwd: str | None = None,
 ) -> str:
     work_item_id = uuid.uuid4().hex
     # An auto-intaken bead already exists; filing a second one for the same work
@@ -131,6 +133,7 @@ async def intake(
             repo=repo,
             chain_template=template.id,
             chain_definition=chain_definition,
+            bead_cwd=bead_cwd,
             submodules=submodules,
             root_merge_policy=root_merge_policy,
             attachments=attachments,
@@ -204,6 +207,37 @@ async def _stop_for_budget(db, work_item_id: str, node: dict, budget: _policy.Bu
     return "needs_human"
 
 
+#: The hooks whose job is to judge a change rather than make one. They are the
+#: only ones handed a review package: everything else is working *in* the diff.
+REVIEW_HOOKS = frozenset({"on.review.local.run", "on.review.mr.run"})
+
+
+def _review_package(
+    db, run_dirs, work_item_id: str, worktree, task_hook: str, session_id: str
+) -> str | None:
+    """The change under review, written out for a reviewer, or None.
+
+    None on every non-review hook, on an item with no `base_ref` (pre-migration
+    items and any template with no env_setup node), and on a git failure -- a
+    review with no diff is worse than one whose prompt never promised a file.
+
+    `base_ref` is read fresh rather than off the `work_items` row `run` opened
+    with: `env_setup` stamps it during the chain's first node, so that row is
+    always the pre-stamp one.
+    """
+    if task_hook not in REVIEW_HOOKS:
+        return None
+    row = db.read(
+        lambda c: c.execute(
+            "SELECT base_ref FROM work_items WHERE id = ?", (work_item_id,)
+        ).fetchone()
+    )
+    if row is None or not row["base_ref"]:
+        return None
+    path = _review.write_package(run_dirs.results, worktree, row["base_ref"], session_id)
+    return str(path) if path else None
+
+
 async def _dispatch(
     db,
     run_dirs,
@@ -218,6 +252,7 @@ async def _dispatch(
     steer: Steer | None = None,
     launch: LaunchContext | None = None,
     budget: _policy.Budget = _policy.NO_BUDGET,
+    escalate: bool = False,
 ) -> str:
     binding = registry.hooks[task_hook]
     session_id = uuid.uuid4().hex
@@ -251,11 +286,15 @@ async def _dispatch(
             binding,
             launch.repo_entry if launch else None,
             launch.steering_dir if launch else None,
+            escalate=escalate,
         )
         return await _agent.run_agent_task(
             db,
             run_dirs,
             hook_point=task_hook,
+            review_package=_review_package(
+                db, run_dirs, work_item_row["id"], worktree, task_hook, session_id
+            ),
             command=inv.command,
             profile=inv.profile,
             model=inv.model,
@@ -650,6 +689,10 @@ async def _walk_node(
             steer=steer,
             launch=launch,
             budget=budget,
+            # Ordered deliberately, and only reachable here: the no-progress stop
+            # above returns first, so a loop that is stuck never buys a more
+            # expensive model for the same blind approach (spec 6).
+            escalate=cap.escalate_after is not None and count > cap.escalate_after,
         )
         if fix == "paused":
             return "paused"
@@ -727,7 +770,7 @@ async def run(
 
     await db.write(lambda c: store.mark_completed(c, work_item_id))
     try:
-        await beads.complete(row["bead_id"], cwd=bd_cwd)
+        await beads.complete(row["bead_id"], cwd=row["bead_cwd"] or bd_cwd)
     except Exception as exc:  # noqa: BLE001
         logger.warning("bead close failed for %s: %r", row["bead_id"], exc)
     return "completed"
@@ -865,7 +908,7 @@ async def resume(
         if start >= len(nodes):
             await db.write(lambda c: store.mark_completed(c, work_item_id))
             try:
-                await beads.complete(row["bead_id"], cwd=bd_cwd)
+                await beads.complete(row["bead_id"], cwd=row["bead_cwd"] or bd_cwd)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("bead close failed for %s: %r", row["bead_id"], exc)
             return "completed"
@@ -912,7 +955,7 @@ async def resume(
 
     await db.write(lambda c: store.mark_completed(c, work_item_id))
     try:
-        await beads.complete(row["bead_id"], cwd=bd_cwd)
+        await beads.complete(row["bead_id"], cwd=row["bead_cwd"] or bd_cwd)
     except Exception as exc:  # noqa: BLE001
         logger.warning("bead close failed for %s: %r", row["bead_id"], exc)
     return "completed"

@@ -39,6 +39,7 @@ def create_work_item(
     root_merge_policy: str | None = None,
     attachments: list[dict] | None = None,
     status: str = "active",
+    bead_cwd: str | None = None,
 ) -> None:
     """`submodules` are the cross-repo paths chosen at intake (06, design 1g).
 
@@ -53,8 +54,8 @@ def create_work_item(
     conn.execute(
         "INSERT INTO work_items (id, bead_id, title, repo, chain_template, "
         "chain_definition, current_node_id, status, created_at, updated_at, "
-        "submodules, root_merge_policy, attachments) "
-        "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)",
+        "submodules, root_merge_policy, attachments, bead_cwd) "
+        "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)",
         (
             id,
             bead_id,
@@ -68,6 +69,7 @@ def create_work_item(
             json.dumps(submodules) if submodules else None,
             root_merge_policy if submodules else None,
             json.dumps(attachments) if attachments else None,
+            bead_cwd,
         ),
     )
     events.append(
@@ -219,7 +221,14 @@ def bump_counter(
         "UPDATE retry_counters SET count = ?, updated_at = ? WHERE work_item_id = ? AND key = ?",
         (new_count, now, work_item_id, key),
     )
-    return new_count, row["started_at"], Cap(row["cap_attempts"], row["cap_wall_s"])
+    # `escalate_after` comes from the freshly-resolved cap, not the row: it is a
+    # routing hint for the next launch, not a limit the item was admitted under,
+    # so there is nothing to hold steady across an edited policy.yaml.
+    return (
+        new_count,
+        row["started_at"],
+        Cap(row["cap_attempts"], row["cap_wall_s"], escalate_after=cap.escalate_after),
+    )
 
 
 def retry_after_cap(conn: sqlite3.Connection, work_item_id: str, node_id: str, key: str, steer):

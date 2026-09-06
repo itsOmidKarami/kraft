@@ -65,6 +65,46 @@ describe("EventTimeline", () => {
     expect(screen.getByText(/on\.test\.run/)).toBeInTheDocument();
   });
 
+  it("says which webhook failed and why, not just that one did", () => {
+    // The point of the event is diagnosis: a dead webhook has to be
+    // distinguishable from a quiet one (Kraft-8mu.11).
+    const { rerender } = render(
+      <EventTimeline
+        events={[
+          ev({
+            type: "notification_failed",
+            payload: {
+              event_type: "gate_requested",
+              status: 502,
+              host: "hooks.example.com",
+              error: null,
+            },
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText(/hooks\.example\.com/)).toHaveTextContent("gate_requested");
+    expect(screen.getByText(/hooks\.example\.com/)).toHaveTextContent("502");
+
+    // never reached the host: no status, an exception name instead
+    rerender(
+      <EventTimeline
+        events={[
+          ev({
+            type: "notification_failed",
+            payload: {
+              event_type: "gate_requested",
+              status: null,
+              host: "hooks.example.com",
+              error: "ConnectTimeout",
+            },
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText(/hooks\.example\.com/)).toHaveTextContent("ConnectTimeout");
+  });
+
   it("renders nothing extra for an event with no detail", () => {
     const { container } = render(<EventTimeline events={[ev({ type: "node_started" })]} />);
     expect(container.querySelector(".event-detail")).toBeNull();

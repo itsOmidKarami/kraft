@@ -63,7 +63,12 @@ def _agent_profiles() -> dict:
 def load_registry(path: str | Path, *, steering_dir: Path | None = None) -> Registry:
     path = Path(path)
     steering_dir = steering_dir if steering_dir is not None else path.parent / "steering"
-    data = yaml.safe_load(path.read_text())
+    try:
+        data = yaml.safe_load(path.read_text())
+    # ValueError covers the UnicodeDecodeError `read_text()` raises on a file
+    # that is not UTF-8: it is a ValueError, not an OSError.
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        raise RegistryError(f"{path.name}: cannot read/parse: {exc}") from exc
     if not isinstance(data, dict) or not isinstance(data.get("hooks"), dict):
         raise RegistryError(f"{path.name}: expected a top-level 'hooks' mapping")
     for hook, binding in data["hooks"].items():
@@ -84,7 +89,7 @@ def load_registry(path: str | Path, *, steering_dir: Path | None = None) -> Regi
                 f"{path.name}: subprocess hook {hook!r} needs a list-of-strings 'command'"
             )
 
-        agent_only = ("profile", "model", "deny_tools", "steering")
+        agent_only = ("profile", "model", "escalate_model", "deny_tools", "steering")
         if kind == "agent":
             profiles = _agent_profiles()
             profile = binding.get("profile", "claude")
@@ -93,8 +98,9 @@ def load_registry(path: str | Path, *, steering_dir: Path | None = None) -> Regi
                     f"{path.name}: hook {hook!r} has unknown profile {profile!r}; "
                     f"known: {sorted(profiles)}"
                 )
-            if binding.get("model") is not None and not isinstance(binding["model"], str):
-                raise RegistryError(f"{path.name}: hook {hook!r} 'model' must be a string")
+            for key in ("model", "escalate_model"):
+                if binding.get(key) is not None and not isinstance(binding[key], str):
+                    raise RegistryError(f"{path.name}: hook {hook!r} {key!r} must be a string")
             for key in ("deny_tools", "steering"):
                 v = binding.get(key, [])
                 if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
@@ -145,8 +151,8 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
         stem = path.stem
         try:
             data = yaml.safe_load(path.read_text())
-        except yaml.YAMLError as exc:
-            invalid[stem] = f"{path.name}: YAML parse error: {exc}"
+        except (OSError, ValueError, yaml.YAMLError) as exc:
+            invalid[stem] = f"{path.name}: cannot read/parse: {exc}"
             continue
 
         if not isinstance(data, dict) or not isinstance(data.get("id"), str):

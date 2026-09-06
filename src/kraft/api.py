@@ -20,17 +20,18 @@ from urllib.parse import urlsplit
 import yaml
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.websockets import WebSocketDisconnect
 
 from kraft import analytics as analytics_mod
 from kraft import auth as auth_mod
 from kraft import config as config_mod
-from kraft import events, executor, findings, reattach, store
+from kraft import events, executor, findings, reattach, review, store
 from kraft import intake as intake_mod
 from kraft import logs as logs_mod
 from kraft import notify as notify_mod
 from kraft import policy as policy_mod
+from kraft import steering as steering_mod
 from kraft.adapters import beads as beads_mod
 from kraft.db import Database
 from kraft.index import db as index_db
@@ -199,6 +200,11 @@ async def lifespan(app: FastAPI):
         asyncio.ensure_future(intake_mod.poller(app)) if app.state.intake["enabled"] else None
     )
     app.state.intake_task = intake_task
+    # PUT /intake swaps this task, and the swap has to await the cancellation of
+    # the old one. Without the lock two overlapping saves both read the same old
+    # task, both start a poller, and only the last assignment is reachable --
+    # the other ticks on, uncancellable, past shutdown.
+    app.state.intake_lock = asyncio.Lock()
     try:
         yield
     finally:
@@ -209,9 +215,13 @@ async def lifespan(app: FastAPI):
         index_conn.close()
         # Before the work item tasks, so a tick in flight cannot _spawn one
         # into the list that is about to be cancelled.
-        if intake_task is not None:
-            intake_task.cancel()
-            await asyncio.gather(intake_task, return_exceptions=True)
+        # app.state, not the local: PUT /intake replaces this task when the
+        # operator toggles the poller, and cancelling the one lifespan happened
+        # to start would leave the live one running past shutdown.
+        live_intake_task = app.state.intake_task
+        if live_intake_task is not None:
+            live_intake_task.cancel()
+            await asyncio.gather(live_intake_task, return_exceptions=True)
         tasks = list(app.state.tasks.values())
         for task in tasks:
             task.cancel()
@@ -726,11 +736,8 @@ async def get_work_item_diff(wid: str, request: Request):
     if not worktree.is_dir():
         raise HTTPException(404, "this work item has no worktree yet")
 
-    # strip=False: a diff whose last line is blank context is still that diff
-    body = config_mod.git_read(worktree, "diff", base, strip=False)
-    numstat = config_mod.git_read(worktree, "diff", "--numstat", base)
-    status = config_mod.git_read(worktree, "status", "--porcelain", "-uall")
-    if body is None or numstat is None or status is None:
+    change = review.read_change(worktree, base)
+    if change is None:
         # None means git itself failed (and git_read has already logged the
         # command and stderr). Returning an empty diff here would be
         # indistinguishable from "no changes" to the human approving the gate,
@@ -738,27 +745,13 @@ async def get_work_item_diff(wid: str, request: Request):
         # reviewer's browser has no business seeing.
         raise HTTPException(500, "git could not read this work item's worktree")
 
-    files = []
-    for line in numstat.splitlines():
-        parts = line.split("\t")
-        if len(parts) == 3:
-            ins, dels, path = parts
-            files.append(
-                {
-                    "path": path,
-                    "insertions": int(ins) if ins.isdigit() else 0,
-                    "deletions": int(dels) if dels.isdigit() else 0,
-                }
-            )
-
-    untracked = [ln[3:] for ln in status.splitlines() if ln.startswith("?? ")]
-    diff, truncated = _truncate_at_file_boundary(body, DIFF_MAX_BYTES)
+    diff, truncated = _truncate_at_file_boundary(change.diff, DIFF_MAX_BYTES)
     return {
         "work_item_id": wid,
         "base_ref": base,
-        "files": files,
+        "files": change.files,
         "diff": diff,
-        "untracked": untracked,
+        "untracked": change.untracked,
         "truncated": truncated,
     }
 
@@ -1578,6 +1571,153 @@ async def put_policy(body: PolicyBody, request: Request):
     config_mod.write_yaml(st.templates_dir / "policy.yaml", data)
     st.policy = policy_obj
     st.invalid_policy = []
+    return data
+
+
+class SteeringBody(BaseModel):
+    body: str
+
+
+def _steering_dir(st) -> Path:
+    return st.templates_dir / "steering"
+
+
+def _revalidate_steering(st) -> None:
+    """Re-run the loaders that resolve steering names, or raise HTTPException.
+
+    Names are resolved at config-load time, not at write time, so the file the
+    operator just edited is only half the question: `registry.yaml` and
+    `repos.yaml` name it, and a body that pushes an assembled block past the
+    injection budget -- or a delete that orphans a name -- breaks a launch that
+    is nowhere near this screen.
+    """
+    steering_dir = _steering_dir(st)
+    try:
+        load_registry(st.templates_dir / "registry.yaml", steering_dir=steering_dir)
+        config_mod.load_repos(_repos_path(st), steering_dir=steering_dir)
+    except (RegistryError, config_mod.ConfigError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/steering")
+async def list_steering(request: Request):
+    """Names and sizes, not bodies: the list is a picker, and the assembled
+    budget is the number an operator is actually rationing."""
+    steering_dir = _steering_dir(request.app.state)
+    if not steering_dir.is_dir():
+        return {"files": [], "max_bytes": steering_mod.MAX_BYTES}
+    files = []
+    for path in sorted(steering_dir.glob("*.md")):
+        try:
+            files.append({"name": path.stem, "bytes": len(path.read_text().encode())})
+        except OSError, ValueError:
+            # Unreadable or not UTF-8: it exists and it is broken, which is
+            # more useful on the screen than a file that silently is not there.
+            files.append({"name": path.stem, "bytes": None})
+    return {"files": files, "max_bytes": steering_mod.MAX_BYTES}
+
+
+@app.get("/steering/{name}")
+async def get_steering(name: str, request: Request):
+    st = request.app.state
+    try:
+        path = steering_mod.path_for(_steering_dir(st), name, where="steering")
+    except steering_mod.SteeringError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    try:
+        return {"name": name, "body": path.read_text()}
+    except FileNotFoundError:
+        raise HTTPException(404, f"unknown steering file {name!r}") from None
+    except (OSError, ValueError) as exc:
+        raise HTTPException(500, f"{name}: cannot read: {exc}") from exc
+
+
+@app.put("/steering/{name}")
+async def put_steering(name: str, body: SteeringBody, request: Request):
+    st = request.app.state
+    steering_dir = _steering_dir(st)
+    try:
+        path = steering_mod.path_for(steering_dir, name, where="steering")
+    except steering_mod.SteeringError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    steering_dir.mkdir(parents=True, exist_ok=True)
+    previous = path.read_text() if path.is_file() else None
+    path.write_text(body.body)
+    try:
+        # After the write, not against a scratch copy: `validate` resolves names
+        # against the real steering directory by design, so the only honest way
+        # to ask "would the config still load" is to make it true first.
+        _revalidate_steering(st)
+    except HTTPException:
+        if previous is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_text(previous)
+        raise
+    _reload_templates(st)
+    return {"name": name, "body": body.body}
+
+
+@app.delete("/steering/{name}")
+async def delete_steering(name: str, request: Request):
+    st = request.app.state
+    try:
+        path = steering_mod.path_for(_steering_dir(st), name, where="steering")
+    except steering_mod.SteeringError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not path.is_file():
+        raise HTTPException(404, f"unknown steering file {name!r}")
+    previous = path.read_text()
+    path.unlink()
+    try:
+        _revalidate_steering(st)
+    except HTTPException:
+        path.write_text(previous)
+        raise
+    _reload_templates(st)
+    return {"deleted": name}
+
+
+class IntakeBody(BaseModel):
+    """`intake.yaml`, typed. Unlike `policy.yaml` this file is a flat fixed
+    shape, so the bounds live here rather than in a loader that has to accept a
+    hand-edited file it did not write."""
+
+    enabled: bool
+    # The poller floors this at 30s anyway; rejecting it is better than
+    # accepting a number the running instance will not honour.
+    interval_s: int = Field(ge=30)
+    max_concurrent: int = Field(ge=1)
+    # P0 is the *highest* priority, so the ceiling is "P<n> and below".
+    priority_ceiling: int = Field(ge=0, le=4)
+    repos: list[str] = []
+
+
+@app.get("/intake")
+async def get_intake(request: Request):
+    return request.app.state.intake
+
+
+@app.put("/intake")
+async def put_intake(body: IntakeBody, request: Request):
+    """Applies without a restart: the poller task is replaced, not just the
+    config it reads. `interval_s` is read once at task start, so a live poller
+    would otherwise keep the old interval until the next reboot."""
+    app_ = request.app
+    st = app_.state
+    data = body.model_dump()
+    config_mod.write_yaml(st.templates_dir / "intake.yaml", data)
+    st.intake = data
+    async with st.intake_lock:
+        task = st.intake_task
+        # Clear it before the await: a second saver that gets in here while we
+        # are waiting must not find, and cancel, a task we are already retiring.
+        st.intake_task = None
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        if data["enabled"]:
+            st.intake_task = asyncio.ensure_future(intake_mod.poller(app_))
     return data
 
 

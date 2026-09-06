@@ -168,3 +168,29 @@ def test_a_policy_file_with_invalid_bytes_is_bad_config_not_a_crash(tmp_path):
     p.write_bytes(b"default: { attempts: 3 }\nbudget: \xff\xfe\n")
     with pytest.raises(policy.PolicyError):
         policy.load_policy(p)
+
+
+def test_escalate_after_is_parsed_onto_the_cap(tmp_path):
+    """`escalate_after` is "how many cycles before a capability bump", the same
+    kind of per-loop decision as "how many cycles before stopping", so it lives
+    beside them (sub-project G spec §6)."""
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        "loops:\n  verify_fix_loop: { attempts: 5, wall_clock_s: 60, escalate_after: 2 }\n"
+        "default: { attempts: 3, wall_clock_s: 60 }\n"
+    )
+    pol = policy.load_policy(p)
+    assert pol.loops["verify_fix_loop"].escalate_after == 2
+    # absent means no escalation, which is the pre-existing behaviour
+    assert pol.default.escalate_after is None
+
+
+@pytest.mark.parametrize("bad", ["0", "-1", "'2'", "true", "1.5"])
+def test_escalate_after_must_be_a_positive_int(tmp_path, bad):
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        f"loops:\n  verify_fix_loop: {{ attempts: 5, wall_clock_s: 60, escalate_after: {bad} }}\n"
+        "default: { attempts: 3, wall_clock_s: 60 }\n"
+    )
+    with pytest.raises(policy.PolicyError, match="escalate_after"):
+        policy.load_policy(p)

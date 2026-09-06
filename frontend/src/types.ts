@@ -293,6 +293,24 @@ export interface HookBinding {
   repos?: Record<string, boolean>;
 }
 
+export interface SteeringFile {
+  name: string;
+  bytes: number | null;
+}
+
+export interface SteeringList {
+  files: SteeringFile[];
+  max_bytes: number;
+}
+
+export interface Intake {
+  enabled: boolean;
+  interval_s: number;
+  max_concurrent: number;
+  priority_ceiling: number;
+  repos: string[];
+}
+
 export interface Cap {
   attempts: number;
   wall_clock_s: number;

@@ -8,6 +8,7 @@ import pytest
 from support.harness import fake_registry, isolated_bd, make_repo
 
 from kraft import db, events, executor, store
+from kraft.adapters import beads
 from kraft.paths import RunDirs
 from kraft.templates import Template, load_registry, load_templates
 
@@ -673,3 +674,41 @@ def test_fix_cycle_dispatch_gets_the_same_launch_context(tmp_path, monkeypatch):
     argvs = _argv_lines(argv_log)
     assert len(argvs) == 1  # only the fix cycle ever launches the fake agent
     assert argvs[0][-2:] == ["--model", "haiku"]
+
+
+def test_run_closes_an_auto_intaken_bead_in_its_own_workspace(tmp_path, monkeypatch):
+    """Auto-intake adopts a bead that already lives in its repo's own `.beads`
+    workspace, not the instance-wide tracker `bd_cwd` points at. Closing it in
+    `bd_cwd` fails: the id does not exist there (Kraft-8mu.5.2)."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    other = isolated_bd(tmp_path, name="other")
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            bead_id = await beads.intake("make the failing test pass", cwd=str(other))
+            wid = await executor.intake(
+                database,
+                rd,
+                title="make the failing test pass",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+                bead_id=bead_id,
+                bead_cwd=str(other),
+            )
+            assert (
+                await executor.run(
+                    database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                )
+                == "completed"
+            )
+            assert _bd_status(other, bead_id) == "closed"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())

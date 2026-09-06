@@ -81,7 +81,7 @@ class Invocation(NamedTuple):
 
 
 def resolve_invocation(
-    binding: dict, repo_entry: dict | None, steering_dir: Path | None
+    binding: dict, repo_entry: dict | None, steering_dir: Path | None, *, escalate: bool = False
 ) -> Invocation:
     """Fold a hook binding and a repo entry into one launch.
 
@@ -121,7 +121,11 @@ def resolve_invocation(
     return Invocation(
         command=binding["command"],
         profile=binding.get("profile", "claude"),
-        model=binding.get("model") or repo.get("default_model"),
+        # `escalate` is the fix loop asking for a capability bump, not naming a
+        # model: an unset `escalate_model` falls through to the ordinary chain.
+        model=(binding.get("escalate_model") if escalate else None)
+        or binding.get("model")
+        or repo.get("default_model"),
         deny_tools=tuple(deny),
         steering_texts=steering_texts,
     )
@@ -161,6 +165,7 @@ async def run_agent_task(
     model: str | None = None,
     deny_tools: tuple[str, ...] = (),
     steering_texts: tuple[str, ...] = (),
+    review_package: str | None = None,
 ) -> str:
     ctx = _CTX.format(
         title=title,
@@ -171,6 +176,17 @@ async def run_agent_task(
         hook_point=hook_point,
         session_id=session_id,
     )
+    if review_package:
+        # By path, like $KRAFT_RESULT_PATH. A diff pasted into every review of
+        # every cycle of every work item is the token cost sub-project G §4
+        # already refuses for result files.
+        ctx += (
+            "\n\nThe change you are reviewing is written out at "
+            "$KRAFT_REVIEW_PACKAGE: commit list, files changed, and the diff "
+            "with ten lines of context per hunk. Read that file first. Its "
+            "context lines ARE the changed files -- do not read a changed file "
+            "separately unless a hunk you must judge is cut off mid-function.\n"
+        )
     if steering_texts:
         # The context-injection boundary (00_overview.md glossary) bans
         # CLAUDE.md, AGENTS.md and any repo file as a context channel. That
@@ -212,7 +228,11 @@ async def run_agent_task(
         # 2 guard: without this a worker in its own worktree reads as a human and
         # may approve its own gate. Deliberately no MCP config here — that would
         # make this adapter vendor-aware, against conceptual model §1.2.
-        env={"KRAFT_WORK_ITEM_ID": work_item_id, "KRAFT_SESSION_ID": session_id},
+        env={
+            "KRAFT_WORK_ITEM_ID": work_item_id,
+            "KRAFT_SESSION_ID": session_id,
+            **({"KRAFT_REVIEW_PACKAGE": review_package} if review_package else {}),
+        },
         post_resolve=_envelope_is_error,
         round=round,
     )

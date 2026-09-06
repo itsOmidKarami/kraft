@@ -405,3 +405,48 @@ def test_materialize_on_a_template_without_those_gates_is_a_noop():
 
 def test_attachment_gates_are_real_gate_names():
     assert set(ATTACHMENT_GATES.values()) <= GATE_NAMES
+
+
+def test_a_registry_with_invalid_bytes_is_a_registry_error(tmp_path):
+    """`read_text()` raises `UnicodeDecodeError` — a `ValueError`, not an
+    `OSError` and not a `yaml.YAMLError`. `lifespan` and the settings-save path
+    catch only `RegistryError`, so anything else escaping here refuses to boot
+    the server with no usable message."""
+    p = tmp_path / "registry.yaml"
+    p.write_bytes(b"hooks:\n  on.env.prepare: { kind: builtin, handler: \xff\xfe }\n")
+    with pytest.raises(templates.RegistryError):
+        templates.load_registry(p)
+
+
+def test_a_template_with_invalid_bytes_is_quarantined_not_a_crash(tmp_path):
+    """`load_templates` quarantines a bad file rather than raising; a file that
+    is not UTF-8 is just another kind of bad file."""
+    d = _dir(tmp_path, **{"registry.yaml": REGISTRY_YAML})
+    (d / "broken.yaml").write_bytes(b"id: broken\nnodes: \xff\xfe\n")
+    registry = templates.load_registry(d / "registry.yaml")
+    result = templates.load_templates(d, registry)
+    assert "broken" in result.invalid
+
+
+def test_load_registry_accepts_escalate_model_on_an_agent_hook(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.x: { kind: agent, command: claude, model: sonnet, escalate_model: opus }\n"
+    )
+    reg = templates.load_registry(tmp_path / "registry.yaml")
+    assert reg.hooks["on.x"]["escalate_model"] == "opus"
+
+
+def test_load_registry_rejects_escalate_model_that_is_not_a_string(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.x: { kind: agent, command: claude, escalate_model: 3 }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="escalate_model"):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_load_registry_rejects_escalate_model_on_a_subprocess_hook(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.x: { kind: subprocess, command: [pytest], escalate_model: opus }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="only to an agent hook"):
+        templates.load_registry(tmp_path / "registry.yaml")
