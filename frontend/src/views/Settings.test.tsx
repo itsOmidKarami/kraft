@@ -336,6 +336,32 @@ describe("Settings · steering", () => {
     expect(await screen.findByText("saved")).toBeInTheDocument();
   });
 
+  it("meters the open file, not the whole directory", async () => {
+    // MAX_BYTES is the assembled budget of one repo or hook's steering list.
+    // Summing every file in the directory against it reads as over budget when
+    // nothing is, and under it when something is.
+    vi.spyOn(api, "getSteering").mockResolvedValue({
+      files: [
+        { name: "house-style", bytes: 14 },
+        { name: "other", bytes: 9000 },
+      ],
+      max_bytes: 8192,
+    });
+    renderAt("/settings/steering");
+    await userEvent.click(await screen.findByRole("button", { name: /house-style/ }));
+    const box = (await screen.findByLabelText("steering body")) as HTMLTextAreaElement;
+    await waitFor(() => expect(box.value).toBe("prefer stdlib\n"));
+
+    // 14 B open, 9014 B on disk in total — the meter must say 14. Scoped to the
+    // hint because the list row legitimately shows this file's size too.
+    const hint = screen.getByText(/counts toward/);
+    expect(hint).toHaveTextContent("14 B");
+    expect(hint).not.toHaveTextContent("9014");
+
+    fireEvent.change(box, { target: { value: "12345" } });
+    await waitFor(() => expect(screen.getByText(/counts toward/)).toHaveTextContent("5 B"));
+  });
+
   it("surfaces a refused delete instead of dropping the file from the list", async () => {
     // A hook still naming the file is exactly when the server says no, and it
     // is the case the operator most needs to read.
