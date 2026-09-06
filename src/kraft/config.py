@@ -49,17 +49,27 @@ def read_yaml(path: str | Path, default: dict | None = None) -> dict:
     return data
 
 
-def write_yaml(path: str | Path, data: dict) -> None:
+def write_text(path: str | Path, text: str) -> None:
+    """Write `text`, atomically. A reader sees the old file or the new one.
+
+    Every config Kraft owns is read straight off disk by something that did not
+    write it -- steering bodies at agent dispatch, the rest at load -- so a
+    half-written file is a half-configured launch, not a cosmetic problem.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as fh:
-            yaml.safe_dump(data, fh, sort_keys=False, default_flow_style=False)
+            fh.write(text)
         os.replace(tmp, path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
+
+
+def write_yaml(path: str | Path, data: dict) -> None:
+    write_text(path, yaml.safe_dump(data, sort_keys=False, default_flow_style=False))
 
 
 # ── repos ────────────────────────────────────────────────────────────────────
