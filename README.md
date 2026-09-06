@@ -139,6 +139,7 @@ Service and admin:
 ```bash
 kraft serve --port 9000  # the same as bare `kraft`; flag > env > access.yaml
 kraft health             # exit 1 when degraded, reasons on stdout
+kraft doctor             # every check in one pass; exit 1 if any fails
 kraft reindex [--repo P] # rescan documents into the search index
 ```
 

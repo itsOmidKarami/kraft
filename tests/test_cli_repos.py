@@ -152,3 +152,38 @@ def test_open_passes_the_editor_through(app, tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(client, "open_worktree", fake_open)
     cli.main(["open", wid, "--editor", "zed"])
     assert seen == {"work_item_id": wid, "editor": "zed"}
+
+
+def test_path_rejects_json_rather_than_ignoring_it(app, tmp_path, capsys):
+    repo = make_repo(tmp_path)
+    wid = _make_item(repo)
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["path", wid, "--json"])
+    assert caught.value.code == 1
+    captured = capsys.readouterr()
+    assert "kraft show --json" in captured.err
+    # nothing on stdout: a caller that piped this must not get a path anyway
+    assert captured.out == ""
+
+
+def test_repos_says_disabled_in_words_not_only_in_colour(app, tmp_path, monkeypatch, capsys):
+    """pytest has no tty, so this is exactly the piped case: dim paint is gone
+    and the word has to carry it (spec D §3, spec F §2.5)."""
+    monkeypatch.setenv("COLUMNS", "300")
+    on = make_repo(tmp_path, name="on")
+    off = make_repo(tmp_path, name="off")
+    asyncio.run(client.ensure_repo(str(on)))
+    asyncio.run(client.ensure_repo(str(off)))
+
+    async def go():
+        async with client.http() as http:
+            response = await http.patch(
+                "/repos", params={"path": str(off)}, json={"enabled": False}
+            )
+        assert response.status_code < 400, response.text
+
+    asyncio.run(go())
+    cli.main(["repos"])
+    lines = capsys.readouterr().out.splitlines()
+    assert "disabled" in next(line for line in lines if str(off) in line)
+    assert "enabled" in next(line for line in lines if str(on) in line)

@@ -106,6 +106,7 @@ kraft repos / kraft connect [PATH]     # `*` marks the repo you are in
 kraft path [ID] (alias cd) / kraft open [ID]
 kraft serve [--host H] [--port P]      # same as bare `kraft`
 kraft health                           # exit 1 when degraded
+kraft doctor                           # every check at once; exit 1 on any
 kraft reindex [--repo PATH]
 ```
 

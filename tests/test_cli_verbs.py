@@ -180,7 +180,35 @@ def test_create_outside_a_connected_repo_says_how_to_fix_it(app, tmp_path, monke
     with pytest.raises(SystemExit) as caught:
         cli.main(["create", "nowhere"])
     assert caught.value.code == 1
-    assert "no repo" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    # the advice matches the situation: this is a git repo, it just is not
+    # connected, so `kraft connect` is the fix and the message must name it
+    assert "kraft connect" in err
+    assert str(stranger) in err
+
+
+def test_create_outside_any_git_repo_says_something_else(app, tmp_path, monkeypatch, capsys):
+    plain = tmp_path / "not-a-repo"
+    plain.mkdir()
+    monkeypatch.chdir(plain)
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["create", "nowhere"])
+    assert caught.value.code == 1
+    err = capsys.readouterr().err
+    assert "kraft connect" not in err  # there is nothing here to connect
+    assert "no repo" in err
+
+
+def test_create_through_the_mcp_door_resolves_the_cwd_repo(app, tmp_path, monkeypatch):
+    """The resolution the CLI does in `_repo_scope` lives in `client.py` too, so
+    an agent standing in a connected repo does not have to name it (spec F §2.4)."""
+    import asyncio
+
+    repo = make_repo(tmp_path)
+    _connect(repo)
+    monkeypatch.chdir(repo)
+    created = asyncio.run(client.create_work_item("filed by an agent"))
+    assert created["status"] == "paused"
 
 
 def test_reject_requires_a_note(app, capsys):
