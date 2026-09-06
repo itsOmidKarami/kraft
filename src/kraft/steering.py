@@ -47,6 +47,15 @@ def _path(steering_dir: Path, name: str, where: str) -> Path:
     return Path(steering_dir) / f"{name}.md"
 
 
+def path_for(steering_dir: Path, name: str, *, where: str) -> Path:
+    """The file a steering name resolves to, or raise.
+
+    The public form of the same rule `validate` applies, so the Settings editor
+    cannot accept a name the config loaders would then reject.
+    """
+    return _path(steering_dir, name, where)
+
+
 def assembled_bytes(bodies: list[str] | tuple[str, ...]) -> int:
     """Bytes of the actual injected block for these bodies: `HEADING` plus the
     bodies joined by `_SEP` — exactly what `adapters/agent.py` builds. Used both

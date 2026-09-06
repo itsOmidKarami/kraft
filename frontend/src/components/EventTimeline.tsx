@@ -22,6 +22,12 @@ function detailOf(e: KraftEvent): string | null {
   // review gate stored them and showed them nowhere; the timeline is the one
   // surface every chain has.
   if (e.type === "worker_session_exited" && typeof p.concerns === "string") return p.concerns;
+  // A dead webhook has to be tellable from a quiet one, which is the whole
+  // reason `notify` records this event rather than only logging it.
+  if (e.type === "notification_failed") {
+    const why = p.status ?? p.error ?? "no response";
+    return `${p.event_type} → ${p.host} · ${why}`;
+  }
   if (e.type === "fix_cycle_started" && Array.isArray(p.failed_tasks)) {
     return `cycle ${p.cycle}: ${(p.failed_tasks as string[]).join(", ")}`;
   }

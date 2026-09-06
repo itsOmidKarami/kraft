@@ -1,9 +1,10 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../api";
 import { Settings } from "./Settings";
+import type { TemplateSummary } from "../types";
 
 const repo = {
   path: "/repo-a",
@@ -45,6 +46,21 @@ beforeEach(() => {
   ]);
   vi.spyOn(api, "getRegistry").mockResolvedValue({ hooks });
   vi.spyOn(api, "getPolicy").mockResolvedValue(policy);
+  vi.spyOn(api, "getSteering").mockResolvedValue({
+    files: [{ name: "house-style", bytes: 14 }],
+    max_bytes: 8192,
+  });
+  vi.spyOn(api, "getSteeringFile").mockResolvedValue({
+    name: "house-style",
+    body: "prefer stdlib\n",
+  });
+  vi.spyOn(api, "getIntake").mockResolvedValue({
+    enabled: false,
+    interval_s: 300,
+    max_concurrent: 1,
+    priority_ceiling: 2,
+    repos: [],
+  });
   vi.spyOn(api, "getAccess").mockResolvedValue(access);
   vi.spyOn(api, "getAuthSessions").mockResolvedValue({ sessions: [] });
   vi.spyOn(api, "getNotify").mockResolvedValue({
@@ -183,6 +199,55 @@ describe("Settings · templates (5b)", () => {
     expect(screen.getByText(/not valid JSON/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
+
+  it("does not clobber a fresh edit with the re-fetch of the previous save", async () => {
+    // A fake backend with a network-like gap: `putTemplate` commits quickly,
+    // `getTemplates` (re-fetched by `reload`) reads it back more slowly. If
+    // `busy` clears as soon as the PUT resolves, Save re-enables while the
+    // page still holds pre-save state — the user types the next edit, and
+    // then the late re-fetch lands and `setDraft(original)` wipes it.
+    const backend: TemplateSummary[] = [
+      {
+        id: "quick-task",
+        gates: 0,
+        nodes: [{ id: "verify", tasks: ["on.test.run"], gate_after: null }],
+      },
+    ];
+    vi.spyOn(api, "getTemplates").mockImplementation(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(() => resolve(backend.map((t) => ({ ...t }))), 40),
+        ),
+    );
+    const put = vi.spyOn(api, "putTemplate").mockImplementation(
+      (_id, nodes) =>
+        new Promise((resolve) =>
+          setTimeout(() => {
+            backend[0] = { ...backend[0], nodes };
+            resolve(undefined as never);
+          }, 5),
+        ),
+    );
+    renderAt("/settings/templates");
+
+    await screen.findByRole("button", { name: /quick-task/ });
+    const box = screen.getByLabelText("template nodes") as HTMLTextAreaElement;
+    // fireEvent, not userEvent.type: `[` and `{` are key-descriptor syntax
+    // for userEvent's keyboard parser, and this draft is JSON.
+    fireEvent.change(box, { target: { value: '[{"id":"one"}]' } });
+    const save = screen.getByRole("button", { name: "Save" });
+    await userEvent.click(save);
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
+
+    // As soon as Save is live again, make the next edit — in the broken
+    // version this lands after the PUT but before the re-fetch.
+    await waitFor(() => expect(save).not.toBeDisabled());
+    fireEvent.change(box, { target: { value: '[{"id":"two"}]' } });
+
+    // give the slow re-fetch every chance to land on top of the new edit
+    await new Promise((r) => setTimeout(r, 80));
+    expect(box.value).toBe('[{"id":"two"}]');
+  });
 });
 
 describe("Settings · plugins (5c)", () => {
@@ -245,6 +310,84 @@ describe("Settings · policy (5d)", () => {
   });
 });
 
+describe("Settings · steering", () => {
+  it("loads a file's body only when it is picked, and saves it back", async () => {
+    const get = vi.spyOn(api, "getSteeringFile");
+    const put = vi
+      .spyOn(api, "putSteeringFile")
+      .mockImplementation(async (name, body) => ({ name, body }));
+    renderAt("/settings/steering");
+    await screen.findByRole("heading", { name: "Steering" });
+
+    // the list is a picker: every body at once would be the whole injection
+    // budget over the wire on every page load
+    expect(get).not.toHaveBeenCalled();
+    expect(screen.getByText("14 B")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /house-style/ }));
+    const box = (await screen.findByLabelText("steering body")) as HTMLTextAreaElement;
+    await waitFor(() => expect(box.value).toBe("prefer stdlib\n"));
+
+    // unchanged body: nothing to save
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    fireEvent.change(box, { target: { value: "prefer stdlib, then native\n" } });
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(put).toHaveBeenCalledWith("house-style", "prefer stdlib, then native\n");
+    expect(await screen.findByText("saved")).toBeInTheDocument();
+  });
+
+  it("surfaces a refused delete instead of dropping the file from the list", async () => {
+    // A hook still naming the file is exactly when the server says no, and it
+    // is the case the operator most needs to read.
+    vi.spyOn(api, "deleteSteeringFile").mockRejectedValue(
+      new Error("registry.yaml: steering 'house-style' does not resolve"),
+    );
+    renderAt("/settings/steering");
+    await userEvent.click(await screen.findByRole("button", { name: /house-style/ }));
+    await screen.findByLabelText("steering body");
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(await screen.findByText(/does not resolve/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /house-style/ })).toBeInTheDocument();
+  });
+});
+
+describe("Settings · auto-intake", () => {
+  it("saves the whole poller config in one PUT and reports it applied", async () => {
+    const put = vi.spyOn(api, "putIntake").mockImplementation(async (body) => body);
+    renderAt("/settings/intake");
+    await screen.findByRole("heading", { name: "Auto-intake" });
+
+    // nothing is sent until Save: the poller restarts on write, so a
+    // half-edited form must not bounce it once per keystroke.
+    await userEvent.click(screen.getByRole("switch", { name: "Auto-intake" }));
+    const interval = screen.getByLabelText("poll interval");
+    await userEvent.clear(interval);
+    await userEvent.type(interval, "60");
+    await userEvent.click(await screen.findByRole("checkbox", { name: /repo-a/ }));
+    expect(put).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(put.mock.calls[0][0]).toEqual({
+      enabled: true,
+      interval_s: 60,
+      max_concurrent: 1,
+      priority_ceiling: 2,
+      repos: ["/repo-a"],
+    });
+    expect(await screen.findByText("saved")).toBeInTheDocument();
+  });
+
+  it("shows the server's rejection rather than pretending the save landed", async () => {
+    vi.spyOn(api, "putIntake").mockRejectedValue(new Error("interval_s: too small"));
+    renderAt("/settings/intake");
+    await screen.findByRole("heading", { name: "Auto-intake" });
+    await userEvent.click(screen.getByRole("switch", { name: "Auto-intake" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("interval_s: too small")).toBeInTheDocument();
+  });
+});
+
 describe("Settings · access (5e)", () => {
   it("switches the bind and sets a password", async () => {
     const put = vi.spyOn(api, "putAccess").mockResolvedValue({ ...access, bind: "0.0.0.0" });
@@ -284,6 +427,33 @@ describe("Settings · access (5e)", () => {
     expect(screen.getByText(/signs you out here/i)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("menuitem", { name: "Revoke" }));
     expect(revoke).toHaveBeenCalledWith("abc");
+  });
+
+  it("reports a save only once the new state has been read back", async () => {
+    // Same network-like gap as the templates page: `putAccess` commits
+    // quickly, `getAccess` reads it back more slowly. "saved" is the signal
+    // that the page is settled, so it must not appear while the page still
+    // renders pre-save state.
+    const backend = { ...access };
+    vi.spyOn(api, "getAccess").mockImplementation(
+      () => new Promise((resolve) => setTimeout(() => resolve({ ...backend }), 40)),
+    );
+    vi.spyOn(api, "putAccess").mockImplementation(
+      (body) =>
+        new Promise((resolve) =>
+          setTimeout(() => {
+            Object.assign(backend, body, { password_set: true });
+            resolve({ ...backend });
+          }, 5),
+        ),
+    );
+    renderAt("/settings/access");
+
+    await userEvent.type(await screen.findByLabelText("Set a password"), "hunter2");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await screen.findByText("saved");
+    expect(screen.getByLabelText("New password")).toBeInTheDocument();
   });
 });
 
