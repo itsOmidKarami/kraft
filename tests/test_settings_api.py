@@ -19,9 +19,11 @@ import yaml
 from fastapi.testclient import TestClient
 from support.harness import fake_templates_dir, isolated_bd, make_repo
 
-from kraft import auth, config, events, steering, store
+from kraft import api as api_mod
+from kraft import auth, config, events, store
 from kraft import db as kdb
 from kraft import intake as intake_mod
+from kraft import steering as steering_mod
 from kraft.paths import RunDirs
 
 _FAKE_AGENT = Path(__file__).resolve().parents[0] / "support" / "fake_agent.py"
@@ -1000,7 +1002,7 @@ def _steering_dir(templates_dir):
 def test_steering_list_reports_sizes_against_the_injection_budget(client, templates_dir):
     (_steering_dir(templates_dir) / "house-style.md").write_text("prefer stdlib\n")
     body = client.get("/steering").json()
-    assert body["max_bytes"] == steering.MAX_BYTES
+    assert body["max_bytes"] == steering_mod.MAX_BYTES
     assert body["files"] == [{"name": "house-style", "bytes": len(b"prefer stdlib\n")}]
 
 
@@ -1033,7 +1035,7 @@ def test_a_body_over_the_injection_budget_is_refused_and_rolled_back(client, tem
     (templates_dir / "registry.yaml").write_text(yaml.safe_dump(registry))
     client.put("/registry", json={"hooks": registry["hooks"]})
 
-    resp = client.put("/steering/big", json={"body": "x" * (steering.MAX_BYTES + 1)})
+    resp = client.put("/steering/big", json={"body": "x" * (steering_mod.MAX_BYTES + 1)})
     assert resp.status_code == 422
     # the file on disk is the one that still loads, not the one that was refused
     assert (templates_dir / "steering" / "big.md").read_text() == "small\n"
@@ -1112,3 +1114,99 @@ def test_two_overlapping_intake_saves_leave_exactly_one_live_poller(client):
             app.state.intake_task = None
 
     asyncio.run(scenario())
+
+
+def test_an_unexpected_validation_error_leaves_the_steering_file_untouched(
+    client, templates_dir, monkeypatch
+):
+    """Validating by writing the real file first and undoing it on failure only
+    undoes the failures it anticipated. Validation has to happen against a
+    scratch copy, so the real directory is never briefly wrong — a dispatch
+    reads these files straight off disk.
+    """
+    (_steering_dir(templates_dir) / "house-style.md").write_text("prefer stdlib\n")
+
+    def boom(*a, **k):
+        raise RuntimeError("something nobody predicted")
+
+    monkeypatch.setattr(api_mod, "load_registry", boom)
+    with pytest.raises(RuntimeError):
+        client.put("/steering/house-style", json={"body": "REPLACED\n"})
+    assert (templates_dir / "steering" / "house-style.md").read_text() == "prefer stdlib\n"
+
+
+def test_a_refused_steering_save_never_writes_the_real_file(client, templates_dir):
+    """Not "writes it and puts it back" — never writes it. Asserted by watching
+    the path itself rather than its final contents, which a rollback also
+    satisfies."""
+    steering = _steering_dir(templates_dir)
+    (steering / "big.md").write_text("small\n")
+    registry = yaml.safe_load((templates_dir / "registry.yaml").read_text())
+    registry["hooks"]["on.implementation.start"]["steering"] = ["big"]
+    (templates_dir / "registry.yaml").write_text(yaml.safe_dump(registry))
+    client.put("/registry", json={"hooks": registry["hooks"]})
+
+    target = steering / "big.md"
+    before = target.stat().st_mtime_ns
+    assert (
+        client.put("/steering/big", json={"body": "x" * (steering_mod.MAX_BYTES + 1)}).status_code
+        == 422
+    )
+    assert target.read_text() == "small\n"
+    assert target.stat().st_mtime_ns == before, "the real file was written and then put back"
+
+
+def test_get_intake_reads_the_file_not_the_cached_state(client, templates_dir):
+    """`intake.yaml` was hand-edited until this screen existed, so the screen
+    has to show what is on disk. Returning `app.state` hides an edit made since
+    boot, and the next save silently overwrites it."""
+    (templates_dir / "intake.yaml").write_text(
+        "enabled: false\ninterval_s: 900\nmax_concurrent: 4\npriority_ceiling: 1\nrepos: []\n"
+    )
+    body = client.get("/intake").json()
+    assert body["interval_s"] == 900
+    assert body["max_concurrent"] == 4
+
+
+def test_saving_steering_reloads_nothing(client, templates_dir, monkeypatch):
+    """No `app.state` holds steering bodies — they are read from disk at
+    dispatch — so a reload here is dead code that tells the next reader state
+    caches them."""
+    called = []
+    monkeypatch.setattr(api_mod, "_reload_templates", lambda st: called.append(True))
+    assert client.put("/steering/fresh", json={"body": "hi\n"}).status_code == 200
+    assert called == []
+
+
+def test_a_stray_unreadable_entry_does_not_break_an_unrelated_save(client, templates_dir):
+    """`$KRAFT_HOME/templates/steering/` is hand-editable, so it can hold things
+    that are not readable files. Copying the directory to validate against must
+    not turn one of those into a 500 on every save of every other file — the old
+    write-then-rollback never touched entries nothing referenced.
+    """
+    steering = _steering_dir(templates_dir)
+    (steering / "dangling.md").symlink_to(steering / "nothing-here.md")
+    (steering / "adirectory.md").mkdir()
+
+    assert client.put("/steering/house-style", json={"body": "prefer stdlib\n"}).status_code == 200
+    assert (steering / "house-style.md").read_text() == "prefer stdlib\n"
+
+
+def test_a_delete_referenced_only_by_repos_yaml_is_refused(tmp_path, client, templates_dir):
+    """The registry is one of two files that name steering; `repos.yaml` is the
+    other, and only the registry leg was covered."""
+    (_steering_dir(templates_dir) / "house-style.md").write_text("prefer stdlib\n")
+    repo = make_repo(tmp_path)
+    assert client.post("/repos", json={"path": str(repo)}).status_code == 201
+    repos = yaml.safe_load((templates_dir / "repos.yaml").read_text())
+    repos["repos"][0]["steering"] = ["house-style"]
+    config.write_yaml(templates_dir / "repos.yaml", repos)
+
+    assert client.delete("/steering/house-style").status_code == 422
+    assert (templates_dir / "steering" / "house-style.md").is_file()
+
+    # and once nothing names it, the same delete goes through
+    repos["repos"][0].pop("steering")
+    config.write_yaml(templates_dir / "repos.yaml", repos)
+    assert client.delete("/steering/house-style").status_code == 200
+    assert not (templates_dir / "steering" / "house-style.md").exists()

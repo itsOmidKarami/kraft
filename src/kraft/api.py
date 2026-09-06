@@ -95,8 +95,8 @@ async def lifespan(app: FastAPI):
     # Config the Settings screens edit. Read once here and re-read on every save,
     # so a hand edit and a UI edit are the same operation to the rest of the app.
     access = config_mod.load_access(templates_dir / "access.yaml")
-    # No Settings screen edits this file by design, so a hand-edit typo has no UI
-    # to fix it from. Degrade to the default — off — instead of refusing to boot.
+    # A hand-edit typo must not refuse the boot: degrade to the default — off —
+    # so Settings → Auto-intake comes up and can be used to fix the file.
     try:
         app.state.intake = config_mod.load_intake(templates_dir / "intake.yaml")
     except config_mod.ConfigError as exc:
@@ -1597,21 +1597,48 @@ def _steering_dir(st) -> Path:
     return st.templates_dir / "steering"
 
 
-def _revalidate_steering(st) -> None:
-    """Re-run the loaders that resolve steering names, or raise HTTPException.
+def _check_steering_change(st, name: str, body: str | None) -> None:
+    """Would the configs still load with this change applied? Raise if not.
 
-    Names are resolved at config-load time, not at write time, so the file the
-    operator just edited is only half the question: `registry.yaml` and
-    `repos.yaml` name it, and a body that pushes an assembled block past the
-    injection budget -- or a delete that orphans a name -- breaks a launch that
-    is nowhere near this screen.
+    Names resolve at config-load time, not at write time, so the edited file is
+    only half the question: `registry.yaml` and `repos.yaml` name it, and a body
+    that pushes an assembled block past the injection budget -- or a delete that
+    orphans a name -- breaks a launch nowhere near this screen.
+
+    Checked against a scratch *copy* of the steering directory with the change
+    applied (`body=None` means the delete), never by writing the real file and
+    undoing it after. Agent dispatch reads these files straight off disk, so the
+    real directory must never be briefly wrong -- and an undo only undoes the
+    failures it anticipated. Note the inversion versus `_validate_repos`: there
+    the config is the candidate and the steering dir is real; here it is the
+    other way round, which is why both loaders take a `steering_dir`.
     """
-    steering_dir = _steering_dir(st)
-    try:
-        load_registry(st.templates_dir / "registry.yaml", steering_dir=steering_dir)
-        config_mod.load_repos(_repos_path(st), steering_dir=steering_dir)
-    except (RegistryError, config_mod.ConfigError) as exc:
-        raise HTTPException(422, str(exc)) from exc
+    real = _steering_dir(st)
+    with tempfile.TemporaryDirectory() as tmp:
+        scratch = Path(tmp)
+        if real.is_dir():
+            for src in real.glob("*.md"):
+                try:
+                    shutil.copy2(src, scratch / src.name)
+                except OSError:
+                    # This directory is hand-editable, so it can hold a broken
+                    # symlink, an unreadable file, or a directory named *.md.
+                    # Skip it rather than failing the save: if a config
+                    # references it, the loaders below reject the save with a
+                    # message naming it; if nothing does, it is none of this
+                    # save's business, and the write path it replaced never
+                    # touched unreferenced entries either.
+                    continue
+        target = scratch / f"{name}.md"
+        if body is None:
+            target.unlink(missing_ok=True)
+        else:
+            target.write_text(body)
+        try:
+            load_registry(st.templates_dir / "registry.yaml", steering_dir=scratch)
+            config_mod.load_repos(_repos_path(st), steering_dir=scratch)
+        except (RegistryError, config_mod.ConfigError) as exc:
+            raise HTTPException(422, str(exc)) from exc
 
 
 @app.get("/steering")
@@ -1655,21 +1682,11 @@ async def put_steering(name: str, body: SteeringBody, request: Request):
         path = steering_mod.path_for(steering_dir, name, where="steering")
     except steering_mod.SteeringError as exc:
         raise HTTPException(400, str(exc)) from exc
-    steering_dir.mkdir(parents=True, exist_ok=True)
-    previous = path.read_text() if path.is_file() else None
-    path.write_text(body.body)
-    try:
-        # After the write, not against a scratch copy: `validate` resolves names
-        # against the real steering directory by design, so the only honest way
-        # to ask "would the config still load" is to make it true first.
-        _revalidate_steering(st)
-    except HTTPException:
-        if previous is None:
-            path.unlink(missing_ok=True)
-        else:
-            path.write_text(previous)
-        raise
-    _reload_templates(st)
+    _check_steering_change(st, name, body.body)
+    config_mod.write_text(path, body.body)
+    # Nothing to reload: no `app.state` holds steering bodies. They are read
+    # from disk at dispatch, and `resolve_invocation` re-checks the assembled
+    # budget at every launch, so the next agent picks this up on its own.
     return {"name": name, "body": body.body}
 
 
@@ -1682,14 +1699,8 @@ async def delete_steering(name: str, request: Request):
         raise HTTPException(400, str(exc)) from exc
     if not path.is_file():
         raise HTTPException(404, f"unknown steering file {name!r}")
-    previous = path.read_text()
+    _check_steering_change(st, name, None)
     path.unlink()
-    try:
-        _revalidate_steering(st)
-    except HTTPException:
-        path.write_text(previous)
-        raise
-    _reload_templates(st)
     return {"deleted": name}
 
 
@@ -1710,7 +1721,16 @@ class IntakeBody(BaseModel):
 
 @app.get("/intake")
 async def get_intake(request: Request):
-    return request.app.state.intake
+    """From disk, like `GET /policy`. `intake.yaml` was hand-edited until this
+    screen existed, so returning the cached state would hide an edit made since
+    boot and let the next save overwrite it silently."""
+    st = request.app.state
+    try:
+        return config_mod.load_intake(st.templates_dir / "intake.yaml")
+    except config_mod.ConfigError:
+        # Unreadable: show what the instance is actually running on, which
+        # lifespan already degraded to the defaults. Saving replaces the file.
+        return st.intake
 
 
 @app.put("/intake")

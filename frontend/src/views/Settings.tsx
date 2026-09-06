@@ -728,7 +728,11 @@ function SteeringPage() {
     }
   };
 
-  const used = list.files.reduce((n, f) => n + (f.bytes ?? 0), 0);
+  // This file's own size, not a total across the directory: MAX_BYTES is the
+  // assembled budget of one repo or hook's steering list, so summing unrelated
+  // files reads as over budget when nothing is, and under it when something is.
+  // Advisory only — the server checks the real assembled total on save.
+  const draftBytes = new TextEncoder().encode(draft).length;
 
   return (
     <>
@@ -791,7 +795,8 @@ function SteeringPage() {
                 </button>
                 <span className="save-hint">
                   {message ??
-                    `${used} of ${list.max_bytes} B used across every steering file`}
+                    `${draftBytes} B · counts toward the ${list.max_bytes} B assembled ` +
+                      `budget of any repo or hook that references this file`}
                 </span>
               </div>
             </>
