@@ -98,8 +98,69 @@ def test_bare_kraft_still_serves(monkeypatch):
     assert served == [True]
 
 
-def test_unknown_subcommand_exits_with_a_usable_message(monkeypatch):
+def test_unknown_subcommand_exits_with_a_usable_message(monkeypatch, capsys):
+    """argparse owns usage errors now: exit 2, message on stderr, naming the verb."""
     monkeypatch.setattr(cli, "_serve", lambda: pytest.fail("must not serve"))
     with pytest.raises(SystemExit) as exc:
         cli.main(["wat"])
-    assert "wat" in str(exc.value)
+    assert exc.value.code == 2
+    assert "wat" in capsys.readouterr().err
+
+
+def _servable_home(monkeypatch, tmp_path, access_yaml: str) -> Path:
+    """A templates dir that already exists, so _serve() skips seeding."""
+    home = tmp_path / "templates"
+    home.mkdir()
+    (home / "access.yaml").write_text(access_yaml)
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(home))
+    # setenv, not delenv: `kraft serve --host` writes KRAFT_HOST into os.environ,
+    # and monkeypatch records no undo for a delenv of a variable that was absent —
+    # so a delenv here would let that write leak into every later test.
+    monkeypatch.setenv("KRAFT_HOST", "")
+    monkeypatch.setenv("KRAFT_PORT", "")
+    return home
+
+
+def test_serve_verb_reaches_uvicorn_with_the_configured_bind(monkeypatch, tmp_path):
+    _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
+    seen = {}
+    monkeypatch.setattr(cli.uvicorn, "run", lambda app, **kw: seen.update(kw))
+    cli.main(["serve"])
+    assert seen["host"] == "127.0.0.1"
+    assert seen["port"] == 8765
+
+
+def test_serve_flags_override_access_yaml(monkeypatch, tmp_path):
+    _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
+    seen = {}
+    monkeypatch.setattr(cli.uvicorn, "run", lambda app, **kw: seen.update(kw))
+    cli.main(["serve", "--port", "9001"])
+    assert seen["port"] == 9001
+    assert seen["host"] == "127.0.0.1"  # untouched: only the flag given changes
+
+
+def test_serve_flag_beats_env(monkeypatch, tmp_path):
+    _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
+    monkeypatch.setenv("KRAFT_PORT", "9002")
+    seen = {}
+    monkeypatch.setattr(cli.uvicorn, "run", lambda app, **kw: seen.update(kw))
+    cli.main(["serve", "--port", "9003"])
+    assert seen["port"] == 9003
+
+
+def test_serve_host_flag_cannot_bypass_the_password_check(monkeypatch, tmp_path):
+    """The security regression test for this sub-project. A flag must not be a
+    way around a check an env var respects."""
+    _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
+    monkeypatch.setattr(cli.uvicorn, "run", lambda app, **kw: pytest.fail("must not bind"))
+    with pytest.raises(SystemExit, match="refusing to bind 0.0.0.0"):
+        cli.main(["serve", "--host", "0.0.0.0"])
+
+
+def test_bare_kraft_and_kraft_serve_are_the_same_path(monkeypatch, tmp_path):
+    _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
+    calls = []
+    monkeypatch.setattr(cli.uvicorn, "run", lambda app, **kw: calls.append(kw))
+    cli.main([])
+    cli.main(["serve"])
+    assert calls[0] == calls[1]

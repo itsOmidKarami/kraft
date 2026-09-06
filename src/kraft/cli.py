@@ -6,6 +6,9 @@ checkout and an install can only ever differ in where their paths point.
 
 from __future__ import annotations
 
+import argparse
+import asyncio
+import json
 import os
 import shutil
 import sys
@@ -13,7 +16,7 @@ from pathlib import Path
 
 import uvicorn
 
-from kraft import config
+from kraft import client, config, render
 from kraft.paths import BUNDLED, default_templates_dir
 
 
@@ -71,27 +74,492 @@ def _serve() -> None:
     uvicorn.run("kraft.api:app", host=host, port=port, log_level="warning")
 
 
-def main(argv: list[str] | None = None) -> None:
-    """Bare `kraft` serves, as it always has. Subcommands are the agent surface.
+def emit(value, renderer, as_json: bool) -> None:
+    """One place decides human-or-JSON, so no verb can forget the contract.
 
-    argparse is deliberately not used: serving must stay the zero-argument
-    default, and one string compare is the whole dispatch.
+    `--json` prints exactly what `client.py` returned. The CLI must never become
+    a second definition of what a work item is — the MCP door reads the same
+    value, and the two are only guaranteed identical if neither reshapes.
+    """
+    if as_json:
+        print(json.dumps(value, indent=2))
+    else:
+        print(renderer(value))
+
+
+def _json_flag() -> argparse.ArgumentParser:
+    """A parent parser so `--json` works on every verb without eight copies."""
+    parent = argparse.ArgumentParser(add_help=False)
+    parent.add_argument(
+        "--json", action="store_true", help="print the raw API payload instead of a table"
+    )
+    return parent
+
+
+def _cmd_serve(ns: argparse.Namespace) -> None:
+    """The same path as bare `kraft`, with two flags on top.
+
+    The flags become the env vars `_bind()` already reads, so there is one
+    precedence chain (flag > env > access.yaml) and one place that refuses a
+    LAN bind without a password. Setting the env rather than passing arguments
+    through is deliberate: a second signature would be a second place for that
+    check to be forgotten.
+    """
+    if ns.host:
+        os.environ["KRAFT_HOST"] = ns.host
+    if ns.port:
+        os.environ["KRAFT_PORT"] = str(ns.port)
+    _serve()
+
+
+def _render_health(payload: dict) -> str:
+    return render.health_block(payload)
+
+
+def _cmd_health(ns: argparse.Namespace) -> None:
+    payload = asyncio.run(client.health())
+    emit(payload, _render_health, ns.json)
+    if payload.get("status") != "ok":
+        # exit 1 so `kraft health && ...` works; the reasons are already on stdout
+        raise SystemExit(1)
+
+
+def _render_reindex(result: dict) -> str:
+    scope = result.get("repo") or "all repos"
+    counts = ", ".join(f"{k} {v}" for k, v in result.get("stats", {}).items())
+    return f"reindexed {scope}: {counts}"
+
+
+def _cmd_reindex(ns: argparse.Namespace) -> None:
+    emit(asyncio.run(client.reindex(ns.repo)), _render_reindex, ns.json)
+
+
+def _cmd_mcp(ns: argparse.Namespace) -> None:
+    from kraft.mcp import serve_stdio
+
+    serve_stdio()
+
+
+def _cmd_init(ns: argparse.Namespace) -> None:
+    from kraft.init import install
+
+    for path in install(repo_scope=ns.repo):
+        print(f"kraft: wrote {path}")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="kraft",
+        description="Kraft: run it with no arguments to serve; subcommands talk to a server.",
+    )
+    subs = parser.add_subparsers(dest="verb", required=True)
+    common = _json_flag()
+
+    serve = subs.add_parser("serve", help="run the server (the same as bare `kraft`)")
+    serve.add_argument("--host", help="bind address (default: access.yaml, or KRAFT_HOST)")
+    serve.add_argument("--port", type=int, help="port (default: access.yaml, or KRAFT_PORT)")
+    serve.set_defaults(func=_cmd_serve)
+
+    mcp = subs.add_parser("mcp", help="serve the MCP tools over stdio")
+    mcp.set_defaults(func=_cmd_mcp)
+
+    init = subs.add_parser("init", help="register Kraft's MCP server and skills with an agent")
+    init.add_argument("--repo", action="store_true", help="install into this repo, not the user")
+    init.set_defaults(func=_cmd_init)
+
+    _add_verbs(subs, common)
+    return parser
+
+
+_LIST_COLUMNS = [
+    ("ID", "id"),
+    ("STATUS", "status"),
+    ("GATE", "pending_gate"),
+    ("NODE", "current_node_id"),
+    ("TITLE", "title"),
+]
+
+
+def _render_list(items: list[dict]) -> str:
+    painted = [
+        {
+            **item,
+            "status": render.paint(item["status"], render.STATUS_COLORS.get(item["status"], "")),
+        }
+        for item in items
+    ]
+    return render.table(painted, _LIST_COLUMNS)
+
+
+def _render_show(item: dict) -> str:
+    return render.kv([(key, str(value)) for key, value in item.items()])
+
+
+def _render_search(payload: dict) -> str:
+    rows = [
+        {"kind": hit.get("kind"), "repo": hit.get("repo"), "path": hit.get("path")}
+        for hit in payload.get("results", [])
+    ]
+    return render.table(rows, [("KIND", "kind"), ("REPO", "repo"), ("PATH", "path")])
+
+
+def _render_action(result: dict) -> str:
+    """An act response is small and shapeless; a kv block beats inventing a table."""
+    return render.kv([(key, str(value)) for key, value in result.items()]) or "ok"
+
+
+def _repo_scope(ns: argparse.Namespace) -> str | None:
+    """Explicit --repo, then the cwd's connected repo, then nothing.
+
+    The one precedence rule every verb shares. `--all` opts out of the implicit
+    half, for when the scoping is what surprised you.
+    """
+    if getattr(ns, "all", False):
+        return None
+    if getattr(ns, "repo", None):
+        return ns.repo
+    return asyncio.run(client.resolve_repo())
+
+
+def _cmd_list(ns: argparse.Namespace) -> None:
+    repo = _repo_scope(ns)
+    items = asyncio.run(client.list_work_items(ns.status))
+    if repo:
+        items = [item for item in items if item["repo"] == repo]
+    emit(items, _render_list, ns.json)
+
+
+def _cmd_show(ns: argparse.Namespace) -> None:
+    emit(asyncio.run(client.get_work_item(ns.id)), _render_show, ns.json)
+
+
+def _cmd_search(ns: argparse.Namespace) -> None:
+    emit(asyncio.run(client.search(ns.query, ns.limit)), _render_search, ns.json)
+
+
+def _cmd_create(ns: argparse.Namespace) -> None:
+    emit(
+        asyncio.run(client.create_work_item(ns.title, _repo_scope(ns), ns.chain)),
+        _render_action,
+        ns.json,
+    )
+
+
+def _cmd_approve(ns: argparse.Namespace) -> None:
+    emit(asyncio.run(client.approve_gate(ns.gate, ns.id)), _render_action, ns.json)
+
+
+def _cmd_reject(ns: argparse.Namespace) -> None:
+    emit(asyncio.run(client.reject_gate(ns.note, ns.gate, ns.id)), _render_action, ns.json)
+
+
+def _cmd_pause(ns: argparse.Namespace) -> None:
+    emit(asyncio.run(client.pause(ns.id)), _render_action, ns.json)
+
+
+def _cmd_resume(ns: argparse.Namespace) -> None:
+    emit(asyncio.run(client.resume(ns.steer, ns.id)), _render_action, ns.json)
+
+
+def _print_log(entry: dict, as_json: bool) -> None:
+    """NDJSON under --json: one object per line, because a stream has no end to
+    close an array on. `flush` because a follow that buffers is not a follow."""
+    print(json.dumps(entry) if as_json else render.log_line(entry), flush=True)
+
+
+def _cmd_logs(ns: argparse.Namespace) -> None:
+    async def run() -> None:
+        session_id = ns.session or (await client.latest_session(ns.id))["id"]
+        payload = await client._get(f"/worker-sessions/{session_id}/log", format="jsonl")
+        lines = payload.get("lines", [])
+        # `-n 0` means none, so the slice cannot be guarded by truthiness
+        lines = lines[-ns.n :] if ns.n else []
+        for entry in lines:
+            _print_log(entry, ns.json)
+        if ns.follow:
+            seen = lines[-1]["n"] + 1 if lines else 0
+            async for entry in client.stream_log(session_id, after_line=seen):
+                _print_log(entry, ns.json)
+
+    asyncio.run(run())
+
+
+def _cmd_events(ns: argparse.Namespace) -> None:
+    rows = asyncio.run(client.events(ns.id, ns.after))
+    if ns.type:
+        rows = [row for row in rows if row.get("type") == ns.type]
+    emit(rows, render.event_line, ns.json)
+
+
+def _cmd_watch(ns: argparse.Namespace) -> None:
+    if ns.json:
+        raise ValueError(
+            "watch has no --json; use `kraft events --json` to stream structured output"
+        )
+    if not sys.stdout.isatty():
+        raise ValueError("watch needs a terminal to redraw in — try `kraft events` in a pipe")
+
+    async def run() -> None:
+        repo = ns.repo or await client.resolve_repo()
+        drawn = 0
+
+        async def frame(drawn: int) -> tuple[int, int]:
+            """Draw the board, and report the event cursor it reflects.
+
+            The cursor comes back with the board so the stream can start from
+            *now*: connecting at seq 0 would replay every event the server has
+            ever committed, redrawing the board once per historical row.
+            """
+            payload = await client._get("/work-items")
+            items = client.trim_work_items(payload["items"])
+            if repo:
+                items = [item for item in items if item["repo"] == repo]
+            return render.redraw(_render_list(items), drawn), payload["cursor"]
+
+        drawn, cursor = await frame(drawn)
+        async for _event in client.stream_events(cursor):
+            drawn, cursor = await frame(drawn)
+
+    try:
+        asyncio.run(run())
+    except KeyboardInterrupt:
+        pass  # the frame stays on screen; that is the point of not using an alt screen
+
+
+_DOC_COLUMNS = [("ID", "document_id"), ("KIND", "kind"), ("TITLE", "title"), ("PATH", "path")]
+
+
+def _render_docs(rows: list[dict]) -> str:
+    return render.table(rows, _DOC_COLUMNS)
+
+
+def _cmd_diff(ns: argparse.Namespace) -> None:
+    payload = asyncio.run(client.diff(ns.id))
+    if ns.json:
+        emit(payload, str, True)
+        return
+    if ns.name_only:
+        if payload.get("base_ref") is None:
+            # empty and unknown are different answers, in every view
+            print("no baseline recorded for this work item")
+            return
+        paths = [f["path"] for f in payload.get("files", [])] + list(payload.get("untracked", []))
+        print("\n".join(paths))
+        return
+    text = render.diff_stat(payload) if ns.stat else render.diff_body(payload)
+    render.page(text, force_plain=ns.no_pager)
+
+
+def _cmd_docs(ns: argparse.Namespace) -> None:
+    emit(asyncio.run(client.documents(ns.id)), _render_docs, ns.json)
+
+
+def _cmd_doc(ns: argparse.Namespace) -> None:
+    if ns.open is not None:
+        editor = ns.open or None  # `--open` alone means the server's default
+        result = asyncio.run(client.open_document(ns.doc_id, editor))
+        emit(result, _render_action, ns.json)
+        return
+    doc = asyncio.run(client.document(ns.doc_id))
+    if ns.json:
+        emit(doc, str, True)
+        return
+    render.page(doc.get("content", ""), force_plain=ns.no_pager)
+
+
+_REPO_COLUMNS = [
+    ("", "here"),
+    ("NAME", "name"),
+    ("CHAIN", "default_chain_template"),
+    ("PATH", "path"),
+]
+
+#: Printed by `kraft path --shell`. A subprocess cannot change its parent's
+#: directory, so the real `cd` has to be a function in the user's shell.
+SHELL_WRAPPER = """\
+# Add to ~/.zshrc or ~/.bashrc:
+kcd() { cd "$(kraft path "$@")" || return; }
+"""
+
+
+def _render_repos(rows: list[dict], here: str | None) -> str:
+    """The cwd's repo gets a `*` in the first column: it is the answer to "why
+    did my last command pick that repo"."""
+    shaped = [
+        {
+            **row,
+            "here": "*" if row["path"] == here else " ",
+            "name": row["name"]
+            if row.get("enabled", True)
+            else render.paint(row["name"], render.DIM),
+        }
+        for row in rows
+    ]
+    return render.table(shaped, _REPO_COLUMNS)
+
+
+def _cmd_repos(ns: argparse.Namespace) -> None:
+    async def run():
+        return await client.repos(), await client.resolve_repo()
+
+    rows, here = asyncio.run(run())
+    emit(rows, lambda value: _render_repos(value, here), ns.json)
+
+
+def _cmd_connect(ns: argparse.Namespace) -> None:
+    result = asyncio.run(client.ensure_repo(ns.path))
+    if ns.json:
+        emit(result, str, True)
+        return
+    verb = "already connected" if result.get("already_connected") else "connected"
+    print(f"{verb}: {result['path']}")
+
+
+def _cmd_path(ns: argparse.Namespace) -> None:
+    if ns.shell:
+        print(SHELL_WRAPPER, end="")
+        return
+    item = asyncio.run(client.get_work_item(ns.id))
+    # exactly one line: this is consumed by cd "$(kraft path ID)"
+    print(item["worktree_path"])
+
+
+def _cmd_open(ns: argparse.Namespace) -> None:
+    emit(asyncio.run(client.open_worktree(ns.id, ns.editor)), _render_action, ns.json)
+
+
+def _add_verbs(subs, common: argparse.ArgumentParser) -> None:
+    """The verbs that talk to a running server. Split out so the framework has
+    one seam the later CLI sub-projects extend."""
+    listing = subs.add_parser("list", parents=[common], help="the board")
+    listing.add_argument("--status", help="active, needs_human, paused or completed")
+    listing.add_argument("--repo", help="only this repo (default: the repo you are standing in)")
+    listing.add_argument("--all", action="store_true", help="every repo, ignoring the cwd")
+    listing.set_defaults(func=_cmd_list)
+
+    show = subs.add_parser("show", parents=[common], help="one work item")
+    show.add_argument("id", nargs="?", help="default: the work item this session is standing in")
+    show.set_defaults(func=_cmd_show)
+
+    search = subs.add_parser("search", parents=[common], help="specs, plans and session summaries")
+    search.add_argument("query")
+    search.add_argument("--limit", type=int, default=20)
+    search.set_defaults(func=_cmd_search)
+
+    create = subs.add_parser("create", parents=[common], help="file a work item (starts paused)")
+    create.add_argument("title")
+    create.add_argument("--repo", help="default: the repo you are standing in")
+    create.add_argument("--chain", default="quick-task", help="chain template (default quick-task)")
+    create.set_defaults(func=_cmd_create, all=False)
+
+    approve = subs.add_parser("approve", parents=[common], help="approve the pending gate")
+    approve.add_argument("id", nargs="?")
+    approve.add_argument("--gate", help="default: whichever gate is pending")
+    approve.set_defaults(func=_cmd_approve)
+
+    reject = subs.add_parser("reject", parents=[common], help="reject the pending gate")
+    reject.add_argument("id", nargs="?")
+    reject.add_argument("--note", required=True, help="what is wrong; a rejection needs a reason")
+    reject.add_argument("--gate", help="default: whichever gate is pending")
+    reject.set_defaults(func=_cmd_reject)
+
+    pause = subs.add_parser("pause", parents=[common], help="stop the running attempt")
+    pause.add_argument("id", nargs="?")
+    pause.set_defaults(func=_cmd_pause)
+
+    resume = subs.add_parser("resume", parents=[common], help="start or restart a paused item")
+    resume.add_argument("id", nargs="?")
+    resume.add_argument("--steer", help="carried into the next attempt's prompt")
+    resume.set_defaults(func=_cmd_resume)
+
+    logs = subs.add_parser("logs", parents=[common], help="a worker session's log")
+    logs.add_argument("id", nargs="?", help="default: the work item you are standing in")
+    logs.add_argument("-f", "--follow", action="store_true", help="follow until the session stops")
+    logs.add_argument("--session", help="default: the most recent session of the work item")
+    logs.add_argument(
+        "-n", type=int, default=50, help="backlog lines before following (0 for none)"
+    )
+    logs.set_defaults(func=_cmd_logs)
+
+    events_p = subs.add_parser("events", parents=[common], help="the chain's own history")
+    events_p.add_argument("id", nargs="?")
+    events_p.add_argument("--after", type=int, default=0, help="only events after this seq")
+    events_p.add_argument("--type", help="only this event type")
+    events_p.set_defaults(func=_cmd_events)
+
+    watch = subs.add_parser("watch", parents=[common], help="a live board, redrawn on each event")
+    watch.add_argument("--repo", help="default: the repo you are standing in")
+    watch.set_defaults(func=_cmd_watch, all=False)
+
+    diff = subs.add_parser("diff", parents=[common], help="what the agent changed")
+    diff.add_argument("id", nargs="?")
+    diff.add_argument("--stat", action="store_true", help="per-file counts only")
+    diff.add_argument("--name-only", action="store_true", help="changed and untracked paths")
+    diff.add_argument("--no-pager", action="store_true")
+    diff.set_defaults(func=_cmd_diff)
+
+    docs = subs.add_parser("docs", parents=[common], help="documents linked to a work item")
+    docs.add_argument("id", nargs="?")
+    docs.set_defaults(func=_cmd_docs)
+
+    doc = subs.add_parser("doc", parents=[common], help="print one document, or open it")
+    doc.add_argument("doc_id")
+    doc.add_argument(
+        "--open",
+        nargs="?",
+        const="",
+        metavar="EDITOR",
+        help="open in an editor on the server (code, cursor, zed, obsidian; default: system)",
+    )
+    doc.add_argument("--no-pager", action="store_true")
+    doc.set_defaults(func=_cmd_doc)
+
+    repos = subs.add_parser("repos", parents=[common], help="connected repositories")
+    repos.set_defaults(func=_cmd_repos)
+
+    connect = subs.add_parser("connect", parents=[common], help="connect a repo (idempotent)")
+    connect.add_argument("path", nargs="?", help="default: the current directory")
+    connect.set_defaults(func=_cmd_connect)
+
+    path = subs.add_parser(
+        "path", aliases=["cd"], parents=[common], help="print a work item's worktree path"
+    )
+    path.add_argument("id", nargs="?")
+    path.add_argument("--shell", action="store_true", help="print a shell function that cds")
+    path.set_defaults(func=_cmd_path)
+
+    open_p = subs.add_parser("open", parents=[common], help="open the worktree in an editor")
+    open_p.add_argument("id", nargs="?")
+    open_p.add_argument("--editor", help="code, cursor, zed, obsidian (default: system)")
+    open_p.set_defaults(func=_cmd_open)
+
+    health = subs.add_parser("health", parents=[common], help="the server's own status")
+    health.set_defaults(func=_cmd_health)
+
+    reindex = subs.add_parser("reindex", parents=[common], help="rescan documents into the index")
+    reindex.add_argument("--repo", help="one repo path (default: all)")
+    reindex.set_defaults(func=_cmd_reindex)
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Bare `kraft` serves, as it always has. Subcommands are the two front doors.
+
+    The zero-argument check happens before argparse sees anything: serving must
+    stay the default, and argparse would print usage for an empty argv. (This
+    file used to avoid argparse entirely, on the grounds that one string compare
+    was the whole dispatch. That stopped being true at eight verbs with flags.)
     """
     args = sys.argv[1:] if argv is None else list(argv)
     if not args:
         _serve()
         return
-    if args[0] == "mcp":
-        from kraft.mcp import serve_stdio
-
-        serve_stdio()
-        return
-    if args[0] == "init":
-        from kraft.init import install
-
-        for path in install(repo_scope="--repo" in args[1:]):
-            print(f"kraft: wrote {path}")
-        return
-    raise SystemExit(
-        f"kraft: unknown command {args[0]!r} (try `kraft`, `kraft mcp`, or `kraft init`)"
-    )
+    ns = build_parser().parse_args(args)
+    try:
+        ns.func(ns)
+    except (ValueError, PermissionError) as exc:
+        # ValueError is what client.py raises for every API and context failure;
+        # PermissionError is the worker self-action guard.
+        print(f"kraft: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+    except KeyboardInterrupt:
+        raise SystemExit(130) from None
