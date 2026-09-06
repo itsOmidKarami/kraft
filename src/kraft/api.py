@@ -731,6 +731,8 @@ async def get_work_item_diff(wid: str, request: Request):
             "diff": "",
             "untracked": [],
             "truncated": False,
+            "diff_max_bytes": DIFF_MAX_BYTES,
+            "worktree_path": str(st.run_dirs.worktrees / wid),
         }
     worktree = st.run_dirs.worktrees / wid
     if not worktree.is_dir():
@@ -753,6 +755,12 @@ async def get_work_item_diff(wid: str, request: Request):
         "diff": diff,
         "untracked": change.untracked,
         "truncated": truncated,
+        # A reviewer told the diff is partial and not told how much is missing
+        # or where the rest is has been given half a warning (spec F §2.2).
+        # `worktree_path` is no new disclosure: GET /work-items/{wid} has always
+        # returned it, to the same authenticated caller.
+        "diff_max_bytes": DIFF_MAX_BYTES,
+        "worktree_path": str(worktree),
     }
 
 

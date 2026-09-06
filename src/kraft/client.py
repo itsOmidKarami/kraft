@@ -232,6 +232,23 @@ async def events(work_item_id: str | None = None, after_seq: int = 0) -> list[di
     return await _get(f"/work-items/{await _target(work_item_id)}/events", after_seq=after_seq)
 
 
+async def log_backlog(session_id: str, limit: int | None = None) -> list[dict]:
+    """The lines already written to one worker session's log, oldest first.
+
+    Here rather than in `cli.py` because this module is the only one that is
+    supposed to know an API path — and because the MCP door reads a backlog the
+    same way, which it could not do without copying the request.
+
+    `limit` is `None` for everything and `0` for none; `0` cannot be spelled as
+    a falsy "no limit", which is the bug the slice invites.
+    """
+    payload = await _get(f"/worker-sessions/{session_id}/log", format="jsonl")
+    lines = payload.get("lines", [])
+    if limit is None:
+        return lines
+    return lines[-limit:] if limit > 0 else []
+
+
 async def stream_log(session_id: str, after_line: int = 0) -> AsyncIterator[dict]:
     """Follow one worker session's log until the session stops.
 
@@ -393,10 +410,13 @@ async def create_work_item(
         work_item_id, _origin = resolve_context()
         if work_item_id is not None:
             repo = (await get_work_item(work_item_id)).get("repo")
+    if repo is None:
+        # The cwd's connected repo, which is what `_repo_scope` already resolves
+        # for the CLI door. Doing it here too means both doors agree, and that
+        # the error below only fires when there really is no repo to find.
+        repo = await resolve_repo()
     if not repo:
-        raise ValueError(
-            "no repo: pass one, or run from a Kraft worktree so the repo can be resolved"
-        )
+        raise ValueError(_no_repo_message())
     status, body = await _post(
         "/work-items",
         {"title": title, "repo": repo, "chain_template": chain_template, "autostart": False},
@@ -404,6 +424,27 @@ async def create_work_item(
     if status >= 400:
         raise ValueError(f"kraft {status}: {body.get('detail', body)}")
     return {"id": body["id"], "status": body.get("status", "paused"), "title": title}
+
+
+def _no_repo_message(cwd: Path | None = None) -> str:
+    """Advice that matches the situation, not the API's field list.
+
+    Standing in an ordinary git repo that is simply not connected is the common
+    way to reach this, and "run from a Kraft worktree" is useless advice there —
+    the fix is one `kraft connect` away (spec A §8).
+    """
+    toplevel = config.git_read(
+        cwd or Path.cwd(), "rev-parse", "--show-toplevel", expected_failure=True
+    )
+    if toplevel:
+        return (
+            f"no repo: {toplevel} is a git repo but is not connected to Kraft — "
+            f"connect it with `kraft connect {toplevel}`, or name a repo explicitly"
+        )
+    return (
+        "no repo: name one explicitly, or run from a connected repo or a Kraft worktree "
+        "so it can be resolved"
+    )
 
 
 async def ensure_repo(path: str | None = None) -> dict:

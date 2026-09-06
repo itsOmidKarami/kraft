@@ -8,7 +8,7 @@ import json
 import pytest
 from support.harness import make_repo
 
-from kraft import cli, client
+from kraft import cli, client, render
 
 # `app` fixture: tests/conftest.py (sub-project A Task 4). It wires client.http()
 # to the ASGI app with the lifespan entered per client.
@@ -186,3 +186,38 @@ def test_diff_name_only_without_a_baseline_says_so(app, tmp_path, capsys):
     wid = _make_item(repo)
     cli.main(["diff", wid, "--name-only"])
     assert "no baseline" in capsys.readouterr().out
+
+
+def _truncated_payload(wid, worktree="/tmp/kraft/worktrees/wi-1", **extra):
+    return {
+        "work_item_id": wid,
+        "base_ref": "abc",
+        "files": [{"path": "x.py", "insertions": 1, "deletions": 0}],
+        "diff": "diff --git a/x.py b/x.py\n+hi\n",
+        "untracked": [],
+        "truncated": True,
+        "diff_max_bytes": 1_000_000,
+        "worktree_path": worktree,
+        **extra,
+    }
+
+
+def test_the_truncation_warning_names_the_limit_and_the_worktree(app, tmp_path, capsys):
+    text = render.diff_stat(_truncated_payload("wi-1"))
+    assert "1000000 bytes" in text
+    assert "/tmp/kraft/worktrees/wi-1" in text
+
+
+def test_an_untruncated_diff_says_nothing_about_a_limit(app):
+    payload = _truncated_payload("wi-1")
+    payload["truncated"] = False
+    assert "1000000" not in render.diff_stat(payload)
+
+
+def test_the_diff_api_carries_the_limit_and_the_worktree(app, tmp_path):
+    repo = make_repo(tmp_path)
+    wid = _make_item(repo)
+    payload = asyncio.run(client.diff(wid))
+    # present even when nothing was truncated: the renderer must not have to ask
+    assert payload["diff_max_bytes"] > 0
+    assert payload["worktree_path"].endswith(wid)

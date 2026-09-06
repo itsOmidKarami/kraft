@@ -36,7 +36,8 @@ must not be a way around a security check that an env var respects.
 invalid policy, index counts, reattach summary. Exits `0` on `ok` and `1` on
 `degraded`, so it is usable in a shell conditional.
 
-**`kraft doctor` — deferred, own bead.** Sketched here so the next person does
+**`kraft doctor` — deferred, own bead.** *(Built 2026-09-06; see the
+CLI-F design for what shipped.)* Sketched here so the next person does
 not redesign it from scratch. The checks a human runs when something is wrong,
 in one pass, each line a check and a verdict:
 

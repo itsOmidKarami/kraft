@@ -9,6 +9,7 @@ rather than growing the dispatch table.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -17,6 +18,11 @@ from typing import TextIO
 
 RESET = "\033[0m"
 DIM = "\033[2m"
+
+#: Every escape `paint` can introduce. Column widths are measured with these
+#: removed: a painted cell is ~9 bytes wider than it draws, and measuring the
+#: painted string shears every column to its right (spec F §2.1).
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 #: Status -> ANSI colour. Anything unlisted renders unpainted.
 STATUS_COLORS = {
@@ -43,6 +49,15 @@ def use_color(stream: TextIO | None = None) -> bool:
 
 def paint(text: str, code: str, stream: TextIO | None = None) -> str:
     return f"{code}{text}{RESET}" if code and use_color(stream) else text
+
+
+def strip_ansi(text: str) -> str:
+    return _ANSI.sub("", text)
+
+
+def visible_width(text: str) -> int:
+    """What the cell draws, not what it stores."""
+    return len(strip_ansi(text))
 
 
 def relative_time(iso: str | None, now: datetime | None = None) -> str:
@@ -79,14 +94,16 @@ def table(rows: list[dict], columns: list[tuple[str, str]], width: int | None = 
     width = width or shutil.get_terminal_size((100, 24)).columns
     cells = [[_cell(row.get(key)) for _header, key in columns] for row in rows]
     headers = [header for header, _key in columns]
-    widths = [max(len(headers[i]), *(len(row[i]) for row in cells)) for i in range(len(columns))]
+    widths = [
+        max(len(headers[i]), *(visible_width(row[i]) for row in cells)) for i in range(len(columns))
+    ]
     # the last column gets whatever is left, and is cut to it
     last = max(8, width - sum(widths[:-1]) - 2 * (len(columns) - 1))
     widths[-1] = min(widths[-1], last)
 
     def line(values: list[str]) -> str:
         parts = [
-            _fit(value, widths[i]) if i == len(values) - 1 else value.ljust(widths[i])
+            _fit(value, widths[i]) if i == len(values) - 1 else _pad(value, widths[i])
             for i, value in enumerate(values)
         ]
         return "  ".join(parts).rstrip()
@@ -105,8 +122,21 @@ def _cell(value: object) -> str:
     return "-" if value in (None, "") else str(value)
 
 
+def _pad(value: str, width: int) -> str:
+    """`ljust` that counts what the terminal shows."""
+    return value + " " * max(0, width - visible_width(value))
+
+
 def _fit(value: str, width: int) -> str:
-    return value if len(value) <= width else value[: width - 1] + "…"
+    """Truncate to a visible width, dropping the colour of anything it cuts.
+
+    Slicing a painted string can land inside an escape sequence, and a half-
+    written escape corrupts the rest of the terminal line — every row after it,
+    not just this cell. A correct plain cell beats a coloured broken one.
+    """
+    if visible_width(value) <= width:
+        return value
+    return strip_ansi(value)[: width - 1] + "…"
 
 
 #: Log source -> ANSI colour. stderr is the one a reader is scanning for.
@@ -175,11 +205,16 @@ def _diff_trailer(payload: dict) -> list[str]:
         lines.append(paint("untracked (not in the diff above):", DIM))
         lines.extend(f"  {path}" for path in payload["untracked"])
     if payload.get("truncated"):
+        limit = payload.get("diff_max_bytes")
+        where = payload.get("worktree_path")
         lines.append("")
         lines.append(
             paint(
-                "WARNING: diff truncated by the server at its size limit — "
-                "this is not the whole change. Read the rest in the worktree.",
+                "WARNING: diff truncated by the server at "
+                + (f"{limit} bytes" if limit else "its size limit")
+                + " — this is not the whole change. Read the rest in "
+                + (where or "the worktree")
+                + ".",
                 "\033[33m",
             )
         )
@@ -277,3 +312,23 @@ def health_block(payload: dict) -> str:
     if reattach.get("unknown"):
         pairs.append(("orphaned sessions", ", ".join(reattach["unknown"])))
     return kv(pairs)
+
+
+def doctor_block(rows: list[dict]) -> str:
+    """One line per check: verdict, name, detail. Scannable by the column of
+    verdicts alone — a doctor whose output has to be read word by word is the
+    failure mode spec E §4 names."""
+    width = max((len(row["name"]) for row in rows), default=0)
+    out = []
+    for row in rows:
+        if row.get("skipped"):
+            mark = paint("skip", DIM)
+        else:
+            mark = paint("ok  ", "\033[32m") if row["ok"] else paint("FAIL", "\033[31m")
+        out.append(f"{mark}  {row['name'].ljust(width)}  {row['detail']}".rstrip())
+    failed = sum(1 for row in rows if not row["ok"])
+    out.append("")
+    out.append(
+        f"{failed} of {len(rows)} checks failed" if failed else f"all {len(rows)} checks passed"
+    )
+    return "\n".join(out)
