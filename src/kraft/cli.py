@@ -124,6 +124,16 @@ def _cmd_health(ns: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+def _cmd_doctor(ns: argparse.Namespace) -> None:
+    from kraft import doctor
+
+    rows = asyncio.run(doctor.run_checks())
+    emit(rows, render.doctor_block, ns.json)
+    if any(not row["ok"] for row in rows):
+        # exit 1 so `kraft doctor && ...` works; the failures are already on stdout
+        raise SystemExit(1)
+
+
 def _render_reindex(result: dict) -> str:
     scope = result.get("repo") or "all repos"
     counts = ", ".join(f"{k} {v}" for k, v in result.get("stats", {}).items())
@@ -270,10 +280,7 @@ def _print_log(entry: dict, as_json: bool) -> None:
 def _cmd_logs(ns: argparse.Namespace) -> None:
     async def run() -> None:
         session_id = ns.session or (await client.latest_session(ns.id))["id"]
-        payload = await client._get(f"/worker-sessions/{session_id}/log", format="jsonl")
-        lines = payload.get("lines", [])
-        # `-n 0` means none, so the slice cannot be guarded by truthiness
-        lines = lines[-ns.n :] if ns.n else []
+        lines = await client.log_backlog(session_id, ns.n)
         for entry in lines:
             _print_log(entry, ns.json)
         if ns.follow:
@@ -370,6 +377,7 @@ def _cmd_doc(ns: argparse.Namespace) -> None:
 _REPO_COLUMNS = [
     ("", "here"),
     ("NAME", "name"),
+    ("STATE", "state"),
     ("CHAIN", "default_chain_template"),
     ("PATH", "path"),
 ]
@@ -389,9 +397,12 @@ def _render_repos(rows: list[dict], here: str | None) -> str:
         {
             **row,
             "here": "*" if row["path"] == here else " ",
-            "name": row["name"]
+            # The word, not just dim paint: spec D §3 lists enabled as output,
+            # and paint alone vanishes into a pipe or under NO_COLOR. Dim moves
+            # onto this cell so there is one signal with colour as an accent.
+            "state": "enabled"
             if row.get("enabled", True)
-            else render.paint(row["name"], render.DIM),
+            else render.paint("disabled", render.DIM),
         }
         for row in rows
     ]
@@ -416,6 +427,11 @@ def _cmd_connect(ns: argparse.Namespace) -> None:
 
 
 def _cmd_path(ns: argparse.Namespace) -> None:
+    if ns.json:
+        # Inherited from the shared parent parser, and meaningless here: one bare
+        # line is the contract that makes `cd "$(kraft path ID)"` work. Rejected
+        # rather than ignored, the way `watch` rejects it.
+        raise ValueError("path has no --json; it prints one line — use `kraft show --json`")
     if ns.shell:
         print(SHELL_WRAPPER, end="")
         return
@@ -535,6 +551,11 @@ def _add_verbs(subs, common: argparse.ArgumentParser) -> None:
 
     health = subs.add_parser("health", parents=[common], help="the server's own status")
     health.set_defaults(func=_cmd_health)
+
+    doctor_p = subs.add_parser(
+        "doctor", parents=[common], help="check the whole install, one line per check"
+    )
+    doctor_p.set_defaults(func=_cmd_doctor)
 
     reindex = subs.add_parser("reindex", parents=[common], help="rescan documents into the index")
     reindex.add_argument("--repo", help="one repo path (default: all)")

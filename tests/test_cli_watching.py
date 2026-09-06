@@ -306,3 +306,18 @@ def test_a_closed_event_stream_is_a_kraft_message(app, monkeypatch, capsys):
         cli.main(["watch"])
     assert caught.value.code == 1
     assert "closed the event stream" in capsys.readouterr().err
+
+
+def test_log_backlog_limits_live_in_client(monkeypatch):
+    """The backlog read is `client.py`'s, not the CLI's — the MCP door reads it
+    the same way rather than copying the path (spec F §2.3)."""
+
+    async def fake_get(path, **params):
+        assert path == "/worker-sessions/sess-1/log" and params == {"format": "jsonl"}
+        return {"lines": [{"n": i, "text": f"line{i}"} for i in range(5)]}
+
+    monkeypatch.setattr(client, "_get", fake_get)
+    assert len(asyncio.run(client.log_backlog("sess-1"))) == 5
+    assert [e["n"] for e in asyncio.run(client.log_backlog("sess-1", 2))] == [3, 4]
+    # 0 means none, and must not read as "no limit"
+    assert asyncio.run(client.log_backlog("sess-1", 0)) == []
