@@ -1215,11 +1215,26 @@ async def ws_events(websocket: WebSocket, after_seq: int = 0):
         return
     # HTTP middleware does not run for websockets, so the session check has to be
     # here too — otherwise a LAN bind would leave the live event stream open.
+    #
+    # Both credentials, for the same reason the HTTP middleware takes both: a
+    # browser has a session cookie, and a non-browser client (`kraft watch`, an
+    # agent) has the bearer token from run/. Accepting only the cookie made the
+    # live stream the one endpoint a CLI could not reach.
     if _requires_auth(websocket.app):
-        token = websocket.cookies.get(auth_mod.COOKIE)
-        if not token or not await websocket.app.state.db.write(
-            lambda c, token=token: auth_mod.touch_session(c, token)
-        ):
+        bearer = websocket.headers.get("authorization", "")
+        expected = getattr(websocket.app.state, "mcp_token", None)
+        authorised = bool(
+            expected and bearer.startswith("Bearer ") and hmac.compare_digest(bearer[7:], expected)
+        )
+        if not authorised:
+            token = websocket.cookies.get(auth_mod.COOKIE)
+            authorised = bool(
+                token
+                and await websocket.app.state.db.write(
+                    lambda c, token=token: auth_mod.touch_session(c, token)
+                )
+            )
+        if not authorised:
             await websocket.close(code=1008)
             return
     st = websocket.app.state

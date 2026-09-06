@@ -224,6 +224,57 @@ def test_ws_rejects_cross_site_origin(tmp_path, monkeypatch):
         assert exc.value.code == 1008
 
 
+def _require_auth(client, monkeypatch):
+    """Turn the auth gate on for an in-process app.
+
+    `_requires_auth` keys off the address the process actually bound, so on
+    loopback it is off. Making it true for real would mean binding a test server
+    to 0.0.0.0 — a LAN-visible port for the length of a test run, which is not a
+    trade a test suite should make. The wire protocol is covered by
+    test_ws_events_delivered_under_real_uvicorn; what this asserts is the branch.
+    """
+    state = client.app.state
+    monkeypatch.setattr(state, "bound_host", "10.0.0.5", raising=False)
+    monkeypatch.setattr(state, "access", {**state.access, "password_hash": "x"}, raising=False)
+
+
+def test_ws_events_refuses_a_client_with_no_credential(tmp_path, monkeypatch):
+    with _api_client(tmp_path, monkeypatch) as client:
+        _require_auth(client, monkeypatch)
+        with pytest.raises(WebSocketDisconnect) as exc:
+            with client.websocket_connect("/ws/events"):
+                pass
+        assert exc.value.code == 1008
+
+
+def test_ws_events_accepts_the_mcp_bearer_token(tmp_path, monkeypatch):
+    """Non-browser clients carry a bearer, not a cookie. `kraft watch` is one.
+
+    The HTTP middleware has always accepted this token; the websocket accepting
+    only the session cookie made the live stream the one endpoint a CLI could
+    not reach.
+    """
+    with _api_client(tmp_path, monkeypatch) as client:
+        _require_auth(client, monkeypatch)
+        token = client.app.state.mcp_token
+        assert token, "the server mints an MCP token at startup"
+        with client.websocket_connect(
+            "/ws/events", headers={"Authorization": f"Bearer {token}"}
+        ) as ws:
+            assert ws is not None  # the handshake completed; frame delivery is covered above
+
+
+def test_ws_events_refuses_a_wrong_bearer(tmp_path, monkeypatch):
+    with _api_client(tmp_path, monkeypatch) as client:
+        _require_auth(client, monkeypatch)
+        with pytest.raises(WebSocketDisconnect) as exc:
+            with client.websocket_connect(
+                "/ws/events", headers={"Authorization": "Bearer not-the-token"}
+            ):
+                pass
+        assert exc.value.code == 1008
+
+
 def test_ws_no_gap_or_dup_when_events_land_in_register_window(tmp_path, monkeypatch):
     """Spec §6.1: events committed between register() and the catch-up read are
     delivered exactly once. Force that race by writing two events inside a

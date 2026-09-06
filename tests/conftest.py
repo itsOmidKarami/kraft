@@ -2,8 +2,16 @@ from __future__ import annotations
 
 import os
 import shutil
+from pathlib import Path
 
+import httpx
 import pytest
+from support.harness import fake_templates_dir, isolated_bd
+
+from kraft import client
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 
 
 def pytest_collection_modifyitems(config, items):
@@ -13,3 +21,41 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if "e2e" in item.keywords:
             item.add_marker(skip)
+
+
+@pytest.fixture
+def app(tmp_path, monkeypatch):
+    """The app wired to client.http(), with its lifespan entered per call.
+
+    cli.main() runs asyncio.run() itself, so — unlike test_client_read.py, where
+    one coroutine owns the loop — the lifespan cannot stay open across the call.
+    Each handler opens and closes its own loop, so each gets its own lifespan.
+    """
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))))
+    monkeypatch.setenv(
+        "KRAFT_FRONTEND_DIST", os.environ.get("KRAFT_FRONTEND_DIST") or str(tmp_path / "no-dist")
+    )
+    monkeypatch.delenv("KRAFT_WORK_ITEM_ID", raising=False)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    import kraft.api as api
+
+    class Lifespan(httpx.AsyncClient):
+        """An AsyncClient that enters the app lifespan for the life of the client."""
+
+        async def __aenter__(self):
+            self._ctx = api.app.router.lifespan_context(api.app)
+            await self._ctx.__aenter__()
+            return await super().__aenter__()
+
+        async def __aexit__(self, *exc):
+            await super().__aexit__(*exc)
+            await self._ctx.__aexit__(*exc)
+
+    monkeypatch.setattr(
+        client,
+        "http",
+        lambda: Lifespan(transport=httpx.ASGITransport(app=api.app), base_url="http://kraft"),
+    )
+    return api
