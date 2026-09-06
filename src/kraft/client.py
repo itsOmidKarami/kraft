@@ -7,7 +7,9 @@ it lives in `api.py`, where the UI already exercises it.
 
 from __future__ import annotations
 
+import json
 import os
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import httpx
@@ -40,6 +42,30 @@ def resolve_context(cwd: Path | None = None) -> tuple[str | None, str]:
         if candidate.parent == worktrees:
             return candidate.name, "user"
     return None, "user"
+
+
+async def resolve_repo(cwd: Path | None = None) -> str | None:
+    """The connected repo the cwd is inside, or None.
+
+    Reads `GET /repos` rather than parsing `repos.yaml`: a local YAML read would
+    work with the server down, but it puts a second reader on config the API
+    already owns and shapes, and every verb that uses this answer needs the
+    server anyway.
+
+    Parents are walked so a submodule checkout resolves to the connected
+    superproject.
+    """
+    here = cwd or Path.cwd()
+    toplevel = config.git_read(here, "rev-parse", "--show-toplevel", expected_failure=True)
+    if toplevel is None:
+        return None
+    payload = await _get("/repos")
+    connected = {entry["path"] for entry in payload["repos"]}
+    root = Path(toplevel)
+    for candidate in (root, *root.parents):
+        if str(candidate) in connected:
+            return str(candidate)
+    return None
 
 
 def _forbid_self_action(work_item_id: str | None) -> str:
@@ -96,11 +122,19 @@ def _detail(response: httpx.Response) -> str:
         return response.text
 
 
+async def _send(method: str, path: str, **kwargs) -> httpx.Response:
+    """Every request goes through here, so a dead server reads the same at both
+    front doors — an agent calling through MCP gets this sentence too, not a
+    traceback it will try to reason about."""
+    try:
+        async with http() as session:
+            return await session.request(method, path, **kwargs)
+    except httpx.ConnectError as exc:
+        raise ValueError(f"no Kraft server at {base_url()} — start one with `kraft serve`") from exc
+
+
 async def _get(path: str, **params) -> dict | list:
-    async with http() as session:
-        response = await session.get(
-            path, params={k: v for k, v in params.items() if v is not None}
-        )
+    response = await _send("GET", path, params={k: v for k, v in params.items() if v is not None})
     if response.status_code >= 400:
         # An agent reads this string. "404: work item not found" is actionable;
         # an httpx traceback is not.
@@ -116,11 +150,19 @@ async def list_work_items(status: str | None = None) -> list[dict]:
     not ask for.
     """
     payload = await _get("/work-items")
+    return trim_work_items(payload["items"], status)
+
+
+def trim_work_items(items: list[dict], status: str | None = None) -> list[dict]:
+    """The board rows, trimmed to the fields a caller can act on.
+
+    Split out of `list_work_items` so a caller that needs the envelope too — the
+    live board wants `cursor` alongside the rows — gets identical shaping rather
+    than a second definition of what a work item is.
+    """
     keep = ("id", "title", "repo", "status", "current_node_id", "pending_gate")
     return [
-        {k: item[k] for k in keep}
-        for item in payload["items"]
-        if status is None or item["status"] == status
+        {k: item[k] for k in keep} for item in items if status is None or item["status"] == status
     ]
 
 
@@ -147,6 +189,182 @@ async def get_work_item(work_item_id: str | None = None) -> dict:
     return {k: item[k] for k in keep if k in item}
 
 
+async def _target(work_item_id: str | None) -> str:
+    """An explicit id, or the item this session is standing in.
+
+    Not `_forbid_self_action`: reading your own logs is exactly what a worker
+    session should be able to do. The guard is about acting, not looking.
+    """
+    if work_item_id:
+        return work_item_id
+    resolved, _origin = resolve_context()
+    if resolved is None:
+        raise ValueError("no work item: pass an id, or run from a Kraft worktree")
+    return resolved
+
+
+async def worker_sessions(work_item_id: str | None = None) -> list[dict]:
+    """The item's agent sessions, oldest first.
+
+    Reads the untrimmed detail endpoint: `get_work_item` deliberately drops
+    `worker_sessions` so an agent's context is not spent on it, which means the
+    log verbs cannot reuse it.
+    """
+    item = await _get(f"/work-items/{await _target(work_item_id)}")
+    return item.get("worker_sessions", [])
+
+
+async def latest_session(work_item_id: str | None = None) -> dict:
+    """The most recent session — "what is it doing now", which is the question
+    `kraft logs` is asked."""
+    sessions = await worker_sessions(work_item_id)
+    if not sessions:
+        raise ValueError("no worker session has run for this work item yet")
+    return sessions[-1]
+
+
+async def events(work_item_id: str | None = None, after_seq: int = 0) -> list[dict]:
+    """The chain's own history: node transitions, gate decisions, escalations.
+
+    This is the "why is it stopped" view, where the log is the "what is it
+    saying" view.
+    """
+    return await _get(f"/work-items/{await _target(work_item_id)}/events", after_seq=after_seq)
+
+
+async def stream_log(session_id: str, after_line: int = 0) -> AsyncIterator[dict]:
+    """Follow one worker session's log until the session stops.
+
+    The server's `_tail` sends `data: {json}` frames and one terminal
+    `event: end` when the session is no longer running, so the iterator ends on
+    its own — a follow that outlives the agent is worse than no follow.
+
+    `after_line` is applied here rather than sent: the follow endpoint replays
+    from the top of the file and takes no offset, so skipping is the client's
+    job. Cheap, and it keeps the resume semantics in one place.
+
+    Not an MCP tool: a tool returns a value and a generator has none. An agent
+    that wants history calls `events()`.
+    """
+    async with http() as session:
+        try:
+            async with session.stream(
+                "GET",
+                f"/worker-sessions/{session_id}/log",
+                params={"format": "jsonl", "follow": "true"},
+                timeout=None,
+            ) as response:
+                if response.status_code >= 400:
+                    await response.aread()
+                    raise ValueError(f"kraft {response.status_code}: {_detail(response)}")
+                async for raw in response.aiter_lines():
+                    if raw.startswith("event: end"):
+                        return
+                    if raw.startswith("data: "):
+                        payload = raw[6:].strip()
+                        if payload and payload != "{}":
+                            line = json.loads(payload)
+                            if line.get("n", 0) >= after_line:
+                                yield line
+        except httpx.ConnectError as exc:
+            raise ValueError(
+                f"no Kraft server at {base_url()} — start one with `kraft serve`"
+            ) from exc
+        except httpx.HTTPError as exc:
+            # a follow outlives its request: a read error mid-stream is the
+            # server going away, and reads as a sentence like any other failure
+            raise ValueError(f"the Kraft server at {base_url()} closed the log stream") from exc
+
+
+async def stream_events(after_seq: int = 0) -> AsyncIterator[dict]:
+    """The live event bus — the same stream the board's UI redraws from.
+
+    The bearer goes in a header: the websocket handler accepts it as of the
+    /ws/events auth fix, because a CLI has no session cookie to offer.
+    """
+    from websockets.asyncio.client import connect
+    from websockets.exceptions import ConnectionClosed, InvalidHandshake
+
+    url = base_url().replace("http://", "ws://", 1) + f"/ws/events?after_seq={after_seq}"
+    run_dir = Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())
+    token = auth.read_mcp_token(run_dir)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    try:
+        async with connect(url, additional_headers=headers) as socket:
+            async for message in socket:
+                yield json.loads(message)
+    except (OSError, InvalidHandshake) as exc:
+        raise ValueError(f"no Kraft server at {base_url()} — start one with `kraft serve`") from exc
+    except ConnectionClosed as exc:
+        # mid-stream: the server went away while we were watching, which is a
+        # sentence like any other failure, not a traceback out of the event loop
+        raise ValueError(f"the Kraft server at {base_url()} closed the event stream") from exc
+
+
+async def diff(work_item_id: str | None = None) -> dict:
+    """What the agent changed, against the item's `base_ref`.
+
+    The payload is passed through untouched — `truncated` and `untracked` are
+    the two fields a renderer must not drop, and passing the dict whole is how
+    that is guaranteed rather than remembered.
+    """
+    return await _get(f"/work-items/{await _target(work_item_id)}/diff")
+
+
+async def documents(work_item_id: str | None = None) -> list[dict]:
+    """The specs, plans and summaries the indexer linked to this item. No
+    content: that is one `document()` call per id."""
+    payload = await _get(f"/work-items/{await _target(work_item_id)}/documents")
+    return payload.get("documents", [])
+
+
+async def document(doc_id: str) -> dict:
+    return await _get(f"/documents/{doc_id}")
+
+
+async def open_document(doc_id: str, editor: str | None = None) -> dict:
+    """Hand the document to an editor on the server's machine.
+
+    Reuses the server's editor table and its 501-when-headless answer rather
+    than growing a second launcher here.
+    """
+    return await _act(f"/documents/{doc_id}/open", {"editor": editor} if editor else {})
+
+
+async def repos() -> list[dict]:
+    """Every connected repo, as the API shapes it.
+
+    This and `resolve_repo` are the only readers of the repo list on the client
+    side, and neither parses `repos.yaml`: a local YAML read would work with the
+    server down, but would drift from the API's shaping (spec D §4).
+    """
+    return (await _get("/repos")).get("repos", [])
+
+
+async def open_worktree(work_item_id: str | None = None, editor: str | None = None) -> dict:
+    """Open the item's worktree in an editor on the server's machine — the same
+    launch as the UI's "Open worktree", including its 501 when headless."""
+    target = await _target(work_item_id)
+    return await _act(f"/work-items/{target}/open-worktree", {"editor": editor} if editor else {})
+
+
+async def health() -> dict:
+    """The server's own view of itself: invalid config, index state, reattach."""
+    return await _get("/health")
+
+
+async def reindex(repo: str | None = None) -> dict:
+    """Rescan one repo's documents, or every repo's. Returns the change counts.
+
+    Not through `_act`: `/index/rescan` takes `repo` as a query parameter, and
+    `_post` only sends JSON bodies.
+    """
+    response = await _send("POST", "/index/rescan", params={"repo": repo} if repo else None)
+    if response.status_code >= 400:
+        raise ValueError(f"kraft {response.status_code}: {_detail(response)}")
+    return response.json()
+
+
 async def search(q: str, limit: int = 20) -> dict:
     """Cross-repo search over specs, plans, and session summaries."""
     return await _get("/search", q=q, limit=limit)
@@ -155,8 +373,7 @@ async def search(q: str, limit: int = 20) -> dict:
 async def _post(path: str, payload: dict | None = None) -> tuple[int, dict]:
     """Status alongside the body: some callers treat a 4xx as a normal outcome
     (a 409 from POST /repos means the repo is already connected)."""
-    async with http() as session:
-        response = await session.post(path, json=payload or {})
+    response = await _send("POST", path, json=payload or {})
     try:
         body = response.json()
     except ValueError:
