@@ -153,6 +153,30 @@ just install    # build the SPA, install the `kraft` command; then run `kraft`
 ahead of the real agent on PATH, so a dev instance never spends tokens. A work
 item title containing `KRAFT_FAIL` or `KRAFT_SLOW` steers its own fake agent.
 
+### The `kraft` command
+
+Every MCP tool is also a subcommand, so a hook or a non-MCP agent gets the same
+surface. `--json` on any verb prints the raw API payload.
+
+```bash
+kraft list [--all] [--status=paused]   # the board, scoped to the cwd's repo
+kraft show [ID]                        # ID defaults to the worktree you are in
+kraft create "title"                   # files it paused; a human starts it
+kraft approve [ID] / kraft reject [ID] --note "why"
+kraft pause [ID] / kraft resume [ID] --steer "..."
+kraft search "query"
+kraft logs [ID] [-f] [-n N]            # a worker session's log; --json is NDJSON
+kraft events [ID] [--after N] [--type T]
+kraft watch                            # live board, needs a terminal
+kraft diff [ID] [--stat|--name-only]   # truncation and untracked always shown
+kraft docs [ID] / kraft doc DOC_ID [--open [EDITOR]]
+kraft repos / kraft connect [PATH]     # `*` marks the repo you are in
+kraft path [ID] (alias cd) / kraft open [ID]
+kraft serve [--host H] [--port P]      # same as bare `kraft`
+kraft health                           # exit 1 when degraded
+kraft reindex [--repo PATH]
+```
+
 Installed Kraft keeps state in `$KRAFT_HOME` (default `~/.kraft`): `run/` for the
 databases, logs and worktrees, `templates/` for the YAML the Settings screens
 edit, seeded from the packaged defaults on first run and never overwritten after.

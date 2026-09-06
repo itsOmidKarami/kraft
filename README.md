@@ -78,6 +78,73 @@ where a human decides; an agent approving its own would make the gate decorative
 so hooks and non-MCP agents get the same surface. Design:
 [`docs/superpowers/specs/2026-09-05-agent-integration-design.md`](docs/superpowers/specs/2026-09-05-agent-integration-design.md).
 
+## The `kraft` command
+
+`kraft` with no arguments serves. Subcommands talk to a running server.
+
+```bash
+kraft list                      # the board, scoped to the repo you are in
+kraft list --all --status=paused
+kraft show                      # the work item whose worktree you are in
+kraft create "fix the flaky test"   # files it paused; a human starts it
+kraft approve                   # approve whichever gate is pending
+kraft reject --note "the plan skips migrations"
+kraft pause / kraft resume --steer "try the other adapter"
+kraft search "retry policy"
+```
+
+Every verb takes `--json`, which prints the raw API payload — the same value
+`kraft mcp` hands an agent. An id is optional wherever the work item can be
+inferred from the directory you are standing in.
+
+Following a running item:
+
+```bash
+kraft logs -f            # the current session's log, until it stops
+kraft logs --session <id> -n 0
+kraft events             # node transitions, gate decisions, escalations
+kraft watch              # a live board, redrawn on every event
+```
+
+`kraft logs --json` emits NDJSON — one object per line — because a stream has no
+end to close an array on.
+
+Reviewing before you approve:
+
+```bash
+kraft diff --stat        # how big is it
+kraft diff --name-only   # changed and untracked paths
+kraft diff               # the coloured body, through $PAGER
+kraft docs               # specs, plans and summaries linked to the item
+kraft doc <id> --open    # open one in an editor on the server's machine
+```
+
+A truncated diff always says so on its last line, and files the agent wrote
+without `git add` are listed separately — they are invisible in a unified diff.
+
+Repos and worktrees:
+
+```bash
+kraft repos              # what is connected; `*` marks the one you are in
+kraft connect            # connect the current repo (safe to repeat)
+cd "$(kraft path <id>)"  # into the item's worktree; `kraft cd` is an alias
+kraft path --shell       # a shell function that does the cd for you
+kraft open <id>          # the worktree in an editor
+```
+
+Disconnecting and editing a repo's settings stay in the UI.
+
+Service and admin:
+
+```bash
+kraft serve --port 9000  # the same as bare `kraft`; flag > env > access.yaml
+kraft health             # exit 1 when degraded, reasons on stdout
+kraft reindex [--repo P] # rescan documents into the search index
+```
+
+A non-loopback bind still refuses to start without a password, flag or not.
+There is no `kraft stop`: the server runs in the foreground, Ctrl-C stops it.
+
 ## Develop
 
 ```bash
