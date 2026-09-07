@@ -1,0 +1,94 @@
+"""init writes a filled-in registry rather than asking ten questions, so the
+guesses have to be right — and honest about ambiguity when it exists."""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+PLUGIN = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PLUGIN))
+
+import kl  # noqa: E402
+
+
+def test_a_justfile_test_recipe_wins(tmp_path):
+    (tmp_path / "justfile").write_text("build:\n    echo hi\n\ntest *ARGS:\n    pytest {{ARGS}}\n")
+    (tmp_path / "Makefile").write_text("test:\n\tmake-test\n")
+    assert kl.detect(tmp_path)["test_command"] == ["just", "test"]
+
+
+def test_a_makefile_target_is_next(tmp_path):
+    (tmp_path / "Makefile").write_text("all:\n\tbuild\n\ntest:\n\tpytest\n")
+    assert kl.detect(tmp_path)["test_command"] == ["make", "test"]
+
+
+def test_package_json_scripts_are_next(tmp_path):
+    (tmp_path / "package.json").write_text(json.dumps({"scripts": {"test": "vitest"}}))
+    assert kl.detect(tmp_path)["test_command"] == ["npm", "test"]
+
+
+def test_a_pyproject_falls_back_to_pytest(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    assert kl.detect(tmp_path)["test_command"] == ["pytest", "-q"]
+
+
+def test_an_unrecognised_repo_reports_no_command_rather_than_guessing(tmp_path):
+    assert kl.detect(tmp_path)["test_command"] is None
+
+
+def test_a_makefile_without_a_test_target_is_not_a_match(tmp_path):
+    (tmp_path / "Makefile").write_text("all:\n\tbuild\n")
+    assert kl.detect(tmp_path)["test_command"] is None
+
+
+def test_installed_skills_are_matched_to_hooks(tmp_path):
+    skills = tmp_path / ".claude" / "skills" / "superpowers" / "skills"
+    for name in ("brainstorming", "writing-plans", "test-driven-development"):
+        (skills / name).mkdir(parents=True)
+        (skills / name / "SKILL.md").write_text(f"---\nname: {name}\n---\n")
+    (tmp_path / ".claude" / "skills" / "superpowers" / ".claude-plugin").mkdir(parents=True)
+    (tmp_path / ".claude" / "skills" / "superpowers" / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps({"name": "superpowers"})
+    )
+
+    found = kl.detect(tmp_path)["skills"]
+    assert "superpowers:brainstorming" in found["on.spec.requested"]
+    assert "superpowers:writing-plans" in found["on.plan.requested"]
+    assert "superpowers:test-driven-development" in found["on.implementation.start"]
+
+
+def test_a_skill_outside_a_plugin_is_reported_unprefixed(tmp_path):
+    plain = tmp_path / ".claude" / "skills" / "code-review"
+    plain.mkdir(parents=True)
+    (plain / "SKILL.md").write_text("---\nname: code-review\n---\n")
+    found = kl.detect(tmp_path)["skills"]
+    assert "code-review" in found["on.review.local.run"]
+
+
+def test_every_hook_in_the_chain_gets_a_key_even_with_nothing_installed(tmp_path, monkeypatch):
+    monkeypatch.setattr(kl, "SKILL_ROOTS", (Path(".claude") / "skills",))
+    chain = json.loads((PLUGIN / "chains" / "default.json").read_text())
+    hooks = {hook for node in chain["nodes"] for hook in node["tasks"]}
+    found = kl.detect(tmp_path)["skills"]
+    assert set(found) == hooks, "a hook with no key would leave a hole in the registry"
+    assert all(candidates == [] for candidates in found.values())
+
+
+def test_hook_keywords_covers_exactly_the_chains_hooks():
+    chain = json.loads((PLUGIN / "chains" / "default.json").read_text())
+    hooks = {hook for node in chain["nodes"] for hook in node["tasks"]}
+    assert set(kl.HOOK_KEYWORDS) == hooks
+
+
+def test_keywords_do_not_match_on_short_substrings(tmp_path, monkeypatch):
+    """`pr` once matched `compress`, `improver` and `project-artifact`. A keyword
+    short enough to appear inside unrelated words offers the human a menu of
+    nonsense and buries the real candidate."""
+    monkeypatch.setattr(kl, "SKILL_ROOTS", (Path(".claude") / "skills",))
+    skills = tmp_path / ".claude" / "skills"
+    for name in ("compress", "claude-md-improver", "project-artifact"):
+        (skills / name).mkdir(parents=True)
+        (skills / name / "SKILL.md").write_text(f"---\nname: {name}\n---\n")
+    assert kl.detect(tmp_path)["skills"]["on.mr.open"] == []

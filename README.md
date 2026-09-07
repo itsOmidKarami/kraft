@@ -78,6 +78,21 @@ where a human decides; an agent approving its own would make the gate decorative
 so hooks and non-MCP agents get the same surface. Design:
 [`docs/superpowers/specs/2026-09-05-agent-integration-design.md`](docs/superpowers/specs/2026-09-05-agent-integration-design.md).
 
+## Without the orchestrator
+
+`plugins/kraft-lite/` runs the same chain inside a single agent session — same
+node list, same gates, same caps, no service. It is the attended half of Kraft:
+one chain, in front of you, resumable across sessions but not outliving your
+terminal. Chain and policy come from `templates/`, rendered by `just lite-build`.
+
+That directory is published as a standalone repo by `just lite-publish`, so it
+must stay self-contained: no import above `plugins/kraft-lite/`, no dependency
+beyond the standard library. `dev/build_lite_chain.py` and
+`tests/kraft_lite_artifact_test.py` are the two pieces that deliberately live
+outside it, because they are the seam between the two repos.
+
+See [`plugins/kraft-lite/README.md`](plugins/kraft-lite/README.md).
+
 ## The `kraft` command
 
 `kraft` with no arguments serves. Subcommands talk to a running server.
