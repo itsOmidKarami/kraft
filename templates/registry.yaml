@@ -7,8 +7,11 @@ hooks:
   # --- placeholder bindings: each replaced by its plugin effort (see 03_plugin_adapters) ---
   on.chain.review_ready:     { kind: builtin, handler: noop }
   on.review.local.run:       { kind: builtin, handler: noop }
-  on.mr.open:                { kind: builtin, handler: noop }
-  on.ci.poll:                { kind: builtin, handler: noop }
+  # backend: glab because this repo's origin is gitlab.com. The public repo
+  # after the v0.1.0 split (Kraft-5fx) uses `gh`; changing these three lines is
+  # the whole migration. Never probed — see adapters/forge.resolve.
+  on.mr.open:                { kind: forge, handler: open_mr, backend: glab }
+  on.ci.poll:                { kind: forge, handler: ci_poll, backend: glab }
   on.review.mr.run:          { kind: builtin, handler: noop }
-  on.human_review.requested: { kind: builtin, handler: noop }
-  on.merge:                  { kind: builtin, handler: noop }
+  on.human_review.requested: { kind: agent, command: claude, skill: review-brief, artifact: review_brief }
+  on.merge:                  { kind: forge, handler: merge, backend: glab }

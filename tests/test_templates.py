@@ -39,7 +39,29 @@ def test_shipped_yaml_parses_and_matches_spec():
         "skill": "plan",
         "artifact": "plan",
     }
-    assert registry["hooks"]["on.merge"] == {"kind": "builtin", "handler": "noop"}
+    # The back half is no longer noop (Kraft-33j). backend is glab because this
+    # repo's origin is gitlab.com; the public repo after the split uses gh.
+    assert registry["hooks"]["on.merge"] == {
+        "kind": "forge",
+        "handler": "merge",
+        "backend": "glab",
+    }
+    assert registry["hooks"]["on.mr.open"] == {
+        "kind": "forge",
+        "handler": "open_mr",
+        "backend": "glab",
+    }
+    assert registry["hooks"]["on.ci.poll"] == {
+        "kind": "forge",
+        "handler": "ci_poll",
+        "backend": "glab",
+    }
+    assert registry["hooks"]["on.human_review.requested"] == {
+        "kind": "agent",
+        "command": "claude",
+        "skill": "review-brief",
+        "artifact": "review_brief",
+    }
     assert registry["hooks"]["on.env.prepare"] == {"kind": "builtin", "handler": "env_setup"}
     assert registry["hooks"]["on.implementation.start"] == {"kind": "agent", "command": "claude"}
     assert registry["hooks"]["on.test.run"] == {"kind": "subprocess", "command": ["pytest", "-q"]}
@@ -495,3 +517,26 @@ def test_skill_and_artifact_are_agent_only(tmp_path):
     )
     with pytest.raises(templates.RegistryError, match="only to an agent hook"):
         templates.load_registry(tmp_path / "registry.yaml", skills_dir=tmp_path / "skills")
+
+
+def test_forge_binding_loads(tmp_path):
+    p = tmp_path / "registry.yaml"
+    p.write_text("hooks:\n  on.mr.open: {kind: forge, handler: open_mr, backend: glab}\n")
+    registry = templates.load_registry(p)
+    assert registry.hooks["on.mr.open"]["backend"] == "glab"
+
+
+def test_forge_binding_needs_a_known_handler(tmp_path):
+    p = tmp_path / "registry.yaml"
+    p.write_text("hooks:\n  on.mr.open: {kind: forge, handler: teleport, backend: glab}\n")
+    with pytest.raises(templates.RegistryError, match="teleport"):
+        templates.load_registry(p)
+
+
+def test_forge_binding_needs_a_known_backend(tmp_path):
+    """Named, never probed — so an unknown name has to fail at load, not at
+    dispatch three nodes into a chain."""
+    p = tmp_path / "registry.yaml"
+    p.write_text("hooks:\n  on.mr.open: {kind: forge, handler: open_mr, backend: bitbucket}\n")
+    with pytest.raises(templates.RegistryError, match="bitbucket"):
+        templates.load_registry(p)

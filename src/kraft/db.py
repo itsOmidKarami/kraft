@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -25,7 +25,7 @@ CREATE TABLE work_items (
   chain_definition TEXT NOT NULL,
   current_node_id  TEXT,
   status           TEXT NOT NULL CHECK (status IN
-                     ('active', 'needs_human', 'completed', 'paused')),
+                     ('active', 'needs_human', 'completed', 'paused', 'abandoned')),
   -- steer text a human left while paused, consumed by the next agent launch
   pending_steer_context TEXT,
   -- cross-repo (06): submodule paths chosen at intake, and what happens to the
@@ -205,6 +205,37 @@ FROM worker_sessions""",
         "DROP TABLE worker_sessions",
         "ALTER TABLE worker_sessions_new RENAME TO worker_sessions",
         "CREATE INDEX idx_worker_sessions_status ON worker_sessions(status)",
+    ],
+    # 'abandoned' joins the status CHECK, and SQLite cannot alter a constraint —
+    # so work_items is rebuilt the same 12-step way migration 4 used (Kraft-x85).
+    11: [
+        """CREATE TABLE work_items_new (
+  id               TEXT PRIMARY KEY,
+  bead_id          TEXT,
+  title            TEXT NOT NULL,
+  repo             TEXT NOT NULL,
+  chain_template   TEXT NOT NULL,
+  chain_definition TEXT NOT NULL,
+  current_node_id  TEXT,
+  status           TEXT NOT NULL CHECK (status IN
+                     ('active', 'needs_human', 'completed', 'paused', 'abandoned')),
+  pending_steer_context TEXT,
+  submodules       TEXT,
+  root_merge_policy TEXT,
+  attachments      TEXT,
+  base_ref         TEXT,
+  bead_cwd         TEXT,
+  created_at       TEXT NOT NULL,
+  updated_at       TEXT NOT NULL
+)""",
+        """INSERT INTO work_items_new (id, bead_id, title, repo, chain_template,
+  chain_definition, current_node_id, status, pending_steer_context, submodules,
+  root_merge_policy, attachments, base_ref, bead_cwd, created_at, updated_at)
+SELECT id, bead_id, title, repo, chain_template, chain_definition, current_node_id,
+       status, pending_steer_context, submodules, root_merge_policy, attachments,
+       base_ref, bead_cwd, created_at, updated_at FROM work_items""",
+        "DROP TABLE work_items",
+        "ALTER TABLE work_items_new RENAME TO work_items",
     ],
 }
 

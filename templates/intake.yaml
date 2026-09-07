@@ -6,7 +6,7 @@
 # the typing, not the judgement.
 enabled: false
 interval_s: 300
-max_concurrent: 1
+max_concurrent: 3
 repos: []              # empty means every enabled repo in repos.yaml
 priority_ceiling: 2    # only P2 and below start unattended: the highest-priority
                        # work is what a human should be looking at

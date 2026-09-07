@@ -241,6 +241,10 @@ export const useStore = create<State>((set, get) => ({
           };
         case "work_item_completed":
           return { ...base, ...patchItem(s, id, (w) => ({ ...w, status: "completed" })) };
+        case "work_item_abandoned":
+          // A live board would otherwise keep offering actions on a worktree
+          // that has already been removed.
+          return { ...base, ...patchItem(s, id, (w) => ({ ...w, status: "abandoned" })) };
         default:
           return base;
       }
