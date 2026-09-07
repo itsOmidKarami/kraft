@@ -114,6 +114,27 @@ lite-version:
     - git fetch -q origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
     - python3 dev/check_lite_version.py FETCH_HEAD "$CI_COMMIT_SHA"
 
+# The plugin claims to need "python3 and nothing else", and its own workflow pins
+# that floor at 3.10 -- but that workflow only runs on the published repo, which
+# is after a bad publish has already reached users. This is the same check one
+# step earlier. `--no-project` is required: this repo's pyproject demands >=3.14
+# and uv refuses the older interpreter without it. No lockfile and nothing but
+# pytest, so a dependency appearing here is the first sign the plugin stopped
+# being stdlib-only.
+#
+# No before_script on purpose: the bd-backed tests skip when `bd` is absent, so
+# this runs 124 passed / 3 skipped rather than paying for the bd download. The
+# skipped three are covered by lint-and-test, which installs it.
+lite-floor:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - plugins/kraft-lite/**/*
+        # Without this the job cannot run in the merge request that changes it.
+        - .gitlab-ci.yml
+  script:
+    - uv run --python 3.10 --no-project --with pytest pytest plugins/kraft-lite/tests -q
+
 frontend:
   image: node:20-bookworm-slim
   rules:
