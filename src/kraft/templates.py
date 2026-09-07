@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -113,6 +114,36 @@ def load_registry(
                     f"{path.name}: forge hook {hook!r} has unknown backend {backend!r}; "
                     f"known: {sorted(_FORGE_BACKENDS)}"
                 )
+            for key in ("poll_timeout", "poll_interval"):
+                if key not in binding:
+                    continue
+                if handler != "ci_poll":
+                    raise RegistryError(
+                        f"{path.name}: forge hook {hook!r} has {key!r}, which applies "
+                        "only to a ci_poll handler"
+                    )
+                value = binding[key]
+                # bool is an int in Python, and `poll_timeout: true` is a typo,
+                # not a one-second deadline.
+                bad = isinstance(value, bool) or not isinstance(value, int | float)
+                # .inf is a node that never returns and never frees its intake
+                # slot; .nan goes straight into asyncio.sleep.
+                bad = bad or not math.isfinite(value)
+                # A zero timeout is a meaningful single-shot check. A zero
+                # *interval* is a hot loop: it would re-run the forge CLI as
+                # fast as a thread can return for the whole timeout. Tests that
+                # want no wait pass it to `run_task` directly, not through here.
+                if key == "poll_timeout":
+                    bad = bad or value < 0
+                    wanted = "non-negative number"
+                else:
+                    bad = bad or value <= 0
+                    wanted = "positive number"
+                if bad:
+                    raise RegistryError(
+                        f"{path.name}: forge hook {hook!r} {key!r} must be a "
+                        f"{wanted}, not {value!r}"
+                    )
         if kind == "subprocess" and not (
             isinstance(binding.get("command"), list)
             and all(isinstance(x, str) for x in binding["command"])
@@ -178,7 +209,7 @@ def load_registry(
         if kind == "builtin":
             known = {"kind", "handler"}
         elif kind == "forge":
-            known = {"kind", "handler", "backend"}
+            known = {"kind", "handler", "backend", "poll_timeout", "poll_interval"}
         else:
             known = {"kind", "command"}
         # `interactive` is UI-facing rather than dispatch-facing (02 §13): the
