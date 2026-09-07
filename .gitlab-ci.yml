@@ -92,6 +92,28 @@ slow-tests:
   after_script:
     - uv cache prune --ci
 
+# `main` on the public plugin repo is force-pushed on every publish, so its tags
+# are the only fixed points in that history. A plugin change merged without a
+# version bump has no tag it can be released under: `just lite-publish` refuses,
+# and until somebody tries, main here holds plugin content matching no release.
+# MR-only: it compares against the target branch, which a branch pipeline has no
+# notion of. The script owns the definition of "published surface" so that docs
+# and tests do not demand a release.
+lite-version:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - plugins/kraft-lite/**/*
+  variables:
+    # `git diff base...head` needs the merge base, and guessing a --depth that
+    # always contains it is how this job would start failing on long branches.
+    GIT_DEPTH: 0
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends git ca-certificates
+  script:
+    - git fetch -q origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - python3 dev/check_lite_version.py FETCH_HEAD "$CI_COMMIT_SHA"
+
 frontend:
   image: node:20-bookworm-slim
   rules:
