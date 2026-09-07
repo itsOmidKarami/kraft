@@ -148,3 +148,93 @@ def test_start_without_a_registry_warns_but_runs(tmp_path, monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "chain_id" in json.loads(captured.out)
     assert "registry" in captured.err
+
+
+def _chain_file(tmp_path, *hooks):
+    """A one-node chain naming exactly these hooks."""
+    path = tmp_path / "custom.json"
+    path.write_text(
+        json.dumps(
+            {
+                "id": "custom",
+                "loops": {},
+                "nodes": [{"id": "only", "tasks": list(hooks), "gate_after": None}],
+            }
+        )
+    )
+    return path
+
+
+def test_a_custom_hook_gets_candidates_from_its_own_words(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        kl, "_installed_skills", lambda root: ["acme:deploy-checklist", "other:unrelated"]
+    )
+    got = kl.detect(tmp_path, _chain_file(tmp_path, "on.deploy.staging"))
+    assert got["skills"] == {"on.deploy.staging": ["acme:deploy-checklist"]}
+
+
+def test_a_curated_hook_keeps_its_curated_keywords(tmp_path, monkeypatch):
+    # `finishing` is not a word in `on.mr.open`; only the curated table knows it.
+    monkeypatch.setattr(
+        kl, "_installed_skills", lambda root: ["superpowers:finishing-a-development-branch"]
+    )
+    got = kl.detect(tmp_path, _chain_file(tmp_path, "on.mr.open"))
+    assert got["skills"]["on.mr.open"] == ["superpowers:finishing-a-development-branch"]
+
+
+def test_a_hook_of_only_structural_words_reports_no_candidates(tmp_path, monkeypatch):
+    monkeypatch.setattr(kl, "_installed_skills", lambda root: ["anything:at-all"])
+    got = kl.detect(tmp_path, _chain_file(tmp_path, "on.run.start"))
+    assert got["skills"] == {"on.run.start": []}
+
+
+def test_the_packaged_chain_still_reports_its_twelve_hooks(tmp_path):
+    got = kl.detect(tmp_path)
+    assert set(got["skills"]) == set(kl.HOOK_KEYWORDS)
+    assert len(got["skills"]) == 12
+
+
+def test_a_gitlab_repo_with_glab_installed_polls_with_glab(tmp_path, monkeypatch):
+    (tmp_path / ".gitlab-ci.yml").write_text("stages: [test]\n")
+    monkeypatch.setattr(kl.shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    assert kl.detect(tmp_path)["ci_command"] == ["glab", "ci", "status"]
+
+
+def test_a_github_repo_with_gh_installed_polls_with_gh(tmp_path, monkeypatch):
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    monkeypatch.setattr(kl.shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    assert kl.detect(tmp_path)["ci_command"] == ["gh", "pr", "checks"]
+
+
+def test_the_origin_remote_outranks_a_stray_ci_file(tmp_path, monkeypatch):
+    # A repo can carry a .github/workflows it no longer uses; origin is the forge
+    # whose CI a merge request actually runs on.
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    monkeypatch.setattr(kl, "_origin_url", lambda root: "git@gitlab.com:me/x.git")
+    monkeypatch.setattr(kl.shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    assert kl.detect(tmp_path)["ci_command"] == ["glab", "ci", "status"]
+
+
+def test_a_forge_whose_cli_is_missing_reports_no_command(tmp_path, monkeypatch):
+    (tmp_path / ".gitlab-ci.yml").write_text("stages: [test]\n")
+    monkeypatch.setattr(kl.shutil, "which", lambda cli: None)
+    assert kl.detect(tmp_path)["ci_command"] is None
+
+
+def test_a_repo_with_no_forge_reports_no_command(tmp_path, monkeypatch):
+    monkeypatch.setattr(kl, "_origin_url", lambda root: "")
+    assert kl.detect(tmp_path)["ci_command"] is None
+
+
+def test_the_forge_is_read_from_the_host_not_the_repo_name(tmp_path, monkeypatch):
+    # A GitHub repo may be named after the other forge -- a mirror, a migration
+    # tool. Matching the whole URL picks the wrong client for it.
+    monkeypatch.setattr(kl, "_origin_url", lambda root: "git@github.com:me/gitlab-mirror.git")
+    monkeypatch.setattr(kl.shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    assert kl.detect(tmp_path)["ci_command"] == ["gh", "pr", "checks"]
+
+
+def test_a_self_hosted_gitlab_host_is_still_gitlab(tmp_path, monkeypatch):
+    monkeypatch.setattr(kl, "_origin_url", lambda root: "https://gitlab.example.com/me/x.git")
+    monkeypatch.setattr(kl.shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    assert kl.detect(tmp_path)["ci_command"] == ["glab", "ci", "status"]
