@@ -1,0 +1,92 @@
+{
+  "id": "default",
+  "nodes": [
+    {
+      "id": "spec",
+      "tasks": [
+        "on.spec.requested"
+      ],
+      "gate_after": "spec_approval",
+      "fix_loop": null
+    },
+    {
+      "id": "plan",
+      "tasks": [
+        "on.plan.requested"
+      ],
+      "gate_after": "plan_approval",
+      "fix_loop": null
+    },
+    {
+      "id": "chain_review",
+      "tasks": [
+        "on.chain.review_ready"
+      ],
+      "gate_after": "chain_finalized",
+      "fix_loop": null
+    },
+    {
+      "id": "env_setup",
+      "tasks": [
+        "on.env.prepare"
+      ],
+      "gate_after": null,
+      "fix_loop": null
+    },
+    {
+      "id": "implementation",
+      "tasks": [
+        "on.implementation.start"
+      ],
+      "gate_after": null,
+      "fix_loop": null
+    },
+    {
+      "id": "verify",
+      "tasks": [
+        "on.test.run",
+        "on.review.local.run"
+      ],
+      "gate_after": null,
+      "fix_loop": "verify_fix_loop"
+    },
+    {
+      "id": "open_mr",
+      "tasks": [
+        "on.mr.open"
+      ],
+      "gate_after": null,
+      "fix_loop": null
+    },
+    {
+      "id": "mr_checks",
+      "tasks": [
+        "on.ci.poll",
+        "on.review.mr.run"
+      ],
+      "gate_after": null,
+      "fix_loop": null
+    },
+    {
+      "id": "human_review",
+      "tasks": [
+        "on.human_review.requested"
+      ],
+      "gate_after": "human_review_approval",
+      "fix_loop": null
+    },
+    {
+      "id": "merge",
+      "tasks": [
+        "on.merge"
+      ],
+      "gate_after": null,
+      "fix_loop": null
+    }
+  ],
+  "loops": {
+    "verify_fix_loop": {
+      "attempts": 3
+    }
+  }
+}
