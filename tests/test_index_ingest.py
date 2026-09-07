@@ -232,6 +232,19 @@ def test_scan_repo_classifies_sessions(tmp_path):
     assert [x.work_item_id for x in summary.links if x.work_item_id] == ["w1"]
 
 
+def test_a_spec_with_work_item_ids_is_linked(tmp_path):
+    repo = make_repo_with_engineering(
+        tmp_path,
+        {
+            ".engineering/specs/w1.md": (
+                "---\nwork_item_ids: [w1]\nkind: specs\ntitle: A spec\n---\n\nbody\n"
+            )
+        },
+    )
+    doc = next(d for d in ingest.scan_repo(repo) if d.path.endswith("specs/w1.md"))
+    assert [link.work_item_id for link in doc.links] == ["w1"]
+
+
 def _all_docs(conn):
     return {r["path"]: r for r in conn.execute("SELECT * FROM documents ORDER BY path").fetchall()}
 
@@ -264,7 +277,7 @@ def _artifact(path, content_hash, title="A"):
     )
 
 
-def test_reconcile_writes_links_for_summaries_only(conn):
+def test_reconcile_writes_the_links_it_is_given(conn):
     scanned = [
         _artifact(".engineering/specs/a.md", "h1"),
         _summary(

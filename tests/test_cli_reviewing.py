@@ -221,3 +221,63 @@ def test_the_diff_api_carries_the_limit_and_the_worktree(app, tmp_path):
     # present even when nothing was truncated: the renderer must not have to ask
     assert payload["diff_max_bytes"] > 0
     assert payload["worktree_path"].endswith(wid)
+
+
+def test_artifact_json_is_the_raw_payload(app, monkeypatch, capsys):
+    payload = {"path": ".engineering/specs/w1.md", "title": "fake spec", "content": "# Spec\n"}
+
+    async def fake_artifact(work_item_id=None):
+        return payload
+
+    monkeypatch.setattr(client, "artifact", fake_artifact)
+    cli.main(["artifact", "w1", "--json"])
+    assert json.loads(capsys.readouterr().out) == payload
+
+
+def test_artifact_prints_the_document_content(app, monkeypatch, capsys):
+    async def fake_artifact(work_item_id=None):
+        return {"path": ".engineering/specs/w1.md", "title": "fake spec", "content": "# Hello\n"}
+
+    monkeypatch.setattr(client, "artifact", fake_artifact)
+    cli.main(["artifact", "w1"])
+    out = capsys.readouterr().out
+    assert "# Hello" in out
+    # the front-matter/plumbing keys are not the reviewer's business, only the content is
+    assert "fake spec" not in out
+
+
+def test_artifact_truncation_reaches_stdout(app, monkeypatch, capsys):
+    """`_cmd_artifact` used to page `content` straight through with no read of
+    `truncated` at all -- the one surface where a reviewer could approve a
+    document whose tail was silently cut."""
+
+    async def fake_artifact(work_item_id=None):
+        return {
+            "path": ".engineering/specs/w1.md",
+            "title": "fake spec",
+            "content": "# Hello\n",
+            "truncated": True,
+            "artifact_max_bytes": 1_000_000,
+        }
+
+    monkeypatch.setattr(client, "artifact", fake_artifact)
+    cli.main(["artifact", "w1"])
+    out = capsys.readouterr().out
+    assert "# Hello" in out
+    assert "1000000 bytes" in out
+    assert ".engineering/specs/w1.md" in out
+
+
+def test_an_untruncated_artifact_says_nothing_about_a_limit(app, monkeypatch, capsys):
+    async def fake_artifact(work_item_id=None):
+        return {
+            "path": ".engineering/specs/w1.md",
+            "title": "fake spec",
+            "content": "# Hello\n",
+            "truncated": False,
+            "artifact_max_bytes": 1_000_000,
+        }
+
+    monkeypatch.setattr(client, "artifact", fake_artifact)
+    cli.main(["artifact", "w1"])
+    assert "1000000" not in capsys.readouterr().out

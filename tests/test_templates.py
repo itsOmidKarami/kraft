@@ -27,7 +27,18 @@ def test_shipped_yaml_parses_and_matches_spec():
         "on.implementation.start",
         "on.test.run",
     } <= set(registry["hooks"])
-    assert registry["hooks"]["on.spec.requested"] == {"kind": "builtin", "handler": "noop"}
+    assert registry["hooks"]["on.spec.requested"] == {
+        "kind": "agent",
+        "command": "claude",
+        "skill": "spec",
+        "artifact": "spec",
+    }
+    assert registry["hooks"]["on.plan.requested"] == {
+        "kind": "agent",
+        "command": "claude",
+        "skill": "plan",
+        "artifact": "plan",
+    }
     assert registry["hooks"]["on.merge"] == {"kind": "builtin", "handler": "noop"}
     assert registry["hooks"]["on.env.prepare"] == {"kind": "builtin", "handler": "env_setup"}
     assert registry["hooks"]["on.implementation.start"] == {"kind": "agent", "command": "claude"}
@@ -450,3 +461,37 @@ def test_load_registry_rejects_escalate_model_on_a_subprocess_hook(tmp_path):
     )
     with pytest.raises(templates.RegistryError, match="only to an agent hook"):
         templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_an_agent_hook_accepts_skill_and_artifact(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n"
+        "  on.spec.requested: { kind: agent, command: claude, "
+        "skill: chain-review, artifact: spec }\n"
+    )
+    reg = templates.load_registry(tmp_path / "registry.yaml", skills_dir=tmp_path / "skills")
+    assert reg.hooks["on.spec.requested"]["artifact"] == "spec"
+
+
+def test_an_unknown_skill_fails_the_registry(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.spec.requested: { kind: agent, command: claude, skill: nope }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="nope"):
+        templates.load_registry(tmp_path / "registry.yaml", skills_dir=tmp_path / "skills")
+
+
+def test_a_bad_artifact_kind_fails_the_registry(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.spec.requested: { kind: agent, command: claude, artifact: ../etc }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="artifact"):
+        templates.load_registry(tmp_path / "registry.yaml", skills_dir=tmp_path / "skills")
+
+
+def test_skill_and_artifact_are_agent_only(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.merge: { kind: builtin, handler: noop, skill: spec }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="only to an agent hook"):
+        templates.load_registry(tmp_path / "registry.yaml", skills_dir=tmp_path / "skills")

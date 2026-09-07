@@ -84,14 +84,25 @@ def isolated_bd(tmp_path: Path, name: str = "tracker") -> Path:
 def fake_registry(python_exe: str, fake_agent_path: Path) -> Registry:
     base = load_registry(_REPO_ROOT / "templates" / "registry.yaml")
     hooks = dict(base.hooks)
-    hooks["on.implementation.start"] = {
-        "kind": "agent",
-        "command": f"{python_exe} {fake_agent_path}",
-    }
+    fake = f"{python_exe} {fake_agent_path}"
+    hooks["on.implementation.start"] = {"kind": "agent", "command": fake}
+    # The shipped registry binds these to `claude`. A test that drives the
+    # default chain must not shell out to the operator's real agent, and a
+    # missing binary would land the item in needs_human rather than at a gate.
+    for hook in ("on.spec.requested", "on.plan.requested"):
+        hooks[hook] = {**hooks[hook], "command": fake}
     return Registry(hooks=hooks)
 
 
-def fake_templates_dir(tmp_path: Path, agent_command: str) -> Path:
+def fake_templates_dir(tmp_path: Path, agent_command: str, *, planning_hooks: bool = False) -> Path:
+    """Registry + `quick-task`/`default` chains against a throwaway templates dir.
+
+    `on.spec.requested`/`on.plan.requested` default to `builtin: noop` — most
+    callers drive chains that never reach those gates and must not shell out.
+    Pass `planning_hooks=True` to bind them to `agent_command` instead, the way
+    `fake_registry` above does: spread the shipped binding and swap only the
+    command, so its `skill:`/`artifact:` keys survive.
+    """
     d = tmp_path / "templates"
     d.mkdir(parents=True, exist_ok=True)
     shutil.copy(_REPO_ROOT / "templates" / "quick-task.yaml", d / "quick-task.yaml")
@@ -104,6 +115,14 @@ def fake_templates_dir(tmp_path: Path, agent_command: str) -> Path:
         # byte diff rather than a real one.
         return {"kind": "builtin", "handler": "noop"}
 
+    if planning_hooks:
+        shipped = load_registry(_REPO_ROOT / "templates" / "registry.yaml").hooks
+        spec_hook = {**shipped["on.spec.requested"], "command": agent_command}
+        plan_hook = {**shipped["on.plan.requested"], "command": agent_command}
+    else:
+        spec_hook = noop()
+        plan_hook = noop()
+
     (d / "registry.yaml").write_text(
         yaml.safe_dump(
             {
@@ -114,8 +133,8 @@ def fake_templates_dir(tmp_path: Path, agent_command: str) -> Path:
                         "kind": "subprocess",
                         "command": ["python", "-m", "pytest", "-q"],
                     },
-                    "on.spec.requested": noop(),
-                    "on.plan.requested": noop(),
+                    "on.spec.requested": spec_hook,
+                    "on.plan.requested": plan_hook,
                     "on.chain.review_ready": noop(),
                     "on.review.local.run": noop(),
                     "on.mr.open": noop(),

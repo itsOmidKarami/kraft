@@ -73,15 +73,19 @@ _ATTACHMENT_PROMPT = (
 class LaunchContext:
     """The repo config an agent dispatch resolves against.
 
-    `None` on either field means "nothing configured", not "look elsewhere" —
+    `None` on any field means "nothing configured", not "look elsewhere" —
     `agent.resolve_invocation` already treats a missing repo entry and a missing
     steering dir as empty. Threaded keyword-only, `launch: LaunchContext | None
     = None`, from `api.py` down through every walk/resume path so a work item's
     repo config reaches its agent launches, including reattach and the fix cycle.
+
+    `skills_dir` is where an operator may override a bundled method file;
+    `None` means the packaged copies only.
     """
 
     repo_entry: dict | None
     steering_dir: Path | None
+    skills_dir: Path | None = None
 
 
 class Steer:
@@ -286,6 +290,7 @@ async def _dispatch(
             binding,
             launch.repo_entry if launch else None,
             launch.steering_dir if launch else None,
+            skills_dir=launch.skills_dir if launch else None,
             escalate=escalate,
         )
         return await _agent.run_agent_task(
@@ -300,6 +305,8 @@ async def _dispatch(
             model=inv.model,
             deny_tools=inv.deny_tools,
             steering_texts=inv.steering_texts,
+            artifact=binding.get("artifact"),
+            method_text=inv.method_text,
             title=work_item_row["title"],
             task_instruction=(_STEER_PROMPT.format(steer=note) if note else "") + instruction,
             repo_path=work_item_row["repo"],
@@ -741,10 +748,38 @@ async def run(
         raise LookupError(f"unknown work_item {work_item_id!r}")
     chain = json.loads(row["chain_definition"])
     nodes = chain["nodes"]
-    worktree = run_dirs.worktrees / work_item_id
-
+    # Record the chain as loaded before touching the filesystem: this is
+    # bookkeeping about the item, not about the worktree, and a work item
+    # whose worktree can never be created (bad repo, git failure) must still
+    # end up with a `chain_loaded` event and a non-NULL `current_node_id` --
+    # otherwise it looks indistinguishable from a crash between
+    # create_work_item and the first load_chain (see the `cur is None`
+    # branch in `resume`), and the WS gets fewer events than a client
+    # waiting on this chain to progress at all is entitled to expect.
     if start_index == 0:
         await db.write(lambda c: store.load_chain(c, work_item_id, nodes[0]["id"]))
+
+    # Before the first dispatch, not inside the `env_setup` node: `default.yaml`
+    # runs `spec` and `plan` first, and both need a checkout — and, for `plan`'s
+    # attached-spec fallback to have anything to find, attachments already
+    # copied in — to write into.
+    #
+    # A git failure here (bad repo, no permission, ...) is attributed to the
+    # node that was about to dispatch rather than left to `api._guard`'s bare
+    # crash handler: this call moved out of `env_setup`'s own session so spec
+    # and plan can use the checkout too, but the observable shape of "a node
+    # failed to start" -- node_started, then needs_human naming it -- should
+    # not disappear just because the failure now happens a moment earlier.
+    try:
+        worktree = await _builtins.ensure_worktree(
+            db, run_dirs, repo=row["repo"], work_item_id=work_item_id, attachments=_attachments(row)
+        )
+    except RuntimeError as exc:
+        failing_node = nodes[start_index]["id"]
+        reason = str(exc)
+        await db.write(lambda c: store.enter_node(c, work_item_id, failing_node))
+        await db.write(lambda c: store.mark_needs_human(c, work_item_id, failing_node, reason))
+        return "needs_human"
 
     for node in nodes[start_index:]:
         result = await _walk_node(
@@ -890,13 +925,32 @@ async def resume(
         raise LookupError(f"unknown work_item {work_item_id!r}")
     chain = json.loads(row["chain_definition"])
     nodes = chain["nodes"]
-    worktree = run_dirs.worktrees / work_item_id
     cur = row["current_node_id"]
 
     if cur is None:
         # crash between create_work_item and the first load_chain; nothing ran.
+        # Recorded before ensure_worktree below for the same reason `run` records
+        # it first: a worktree that can never be created must not leave the item
+        # looking like it crashed before load_chain ever happened.
         await db.write(lambda c: store.load_chain(c, work_item_id, nodes[0]["id"]))
         cur = nodes[0]["id"]
+
+    # Before the first dispatch, not inside the `env_setup` node: `default.yaml`
+    # runs `spec` and `plan` first, and both need a checkout — and, for `plan`'s
+    # attached-spec fallback to have anything to find, attachments already
+    # copied in — to write into.
+    #
+    # See the matching comment in `run`: a git failure here is attributed to
+    # the current node rather than left to `api._guard`'s bare crash handler.
+    try:
+        worktree = await _builtins.ensure_worktree(
+            db, run_dirs, repo=row["repo"], work_item_id=work_item_id, attachments=_attachments(row)
+        )
+    except RuntimeError as exc:
+        reason = str(exc)
+        await db.write(lambda c: store.enter_node(c, work_item_id, cur))
+        await db.write(lambda c: store.mark_needs_human(c, work_item_id, cur, reason))
+        return "needs_human"
 
     start = next(i for i, n in enumerate(nodes) if n["id"] == cur)
 

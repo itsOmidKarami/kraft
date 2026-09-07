@@ -20,6 +20,7 @@ import type {
   TemplateSummary,
   TemplateValidation,
   WorkItem,
+  WorkItemArtifact,
   WorkItemDiff,
   WorkItemDocument,
   WorkerSession,
@@ -148,6 +149,9 @@ export const getWorkItemDocuments = (id: string) =>
 
 export const getWorkItemDiff = (id: string) =>
   req<WorkItemDiff>(`/work-items/${id}/diff`);
+
+export const getWorkItemArtifact = (id: string) =>
+  req<WorkItemArtifact>(`/work-items/${encodeURIComponent(id)}/artifact`);
 
 /* ── settings (design 5a–5e) ─────────────────────────────────────────────── */
 

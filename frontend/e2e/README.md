@@ -10,6 +10,7 @@ Four specs, all against one running orchestrator:
 | `search.spec.ts` | the search overlay in detail: filters, document viewer, Escape handling |
 | `phone.visual.spec.ts` | sub-project B's phone contract at a 390x844 viewport: the board, the gate, the reject textarea's 16px floor (under it, mobile Safari zooms on focus and never zooms back), and the diff viewer wrapping a **real** diff. Writes screenshots to `frontend/e2e-shots/`. jsdom has no viewport, so the unit tests can only assert class boundaries and stylesheet source order — this is the only place the media queries are real |
 | `attachments.visual.spec.ts` | intake from an existing spec/plan: the type-to-search picker, the struck-through chain preview, the `from spec+plan` badge, the "attached at intake" tag. Writes screenshots to `frontend/e2e-shots/` (gitignored) — it asserts little and is meant to be looked at |
+| `planning.spec.ts` | a `default`-chain item reaching `spec_approval`, the "Review spec" button and its document modal, rejecting the gate (re-runs the spec node, returns to the same gate), approving into `plan_approval`, and the "Review plan" button/modal |
 
 `lifecycle.spec.ts` slows the implementation hook through `PUT /registry` so
 there is something to pause, and puts it back afterwards — so these run one at
@@ -38,8 +39,9 @@ cd frontend && npm run build   # produces frontend/dist/
 
 `frontend/e2e/serve.py` boots `python -m kraft` against hermetic fixtures
 (`tests/support/harness.py`): a fresh sample git repo, an isolated `bd`
-tracker, and the fake agent (`KRAFT_FAKE_AGENT=fix`, which flips `calc.py`
-`a - b` → `a + b` so pytest passes). No `claude` binary needed.
+tracker, and the fake agent (`fixtures/fake-claude.sh`, `KRAFT_FAKE_CLAUDE=fix`,
+which flips `calc.py` `a - b` → `a + b` so pytest passes, and also honours the
+`artifact:` contract on the two planning hooks). No `claude` binary needed.
 
 ```bash
 uv run python frontend/e2e/serve.py
@@ -54,7 +56,7 @@ Env it sets for the child `python -m kraft`:
 | `KRAFT_TEMPLATES_DIR` | fake templates dir (quick-task + default + registry + policy) |
 | `KRAFT_BD_CWD` | isolated `bd` tracker repo |
 | `KRAFT_FRONTEND_DIST` | `frontend/dist` |
-| `KRAFT_FAKE_AGENT` | `fix` |
+| `KRAFT_FAKE_CLAUDE` | `fix` |
 
 It polls `http://127.0.0.1:8765/health` until `200`, then prints:
 

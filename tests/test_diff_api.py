@@ -214,3 +214,7 @@ def test_diff_degrades_gracefully_when_base_ref_is_null_and_worktree_is_gone(
     r = client.get(f"/work-items/{item_without_base_ref}/diff")
     assert r.status_code == 200
     assert r.json()["base_ref"] is None
+
+
+def test_gate_artifact_is_none_without_a_pending_gate(client, seeded_item):
+    assert client.get(f"/work-items/{seeded_item}").json()["gate_artifact"] is None

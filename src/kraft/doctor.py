@@ -14,8 +14,10 @@ import shutil
 import stat
 from pathlib import Path
 
+import yaml
+
 from kraft import auth, client, config
-from kraft.paths import RunDirs, default_run_dir, default_templates_dir
+from kraft.paths import BUNDLED, RunDirs, default_run_dir, default_templates_dir
 
 #: The agent CLI a chain launches. A fact about the shipped registry, not
 #: configuration — `adapters/agent.py` has one profile and it is this one.
@@ -83,10 +85,15 @@ def _health_checks(payload: dict) -> list[dict]:
 def _config_checks() -> list[dict]:
     templates = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
     if not templates.is_dir():
+        # `hooks` still reports, as a skip: every check this function can emit
+        # emits on every path, so a caller reading the run by name never has to
+        # ask whether a row is missing because it passed, because it was skipped,
+        # or because an earlier branch returned before reaching it.
         return [
             _check(
                 "templates", False, f"{templates} does not exist — start `kraft` once to seed it"
             ),
+            _hooks_check(),
             _token_check(),
         ]
     checks = [_check("templates", True, str(templates))]
@@ -95,8 +102,62 @@ def _config_checks() -> list[dict]:
         checks.append(_check("access.yaml", True, "parses"))
     except config.ConfigError as exc:
         checks.append(_check("access.yaml", False, str(exc)))
+    checks.append(_hooks_check())
     checks.append(_token_check())
     return checks
+
+
+def _is_noop(binding) -> bool:
+    return isinstance(binding, dict) and binding.get("handler") == "noop"
+
+
+def _hooks_check() -> dict:
+    """Hooks this version ships a real binding for, still on `builtin: noop`
+    locally.
+
+    `templates/` is seeded once and never overwritten (`cli.seed_home`), so an
+    operator who installed before a hook was implemented keeps the placeholder
+    forever — and a placeholder gate shows an empty card with nothing to read
+    and no reason why. Always `ok`: which hooks to run is the operator's
+    decision, and `kraft doctor` exits 1 on any failed check.
+    """
+    shipped_path = BUNDLED / "templates" / "registry.yaml"
+    # `KRAFT_TEMPLATES_DIR` first, exactly as `_config_checks` reads it above:
+    # doctor must inspect the directory the running server actually loaded,
+    # not the one $KRAFT_HOME implies.
+    live_path = (
+        Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir()) / "registry.yaml"
+    )
+    if not shipped_path.is_file():
+        # A source checkout has no `_bundled/`: there is nothing to compare to.
+        return _check("hooks", True, "skipped: not an installed Kraft", skipped=True)
+    try:
+        shipped = yaml.safe_load(shipped_path.read_text())["hooks"]
+        live = yaml.safe_load(live_path.read_text())["hooks"]
+    except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as exc:
+        return _check("hooks", True, f"skipped: cannot compare ({exc})", skipped=True)
+    # Two different problems with two different fixes, so they are counted
+    # separately rather than as one "stale" bucket: a hook still on the
+    # placeholder is a binding to change, while a hook missing entirely is a
+    # line to add. The second is what a registry seeded before the hook point
+    # existed looks like, and `.get(h)` returning None reads as "not a noop" —
+    # which silently exempted exactly the case this check exists for (Kraft-zmb).
+    real = {h: b for h, b in shipped.items() if not _is_noop(b)}
+    placeholder = sorted(h for h in real if _is_noop(live.get(h)))
+    absent = sorted(h for h in real if h not in live)
+    if not placeholder and not absent:
+        return _check("hooks", True, f"{len(live)} bound, none left on the placeholder")
+    parts = []
+    if placeholder:
+        parts.append(f"{', '.join(placeholder)} still builtin:noop")
+    if absent:
+        parts.append(f"{', '.join(absent)} missing entirely")
+    return _check(
+        "hooks",
+        True,
+        f"{'; '.join(parts)} in {live_path}, but bound in this version's "
+        "defaults — Settings → Hooks, or edit that file",
+    )
 
 
 def _token_check() -> dict:

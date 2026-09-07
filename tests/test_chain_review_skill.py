@@ -13,7 +13,7 @@ import pytest
 
 from kraft.templates import GATE_NAMES, load_registry
 
-SKILL = Path(__file__).parent.parent / "skills" / "chain-review" / "SKILL.md"
+SKILL = Path(__file__).parent.parent / "src" / "kraft" / "skills" / "chain-review" / "SKILL.md"
 REGISTRY = Path(__file__).parent.parent / "templates" / "registry.yaml"
 
 
