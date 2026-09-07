@@ -51,7 +51,13 @@ implementation, verification, and review, with four gates where a human decides.
 migration.
 
 `kraft-lite:status` lists what is in the directory; `kl.py chains` is the verb
-behind it.
+behind it. `kl.py summary` reports one run back: per-node times split into
+work and waiting at a gate, attempts against their caps, gates answered and
+rejection notes, off records the walk was writing anyway. Three labels ride along
+on those writes to make it possible - when a record was written by the wall clock,
+seconds already spent at a gate, and attempts already spent - because each is
+something a later write would otherwise overwrite. It counts no tokens and no money - Lite runs inside your
+session and never sees them.
 
 A directory can hold several chains. Every verb takes `--chain-id <id>`; with one
 unfinished chain the flag is optional, and with two or more it is required —

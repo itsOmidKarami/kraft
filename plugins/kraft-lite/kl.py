@@ -30,6 +30,23 @@ CHAIN_LABEL = "kraft-chain:"
 NODE_LABEL = "kraft-node:"
 GATE_LABEL = "kraft-gate:"
 ATTEMPT_LABEL = "kraft-attempt:"
+#: Attempts this node has ever cost, as against the budget it has left. `rewind`
+#: clears the budget on purpose, and the retries it clears are exactly the ones
+#: that made the run expensive — a summary reading the budget reports a chain
+#: rewound twice as having cost nothing.
+SPENT_LABEL = "kraft-spent:"
+#: When a node was blocked at its gate, cleared once the wait it opened has been
+#: banked. The approve overwrites the node's own `updated_at`, so without a stamp
+#: of its own the wait is unrecoverable — and in a gated chain the wait is usually
+#: the largest number in the run.
+BLOCKED_LABEL = "kraft-blocked-at:"
+#: Seconds this node has spent held at a gate, over every round of them.
+WAITED_LABEL = "kraft-waited:"
+#: When this record was last written, by the wall clock. `updated_at` cannot serve:
+#: it is bd's import guard, and `_bump_updated` pushes it forward whenever two
+#: writes land inside the same second, so a run timed with it reports seconds that
+#: never passed. Every write carries this, so both clocks in a summary are one.
+AT_LABEL = "kraft-at:"
 
 
 def dep_ids(record: dict) -> list[str]:
@@ -97,6 +114,53 @@ def set_label(record: dict, prefix: str, value: str) -> dict:
 
 def attempts(record: dict) -> int:
     return int(label_value(record, ATTEMPT_LABEL) or 0)
+
+
+def spent(record: dict) -> int:
+    """Attempts over the node's whole life. Falls back to the budget for chains
+    started before this label existed, which is the same number until a rewind."""
+    value = label_value(record, SPENT_LABEL)
+    return int(value) if value is not None else attempts(record)
+
+
+def waited(record: dict) -> int:
+    return int(label_value(record, WAITED_LABEL) or 0)
+
+
+def bank_wait(record: dict) -> dict:
+    """Close an open gate wait into the node's running total.
+
+    Banked at the moment the wait ends rather than left as two stamps to subtract
+    later: the end of the wait is a write, and a write's `updated_at` is pushed
+    forward when it follows another inside the same second. Subtracting a wall
+    clock start from a pushed end charges the human every second of that push.
+    """
+    started = label_value(record, BLOCKED_LABEL)
+    if started is None:
+        return record
+    total = waited(record) + max(0, _seconds(started, _now().strftime(BD_TIME)) or 0)
+    record = set_label(record, WAITED_LABEL, str(total))
+    return dict(record, labels=[x for x in record["labels"] if not x.startswith(BLOCKED_LABEL)])
+
+
+def open_gate(record: dict, name: str) -> dict:
+    """Block a node at a gate, banking any round it is already serving.
+
+    A `gate` run against a node that is already blocked — a re-run, a chain
+    steered by hand — would otherwise overwrite the open stamp, and every hour
+    waited under it is gone.
+    """
+    record = bank_wait(set_label(record, GATE_LABEL, name))
+    return set_label(record, BLOCKED_LABEL, _now().strftime(BD_TIME))
+
+
+def spend_attempt(record: dict) -> dict:
+    """Charge one attempt to both the node's budget and its lifetime total."""
+    # Both read off the record as it came in: `spent` falls back to the budget,
+    # so charging the budget first makes the very first attempt count as two.
+    charged = spent(record) + 1
+    record = set_label(record, ATTEMPT_LABEL, str(attempts(record) + 1))
+    return set_label(record, SPENT_LABEL, str(charged))
 
 
 def ordered(records: list[dict]) -> list[dict]:
@@ -191,11 +255,32 @@ class JsonlStore:
         # Stamped here too, not only in BdStore: `bd import` of this file is the
         # documented migration, and without a timestamp bd keeps the *oldest*
         # row on a tie — importing a chain two gates in rewinds it to `open`.
-        append_jsonl(self.path, [_bump_updated(r) for r in records])
+        append_jsonl(self.path, _prepare(records))
 
 
 #: How bd writes timestamps, and the granularity it compares them at.
 BD_TIME = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def _prepare(records: list[dict]) -> list[dict]:
+    """What every write does to every record, whichever store is behind it: bump
+    bd's guard, and stamp the wall clock the summary reads back."""
+    at = _now().strftime(BD_TIME)
+    return [set_label(_bump_updated(r), AT_LABEL, at) for r in records]
+
+
+def _at(record: dict | None) -> str | None:
+    """When this record was last written. Falls back to bd's guard for chains
+    started before the stamp existed, which is what it was read as then."""
+    if record is None:
+        return None
+    return label_value(record, AT_LABEL) or record.get("updated_at")
+
+
+def _now() -> dt.datetime:
+    # noqa UP017: `dt.UTC` is 3.11+. This file ships standalone and is tested
+    # against the floor in the CI matrix, so the older spelling stays.
+    return dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)  # noqa: UP017
 
 
 def _bump_updated(record: dict) -> dict:
@@ -206,9 +291,7 @@ def _bump_updated(record: dict) -> dict:
     writes inside the same second — which is every gate-then-approve — are
     silently dropped unless the timestamp moves.
     """
-    # noqa UP017: `dt.UTC` is 3.11+. This file ships standalone and is tested
-    # against the floor in the CI matrix, so the older spelling stays.
-    now = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)  # noqa: UP017
+    now = _now()
     previous = record.get("updated_at")
     if previous:
         try:
@@ -237,7 +320,7 @@ class BdStore:
         return [json.loads(line) for line in out.splitlines() if line.strip()]
 
     def write(self, records: list[dict]) -> None:
-        payload = "".join(json.dumps(_bump_updated(r)) + "\n" for r in records)
+        payload = "".join(json.dumps(r) + "\n" for r in _prepare(records))
         self._bd(["import", "-"], stdin=payload)
 
 
@@ -347,10 +430,18 @@ def rewind(records: list[dict], from_node: str, note: str) -> list[dict]:
         )
     out = []
     for offset, record in enumerate(walk[ids.index(from_node) :]):
+        # Banked before the stamp that opens it is stripped below. `--from-node` is
+        # how the last gate sends work back, so the wait it interrupts is usually
+        # the longest one in the run - dropping it here loses exactly that.
+        record = bank_wait(record)
         labels = [
             x
             for x in record.get("labels", [])
-            if not x.startswith(GATE_LABEL) and not x.startswith(ATTEMPT_LABEL)
+            # `WAITED_LABEL` is not in this list on purpose: those hours were
+            # spent, whatever the redo goes on to cost.
+            if not x.startswith(GATE_LABEL)
+            and not x.startswith(ATTEMPT_LABEL)
+            and not x.startswith(BLOCKED_LABEL)
         ]
         reopened = dict(record, status="open", labels=labels)
         if offset == 0:
@@ -381,6 +472,145 @@ def chain_summaries(records: list[dict]) -> list[dict]:
             }
         )
     return rows
+
+
+def _seconds(earlier: str | None, later: str | None) -> int | None:
+    try:
+        return int(
+            (
+                dt.datetime.strptime(later, BD_TIME) - dt.datetime.strptime(earlier, BD_TIME)
+            ).total_seconds()
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+#: Every key `summary` reports a total under, so an unstarted chain and a walked
+#: one hand a caller the same shape.
+TOTALS = ("nodes", "closed", "attempts", "blocked_seconds", "gates", "rejections")
+
+
+def summary(records: list[dict], chain: dict) -> dict:
+    """What the run cost, read back out of the records it already wrote.
+
+    The shape of the run is read back out of records the walk wrote anyway: the
+    epic is closed at `start` and never written again, so its stamp is the run's
+    start, and each node's is when it was last closed. What the walk does not
+    otherwise keep, and this reads, is three labels written by writes that were
+    already happening - `kraft-at:`, `kraft-waited:` and `kraft-spent:`. Two
+    ceilings are worth knowing about:
+
+    ponytail: one second is the granularity of every stamp here, so a chain walked
+    faster than that reports zeros. Nothing sub-second is recoverable.
+
+    ponytail: a rewind rewrites the tail's stamps, so a node redone after a
+    rejection is timed from the redo, not from the attempt that was rejected. Time
+    already spent waiting at a gate is the exception — it is banked, not restamped,
+    so it survives.
+    """
+    epic = next((r for r in records if label_value(r, CHAIN_LABEL)), None)
+    walk = [r for r in ordered(records) if label_value(r, NODE_LABEL)]
+    if epic is None:
+        # Same distinction `_state` draws, for the same reason: a directory with
+        # no chain in it has not finished one.
+        return {
+            "chain_id": None,
+            "title": "",
+            "status": "unstarted",
+            "started": None,
+            "finished": None,
+            "duration_seconds": None,
+            "nodes": [],
+            "totals": dict.fromkeys(TOTALS, 0),
+        }
+    node_record = current(records)
+    definitions = {n["id"]: n for n in chain["nodes"]}
+
+    #: Every stamp the chain carries, so a node can be timed from whatever happened
+    #: last before it closed rather than from its predecessor's close. After a
+    #: rewind those differ: the predecessor still holds its stamp from the first
+    #: pass, and timing from it charges the redo for the whole walk in between.
+    events = sorted(x for x in (_at(r) for r in records) if x)
+
+    def since(record: dict) -> str | None:
+        closed_at = _at(record)
+        earlier = [e for e in events if e < closed_at] if closed_at else []
+        return earlier[-1] if earlier else _at(epic)
+
+    rows = []
+    for record in walk:
+        node_id = label_value(record, NODE_LABEL)
+        definition = definitions.get(node_id, {})
+        loop = definition.get("fix_loop")
+        # Lines, not occurrences: `--note "Rejected: by CI"` is one rejection whose
+        # reason happens to quote another.
+        rejections = [
+            line[len(NOTE_PREFIX) :].strip()
+            for line in record.get("description", "").splitlines()
+            if line.startswith(NOTE_PREFIX)
+        ]
+        # Banked rounds, plus the one being served right now if the node is sitting
+        # at a gate — mid-run, that open wait is the whole question.
+        holding = _seconds(label_value(record, BLOCKED_LABEL), _now().strftime(BD_TIME))
+        blocked_seconds = waited(record) + max(0, holding or 0)
+        closed = record["status"] == "closed"
+        rows.append(
+            {
+                "node": node_id,
+                "status": record["status"],
+                # An unreached node carries the stamp `materialize` gave it, which
+                # would otherwise read as work that took no time.
+                # Clamped, and the carry below is a running maximum: `_bump_updated`
+                # moves each record's stamp forward on its own, so a node written
+                # three times (gate, reject, close) is stamped later than the node
+                # that ran after it. Timed straight, the successor reports negative
+                # seconds. Sub-second is the truth being floored here — the whole
+                # overlap is the artificial second-per-write bump.
+                "seconds": max(0, _seconds(since(record), _at(record)) or 0)
+                if closed and _at(record)
+                else None,
+                "attempts": spent(record),
+                "cap": chain["loops"].get(loop, {}).get("attempts") if loop else None,
+                "gate": definition.get("gate_after"),
+                # Of that time, the part the human held. A node that never reached
+                # a gate reports null rather than zero: it did not wait, as against
+                # waiting for no time.
+                # Presence, not size: a gate answered inside a second banks zero,
+                # and zero is a different answer from a node that never had a gate.
+                "blocked_seconds": blocked_seconds
+                if label_value(record, WAITED_LABEL) is not None
+                or label_value(record, BLOCKED_LABEL)
+                else None,
+                # The latest reason leads, and every one of them is counted: a node
+                # rejected twice cost two rounds, not one.
+                "rejected": rejections[-1] if rejections else None,
+                "rejections": len(rejections),
+            }
+        )
+    # The last stamp any node carries, not the last row's: a chain written before
+    # the wall clock stamp existed falls back to `updated_at`, which a node written
+    # several times pushes past the node that ran after it.
+    closed_stamps = [_at(r) for r in walk if r["status"] == "closed" and _at(r)]
+    finished = max(closed_stamps, default=None) if node_record is None else None
+    return {
+        "chain_id": (epic or {}).get("id"),
+        "title": (epic or {}).get("title", ""),
+        "status": "done" if node_record is None else node_record["status"],
+        "started": _at(epic),
+        "finished": finished,
+        "duration_seconds": _seconds(_at(epic), finished),
+        "nodes": rows,
+        "totals": {
+            "nodes": len(rows),
+            "closed": sum(1 for r in rows if r["status"] == "closed"),
+            "attempts": sum(r["attempts"] for r in rows),
+            "blocked_seconds": sum(r["blocked_seconds"] or 0 for r in rows),
+            # Gates *answered*. The template's gate count is knowable before the
+            # run starts, so reporting it as what the run cost says nothing.
+            "gates": sum(1 for r in rows if r["gate"] and r["status"] == "closed"),
+            "rejections": sum(r["rejections"] for r in rows),
+        },
+    }
 
 
 def _titled(by_chain: dict[str, list[dict]], ids: list[str]) -> str:
@@ -553,11 +783,11 @@ def main(argv: list[str] | None = None) -> int:
     # The last gate rejects work that an earlier node produced: its own hook only
     # presents it. Without this the gate is approve-or-stall.
     reject.add_argument("--from-node", default=None)
-    for name in ("state", "close", "approve", "attempt"):
+    for name in ("state", "summary", "close", "approve", "attempt"):
         sub.add_parser(name)
     # Every verb that reads or writes chain state can be told which chain. `start`
     # mints its own id and `detect` touches no state, so neither takes one.
-    for name in ("state", "close", "approve", "attempt", "gate", "reject"):
+    for name in ("state", "summary", "close", "approve", "attempt", "gate", "reject"):
         sub.choices[name].add_argument("--chain-id", default=None)
 
     args = parser.parse_args(argv)
@@ -598,33 +828,42 @@ def main(argv: list[str] | None = None) -> int:
     resolved_id = epic["id"] if epic else None
     chain = _chain(root, None, resolved_id)
     node_record = current(records)
-    if node_record is None and args.verb != "state":
+    if node_record is None and args.verb not in ("state", "summary"):
         raise SystemExit("kraft-lite: no open node — the chain is finished or was never started")
 
     if args.verb == "state":
         print(json.dumps(_state(root, chain, resolved_id), indent=2))
         return 0
 
+    if args.verb == "summary":
+        print(json.dumps(summary(records, chain), indent=2))
+        return 0
+
     if args.verb in ("close", "approve"):
-        store.write([dict(node_record, status="closed")])
+        store.write([bank_wait(dict(node_record, status="closed"))])
     elif args.verb == "gate":
-        store.write([set_label(dict(node_record, status="blocked"), GATE_LABEL, args.name)])
+        store.write([open_gate(dict(node_record, status="blocked"), args.name)])
     elif args.verb == "reject" and args.from_node:
         store.write(rewind(records, args.from_node, args.note))
     elif args.verb == "reject":
         description = node_record.get("description", "")
+        # Banked on the way out too: a gate that ends in a rejection held the human
+        # exactly as long as one that ends in an approval.
         store.write(
             [
-                dict(
-                    node_record,
-                    status="open",
-                    description=f"{description}\n{NOTE_PREFIX}{args.note}",
+                bank_wait(
+                    dict(
+                        node_record,
+                        status="open",
+                        description=f"{description}\n{NOTE_PREFIX}{args.note}",
+                    )
                 )
             ]
         )
     elif args.verb == "attempt":
-        count = attempts(node_record) + 1
-        store.write([set_label(node_record, ATTEMPT_LABEL, str(count))])
+        charged = spend_attempt(node_record)
+        count = attempts(charged)
+        store.write([charged])
         state = _state(root, chain, resolved_id)
         state["over_cap"] = state["cap"] is not None and count > state["cap"]
         print(json.dumps(state, indent=2))
