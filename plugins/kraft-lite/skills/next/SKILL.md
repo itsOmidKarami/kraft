@@ -20,7 +20,7 @@ You get `node`, `hooks`, `gate`, `attempt`, `cap`, `status` and `note`.
 
 - `status: unstarted` - there is no chain here. Invoke the `start` skill, or say
   so if you were not asked to start one. Do not report this as finished.
-- `status: done` - the chain is finished. Say so and stop.
+- `status: done` - the chain is finished. Report the summary (below) and stop.
 - `status: blocked` - a gate is waiting. Invoke the `gate` skill. Do not proceed.
 - `note` non-empty - the node was rejected. That note leads this attempt.
 
@@ -63,6 +63,37 @@ not the whole chain.
 
 A hook failed and `cap` is null: stop and report. A node with no fix loop has no
 retry budget to spend.
+
+## 4. When the chain is done, report what the run cost
+
+    python3 "$CLAUDE_PLUGIN_ROOT/kl.py" summary --chain-id <id>
+
+Render it as a short table - one row per node with its time, how much of that time
+was `blocked_seconds` waiting on a human, attempts against the cap where there is
+one, its gate, and any rejection note - then a line of totals: nodes walked,
+wall-clock duration, time spent waiting on a human, attempts spent, gates
+answered, rejections.
+
+`blocked_seconds` is normally part of the node's `seconds`, not extra to it. Say
+which of the two the run actually went on - in a gated chain the waiting is usually
+the larger, and reporting the total alone bills the agent for the human's hours.
+
+After a rewind the two stop nesting: waiting is banked across every round the node
+ever had, while `seconds` is re-timed from the redo, so `blocked_seconds` can
+exceed it. Both numbers are true - report them as the node's whole history against
+its last run, not as a split.
+
+A node's `attempts` is every attempt it ever cost, so after a rewind it can exceed
+the `cap`, which is the budget the node has now. That is the report working: the
+retries a rewind cleared are the ones the run paid for.
+
+Times are stamped a second apart at the coarsest, so a fast chain reporting about
+a second a node is the clock's floor, not a measurement. A node redone after a
+rejection is timed from the redo. Say so rather than presenting the number flat.
+
+This covers the chain, not the conversation: it has no token count, cost, or turn
+count, because Lite runs inside your session and never sees them. Do not estimate
+them - if the human wants those, they come from the harness.
 
 ## `on.ci.poll` never blocks
 
