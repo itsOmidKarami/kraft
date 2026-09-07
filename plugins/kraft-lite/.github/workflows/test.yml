@@ -1,0 +1,21 @@
+name: test
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      # Both ends of the supported range: the floor is what a system python3
+      # actually is on an older machine, and claiming it without testing it is
+      # how "needs python3 and nothing else" quietly becomes false.
+      matrix:
+        python-version: ["3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      # No requirements file on purpose: the shipped helper is stdlib-only, and
+      # a dependency appearing here would be the first sign that stopped being true.
+      - run: pip install pytest
+      - run: pytest tests -q
