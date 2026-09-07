@@ -12,15 +12,19 @@ endless. No service, no port, no database process.
 
 ## Install
 
-    git clone https://github.com/itsOmidKarami/kraft-lite ~/.claude/skills/kraft-lite
+This repo is its own marketplace:
 
-Or clone into `.claude/skills/` for one repo only. The directory carries a plugin
-manifest, which is what namespaces the commands as `/kraft-lite:*`. It needs
-Python 3.10 or newer and nothing else — no pip install, no dependencies. CI tests
-both ends of that range.
+    /plugin marketplace add itsOmidKarami/kraft-lite
+    /plugin install kraft-lite@kraft-lite
 
-To update, see [Contributing](#contributing) — `main` is force-pushed, so `git
-pull` will not work.
+That is what namespaces the commands as `/kraft-lite:*`. `/plugin update
+kraft-lite` afterwards — Claude Code owns the clone, so the force-push below
+never becomes your problem. It needs Python 3.10 or newer and nothing else — no
+pip install, no dependencies. CI tests both ends of that range.
+
+Add `--scope project` to either command to keep it to one repo. Each release is
+tagged `kraft-lite--vX.Y.Z`, which is the only stable point in this history —
+see [Contributing](#contributing).
 
 ## What runs each node
 
@@ -54,8 +58,8 @@ piece of software.
 ## Contributing
 
 `main` here is regenerated and force-pushed from a private monorepo on every
-publish, so a branch based on it loses its merge base and `git pull` on an
-existing clone will diverge. Update with:
+publish, so a branch based on it loses its merge base and `git pull` on a hand
+clone will diverge. Refresh a hand clone with:
 
     git fetch && git reset --hard origin/main
 
