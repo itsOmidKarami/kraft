@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import atexit
+import os
 import shutil
 import subprocess
 import tempfile
@@ -14,8 +15,17 @@ _SUPPORT = Path(__file__).parent
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+#: Commits are made at a fixed time so that building the same tree twice gives
+#: the same SHA. A commit hash covers its own timestamp at one-second
+#: granularity, so two `make_repo()` calls either side of a second boundary used
+#: to produce different SHAs — a ~7% flake in any test comparing them, and worse
+#: under load, because contention widens the gap between the two calls.
+_FIXED_DATE = "2026-01-01T00:00:00+00:00"
+
+
 def _git(cwd: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
+    env = {**os.environ, "GIT_AUTHOR_DATE": _FIXED_DATE, "GIT_COMMITTER_DATE": _FIXED_DATE}
+    subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True, env=env)
 
 
 def make_repo(tmp_path: Path, name: str = "sample") -> Path:

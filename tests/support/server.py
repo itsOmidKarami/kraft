@@ -33,8 +33,14 @@ class Server:
             self.proc.wait()
 
 
-@contextlib.contextmanager
-def running_server(*, run_dir: Path, templates_dir: Path, bd_cwd: Path, env: dict | None = None):
+def _try_start(run_dir: Path, templates_dir: Path, bd_cwd: Path, env: dict | None):
+    """One attempt at a live server. Returns a `Server`, or the child's returncode
+    if it exited before it ever served.
+
+    `_free_port` closes its socket before uvicorn binds the number, so anything
+    else on the machine can take the port in between. That shows up as an
+    immediate exit, and a fresh port is all it needs.
+    """
     port = _free_port()
     child_env = {
         **os.environ,
@@ -47,20 +53,36 @@ def running_server(*, run_dir: Path, templates_dir: Path, bd_cwd: Path, env: dic
     proc = subprocess.Popen([sys.executable, "-m", "kraft"], cwd=_REPO_ROOT, env=child_env)
     base = f"http://127.0.0.1:{port}"
     client = httpx.Client(base_url=base, timeout=10.0)
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            client.close()
+            return proc.returncode
+        with contextlib.suppress(httpx.TransportError):
+            if client.get("/health").status_code == 200:
+                return Server(proc, base, port, client)
+        time.sleep(0.2)
+    client.close()
+    proc.kill()
+    proc.wait()
+    raise RuntimeError("server did not become healthy in 15s")
+
+
+@contextlib.contextmanager
+def running_server(*, run_dir: Path, templates_dir: Path, bd_cwd: Path, env: dict | None = None):
+    codes = []
+    for _ in range(3):
+        result = _try_start(run_dir, templates_dir, bd_cwd, env)
+        if isinstance(result, Server):
+            srv = result
+            break
+        codes.append(result)
+    else:
+        raise RuntimeError(f"server exited early on every attempt, rc={codes}")
     try:
-        deadline = time.monotonic() + 15
-        while time.monotonic() < deadline:
-            if proc.poll() is not None:
-                raise RuntimeError(f"server exited early rc={proc.returncode}")
-            with contextlib.suppress(httpx.TransportError):
-                if client.get("/health").status_code == 200:
-                    break
-            time.sleep(0.2)
-        else:
-            raise RuntimeError("server did not become healthy in 15s")
-        yield Server(proc, base, port, client)
+        yield srv
     finally:
-        client.close()
-        if proc.poll() is None:
-            proc.kill()
-            proc.wait()
+        srv.client.close()
+        if srv.proc.poll() is None:
+            srv.proc.kill()
+            srv.proc.wait()
