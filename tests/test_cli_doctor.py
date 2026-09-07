@@ -115,3 +115,69 @@ def test_doctor_json_is_the_check_list(app, tmp_path, capsys):
         pass
     rows = json.loads(capsys.readouterr().out)
     assert {"name", "ok", "detail", "skipped"} <= set(rows[0])
+
+
+def test_hooks_check_names_a_hook_left_on_noop(tmp_path, monkeypatch):
+    bundled = tmp_path / "bundled"
+    (bundled / "templates").mkdir(parents=True)
+    (bundled / "templates" / "registry.yaml").write_text(
+        "hooks:\n"
+        "  on.spec.requested: { kind: agent, command: claude, skill: spec, artifact: spec }\n"
+    )
+    live = tmp_path / "templates"
+    live.mkdir()
+    (live / "registry.yaml").write_text(
+        "hooks:\n  on.spec.requested: { kind: builtin, handler: noop }\n"
+    )
+    monkeypatch.setattr(doctor, "BUNDLED", bundled)
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(live))
+
+    check = _by_name(asyncio.run(doctor.run_checks()), "hooks")
+    assert check["ok"] is True  # an operator's choice, not a failure
+    assert "on.spec.requested" in check["detail"]
+
+
+def test_hooks_check_names_a_hook_missing_from_the_live_registry(tmp_path, monkeypatch):
+    """The shape a registry seeded before a hook point existed takes: the key is
+    not on the placeholder, it is not there at all. `live.get(h)` returns None,
+    which is not a noop, so this case used to exempt itself from the very check
+    written for it (Kraft-zmb)."""
+    bundled = tmp_path / "bundled"
+    (bundled / "templates").mkdir(parents=True)
+    (bundled / "templates" / "registry.yaml").write_text(
+        "hooks:\n"
+        "  on.spec.requested: { kind: agent, command: claude, skill: spec, artifact: spec }\n"
+    )
+    live = tmp_path / "templates"
+    live.mkdir()
+    (live / "registry.yaml").write_text(
+        "hooks:\n  on.env.prepare: { kind: builtin, handler: env_setup }\n"
+    )
+    monkeypatch.setattr(doctor, "BUNDLED", bundled)
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(live))
+
+    check = _by_name(asyncio.run(doctor.run_checks()), "hooks")
+    assert check["ok"] is True
+    assert "on.spec.requested" in check["detail"]
+    assert "missing entirely" in check["detail"]
+
+
+def test_every_config_check_reports_even_with_no_templates_dir(tmp_path, monkeypatch):
+    """CI has no `$KRAFT_HOME/templates`, and `_config_checks` returns early
+    there. Every row it can emit must still emit, or a caller reading the run by
+    name gets StopIteration instead of an answer — which is how this reached a
+    red pipeline while passing on a developer machine that had the directory.
+    """
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path / "nope"))
+    monkeypatch.setattr(doctor, "BUNDLED", tmp_path / "absent")
+
+    rows = asyncio.run(doctor.run_checks())
+    assert _by_name(rows, "templates")["ok"] is False
+    hooks = _by_name(rows, "hooks")
+    assert hooks["ok"] is True and hooks["skipped"] is True
+
+
+def test_hooks_check_is_skipped_without_a_bundled_registry(tmp_path, monkeypatch):
+    monkeypatch.setattr(doctor, "BUNDLED", tmp_path / "absent")
+    check = _by_name(asyncio.run(doctor.run_checks()), "hooks")
+    assert check["skipped"] is True

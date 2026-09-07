@@ -10,7 +10,7 @@ from support.harness import fake_registry, isolated_bd, make_repo
 from kraft import db, events, executor, store
 from kraft.adapters import beads
 from kraft.paths import RunDirs
-from kraft.templates import Template, load_registry, load_templates
+from kraft.templates import Registry, Template, load_registry, load_templates
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
@@ -708,6 +708,47 @@ def test_run_closes_an_auto_intaken_bead_in_its_own_workspace(tmp_path, monkeypa
                 == "completed"
             )
             assert _bd_status(other, bead_id) == "closed"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_the_first_node_runs_before_env_setup_and_still_has_a_worktree(tmp_path):
+    """default.yaml puts `spec` first and `env_setup` fourth, so the executor —
+    not the env_setup node — is what guarantees the first task has a checkout
+    to run in (Kraft-bmp)."""
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = Registry(hooks={"on.spec.requested": {"kind": "builtin", "handler": "noop"}})
+            chain = {
+                "template_id": "t",
+                "nodes": [
+                    {
+                        "id": "spec",
+                        "tasks": ["on.spec.requested"],
+                        "gate_after": None,
+                        "fix_loop": None,
+                    }
+                ],
+            }
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="w1",
+                    bead_id="B",
+                    title="t",
+                    repo=str(repo),
+                    chain_template="t",
+                    chain_definition=json.dumps(chain),
+                )
+            )
+            await executor.run(database, rd, work_item_id="w1", registry=registry)
+            assert (rd.worktrees / "w1").is_dir()
         finally:
             await database.close()
 

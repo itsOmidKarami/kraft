@@ -102,6 +102,7 @@ kraft events [ID] [--after N] [--type T]
 kraft watch                            # live board, needs a terminal
 kraft diff [ID] [--stat|--name-only]   # truncation and untracked always shown
 kraft docs [ID] / kraft doc DOC_ID [--open [EDITOR]]
+kraft artifact [ID]                    # the doc the pending gate is about
 kraft repos / kraft connect [PATH]     # `*` marks the repo you are in
 kraft path [ID] (alias cd) / kraft open [ID]
 kraft serve [--host H] [--port P]      # same as bare `kraft`

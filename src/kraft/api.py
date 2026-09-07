@@ -32,11 +32,19 @@ from kraft import logs as logs_mod
 from kraft import notify as notify_mod
 from kraft import policy as policy_mod
 from kraft import steering as steering_mod
+from kraft.adapters import agent as agent_mod
 from kraft.adapters import beads as beads_mod
 from kraft.db import Database
 from kraft.index import db as index_db
+from kraft.index import ingest as ingest_mod
 from kraft.index.service import Indexer
-from kraft.paths import BUNDLED, RunDirs, default_run_dir, default_templates_dir
+from kraft.paths import (
+    BUNDLED,
+    RunDirs,
+    default_run_dir,
+    default_skills_dir,
+    default_templates_dir,
+)
 from kraft.templates import (
     CONFIG_FILES,
     GATE_NAMES,
@@ -89,7 +97,10 @@ async def lifespan(app: FastAPI):
     # `_launch` — which reads st.templates_dir — can build a launch context for
     # a reattached work item's resume.
     app.state.templates_dir = templates_dir
-    registry = load_registry(templates_dir / "registry.yaml")
+    # Where an operator may override a bundled method file. Absent on almost
+    # every install; `kraft.skill` falls back to the packaged copy.
+    app.state.skills_dir = Path(os.environ.get("KRAFT_SKILLS_DIR") or default_skills_dir())
+    registry = load_registry(templates_dir / "registry.yaml", skills_dir=app.state.skills_dir)
     templates = load_templates(templates_dir, registry)
 
     # Config the Settings screens edit. Read once here and re-read on every save,
@@ -506,6 +517,37 @@ def _gate_node_index(chain: dict, gate: str) -> int:
     return next(i for i, n in enumerate(chain["nodes"]) if n.get("gate_after") == gate)
 
 
+def _gate_artifact(st, row, gate: str | None) -> str | None:
+    """The document the pending gate is a decision *about*, or None.
+
+    Derived from the binding, not stored: the gate's node names its hooks, a
+    hook with `artifact:` names a kind, and the kind plus the work item id is
+    the path (`agent.artifact_path`). Nothing here to migrate and nothing to go
+    stale when a rerun revises the same file.
+
+    None when there is no pending gate, when none of the node's hooks produce
+    an artifact, or when the file is not on disk — the last case is an agent
+    that reported done without honouring the contract, and the gate is still
+    answerable, just without a document to read.
+    """
+    if not gate:
+        return None
+    chain = json.loads(row["chain_definition"])
+    try:
+        node = chain["nodes"][_gate_node_index(chain, gate)]
+    except StopIteration:
+        return None
+    worktree = st.run_dirs.worktrees / row["id"]
+    for task in node["tasks"]:
+        kind = st.registry.hooks.get(task, {}).get("artifact")
+        if not kind:
+            continue
+        rel = agent_mod.artifact_path(kind, row["id"])
+        if (worktree / rel).is_file():
+            return rel
+    return None
+
+
 class GateReject(BaseModel):
     note: str
 
@@ -642,6 +684,7 @@ async def get_work_item(wid: str, request: Request):
             "SELECT * FROM worker_sessions WHERE work_item_id = ? ORDER BY created_at", (wid,)
         ).fetchall()
     )
+    pending = _pending_gate(st, wid)
     return {
         **{k: row[k] for k in row.keys()},
         "chain_definition": json.loads(row["chain_definition"]),
@@ -655,7 +698,11 @@ async def get_work_item(wid: str, request: Request):
         # The gate actually waiting on a person. Inferring it client-side from
         # "the node has a gate_after and its sessions are done" cannot see a
         # rejection, and offers Approve on a gate the API will 409 (Kraft).
-        "pending_gate": _pending_gate(st, wid),
+        "pending_gate": pending,
+        # The document the gate is a decision about — the spec at
+        # spec_approval, the plan at plan_approval. The detail screen offers
+        # "Review spec" only when this is set.
+        "gate_artifact": _gate_artifact(st, row, pending),
         # Why the item is stopped, when it is: the detail screen has to tell a
         # loop escalation from an unrelated crash on the same node (Kraft-esc).
         "stop_reason": _stop_reason(st, wid),
@@ -761,6 +808,117 @@ async def get_work_item_diff(wid: str, request: Request):
         # returned it, to the same authenticated caller.
         "diff_max_bytes": DIFF_MAX_BYTES,
         "worktree_path": str(worktree),
+    }
+
+
+def _open_no_symlinks(root: Path, rel: str) -> int:
+    """Open `rel` beneath `root`, refusing a symlink at every component.
+
+    A resolved path is a fact about the filesystem at the instant it was
+    resolved. The agent owns this worktree and can swap any component --
+    including a parent directory -- between the resolve and the open, so
+    containment has to be enforced by the open itself: walk down from the
+    root, one `openat` per component, never following a link.
+    """
+    parts = Path(rel).parts
+    # The root's own ancestors are server-owned, so following links above the
+    # worktree is fine (and necessary on macOS, where /tmp is a symlink).
+    dir_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in parts[:-1]:
+            nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
+            os.close(dir_fd)
+            dir_fd = nxt
+        return os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dir_fd)
+    finally:
+        os.close(dir_fd)
+
+
+async def _refuse_artifact(st, wid: str, rel: str, reason: str) -> None:
+    """Record why an artifact read was refused, on the item's own timeline.
+
+    Spec §4's premise is a reviewer with no access to the server's log, so a
+    `logger.warning` is not a substitute for this -- it is what this replaces.
+    Not called for `rel is None` (`_gate_artifact` found no file): that is the
+    ordinary state of a gate whose agent session has not finished yet, and a
+    UI that polls the detail endpoint while it waits would turn "no document
+    yet" into an event on every poll. Everything past that point means
+    `_gate_artifact` *did* find a file and something went wrong reading the
+    one it found, which is the actual refusal this exists to explain.
+    """
+    payload = {"path": rel, "reason": reason}
+    await st.db.write(lambda c: events.append(c, wid, "artifact_refused", payload))
+
+
+@app.get("/work-items/{wid}/artifact")
+async def get_work_item_artifact(wid: str, request: Request):
+    """The pending gate's document, for a reviewer with no filesystem access.
+
+    Read off disk rather than out of the index: the index ingests committed
+    files on its own schedule, and a reviewer who is looking at the gate right
+    now must see what the agent just wrote.
+    """
+    st = request.app.state
+    row = _work_item_row(st, wid)  # 404s on an unknown work item
+    rel = _gate_artifact(st, row, _pending_gate(st, wid))
+    if rel is None:
+        raise HTTPException(404, "this work item's gate has no artifact")
+    worktree = st.run_dirs.worktrees / wid
+    try:
+        root = worktree.resolve(strict=True)
+        target = (worktree / rel).resolve(strict=True)
+    except OSError:
+        await _refuse_artifact(st, wid, rel, "absent")
+        raise HTTPException(404, "this work item's gate has no artifact") from None
+    if not target.is_relative_to(root):
+        # A symlink out of the worktree is the one way a derived, unstored path
+        # can still point somewhere it should not. Same answer as a missing
+        # file: a reviewer's browser learns nothing about the server's disk.
+        logger.warning("artifact for %s resolves outside its worktree: %s", wid, target)
+        await _refuse_artifact(st, wid, rel, "escaped_containment")
+        raise HTTPException(404, "this work item's gate has no artifact")
+    try:
+        # The resolve+is_relative_to check above is what produces the warning
+        # and names the work item; it is a fact about the instant it ran, not
+        # a guarantee. This walk is the actual containment: the agent that
+        # owns this worktree can swap any component -- not just the leaf --
+        # for a symlink between that check and this open.
+        fd = _open_no_symlinks(root, rel)
+    except OSError:
+        await _refuse_artifact(st, wid, rel, "unreadable")
+        raise HTTPException(404, "this work item's gate has no artifact") from None
+    try:
+        fh = os.fdopen(fd, "rb")
+    except OSError:
+        # fdopen failed before taking ownership of fd (e.g. the walk landed on
+        # a directory) -- close it ourselves, or it leaks.
+        os.close(fd)
+        await _refuse_artifact(st, wid, rel, "unreadable")
+        raise HTTPException(404, "this work item's gate has no artifact") from None
+    try:
+        with fh:
+            # Capped at the read, not just at the response: an agent that writes
+            # a multi-gigabyte file by mistake must not be able to make the
+            # server read it into memory to decide it is too big (spec §4). One
+            # byte over the cap is how `truncated` is known without a stat race.
+            data = fh.read(DIFF_MAX_BYTES + 1)
+    except OSError:
+        await _refuse_artifact(st, wid, rel, "unreadable")
+        raise HTTPException(404, "this work item's gate has no artifact") from None
+    truncated = len(data) > DIFF_MAX_BYTES
+    # Slicing bytes can land mid-codepoint; `errors="replace"` is what makes
+    # that a single replacement character instead of a 500.
+    text = data[:DIFF_MAX_BYTES].decode(errors="replace")
+    fm, body = ingest_mod.split_front_matter(text)
+    return {
+        "work_item_id": wid,
+        "path": rel,
+        "title": ingest_mod.derive_title(rel, fm, body),
+        # Front matter stripped: it is the contract's plumbing, not the
+        # document, and a reviewer reading a spec should not have to skip it.
+        "content": body,
+        "truncated": truncated,
+        "artifact_max_bytes": DIFF_MAX_BYTES,
     }
 
 
@@ -1279,7 +1437,7 @@ async def ws_events(websocket: WebSocket, after_seq: int = 0):
 
 
 def _reload_templates(st) -> None:
-    st.registry = load_registry(st.templates_dir / "registry.yaml")
+    st.registry = load_registry(st.templates_dir / "registry.yaml", skills_dir=st.skills_dir)
     st.templates = load_templates(st.templates_dir, st.registry)
 
 
@@ -1420,10 +1578,13 @@ def _launch(st, repo: str) -> executor.LaunchContext:
         repos = config_mod.load_repos(_repos_path(st), validate_steering=False)
     except config_mod.ConfigError as exc:
         logger.warning("repo config invalid, launching without it: %s", exc)
-        return executor.LaunchContext(repo_entry=None, steering_dir=steering_dir)
+        return executor.LaunchContext(
+            repo_entry=None, steering_dir=steering_dir, skills_dir=st.skills_dir
+        )
     return executor.LaunchContext(
         repo_entry=_connected(repos, repo),
         steering_dir=steering_dir,
+        skills_dir=st.skills_dir,
     )
 
 
@@ -1549,7 +1710,9 @@ async def put_registry(body: RegistryBody, request: Request):
         candidate = Path(tmp) / "registry.yaml"
         candidate.write_text(yaml.safe_dump({"hooks": body.hooks}))
         try:
-            registry = load_registry(candidate, steering_dir=st.templates_dir / "steering")
+            registry = load_registry(
+                candidate, steering_dir=st.templates_dir / "steering", skills_dir=st.skills_dir
+            )
         except RegistryError as exc:
             raise HTTPException(422, str(exc)) from exc
         for src in st.templates_dir.glob("*.yaml"):
@@ -1643,7 +1806,9 @@ def _check_steering_change(st, name: str, body: str | None) -> None:
         else:
             target.write_text(body)
         try:
-            load_registry(st.templates_dir / "registry.yaml", steering_dir=scratch)
+            load_registry(
+                st.templates_dir / "registry.yaml", steering_dir=scratch, skills_dir=st.skills_dir
+            )
             config_mod.load_repos(_repos_path(st), steering_dir=scratch)
         except (RegistryError, config_mod.ConfigError) as exc:
             raise HTTPException(422, str(exc)) from exc

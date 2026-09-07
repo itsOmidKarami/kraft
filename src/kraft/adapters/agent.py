@@ -5,6 +5,7 @@ import shlex
 from pathlib import Path
 from typing import NamedTuple
 
+from kraft import skill as _skill
 from kraft import steering as _steering
 from kraft.adapters import subprocess as _subprocess
 
@@ -38,6 +39,40 @@ _CTX = (
     "needs_context stops this run and costs a full relaunch to pick it back "
     "up, so if you are missing more than one fact, ask for all of them in "
     "that one question rather than stopping once per fact."
+)
+
+
+def artifact_path(kind: str, work_item_id: str) -> str:
+    """Where a hook with `artifact: <kind>` must write its document.
+
+    Derived on both sides — injected here, read back by
+    `GET /work-items/{wid}/artifact` — rather than stored on the work item.
+    Nothing to migrate, nothing to go stale, and a rerun after a rejected gate
+    revises the same file instead of leaving a stale pointer behind.
+    """
+    return f".engineering/{kind}s/{work_item_id}.md"
+
+
+#: The contract a hook with an `artifact:` binding is held to. Not part of the
+#: method: the method says *how* to think about a spec, this says where the
+#: result goes and how a reviewer will find it. Swapping the method must not be
+#: able to lose the contract.
+_ARTIFACT = (
+    "\n\nWrite your {kind} to {path}, relative to the repo root, creating that "
+    "directory if it does not exist, and to no other path. Start it with YAML "
+    "front matter carrying exactly these keys:\n"
+    "---\n"
+    "work_item_ids: [{work_item_id}]\n"
+    "node_id: {node_id}\n"
+    "hook_point: {hook_point}\n"
+    "kind: {kind}s\n"
+    "title: <a one-line title for this {kind}>\n"
+    "---\n"
+    "If that file already exists, a human has read it and asked for changes: "
+    "revise it in place rather than starting a new one.\n"
+    "Before you exit, `git add` that file and commit it. A human reviews it at "
+    "the gate that follows this node, and an uncommitted file is invisible to "
+    "them."
 )
 
 
@@ -78,10 +113,16 @@ class Invocation(NamedTuple):
     model: str | None
     deny_tools: tuple[str, ...]
     steering_texts: tuple[str, ...]
+    method_text: str | None = None
 
 
 def resolve_invocation(
-    binding: dict, repo_entry: dict | None, steering_dir: Path | None, *, escalate: bool = False
+    binding: dict,
+    repo_entry: dict | None,
+    steering_dir: Path | None,
+    *,
+    skills_dir: Path | None = None,
+    escalate: bool = False,
 ) -> Invocation:
     """Fold a hook binding and a repo entry into one launch.
 
@@ -118,6 +159,10 @@ def resolve_invocation(
                 f"resolve_invocation: steering {names!r} totals {total} bytes combined, "
                 f"over the {_steering.MAX_BYTES} byte budget"
             )
+    # Hook-level only, deliberately: a method is what this *hook* does, where
+    # steering is what a repo demands of every hook. A repo-level default would
+    # make one hook's method depend on which repo it ran in.
+    method_text = _skill.read(skills_dir, binding["skill"]) if binding.get("skill") else None
     return Invocation(
         command=binding["command"],
         profile=binding.get("profile", "claude"),
@@ -128,6 +173,7 @@ def resolve_invocation(
         or repo.get("default_model"),
         deny_tools=tuple(deny),
         steering_texts=steering_texts,
+        method_text=method_text,
     )
 
 
@@ -166,6 +212,8 @@ async def run_agent_task(
     deny_tools: tuple[str, ...] = (),
     steering_texts: tuple[str, ...] = (),
     review_package: str | None = None,
+    artifact: str | None = None,
+    method_text: str | None = None,
 ) -> str:
     ctx = _CTX.format(
         title=title,
@@ -176,6 +224,14 @@ async def run_agent_task(
         hook_point=hook_point,
         session_id=session_id,
     )
+    if artifact:
+        ctx += _ARTIFACT.format(
+            kind=artifact,
+            path=artifact_path(artifact, work_item_id),
+            work_item_id=work_item_id,
+            node_id=node_id,
+            hook_point=hook_point,
+        )
     if review_package:
         # By path, like $KRAFT_RESULT_PATH. A diff pasted into every review of
         # every cycle of every work item is the token cost sub-project G §4
@@ -187,6 +243,11 @@ async def run_agent_task(
             "context lines ARE the changed files -- do not read a changed file "
             "separately unless a hunk you must judge is cut off mid-function.\n"
         )
+    if method_text:
+        # After the contract, before steering: the agent reads what it must
+        # produce, then how to produce it, then the house rules that apply to
+        # everything. Steering stays last so it is never buried.
+        ctx += _skill.HEADING + method_text + _skill.UNAVAILABLE
     if steering_texts:
         # The context-injection boundary (00_overview.md glossary) bans
         # CLAUDE.md, AGENTS.md and any repo file as a context channel. That

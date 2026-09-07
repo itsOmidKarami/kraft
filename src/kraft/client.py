@@ -183,6 +183,7 @@ async def get_work_item(work_item_id: str | None = None) -> dict:
         "status",
         "current_node_id",
         "pending_gate",
+        "gate_artifact",
         "worktree_path",
         "bead_id",
     )
@@ -326,6 +327,15 @@ async def diff(work_item_id: str | None = None) -> dict:
     that is guaranteed rather than remembered.
     """
     return await _get(f"/work-items/{await _target(work_item_id)}/diff")
+
+
+async def artifact(work_item_id: str | None = None) -> dict:
+    """The document the item's pending gate is a decision about.
+
+    404s when there is no pending gate or the hook produced no document —
+    reading a gate's artifact is only meaningful while the gate is open.
+    """
+    return await _get(f"/work-items/{await _target(work_item_id)}/artifact")
 
 
 async def documents(work_item_id: str | None = None) -> list[dict]:

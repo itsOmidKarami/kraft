@@ -34,6 +34,9 @@ export interface WorkItem {
   /** The gate waiting on a person, straight from the server — a rejected gate
    *  is not pending, which no client-side inference from sessions can see. */
   pending_gate?: string | null;
+  /** Repo-relative path to the document the pending gate is a decision about,
+   *  or null when the agent wrote nothing for a human to review. */
+  gate_artifact?: string | null;
   // client-derived, not from the list endpoint:
   rejectNote?: string | null;
   fixCycle?: number;
@@ -142,6 +145,15 @@ export interface WorkItemDiff {
   files: { path: string; insertions: number; deletions: number }[];
   diff: string;
   untracked: string[];
+  truncated: boolean;
+}
+
+/** The document a gate is a decision about, read off the worktree. */
+export interface WorkItemArtifact {
+  work_item_id: string;
+  path: string;
+  title: string;
+  content: string;
   truncated: boolean;
 }
 

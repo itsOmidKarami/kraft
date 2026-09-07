@@ -342,4 +342,16 @@ describe("WorkItemDetail", () => {
     expect(screen.queryByTestId("needs-context-card")).toBeNull();
     expect(screen.getByText(/Review changes/)).toBeInTheDocument();
   });
+
+  it("offers the spec at a spec gate", async () => {
+    setup({ pending_gate: "spec_approval", gate_artifact: ".engineering/specs/w1.md" });
+    renderDetail();
+    expect(await screen.findByText(/Review spec/)).toBeTruthy();
+  });
+
+  it("offers nothing when the gate has no artifact", async () => {
+    setup({ pending_gate: "spec_approval", gate_artifact: null });
+    renderDetail();
+    expect(screen.queryByText(/Review spec/)).toBeNull();
+  });
 });

@@ -24,6 +24,16 @@ def default_templates_dir() -> Path:
     return kraft_home() / "templates"
 
 
+def default_skills_dir() -> Path:
+    """Where an operator may override a bundled method file.
+
+    Not seeded by `cli.seed_home` and usually absent: the shipped skills live in
+    the package (`kraft.skill.BUNDLED`), and this directory exists only when
+    someone has deliberately overridden one.
+    """
+    return kraft_home() / "skills"
+
+
 #: Built SPA and default config, copied in by `just install`. Absent in a plain
 #: source checkout — the API then serves no SPA, and `just dev` points
 #: KRAFT_FRONTEND_DIST at vite's output instead.

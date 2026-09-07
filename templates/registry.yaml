@@ -1,10 +1,10 @@
 hooks:
   on.env.prepare:          { kind: builtin,    handler: env_setup }
+  on.spec.requested:       { kind: agent,      command: claude, skill: spec, artifact: spec }
+  on.plan.requested:       { kind: agent,      command: claude, skill: plan, artifact: plan }
   on.implementation.start: { kind: agent,      command: claude }
   on.test.run:             { kind: subprocess, command: [pytest, -q] }
   # --- placeholder bindings: each replaced by its plugin effort (see 03_plugin_adapters) ---
-  on.spec.requested:         { kind: builtin, handler: noop }
-  on.plan.requested:         { kind: builtin, handler: noop }
   on.chain.review_ready:     { kind: builtin, handler: noop }
   on.review.local.run:       { kind: builtin, handler: noop }
   on.mr.open:                { kind: builtin, handler: noop }

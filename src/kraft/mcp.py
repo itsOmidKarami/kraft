@@ -35,6 +35,11 @@ def build() -> MCPServer:
         return await client.get_work_item(work_item_id)
 
     @server.tool()
+    async def get_gate_artifact(work_item_id: str | None = None) -> dict:
+        """The spec or plan the work item's pending gate is a decision about."""
+        return await client.artifact(work_item_id)
+
+    @server.tool()
     async def search(q: str, limit: int = 20) -> dict:
         """Search Kraft's cross-repo index of specs, plans, and session
         summaries. Use this before writing a spec, to find whether the decision

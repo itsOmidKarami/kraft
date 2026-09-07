@@ -170,7 +170,7 @@ loop (`02` §7.2), not a branch in the chain.
   silently approximating it with a different task.
 - Gate rejection (`chain_finalized`) re-invokes `on.chain.review_ready` via the
   coordinator, note injected (`02` §7.2 entry point B).
-- **Skill:** `chain-review`, authored at `skills/chain-review/SKILL.md`. It sits
+- **Skill:** `chain-review`, authored at `src/kraft/skills/chain-review/SKILL.md`. It sits
   beside `templates/` because it is a product artifact injected into the headless
   session, not guidance for agents working on Kraft itself (`.agents/skills/`).
 - **Allowed hook set is injected, not assumed.** The adapter passes the hook points
@@ -450,7 +450,7 @@ isn't.
 4. **Planning** — near-zero marginal cost once (1) exists; two hook bindings, config
    only.
 5. **Chain Review** — same marginal-cost logic as Planning. The skill it depends on
-   is written (`skills/chain-review/SKILL.md`), so this is adapter wiring only:
+   is written (`src/kraft/skills/chain-review/SKILL.md`), so this is adapter wiring only:
    bind `on.chain.review_ready`, inject the skill plus the repo's enabled hook set,
    and validate the returned tail before splicing.
 6. **Review** — ponytail-review reuses (1)'s machinery directly; remote-review CLI is
@@ -493,7 +493,7 @@ and `orchestrator_core_addendum_v1.md` §8 folded in.
 - Original §10's parked fix-loop discussion and §11's "left alone for now" list are
   reflected as resolved above; remaining genuine placeholders retained in §10.
 - **§3a Chain Review** — skill name and location resolved: `chain-review`, authored at
-  `skills/chain-review/SKILL.md` (Kraft-nk7). The output schema loses its "proposed,
+  `src/kraft/skills/chain-review/SKILL.md` (Kraft-nk7). The output schema loses its "proposed,
   unconfirmed" label and gains `rationale`, and the adapter's obligation to inject the
   repo's *enabled* hook set is stated. §10's "Chain Review skill: name and actual
   content" placeholder is retired; §11 step 5 is no longer blocked and is now adapter
