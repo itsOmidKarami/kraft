@@ -85,6 +85,33 @@ install:
 test *ARGS:
     uv run pytest {{ARGS}}
 
+# Regenerate the Lite plugin's chain artifact from the YAML templates.
+lite-build:
+    uv run python dev/build_lite_chain.py
+
+# The published history is REGENERATED each time and force-pushed. That is
+# deliberate: this repo's own release will rewrite its history, which changes
+# every commit a split derives from, and a preserved history would stop
+# fast-forwarding the moment that lands.
+#
+# It is also why this recipe has an expiry. The day the public repo has an
+# external contributor, force-pushing destroys their merge base: stop running
+# this, and make the public repo the source instead.
+#
+# One-way. An outside PR comes back by cherry-pick into this repo, never by
+# pulling into the public one.
+#
+# Publish plugins/kraft-lite/ to its own public repo; regenerates and force-pushes.
+lite-publish:
+    just lite-build
+    git diff --exit-code plugins/kraft-lite/chains/default.json
+    uv run pytest plugins/kraft-lite/tests -q
+    test -f plugins/kraft-lite/LICENSE
+    git branch -D lite-publish 2>/dev/null || true
+    git subtree split --prefix=plugins/kraft-lite -b lite-publish
+    git push --force lite lite-publish:main
+    git branch -D lite-publish
+
 # Frontend typecheck + unit tests. `npm test` is vitest, which does NOT typecheck;
 # CI's `npm run build` runs `tsc -b` and will fail on errors vitest sails past. Keep
 # the two in step here, or the only way to find a type error is to spend a pipeline.
