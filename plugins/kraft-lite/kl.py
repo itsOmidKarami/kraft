@@ -266,59 +266,169 @@ def store_for(root: Path):
 DEFAULT_CHAIN = Path(__file__).parent / "chains" / "default.json"
 
 
-def _chain(root: Path, path: Path | None) -> dict:
+def _frozen_path(root: Path, chain_id: str) -> Path:
+    return root / STATE_DIR / "chains" / f"{chain_id}.json"
+
+
+def _chain(root: Path, path: Path | None, chain_id: str | None = None) -> dict:
     """The chain this run walks.
 
-    `start` freezes its chain into the state directory and every later verb reads
-    that copy. Re-reading the template each time would mean a `--chain` given at
-    start is forgotten by the next verb — and worse, that editing a template
-    retargets a run already in flight.
+    `start` freezes its chain and every later verb reads that copy. Re-reading the
+    template each time would mean a `--chain` given at start is forgotten by the
+    next verb — and worse, that editing a template retargets a run already in
+    flight. One file per chain id is what lets two runs in one directory hold
+    different templates; a single file meant the second `start` silently
+    retargeted the first run.
     """
-    frozen = root / STATE_DIR / "chain.json"
     if path is not None:
         return json.loads(path.read_text())
-    if frozen.is_file():
-        return json.loads(frozen.read_text())
+    if chain_id is not None:
+        per_chain = _frozen_path(root, chain_id)
+        if per_chain.is_file():
+            return json.loads(per_chain.read_text())
+    # Chains frozen before templates were per-chain. Remove at the next breaking
+    # release; until then it is what keeps a run in flight walking across upgrade.
+    legacy = root / STATE_DIR / "chain.json"
+    if legacy.is_file():
+        return json.loads(legacy.read_text())
     return json.loads(DEFAULT_CHAIN.read_text())
 
 
-def _freeze_chain(root: Path, chain: dict) -> None:
-    frozen = root / STATE_DIR / "chain.json"
+def _freeze_chain(root: Path, chain: dict, chain_id: str) -> None:
+    frozen = _frozen_path(root, chain_id)
     frozen.parent.mkdir(parents=True, exist_ok=True)
     frozen.write_text(json.dumps(chain, indent=2) + "\n")
 
 
-def _ours(records: list[dict]) -> list[dict]:
-    """The live chain's records. bd holds a whole project's issues, and a repo
-    accumulates one epic per `start`, so both have to be filtered out.
-
-    The live chain is the newest one with unfinished work; with none unfinished,
-    the newest overall, so a completed run still reports `done` rather than
-    `unstarted`. Node ids are `<chain-id>.<node-id>`, so the prefix identifies the
-    owner.
-
-    ponytail: newest-wins, no way to name an older run. Upgrade path is a
-    `--chain-id` argument on every verb, worth adding the first time somebody
-    wants to walk two at once.
-    """
+def chain_index(records: list[dict]) -> dict[str, list[dict]]:
+    """Every chain in this store, keyed by its epic id, oldest first. Node ids are
+    `<chain-id>.<node-id>`, so the prefix names the owner."""
     epics = [r["id"] for r in records if label_value(r, CHAIN_LABEL)]
-    if not epics:
-        return []
     by_chain: dict[str, list[dict]] = {e: [] for e in epics}
     for record in records:
         owner = record["id"].split(".")[0]
         if owner in by_chain:
             by_chain[owner].append(record)
-
-    def unfinished(chain_id: str) -> bool:
-        return any(r["status"] != "closed" for r in by_chain[chain_id])
-
-    live = [e for e in epics if unfinished(e)] or epics
-    return by_chain[live[-1]]
+    return by_chain
 
 
-def _state(root: Path, chain: dict) -> dict:
-    records = _ours(store_for(root).load())
+def _by_age(by_chain: dict[str, list[dict]]) -> list[str]:
+    """Chain ids oldest first, by the epic's timestamp rather than by store order.
+
+    `bd export` promises neither insertion nor sorted order — `ordered()` says so
+    a few functions up — so reading the last record as the newest is a coin flip.
+    The epic is closed at `start` and never written again, so its `updated_at` is
+    the run's start time. Ties fall back to store order, which is what a sort this
+    stable does anyway.
+    """
+
+    def stamp(chain_id: str) -> str:
+        epic = next((r for r in by_chain[chain_id] if label_value(r, CHAIN_LABEL)), None)
+        return (epic or {}).get("updated_at", "")
+
+    return sorted(by_chain, key=stamp)
+
+
+def rewind(records: list[dict], from_node: str, note: str) -> list[dict]:
+    """Reopen `from_node` and every node after it, carrying the reason.
+
+    Reopening only the named node is not enough: `current` returns the first open
+    node whose dependencies are closed, so with the later nodes still closed the
+    walk would run the reopened one and jump straight back to the gate that
+    rejected it — the redone work would never be verified. The chain's links are
+    strictly linear and cannot express a backward edge, so the rewind is done by
+    reopening the tail.
+    """
+    walk = [r for r in ordered(records) if label_value(r, NODE_LABEL)]
+    ids = [label_value(r, NODE_LABEL) for r in walk]
+    if from_node not in ids:
+        raise SystemExit(
+            f"kraft-lite: no node {from_node!r} in this chain. Its nodes are:\n  " + ", ".join(ids)
+        )
+    out = []
+    for offset, record in enumerate(walk[ids.index(from_node) :]):
+        labels = [
+            x
+            for x in record.get("labels", [])
+            if not x.startswith(GATE_LABEL) and not x.startswith(ATTEMPT_LABEL)
+        ]
+        reopened = dict(record, status="open", labels=labels)
+        if offset == 0:
+            description = record.get("description", "")
+            reopened["description"] = f"{description}\n{NOTE_PREFIX}{note}"
+        out.append(reopened)
+    return out
+
+
+def chain_summaries(records: list[dict]) -> list[dict]:
+    """Every chain in the directory: what it is called, and where it got to.
+
+    Reads the node record's own label rather than a template, so listing chains
+    costs no template reads and works even where a frozen template has gone
+    missing.
+    """
+    by_chain = chain_index(records)
+    rows = []
+    for chain_id in _by_age(by_chain):
+        epic = next((r for r in by_chain[chain_id] if label_value(r, CHAIN_LABEL)), None)
+        node_record = current(by_chain[chain_id])
+        rows.append(
+            {
+                "chain_id": chain_id,
+                "title": (epic or {}).get("title", ""),
+                "status": "done" if node_record is None else node_record["status"],
+                "node": label_value(node_record, NODE_LABEL) if node_record else None,
+            }
+        )
+    return rows
+
+
+def _titled(by_chain: dict[str, list[dict]], ids: list[str]) -> str:
+    lines = []
+    for chain_id in ids:
+        epic = next((r for r in by_chain[chain_id] if label_value(r, CHAIN_LABEL)), None)
+        lines.append(f"  {chain_id}  {epic.get('title', '') if epic else ''}")
+    return "\n".join(lines)
+
+
+def _ours(records: list[dict], chain_id: str | None = None) -> list[dict]:
+    """The chain a verb acts on.
+
+    A directory accumulates one epic per `start`. Picking the newest unfinished one
+    silently is how the wrong run gets advanced — a gate answered against a chain
+    nobody named — so two or more unfinished chains and no id is an error rather
+    than a guess. With one unfinished chain the id stays optional, which is the
+    case nearly every run is in.
+    """
+    by_chain = chain_index(records)
+    if chain_id is not None:
+        # Checked before the empty case: an id that names nothing must say so.
+        # Reporting `unstarted` instead sends the human to `start` over a typo.
+        if chain_id not in by_chain:
+            raise SystemExit(
+                f"kraft-lite: no chain {chain_id!r} in this directory. Chains here:\n"
+                + (_titled(by_chain, list(by_chain)) if by_chain else "  (none)")
+            )
+        return by_chain[chain_id]
+    if not by_chain:
+        return []
+
+    def unfinished(candidate: str) -> bool:
+        return any(r["status"] != "closed" for r in by_chain[candidate])
+
+    live = [e for e in by_chain if unfinished(e)]
+    if len(live) > 1:
+        raise SystemExit(
+            "kraft-lite: this directory has more than one unfinished chain. "
+            "Pass --chain-id to say which:\n" + _titled(by_chain, live)
+        )
+    # No unfinished chain means the newest overall, so a completed run still
+    # reports `done` rather than `unstarted`.
+    return by_chain[(live or _by_age(by_chain))[-1]]
+
+
+def _state(root: Path, chain: dict, chain_id: str | None = None) -> dict:
+    records = _ours(store_for(root).load(), chain_id)
     node_record = current(records)
     epic = next((r for r in records if label_value(r, CHAIN_LABEL)), None)
     if node_record is None:
@@ -343,8 +453,8 @@ def _state(root: Path, chain: dict) -> dict:
         # `done` having run nothing at all.
         raise SystemExit(
             f"kraft-lite: node {node_id!r} is not in this chain. "
-            f"{STATE_DIR}/chain.json is the chain this run started with — "
-            "restore it, or start a new chain."
+            f"{_frozen_path(root, epic['id']).relative_to(root) if epic else 'the frozen chain'}"
+            " is the chain this run started with — restore it, or start a new chain."
         )
     loop = definition.get("fix_loop")
     note = node_record.get("description", "")
@@ -361,6 +471,47 @@ def _state(root: Path, chain: dict) -> dict:
     }
 
 
+#: A registry hook is an unquoted key at column zero. Everything under it — `kind`,
+#: `skill`, `prompt` — is indented, and comments start with `#`. That is enough
+#: structure to find the hooks with a scan, which is what keeps this file free of
+#: the YAML dependency it would otherwise need for one check.
+HOOK_KEY = re.compile(r"^([a-z][a-z0-9_.]*):", re.MULTILINE)
+
+
+def registry_hooks(root: Path) -> set[str] | None:
+    """The hooks bound in this repo's registry, or None when there is no registry."""
+    path = root / STATE_DIR / "registry.yaml"
+    if not path.is_file():
+        return None
+    return set(HOOK_KEY.findall(path.read_text()))
+
+
+def validate_hooks(root: Path, chain: dict) -> None:
+    """A hook with no binding is otherwise found mid-walk, after the earlier nodes
+    have already run and spent the human's attention.
+
+    A missing registry only warns: the `start` skill already refuses to run without
+    one, so erroring here would duplicate that guard at the price of a fixture in
+    every test that starts a chain.
+    """
+    bound = registry_hooks(root)
+    if bound is None:
+        print(
+            f"kraft-lite: no {STATE_DIR}/registry.yaml — starting without checking "
+            "the chain's hooks. Run the init skill to write one.",
+            file=sys.stderr,
+        )
+        return
+    wanted = {task for node in chain["nodes"] for task in node["tasks"]}
+    missing = sorted(wanted - bound)
+    if missing:
+        raise SystemExit(
+            "kraft-lite: this chain names hooks with no registry binding: "
+            + ", ".join(missing)
+            + f"\nAdd them to {STATE_DIR}/registry.yaml, or re-run the init skill."
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="kl")
     sub = parser.add_subparsers(dest="verb", required=True)
@@ -368,49 +519,73 @@ def main(argv: list[str] | None = None) -> int:
     start = sub.add_parser("start")
     start.add_argument("--title", required=True)
     start.add_argument("--chain", type=Path, default=None)
-    sub.add_parser("state")
-    sub.add_parser("close")
-    sub.add_parser("approve")
-    sub.add_parser("attempt")
     sub.add_parser("detect")
+    sub.add_parser("chains")
     gate = sub.add_parser("gate")
     gate.add_argument("--name", required=True)
     reject = sub.add_parser("reject")
     reject.add_argument("--note", required=True)
+    # The last gate rejects work that an earlier node produced: its own hook only
+    # presents it. Without this the gate is approve-or-stall.
+    reject.add_argument("--from-node", default=None)
+    for name in ("state", "close", "approve", "attempt"):
+        sub.add_parser(name)
+    # Every verb that reads or writes chain state can be told which chain. `start`
+    # mints its own id and `detect` touches no state, so neither takes one.
+    for name in ("state", "close", "approve", "attempt", "gate", "reject"):
+        sub.choices[name].add_argument("--chain-id", default=None)
 
     args = parser.parse_args(argv)
     root = repo_root()
+    chain_id = getattr(args, "chain_id", None)
 
     if args.verb == "detect":
         print(json.dumps(detect(root), indent=2))
         return 0
 
-    chain = _chain(root, getattr(args, "chain", None))
+    if args.verb == "chains":
+        print(json.dumps(chain_summaries(store_for(root).load()), indent=2))
+        return 0
+
     store = store_for(root)
 
     if args.verb == "start":
-        chain_id = new_chain_id()
-        _freeze_chain(root, chain)
-        records = materialize(chain, args.title, chain_id)
+        new_id = new_chain_id()
+        # Not `_chain`: its legacy rung exists to keep runs already in flight
+        # walking, and nothing deletes `chain.json`. Reading it here would make
+        # every future `start` in an upgraded directory run that old template
+        # instead of the packaged default.
+        chain = json.loads((args.chain or DEFAULT_CHAIN).read_text())
+        validate_hooks(root, chain)
+        _freeze_chain(root, chain, new_id)
+        records = materialize(chain, args.title, new_id)
         # The epic is a container, not a step: close it now so the walk starts at
         # the first real node.
         records[0]["status"] = "closed"
         store.write(records)
-        print(json.dumps({"chain_id": chain_id, "backend": backend(root)}))
+        print(json.dumps({"chain_id": new_id, "backend": backend(root)}))
         return 0
 
-    node_record = current(_ours(store.load()))
+    records = _ours(store.load(), chain_id)
+    epic = next((r for r in records if label_value(r, CHAIN_LABEL)), None)
+    # A verb run without the flag still has to read the template of the chain it
+    # actually resolved, not the directory's last one.
+    resolved_id = epic["id"] if epic else None
+    chain = _chain(root, None, resolved_id)
+    node_record = current(records)
     if node_record is None and args.verb != "state":
         raise SystemExit("kraft-lite: no open node — the chain is finished or was never started")
 
     if args.verb == "state":
-        print(json.dumps(_state(root, chain), indent=2))
+        print(json.dumps(_state(root, chain, resolved_id), indent=2))
         return 0
 
     if args.verb in ("close", "approve"):
         store.write([dict(node_record, status="closed")])
     elif args.verb == "gate":
         store.write([set_label(dict(node_record, status="blocked"), GATE_LABEL, args.name)])
+    elif args.verb == "reject" and args.from_node:
+        store.write(rewind(records, args.from_node, args.note))
     elif args.verb == "reject":
         description = node_record.get("description", "")
         store.write(
@@ -425,12 +600,12 @@ def main(argv: list[str] | None = None) -> int:
     elif args.verb == "attempt":
         count = attempts(node_record) + 1
         store.write([set_label(node_record, ATTEMPT_LABEL, str(count))])
-        state = _state(root, chain)
+        state = _state(root, chain, resolved_id)
         state["over_cap"] = state["cap"] is not None and count > state["cap"]
         print(json.dumps(state, indent=2))
         return 0
 
-    print(json.dumps(_state(root, chain), indent=2))
+    print(json.dumps(_state(root, chain, resolved_id), indent=2))
     return 0
 
 

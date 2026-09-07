@@ -46,6 +46,10 @@ lint-and-test:
         - src/**/*
         - tests/**/*
         - templates/**/*
+        # pyproject's testpaths includes plugins/kraft-lite/tests, so the suite
+        # covers the plugin; without this line a plugin-only merge produces no
+        # job and main - the only place the merge result runs - never tests it.
+        - plugins/**/*
         - pyproject.toml
         - uv.lock
         - .gitlab-ci.yml
@@ -74,6 +78,10 @@ slow-tests:
         - src/**/*
         - tests/**/*
         - templates/**/*
+        # pyproject's testpaths includes plugins/kraft-lite/tests, so the suite
+        # covers the plugin; without this line a plugin-only merge produces no
+        # job and main - the only place the merge result runs - never tests it.
+        - plugins/**/*
         - pyproject.toml
         - uv.lock
         - .gitlab-ci.yml
