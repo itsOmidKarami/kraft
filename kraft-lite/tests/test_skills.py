@@ -127,10 +127,29 @@ def test_the_readme_warns_that_main_is_force_pushed():
     assert "git reset --hard origin/main" in readme
 
 
-def test_the_readme_cites_no_path_outside_the_plugin():
-    """This file ships to a repo where nothing above the plugin exists."""
-    import re
+# Not just links: a bare `docs/superpowers/specs/...` in prose is the same dead
+# reference to a reader who only ever sees the published repo. `(?<![\w./-])`
+# keeps `/dev/null` and `.kraft-lite/chain.jsonl` out of it.
+OUTSIDE = re.compile(
+    r"(?<![\w./-])(?:\.\./|/(?:Users|home)/|docs/|design/|src/|templates/|dev/|fixtures/)"
+)
 
+
+def test_no_shipped_prose_cites_a_path_outside_the_plugin(texts):
+    """These files ship to a repo where nothing above the plugin exists. The
+    monorepo has a `docs/` and a `templates/` that the split leaves behind, and
+    citing one reads fine here and 404s there."""
+    prose = {"README.md": (PLUGIN / "README.md").read_text()}
+    prose.update({f"skills/{name}/SKILL.md": text for name, text in texts.items()})
+    offenders = {
+        name: sorted(set(OUTSIDE.findall(text)))
+        for name, text in prose.items()
+        if OUTSIDE.search(text)
+    }
+    assert not offenders, f"paths that do not survive the split: {offenders}"
+
+
+def test_the_readme_links_nowhere_outside_the_published_tree():
     readme = (PLUGIN / "README.md").read_text()
-    outside = re.findall(r"\]\((?:\.\./|/|docs/|src/|templates/|dev/)[^)]*\)", readme)
+    outside = re.findall(r"\]\((?:\.\./|/)[^)]*\)", readme)
     assert not outside, f"links outside the published tree: {outside}"
