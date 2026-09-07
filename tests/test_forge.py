@@ -155,8 +155,14 @@ def test_resolve_returns_each_named_backend():
     assert isinstance(forge.resolve("fake"), forge.FakeForge)
 
 
-def _forge_session(tmp_path, monkeypatch, fake, handler: str, session_id: str) -> tuple[str, str]:
-    """Run one forge node against `fake`. Returns (returned status, recorded status)."""
+def _forge_session(
+    tmp_path, monkeypatch, fake, handler: str, session_id: str, **extra
+) -> tuple[str, str]:
+    """Run one forge node against `fake`. Returns (returned status, recorded status).
+
+    `extra` goes straight to `run_task`, which is how the poll tests set a
+    zero interval and keep themselves off the clock.
+    """
     monkeypatch.setattr(forge, "resolve", lambda name: fake)
 
     async def scenario():
@@ -182,6 +188,7 @@ def _forge_session(tmp_path, monkeypatch, fake, handler: str, session_id: str) -
                 repo=tmp_path,
                 branch="kraft/w1",
                 title="t",
+                **extra,
             )
             row = database.read(
                 lambda c: c.execute(
@@ -208,6 +215,104 @@ def test_ci_poll_records_done_when_the_pipeline_is_green(tmp_path, monkeypatch):
     returned, recorded = _forge_session(tmp_path, monkeypatch, fake, "ci_poll", "s2")
     assert returned == "done"
     assert recorded == "done"
+
+
+def _session_log(tmp_path, session_id: str) -> str:
+    return (tmp_path / "run" / "logs" / f"{session_id}.log").read_text()
+
+
+def test_ci_poll_waits_out_a_pending_pipeline(tmp_path, monkeypatch):
+    """A pipeline that is merely still running must not stop the node."""
+    fake = forge.FakeForge(ci_states=["pending", "pending", "success"])
+    returned, recorded = _forge_session(
+        tmp_path, monkeypatch, fake, "ci_poll", "s4", poll_interval=0
+    )
+    assert (returned, recorded) == ("done", "done")
+    assert fake.ci_states == ["success"], "both pendings should have been consumed"
+
+
+def test_ci_poll_times_out_while_still_pending(tmp_path, monkeypatch):
+    """A pipeline that never settles fails the node, but says why."""
+    fake = forge.FakeForge(ci_states=["pending"])
+    returned, recorded = _forge_session(
+        tmp_path, monkeypatch, fake, "ci_poll", "s5", poll_timeout=0, poll_interval=0
+    )
+    assert (returned, recorded) == ("failed", "failed")
+    assert "timed out" in _session_log(tmp_path, "s5")
+
+
+def test_ci_poll_red_pipeline_is_not_reported_as_a_timeout(tmp_path, monkeypatch):
+    """The human_review brief has to tell 'finished red' from 'never finished'."""
+    fake = forge.FakeForge(ci_states=["failed"])
+    _forge_session(tmp_path, monkeypatch, fake, "ci_poll", "s6", poll_interval=0)
+    log = _session_log(tmp_path, "s6")
+    assert "timed out" not in log
+    assert "pipeline failed" in log
+
+
+def test_poll_backs_off_and_caps_the_interval(tmp_path, monkeypatch):
+    """Without a cap, a long pipeline would stretch the gap between checks
+    without bound; without doubling, a 30-minute wait costs 360 CLI calls."""
+    slept: list[float] = []
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+
+    monkeypatch.setattr(forge.asyncio, "sleep", fake_sleep)
+    fake = forge.FakeForge(ci_states=["pending"] * 5 + ["success"])
+    ci, timed_out = asyncio.run(
+        forge._poll_ci(fake, repo=tmp_path, branch="b", timeout=10_000, interval=5)
+    )
+    assert (ci.state, timed_out) == ("success", False)
+    assert slept == [5, 10, 20, 40, forge._MAX_POLL_INTERVAL]
+
+
+def test_a_configured_interval_longer_than_the_cap_is_not_clamped_down(tmp_path, monkeypatch):
+    """The cap bounds the *growth*, not the human's choice. A registry asking
+    for 300s between checks -- a rate-limited forge -- must not silently get
+    60s and five times the CLI calls. It holds at 300 rather than doubling
+    past it: the configured interval is what was asked for."""
+    slept: list[float] = []
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+
+    monkeypatch.setattr(forge.asyncio, "sleep", fake_sleep)
+    fake = forge.FakeForge(ci_states=["pending"] * 3 + ["success"])
+    asyncio.run(forge._poll_ci(fake, repo=tmp_path, branch="b", timeout=10_000, interval=300))
+    assert slept == [300, 300, 300]
+
+
+def test_poll_never_sleeps_past_its_deadline(tmp_path, monkeypatch):
+    """An interval longer than what is left would overshoot the timeout and
+    report the pipeline late."""
+    slept: list[float] = []
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+
+    monkeypatch.setattr(forge.asyncio, "sleep", fake_sleep)
+    fake = forge.FakeForge(ci_states=["pending"])
+    _, timed_out = asyncio.run(
+        forge._poll_ci(fake, repo=tmp_path, branch="b", timeout=0.05, interval=100)
+    )
+    assert timed_out is True
+    assert slept and all(s <= 0.05 for s in slept)
+
+
+def test_a_forge_error_mid_poll_fails_the_node_rather_than_escaping(tmp_path, monkeypatch):
+    """The poll widened the window a flaky CLI can raise in from one call to
+    the whole timeout; it still has to land as a failed node."""
+
+    class Exploding(forge.FakeForge):
+        async def ci_status(self, *, repo, mr, branch=""):
+            raise forge.ForgeError("glab fell over")
+
+    returned, recorded = _forge_session(
+        tmp_path, monkeypatch, Exploding(), "ci_poll", "s7", poll_interval=0
+    )
+    assert (returned, recorded) == ("failed", "failed")
+    assert "glab fell over" in _session_log(tmp_path, "s7")
 
 
 def test_a_forge_error_fails_the_node_rather_than_escaping(tmp_path, monkeypatch):
@@ -275,18 +380,18 @@ def _back_half_template() -> Template:
     )
 
 
-def _forge_registry() -> Registry:
+def _forge_registry(**poll) -> Registry:
     return Registry(
         hooks={
             "on.env.prepare": {"kind": "builtin", "handler": "env_setup"},
             "on.mr.open": {"kind": "forge", "handler": "open_mr", "backend": "fake"},
-            "on.ci.poll": {"kind": "forge", "handler": "ci_poll", "backend": "fake"},
+            "on.ci.poll": {"kind": "forge", "handler": "ci_poll", "backend": "fake", **poll},
             "on.merge": {"kind": "forge", "handler": "merge", "backend": "fake"},
         }
     )
 
 
-def _run_back_half(tmp_path, monkeypatch, fake):
+def _run_back_half(tmp_path, monkeypatch, fake, **poll):
     monkeypatch.setattr(forge, "resolve", lambda name: fake)
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
@@ -307,7 +412,7 @@ def _run_back_half(tmp_path, monkeypatch, fake):
                 database,
                 rd,
                 work_item_id=wid,
-                registry=_forge_registry(),
+                registry=_forge_registry(**poll),
                 bd_cwd=str(tracker),
             )
             row = database.read(
@@ -338,6 +443,23 @@ def test_red_pipeline_stops_before_the_merge_node(tmp_path, monkeypatch):
 
     assert fake.opened, "the merge request should still have been opened"
     assert fake.merged == [], "a red pipeline reached the merge node"
+    assert status == "needs_human"
+
+
+def test_the_executor_forwards_the_registry_poll_keys(tmp_path, monkeypatch):
+    """Task 2's whole payoff is one splat in `executor._dispatch`. Without it
+    the binding is ignored, the node waits out the default interval and the
+    pipeline goes green -- so this fails loudly rather than silently.
+
+    `poll_timeout: 0` is a single-shot check: the first status is pending, so
+    the node times out and the chain must stop before merge.
+    """
+    fake = forge.FakeForge(ci_states=["pending", "success"])
+
+    status = _run_back_half(tmp_path, monkeypatch, fake, poll_timeout=0)
+
+    assert fake.opened, "the merge request should still have been opened"
+    assert fake.merged == [], "a pipeline that never settled reached the merge node"
     assert status == "needs_human"
 
 

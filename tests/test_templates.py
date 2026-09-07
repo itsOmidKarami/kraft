@@ -540,3 +540,60 @@ def test_forge_binding_needs_a_known_backend(tmp_path):
     p.write_text("hooks:\n  on.mr.open: {kind: forge, handler: open_mr, backend: bitbucket}\n")
     with pytest.raises(templates.RegistryError, match="bitbucket"):
         templates.load_registry(p)
+
+
+# ── poll keys on a ci_poll forge hook ─────────────────────────────────────────
+
+
+def test_ci_poll_hook_accepts_poll_keys(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.ci.poll: { kind: forge, handler: ci_poll, backend: glab, "
+        "poll_timeout: 600, poll_interval: 10 }\n"
+    )
+    reg = templates.load_registry(tmp_path / "registry.yaml")
+    assert reg.hooks["on.ci.poll"]["poll_timeout"] == 600
+
+
+def test_poll_keys_rejected_on_a_forge_hook_that_never_polls(tmp_path):
+    """open_mr would read neither key: a setting that silently does nothing."""
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.mr.open: { kind: forge, handler: open_mr, backend: glab, "
+        "poll_timeout: 600 }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="only to a ci_poll handler"):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+@pytest.mark.parametrize("value", ["-1", "never", "true"])
+def test_poll_timeout_must_be_a_non_negative_number(tmp_path, value):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.ci.poll: { kind: forge, handler: ci_poll, backend: glab, "
+        f"poll_timeout: {value} }}\n"
+    )
+    with pytest.raises(templates.RegistryError, match="non-negative number"):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+@pytest.mark.parametrize("key", ["poll_timeout", "poll_interval"])
+@pytest.mark.parametrize("value", [".inf", ".nan"])
+def test_poll_keys_reject_infinity_and_nan(tmp_path, key, value):
+    """`.inf` is a node that never returns and never frees its intake slot;
+    `.nan` goes straight into asyncio.sleep."""
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.ci.poll: { kind: forge, handler: ci_poll, backend: glab, "
+        f"{key}: {value} }}\n"
+    )
+    with pytest.raises(templates.RegistryError):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "never", "true"])
+def test_poll_interval_must_be_positive(tmp_path, value):
+    """Zero here is a hot loop: the forge CLI re-run as fast as a thread
+    returns, for the whole timeout."""
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.ci.poll: { kind: forge, handler: ci_poll, backend: glab, "
+        f"poll_interval: {value} }}\n"
+    )
+    with pytest.raises(templates.RegistryError, match="positive number"):
+        templates.load_registry(tmp_path / "registry.yaml")
