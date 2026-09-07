@@ -4,13 +4,19 @@ invented, a kind Lite cannot run, a missing frontmatter name."""
 
 from __future__ import annotations
 
+import ast
 import json
 import re
+import sys
 from pathlib import Path
 
 import pytest
 
 PLUGIN = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PLUGIN))
+
+import kl  # noqa: E402
+
 SKILLS = ["init", "start", "next", "gate", "status"]
 CHAIN = json.loads((PLUGIN / "chains" / "default.json").read_text())
 HOOKS = {hook for node in CHAIN["nodes"] for hook in node["tasks"]}
@@ -208,3 +214,45 @@ def test_a_skill_says_the_registry_can_be_edited_mid_run(texts):
     body = texts["next"]
     assert "cannot be reordered" in body or "cannot be changed" in body
     assert "registry.yaml" in body
+
+
+def test_a_key_with_a_body_is_bound():
+    assert kl._bound_hooks("on.merge:\n  kind: skill\n  skill: x:y\n") == {"on.merge"}
+
+
+def test_a_key_with_no_body_is_not_bound():
+    # The Kraft-l5z case: this passed validation and died at dispatch, six nodes in.
+    assert kl._bound_hooks("on.ci.poll:\non.merge:\n  kind: skill\n") == {"on.merge"}
+
+
+def test_a_comment_only_body_is_not_bound():
+    text = "on.ci.poll:\n# TODO: pick a client\non.merge:\n  kind: skill\n"
+    assert kl._bound_hooks(text) == {"on.merge"}
+
+
+def test_a_trailing_key_with_no_body_is_not_bound():
+    assert kl._bound_hooks("on.merge:\n  kind: skill\non.ci.poll:\n") == {"on.merge"}
+
+
+def test_blank_lines_between_a_key_and_its_body_do_not_unbind_it():
+    assert kl._bound_hooks("on.merge:\n\n  kind: skill\n") == {"on.merge"}
+
+
+def test_the_marketplace_entry_matches_the_plugin_manifest():
+    """`claude plugin tag` would validate this, but it tags HEAD and lite-publish
+    tags the subtree-split commit, so the CLI cannot be used here. The two files
+    restate each other's name and description with nothing pinning them."""
+    plugin = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text())
+    marketplace = json.loads((PLUGIN / ".claude-plugin" / "marketplace.json").read_text())
+    entry = next(p for p in marketplace["plugins"] if p["source"] == "./")
+    assert entry["name"] == plugin["name"]
+    assert entry["description"] == plugin["description"]
+
+
+def test_kl_parses_on_the_oldest_supported_python():
+    """kl.py ships into repos with whatever python3 they have, and the plugin's
+    own CI matrix pins the floor at 3.10. The Kraft monorepo requires >=3.14, so
+    `ruff format` will happily rewrite this file into syntax the floor cannot
+    parse -- PEP 758's unparenthesized `except A, B:` is the one that bit."""
+    source = (PLUGIN / "kl.py").read_text()
+    ast.parse(source, feature_version=(3, 10))
