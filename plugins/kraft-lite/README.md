@@ -26,6 +26,13 @@ Add `--scope project` to either command to keep it to one repo. Each release is
 tagged `kraft-lite--vX.Y.Z`, which is the only stable point in this history —
 see [Contributing](#contributing).
 
+## What is fixed and what is not
+
+A chain freezes when it starts: its nodes cannot be reordered, added to or
+removed, and a verb that meets a node missing from the frozen template fails
+rather than guessing. The registry is the opposite - it is re-read on every hook
+dispatch, so rebinding a hook is how a chain already in flight gets corrected.
+
 ## What runs each node
 
 `/kraft-lite:init` detects which skills you already have and writes
@@ -43,11 +50,21 @@ implementation, verification, and review, with four gates where a human decides.
 `bd export` format either way, so adopting `bd` later is `bd import`, not a
 migration.
 
+`kraft-lite:status` lists what is in the directory; `kl.py chains` is the verb
+behind it.
+
+A directory can hold several chains. Every verb takes `--chain-id <id>`; with one
+unfinished chain the flag is optional, and with two or more it is required —
+Lite refuses to guess which run a gate belongs to. Frozen chain templates live in
+`.kraft-lite/chains/<chain-id>.json`, one per run, so two chains can walk
+different templates side by side.
+
 ## What it does not do
 
-Unattended execution, parallel chains, a web board, CI polling, spend caps,
-cross-repo search. Lite is the attended case: one chain, in front of you,
-resumable across sessions but not outliving your terminal. Those other things
+Unattended execution, a web board, CI polling, spend caps,
+cross-repo search. Lite is the attended case: the chain is in front of you,
+resumable across sessions but not outliving your terminal. Several chains can
+share a directory, but nothing walks one while you are away. Those other things
 need a process that keeps running when you close the lid, which is a different
 piece of software.
 

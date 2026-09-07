@@ -7,8 +7,16 @@ description: Use when starting a new piece of work under Kraft Lite - materializ
 
     python3 "$CLAUDE_PLUGIN_ROOT/kl.py" start --title "<the work>"
 
+To run a chain other than the packaged default, add `--chain <path-to-chain.json>`.
+The template is frozen against this run, so editing that file later does not
+retarget a chain already in flight.
+
 It prints the chain id and which backend holds the state (`bd`, or a JSONL file
-under `.kraft-lite/`). Say which, so the human knows where their state lives.
+under `.kraft-lite/`). Say both, so the human knows where their state lives and
+which chain is theirs.
+
+Carry that id. Every later verb in this chain takes `--chain-id <id>`, and a
+directory holding two unfinished chains refuses to guess between them.
 
 If `.kraft-lite/registry.yaml` does not exist, run the `init` skill first. Do not
 invent bindings.
