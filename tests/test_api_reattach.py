@@ -37,7 +37,7 @@ def test_reattach_adopts_running_agent(tmp_path):
     templates = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
-    slow_env = {"KRAFT_FAKE_CLAUDE": "slow", "KRAFT_FAKE_CLAUDE_DELAY": "40"}
+    slow_env = {"KRAFT_FAKE_CLAUDE": "slow", "KRAFT_FAKE_CLAUDE_DELAY": "8"}
 
     with running_server(
         run_dir=run_dir, templates_dir=templates, bd_cwd=tracker, env=slow_env

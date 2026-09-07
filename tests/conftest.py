@@ -23,6 +23,19 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip)
 
 
+@pytest.fixture(autouse=True)
+def _isolated_kraft_home(tmp_path, monkeypatch):
+    """No test may reach the operator's real `~/.kraft`.
+
+    `kraft_home()` falls back to `~/.kraft` (paths.py:16). Only KRAFT_RUN_DIR and
+    KRAFT_TEMPLATES_DIR were ever overridden, so `default_skills_dir()` — and any
+    check that reads its env var lazily — resolved against the real home, which
+    exists on a developer machine and not in a CI container. Autouse rather than
+    part of `app`, so a test cannot reach the home by not opting in.
+    """
+    monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "kraft-home"))
+
+
 @pytest.fixture
 def app(tmp_path, monkeypatch):
     """The app wired to client.http(), with its lifespan entered per call.
