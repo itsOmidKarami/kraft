@@ -37,6 +37,16 @@ def test_the_manifest_namespaces_the_skills():
     assert manifest["skills"] == ["./skills"]
 
 
+def test_the_marketplace_offers_this_plugin_from_the_repo_root():
+    """The published repo is its own marketplace, so `source` has to be the root
+    the plugin manifest sits in, and the plugin name has to be the one users type
+    after `@`."""
+    market = json.loads((PLUGIN / ".claude-plugin" / "marketplace.json").read_text())
+    plugin = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text())
+    assert market["name"] == plugin["name"], "`/plugin install kraft-lite@kraft-lite` needs both"
+    assert [(e["name"], e["source"]) for e in market["plugins"]] == [(plugin["name"], "./")]
+
+
 def test_no_skill_cites_a_hook_the_chain_does_not_have(texts):
     cited = {h for text in texts.values() for h in re.findall(r"`(on\.[\w.]+)`", text)}
     assert cited, "the skills cite no hooks at all"

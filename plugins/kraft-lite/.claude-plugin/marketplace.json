@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "kraft-lite",
+  "description": "Run a Kraft chain in one agent session: ordered nodes, human gates, capped fix loops.",
+  "owner": {
+    "name": "Omid Karami",
+    "url": "https://github.com/itsOmidKarami"
+  },
+  "plugins": [
+    {
+      "name": "kraft-lite",
+      "description": "Run a Kraft chain in this session: ordered nodes, human gates, capped fix loops. No orchestrator.",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}

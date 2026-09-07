@@ -103,13 +103,34 @@ lite-build:
 #
 # Publish plugins/kraft-lite/ to its own public repo; regenerates and force-pushes.
 lite-publish:
+    #!/usr/bin/env bash
+    set -euo pipefail
     just lite-build
     git diff --exit-code plugins/kraft-lite/chains/default.json
     uv run pytest plugins/kraft-lite/tests -q
     test -f plugins/kraft-lite/LICENSE
+    claude plugin validate plugins/kraft-lite --strict
+    version=$(python3 -c "import json;print(json.load(open('plugins/kraft-lite/.claude-plugin/plugin.json'))['version'])")
+    tag="kraft-lite--v$version"
+    # `main` is force-pushed, so the tags are the only fixed points in the
+    # published history: one already at this version means the bump is missing.
+    # --exit-code says 2 for "no such tag", and anything else is a remote that
+    # could not be reached -- which must not read as a clean bump.
+    rc=0; git ls-remote --exit-code --tags lite "$tag" >/dev/null || rc=$?
+    case $rc in
+        0) echo "kraft-lite v$version is already published -- bump plugin.json"; exit 1 ;;
+        2) ;;
+        *) echo "cannot reach the lite remote: git ls-remote exited $rc"; exit 1 ;;
+    esac
     git branch -D lite-publish 2>/dev/null || true
+    git tag -d "$tag" 2>/dev/null || true
     git subtree split --prefix=plugins/kraft-lite -b lite-publish
-    git push --force lite lite-publish:main
+    git tag "$tag" lite-publish
+    # Atomic: a tag push that fails after main moved would leave the release
+    # untagged, and the next force-push makes that commit unreachable.
+    git push --force --atomic lite lite-publish:main "$tag"
+    # Both point into the split history, which is disjoint from this repo's.
+    git tag -d "$tag"
     git branch -D lite-publish
 
 # Frontend typecheck + unit tests. `npm test` is vitest, which does NOT typecheck;
