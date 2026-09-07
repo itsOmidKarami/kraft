@@ -22,16 +22,28 @@ PLUGIN = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.skipif(shutil.which("bd") is None, reason="bd is not installed")
 
 
-@pytest.fixture
-def bd_repo(tmp_path):
-    """A throwaway bd workspace. Never the repo the suite is running in."""
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-    init = subprocess.run(
-        ["bd", "init", "--prefix", "KL"], cwd=tmp_path, capture_output=True, text=True
-    )
+@pytest.fixture(scope="session")
+def _bd_template(tmp_path_factory):
+    """One `bd init`ed workspace per test-run process, handed out by `copytree`.
+
+    `bd init` spins up Dolt (~2.6s), and doing it per test was most of this
+    file's runtime. Every test here only needs a *working* bd workspace, so one
+    init and a copy per test is the same thing for less than a tenth of the cost.
+    """
+    tpl = tmp_path_factory.mktemp("kl-bd-tpl")
+    subprocess.run(["git", "init", "-q"], cwd=tpl, check=True)
+    init = subprocess.run(["bd", "init", "--prefix", "KL"], cwd=tpl, capture_output=True, text=True)
     if init.returncode != 0:
         pytest.skip(f"bd init failed here: {init.stderr.strip()}")
-    return tmp_path
+    return tpl
+
+
+@pytest.fixture
+def bd_repo(tmp_path, _bd_template):
+    """A throwaway bd workspace. Never the repo the suite is running in."""
+    repo = tmp_path / "repo"
+    shutil.copytree(_bd_template, repo)
+    return repo
 
 
 def kl(cwd: Path, *args: str) -> dict:
