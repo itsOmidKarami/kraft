@@ -353,3 +353,16 @@ def test_a_co_task_exception_is_logged_even_when_budget_wins(monkeypatch, caplog
     assert verdict == executor.BUDGET
     assert failed == [] and excs == []
     assert "co-task blew up" in caplog.text
+
+
+def test_shipped_policy_has_real_spend_caps():
+    """The packaged default must never ship uncapped (Kraft-9oq).
+
+    Read from the repo's own templates/ rather than a seeded home: this pins
+    what a fresh install *gets*, and a seeded home is whatever the developer
+    running the suite happens to have.
+    """
+    shipped = Path(__file__).parents[1] / "templates" / "policy.yaml"
+    loaded = policy.load_policy(shipped)
+    assert loaded.budget.work_item_usd == 10
+    assert loaded.budget.daily_usd == 50

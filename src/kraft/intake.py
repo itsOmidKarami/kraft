@@ -23,12 +23,6 @@ from kraft.adapters import beads
 logger = logging.getLogger(__name__)
 
 
-def _active_count(db) -> int:
-    return db.read(
-        lambda c: c.execute("SELECT COUNT(*) FROM work_items WHERE status = 'active'").fetchone()[0]
-    )
-
-
 def _known_beads(db) -> set[str]:
     return {
         r[0]
@@ -68,7 +62,7 @@ async def tick(app) -> list[str]:
         return []
     # Every active item counts, not only auto-started ones: a person working on
     # three things must not find the poller adding a fourth.
-    slots = int(cfg.get("max_concurrent", 1)) - _active_count(st.db)
+    slots = int(cfg.get("max_concurrent", 1)) - st.db.read(store.active_count)
     if slots <= 0:
         return []
 

@@ -114,6 +114,9 @@ const STATUS_TAG: Record<WorkItem["status"], string> = {
   completed: "tag tag-neutral",
   needs_human: "tag tag-accent",
   paused: "tag tag-neutral",
+  // Same muted treatment as completed: both are terminal, and neither is a
+  // state the reader needs drawn to.
+  abandoned: "tag tag-neutral",
 };
 
 export function WorkItemDetail() {
