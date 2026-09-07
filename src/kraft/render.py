@@ -254,6 +254,26 @@ def diff_body(payload: dict) -> str:
     return "\n".join([*out, *_diff_trailer(payload)])
 
 
+def artifact_body(payload: dict) -> str:
+    """A gate's spec/plan document, with the same truncation notice the diff
+    renderer gives — `kraft artifact` is the one surface where a reviewer
+    could otherwise approve a document whose tail was silently cut, since
+    `_cmd_artifact` used to page `content` straight through with no read of
+    `truncated` at all."""
+    out = payload.get("content", "")
+    if payload.get("truncated"):
+        limit = payload.get("artifact_max_bytes")
+        out += "\n\n" + paint(
+            "WARNING: this document was truncated by the server at "
+            + (f"{limit} bytes" if limit else "its size limit")
+            + " — this is not the whole file. Read the rest at "
+            + (payload.get("path") or "its path in the worktree")
+            + ".",
+            "\033[33m",
+        )
+    return out
+
+
 def page(text: str, *, force_plain: bool = False) -> None:
     """Through `$PAGER` on a terminal; straight to stdout otherwise.
 

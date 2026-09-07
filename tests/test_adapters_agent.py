@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from support.harness import make_repo
 
-from kraft import db, steering, store
+from kraft import db, skill, steering, store
 from kraft.adapters import agent
 from kraft.adapters.subprocess import read_concerns, read_question
 from kraft.paths import RunDirs
@@ -678,3 +678,53 @@ def test_escalate_falls_back_to_the_repo_default_when_the_hook_names_neither():
         ).model
         == "haiku"
     )
+
+
+def test_an_artifact_binding_names_the_exact_path_in_the_system_prompt(monkeypatch):
+    seen = _capture_cmd(monkeypatch)
+    _run(artifact="spec")
+    prompt = _system_prompt(seen["cmd"])
+    assert ".engineering/specs/w1.md" in prompt
+    assert "commit" in prompt
+
+
+def test_no_artifact_and_no_method_leave_the_system_prompt_byte_identical(monkeypatch):
+    seen = _capture_cmd(monkeypatch)
+    _run()
+    without = _system_prompt(seen["cmd"])
+    seen2 = _capture_cmd(monkeypatch)
+    _run(artifact=None, method_text=None)
+    assert _system_prompt(seen2["cmd"]) == without
+
+
+def test_method_text_is_injected_under_the_method_heading(monkeypatch):
+    seen = _capture_cmd(monkeypatch)
+    _run(method_text="Write it in one page.")
+    prompt = _system_prompt(seen["cmd"])
+    assert skill.HEADING + "Write it in one page." in prompt
+    assert prompt.endswith(skill.UNAVAILABLE)
+
+
+def test_the_artifact_block_precedes_the_method_block(monkeypatch):
+    """Spec §2.6 fixes the order: what to produce, then how to produce it."""
+    seen = _capture_cmd(monkeypatch)
+    _run(artifact="spec", method_text="Write it in one page.")
+    prompt = _system_prompt(seen["cmd"])
+    assert prompt.index(".engineering/specs/w1.md") < prompt.index(skill.HEADING)
+
+
+def test_resolve_invocation_reads_the_skill(tmp_path):
+    inv = agent.resolve_invocation(
+        {"command": "c", "skill": "chain-review"}, None, None, skills_dir=tmp_path
+    )
+    assert inv.method_text.startswith("---")
+
+
+def test_resolve_invocation_without_a_skill_carries_no_method(tmp_path):
+    inv = agent.resolve_invocation({"command": "c"}, None, None, skills_dir=tmp_path)
+    assert inv.method_text is None
+
+
+def test_artifact_path_is_the_kind_pluralised():
+    assert agent.artifact_path("spec", "w1") == ".engineering/specs/w1.md"
+    assert agent.artifact_path("plan", "w1") == ".engineering/plans/w1.md"
