@@ -10,7 +10,13 @@ export interface ChainDefinition {
   nodes: ChainNode[];
 }
 
-export type WorkItemStatus = "active" | "needs_human" | "completed" | "paused";
+export type WorkItemStatus =
+  | "active"
+  | "needs_human"
+  | "completed"
+  | "paused"
+  // Terminal, and off the board unless explicitly asked for (Kraft-x85).
+  | "abandoned";
 
 export interface WorkItemAttachment {
   kind: "spec" | "plan";

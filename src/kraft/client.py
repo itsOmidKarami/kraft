@@ -142,14 +142,21 @@ async def _get(path: str, **params) -> dict | list:
     return response.json()
 
 
-async def list_work_items(status: str | None = None) -> list[dict]:
+async def list_work_items(
+    status: str | None = None, *, include_abandoned: bool = False
+) -> list[dict]:
     """The board, trimmed to what a caller can act on.
 
     `GET /work-items` carries the full chain definition per row for the UI's
     progress rendering; forwarding that spends an agent's context on JSON it did
     not ask for.
+
+    Abandoned items are off the board by default. Without the flag there is no
+    way to see one again from the CLI, which makes `kraft abandon` look like a
+    delete.
     """
-    payload = await _get("/work-items")
+    path = "/work-items?include_abandoned=true" if include_abandoned else "/work-items"
+    payload = await _get(path)
     return trim_work_items(payload["items"], status)
 
 
@@ -510,6 +517,12 @@ async def pause(work_item_id: str | None = None) -> dict:
     """Stop the running node's sessions. Only an active item can be paused."""
     target = _forbid_self_action(work_item_id)
     return await _act(f"/work-items/{target}/pause")
+
+
+async def abandon(work_item_id: str | None = None) -> dict:
+    """Terminal. Removes the worktree, destroying anything uncommitted in it."""
+    target = _forbid_self_action(work_item_id)
+    return await _act(f"/work-items/{target}/abandon")
 
 
 async def resume(steer: str | None = None, work_item_id: str | None = None) -> dict:

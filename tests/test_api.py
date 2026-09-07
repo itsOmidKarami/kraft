@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import sqlite3
 import time
@@ -878,3 +879,122 @@ def test_needs_context_question_does_not_resurface_a_stale_answer(tmp_path, monk
 
         body = client.get(f"/work-items/{wid}").json()
         assert body["needs_context_question"] == "(no question given)"
+
+
+def _set_status(wid: str, status: str) -> None:
+    """Force a work item's status. The states this test needs — one item wedged
+    active while another waits paused — are transient under real orchestration,
+    so they are written directly rather than raced for."""
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    try:
+        conn.execute("UPDATE work_items SET status = ? WHERE id = ?", (status, wid))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_resume_refuses_when_all_slots_are_busy(tmp_path, monkeypatch):
+    """A manual start is bounded by the same limit as auto-intake (Kraft-n2d).
+
+    The limit lived only in the intake tick, so `resume` started an item no
+    matter how many were already running.
+    """
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        busy = _post_default(client, repo)
+        _poll_events(client, busy, "gate_requested")
+        idle = _post_default(client, repo)
+        _poll_events(client, idle, "gate_requested")
+        _set_status(busy, "active")
+        _set_status(idle, "paused")
+        client.app.state.intake["max_concurrent"] = 1
+
+        r = client.post(f"/work-items/{idle}/resume", json={})
+
+        assert r.status_code == 409, r.text
+        assert "1" in r.json()["detail"]
+        assert client.get(f"/work-items/{busy}").json()["status"] == "active"
+
+
+def test_resume_works_when_a_slot_is_free(tmp_path, monkeypatch):
+    """The guard must not wedge the ordinary single-item case shut."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+        _set_status(wid, "paused")
+        client.app.state.intake["max_concurrent"] = 1
+
+        r = client.post(f"/work-items/{wid}/resume", json={})
+
+        assert r.status_code == 200, r.text
+
+
+def test_abandon_sets_terminal_status_and_removes_the_worktree(tmp_path, monkeypatch):
+    """A rejected or dead item stayed on the board forever, worktree and all."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+        worktree = Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees" / wid
+        assert worktree.is_dir(), "fixture never made a worktree; the test would prove nothing"
+        _set_status(wid, "paused")
+
+        r = client.post(f"/work-items/{wid}/abandon")
+
+        assert r.status_code == 200, r.text
+        assert r.json()["status"] == "abandoned"
+        assert not worktree.exists()
+
+
+def test_abandon_refuses_an_active_item(tmp_path, monkeypatch):
+    """Pause first. Otherwise this races a running agent's writes."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+        _set_status(wid, "active")
+
+        r = client.post(f"/work-items/{wid}/abandon")
+
+        assert r.status_code == 409, r.text
+        assert "active" in r.json()["detail"]
+
+
+def test_list_hides_abandoned_items(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+        _set_status(wid, "paused")
+        client.post(f"/work-items/{wid}/abandon")
+
+        visible = client.get("/work-items").json()["items"]
+        everything = client.get("/work-items?include_abandoned=true").json()["items"]
+
+        assert wid not in [i["id"] for i in visible]
+        assert wid in [i["id"] for i in everything]
+
+
+def test_cli_can_list_abandoned_items(tmp_path, monkeypatch):
+    """`kraft abandon` without a way to see the result makes the item vanish:
+    hidden from the board by design, and unreachable from the CLI by omission."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+        _set_status(wid, "paused")
+        client.post(f"/work-items/{wid}/abandon")
+
+        import kraft.client as kc
+
+        monkeypatch.setattr(kc, "_get", lambda path: _as_coro(client.get(path).json()))
+        visible = asyncio.run(kc.list_work_items())
+        everything = asyncio.run(kc.list_work_items(include_abandoned=True))
+
+        assert wid not in [i["id"] for i in visible]
+        assert wid in [i["id"] for i in everything]
+
+
+async def _as_coro(value):
+    return value

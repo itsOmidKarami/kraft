@@ -164,3 +164,22 @@ def test_bare_kraft_and_kraft_serve_are_the_same_path(monkeypatch, tmp_path):
     cli.main([])
     cli.main(["serve"])
     assert calls[0] == calls[1]
+
+
+def test_version_flag_prints_a_version(capsys):
+    """A stale install is invisible without this: the build that predated
+    argparse fell through to `serve` on every subcommand (Kraft-krd)."""
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--version"])
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert out.startswith("kraft ")
+    assert out.strip() != "kraft"
+
+
+def test_abandon_refuses_without_yes(monkeypatch):
+    """The worktree goes with the item, so the destructive verb asks first."""
+    ns = cli.build_parser().parse_args(["abandon", "w1"])
+    assert ns.yes is False
+    with pytest.raises(ValueError, match="--yes"):
+        ns.func(ns)

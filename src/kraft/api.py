@@ -571,9 +571,15 @@ class OpenDocument(BaseModel):
 @app.get("/work-items")
 async def list_work_items(request: Request):
     st = request.app.state
+    # Read outside `_read`: that closure runs on the database thread and has no
+    # request to ask.
+    include_abandoned = request.query_params.get("include_abandoned") == "true"
 
     def _read(c):
-        rows = c.execute("SELECT * FROM work_items ORDER BY created_at").fetchall()
+        rows = c.execute(
+            "SELECT * FROM work_items WHERE (? OR status != 'abandoned') ORDER BY created_at",
+            (include_abandoned,),
+        ).fetchall()
         cursor = c.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()[0]
         # The latest gate_* event per item, in one pass — the board renders a gate
         # prompt per row and must not offer Approve on a rejected gate.
@@ -1047,6 +1053,48 @@ def _terminate(pid: int | None) -> None:
         pass  # already gone, or not ours — the row still moves to paused
 
 
+async def _remove_worktree(repo: Path, worktree: Path, wid: str) -> bool:
+    """Reclaim the worktree and the `kraft/<id>` branch.
+
+    Best-effort: the row is already abandoned by the time this runs, and a git
+    failure here must not leave the item in a state the board cannot show. The
+    prune is between the two because a directory removed out from under git
+    leaves an administrative entry that makes the branch delete fail.
+    """
+    ok = True
+    for args in (
+        ["git", "worktree", "remove", "--force", str(worktree)],
+        ["git", "worktree", "prune"],
+        ["git", "branch", "-D", f"kraft/{wid}"],
+    ):
+        done = await asyncio.to_thread(
+            subprocess.run, args, cwd=repo, capture_output=True, text=True
+        )
+        if done.returncode != 0:
+            logger.warning("abandon %s: %s failed: %s", wid, args[1], done.stderr.strip())
+            ok = False
+    return ok
+
+
+@app.post("/work-items/{wid}/abandon")
+async def abandon_work_item(wid: str, request: Request):
+    """Terminal state plus worktree and branch reclaim (Kraft-x85).
+
+    Refuses while the item is active rather than killing its sessions itself:
+    `pause` already owns stopping an attempt, and doing both here would leave
+    two places that know how to terminate an agent.
+    """
+    st = request.app.state
+    row = _work_item_row(st, wid)
+    if row["status"] == "active":
+        raise HTTPException(409, "work item is active; pause it before abandoning")
+    if row["status"] == "abandoned":
+        return {"id": wid, "status": "abandoned", "worktree_removed": False}
+    await st.db.write(lambda c: store.abandon_work_item(c, wid))
+    removed = await _remove_worktree(Path(row["repo"]), st.run_dirs.worktrees / wid, wid)
+    return {"id": wid, "status": "abandoned", "worktree_removed": removed}
+
+
 @app.post("/work-items/{wid}/pause")
 async def pause_work_item(wid: str, request: Request):
     """Stop the current node's running sessions (02 §10.2).
@@ -1092,6 +1140,14 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         row["status"] == "needs_human" and _needs_context_stop(st, wid)
     ):
         raise HTTPException(409, "work item is not paused")
+    # The one door that starts new work. Deliberately not on `approve` or
+    # `retry`: those continue an item that is already underway, and refusing
+    # them would strand a human mid-chain with no way to finish (Kraft-n2d).
+    limit = int(st.intake.get("max_concurrent", 1))
+    if st.db.read(store.active_count) >= limit:
+        raise HTTPException(
+            409, f"all {limit} slots are busy; pause something or raise max_concurrent"
+        )
     if body.steer and body.steer.strip():
         await st.db.write(lambda c: store.set_steer(c, wid, body.steer.strip()))
     steer = await st.db.write(lambda c: store.take_steer(c, wid))

@@ -109,10 +109,11 @@ The default bindings Lite ships:
 | human_review | `on.human_review.requested` | `prompt` |
 | merge | `on.merge` | `prompt` |
 
-Seven of these are `{kind: builtin, handler: noop}` in Kraft today. Lite is the
+Three of these are `{kind: builtin, handler: noop}` in Kraft today. Lite is the
 first working implementation of those nodes, not a degraded copy of one. That
-count moves as adapters land — the planning adapter took it from nine to seven —
-so it is asserted by a test rather than trusted here.
+count moves as adapters land — the planning adapter took it from nine to seven,
+and the forge adapter took it from seven to three — so it is asserted by a test
+rather than trusted here.
 
 Kraft's own registry has since grown a `skill:` field on `kind: agent` hooks, and
 resolves a `provider:name` value by telling the agent to load that skill by name.

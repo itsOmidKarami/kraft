@@ -60,7 +60,20 @@ def test_the_spec_does_not_state_a_noop_count_that_has_gone_stale():
     spec = (ROOT / "docs" / "superpowers" / "specs" / "2026-09-07-kraft-lite-design.md").read_text()
     claimed = re.search(r"(\w+) of these are `\{kind: builtin, handler: noop\}`", spec)
     assert claimed, "the spec no longer makes the claim this test guards"
-    words = {"five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+    # Counts below five became reachable once the forge adapter landed and
+    # took the noop count from seven to three.
+    words = {
+        "one": 1,
+        "two": 2,
+        "three": 3,
+        "four": 4,
+        "five": 5,
+        "six": 6,
+        "seven": 7,
+        "eight": 8,
+        "nine": 9,
+        "ten": 10,
+    }
     assert words[claimed.group(1).lower()] == len(noop), (
         f"spec says {claimed.group(1)}, registry has {len(noop)}: {noop}"
     )

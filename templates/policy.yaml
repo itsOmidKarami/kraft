@@ -15,5 +15,5 @@ findings:
 # CLI only reports its cost when the session exits. Overshoot is bounded by the
 # cost of one task, not by the cap.
 budget:
-  work_item_usd: null   # per work item, across every loop in its chain
-  daily_usd: null       # every work item on this instance, since local midnight
+  work_item_usd: 10     # per work item, across every loop in its chain
+  daily_usd: 50         # every work item on this instance, since local midnight
