@@ -40,6 +40,22 @@ def test_a_whole_chain_walks_to_done(tmp_path):
     assert kl(tmp_path, "state")["status"] == "done"
 
 
+def test_a_finished_chain_still_summarizes(tmp_path):
+    """`state` is the only other verb allowed to run once the walk is over, and
+    the summary is worth nothing if it is refused at exactly the moment it is
+    wanted."""
+    kl(tmp_path, "start", "--title", "Add a flag")
+    for _ in CHAIN["nodes"]:
+        kl(tmp_path, "close")
+
+    out = kl(tmp_path, "summary")
+    assert out["status"] == "done"
+    assert out["title"] == "Add a flag"
+    assert [n["node"] for n in out["nodes"]] == [n["id"] for n in CHAIN["nodes"]]
+    assert out["totals"]["closed"] == len(CHAIN["nodes"])
+    assert out["duration_seconds"] >= 0
+
+
 def test_the_state_file_is_bd_importable(tmp_path):
     kl(tmp_path, "start", "--title", "Add a flag")
     kl(tmp_path, "close")
@@ -75,3 +91,56 @@ def test_nothing_in_the_plugin_reaches_outside_the_plugin():
         if "parents[2]" in text or "../.." in text:
             offenders.append(str(path.relative_to(PLUGIN)))
     assert not offenders, f"reaches above the plugin root: {offenders}"
+
+
+def test_the_gate_verb_records_the_wait_it_opened(tmp_path):
+    """The wait is only measurable if the block writes a stamp of its own: the
+    approve overwrites the node's `updated_at`, so afterwards there is none."""
+    kl(tmp_path, "start", "--title", "Add a flag")
+    kl(tmp_path, "gate", "--name", "spec_approval")
+    kl(tmp_path, "approve")
+
+    node = kl(tmp_path, "summary")["nodes"][0]
+    assert node["blocked_seconds"] is not None
+    assert node["blocked_seconds"] <= node["seconds"]
+
+
+def test_no_node_waits_longer_than_it_took(tmp_path):
+    """`updated_at` is bd's import guard, not a clock: it is pushed forward when
+    two writes land in the same second, so timing a node with it while timing the
+    wait with the wall clock made a sub-second run report eight seconds of
+    waiting, on nodes that reported taking none."""
+    kl(tmp_path, "start", "--title", "Add a flag")
+    for node in CHAIN["nodes"]:
+        if node["gate_after"]:
+            kl(tmp_path, "gate", "--name", node["gate_after"])
+            kl(tmp_path, "approve")
+        else:
+            kl(tmp_path, "close")
+
+    out = kl(tmp_path, "summary")
+    for node in out["nodes"]:
+        assert node["blocked_seconds"] is None or node["blocked_seconds"] <= node["seconds"], node
+    assert out["totals"]["blocked_seconds"] <= out["duration_seconds"], out["totals"]
+
+
+def test_a_chain_stopped_at_a_gate_reports_what_it_is_waiting_on(tmp_path):
+    """The mid-run question the status skill points `summary` at: this node has
+    been sitting on a human since some point, and that is the number they want."""
+    kl(tmp_path, "start", "--title", "Add a flag")
+    kl(tmp_path, "gate", "--name", "spec_approval")
+
+    node = kl(tmp_path, "summary")["nodes"][0]
+    assert node["status"] == "blocked"
+    assert node["blocked_seconds"] is not None, "a gate held right now is still a wait"
+
+
+def test_a_rewind_banks_the_wait_it_interrupts(tmp_path):
+    """`reject --from-node` is how the *last* gate sends work back, so the wait it
+    closes is the one a human has been sitting on longest in the whole run."""
+    kl(tmp_path, "start", "--title", "Add a flag")
+    kl(tmp_path, "gate", "--name", "spec_approval")
+    kl(tmp_path, "reject", "--note", "redo", "--from-node", "spec")
+
+    node = kl(tmp_path, "summary")["nodes"][0]
+    assert node["blocked_seconds"] is not None, "the gate held someone, then was rewound"
