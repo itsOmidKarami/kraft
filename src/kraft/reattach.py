@@ -66,7 +66,7 @@ async def _exit_from_file(db, session_id: str, result_path: Path, status: str) -
     )
 
 
-async def _adopt(db, session_id: str, pid: int, poll_s: float = 0.5) -> None:
+async def _adopt(db, session_id: str, pid: int, poll_s: float = 0.1) -> None:
     while _pid_alive(pid):
         await asyncio.sleep(poll_s)
     row = db.read(
