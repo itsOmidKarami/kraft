@@ -153,3 +153,58 @@ def test_the_readme_links_nowhere_outside_the_published_tree():
     readme = (PLUGIN / "README.md").read_text()
     outside = re.findall(r"\]\((?:\.\./|/)[^)]*\)", readme)
     assert not outside, f"links outside the published tree: {outside}"
+
+
+@pytest.mark.parametrize("name", ["next", "gate", "status"])
+def test_every_stateful_skill_passes_the_chain_id(texts, name):
+    """A cleared context has only the skill prose and the disk. If the skills do
+    not carry the id, two chains in one directory stall on the ambiguity error."""
+    assert "--chain-id" in texts[name], f"the {name} skill must pass the chain id"
+
+
+def test_the_start_skill_documents_the_chain_argument(texts):
+    """kl.py has accepted --chain since the first release; the skill never said
+    so, which is why /kraft-lite:start could only ever run the default chain."""
+    body = texts["start"]
+    assert "--chain " in body or "--chain <" in body
+    assert "--chain-id" in body, "and it must hand the minted id onward"
+
+
+def test_the_status_skill_uses_the_chains_verb(texts):
+    """It is told to report every chain in the directory. Before the verb existed
+    the only way to enumerate them was to trigger the ambiguity error."""
+    assert 'kl.py" chains' in texts["status"], "it must invoke the verb, not describe it"
+
+
+def test_the_gate_skill_offers_a_rewind(texts):
+    """The last gate rejects work an earlier node produced; without --from-node it
+    is approve-or-stall."""
+    assert "--from-node" in texts["gate"]
+
+
+def test_the_next_skill_uses_a_background_wait_when_the_harness_has_one(texts):
+    """Runs-once-and-reports made the human re-invoke this skill until CI went
+    green. Blocking is still banned; delegating the wait is not."""
+    body = texts["next"]
+    assert "background" in body
+    assert "wake" in body or "notif" in body
+    assert "Do not idle" in body, "blocking synchronously is still banned"
+
+
+def test_the_next_skill_handles_a_hook_with_no_registry_entry(texts):
+    """It has an instruction for a bound-but-missing skill and none for a hook
+    that is not in the registry at all."""
+    assert "not in the registry" in texts["next"] or "no registry entry" in texts["next"]
+
+
+def test_the_next_skill_warns_that_a_node_replays_its_hooks(texts):
+    """State is per node, not per hook, so resuming re-runs earlier hooks."""
+    assert "idempotent" in texts["next"]
+
+
+def test_a_skill_says_the_registry_can_be_edited_mid_run(texts):
+    """Chains freeze at start and cannot be reordered; registries are re-read at
+    every dispatch, so rebinding is the only mid-run correction."""
+    body = texts["next"]
+    assert "cannot be reordered" in body or "cannot be changed" in body
+    assert "registry.yaml" in body

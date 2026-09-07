@@ -42,3 +42,8 @@ templates/notify.yaml
 # Dev instance home (`just dev`) and the build outputs `just install` copies in
 .dev/
 src/kraft/_bundled/
+
+# Kraft Lite run state. The registry beside it is committed on purpose.
+.kraft-lite/chain.json
+.kraft-lite/chains/
+.kraft-lite/chain.jsonl

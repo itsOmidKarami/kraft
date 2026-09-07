@@ -1,0 +1,86 @@
+# Kraft Lite hook registry for this repo.
+# Written by /kraft-lite:init from `kl.py detect`. Meant to be edited and committed.
+# Every `skill` entry has a `prompt` sibling: if the skill is renamed or
+# uninstalled the chain falls back to the instruction instead of stopping.
+
+on.spec.requested:
+  kind: skill
+  skill: superpowers:brainstorming
+  prompt: Agree requirements and write a spec before any code.
+  # also found: (none)
+
+on.plan.requested:
+  kind: skill
+  skill: superpowers:writing-plans
+  prompt: Turn the approved spec into a written, step-by-step implementation plan.
+  # also found: superpowers:executing-plans (the run-a-plan half, not the write-a-plan half)
+
+on.chain.review_ready:
+  kind: prompt
+  prompt: >-
+    Read back the whole chain - spec, plan, and the nodes still to run - and
+    confirm the order and the gates still match the work before anything is built.
+  # also found: (none)
+
+on.env.prepare:
+  kind: prompt
+  prompt: >-
+    Confirm the work is already isolated in its own worktree, and create one only
+    if it is not.
+  # was: kind: skill, superpowers:using-git-worktrees. Re-bound at the
+  # chain_finalized gate of kl-3b54b9c4: chains started from inside a worktree
+  # already have their isolation, and a second worktree orphans the state
+  # directory and the uncommitted artifacts the run has produced so far.
+
+on.implementation.start:
+  kind: skill
+  skill: superpowers:test-driven-development
+  prompt: Implement the plan, writing the failing test before the code each time.
+  # also found: (none)
+
+on.test.run:
+  kind: subprocess
+  command: [pytest, plugins/kraft-lite/tests, -q]
+  # detect returned `just test`, the Kraft backend suite: ~14min and it does not
+  # cover plugins/kraft-lite. Chose the plugin's own suite, which is what this
+  # work changes. Widen this when a chain touches the backend.
+
+on.review.local.run:
+  kind: skill
+  skill: superpowers:requesting-code-review
+  prompt: Review the working tree for correctness and for anything simpler that would do.
+  # also found: caveman:caveman-review, ponytail:ponytail-review,
+  #             superpowers:receiving-code-review (processes feedback, does not produce it)
+
+on.mr.open:
+  kind: skill
+  skill: superpowers:finishing-a-development-branch
+  prompt: Decide how this branch integrates and open the merge request.
+  # also found: (none)
+
+on.ci.poll:
+  kind: subprocess
+  command: [glab, ci, status]
+  # Runs once and reports. Never waits - see the `next` skill.
+  # The init skill hardcodes [gh, pr, checks]; this repo's origin is GitLab and it
+  # has .gitlab-ci.yml, so gh could never have worked here. Tracked as Kraft-rje.
+
+on.review.mr.run:
+  kind: skill
+  skill: superpowers:requesting-code-review
+  prompt: Review the merge request as published, not just the local tree.
+  # also found: caveman:caveman-review, ponytail:ponytail-review,
+  #             superpowers:receiving-code-review
+
+on.human_review.requested:
+  kind: prompt
+  prompt: >-
+    Present the finished work to the human for sign-off: what changed, what was
+    verified, and anything deliberately left out.
+  # also found: (none)
+
+on.merge:
+  kind: skill
+  skill: superpowers:finishing-a-development-branch
+  prompt: Merge the branch and clean up the worktree.
+  # also found: (none)
