@@ -7,6 +7,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 PLUGIN = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLUGIN))
 
@@ -92,3 +94,57 @@ def test_keywords_do_not_match_on_short_substrings(tmp_path, monkeypatch):
         (skills / name).mkdir(parents=True)
         (skills / name / "SKILL.md").write_text(f"---\nname: {name}\n---\n")
     assert kl.detect(tmp_path)["skills"]["on.mr.open"] == []
+
+
+def _registry(root, hooks):
+    directory = root / kl.STATE_DIR
+    directory.mkdir(parents=True, exist_ok=True)
+    body = "# a registry\n" + "".join(
+        f"{hook}:\n  kind: prompt\n  prompt: do the thing\n  # also found: (none)\n"
+        for hook in hooks
+    )
+    (directory / "registry.yaml").write_text(body)
+
+
+def test_registry_hooks_reads_the_top_level_keys_only(tmp_path):
+    """kl.py may not import yaml, so the scan has to be a regex. Nested keys are
+    indented and must not be mistaken for hooks."""
+    _registry(tmp_path, ["on.spec.requested", "on.test.run"])
+    assert kl.registry_hooks(tmp_path) == {"on.spec.requested", "on.test.run"}
+
+
+def test_registry_hooks_is_none_when_there_is_no_registry(tmp_path):
+    assert kl.registry_hooks(tmp_path) is None
+
+
+def test_start_rejects_a_chain_whose_hooks_are_not_bound(tmp_path, monkeypatch, capsys):
+    """An unbound hook is otherwise only discovered mid-walk, by which point the
+    chain has already run its earlier nodes."""
+    monkeypatch.setattr(kl.shutil, "which", lambda name: None)
+    monkeypatch.chdir(tmp_path)
+    _registry(tmp_path, ["on.spec.requested"])
+    with pytest.raises(SystemExit) as caught:
+        kl.main(["start", "--title", "t"])
+    message = str(caught.value)
+    assert "on.plan.requested" in message, "the unbound hooks are named"
+    assert "on.spec.requested" not in message, "the bound one is not"
+
+
+def test_start_accepts_the_shipped_chain_against_a_full_registry(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(kl.shutil, "which", lambda name: None)
+    monkeypatch.chdir(tmp_path)
+    chain = json.loads((PLUGIN / "chains" / "default.json").read_text())
+    _registry(tmp_path, sorted({t for n in chain["nodes"] for t in n["tasks"]}))
+    kl.main(["start", "--title", "t"])
+    assert "chain_id" in json.loads(capsys.readouterr().out)
+
+
+def test_start_without_a_registry_warns_but_runs(tmp_path, monkeypatch, capsys):
+    """The start skill already refuses to run without a registry. Erroring here
+    too would only cost every existing test a fixture."""
+    monkeypatch.setattr(kl.shutil, "which", lambda name: None)
+    monkeypatch.chdir(tmp_path)
+    kl.main(["start", "--title", "t"])
+    captured = capsys.readouterr()
+    assert "chain_id" in json.loads(captured.out)
+    assert "registry" in captured.err
