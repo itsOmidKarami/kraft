@@ -7,17 +7,30 @@ description: Use when a Kraft Lite chain is blocked at a gate - presents what th
 
 A gate is a decision that belongs to a human. You present, they decide.
 
-Run `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" state` for the gate name, then show them
+Run `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" state --chain-id <id>` for the gate name, then show them
 what the gate is actually about - the spec, the plan, the diff, the findings. A
 gate answered without the artefact in front of the person is a gate that has
 stopped meaning anything.
 
 Then, on their answer:
 
-    python3 "$CLAUDE_PLUGIN_ROOT/kl.py" approve
-    python3 "$CLAUDE_PLUGIN_ROOT/kl.py" reject --note "<their reason>"
+    python3 "$CLAUDE_PLUGIN_ROOT/kl.py" approve --chain-id <id>
+    python3 "$CLAUDE_PLUGIN_ROOT/kl.py" reject --note "<their reason>" --chain-id <id>
 
-`--note` is required. A rejection with no reason strands whoever picks the work
+A plain reject reopens the node being gated. That is right for a gate on the node
+that made the artefact - a rejected spec re-runs the spec node. It is wrong for a
+gate on work an earlier node produced: rejecting `human_review_approval` would
+re-present the same work rather than return to it. When the human is rejecting
+something built further back, name where it goes:
+
+    python3 "$CLAUDE_PLUGIN_ROOT/kl.py" reject --note "<reason>" --from-node <node> --chain-id <id>
+
+That reopens that node and every node after it, so the redone work is verified
+again on the way back rather than skipped.
+
+`--chain-id` is what stops an answer landing on the wrong chain, and with two
+unfinished chains in the directory the verb refuses to guess. `--note` is
+required. A rejection with no reason strands whoever picks the work
 up next, including you after a compaction.
 
 After an approve, invoke the `next` skill. After a reject, invoke `next` too: the
