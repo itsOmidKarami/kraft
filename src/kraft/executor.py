@@ -330,6 +330,9 @@ async def _dispatch(
             **common,
         )
     if kind == "forge":
+        # Only what the binding actually sets, so the adapter's constants stay
+        # the one place a default lives.
+        poll = {k: binding[k] for k in ("poll_timeout", "poll_interval") if k in binding}
         return await _forge.run_task(
             db,
             run_dirs,
@@ -342,6 +345,7 @@ async def _dispatch(
             repo=worktree,
             branch=f"kraft/{work_item_row['id']}",
             title=work_item_row["title"],
+            **poll,
             **common,
         )
     raise RuntimeError(
