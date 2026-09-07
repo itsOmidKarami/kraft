@@ -20,6 +20,17 @@ gate, attempts spent against the cap if there is one, and which backend holds th
 state. `status: unstarted` means no chain exists here yet - say that, rather than
 that nothing is running.
 
+For a chain that has finished - or when the human asks what a run has cost so far:
+
+    python3 "$CLAUDE_PLUGIN_ROOT/kl.py" summary --chain-id <id>
+
+That adds per-node times, how much of each was spent waiting on a human at a
+gate, attempts spent, gates answered and rejection notes. The
+run's wall-clock `duration_seconds` is null until the chain is done - report the
+nodes it has walked so far and say the total lands at the end, rather than calling
+an unfinished run instant. It has no token or cost figures: Lite runs inside your
+session and cannot see them.
+
 Read-only. Do not advance, close, or approve anything from here - that is what
 `next` and `gate` are for.
 
