@@ -460,7 +460,7 @@ def test_migrate_v4_to_v5_rebuilds_work_items_for_the_paused_status(tmp_path):
                 "  status           TEXT NOT NULL CHECK (status IN "
                 "('active', 'needs_human', 'completed')),",
             ),
-            ("('active', 'needs_human', 'completed', 'paused')),", ""),
+            ("('active', 'needs_human', 'completed', 'paused', 'abandoned')),", ""),
         ),
     )
     conn.execute(

@@ -12,6 +12,8 @@ import json
 import os
 import shutil
 import sys
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
 import uvicorn
@@ -157,11 +159,25 @@ def _cmd_init(ns: argparse.Namespace) -> None:
         print(f"kraft: wrote {path}")
 
 
+def _version() -> str:
+    try:
+        return _pkg_version("kraft")
+    except PackageNotFoundError:
+        # A source checkout that was never installed still answers, rather than
+        # traceback: `--version` exists to diagnose an install, so it has to
+        # survive not being one.
+        return "0.0.0+source"
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="kraft",
         description="Kraft: run it with no arguments to serve; subcommands talk to a server.",
     )
+    # An install can silently fall behind the checkout it was built from — the
+    # build that predated this file's argparse answered every subcommand by
+    # serving, and nothing said so (Kraft-krd).
+    parser.add_argument("--version", action="version", version=f"kraft {_version()}")
     subs = parser.add_subparsers(dest="verb", required=True)
     common = _json_flag()
 
@@ -233,7 +249,7 @@ def _repo_scope(ns: argparse.Namespace) -> str | None:
 
 def _cmd_list(ns: argparse.Namespace) -> None:
     repo = _repo_scope(ns)
-    items = asyncio.run(client.list_work_items(ns.status))
+    items = asyncio.run(client.list_work_items(ns.status, include_abandoned=ns.include_abandoned))
     if repo:
         items = [item for item in items if item["repo"] == repo]
     emit(items, _render_list, ns.json)
@@ -265,6 +281,12 @@ def _cmd_reject(ns: argparse.Namespace) -> None:
 
 def _cmd_pause(ns: argparse.Namespace) -> None:
     emit(asyncio.run(client.pause(ns.id)), _render_action, ns.json)
+
+
+def _cmd_abandon(ns: argparse.Namespace) -> None:
+    if not ns.yes:
+        raise ValueError("abandon destroys the worktree and anything uncommitted in it; pass --yes")
+    emit(asyncio.run(client.abandon(ns.id)), _render_action, ns.json)
 
 
 def _cmd_resume(ns: argparse.Namespace) -> None:
@@ -459,6 +481,11 @@ def _add_verbs(subs, common: argparse.ArgumentParser) -> None:
     listing.add_argument("--status", help="active, needs_human, paused or completed")
     listing.add_argument("--repo", help="only this repo (default: the repo you are standing in)")
     listing.add_argument("--all", action="store_true", help="every repo, ignoring the cwd")
+    # Not folded into --all: that one widens the *repo* scope, and abandoning is
+    # a different axis. Overloading it would make `--all` mean two things.
+    listing.add_argument(
+        "--include-abandoned", action="store_true", help="also show abandoned items"
+    )
     listing.set_defaults(func=_cmd_list)
 
     show = subs.add_parser("show", parents=[common], help="one work item")
@@ -495,6 +522,15 @@ def _add_verbs(subs, common: argparse.ArgumentParser) -> None:
     resume.add_argument("id", nargs="?")
     resume.add_argument("--steer", help="carried into the next attempt's prompt")
     resume.set_defaults(func=_cmd_resume)
+
+    abandon = subs.add_parser(
+        "abandon", parents=[common], help="drop an item and reclaim its worktree"
+    )
+    abandon.add_argument("id", nargs="?")
+    abandon.add_argument(
+        "--yes", action="store_true", help="required: this destroys uncommitted work"
+    )
+    abandon.set_defaults(func=_cmd_abandon)
 
     logs = subs.add_parser("logs", parents=[common], help="a worker session's log")
     logs.add_argument("id", nargs="?", help="default: the work item you are standing in")

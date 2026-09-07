@@ -15,6 +15,7 @@ from kraft import policy as _policy
 from kraft import review as _review
 from kraft.adapters import agent as _agent
 from kraft.adapters import beads
+from kraft.adapters import forge as _forge
 from kraft.adapters import subprocess as _subprocess
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.templates import ATTACHMENT_GATES, Registry, Template, materialize
@@ -326,6 +327,21 @@ async def _dispatch(
             # CPython would import the stale bytecode and the re-measure would
             # never see the fix. Never writing bytecode keeps every cycle honest.
             env={"PYTHONDONTWRITEBYTECODE": "1"},
+            **common,
+        )
+    if kind == "forge":
+        return await _forge.run_task(
+            db,
+            run_dirs,
+            hook_point=task_hook,
+            handler=binding["handler"],
+            backend=binding["backend"],
+            # The worktree, not the repo: every forge CLI resolves the merge
+            # request from the *current branch*, and the repo is on whatever
+            # the human has checked out.
+            repo=worktree,
+            branch=f"kraft/{work_item_row['id']}",
+            title=work_item_row["title"],
             **common,
         )
     raise RuntimeError(

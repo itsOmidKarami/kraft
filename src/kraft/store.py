@@ -551,6 +551,28 @@ def running_sessions_for_node(conn: sqlite3.Connection, work_item_id: str) -> li
     ).fetchall()
 
 
+def active_count(conn: sqlite3.Connection) -> int:
+    """How many work items are running right now.
+
+    One definition, because two callers bound against it: auto-intake decides
+    whether to pick anything up, and a manual resume is refused when the last
+    slot is taken. Two copies of this query would let those two disagree about
+    what "busy" means.
+    """
+    return conn.execute("SELECT COUNT(*) FROM work_items WHERE status = 'active'").fetchone()[0]
+
+
+def abandon_work_item(conn: sqlite3.Connection, work_item_id: str) -> None:
+    """Terminal. The row stays — its events and sessions are still the record of
+    what happened — but it is out of the running set for good, and off the board.
+    """
+    conn.execute(
+        "UPDATE work_items SET status = 'abandoned', updated_at = ? WHERE id = ?",
+        (_now(), work_item_id),
+    )
+    events.append(conn, work_item_id, "work_item_abandoned", {})
+
+
 def pause_work_item(conn: sqlite3.Connection, work_item_id: str, session_ids: list[str]) -> None:
     """Mark the item and its killed sessions paused (02 §10.2).
 

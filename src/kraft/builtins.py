@@ -127,9 +127,15 @@ async def _record_done(
     hook_point: str,
     round: int,
     log: str,
+    status: str = "done",
 ) -> str:
     """A session row for a builtin that did its work in-process. Shared so a
-    builtin's bookkeeping cannot drift from `noop`'s."""
+    builtin's bookkeeping cannot drift from `noop`'s.
+
+    `status` defaults to "done" because every original caller succeeded by
+    construction. A forge task can genuinely fail — a red pipeline — and
+    recording that as done would let the chain walk into the merge node.
+    """
     log_path = run_dirs.logs / f"{session_id}.log"
     result_path = run_dirs.results / f"{session_id}.json"
     log_path.write_text(log)
@@ -160,8 +166,8 @@ async def _record_done(
             round=round,
         )
     )
-    await db.write(lambda c: store.session_exited(c, session_id, "done"))
-    return "done"
+    await db.write(lambda c: store.session_exited(c, session_id, status))
+    return status
 
 
 async def env_setup(

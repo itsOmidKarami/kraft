@@ -10,7 +10,11 @@ from kraft import skill as _skill
 from kraft import steering as _steering
 from kraft.paths import default_skills_dir
 
-_VALID_KINDS = {"builtin", "agent", "subprocess"}
+_VALID_KINDS = {"builtin", "agent", "subprocess", "forge"}
+_FORGE_HANDLERS = {"open_mr", "ci_poll", "merge"}
+#: Duplicated in `adapters.forge.resolve`, deliberately: config validation must
+#: not import the adapter layer. Edit both together.
+_FORGE_BACKENDS = {"glab", "gh", "fake"}
 # Config files that share the templates directory but are not chain templates.
 # One definition: `load_templates` skips them, and the registry save copies the
 # templates around them. Without this, every settings file the UI writes would be
@@ -96,6 +100,19 @@ def load_registry(
             raise RegistryError(f"{path.name}: builtin hook {hook!r} needs a string 'handler'")
         if kind == "agent" and not isinstance(binding.get("command"), str):
             raise RegistryError(f"{path.name}: agent hook {hook!r} needs a string 'command'")
+        if kind == "forge":
+            handler = binding.get("handler")
+            if handler not in _FORGE_HANDLERS:
+                raise RegistryError(
+                    f"{path.name}: forge hook {hook!r} has unknown handler {handler!r}; "
+                    f"known: {sorted(_FORGE_HANDLERS)}"
+                )
+            backend = binding.get("backend")
+            if backend not in _FORGE_BACKENDS:
+                raise RegistryError(
+                    f"{path.name}: forge hook {hook!r} has unknown backend {backend!r}; "
+                    f"known: {sorted(_FORGE_BACKENDS)}"
+                )
         if kind == "subprocess" and not (
             isinstance(binding.get("command"), list)
             and all(isinstance(x, str) for x in binding["command"])
@@ -158,7 +175,12 @@ def load_registry(
         # key nobody reads is a setting that silently does nothing — a
         # `deny_tool:` typo denies no tool and fails nowhere, the same failure
         # an unknown *profile* is already rejected for.
-        known = {"kind", "handler"} if kind == "builtin" else {"kind", "command"}
+        if kind == "builtin":
+            known = {"kind", "handler"}
+        elif kind == "forge":
+            known = {"kind", "handler", "backend"}
+        else:
+            known = {"kind", "command"}
         # `interactive` is UI-facing rather than dispatch-facing (02 §13): the
         # registry round-trips it through Settings today, ahead of the screen
         # that will read it.

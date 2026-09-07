@@ -320,7 +320,7 @@ def save_notify(path: str | Path, notify: dict) -> None:
 INTAKE_DEFAULT: dict = {
     "enabled": False,
     "interval_s": 300,
-    "max_concurrent": 1,
+    "max_concurrent": 3,
     "repos": [],
     "priority_ceiling": 2,
 }

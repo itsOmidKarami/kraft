@@ -135,6 +135,12 @@ describe("applyEvent", () => {
     useStore.getState().applyEvent(ev({ type: "work_item_needs_human", payload: { node_id: "verify", reason: "x" } }));
     expect(useStore.getState().workItems.w1.status).toBe("needs_human");
   });
+  it("work_item_abandoned sets status", () => {
+    // A live board holding a row for an item someone abandoned elsewhere would
+    // keep offering actions on a worktree that no longer exists.
+    useStore.getState().applyEvent(ev({ type: "work_item_abandoned", payload: {} }));
+    expect(useStore.getState().workItems.w1.status).toBe("abandoned");
+  });
 
   it("work_item_needs_human carries the needs_context question off the live stream", () => {
     // Without this the question arrived only on the next hydrate: the status
