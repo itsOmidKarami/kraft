@@ -70,6 +70,34 @@ fake-claude session
 EOF
 fi
 
+# A hook with `artifact:` in the registry is contractually required to write and
+# commit a document. Honour it for the two planning hooks, so the gate, the
+# artifact endpoint and the indexer all see the real inputs.
+hook="$(field 'Hook point')"
+item="$(field 'Work item')"
+case "$hook" in
+  on.spec.requested) kind="spec" ;;
+  on.plan.requested) kind="plan" ;;
+  *) kind="" ;;
+esac
+if [ -n "$kind" ] && [ -n "$item" ]; then
+  mkdir -p ".engineering/${kind}s"
+  cat > ".engineering/${kind}s/${item}.md" <<EOF
+---
+work_item_ids: [${item}]
+node_id: $(field 'Node')
+hook_point: ${hook}
+kind: ${kind}s
+title: fake ${kind}
+---
+
+fake ${kind} body
+EOF
+  git add ".engineering/${kind}s/${item}.md" >/dev/null 2>&1 || true
+  git -c user.name=fake -c user.email=fake@kraft \
+      commit -q -m "fake ${kind}" -- ".engineering/${kind}s/${item}.md" >/dev/null 2>&1 || true
+fi
+
 if [ -n "${KRAFT_RESULT_PATH:-}" ]; then
   rtmp="$(mktemp)"
   # ponytail: no JSON-string escaping on these values, same as the pre-existing

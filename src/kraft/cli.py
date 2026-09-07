@@ -374,6 +374,14 @@ def _cmd_doc(ns: argparse.Namespace) -> None:
     render.page(doc.get("content", ""), force_plain=ns.no_pager)
 
 
+def _cmd_artifact(ns: argparse.Namespace) -> None:
+    payload = asyncio.run(client.artifact(ns.id))
+    if ns.json:
+        emit(payload, str, True)
+        return
+    render.page(render.artifact_body(payload), force_plain=ns.no_pager)
+
+
 _REPO_COLUMNS = [
     ("", "here"),
     ("NAME", "name"),
@@ -529,6 +537,13 @@ def _add_verbs(subs, common: argparse.ArgumentParser) -> None:
     )
     doc.add_argument("--no-pager", action="store_true")
     doc.set_defaults(func=_cmd_doc)
+
+    artifact = subs.add_parser(
+        "artifact", parents=[common], help="the document the pending gate is about"
+    )
+    artifact.add_argument("id", nargs="?")
+    artifact.add_argument("--no-pager", action="store_true")
+    artifact.set_defaults(func=_cmd_artifact)
 
     repos = subs.add_parser("repos", parents=[common], help="connected repositories")
     repos.set_defaults(func=_cmd_repos)

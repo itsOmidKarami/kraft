@@ -2,10 +2,12 @@ import asyncio
 import subprocess
 from pathlib import Path
 
-from support.harness import make_repo, make_repo_with_engineering
+import pytest
+from support.harness import _git, make_repo, make_repo_with_engineering
 
 from kraft import builtins as kraft_builtins
 from kraft import db, store
+from kraft.config import git_read
 from kraft.paths import RunDirs
 
 
@@ -92,6 +94,46 @@ def test_env_setup_copies_an_uncommitted_attachment_into_the_worktree(tmp_path):
             assert status == "done"
             copied = rd.worktrees / "w1" / ".engineering" / "plans" / "p.md"
             assert copied.read_text() == "# the plan\n"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_ensure_worktree_alone_copies_attachments_before_any_node_runs(tmp_path):
+    """`default.yaml` runs `spec` and `plan` before `env_setup`, so `plan`'s
+    attached-spec fallback only works if the copy happened at
+    `ensure_worktree` time, not `env_setup` time. Prove it without going
+    through `env_setup` at all."""
+    repo = make_repo(tmp_path)
+    spec = repo / ".engineering" / "specs" / "s.md"
+    spec.parent.mkdir(parents=True)
+    spec.write_text("# the spec\n")  # never committed
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="w1",
+                    bead_id="B",
+                    title="t",
+                    repo=str(repo),
+                    chain_template="default",
+                    chain_definition="{}",
+                )
+            )
+            worktree = await kraft_builtins.ensure_worktree(
+                database,
+                rd,
+                repo=str(repo),
+                work_item_id="w1",
+                attachments=[{"kind": "spec", "path": ".engineering/specs/s.md"}],
+            )
+            copied = worktree / ".engineering" / "specs" / "s.md"
+            assert copied.read_text() == "# the spec\n"
         finally:
             await database.close()
 
@@ -289,7 +331,9 @@ def test_env_setup_does_not_restamp_on_reentry(tmp_path):
                 repo=str(repo),
             )
             await database.write(lambda c: store.set_base_ref(c, "w1", "PINNED"))
-            # second call returns early: the worktree already exists
+            # second call: `ensure_worktree` returns early (the worktree already
+            # exists) and re-pins nothing; `env_setup` still writes its own
+            # session row and reports done.
             status = await kraft_builtins.env_setup(
                 database,
                 rd,
@@ -303,6 +347,103 @@ def test_env_setup_does_not_restamp_on_reentry(tmp_path):
                 lambda c: c.execute("SELECT base_ref FROM work_items WHERE id='w1'").fetchone()
             )
             assert row["base_ref"] == "PINNED"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def _make_item(database, repo, wid="w1"):
+    return database.write(
+        lambda c: store.create_work_item(
+            c,
+            id=wid,
+            bead_id="B",
+            title="t",
+            repo=str(repo),
+            chain_template="quick-task",
+            chain_definition="{}",
+        )
+    )
+
+
+def _base_ref(database, wid="w1"):
+    return database.read(
+        lambda c: c.execute("SELECT base_ref FROM work_items WHERE id = ?", (wid,)).fetchone()
+    )["base_ref"]
+
+
+def test_ensure_worktree_is_idempotent_and_pins_base_ref_once(tmp_path):
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            first = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id="w1"
+            )
+            assert first.is_dir()
+            pinned = _base_ref(database)
+            assert pinned
+
+            # A second commit lands, then a second call: the pin must not move,
+            # and the existing worktree must be reused rather than re-added
+            # (git refuses to add a worktree at a path that already exists).
+            (repo / "second.txt").write_text("x")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "second")
+            again = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id="w1"
+            )
+            assert again == first
+            assert _base_ref(database) == pinned
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_ensure_worktree_reattaches_an_existing_branch(tmp_path):
+    """A rejected gate can leave `kraft/<id>` behind with no worktree. The next
+    run must check that branch out, not fail on `-b` for a name in use."""
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            wt = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id="w1"
+            )
+            _git(repo, "worktree", "remove", "--force", str(wt))
+
+            again = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id="w1"
+            )
+            assert again.is_dir()
+            assert git_read(again, "rev-parse", "--abbrev-ref", "HEAD") == "kraft/w1"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_ensure_worktree_raises_when_git_fails(tmp_path):
+    not_a_repo = tmp_path / "not-a-repo"
+    not_a_repo.mkdir()
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, not_a_repo)
+            with pytest.raises(RuntimeError, match="w1"):
+                await kraft_builtins.ensure_worktree(
+                    database, rd, repo=str(not_a_repo), work_item_id="w1"
+                )
         finally:
             await database.close()
 

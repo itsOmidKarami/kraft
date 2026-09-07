@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
 
+from kraft import skill as _skill
 from kraft import steering as _steering
+from kraft.paths import default_skills_dir
 
 _VALID_KINDS = {"builtin", "agent", "subprocess"}
 # Config files that share the templates directory but are not chain templates.
@@ -29,6 +32,9 @@ GATE_NAMES = {"spec_approval", "plan_approval", "chain_finalized", "human_review
 #: than the node id: gate names are a validated closed vocabulary, node ids are
 #: free text a custom template chooses.
 ATTACHMENT_GATES = {"spec": "spec_approval", "plan": "plan_approval"}
+#: An `artifact:` value becomes a path segment (`.engineering/<kind>s/<id>.md`),
+#: so it is a bare lowercase identifier — not a path, not a pattern.
+_ARTIFACT_KIND = re.compile(r"[a-z][a-z0-9_-]*")
 
 
 class RegistryError(Exception):
@@ -60,9 +66,18 @@ def _agent_profiles() -> dict:
     return PROFILES
 
 
-def load_registry(path: str | Path, *, steering_dir: Path | None = None) -> Registry:
+def load_registry(
+    path: str | Path,
+    *,
+    steering_dir: Path | None = None,
+    skills_dir: Path | None = None,
+) -> Registry:
     path = Path(path)
     steering_dir = steering_dir if steering_dir is not None else path.parent / "steering"
+    # Not `path.parent / "skills"`: a method file is shipped in the package and
+    # only *overlaid* from $KRAFT_HOME, so the default is the home directory,
+    # not a sibling of whichever registry file is being validated.
+    skills_dir = skills_dir if skills_dir is not None else default_skills_dir()
     try:
         data = yaml.safe_load(path.read_text())
     # ValueError covers the UnicodeDecodeError `read_text()` raises on a file
@@ -89,7 +104,15 @@ def load_registry(path: str | Path, *, steering_dir: Path | None = None) -> Regi
                 f"{path.name}: subprocess hook {hook!r} needs a list-of-strings 'command'"
             )
 
-        agent_only = ("profile", "model", "escalate_model", "deny_tools", "steering")
+        agent_only = (
+            "profile",
+            "model",
+            "escalate_model",
+            "deny_tools",
+            "steering",
+            "skill",
+            "artifact",
+        )
         if kind == "agent":
             profiles = _agent_profiles()
             profile = binding.get("profile", "claude")
@@ -111,6 +134,18 @@ def load_registry(path: str | Path, *, steering_dir: Path | None = None) -> Regi
                 _steering.validate(steering_dir, binding.get("steering", []), where=path.name)
             except _steering.SteeringError as exc:
                 raise RegistryError(str(exc)) from exc
+            if "skill" in binding:
+                try:
+                    _skill.validate(skills_dir, binding["skill"], where=path.name)
+                except _skill.SkillError as exc:
+                    raise RegistryError(str(exc)) from exc
+            if "artifact" in binding:
+                art = binding["artifact"]
+                if not isinstance(art, str) or not _ARTIFACT_KIND.fullmatch(art):
+                    raise RegistryError(
+                        f"{path.name}: hook {hook!r} 'artifact' must be a bare lowercase "
+                        f"kind like 'spec' or 'plan'; got {art!r}"
+                    )
         else:
             for key in agent_only:
                 if key in binding:

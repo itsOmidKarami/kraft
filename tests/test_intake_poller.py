@@ -63,6 +63,7 @@ async def _stub(tmp_path, *, repo_entry=None, budget=policy.NO_BUDGET, **intake_
             registry=registry,
             templates=load_templates(templates_dir, registry),
             templates_dir=templates_dir,
+            skills_dir=tmp_path / "skills",
             policy=policy.Policy(
                 loops={}, default=policy.Cap(attempts=3, wall_clock_s=3600), budget=budget
             ),

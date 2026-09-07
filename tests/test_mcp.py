@@ -24,6 +24,7 @@ def test_the_tools_are_registered():
     assert {t.name for t in _tools()} == {
         "list_work_items",
         "get_work_item",
+        "get_gate_artifact",
         "search",
         "create_work_item",
         "ensure_repo",

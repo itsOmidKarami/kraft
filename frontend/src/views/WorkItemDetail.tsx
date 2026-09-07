@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { ChatText, FolderOpen, Pause, Prohibit } from "@phosphor-icons/react";
 import * as api from "../api";
+import { ArtifactModal } from "../components/ArtifactModal";
 import { BudgetCard } from "../components/BudgetCard";
 import { CappedCard } from "../components/CappedCard";
 import { CurrentNodePanel } from "../components/CurrentNodePanel";
@@ -131,6 +132,7 @@ export function WorkItemDetail() {
   // state, which is exactly how a shell-cached deep link presented itself.
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [showDiff, setShowDiff] = useState(false);
+  const [showArtifact, setShowArtifact] = useState(false);
   const [worktreeErr, setWorktreeErr] = useState<string | null>(null);
   const local = onServerMachine();
 
@@ -298,6 +300,10 @@ export function WorkItemDetail() {
               <button className="btn btn-secondary" onClick={() => setShowDiff(true)}>
                 Review changes
               </button>
+            ) : item.gate_artifact ? (
+              <button className="btn btn-secondary" onClick={() => setShowArtifact(true)}>
+                {gate === "spec_approval" ? "Review spec" : "Review plan"}
+              </button>
             ) : undefined
           }
           deferred={gate === "human_review_approval" ? item.deferred_findings : undefined}
@@ -361,6 +367,9 @@ export function WorkItemDetail() {
       )}
 
       {showDiff && <DiffModal workItemId={item.id} onClose={() => setShowDiff(false)} />}
+      {showArtifact && (
+        <ArtifactModal workItemId={item.id} onClose={() => setShowArtifact(false)} />
+      )}
 
       <Tabs
         value={tab}

@@ -127,8 +127,13 @@ def main() -> int:
         },
     )
     tracker = isolated_bd(tmp)
+    # fixtures/fake-claude.sh, not tests/support/fake_agent.py: the planning
+    # hooks (on.spec.requested/on.plan.requested) carry an `artifact:` contract
+    # (write + commit a document into the worktree), and only fake-claude.sh
+    # honours it. Same binary also does fake_agent.py's calc.py `fix` trick, so
+    # one command covers on.implementation.start too.
     templates = fake_templates_dir(
-        tmp, f"{sys.executable} {REPO / 'tests' / 'support' / 'fake_agent.py'}"
+        tmp, str(REPO / "fixtures" / "fake-claude.sh"), planning_hooks=True
     )
 
     env = {
@@ -138,7 +143,7 @@ def main() -> int:
         "KRAFT_TEMPLATES_DIR": str(templates),
         "KRAFT_BD_CWD": str(tracker),
         "KRAFT_FRONTEND_DIST": str(dist),
-        "KRAFT_FAKE_AGENT": "fix",
+        "KRAFT_FAKE_CLAUDE": "fix",
         "KRAFT_INDEX_REPOS": str(repo),
     }
     # Own process group: the orchestrator spawns detached agent/git children,
