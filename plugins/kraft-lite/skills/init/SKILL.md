@@ -26,8 +26,12 @@ Rules for filling it in:
   hooks together - not one question per hook.
 - None: write `kind: prompt` with a one-line instruction describing the node's
   job. The chain still runs.
-- `on.test.run` and `on.ci.poll` are `kind: subprocess`. Use the detected test
-  command; `on.ci.poll` is `[gh, pr, checks]`.
+- `on.test.run` and `on.ci.poll` are `kind: subprocess` — but only when detect
+  found a command for them. Use `test_command` and `ci_command` verbatim. Either
+  one being `null` means `kind: prompt` instead: for `on.ci.poll`, an instruction
+  to report the pipeline's state once, by whatever means this repo has. Never
+  write a command detect did not report — a binding that cannot run here reads as
+  finished until the node fails.
 
 Every `skill` entry gets a `prompt` sibling. A renamed or uninstalled skill then
 degrades to an instruction instead of stopping the chain.

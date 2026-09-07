@@ -478,12 +478,36 @@ def _state(root: Path, chain: dict, chain_id: str | None = None) -> dict:
 HOOK_KEY = re.compile(r"^([a-z][a-z0-9_.]*):", re.MULTILINE)
 
 
+def _bound_hooks(text: str) -> set[str]:
+    """Keys that are actually bound, not merely present.
+
+    A regex cannot express "followed by an indented line, but not by another
+    column-zero key" without a lookahead nobody wants to read at 3am, so this
+    walks the lines instead. Structural only: `kind: banana` is bound as far as
+    this is concerned, and fails at dispatch with a message that says so.
+    """
+    bound: set[str] = set()
+    pending: str | None = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        match = HOOK_KEY.match(line)
+        if match:
+            # A key immediately following another leaves the first unbound.
+            pending = match.group(1)
+        elif pending and line[:1] in " \t":
+            bound.add(pending)
+            pending = None
+    return bound
+
+
 def registry_hooks(root: Path) -> set[str] | None:
     """The hooks bound in this repo's registry, or None when there is no registry."""
     path = root / STATE_DIR / "registry.yaml"
     if not path.is_file():
         return None
-    return set(HOOK_KEY.findall(path.read_text()))
+    return _bound_hooks(path.read_text())
 
 
 def validate_hooks(root: Path, chain: dict) -> None:
@@ -519,7 +543,8 @@ def main(argv: list[str] | None = None) -> int:
     start = sub.add_parser("start")
     start.add_argument("--title", required=True)
     start.add_argument("--chain", type=Path, default=None)
-    sub.add_parser("detect")
+    detect_parser = sub.add_parser("detect")
+    detect_parser.add_argument("--chain", type=Path, default=None)
     sub.add_parser("chains")
     gate = sub.add_parser("gate")
     gate.add_argument("--name", required=True)
@@ -540,7 +565,7 @@ def main(argv: list[str] | None = None) -> int:
     chain_id = getattr(args, "chain_id", None)
 
     if args.verb == "detect":
-        print(json.dumps(detect(root), indent=2))
+        print(json.dumps(detect(root, args.chain), indent=2))
         return 0
 
     if args.verb == "chains":
@@ -628,6 +653,26 @@ HOOK_KEYWORDS = {
     "on.merge": ("finishing", "merge"),
 }
 
+#: Words in a hook name that say when it fires, not what it does. A custom hook
+#: derives its candidates from the words that are left, so these must not match
+#: a skill: `on.deploy.staging` should look for deploy skills, not for every
+#: skill with "start" in its name.
+HOOK_STOPWORDS = frozenset({"on", "requested", "run", "start", "prepare", "poll", "open", "ready"})
+
+
+def _hook_keywords(hook: str) -> tuple[str, ...]:
+    """Keywords to match installed skill names against.
+
+    `HOOK_KEYWORDS` is the curated answer for the hooks that ship with the default
+    chain — it encodes judgements the name alone cannot, like `on.mr.open` wanting
+    `finishing`. It is not the list of hooks that exist: a custom chain names
+    hooks nobody curated, and those derive from their own words.
+    """
+    if hook in HOOK_KEYWORDS:
+        return HOOK_KEYWORDS[hook]
+    return tuple(w for w in re.split(r"[._]", hook) if w and w not in HOOK_STOPWORDS)
+
+
 SKILL_ROOTS = (
     Path.home() / ".claude" / "plugins",
     Path.home() / ".claude" / "skills",
@@ -656,6 +701,74 @@ def _test_command(root: Path) -> list[str] | None:
     return None
 
 
+#: The client each forge's CI is read with, and the command that reads it once.
+#: Both are read-only status calls: `next` is forbidden to sit in a wait loop.
+FORGE_CLI = {
+    "gitlab": ("glab", ["glab", "ci", "status"]),
+    "github": ("gh", ["gh", "pr", "checks"]),
+}
+
+
+def _origin_url(root: Path) -> str:
+    """`origin`'s URL, or empty when there is no remote, no git, or no repo."""
+    try:
+        done = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
+def _origin_host(root: Path) -> str:
+    """Just the host from origin's URL.
+
+    The repo name is not evidence of a forge: `github.com/me/gitlab-mirror` is a
+    GitHub repo, and matching the whole URL binds it the wrong client. Handles
+    both git's scp-like `git@host:path` and ordinary `scheme://host/path`.
+    """
+    url = _origin_url(root)
+    if "://" in url:
+        url = url.split("://", 1)[1]
+    # Strip any userinfo, then take everything up to the path or port separator.
+    host = url.rsplit("@", 1)[-1]
+    return re.split(r"[/:]", host, maxsplit=1)[0].lower()
+
+
+def _forge(root: Path) -> str | None:
+    """Which forge's CI this repo's merge requests run on.
+
+    `origin` decides, because that is where a merge request lands. The CI files
+    are only the fallback for a checkout with no remote configured yet — and a
+    repo can carry a `.github/workflows` it has stopped using.
+    """
+    host = _origin_host(root)
+    if "gitlab" in host:
+        return "gitlab"
+    if "github" in host:
+        return "github"
+    if (root / ".gitlab-ci.yml").is_file():
+        return "gitlab"
+    if (root / ".github" / "workflows").is_dir():
+        return "github"
+    return None
+
+
+def _ci_command(root: Path) -> list[str] | None:
+    """None when the forge is unknown or its client is not installed. init then
+    writes `kind: prompt`, which is honest: a bound command that cannot run reads
+    as finished and fails at the node instead."""
+    forge = _forge(root)
+    if forge is None:
+        return None
+    cli, command = FORGE_CLI[forge]
+    return command if shutil.which(cli) else None
+
+
 def _installed_skills(root: Path) -> list[str]:
     """Every SKILL.md reachable, named as the agent would invoke it: prefixed
     with the plugin whose manifest encloses it, bare when there is none."""
@@ -681,13 +794,21 @@ def _installed_skills(root: Path) -> list[str]:
     return sorted(names)
 
 
-def detect(root: Path) -> dict:
+def detect(root: Path, chain_path: Path | None = None) -> dict:
+    chain = json.loads((chain_path or DEFAULT_CHAIN).read_text())
+    # dict.fromkeys, not set: init writes the registry in this order, and a
+    # registry whose keys follow the chain reads like the run it configures.
+    hooks = dict.fromkeys(task for node in chain["nodes"] for task in node["tasks"])
     installed = _installed_skills(root)
-    skills = {
-        hook: [n for n in installed if any(k in n.lower() for k in keywords)] if keywords else []
-        for hook, keywords in HOOK_KEYWORDS.items()
+    skills = {}
+    for hook in hooks:
+        keywords = _hook_keywords(hook)
+        skills[hook] = [n for n in installed if any(k in n.lower() for k in keywords)]
+    return {
+        "test_command": _test_command(root),
+        "ci_command": _ci_command(root),
+        "skills": skills,
     }
-    return {"test_command": _test_command(root), "skills": skills}
 
 
 if __name__ == "__main__":

@@ -102,6 +102,27 @@ lite-build:
 # pulling into the public one.
 #
 # Publish plugins/kraft-lite/ to its own public repo; regenerates and force-pushes.
+# Has the version in plugin.json actually been published? `lite-version` in CI
+# stops a plugin change without a bump; this is the other half — a bump that
+# never reached the remote. Deliberately manual: CI has no credentials for the
+# lite remote, and the window between a bump merging and a publish running is a
+# normal state a per-merge job would fail main throughout.
+lite-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    version=$(python3 -c "import json;print(json.load(open('plugins/kraft-lite/.claude-plugin/plugin.json'))['version'])")
+    tag="kraft-lite--v$version"
+    # Same exit-code reading as lite-publish, opposite polarity: there, an existing
+    # tag means the bump is missing; here, a missing tag means the publish is.
+    # Anything but 0 or 2 is a remote that could not be reached, which must not
+    # read as an answer either way.
+    rc=0; git ls-remote --exit-code --tags lite "$tag" >/dev/null || rc=$?
+    case $rc in
+        0) echo "kraft-lite v$version is published as $tag" ;;
+        2) echo "kraft-lite v$version has no $tag on the lite remote — run 'just lite-publish'"; exit 1 ;;
+        *) echo "cannot reach the lite remote: git ls-remote exited $rc"; exit 1 ;;
+    esac
+
 lite-publish:
     #!/usr/bin/env bash
     set -euo pipefail
