@@ -1,7 +1,13 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "kraft-lite",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Run a Kraft chain in this session: ordered nodes, human gates, capped fix loops. No orchestrator.",
-  "skills": ["./skills"]
+  "author": {
+    "name": "Omid Karami",
+    "url": "https://github.com/itsOmidKarami"
+  },
+  "skills": [
+    "./skills"
+  ]
 }
