@@ -20,6 +20,13 @@ from typing import Literal, Protocol
 
 CIState = Literal["pending", "success", "failed"]
 
+#: How long a `ci_poll` node waits for a pipeline to settle, and how long it
+#: sleeps between checks. Both are overridable per node in the registry; a
+#: pipeline slower than this needs a human whatever the number is.
+DEFAULT_POLL_TIMEOUT = 1800.0
+DEFAULT_POLL_INTERVAL = 5.0
+_MAX_POLL_INTERVAL = 60.0
+
 
 class ForgeError(RuntimeError):
     """The forge could not be reached, or answered something unusable."""
@@ -218,6 +225,33 @@ def resolve(name: str) -> Forge:
             raise ForgeError(f"unknown forge backend {name!r}; known: gh, glab, fake")
 
 
+async def _poll_ci(
+    forge: Forge, *, repo: Path, branch: str, timeout: float, interval: float
+) -> tuple[CIStatus, bool]:
+    """Wait for a pipeline to settle.
+
+    Returns the last status seen and whether the wait ran out with it still
+    pending. Backoff rather than a fixed interval: a thirty-minute pipeline
+    should not cost three hundred CLI invocations, and the early checks are the
+    ones worth making promptly.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    # The cap bounds how far the backoff *grows*, not what the caller asked
+    # for: a registry that sets a 300s interval for a rate-limited forge must
+    # not silently get 60s and five times the CLI calls.
+    cap = max(_MAX_POLL_INTERVAL, interval)
+    while True:
+        ci = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
+        if ci.state != "pending":
+            return ci, False
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            return ci, True
+        await asyncio.sleep(min(interval, remaining))
+        interval = min(interval * 2, cap)
+
+
 async def run_task(
     db,
     run_dirs,
@@ -232,6 +266,8 @@ async def run_task(
     branch: str,
     title: str,
     round: int = 0,
+    poll_timeout: float = DEFAULT_POLL_TIMEOUT,
+    poll_interval: float = DEFAULT_POLL_INTERVAL,
 ) -> str:
     """One forge node.
 
@@ -254,11 +290,22 @@ async def run_task(
             case "ci_poll":
                 # Both CLIs resolve the merge request from the checked-out
                 # branch, so the number is not threaded between nodes.
-                ci = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
-                log = f"pipeline {ci.state}: {ci.url}\n" + "".join(f"  {j}\n" for j in ci.jobs)
-                # ponytail: a pending pipeline stops the node rather than
-                # waiting. A real poll loop with backoff belongs here once a
-                # live run shows how long this repo's pipeline actually takes.
+                ci, timed_out = await _poll_ci(
+                    forge,
+                    repo=repo,
+                    branch=branch,
+                    timeout=poll_timeout,
+                    interval=poll_interval,
+                )
+                # A timeout and a red pipeline are both a failed node, but a
+                # reviewer -- and any fix loop built on this node (Kraft-cbr) --
+                # has to tell "finished red" from "never finished".
+                head = (
+                    f"pipeline timed out after {poll_timeout:g}s, still pending"
+                    if timed_out
+                    else f"pipeline {ci.state}"
+                )
+                log = f"{head}: {ci.url}\n" + "".join(f"  {j}\n" for j in ci.jobs)
                 status = "done" if ci.state == "success" else "failed"
             case "merge":
                 await forge.merge(repo=repo, mr=MR(number=0, url=""))
