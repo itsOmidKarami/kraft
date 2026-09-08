@@ -1210,3 +1210,45 @@ def test_a_delete_referenced_only_by_repos_yaml_is_refused(tmp_path, client, tem
     config.write_yaml(templates_dir / "repos.yaml", repos)
     assert client.delete("/steering/house-style").status_code == 200
     assert not (templates_dir / "steering" / "house-style.md").exists()
+
+
+def test_probe_from_a_worktree_reports_the_main_checkout(tmp_path):
+    """An agent's cwd IS a linked worktree, and `/kraft:handoff` tells it to call
+    `ensure_repo()` every time. Without this, every handoff registers the
+    worktree as a repo of its own — observed live in repos.yaml."""
+    repo = make_repo(tmp_path)
+    worktree = tmp_path / "wt"
+    subprocess.run(
+        ["git", "worktree", "add", "-q", str(worktree), "-b", "wt-branch"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    assert Path(config.probe_repo(worktree)["path"]) == repo.resolve()
+
+
+def test_probe_of_a_submodule_stays_the_submodule(tmp_path):
+    """A submodule's common dir is `<super>/.git/modules/<path>`, whose parent is
+    `<super>/.git/modules` — not a repo at all. The `.git` guard keeps a
+    submodule on the `--show-toplevel` answer it has always had."""
+    lib = make_repo(tmp_path, name="lib")
+    super_repo = make_repo(tmp_path, name="super")
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            str(lib),
+            "libs/sub",
+        ],
+        cwd=super_repo,
+        check=True,
+        capture_output=True,
+    )
+    assert (
+        Path(config.probe_repo(super_repo / "libs" / "sub")["path"])
+        == (super_repo / "libs" / "sub").resolve()
+    )

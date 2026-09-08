@@ -60,3 +60,13 @@ def test_a_short_painted_last_column_keeps_its_colour(painting):
     row = [{"a": "x", "b": render.paint("ok", "\033[32m")}]
     body = render.table(row, [("A", "a"), ("B", "b")], width=40).splitlines()[1]
     assert "\033[32m" in body
+
+
+def test_a_headerless_table_is_the_row_alone(monkeypatch):
+    """A followed stream renders one row per frame; `table` prepending SEQ/STATUS
+    to every one of them is what a human sees as a header per event."""
+    monkeypatch.setenv("COLUMNS", "120")
+    out = render.table(_ROWS[:1], _COLUMNS, headers=False)
+    assert out.splitlines() == [out]
+    assert "STATUS" not in render.strip_ansi(out)
+    assert "wi-1" in out

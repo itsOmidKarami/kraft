@@ -26,7 +26,7 @@ nodes:
     tasks: [on.ci.poll, on.review.mr.run]
     gate_after: null
   - id: human_review
-    tasks: [on.human_review.requested]
+    tasks: [on.mr.sync, on.human_review.requested]
     gate_after: human_review_approval
   - id: merge
     tasks: [on.merge]

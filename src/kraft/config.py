@@ -212,7 +212,19 @@ def probe_repo(path: str | Path) -> dict:
     toplevel = git_read(p, "rev-parse", "--show-toplevel", expected_failure=True)
     if toplevel is None:
         raise ConfigError(f"{p} is not a git repository")
-    root = Path(toplevel)
+    # A linked worktree's `--show-toplevel` is the worktree, so probing from one
+    # would register it as a repo of its own — and agents run in worktrees
+    # (Kraft-97e). The common git dir points at the main checkout's `.git`, whose
+    # parent is that checkout. In an ordinary checkout it is `<repo>/.git`, so
+    # this is not a worktree special case and the answer is unchanged.
+    #
+    # The `.git` name guard is load-bearing: a submodule's common dir is
+    # `<super>/.git/modules/<path>`, whose parent is not a repo at all. Anything
+    # that is not a plain `.git` directory stays on `--show-toplevel`.
+    common = git_read(
+        p, "rev-parse", "--path-format=absolute", "--git-common-dir", expected_failure=True
+    )
+    root = Path(common).parent if common and Path(common).name == ".git" else Path(toplevel)
 
     submodules: list[str] = []
     gitmodules = root / ".gitmodules"

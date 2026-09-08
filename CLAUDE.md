@@ -96,6 +96,7 @@ kraft show [ID]                        # ID defaults to the worktree you are in
 kraft create "title"                   # files it paused; a human starts it
 kraft approve [ID] / kraft reject [ID] --note "why"
 kraft pause [ID] / kraft resume [ID] --steer "..."
+kraft retry [ID] [--steer "..."]       # the only door back onto a stopped item
 kraft search "query"
 kraft logs [ID] [-f] [-n N]            # a worker session's log; --json is NDJSON
 kraft events [ID] [--after N] [--type T]
@@ -103,7 +104,8 @@ kraft watch                            # live board, needs a terminal
 kraft diff [ID] [--stat|--name-only]   # truncation and untracked always shown
 kraft docs [ID] / kraft doc DOC_ID [--open [EDITOR]]
 kraft artifact [ID]                    # the doc the pending gate is about
-kraft repos / kraft connect [PATH]     # `*` marks the repo you are in
+kraft repos                            # `*` marks the repo you are in
+kraft connect [PATH] / kraft disconnect [PATH]
 kraft path [ID] (alias cd) / kraft open [ID]
 kraft serve [--host H] [--port P]      # same as bare `kraft`
 kraft health                           # exit 1 when degraded

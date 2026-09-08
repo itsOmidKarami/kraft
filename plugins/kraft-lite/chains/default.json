@@ -70,6 +70,7 @@
     {
       "id": "human_review",
       "tasks": [
+        "on.mr.sync",
         "on.human_review.requested"
       ],
       "gate_after": "human_review_approval",

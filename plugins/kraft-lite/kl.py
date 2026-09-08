@@ -886,6 +886,9 @@ HOOK_KEYWORDS = {
     "on.test.run": (),
     "on.review.local.run": ("review",),
     "on.mr.open": ("finishing", "branch", "pull-request", "merge-request"),
+    # No candidates: rewriting a merge request description from the branch is
+    # the forge adapter's own job, not something an installed skill serves.
+    "on.mr.sync": (),
     "on.ci.poll": (),
     "on.review.mr.run": ("review",),
     "on.human_review.requested": (),

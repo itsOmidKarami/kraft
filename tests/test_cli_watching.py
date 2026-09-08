@@ -118,6 +118,8 @@ def test_events_follow_filters_by_item_and_stops_on_completion(app, tmp_path, mo
     assert "102" in out
     assert "103" in out
     assert "104" not in out  # left the loop at work_item_completed, not run on
+    # the bug as a human meets it: `SEQ` above every single streamed line
+    assert out.count("SEQ") == 1
 
 
 def test_events_follow_returns_at_once_on_an_item_that_already_ended(
@@ -374,3 +376,23 @@ def test_log_backlog_limits_live_in_client(monkeypatch):
     assert [e["n"] for e in asyncio.run(client.log_backlog("sess-1", 2))] == [3, 4]
     # 0 means none, and must not read as "no limit"
     assert asyncio.run(client.log_backlog("sess-1", 0)) == []
+
+
+def test_events_follow_json_is_one_object_per_line(app, tmp_path, monkeypatch, capsys):
+    """`kraft logs -f --json` is NDJSON and CLAUDE.md documents that contract.
+    A followed stream that emits pretty-printed arrays breaks `read -r`, a
+    `split("\\n")`, and any log shipper (Kraft-tom2)."""
+    repo = make_repo(tmp_path)
+    wid = _make_item(repo)
+
+    async def fake_stream(after_seq=0):
+        yield {"type": "node_started", "seq": 201, "work_item_id": wid}
+        yield {"type": "work_item_completed", "seq": 202, "work_item_id": wid}
+
+    monkeypatch.setattr(client, "stream_events", fake_stream)
+    cli.main(["events", wid, "--after", "9999", "-f", "--json"])
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+    # --after 9999 empties the backlog, so every line here is a streamed frame
+    parsed = [json.loads(line) for line in lines[1:]]
+    assert [event["seq"] for event in parsed] == [201, 202]
+    assert all(isinstance(event, dict) for event in parsed)

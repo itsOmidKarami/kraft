@@ -142,6 +142,14 @@ async def _get(path: str, **params) -> dict | list:
     return response.json()
 
 
+async def _delete(url: str, **params) -> None:
+    """No body on the way back: DELETE /repos answers 204. The error string is
+    `_get`'s, because a 404 an agent reads must be one sentence either way."""
+    response = await _send("DELETE", url, params=params)
+    if response.status_code >= 400:
+        raise ValueError(f"kraft {response.status_code}: {_detail(response)}")
+
+
 async def list_work_items(
     status: str | None = None, *, include_abandoned: bool = False
 ) -> list[dict]:
@@ -173,6 +181,25 @@ def trim_work_items(items: list[dict], status: str | None = None) -> list[dict]:
     ]
 
 
+def _next_node_id(item: dict) -> str | None:
+    """The node after the current one, or None at the end of the chain.
+
+    A NULL `current_node_id` is a work item nobody has started: node zero is what
+    comes next, which is the same rule `resume` follows (design §6 rule 1).
+    Saying "done" there would be a lie, and this field exists so an agent can say
+    where work got to (Kraft-9rs).
+    """
+    ids = [node["id"] for node in (item.get("chain_definition") or {}).get("nodes") or []]
+    current = item.get("current_node_id")
+    if current is None:
+        after = 0
+    elif current in ids:
+        after = ids.index(current) + 1
+    else:
+        after = len(ids)  # a node the chain no longer has: nothing to promise
+    return ids[after] if after < len(ids) else None
+
+
 async def get_work_item(work_item_id: str | None = None) -> dict:
     """One item. Defaults to the item this session is standing in."""
     if work_item_id is None:
@@ -194,14 +221,18 @@ async def get_work_item(work_item_id: str | None = None) -> dict:
         "worktree_path",
         "bead_id",
     )
-    return {k: item[k] for k in keep if k in item}
+    return {**{k: item[k] for k in keep if k in item}, "next_node_id": _next_node_id(item)}
 
 
-async def _target(work_item_id: str | None) -> str:
+async def resolve_work_item(work_item_id: str | None) -> str:
     """An explicit id, or the item this session is standing in.
 
     Not `_forbid_self_action`: reading your own logs is exactly what a worker
     session should be able to do. The guard is about acting, not looking.
+
+    Public because `cli._cmd_events` needs the resolved id twice — once for the
+    events call, once to filter the instance-wide bus — and `cli.py` must not
+    become a second definition of what a work item is (Kraft-t5s9).
     """
     if work_item_id:
         return work_item_id
@@ -218,7 +249,7 @@ async def worker_sessions(work_item_id: str | None = None) -> list[dict]:
     `worker_sessions` so an agent's context is not spent on it, which means the
     log verbs cannot reuse it.
     """
-    item = await _get(f"/work-items/{await _target(work_item_id)}")
+    item = await _get(f"/work-items/{await resolve_work_item(work_item_id)}")
     return item.get("worker_sessions", [])
 
 
@@ -237,7 +268,8 @@ async def events(work_item_id: str | None = None, after_seq: int = 0) -> list[di
     This is the "why is it stopped" view, where the log is the "what is it
     saying" view.
     """
-    return await _get(f"/work-items/{await _target(work_item_id)}/events", after_seq=after_seq)
+    target = await resolve_work_item(work_item_id)
+    return await _get(f"/work-items/{target}/events", after_seq=after_seq)
 
 
 async def log_backlog(session_id: str, limit: int | None = None) -> list[dict]:
@@ -333,7 +365,7 @@ async def diff(work_item_id: str | None = None) -> dict:
     the two fields a renderer must not drop, and passing the dict whole is how
     that is guaranteed rather than remembered.
     """
-    return await _get(f"/work-items/{await _target(work_item_id)}/diff")
+    return await _get(f"/work-items/{await resolve_work_item(work_item_id)}/diff")
 
 
 async def artifact(work_item_id: str | None = None) -> dict:
@@ -342,13 +374,13 @@ async def artifact(work_item_id: str | None = None) -> dict:
     404s when there is no pending gate or the hook produced no document —
     reading a gate's artifact is only meaningful while the gate is open.
     """
-    return await _get(f"/work-items/{await _target(work_item_id)}/artifact")
+    return await _get(f"/work-items/{await resolve_work_item(work_item_id)}/artifact")
 
 
 async def documents(work_item_id: str | None = None) -> list[dict]:
     """The specs, plans and summaries the indexer linked to this item. No
     content: that is one `document()` call per id."""
-    payload = await _get(f"/work-items/{await _target(work_item_id)}/documents")
+    payload = await _get(f"/work-items/{await resolve_work_item(work_item_id)}/documents")
     return payload.get("documents", [])
 
 
@@ -378,7 +410,7 @@ async def repos() -> list[dict]:
 async def open_worktree(work_item_id: str | None = None, editor: str | None = None) -> dict:
     """Open the item's worktree in an editor on the server's machine — the same
     launch as the UI's "Open worktree", including its 501 when headless."""
-    target = await _target(work_item_id)
+    target = await resolve_work_item(work_item_id)
     return await _act(f"/work-items/{target}/open-worktree", {"editor": editor} if editor else {})
 
 
@@ -482,6 +514,24 @@ async def ensure_repo(path: str | None = None) -> dict:
     return {**body, "already_connected": False}
 
 
+async def disconnect_repo(path: str | None = None) -> dict:
+    """Forget a repo. No repo file is touched and no work item is dropped.
+
+    The path is resolved through the probe first, for the same reason
+    `ensure_repo` probes on a 409: after Kraft-97e `POST /repos` stores the main
+    checkout, and an agent standing in a worktree of that repo would otherwise
+    send the worktree path and get a 404 — `api._connected` matches the raw path
+    or its `resolve()` and knows nothing about worktrees. A probe that fails (not
+    a git directory) falls back to the path as given, so the 404 still says what
+    is wrong rather than being swallowed here.
+    """
+    path = path or os.getcwd()
+    status, probed = await _post("/repos/probe", {"path": path})
+    target = probed["path"] if status < 400 else path
+    await _delete("/repos", path=target)
+    return {"path": target}
+
+
 async def _pending_gate_of(work_item_id: str) -> str:
     gate = (await get_work_item(work_item_id)).get("pending_gate")
     if not gate:
@@ -534,3 +584,16 @@ async def resume(steer: str | None = None, work_item_id: str | None = None) -> d
     target = _forbid_self_action(work_item_id)
     payload = {"steer": steer.strip()} if steer and steer.strip() else {}
     return await _act(f"/work-items/{target}/resume", payload)
+
+
+async def retry(steer: str | None = None, work_item_id: str | None = None) -> dict:
+    """Re-run the node an item stopped on, optionally with a steer.
+
+    The only door back onto a `needs_human` stop: resume wants `paused`, pause
+    wants `running`, and approve/reject want a pending gate. `_forbid_self_action`
+    rather than `resolve_work_item`, because a retry restarts the node that is
+    running you.
+    """
+    target = _forbid_self_action(work_item_id)
+    payload = {"steer": steer.strip()} if steer and steer.strip() else {}
+    return await _act(f"/work-items/{target}/retry", payload)

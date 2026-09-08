@@ -94,6 +94,13 @@ def build() -> MCPServer:
         create_work_item is started for the first time."""
         return await client.resume(steer, work_item_id)
 
+    @server.tool()
+    async def retry_work_item(steer: str | None = None, work_item_id: str | None = None) -> dict:
+        """Re-run the node a stopped Kraft work item stopped on, with `steer`
+        carried into the retry's prompt. This is the only way back onto an item
+        that stopped for a human: resume only takes a paused item."""
+        return await client.retry(steer, work_item_id)
+
     return server
 
 
