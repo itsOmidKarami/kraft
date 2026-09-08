@@ -197,6 +197,46 @@ def test_live_pid_matching_identity_is_adopted(tmp_path):
     asyncio.run(scenario())
 
 
+def test_a_restart_mid_ci_poll_has_a_row_to_reattach(tmp_path):
+    """Kraft-7xt: `forge.run_task` now creates its session row before the poll
+    (Kraft-41b), so a restart mid-wait finds it -- it has no pid (the work
+    happens in-process, not in a child), so it stays 'pending' the whole
+    time. Before that fix there was no row at all and the node silently
+    re-ran from scratch; now the restart surfaces it as needs_human, the same
+    as any other unconfirmed session, rather than losing track of it."""
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed_item(database)
+            await database.write(
+                lambda c: store.enter_node(c, "w1", "verify")
+            )  # the forge nodes live past "implementation" in a real chain
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="verify",
+                    hook_point="on.ci.poll",
+                    log_path=str(rd.logs / "s1.log"),
+                    result_path=str(rd.results / "s1.json"),
+                )
+            )  # never left 'pending': no pid, no child to launch
+            summary, adopted = await reattach.reattach(database, rd, _REG)
+            assert adopted == {}
+            assert summary.unknown == ["s1"]
+            row = database.read(
+                lambda c: c.execute("SELECT status FROM work_items WHERE id='w1'").fetchone()
+            )
+            assert row["status"] == "needs_human"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 def test_resolved_from_file_carries_concerns_and_question(tmp_path):
     """A session resolved from its result file after a restart must reach
     `worker_session_exited` with the same payload `adapters.subprocess.run_task`

@@ -168,6 +168,41 @@ describe("WorkItemDetail", () => {
     expect(screen.getByRole("button", { name: /^Pause$/ })).toBeEnabled();
   });
 
+  it("offers Cancel at a gate, disabled while active (Kraft-aayj)", () => {
+    setup({ status: "active" });
+    renderDetail();
+    const cancelBtn = screen.getByRole("button", { name: /^Cancel$/ });
+    expect(cancelBtn).toBeDisabled();
+    expect(screen.getByText(/pause it before abandoning/)).toBeInTheDocument();
+  });
+
+  it("abandons on confirm once the item is stopped, and does nothing without one", async () => {
+    const spy = vi.spyOn(api, "abandonWorkItem").mockResolvedValue({
+      id: "w1",
+      status: "abandoned",
+      worktree_removed: true,
+    });
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+    setup({ status: "needs_human" });
+    renderDetail();
+
+    const cancelBtn = screen.getByRole("button", { name: /^Cancel$/ });
+    expect(cancelBtn).toBeEnabled();
+
+    await userEvent.click(cancelBtn);
+    expect(spy).not.toHaveBeenCalled(); // declined the confirm
+
+    await userEvent.click(cancelBtn);
+    expect(confirmSpy).toHaveBeenCalledTimes(2);
+    expect(spy).toHaveBeenCalledWith("w1");
+  });
+
+  it("hides Cancel once the item is completed or abandoned", () => {
+    setup({ status: "completed" });
+    renderDetail();
+    expect(screen.queryByRole("button", { name: /^Cancel$/ })).toBeNull();
+  });
+
   it("swaps the control row for the paused card, which resumes with or without the note", async () => {
     const spy = vi.spyOn(api, "resumeWorkItem").mockResolvedValue({
       id: "w1",

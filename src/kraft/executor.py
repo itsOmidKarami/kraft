@@ -69,6 +69,21 @@ _ATTACHMENT_PROMPT = (
     "for this work item. Do not re-plan."
 )
 
+# A repo's own tracking-issue guidance (e.g. CLAUDE.md's beads workflow) tells
+# any agent to close a bead once it judges the work done. That is right for a
+# human session and wrong here: at implementation time, verify, review and
+# merge are all still ahead, and closing a bead early makes the tracker say
+# "done" for work a rejected gate or a red pipeline can still undo. Kraft
+# closes the work item's own tracking bead itself, once the chain actually
+# completes (see `beads.complete` below) -- a worker closing any bead,
+# including its own, only duplicates or races that (Kraft-a03).
+_BEAD_NOTE = (
+    "\n\nDo not run `bd close` on any bead, including this work item's own "
+    "tracking bead. Kraft closes it automatically once the whole chain "
+    "completes; closing it here would mark work done before verify, review "
+    "and merge have run."
+)
+
 
 def _brief(work_item_row) -> str:
     """What the work item is, as an agent is told it.
@@ -300,9 +315,10 @@ async def _dispatch(
         if _budget_breach(db, work_item_row["id"], budget) is not None:
             return BUDGET
         note = steer.take() if steer else None
-        instruction = instruction_override or (
-            _brief(work_item_row) + _attachment_note(_attachments(work_item_row))
-        )
+        instruction = (
+            instruction_override
+            or (_brief(work_item_row) + _attachment_note(_attachments(work_item_row)))
+        ) + _BEAD_NOTE
         inv = _agent.resolve_invocation(
             binding,
             launch.repo_entry if launch else None,
