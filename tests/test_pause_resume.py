@@ -24,7 +24,7 @@ def _client(tmp_path, monkeypatch):
     monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "no-dist"))
     import kraft.api as api
 
-    return TestClient(api.app)
+    return TestClient(api.app, client=("127.0.0.1", 54321))
 
 
 def _wait(fn, what, timeout=60):

@@ -14,7 +14,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 
 
-def _client(tmp_path, monkeypatch, *, templates_dir=None):
+def _client(tmp_path, monkeypatch, *, templates_dir=None, peer=("127.0.0.1", 54321)):
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
     monkeypatch.setenv(
@@ -24,7 +24,29 @@ def _client(tmp_path, monkeypatch, *, templates_dir=None):
     monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "no-dist"))
     import kraft.api as api
 
-    return TestClient(api.app)
+    return TestClient(api.app, client=peer)
+
+
+def _as_authenticated_lan_peer(client, monkeypatch):
+    """Make this client remote *and* fully credentialed.
+
+    A password so `_perimeter` (Task 3) has nothing to say, and the MCP bearer so
+    `_authenticate` has nothing to say — then anything it is refused, it is
+    refused for being on another machine, which is the only thing under test.
+    """
+    st = client.app.state
+    monkeypatch.setattr(st, "access", {**st.access, "password_hash": "x"}, raising=False)
+    client.headers["authorization"] = f"Bearer {st.mcp_token}"
+
+
+def _spy_on_launches(monkeypatch):
+    """Every editor is installed and every launch is recorded, never performed."""
+    launched = []
+    monkeypatch.setattr("kraft.api.shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(
+        "kraft.api.subprocess.Popen", lambda argv, **kw: launched.append(argv) or object()
+    )
+    return launched
 
 
 # ── log classification ───────────────────────────────────────────────────────
@@ -125,11 +147,7 @@ def test_open_document_launches_the_named_editor(tmp_path, monkeypatch):
         wid = _completed_item(client, repo)
         doc = client.get(f"/work-items/{wid}/documents").json()["documents"][0]
 
-        launched = []
-        monkeypatch.setattr("kraft.api.shutil.which", lambda name: f"/usr/bin/{name}")
-        monkeypatch.setattr(
-            "kraft.api.subprocess.Popen", lambda argv, **kw: launched.append(argv) or object()
-        )
+        launched = _spy_on_launches(monkeypatch)
         r = client.post(f"/documents/{doc['document_id']}/open", json={"editor": "code"})
         assert r.status_code == 200
         assert r.json()["editor"] == "code"
@@ -177,11 +195,7 @@ def test_open_worktree_launches_the_editor_on_the_checkout(tmp_path, monkeypatch
         worktree = client.get(f"/work-items/{wid}").json()["worktree_path"]
         assert Path(worktree).is_dir()
 
-        launched = []
-        monkeypatch.setattr("kraft.api.shutil.which", lambda name: f"/usr/bin/{name}")
-        monkeypatch.setattr(
-            "kraft.api.subprocess.Popen", lambda argv, **kw: launched.append(argv) or object()
-        )
+        launched = _spy_on_launches(monkeypatch)
         r = client.post(f"/work-items/{wid}/open-worktree", json={"editor": "zed"})
         assert r.status_code == 200 and r.json()["path"] == worktree
         assert launched == [["/usr/bin/zed", worktree]]
@@ -194,3 +208,50 @@ def test_bead_search_is_live_and_quiet_on_an_empty_query(tmp_path, monkeypatch):
         assert client.get("/beads/search?q=").json() == {"query": "", "beads": []}
         body = client.get("/beads/search?q=zzz-no-such-bead").json()
         assert body["beads"] == []
+
+
+def test_open_document_is_refused_for_a_non_loopback_client(tmp_path, monkeypatch):
+    """Opening an editor starts a process and puts a window on the *server's*
+    desktop. One shared password says nothing about who is asking for that."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch, peer=("10.0.0.5", 54321)) as client:
+        _as_authenticated_lan_peer(client, monkeypatch)
+        wid = _completed_item(client, repo)
+        doc = client.get(f"/work-items/{wid}/documents").json()["documents"][0]
+
+        launched = _spy_on_launches(monkeypatch)
+        r = client.post(f"/documents/{doc['document_id']}/open", json={"editor": "code"})
+        assert r.status_code == 403, r.text
+        assert "own machine" in r.json()["detail"]
+        assert launched == [], "no process may start for a remote caller"
+
+
+def test_open_worktree_is_refused_for_a_non_loopback_client(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch, peer=("10.0.0.5", 54321)) as client:
+        _as_authenticated_lan_peer(client, monkeypatch)
+        wid = _completed_item(client, repo)
+        assert Path(client.get(f"/work-items/{wid}").json()["worktree_path"]).is_dir()
+
+        launched = _spy_on_launches(monkeypatch)
+        r = client.post(f"/work-items/{wid}/open-worktree", json={"editor": "zed"})
+        assert r.status_code == 403, r.text
+        assert launched == []
+
+
+def test_open_document_refuses_a_document_path_outside_its_repo(tmp_path, monkeypatch):
+    """The path is assembled from an index row rather than from the caller — and
+    the index row is the only thing standing between `../../..` and an editor
+    opened on /etc/passwd. Resolve it and require the repo above it."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _completed_item(client, repo)
+        doc_id = client.get(f"/work-items/{wid}/documents").json()["documents"][0]["document_id"]
+        escaped = {**client.get(f"/documents/{doc_id}").json(), "path": "../../../etc/passwd"}
+        monkeypatch.setattr(client.app.state.indexer, "get_document", lambda _id: escaped)
+
+        launched = _spy_on_launches(monkeypatch)
+        r = client.post(f"/documents/{doc_id}/open", json={"editor": "code"})
+        assert r.status_code == 400, r.text
+        assert "escapes its repo" in r.json()["detail"]
+        assert launched == []
