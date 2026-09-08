@@ -70,10 +70,17 @@
     {
       "id": "human_review",
       "tasks": [
-        "on.mr.sync",
         "on.human_review.requested"
       ],
       "gate_after": "human_review_approval",
+      "fix_loop": null
+    },
+    {
+      "id": "mr_sync",
+      "tasks": [
+        "on.mr.sync"
+      ],
+      "gate_after": null,
       "fix_loop": null
     },
     {

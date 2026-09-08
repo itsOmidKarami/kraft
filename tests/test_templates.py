@@ -101,7 +101,7 @@ def test_policy_yaml_is_not_scanned_as_a_template():
     assert "policy" not in ts.valid
 
 
-def test_shipped_default_yaml_is_the_ten_node_chain():
+def test_shipped_default_yaml_is_the_eleven_node_chain():
     reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
     ts = templates.load_templates(TEMPLATES_DIR, reg)
     assert "default" in ts.valid, ts.invalid
@@ -116,6 +116,7 @@ def test_shipped_default_yaml_is_the_ten_node_chain():
         "open_mr",
         "mr_checks",
         "human_review",
+        "mr_sync",
         "merge",
     ]
     gates = {n["id"]: n.get("gate_after") for n in nodes}
@@ -123,7 +124,26 @@ def test_shipped_default_yaml_is_the_ten_node_chain():
     assert gates["plan"] == "plan_approval"
     assert gates["chain_review"] == "chain_finalized"
     assert gates["human_review"] == "human_review_approval"
-    assert gates["env_setup"] is None and gates["merge"] is None
+    assert gates["env_setup"] is None and gates["merge"] is None and gates["mr_sync"] is None
+
+
+def test_the_default_chain_syncs_the_mr_after_the_review_gate():
+    """§5. `_measure_node` runs a node's tasks concurrently, so a sync sharing
+    the human_review node could push before the brief was written -- and after
+    Kraft-nh5m the pushed head is what merge is checked against. The gate stays
+    on the node carrying the brief, because `_gate_artifact` scans the gate
+    node's own tasks."""
+    reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
+    nodes = templates.load_templates(TEMPLATES_DIR, reg).valid["default"].nodes
+    at = {n["id"]: i for i, n in enumerate(nodes)}
+
+    sync = next(n for n in nodes if "on.mr.sync" in n["tasks"])
+    gate = next(n for n in nodes if n.get("gate_after") == "human_review_approval")
+
+    assert sync["tasks"] == ["on.mr.sync"], "the sync still shares a node with another task"
+    assert "on.human_review.requested" in gate["tasks"]
+    assert "on.mr.sync" not in gate["tasks"]
+    assert at[gate["id"]] < at[sync["id"]] < at["merge"]
 
 
 def test_unknown_gate_after_quarantines_template(tmp_path):

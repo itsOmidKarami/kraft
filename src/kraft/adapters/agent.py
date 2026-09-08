@@ -38,7 +38,14 @@ _CTX = (
     'information nobody gave you, with what you need in a "question" field. '
     "needs_context stops this run and costs a full relaunch to pick it back "
     "up, so if you are missing more than one fact, ask for all of them in "
-    "that one question rather than stopping once per fact."
+    "that one question rather than stopping once per fact.\n"
+    "\n"
+    "You are working in a git worktree cut for this work item, on its own "
+    "branch. Commit everything you change before you exit — `git add` and "
+    "`git commit`, in this worktree. Work left uncommitted never reaches the "
+    "merge request this chain opens, and is destroyed with the worktree. Do "
+    "not push and do not merge: Kraft pushes the branch and opens, updates "
+    "and merges the merge request itself."
 )
 
 
@@ -69,10 +76,7 @@ _ARTIFACT = (
     "title: <a one-line title for this {kind}>\n"
     "---\n"
     "If that file already exists, a human has read it and asked for changes: "
-    "revise it in place rather than starting a new one.\n"
-    "Before you exit, `git add` that file and commit it. A human reviews it at "
-    "the gate that follows this node, and an uncommitted file is invisible to "
-    "them."
+    "revise it in place rather than starting a new one."
 )
 
 
