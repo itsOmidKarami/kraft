@@ -1290,10 +1290,15 @@ async def open_worktree(wid: str, body: OpenDocument, request: Request):
 
 @app.post("/work-items/{wid}/retry")
 async def retry_work_item(wid: str, body: Retry, request: Request):
-    """Clear a breached loop cap and re-run the node, steer text in hand (4b).
+    """Re-run the stopped node, steer text in hand (4b), clearing a breached
+    loop cap if there was one.
 
-    Only a node that actually has a fix loop can be capped, so a retry on any
-    other node is a client bug rather than a no-op worth pretending to honour.
+    This is the only door back onto an item stopped by a task failure. It used
+    to refuse a node with no fix loop, on the grounds that only a capped node
+    can be capped — true, and beside the point: resume wants `paused`, pause
+    wants `running`, and approve/reject want a pending gate, so refusing here
+    stranded the item with no route at all (Kraft-bzwi). A missing fix loop now
+    just means there is no counter to clear.
     """
     st = request.app.state
     row = _work_item_row(st, wid)
@@ -1302,9 +1307,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     node = next((n for n in chain["nodes"] if n["id"] == node_id), None)
     if node is None:
         raise HTTPException(409, "work item has no current node to retry")
-    key = node.get("fix_loop")
-    if not key:
-        raise HTTPException(409, f"node {node_id!r} has no fix loop to retry")
+    key = node.get("fix_loop") or None
     if row["status"] != "needs_human":
         raise HTTPException(409, "work item is not stopped")
 

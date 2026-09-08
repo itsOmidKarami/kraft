@@ -271,6 +271,42 @@ def test_run_task_missing_binary_is_failed(tmp_path):
                 lambda c: c.execute("SELECT status FROM worker_sessions WHERE id='s-mb'").fetchone()
             )
             assert row["status"] == "failed"
+            # The status alone is what this branch used to leave behind: a 5ms
+            # "failed" and a zero-byte log, which cost an operator the whole
+            # diagnosis. The log has to name what was missing.
+            log = (rd.logs / "s-mb.log").read_text()
+            assert "kraft-nonexistent-binary-xyz" in log
+            assert "command" in log
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_run_task_missing_cwd_says_so_rather_than_blaming_the_command(tmp_path):
+    """Popen raises FileNotFoundError for a missing cwd too, and the two are
+    fixed in different places — the log must not send you hunting for a binary
+    that is sitting right there."""
+
+    async def scenario():
+        rd = RunDirs(tmp_path).ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database)
+            status = await sp.run_task(
+                database,
+                rd,
+                session_id="s-mc",
+                work_item_id="w1",
+                node_id="verify",
+                hook_point="on.test.run",
+                cmd=["echo", "hi"],  # exists; the cwd is what does not
+                cwd=tmp_path / "no-such-worktree",
+            )
+            assert status == "failed"
+            log = (rd.logs / "s-mc.log").read_text()
+            assert "working directory" in log
+            assert "no-such-worktree" in log
         finally:
             await database.close()
 
