@@ -173,7 +173,12 @@ def test_post_materializes_chain(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         r = client.post(
-            "/work-items", json={"title": "make the failing test pass", "repo": str(repo)}
+            "/work-items",
+            json={
+                "title": "make the failing test pass",
+                "repo": str(repo),
+                "chain_template": "quick-task",
+            },
         )
         assert r.status_code == 201, r.text
         body = r.json()
@@ -205,7 +210,12 @@ def test_happy_path_via_api(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
-            "/work-items", json={"title": "make the failing test pass", "repo": str(repo)}
+            "/work-items",
+            json={
+                "title": "make the failing test pass",
+                "repo": str(repo),
+                "chain_template": "quick-task",
+            },
         ).json()["id"]
         _poll_events(client, wid, "work_item_completed")
 

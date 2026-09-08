@@ -458,7 +458,7 @@ class NewWorkItem(BaseModel):
     #: only a label.
     description: str = ""
     repo: str
-    chain_template: str = "quick-task"
+    chain_template: str = "default"
     #: cross-repo (design 1g "Advanced · cross-repo"): submodule paths from the
     #: repo's .gitmodules, and what happens to the root pointer when they land
     submodules: list[str] = []

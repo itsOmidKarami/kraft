@@ -50,7 +50,7 @@ def build() -> MCPServer:
     async def create_work_item(
         title: str,
         repo: str | None = None,
-        chain_template: str = "quick-task",
+        chain_template: str = "default",
         description: str | None = None,
     ) -> dict:
         """File a new Kraft work item. It is created **paused** and does not run:
