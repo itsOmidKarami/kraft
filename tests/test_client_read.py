@@ -135,3 +135,50 @@ def test_search_passes_the_query_through(wired):
 def test_an_http_error_becomes_a_readable_message(wired):
     with pytest.raises(ValueError, match="404"):
         run_with_app(wired, lambda: client.get_work_item("no-such-item"))
+
+
+def test_get_work_item_names_the_next_node(wired, tmp_path):
+    """`kraft show --json` trims the chain away, so nothing in the CLI's output
+    said what comes next — which is the one thing a status report needs
+    (Kraft-9rs). A NULL current node means "not started": node zero is next, the
+    same rule resume follows."""
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        async with client.http() as http:
+            created = await http.post(
+                "/work-items",
+                json={"title": "chain me", "repo": str(repo), "autostart": False},
+            )
+            assert created.status_code == 201, created.text
+            wid = created.json()["id"]
+            full = (await http.get(f"/work-items/{wid}")).json()
+        return full, await client.get_work_item(wid)
+
+    full, item = run_with_app(wired, scenario)
+    node_ids = [node["id"] for node in full["chain_definition"]["nodes"]]
+    assert full["current_node_id"] is None
+    assert item["next_node_id"] == node_ids[0]
+    # the chain itself is still trimmed away: one string, not the whole chain
+    assert "chain_definition" not in item
+
+
+def test_the_last_node_has_no_next_node(wired, tmp_path):
+    """There is no route that parks an item on its last node without running the
+    whole chain, so this calls the helper directly on a doctored copy of the
+    item's own chain definition."""
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        async with client.http() as http:
+            created = await http.post(
+                "/work-items",
+                json={"title": "nearly done", "repo": str(repo), "autostart": False},
+            )
+            assert created.status_code == 201, created.text
+            wid = created.json()["id"]
+            full = (await http.get(f"/work-items/{wid}")).json()
+        full["current_node_id"] = full["chain_definition"]["nodes"][-1]["id"]
+        return client._next_node_id(full)
+
+    assert run_with_app(wired, scenario) is None

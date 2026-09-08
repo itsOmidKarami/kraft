@@ -49,6 +49,7 @@ class CIStatus:
 
 class Forge(Protocol):
     async def open_mr(self, *, repo: Path, branch: str, title: str, body: str) -> MR: ...
+    async def update_mr(self, *, repo: Path, branch: str, body: str) -> None: ...
     async def ci_status(self, *, repo: Path, mr: MR, branch: str) -> CIStatus: ...
     async def merge(self, *, repo: Path, mr: MR) -> None: ...
 
@@ -65,11 +66,16 @@ class FakeForge:
     ci_states: list[CIState] = field(default_factory=lambda: ["success"])
     opened: dict[int, str] = field(default_factory=dict)
     merged: list[int] = field(default_factory=list)
+    #: Last description written per branch, so a test can see the sync land.
+    bodies: dict[str, str] = field(default_factory=dict)
 
     async def open_mr(self, *, repo: Path, branch: str, title: str, body: str) -> MR:
         number = len(self.opened) + 1
         self.opened[number] = branch
         return MR(number=number, url=f"http://fake.forge/{number}")
+
+    async def update_mr(self, *, repo: Path, branch: str, body: str) -> None:
+        self.bodies[branch] = body
 
     async def ci_status(self, *, repo: Path, mr: MR, branch: str = "") -> CIStatus:
         state = self.ci_states.pop(0) if len(self.ci_states) > 1 else self.ci_states[0]
@@ -104,6 +110,51 @@ async def _run(repo: Path, args: list[str]) -> str:
     return done.stdout
 
 
+async def _commits_on(repo: Path, branch: str) -> tuple[str, ...]:
+    """Subjects of the commits this branch adds, newest last.
+
+    `origin/main` and not the local `main`: a Kraft worktree is cut from
+    whatever the local checkout happened to be at, which may be behind.
+    Returns empty rather than raising — a description is not worth failing a
+    node over.
+    """
+    try:
+        raw = await _run(repo, ["git", "log", "--reverse", "--format=%s", f"origin/main..{branch}"])
+    except ForgeError:
+        return ()
+    return tuple(line for line in raw.splitlines() if line.strip())
+
+
+def mr_body(work_item_id: str, branch: str, commits: tuple[str, ...]) -> str:
+    """The merge request description, rebuilt from the branch as it stands.
+
+    Rebuilt and not appended: `open_mr` runs before verify and mr_checks add
+    their commits, so a description written once describes a branch that no
+    longer exists (Kraft-c09h).
+    """
+    lines = [f"Opened by Kraft for work item {work_item_id}.", ""]
+    if commits:
+        lines.append("Commits on this branch:")
+        lines.append("")
+        lines += [f"- {c}" for c in commits]
+        lines.append("")
+    lines.append(f"Branch `{branch}`. Review the diff and the pipeline before merging.")
+    return "\n".join(lines)
+
+
+#: A forge title is a headline; a Kraft work item title is a paragraph (the
+#: batch that fixed this bug had a 360-character one). First line, clipped.
+MR_TITLE_MAX = 72
+
+
+def mr_title(title: str) -> str:
+    """The work item title, cut down to something a merge request can wear."""
+    head = title.strip().splitlines()[0].strip() if title.strip() else ""
+    if not head:
+        return "Kraft work item"
+    return head if len(head) <= MR_TITLE_MAX else head[: MR_TITLE_MAX - 1].rstrip() + "…"
+
+
 #: glab's pipeline vocabulary, from `glab ci list --help` (glab 1.116.0).
 #: 'skipped' is deliberately not success: nothing proved the branch green, and
 #: the next node is merge. Anything unrecognised falls through to 'failed' for
@@ -132,11 +183,23 @@ class GlabCli:
         # would push too, but pushing explicitly keeps the failure legible when
         # it is the push that fails rather than the create.
         await _run(repo, ["git", "push", "-u", "origin", branch])
-        await _run(repo, ["glab", "mr", "create", "--fill", "--yes"])
+        # Not `--fill`: it derives the title from the commits, and with more
+        # than one commit glab falls back to the branch name — which for Kraft
+        # is always the work item id, so every MR read as a hex string
+        # (Kraft-c09h).
+        await _run(
+            repo,
+            ["glab", "mr", "create", "--title", mr_title(title), "--description", body, "--yes"],
+        )
         # Read the MR back rather than parsing create's human-formatted output.
         raw = await _run(repo, ["glab", "mr", "view", "-F", "json"])
         data = _parse_json(raw, "glab mr view")
         return MR(number=int(data["iid"]), url=str(data["web_url"]))
+
+    async def update_mr(self, *, repo: Path, branch: str, body: str) -> None:
+        # No iid: `glab mr update` resolves the merge request from the
+        # checked-out branch, the way merge and ci already do.
+        await _run(repo, ["glab", "mr", "update", "--description", body])
 
     async def ci_status(self, *, repo: Path, mr: MR, branch: str = "") -> CIStatus:
         # --ref, or this returns the newest pipeline in the whole project: a
@@ -168,10 +231,14 @@ class GhCli:
 
     async def open_mr(self, *, repo: Path, branch: str, title: str, body: str) -> MR:
         await _run(repo, ["git", "push", "-u", "origin", branch])
-        await _run(repo, ["gh", "pr", "create", "--fill"])
+        # `--fill` titles the PR from the commits; see GlabCli.open_mr.
+        await _run(repo, ["gh", "pr", "create", "--title", mr_title(title), "--body", body])
         raw = await _run(repo, ["gh", "pr", "view", "--json", "number,url"])
         data = _parse_json(raw, "gh pr view")
         return MR(number=int(data["number"]), url=str(data["url"]))
+
+    async def update_mr(self, *, repo: Path, branch: str, body: str) -> None:
+        await _run(repo, ["gh", "pr", "edit", "--body", body])
 
     async def ci_status(self, *, repo: Path, mr: MR, branch: str = "") -> CIStatus:
         # `gh pr view` with no argument already resolves from the current
@@ -277,10 +344,7 @@ async def run_task(
     """
     from kraft import builtins as _builtins
 
-    body = (
-        f"Opened by Kraft for work item {work_item_id}.\n\n"
-        f"Branch `{branch}`. Review the diff and the pipeline before merging."
-    )
+    body = mr_body(work_item_id, branch, await _commits_on(repo, branch))
     forge = resolve(backend)
     try:
         match handler:
@@ -307,6 +371,12 @@ async def run_task(
                 )
                 log = f"{head}: {ci.url}\n" + "".join(f"  {j}\n" for j in ci.jobs)
                 status = "done" if ci.state == "success" else "failed"
+            case "sync_mr":
+                # The description `open_mr` wrote predates every commit verify
+                # and mr_checks added, so it is rewritten from the branch head
+                # before a human is asked to read it (Kraft-c09h).
+                await forge.update_mr(repo=repo, branch=branch, body=body)
+                log, status = "merge request description synced\n", "done"
             case "merge":
                 await forge.merge(repo=repo, mr=MR(number=0, url=""))
                 log, status = "merged\n", "done"

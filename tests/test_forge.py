@@ -73,13 +73,23 @@ def _stub(tmp_path, monkeypatch, name: str, stdout: str, rc: int = 0):
 
     A stub binary rather than a monkeypatched `subprocess.run`: this exercises
     the real argv building and the real decoding path, so a wrong flag or a
-    bytes/str slip still fails the test.
+    bytes/str slip still fails the test. Each call appends its argv, one
+    argument per line, to `<tmp_path>/<name>.argv`.
     """
     p = tmp_path / name
-    p.write_text(f"#!/bin/sh\ncat <<'STUBEOF'\n{stdout}\nSTUBEOF\nexit {rc}\n")
+    argv = tmp_path / f"{name}.argv"
+    p.write_text(
+        f'#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a" >> {argv}; done\n'
+        f"cat <<'STUBEOF'\n{stdout}\nSTUBEOF\nexit {rc}\n"
+    )
     p.chmod(0o755)
     monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
     return p
+
+
+def _argv(tmp_path, name: str) -> list[str]:
+    path = tmp_path / f"{name}.argv"
+    return path.read_text().splitlines() if path.exists() else []
 
 
 def test_glab_open_mr_parses_the_number_and_url(tmp_path, monkeypatch):
@@ -490,3 +500,109 @@ def test_glab_ci_status_asks_for_this_branch_only(tmp_path, monkeypatch):
     asyncio.run(forge.GlabCli().ci_status(repo=tmp_path, mr=forge.MR(0, ""), branch="kraft/abc"))
 
     assert "--ref kraft/abc" in argv_log.read_text()
+
+
+LONG_TITLE = (
+    "CLI/UX cleanup batch — Kraft-97e, sws6, 5lpl: worktree-aware probe_repo, "
+    "`kraft disconnect` and `kraft retry` verbs, and a good deal more besides."
+)
+
+
+def test_glab_open_mr_titles_the_mr_with_the_work_item_not_the_branch(tmp_path, monkeypatch):
+    """`--fill` made glab title the MR from the commits, and with more than one
+    commit it falls back to the branch name — always a work item id here, so
+    every Kraft MR read as a hex string (Kraft-c09h)."""
+    _stub(tmp_path, monkeypatch, "glab", GLAB_MR_VIEW)
+    _stub(tmp_path, monkeypatch, "git", "")
+
+    asyncio.run(
+        forge.GlabCli().open_mr(
+            repo=tmp_path, branch="kraft/abc", title="Teach probe_repo about worktrees", body="why"
+        )
+    )
+
+    argv = _argv(tmp_path, "glab")
+    assert "--fill" not in argv
+    assert argv[argv.index("--title") + 1] == "Teach probe_repo about worktrees"
+    assert argv[argv.index("--description") + 1] == "why"
+
+
+def test_gh_open_mr_titles_the_pr_with_the_work_item_not_the_branch(tmp_path, monkeypatch):
+    _stub(tmp_path, monkeypatch, "gh", GH_PR_VIEW)
+    _stub(tmp_path, monkeypatch, "git", "")
+
+    asyncio.run(
+        forge.GhCli().open_mr(
+            repo=tmp_path, branch="kraft/abc", title="Teach probe_repo about worktrees", body="why"
+        )
+    )
+
+    argv = _argv(tmp_path, "gh")
+    assert "--fill" not in argv
+    assert argv[argv.index("--title") + 1] == "Teach probe_repo about worktrees"
+    assert argv[argv.index("--body") + 1] == "why"
+
+
+def test_a_long_work_item_title_is_clipped_to_one_headline():
+    """A work item title is a paragraph; a forge title is a headline."""
+    out = forge.mr_title(LONG_TITLE)
+
+    assert len(out) <= forge.MR_TITLE_MAX
+    assert out.startswith("CLI/UX cleanup batch")
+    assert out.endswith("…")
+
+
+def test_a_short_title_is_passed_through_untouched():
+    assert forge.mr_title("  Teach probe_repo about worktrees\nand more  ") == (
+        "Teach probe_repo about worktrees"
+    )
+
+
+def test_an_empty_title_still_names_something():
+    """glab and gh both refuse an empty --title; a stuck node is worse than a
+    dull one."""
+    assert forge.mr_title("   ") == "Kraft work item"
+
+
+def test_glab_update_mr_rewrites_the_description(tmp_path, monkeypatch):
+    """`open_mr` runs before verify and mr_checks commit, so the description it
+    wrote describes a branch that no longer exists (Kraft-c09h)."""
+    _stub(tmp_path, monkeypatch, "glab", GLAB_MR_VIEW)
+
+    asyncio.run(forge.GlabCli().update_mr(repo=tmp_path, branch="kraft/abc", body="fresh"))
+
+    argv = _argv(tmp_path, "glab")
+    assert argv[:3] == ["mr", "update", "--description"]
+    assert argv[3] == "fresh"
+
+
+def test_gh_update_mr_rewrites_the_body(tmp_path, monkeypatch):
+    _stub(tmp_path, monkeypatch, "gh", GH_PR_VIEW)
+
+    asyncio.run(forge.GhCli().update_mr(repo=tmp_path, branch="kraft/abc", body="fresh"))
+
+    assert _argv(tmp_path, "gh") == ["pr", "edit", "--body", "fresh"]
+
+
+def test_the_body_lists_the_commits_on_the_branch():
+    body = forge.mr_body("af0fb78e", "kraft/af0fb78e", ("spec: batch", "plan: batch", "the work"))
+
+    assert "- spec: batch" in body and "- the work" in body
+    assert body.index("- spec: batch") < body.index("- plan: batch"), "oldest first"
+    assert "af0fb78e" in body
+
+
+def test_the_body_survives_a_branch_with_no_commits_yet():
+    """`git log` returning nothing must not produce a dangling 'Commits:' header
+    — _commits_on swallows a git failure, so this is the shape it hands over."""
+    body = forge.mr_body("af0fb78e", "kraft/af0fb78e", ())
+
+    assert "Commits on this branch" not in body
+    assert "af0fb78e" in body
+
+
+def test_commits_on_a_branch_without_origin_main_is_empty_not_an_error(tmp_path):
+    """A description is not worth failing a node over."""
+    repo = make_repo(tmp_path)
+
+    assert asyncio.run(forge._commits_on(repo, "kraft/nope")) == ()

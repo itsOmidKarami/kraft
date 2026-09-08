@@ -45,3 +45,17 @@ def test_the_worktrees_directory_itself_is_not_a_work_item(run_dir):
 
 def test_a_missing_cwd_does_not_raise(run_dir):
     assert client.resolve_context(cwd=run_dir / "gone") == (None, "user")
+
+
+def test_resolve_work_item_returns_the_standing_item(run_dir, monkeypatch):
+    """`cli.py` reads this to filter the instance-wide event bus, so it is public
+    surface, not a private helper (Kraft-t5s9). An explicit id wins; with none,
+    the session's own item answers."""
+    import asyncio
+
+    assert asyncio.run(client.resolve_work_item("explicit-id")) == "explicit-id"
+    monkeypatch.setenv("KRAFT_WORK_ITEM_ID", "abc123")
+    assert asyncio.run(client.resolve_work_item(None)) == "abc123"
+    monkeypatch.delenv("KRAFT_WORK_ITEM_ID")
+    with pytest.raises(ValueError, match="no work item"):
+        asyncio.run(client.resolve_work_item(None))

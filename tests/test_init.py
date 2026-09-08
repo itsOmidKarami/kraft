@@ -29,7 +29,7 @@ class _Recorder:
         return result
 
 
-SKILL_NAMES = ("handoff", "board", "gates")
+SKILL_NAMES = ("handoff", "board", "gates", "status")
 
 
 def _plugin_root(base):
@@ -142,3 +142,17 @@ def test_a_missing_claude_cli_reports_the_command_instead_of_guessing(tmp_path, 
     with pytest.raises(SystemExit) as exc:
         init.install(repo_scope=False, cwd=tmp_path, run=_Recorder(returncode=1))
     assert "claude mcp add" in str(exc.value)
+
+
+def test_the_status_skill_carries_the_phase_line_and_a_bounded_follow(tmp_path):
+    """Two things make this skill worth installing: a one-line phase report that
+    says what comes *next* (which needs `next_node_id`, Kraft-9rs), and a follow
+    that ends itself. An unfiltered `-f` stops on work_item_completed /
+    work_item_abandoned; a `--type` filter would go silent through exactly the
+    escalation a person needs to hear about."""
+    init.install(repo_scope=True, cwd=tmp_path, run=_Recorder())
+
+    body = (_plugin_root(tmp_path / ".claude") / "skills" / "status" / "SKILL.md").read_text()
+    assert "next_node_id" in body
+    assert "kraft events ID -f" in body
+    assert "Do not pass `--type`" in body

@@ -83,19 +83,30 @@ def relative_time(iso: str | None, now: datetime | None = None) -> str:
     return "just now"
 
 
-def table(rows: list[dict], columns: list[tuple[str, str]], width: int | None = None) -> str:
+def table(
+    rows: list[dict],
+    columns: list[tuple[str, str]],
+    width: int | None = None,
+    headers: bool = True,
+) -> str:
     """Aligned columns, no borders. The last column truncates rather than wraps.
 
     A wrapped table stops being scannable, which is the only reason to render a
     table instead of `--json`.
+
+    `headers=False` is for a stream: a followed verb renders one row per frame,
+    and a header above each of them is noise (Kraft-owea). Widths are still
+    measured against the header text, so a streamed row cannot be narrower than
+    the table it follows.
     """
     if not rows:
         return "(nothing)"
     width = width or shutil.get_terminal_size((100, 24)).columns
     cells = [[_cell(row.get(key)) for _header, key in columns] for row in rows]
-    headers = [header for header, _key in columns]
+    header_cells = [header for header, _key in columns]
     widths = [
-        max(len(headers[i]), *(visible_width(row[i]) for row in cells)) for i in range(len(columns))
+        max(len(header_cells[i]), *(visible_width(row[i]) for row in cells))
+        for i in range(len(columns))
     ]
     # the last column gets whatever is left, and is cut to it
     last = max(8, width - sum(widths[:-1]) - 2 * (len(columns) - 1))
@@ -108,7 +119,8 @@ def table(rows: list[dict], columns: list[tuple[str, str]], width: int | None = 
         ]
         return "  ".join(parts).rstrip()
 
-    return "\n".join([paint(line(headers), DIM), *(line(row) for row in cells)])
+    body = [line(row) for row in cells]
+    return "\n".join([paint(line(header_cells), DIM), *body] if headers else body)
 
 
 def kv(pairs: list[tuple[str, str]]) -> str:
@@ -154,7 +166,7 @@ def log_line(entry: dict) -> str:
 _EVENT_COLUMNS = [("SEQ", "seq"), ("WHEN", "when"), ("TYPE", "type"), ("DETAIL", "detail")]
 
 
-def event_line(rows: list[dict]) -> str:
+def event_line(rows: list[dict], headers: bool = True) -> str:
     """The chain's history as a table. `payload` is JSON text on the wire; only
     its first line is shown, because this view is scanned, not read — `--json`
     is there for the whole thing."""
@@ -167,7 +179,7 @@ def event_line(rows: list[dict]) -> str:
         }
         for row in rows
     ]
-    return table(shaped, _EVENT_COLUMNS)
+    return table(shaped, _EVENT_COLUMNS, headers=headers)
 
 
 def redraw(text: str, previous_lines: int) -> int:

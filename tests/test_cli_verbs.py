@@ -243,3 +243,16 @@ def test_pause_on_a_paused_item_surfaces_the_api_error(app, tmp_path, capsys):
         cli.main(["pause", wid])
     assert caught.value.code == 1
     assert capsys.readouterr().err.startswith("kraft: ")
+
+
+def test_retry_passes_the_id_and_steer_through(app, monkeypatch, capsys):
+    seen = {}
+
+    async def fake_retry(steer=None, work_item_id=None):
+        seen.update(steer=steer, work_item_id=work_item_id)
+        return {"id": work_item_id, "node_id": "n", "steer": steer}
+
+    monkeypatch.setattr(client, "retry", fake_retry)
+    cli.main(["retry", "w1", "--steer", "try the other adapter"])
+    assert seen == {"steer": "try the other adapter", "work_item_id": "w1"}
+    assert "w1" in capsys.readouterr().out
