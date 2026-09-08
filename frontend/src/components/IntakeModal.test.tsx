@@ -8,7 +8,7 @@ import { IntakeModal } from "./IntakeModal";
 
 describe("IntakeModal", () => {
   it("offers the connected repos, and says where to get one when there are none", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "quick-task", nodes: [], gates: 0 }]);
+    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "default", nodes: [], gates: 0 }]);
     const repos = vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] } as never);
     useStore.setState({ workItems: {} } as never);
     render(
@@ -34,7 +34,7 @@ describe("IntakeModal", () => {
   });
 
   it("submits and shows an inline error on failure", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "quick-task", nodes: [], gates: 0 }]);
+    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "default", nodes: [], gates: 0 }]);
     vi.spyOn(api, "createWorkItem").mockRejectedValue(new Error("repo path does not exist"));
     render(
       <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -47,8 +47,8 @@ describe("IntakeModal", () => {
     expect(await screen.findByText(/repo path does not exist/)).toBeInTheDocument();
   });
 
-  it("closes and navigates on success, omitting chain_template for quick-task", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "quick-task", nodes: [], gates: 0 }, { id: "default", nodes: [], gates: 0 }]);
+  it("closes and navigates on success, omitting chain_template for the default chain", async () => {
+    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "default", nodes: [], gates: 0 }, { id: "quick-task", nodes: [], gates: 0 }]);
     const create = vi.spyOn(api, "createWorkItem").mockResolvedValue({ id: "w9" });
     const onClose = vi.fn();
     render(
@@ -69,7 +69,7 @@ describe("IntakeModal", () => {
   });
 
   it("submits the description with the new work item", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "quick-task", nodes: [], gates: 0 }]);
+    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "default", nodes: [], gates: 0 }]);
     const create = vi.spyOn(api, "createWorkItem").mockResolvedValue({ id: "w9" });
     render(
       <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -94,7 +94,7 @@ describe("IntakeModal", () => {
   });
 
   it("sends chain_template when a non-default template is picked", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "quick-task", nodes: [], gates: 0 }, { id: "default", nodes: [], gates: 0 }]);
+    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "default", nodes: [], gates: 0 }, { id: "quick-task", nodes: [], gates: 0 }]);
     const create = vi.spyOn(api, "createWorkItem").mockResolvedValue({ id: "w9" });
     render(
       <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -103,18 +103,18 @@ describe("IntakeModal", () => {
     );
     await userEvent.type(screen.getByLabelText("repo"), "/r");
     await userEvent.type(screen.getByLabelText("title"), "t");
-    await userEvent.click(await screen.findByRole("radio", { name: "default" }));
+    await userEvent.click(await screen.findByRole("radio", { name: "quick-task" }));
     await userEvent.click(screen.getByRole("button", { name: /create/i }));
     await waitFor(() =>
-      expect(create).toHaveBeenCalledWith({ repo: "/r", title: "t", chain_template: "default" }),
+      expect(create).toHaveBeenCalledWith({ repo: "/r", title: "t", chain_template: "quick-task" }),
     );
   });
 
   it("does not submit a template the server never offered", async () => {
-    // The control defaults to "quick-task" before /templates answers. If the
+    // The control defaults to "default" before /templates answers. If the
     // server does not offer it, nothing is checked while state still says
-    // quick-task — and we would submit a chain the server never listed.
-    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "default", nodes: [], gates: 0 }, { id: "release", nodes: [], gates: 0 }]);
+    // default — and we would submit a chain the server never listed.
+    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "release", nodes: [], gates: 0 }, { id: "legacy", nodes: [], gates: 0 }]);
     const create = vi.spyOn(api, "createWorkItem").mockResolvedValue({ id: "w9" });
     render(
       <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -123,17 +123,17 @@ describe("IntakeModal", () => {
     );
     const picked = () =>
       (screen.getAllByRole("radio") as HTMLInputElement[]).find((r) => r.checked)?.value;
-    await waitFor(() => expect(picked()).toBe("default"));
+    await waitFor(() => expect(picked()).toBe("release"));
     await userEvent.type(screen.getByLabelText("repo"), "/r");
     await userEvent.type(screen.getByLabelText("title"), "t");
     await userEvent.click(screen.getByRole("button", { name: /create/i }));
     await waitFor(() =>
-      expect(create).toHaveBeenCalledWith({ repo: "/r", title: "t", chain_template: "default" }),
+      expect(create).toHaveBeenCalledWith({ repo: "/r", title: "t", chain_template: "release" }),
     );
   });
 
   it("offers the cross-repo disclosure only when the repo actually has submodules", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "quick-task", nodes: [], gates: 0 }]);
+    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "default", nodes: [], gates: 0 }]);
     const probe = vi.spyOn(api, "probeRepo").mockResolvedValue({
       path: "/r", name: "r", branch: "main", submodules: [], has_beads: true,
       beads_export_auto: true, beads_export_git_add: true, has_engineering: true,
@@ -150,7 +150,7 @@ describe("IntakeModal", () => {
   });
 
   it("sends the picked submodules and the root merge policy", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "quick-task", nodes: [], gates: 0 }]);
+    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "default", nodes: [], gates: 0 }]);
     vi.spyOn(api, "probeRepo").mockResolvedValue({
       path: "/r", name: "r", branch: "main", submodules: ["libs/a", "libs/b"],
       has_beads: true, beads_export_auto: true, beads_export_git_add: true,
@@ -184,7 +184,7 @@ describe("IntakeModal", () => {
   });
 
   it("searches the chosen repo's artifacts and submits the picked plan", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "quick-task", nodes: [], gates: 0 }]);
+    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "default", nodes: [], gates: 0 }]);
     vi.spyOn(api, "search").mockResolvedValue({
       query: "auth",
       mode: "hybrid",
@@ -258,7 +258,7 @@ describe("IntakeModal", () => {
   });
 
   it("accepts a path typed by hand for a document that is not indexed", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "quick-task", nodes: [], gates: 0 }]);
+    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "default", nodes: [], gates: 0 }]);
     const create = vi.spyOn(api, "createWorkItem").mockResolvedValue({ id: "w1" });
     render(
       <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>

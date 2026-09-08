@@ -869,7 +869,14 @@ def test_connected_repos_default_model_reaches_the_agent_launch(tmp_path, monkey
         added = client.post("/repos", json={"path": str(repo), "default_model": "haiku"})
         assert added.status_code == 201
 
-        wid = client.post("/work-items", json={"title": "x", "repo": str(repo)}).json()["id"]
+        # quick-task: the only agent hook this fixture binds is
+        # `on.implementation.start`, and on the default chain that sits behind
+        # three gates the item never gets past (`on.spec.requested` is a noop
+        # here), so no agent would ever launch to inspect.
+        wid = client.post(
+            "/work-items",
+            json={"title": "x", "repo": str(repo), "chain_template": "quick-task"},
+        ).json()["id"]
 
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline and not argv_log.exists():
@@ -898,7 +905,14 @@ def test_connected_repos_steering_reaches_the_agent_launch(tmp_path, monkeypatch
         added = client.post("/repos", json={"path": str(repo), "steering": ["house"]})
         assert added.status_code == 201, added.text
 
-        wid = client.post("/work-items", json={"title": "x", "repo": str(repo)}).json()["id"]
+        # quick-task: the only agent hook this fixture binds is
+        # `on.implementation.start`, and on the default chain that sits behind
+        # three gates the item never gets past (`on.spec.requested` is a noop
+        # here), so no agent would ever launch to inspect.
+        wid = client.post(
+            "/work-items",
+            json={"title": "x", "repo": str(repo), "chain_template": "quick-task"},
+        ).json()["id"]
 
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline and not argv_log.exists():

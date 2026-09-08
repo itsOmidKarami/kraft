@@ -35,14 +35,14 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
   const itemRepos = useStore((s) => Object.values(s.workItems).map((w) => w.repo));
   const [connected, setConnected] = useState<string[]>([]);
   const knownRepos = [...new Set([...connected, ...itemRepos])];
-  const [templates, setTemplates] = useState<string[]>(["quick-task"]);
+  const [templates, setTemplates] = useState<string[]>(["default"]);
   // GET /templates already returns each template's nodes (§8 chain preview
   // needs them); kept alongside the id list rather than re-fetched per pick.
   const [templateSummaries, setTemplateSummaries] = useState<TemplateSummary[]>([]);
   const [repo, setRepo] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [tpl, setTpl] = useState("quick-task");
+  const [tpl, setTpl] = useState("default");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [advanced, setAdvanced] = useState(false);
@@ -64,9 +64,9 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
         if (!ids.length) return;
         setTemplates(ids);
         setTemplateSummaries(ts);
-        // The optimistic "quick-task" default is a guess made before this
+        // The optimistic "default" default is a guess made before this
         // answered. If the server does not offer it, the segmented control falls
-        // back to its first option while state still says quick-task — and we
+        // back to its first option while state still says default — and we
         // would submit a chain the server never listed (Kraft-2ih).
         setTpl((cur) => (ids.includes(cur) ? cur : ids[0]));
       })
@@ -133,7 +133,7 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
         repo,
         title,
         ...(description.trim() ? { description } : {}),
-        ...(tpl === "quick-task" ? {} : { chain_template: tpl }),
+        ...(tpl === "default" ? {} : { chain_template: tpl }),
         ...(picked.length ? { submodules: picked, root_merge_policy: mergePolicy } : {}),
         ...(attachments.length ? { attachments } : {}),
       });
