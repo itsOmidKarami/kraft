@@ -64,7 +64,10 @@ def test_shipped_yaml_parses_and_matches_spec():
     }
     assert registry["hooks"]["on.env.prepare"] == {"kind": "builtin", "handler": "env_setup"}
     assert registry["hooks"]["on.implementation.start"] == {"kind": "agent", "command": "claude"}
-    assert registry["hooks"]["on.test.run"] == {"kind": "subprocess", "command": ["pytest", "-q"]}
+    assert registry["hooks"]["on.test.run"] == {
+        "kind": "subprocess",
+        "command": ["uv", "run", "pytest", "-q"],
+    }
 
 
 REGISTRY_YAML = """\

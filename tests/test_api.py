@@ -35,7 +35,7 @@ def _client(tmp_path, monkeypatch, *, templates_dir=None):
     )
     import kraft.api as api
 
-    return TestClient(api.app)
+    return TestClient(api.app, client=("127.0.0.1", 54321))
 
 
 def _poll_events(client, wid, want, timeout=30, count=1):

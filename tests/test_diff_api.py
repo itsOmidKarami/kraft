@@ -36,7 +36,7 @@ def _make_client(tmp_path, monkeypatch):
     )
     import kraft.api as api
 
-    return TestClient(api.app)
+    return TestClient(api.app, client=("127.0.0.1", 54321))
 
 
 def _wait_for_completion(client, wid, timeout=120):
