@@ -26,7 +26,14 @@ def test_sigterm_shuts_down_cleanly_mid_task(tmp_path):
         run_dir=run_dir, templates_dir=templates, bd_cwd=tracker, env=slow_env
     ) as srv:
         wid = srv.client.post(
-            "/work-items", json={"title": "make the failing test pass", "repo": str(repo)}
+            "/work-items",
+            # quick-task, not the default chain: this test needs an agent
+            # session running within 20s, and `default` stops at spec_approval.
+            json={
+                "title": "make the failing test pass",
+                "repo": str(repo),
+                "chain_template": "quick-task",
+            },
         ).json()["id"]
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
