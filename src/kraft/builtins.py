@@ -117,7 +117,7 @@ async def ensure_worktree(
     return worktree
 
 
-async def _record_done(
+async def start_session(
     db,
     run_dirs,
     *,
@@ -126,18 +126,44 @@ async def _record_done(
     node_id: str,
     hook_point: str,
     round: int,
-    log: str,
-    status: str = "done",
-) -> str:
-    """A session row for a builtin that did its work in-process. Shared so a
-    builtin's bookkeeping cannot drift from `noop`'s.
+) -> tuple[Path, Path]:
+    """Create the session row before the in-process work starts, not after.
 
-    `status` defaults to "done" because every original caller succeeded by
-    construction. A forge task can genuinely fail — a red pipeline — and
-    recording that as done would let the chain walk into the merge node.
+    `forge.run_task` can now sit in `_poll_ci` for up to `poll_timeout`
+    (default 1800s); recording nothing until it returns left pause, abandon
+    and reattach with no row to find for the whole wait -- pause silently
+    no-op'd and the chain walked on into merge (Kraft-41b), and a restart
+    mid-poll left nothing to reattach (Kraft-7xt). Splitting the row's
+    creation from its exit is what `adapters.subprocess.run_task` already
+    does for a spawned child; this gives an in-process task the same shape.
     """
     log_path = run_dirs.logs / f"{session_id}.log"
     result_path = run_dirs.results / f"{session_id}.json"
+    await db.write(
+        lambda c: store.create_session(
+            c,
+            id=session_id,
+            work_item_id=work_item_id,
+            node_id=node_id,
+            hook_point=hook_point,
+            log_path=str(log_path),
+            result_path=str(result_path),
+            round=round,
+        )
+    )
+    return log_path, result_path
+
+
+async def finish_session(
+    db,
+    log_path: Path,
+    result_path: Path,
+    *,
+    session_id: str,
+    status: str,
+    log: str,
+) -> str:
+    """Write the log and close out a session `start_session` already created."""
     log_path.write_text(log)
     # A subprocess session gets its per-line timestamps from the adapter's drain
     # thread (`adapters/subprocess._watch_log`), which stamps each line as it
@@ -154,20 +180,42 @@ async def _record_done(
         # Best-effort, the same call `_watch_log` makes about its own sidecar: a
         # missing time column is cosmetic, not a reason to fail the node.
         logger.warning("no log time sidecar for session %s", session_id)
-    await db.write(
-        lambda c: store.create_session(
-            c,
-            id=session_id,
-            work_item_id=work_item_id,
-            node_id=node_id,
-            hook_point=hook_point,
-            log_path=str(log_path),
-            result_path=str(result_path),
-            round=round,
-        )
-    )
     await db.write(lambda c: store.session_exited(c, session_id, status))
     return status
+
+
+async def _record_done(
+    db,
+    run_dirs,
+    *,
+    session_id: str,
+    work_item_id: str,
+    node_id: str,
+    hook_point: str,
+    round: int,
+    log: str,
+    status: str = "done",
+) -> str:
+    """A session row for a builtin that did its work in-process, before and
+    after in one call. Shared so a builtin's bookkeeping cannot drift from
+    `noop`'s.
+
+    `status` defaults to "done" because every original caller succeeded by
+    construction. A forge task can genuinely fail — a red pipeline — and
+    recording that as done would let the chain walk into the merge node.
+    """
+    log_path, result_path = await start_session(
+        db,
+        run_dirs,
+        session_id=session_id,
+        work_item_id=work_item_id,
+        node_id=node_id,
+        hook_point=hook_point,
+        round=round,
+    )
+    return await finish_session(
+        db, log_path, result_path, session_id=session_id, status=status, log=log
+    )
 
 
 async def env_setup(

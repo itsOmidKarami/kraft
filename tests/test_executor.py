@@ -546,7 +546,11 @@ def test_dispatch_puts_the_attachment_note_after_the_title(tmp_path, monkeypatch
     prompt = sent[0]
     assert prompt.startswith(title)
     assert prompt.index("Spec: .engineering/specs/a.md") > prompt.index(title)
-    assert prompt.rstrip().endswith("Do not re-plan.")
+    assert "Do not re-plan." in prompt
+    # The bead note (Kraft-a03) is appended after everything else, including
+    # the attachment note.
+    assert prompt.index("Do not re-plan.") < prompt.index("Do not run `bd close`")
+    assert prompt.rstrip().endswith(executor._BEAD_NOTE.strip())
 
 
 def test_dispatch_puts_the_description_after_the_title(tmp_path, monkeypatch):
@@ -623,7 +627,45 @@ def test_dispatch_without_a_description_sends_the_title_alone(tmp_path, monkeypa
 
     sent = [p for p in prompts.read_text().split("\n\x00\n") if p.strip()]
     assert len(sent) == 1
-    assert sent[0].strip() == title
+    assert sent[0].strip() == title + executor._BEAD_NOTE
+
+
+def test_agent_instruction_tells_the_worker_not_to_close_beads(tmp_path, monkeypatch):
+    """A worker at implementation time has verify, review and merge still
+    ahead of it; closing the work item's own tracking bead there says the
+    work is done before it is (Kraft-a03). Kraft closes it itself at chain
+    completion (`beads.complete` in `_walk_node`) -- the instruction has to
+    tell the worker to leave every bead, including its own, alone."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    prompts = tmp_path / "prompts.txt"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompts))
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+    sent = [p for p in prompts.read_text().split("\n\x00\n") if p.strip()]
+    assert "bd close" in sent[0]
+    assert "Kraft closes it automatically" in sent[0]
 
 
 # --- launch context: repo config reaches the agent launch -------------------

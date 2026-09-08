@@ -88,6 +88,38 @@ def test_read_concerns_and_read_question(tmp_path):
     assert sp.read_concerns(question_path) is None
 
 
+def test_read_result_fields_is_the_one_place_the_field_list_lives(tmp_path):
+    """`run_task` and `reattach._exit_from_file` are two independent readers of
+    the same result file; a field spelled out in only one of them would reach
+    the DB on one exit path and silently drop on the other after a restart
+    (Kraft-k3d). Both now call this instead of enumerating the fields
+    themselves."""
+    path = tmp_path / "result.json"
+    path.write_text(
+        json.dumps(
+            {
+                "status": "done_with_concerns",
+                "session_summary_ref": ".engineering/sessions/s1.md",
+                "concerns": "the retry path is untested",
+                "question": "which branch?",
+            }
+        )
+    )
+    assert sp.read_result_fields(path) == {
+        "summary_ref": ".engineering/sessions/s1.md",
+        "concerns": "the retry path is untested",
+        "question": "which branch?",
+    }
+
+
+def test_read_result_fields_on_a_missing_file_is_all_none(tmp_path):
+    assert sp.read_result_fields(tmp_path / "missing.json") == {
+        "summary_ref": None,
+        "concerns": None,
+        "question": None,
+    }
+
+
 def test_the_field_readers_tolerate_a_broken_file(tmp_path):
     """Missing file, non-JSON, non-mapping, absent key, and non-UTF-8 bytes.
 

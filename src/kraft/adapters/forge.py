@@ -340,10 +340,23 @@ async def run_task(
 
     Records a session the way a builtin does rather than the way the subprocess
     adapter does: the work happens in this process, so there is no child to
-    supervise, no log fd to hand over and nothing for reattach to adopt.
+    supervise and no log fd to hand over. The row still has to exist for the
+    whole run, not just at the end -- `ci_poll` can sit in `_poll_ci` for up to
+    `poll_timeout` (30 minutes by default), and pause/abandon/reattach all key
+    off `worker_sessions`. Recording nothing until the node finished silently
+    broke all three for the length of that wait (Kraft-41b, Kraft-7xt).
     """
     from kraft import builtins as _builtins
 
+    log_path, result_path = await _builtins.start_session(
+        db,
+        run_dirs,
+        session_id=session_id,
+        work_item_id=work_item_id,
+        node_id=node_id,
+        hook_point=hook_point,
+        round=round,
+    )
     body = mr_body(work_item_id, branch, await _commits_on(repo, branch))
     forge = resolve(backend)
     try:
@@ -385,14 +398,6 @@ async def run_task(
     except ForgeError as exc:
         log, status = f"{hook_point} failed: {exc}\n", "failed"
 
-    return await _builtins._record_done(
-        db,
-        run_dirs,
-        session_id=session_id,
-        work_item_id=work_item_id,
-        node_id=node_id,
-        hook_point=hook_point,
-        round=round,
-        log=log,
-        status=status,
+    return await _builtins.finish_session(
+        db, log_path, result_path, session_id=session_id, status=status, log=log
     )

@@ -202,6 +202,15 @@ export function WorkItemDetail() {
   // worker_session_paused event rather than pretending it already landed.
   const [pausing, setPausing] = useState(false);
   const [pauseErr, setPauseErr] = useState<string | null>(null);
+  // Cancel is the only door onto /abandon (Kraft-aayj) -- an item stuck at a
+  // gate had no way to be cleared except a terminal. Left disabled while
+  // active: the API itself refuses an abandon then (409, "pause it before
+  // abandoning"), and only after Kraft-41b does pause reliably stop the
+  // current node rather than silently no-op through a live ci_poll wait --
+  // wiring this straight through active would abandon the worktree out from
+  // under whatever is still running.
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelErr, setCancelErr] = useState<string | null>(null);
   // A failed load must not look like an item with nothing in it: without this,
   // the screen renders every panel empty and offers the controls for the wrong
   // state, which is exactly how a shell-cached deep link presented itself.
@@ -257,6 +266,25 @@ export function WorkItemDetail() {
     } catch (e) {
       setPauseErr(e instanceof Error ? e.message : String(e));
       setPausing(false);
+    }
+  };
+
+  const cancel = async () => {
+    if (
+      !window.confirm(
+        "Abandon this work item? This reclaims its worktree and destroys any uncommitted work.",
+      )
+    ) {
+      return;
+    }
+    setCancelling(true);
+    setCancelErr(null);
+    try {
+      await api.abandonWorkItem(item.id);
+    } catch (e) {
+      setCancelErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCancelling(false);
     }
   };
 
@@ -332,6 +360,30 @@ export function WorkItemDetail() {
             </Row>
           ))}
         </section>
+      )}
+
+      {/* Available at any status but a terminal one, gate or no gate -- unlike
+          Pause below, which only makes sense for the one status it is scoped
+          to. This is the fix for a real stuck item: one parked at a gate with
+          nothing local to steer had no way to be cleared except a terminal
+          (Kraft-aayj). */}
+      {item.status !== "completed" && item.status !== "abandoned" && (
+        <div className="control-row desktop-only">
+          <button
+            className="btn btn-ghost"
+            disabled={cancelling || item.status === "active"}
+            onClick={cancel}
+          >
+            <Prohibit size={14} />
+            {cancelling ? "Cancelling…" : "Cancel"}
+          </button>
+          <span className="control-hint">
+            {cancelErr ??
+              (item.status === "active"
+                ? "pause it before abandoning"
+                : "reclaims the worktree and destroys uncommitted work")}
+          </span>
+        </div>
       )}
 
       {/* Phone (design 1n): a gate is actionable anywhere, because it is the one
