@@ -321,7 +321,7 @@ def _cmd_search(ns: argparse.Namespace) -> None:
 
 def _cmd_create(ns: argparse.Namespace) -> None:
     emit(
-        asyncio.run(client.create_work_item(ns.title, _repo_scope(ns), ns.chain)),
+        asyncio.run(client.create_work_item(ns.title, _repo_scope(ns), ns.chain, ns.description)),
         _render_action,
         ns.json,
     )
@@ -585,6 +585,10 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     """The verbs that change a work item."""
     create = subs.add_parser("create", parents=[common], help="file a work item (starts paused)")
     create.add_argument("title")
+    create.add_argument(
+        "--description",
+        help="the brief: what the work actually is, which the spec is written from",
+    )
     create.add_argument("--repo", help="default: the repo you are standing in")
     create.add_argument("--chain", default="quick-task", help="chain template (default quick-task)")
     create.set_defaults(func=_cmd_create, all=False)

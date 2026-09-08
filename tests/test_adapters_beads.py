@@ -27,6 +27,59 @@ def test_intake_then_complete_roundtrip(tmp_path):
     asyncio.run(scenario())
 
 
+def test_intake_writes_the_description_onto_the_bead(tmp_path):
+    repo = isolated_bd(tmp_path)
+
+    def _description(bead_id: str) -> str:
+        out = subprocess.run(
+            ["bd", "show", bead_id, "--json"], cwd=repo, capture_output=True, text=True, check=True
+        ).stdout
+        return json.loads(out)[0]["description"]
+
+    async def scenario():
+        bead_id = await beads.intake(
+            "wire the thing", description="the brief, at length", cwd=str(repo)
+        )
+        assert _description(bead_id) == "the brief, at length"
+
+        plain = await beads.intake("wire the other thing", cwd=str(repo))
+        assert _description(plain) == "Created by the Kraft orchestrator."
+
+        empty = await beads.intake("wire a third thing", description="", cwd=str(repo))
+        assert _description(empty) == "Created by the Kraft orchestrator."
+
+    asyncio.run(scenario())
+
+
+def test_ready_projects_the_description(tmp_path):
+    """Auto-intake reads a bead the human already wrote. Dropping its description
+    is dropping the brief in the one case where nobody is present to notice."""
+    repo = isolated_bd(tmp_path)
+
+    async def scenario():
+        await beads.intake("caulk the transom", description="it leaks at the seam", cwd=str(repo))
+        rows = await beads.ready(cwd=str(repo))
+        assert rows
+        row = next(r for r in rows if r["title"] == "caulk the transom")
+        assert row["description"] == "it leaks at the seam"
+
+    asyncio.run(scenario())
+
+
+def test_ready_tolerates_a_bead_with_no_description(monkeypatch):
+    """`ready` is best-effort by contract; a row without the key must not raise."""
+
+    class _Proc:
+        returncode = 0
+        stdout = '[{"id": "X-1", "title": "t", "priority": 1}]'
+
+    monkeypatch.setattr(beads.subprocess, "run", lambda *a, **k: _Proc())
+    rows = asyncio.run(beads.ready(cwd="/tmp"))
+    assert rows == [
+        {"id": "X-1", "title": "t", "priority": 1, "issue_type": None, "description": None}
+    ]
+
+
 def test_intake_raises_on_bd_failure(tmp_path):
     bare = tmp_path / "bare"
     bare.mkdir()

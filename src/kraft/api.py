@@ -454,6 +454,9 @@ class Attachment(BaseModel):
 
 class NewWorkItem(BaseModel):
     title: str
+    #: the brief — prose, and what the spec node writes a design from. A title is
+    #: only a label.
+    description: str = ""
     repo: str
     chain_template: str = "quick-task"
     #: cross-repo (design 1g "Advanced · cross-repo"): submodule paths from the
@@ -508,6 +511,7 @@ async def create_work_item(body: NewWorkItem, request: Request):
             st.db,
             st.run_dirs,
             title=body.title,
+            description=body.description,
             repo=body.repo,
             template=template,
             bd_cwd=_bd_cwd(),
@@ -697,6 +701,7 @@ async def list_work_items(request: Request):
         {
             "id": r["id"],
             "title": r["title"],
+            "description": r["description"],
             "repo": r["repo"],
             "status": r["status"],
             "chain_template": r["chain_template"],
@@ -812,6 +817,20 @@ async def get_work_item(wid: str, request: Request):
         "concerns": _concerns(st, wid),
         "needs_context_question": _needs_context_question(st, wid),
     }
+
+
+class WorkItemPatch(BaseModel):
+    #: The only editable field. This route is not a general work item update —
+    #: a body carrying anything else is ignored, not applied.
+    description: str
+
+
+@app.patch("/work-items/{wid}")
+async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
+    st = request.app.state
+    _work_item_row(st, wid)  # 404s on an unknown work item
+    await st.db.write(lambda c: store.set_description(c, wid, body.description))
+    return {"id": wid, "description": body.description}
 
 
 @app.get("/work-items/{wid}/events")

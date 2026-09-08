@@ -53,6 +53,53 @@ def test_create_work_item_writes_row_and_event(tmp_path):
     asyncio.run(scenario())
 
 
+def test_create_work_item_round_trips_a_description(tmp_path):
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="w1",
+                    bead_id="B-1",
+                    title="short label",
+                    description="the long brief the spec is written from",
+                    repo="/r",
+                    chain_template="quick-task",
+                    chain_definition=_CHAIN,
+                )
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
+            )
+            assert row["description"] == "the long brief the spec is written from"
+
+            # The event payload stays a scannable label: the brief does not go in it.
+            evts = database.read(lambda c: events.read_after(c, 0, "w1"))
+            created = [e for e in evts if e["type"] == "work_item_created"]
+            assert len(created) == 1
+            assert "description" not in created[0]["payload"]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_create_work_item_without_a_description_stores_null(tmp_path):
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await _mk_item(database)
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
+            )
+            assert row["description"] is None
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 def test_node_lifecycle_events_and_current_node(tmp_path):
     async def scenario():
         database = await _open(tmp_path)

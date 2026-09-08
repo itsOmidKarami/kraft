@@ -109,6 +109,78 @@ function NeedsContextCard({ item }: { item: WorkItem }) {
   );
 }
 
+/** The brief. Read-only until asked, because editing it changes what every
+ *  later node is told — the same reason the edit is recorded as an event. */
+function Description({ item }: { item: WorkItem }) {
+  const hydrateItem = useStore((s) => s.hydrateItem);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(item.description ?? "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const save = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.updateWorkItem(item.id, draft);
+      await hydrateItem(item.id);
+      setEditing(false);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div className="field">
+        <label htmlFor="item-description-edit">Description</label>
+        <textarea
+          id="item-description-edit"
+          className="input"
+          aria-label="description"
+          rows={4}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+        />
+        <div className="gate-actions capped-actions">
+          <button className="btn btn-primary" disabled={busy} onClick={save}>
+            Save
+          </button>
+          <button className="btn" disabled={busy} onClick={() => setEditing(false)}>
+            Cancel
+          </button>
+        </div>
+        {err && <p className="form-error">{err}</p>}
+      </div>
+    );
+  }
+
+  if (!item.description) {
+    return (
+      <button className="btn btn-quiet" onClick={() => setEditing(true)}>
+        Add a description
+      </button>
+    );
+  }
+
+  return (
+    <p className="detail-description" data-testid="item-description">
+      {item.description}
+      <button
+        className="btn btn-quiet"
+        onClick={() => {
+          setDraft(item.description ?? "");
+          setEditing(true);
+        }}
+      >
+        Edit
+      </button>
+    </p>
+  );
+}
+
 const STATUS_TAG: Record<WorkItem["status"], string> = {
   active: "tag tag-outline",
   completed: "tag tag-neutral",
@@ -210,6 +282,7 @@ export function WorkItemDetail() {
           </span>
         </div>
         <h2 className="detail-title">{item.title}</h2>
+        <Description item={item} />
         <div className="detail-hero">
           <span className="hero-node">{item.current_node_id ?? "—"}</span>
           {item.fixCycle != null && (

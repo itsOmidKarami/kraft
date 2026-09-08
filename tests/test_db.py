@@ -125,6 +125,8 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         drop_lines = (*drop_lines, "submodules", "root_merge_policy", "-- cross-repo")
     if version < 11:
         drop_lines = (*drop_lines, "bead_cwd")
+    if version < 13:
+        drop_lines = (*drop_lines, "description", "-- the brief this work item's")
     schema = "\n".join(
         rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
     )
@@ -634,3 +636,36 @@ def test_migrate_v10_to_v11_adds_bead_cwd(tmp_path):
     assert "bead_cwd" in cols
     row = conn2.execute("SELECT id, bead_cwd FROM work_items WHERE id='w1'").fetchone()
     assert row["bead_cwd"] is None
+
+
+def test_migrate_v12_to_v13_adds_description(tmp_path):
+    """The description migration adds the column via ALTER TABLE, and pre-existing
+    rows survive with their other values intact and a NULL description."""
+    path = tmp_path / "orchestrator.db"
+    conn = db._connect(path)
+    _build_old_db(conn, 12, drop_lines=("description",))
+    conn.execute(
+        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
+        "'active','now','now')"
+    )
+    conn.commit()
+    conn.close()
+
+    conn2 = db._connect(path)
+    db.migrate(conn2)
+    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    cols = {r["name"] for r in conn2.execute("PRAGMA table_info(work_items)")}
+    assert "description" in cols
+    row = conn2.execute("SELECT title, description FROM work_items WHERE id='w1'").fetchone()
+    assert row["title"] == "t"
+    assert row["description"] is None
+
+
+def test_fresh_schema_has_description(tmp_path):
+    """SCHEMA_SQL and the migration path must agree — a fresh install and an
+    upgraded one are the same database."""
+    conn = db._connect(tmp_path / "fresh.db")
+    db.migrate(conn)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(work_items)")}
+    assert "description" in cols

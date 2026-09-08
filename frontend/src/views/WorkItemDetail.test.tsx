@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -59,6 +59,37 @@ describe("WorkItemDetail", () => {
     expect(screen.getByText("verify", { selector: ".hero-node" })).toBeInTheDocument();
     expect(screen.getByText(/node 2 of 2/)).toBeInTheDocument();
     expect(screen.getByTestId("chain-bar")).toBeInTheDocument();
+  });
+
+  it("shows the description under the title", async () => {
+    setup({ description: "the brief" });
+    renderDetail();
+    expect(await screen.findByTestId("item-description")).toHaveTextContent("the brief");
+  });
+
+  it("offers to add one when there is no description", () => {
+    setup({ description: null });
+    renderDetail();
+    expect(screen.queryByTestId("item-description")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /add a description/i })).toBeInTheDocument();
+  });
+
+  it("saves an edited description and rehydrates the item", async () => {
+    const update = vi
+      .spyOn(api, "updateWorkItem")
+      .mockResolvedValue({ id: "w1", description: "the revised brief" });
+    setup({ description: "the brief" });
+    renderDetail();
+
+    await userEvent.click(
+      within(screen.getByTestId("item-description")).getByRole("button", { name: /edit/i }),
+    );
+    const box = screen.getByLabelText("description");
+    await userEvent.clear(box);
+    await userEvent.type(box, "the revised brief");
+    await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => expect(update).toHaveBeenCalledWith("w1", "the revised brief"));
   });
 
   it("tags the work-item status in the meta line", () => {

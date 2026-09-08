@@ -68,11 +68,18 @@ export const getEvents = (id: string, afterSeq = 0) =>
 export const createWorkItem = (body: {
   repo: string;
   title: string;
+  description?: string;
   chain_template?: string;
   submodules?: string[];
   root_merge_policy?: string;
   attachments?: { kind: "spec" | "plan"; path: string }[];
 }) => req<{ id: string }>("/work-items", json("POST", body));
+
+export const updateWorkItem = (id: string, description: string) =>
+  req<{ id: string; description: string }>(
+    `/work-items/${id}`,
+    json("PATCH", { description }),
+  );
 
 export const approveGate = (id: string, gate: string) =>
   req<void>(`/work-items/${id}/gates/${gate}/approve`, { method: "POST" });

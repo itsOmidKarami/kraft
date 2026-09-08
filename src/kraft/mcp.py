@@ -48,13 +48,21 @@ def build() -> MCPServer:
 
     @server.tool()
     async def create_work_item(
-        title: str, repo: str | None = None, chain_template: str = "quick-task"
+        title: str,
+        repo: str | None = None,
+        chain_template: str = "quick-task",
+        description: str | None = None,
     ) -> dict:
         """File a new Kraft work item. It is created **paused** and does not run:
         a human starts it from the board. Use this to hand finished work off to
         Kraft rather than doing it in this session. `repo` defaults to the repo
-        of the work item this session is standing in."""
-        return await client.create_work_item(title, repo, chain_template)
+        of the work item this session is standing in.
+
+        `description` is the brief — what the work actually is, in prose. The
+        title is only a label; the spec node writes its design from the
+        description, so put the intent there rather than packing it into the
+        title."""
+        return await client.create_work_item(title, repo, chain_template, description)
 
     @server.tool()
     async def ensure_repo(path: str | None = None) -> dict:
