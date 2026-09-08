@@ -188,10 +188,10 @@ def test_a_hook_of_only_structural_words_reports_no_candidates(tmp_path, monkeyp
     assert got["skills"] == {"on.run.start": []}
 
 
-def test_the_packaged_chain_still_reports_its_twelve_hooks(tmp_path):
+def test_the_packaged_chain_still_reports_its_thirteen_hooks(tmp_path):
     got = kl.detect(tmp_path)
     assert set(got["skills"]) == set(kl.HOOK_KEYWORDS)
-    assert len(got["skills"]) == 12
+    assert len(got["skills"]) == 13
 
 
 def test_a_gitlab_repo_with_glab_installed_polls_with_glab(tmp_path, monkeypatch):

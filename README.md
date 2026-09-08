@@ -105,6 +105,7 @@ kraft create "fix the flaky test"   # files it paused; a human starts it
 kraft approve                   # approve whichever gate is pending
 kraft reject --note "the plan skips migrations"
 kraft pause / kraft resume --steer "try the other adapter"
+kraft retry                     # re-run the node a stopped item stopped on
 kraft search "retry policy"
 ```
 
@@ -142,12 +143,13 @@ Repos and worktrees:
 ```bash
 kraft repos              # what is connected; `*` marks the one you are in
 kraft connect            # connect the current repo (safe to repeat)
+kraft disconnect         # forget it again; work items are untouched
 cd "$(kraft path <id>)"  # into the item's worktree; `kraft cd` is an alias
 kraft path --shell       # a shell function that does the cd for you
 kraft open <id>          # the worktree in an editor
 ```
 
-Disconnecting and editing a repo's settings stay in the UI.
+Editing a repo's settings stays in the UI.
 
 Service and admin:
 

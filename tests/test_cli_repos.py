@@ -187,3 +187,44 @@ def test_repos_says_disabled_in_words_not_only_in_colour(app, tmp_path, monkeypa
     lines = capsys.readouterr().out.splitlines()
     assert "disabled" in next(line for line in lines if str(off) in line)
     assert "enabled" in next(line for line in lines if str(on) in line)
+
+
+def test_disconnect_removes_the_connected_repo(app, tmp_path, capsys):
+    repo = make_repo(tmp_path)
+    asyncio.run(client.ensure_repo(str(repo)))
+    cli.main(["disconnect", str(repo)])
+    assert str(repo) in capsys.readouterr().out
+    assert asyncio.run(client.repos()) == []
+
+
+def test_disconnect_of_an_unconnected_path_is_a_readable_404(app, tmp_path, capsys):
+    """DELETE /repos answers 204 with no body, so the client must not try to
+    parse one — and its 404 has to read as a sentence, like every other verb."""
+    repo = make_repo(tmp_path)
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["disconnect", str(repo)])
+    assert caught.value.code == 1
+    err = capsys.readouterr().err
+    assert "404" in err
+    assert "not connected" in err
+    assert "Traceback" not in err
+
+
+def test_disconnect_from_inside_a_worktree_disconnects_the_repo(app, tmp_path, monkeypatch, capsys):
+    """The symmetric half of Kraft-97e: after Task 1 the stored path is the main
+    checkout, so sending the raw cwd from a worktree would 404. `disconnect_repo`
+    probes first, the way `ensure_repo` does for its 409 branch."""
+    import subprocess
+
+    repo = make_repo(tmp_path)
+    asyncio.run(client.ensure_repo(str(repo)))
+    worktree = tmp_path / "wt"
+    subprocess.run(
+        ["git", "worktree", "add", "-q", str(worktree), "-b", "wt-branch"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    monkeypatch.chdir(worktree)
+    cli.main(["disconnect"])
+    assert asyncio.run(client.repos()) == []
