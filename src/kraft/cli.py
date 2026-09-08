@@ -590,7 +590,7 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
         help="the brief: what the work actually is, which the spec is written from",
     )
     create.add_argument("--repo", help="default: the repo you are standing in")
-    create.add_argument("--chain", default="quick-task", help="chain template (default quick-task)")
+    create.add_argument("--chain", default="default", help="chain template (default `default`)")
     create.set_defaults(func=_cmd_create, all=False)
 
     approve = subs.add_parser("approve", parents=[common], help="approve the pending gate")

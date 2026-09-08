@@ -449,7 +449,7 @@ async def _post(path: str, payload: dict | None = None) -> tuple[int, dict]:
 async def create_work_item(
     title: str,
     repo: str | None = None,
-    chain_template: str = "quick-task",
+    chain_template: str = "default",
     description: str | None = None,
 ) -> dict:
     """Create a work item. It lands paused: an agent files work, a human starts it.

@@ -43,7 +43,15 @@ def test_reattach_adopts_running_agent(tmp_path):
         run_dir=run_dir, templates_dir=templates, bd_cwd=tracker, env=slow_env
     ) as srv:
         wid = srv.client.post(
-            "/work-items", json={"title": "make the failing test pass", "repo": str(repo)}
+            "/work-items",
+            # quick-task, not the default chain: this test needs the
+            # implementation agent actually running to kill and re-adopt, and
+            # `default` stops at spec_approval before it ever starts.
+            json={
+                "title": "make the failing test pass",
+                "repo": str(repo),
+                "chain_template": "quick-task",
+            },
         ).json()["id"]
         started = _poll(srv.client, wid, "worker_session_started", pred=_impl)
         pid = next(
