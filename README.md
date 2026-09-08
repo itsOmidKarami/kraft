@@ -101,7 +101,7 @@ See [`plugins/kraft-lite/README.md`](plugins/kraft-lite/README.md).
 kraft view list                      # the board, scoped to the repo you are in
 kraft view list --all --status=paused
 kraft view show                      # the work item whose worktree you are in
-kraft item create "fix the flaky test"   # files it paused; a human starts it
+kraft item create "fix the flaky test" --description "..."   # files it paused; a human starts it
 kraft item approve                   # approve whichever gate is pending
 kraft item reject --note "the plan skips migrations"
 kraft item pause / kraft item resume --steer "try the other adapter"

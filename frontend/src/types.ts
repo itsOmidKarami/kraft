@@ -27,6 +27,9 @@ export interface WorkItemAttachment {
 export interface WorkItem {
   id: string;
   title: string;
+  /** The brief, in prose. Prepended to every agent's task instruction; the
+   *  title alone is only a label. */
+  description?: string | null;
   repo: string;
   status: WorkItemStatus;
   chain_template: string;

@@ -124,9 +124,18 @@ def table(
 
 
 def kv(pairs: list[tuple[str, str]]) -> str:
-    """A detail block: labels right-padded to a common width."""
+    """A detail block: labels right-padded to a common width.
+
+    A value spanning several lines keeps the block's shape — every line after
+    the first is indented to the value column, so a multi-line description reads
+    as one field rather than running back to the margin.
+    """
     label_width = max((len(label) for label, _value in pairs), default=0)
-    return "\n".join(f"{label.ljust(label_width)}  {value}" for label, value in pairs)
+    indent = " " * (label_width + 2)
+    return "\n".join(
+        f"{label.ljust(label_width)}  {value.replace(chr(10), chr(10) + indent)}"
+        for label, value in pairs
+    )
 
 
 def _cell(value: object) -> str:

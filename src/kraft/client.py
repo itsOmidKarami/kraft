@@ -213,6 +213,7 @@ async def get_work_item(work_item_id: str | None = None) -> dict:
     keep = (
         "id",
         "title",
+        "description",
         "repo",
         "status",
         "current_node_id",
@@ -446,7 +447,10 @@ async def _post(path: str, payload: dict | None = None) -> tuple[int, dict]:
 
 
 async def create_work_item(
-    title: str, repo: str | None = None, chain_template: str = "quick-task"
+    title: str,
+    repo: str | None = None,
+    chain_template: str = "quick-task",
+    description: str | None = None,
 ) -> dict:
     """Create a work item. It lands paused: an agent files work, a human starts it.
 
@@ -466,7 +470,13 @@ async def create_work_item(
         raise ValueError(_no_repo_message())
     status, body = await _post(
         "/work-items",
-        {"title": title, "repo": repo, "chain_template": chain_template, "autostart": False},
+        {
+            "title": title,
+            "repo": repo,
+            "chain_template": chain_template,
+            "autostart": False,
+            **({"description": description} if description else {}),
+        },
     )
     if status >= 400:
         raise ValueError(f"kraft {status}: {body.get('detail', body)}")

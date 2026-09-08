@@ -5,7 +5,7 @@ import json
 import subprocess
 
 
-async def intake(title: str, *, cwd: str | None = None) -> str:
+async def intake(title: str, *, description: str | None = None, cwd: str | None = None) -> str:
     proc = await asyncio.to_thread(
         subprocess.run,
         [
@@ -15,7 +15,7 @@ async def intake(title: str, *, cwd: str | None = None) -> str:
             "--title",
             title,
             "-d",
-            "Created by the Kraft orchestrator.",
+            description or "Created by the Kraft orchestrator.",
             "--type",
             "task",
         ],
@@ -117,6 +117,9 @@ async def ready(*, cwd: str | None = None) -> list[dict]:
             "title": r.get("title"),
             "priority": r.get("priority"),
             "issue_type": r.get("issue_type"),
+            # The bead's own brief. Auto-intake has no human to retype it, so a
+            # description dropped here is a description lost.
+            "description": r.get("description"),
         }
         for r in rows
         if isinstance(r, dict) and r.get("id") and r.get("title")

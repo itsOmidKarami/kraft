@@ -41,6 +41,7 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
   const [templateSummaries, setTemplateSummaries] = useState<TemplateSummary[]>([]);
   const [repo, setRepo] = useState("");
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
   const [tpl, setTpl] = useState("quick-task");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -131,6 +132,7 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
       const { id } = await api.createWorkItem({
         repo,
         title,
+        ...(description.trim() ? { description } : {}),
         ...(tpl === "quick-task" ? {} : { chain_template: tpl }),
         ...(picked.length ? { submodules: picked, root_merge_policy: mergePolicy } : {}),
         ...(attachments.length ? { attachments } : {}),
@@ -181,6 +183,21 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             required
+          />
+        </div>
+
+        <div className="field">
+          <label htmlFor="intake-description">
+            Description{" "}
+            <span className="field-hint">· the brief the spec is written from</span>
+          </label>
+          <textarea
+            id="intake-description"
+            className="input"
+            aria-label="description"
+            rows={4}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
           />
         </div>
 

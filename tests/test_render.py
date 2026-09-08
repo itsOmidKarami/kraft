@@ -66,6 +66,14 @@ def test_kv_aligns_labels():
     assert out[0].index("Kraft-a") == out[1].index("active")
 
 
+def test_kv_indents_the_continuation_of_a_multiline_value():
+    """A description is prose and may contain newlines. Without this, every line
+    after the first starts at column zero and the block stops being a block."""
+    out = render.kv([("id", "Kraft-a"), ("description", "line one\nline two")]).splitlines()
+    assert out[1].index("line one") == out[2].index("line two")
+    assert out[2].startswith(" ")
+
+
 def test_log_line_shows_source_and_text():
     out = render.log_line({"n": 3, "t": "2026-09-06T12:00:00+00:00", "src": "stdout", "text": "hi"})
     assert "hi" in out

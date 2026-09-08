@@ -1,6 +1,6 @@
 ---
 name: spec
-description: Turn a work item title into a design a human can approve or reject in one read.
+description: Turn a work item's brief into a design a human can approve or reject in one read.
 ---
 
 # Writing a spec, headless
@@ -10,6 +10,11 @@ human will read what you produce and either approve it or reject it with a
 note. Write for that reader.
 
 ## Before you write
+
+Your task instruction is the work item's title followed by its description. The
+description is the brief — treat it as the requirement, not as a hint. If it is
+empty, the title is all you have, and a title is a label: lean harder on reading
+the code before deciding what the change is.
 
 Read the code the change touches. Trace the actual flow end to end — the
 files, the callers, the tests that cover them. A design argued from a guess
