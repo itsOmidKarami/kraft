@@ -89,4 +89,12 @@ describe("api", () => {
     expect(body.work_item_id).toBe("w1");
     expect(f).toHaveBeenCalledWith("/work-items/w1/documents", expect.anything());
   });
+
+  it("names the server when the request never leaves the browser", async () => {
+    // what a stopped server actually produces: a bare `TypeError`, not a response
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    await expect(api.listWorkItems()).rejects.toThrow(
+      /could not reach the Kraft server \(GET \/work-items\)/,
+    );
+  });
 });
