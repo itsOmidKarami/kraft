@@ -1,4 +1,4 @@
-"""`kraft mcp` — the MCP front door onto `client.py`.
+"""`kraft admin mcp` — the MCP front door onto `client.py`.
 
 A dispatch table and nothing more. Every tool here is a docstring plus one call
 into `client`, because `kraft <verb>` is the same functions behind a different

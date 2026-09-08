@@ -99,7 +99,7 @@ def test_doctor_exits_1_and_prints_the_failures(app, tmp_path, capsys):
     _prime(tmp_path)
     (tmp_path / "run" / "worktrees" / "wi-ghost").mkdir(parents=True)
     with pytest.raises(SystemExit) as caught:
-        cli.main(["doctor"])
+        cli.main(["admin", "doctor"])
     assert caught.value.code == 1
     out = capsys.readouterr().out
     assert "wi-ghost" in out and "FAIL" in out
@@ -110,7 +110,7 @@ def test_doctor_json_is_the_check_list(app, tmp_path, capsys):
 
     _prime(tmp_path)
     try:
-        cli.main(["doctor", "--json"])
+        cli.main(["admin", "doctor", "--json"])
     except SystemExit:
         pass
     rows = json.loads(capsys.readouterr().out)

@@ -36,7 +36,7 @@ STATUS_COLORS = {
 def use_color(stream: TextIO | None = None) -> bool:
     """Colour only into a terminal, and never when NO_COLOR is set.
 
-    A piped `kraft list` is consumed by something that wants text, not escapes.
+    A piped `kraft view list` is consumed by something that wants text, not escapes.
     """
     stream = stream or sys.stdout
     if os.environ.get("NO_COLOR"):
@@ -268,7 +268,7 @@ def diff_body(payload: dict) -> str:
 
 def artifact_body(payload: dict) -> str:
     """A gate's spec/plan document, with the same truncation notice the diff
-    renderer gives — `kraft artifact` is the one surface where a reviewer
+    renderer gives — `kraft view artifact` is the one surface where a reviewer
     could otherwise approve a document whose tail was silently cut, since
     `_cmd_artifact` used to page `content` straight through with no read of
     `truncated` at all."""

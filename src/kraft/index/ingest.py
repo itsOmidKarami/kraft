@@ -152,7 +152,7 @@ def scan_repo(repo: Path) -> list[ScannedDoc]:
                 source_kind=source_kind,
                 # Every document, not only session summaries: a spec or plan an
                 # agent wrote carries the same `work_item_ids:` key, and gating
-                # on the source kind is what kept them out of `kraft docs`
+                # on the source kind is what kept them out of `kraft view docs`
                 # (Kraft-2k4). A document without the key still links to
                 # nothing — `links_from_front_matter` returns an empty list.
                 links=tuple(links_from_front_matter(fm)),
