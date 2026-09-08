@@ -221,7 +221,10 @@ export interface LogLine {
   n: number;
   t: string | null;
   src: "sys" | "stdout" | "agent" | "tool";
+  /** the raw line, capped at 2000 characters by the server */
   text: string;
+  /** a one-line rendering of a stream-json line; absent for plain output */
+  summary?: string;
 }
 
 export interface Analytics {

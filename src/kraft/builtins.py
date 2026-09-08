@@ -174,7 +174,9 @@ async def finish_session(
     now = datetime.now(UTC).isoformat()
     try:
         logs.times_path(log_path).write_text(
-            "".join(json.dumps({"n": n, "t": now}) + "\n" for n in range(len(log.splitlines())))
+            "".join(
+                json.dumps({"n": n, "t": now}) + "\n" for n in range(len(logs.split_lines(log)))
+            )
         )
     except OSError:
         # Best-effort, the same call `_watch_log` makes about its own sidecar: a

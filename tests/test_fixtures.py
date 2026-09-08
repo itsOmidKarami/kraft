@@ -11,7 +11,16 @@ _SCRIPT = Path(__file__).resolve().parents[1] / "fixtures" / "fake-claude.sh"
 def _run(cwd, env_extra, ctx="ctx"):
     env = {**os.environ, "KRAFT_RESULT_PATH": str(cwd / "result.json"), **env_extra}
     return subprocess.run(
-        [str(_SCRIPT), "-p", "fix it", "--append-system-prompt", ctx, "--output-format", "json"],
+        [
+            str(_SCRIPT),
+            "-p",
+            "fix it",
+            "--append-system-prompt",
+            ctx,
+            "--output-format",
+            "stream-json",
+            "--verbose",
+        ],
         cwd=cwd,
         env=env,
         capture_output=True,

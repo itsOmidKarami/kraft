@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import threading
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -94,31 +95,55 @@ def _watch_log(
 ) -> None:
     """Record when each new line appeared in `log_path`, into a JSONL sidecar.
 
-    Counts lines exactly the way `logs.jsonl` reads them back — one
-    `str.splitlines()` over the whole file — so a line ending in `\r` can never
-    shift the numbering between writer and reader. Best-effort throughout: an I/O
-    error here must never take the session down with it.
+    Reads forward from one open handle rather than re-reading the file: under
+    `--output-format stream-json` the log grows to megabytes while the worker
+    works, and re-reading it five times a second would cost more than the
+    worker. Only `b"\\n"` is counted, so a line is stamped when it completes and
+    a partial trailing line is carried to the next poll -- the numbering
+    `logs.split_lines` defines, which `logs.jsonl` reads back by. Best-effort
+    throughout: an I/O error here must never take the session down with it.
     """
     seen = 0
+    pending = b""
     try:
-        with open(times_path, "w") as times:
+        with open(times_path, "w") as times, open(log_path, "rb") as log:
             while True:
                 done = stop.is_set()
-                try:
-                    total = len(log_path.read_text(errors="replace").splitlines())
-                except OSError:
-                    total = seen
-                if total > seen:
-                    now = datetime.now(UTC).isoformat()
-                    for n in range(seen, total):
-                        times.write(json.dumps({"n": n, "t": now}) + "\n")
-                    times.flush()
-                    seen = total
+                chunk = log.read()  # b"" at EOF; the next read picks up new bytes
+                if chunk:
+                    pending += chunk
+                    complete = pending.count(b"\n")
+                    if complete:
+                        now = datetime.now(UTC).isoformat()
+                        for n in range(seen, seen + complete):
+                            times.write(json.dumps({"n": n, "t": now}) + "\n")
+                        times.flush()
+                        seen += complete
+                        pending = pending[pending.rfind(b"\n") + 1 :]
                 if done:
                     return
                 stop.wait(poll_s)
     except OSError:
         pass
+
+
+def _read_new(path: Path, offset: int) -> tuple[str, int]:
+    """Complete lines written since `offset`, and the offset to resume from.
+
+    A partial trailing line is left where it is rather than decoded half-formed
+    -- the log is a stream and the writer is mid-flush. Best-effort: an
+    unreadable log is "nothing new", not a failed session.
+    """
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(offset)
+            data = fh.read()
+    except OSError:
+        return "", offset
+    cut = data.rfind(b"\n")
+    if cut < 0:
+        return "", offset
+    return data[: cut + 1].decode("utf-8", "replace"), offset + cut + 1
 
 
 def _resolve(result_path: Path, returncode: int) -> str:
@@ -141,6 +166,10 @@ async def run_task(
     env: dict | None = None,
     post_resolve: Callable[[str, Path, int], str] | None = None,
     poll_s: float = 0.05,
+    #: How often the poll loop stops to fold new log lines into live usage. The
+    #: process poll runs 20x a second; parsing the log that often would cost
+    #: more than the worker does. A test that cannot wait passes its own.
+    progress_s: float = 5.0,
     round: int = 0,
 ) -> str:
     log_path = run_dirs.logs / f"{session_id}.log"
@@ -163,6 +192,10 @@ async def run_task(
     log = open(log_path, "w")
     try:
         try:
+            # stdin is DEVNULL for every task, not just agents: a CLI in
+            # stream-json mode waits on stdin before it starts (measured: a 3s
+            # "no stdin data received" stall), and no hook has any business
+            # reading the server's own stdin.
             proc = subprocess.Popen(
                 cmd,
                 cwd=str(cwd),
@@ -170,6 +203,7 @@ async def run_task(
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
                 env=full_env,
+                stdin=subprocess.DEVNULL,
             )
         except FileNotFoundError as exc:
             # Popen raises this for a missing cwd as well as a missing
@@ -208,8 +242,24 @@ async def run_task(
     # uncancellable, so on SIGTERM the executor task's cancel() could not
     # interrupt it and uvicorn fell back to a hard exit (same fix as
     # reattach._adopt).
+    #
+    # The same loop, with a second job: read the log forward from our own byte
+    # offset every `progress_s` and write the running usage onto the session
+    # row. Before this the row held NULL tokens and a NULL model for the whole
+    # run, so `usage_rollup` reported 0 for exactly the node a human was
+    # watching (Kraft-54dk, Kraft-2r8s).
+    seen_usage: dict[str, _usage.Usage] = {}
+    log_offset = 0
+    next_progress = time.monotonic() + progress_s
     while proc.poll() is None:
         await asyncio.sleep(poll_s)
+        if time.monotonic() < next_progress:
+            continue
+        next_progress = time.monotonic() + progress_s
+        chunk, log_offset = _read_new(log_path, log_offset)
+        live = _usage.from_stream(logs.split_lines(chunk), seen_usage)
+        if live is not None:
+            await db.write(lambda c, u=live: store.session_progress(c, session_id, u))
     # the child is gone; let the watcher record whatever it wrote on the way out
     stop.set()
     watcher.join(timeout=2)

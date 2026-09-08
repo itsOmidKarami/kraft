@@ -168,7 +168,9 @@ def log_line(entry: dict) -> str:
     """One JSONL log line: time, source, text. Never raises on a partial line."""
     stamp = (entry.get("t") or "")[11:19] or "--:--:--"
     src = str(entry.get("src") or "?")
-    text = str(entry.get("text") or "")
+    # `summary` is what logs.jsonl derives for a stream-json line; `text` is the
+    # raw line, which is what a plain (non-JSON) line has and all it needs.
+    text = str(entry.get("summary") or entry.get("text") or "")
     return f"{paint(stamp, DIM)} {paint(src.ljust(6), LOG_COLORS.get(src, ''))} {text}"
 
 

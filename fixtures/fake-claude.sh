@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stand-in for `claude` headless. Invoked as:
-#   fake-claude.sh -p <instr> --append-system-prompt <ctx> --output-format json
+#   fake-claude.sh -p <instr> --append-system-prompt <ctx> --output-format stream-json --verbose
 # CWD is the worktree. Modes via KRAFT_FAKE_CLAUDE: fix (default) | noop | slow.
 # The reported status defaults to "done"; KRAFT_FAKE_CLAUDE_STATUS overrides it,
 # and KRAFT_FAKE_CLAUDE_CONCERNS / KRAFT_FAKE_CLAUDE_QUESTION set the field that
@@ -119,6 +119,13 @@ if [ -n "${KRAFT_RESULT_PATH:-}" ]; then
   mv "$rtmp" "$KRAFT_RESULT_PATH"
 fi
 
-# A real agent's final envelope carries its token usage; usage capture parses
-# this line, so the fake has to carry it too or nothing downstream is exercised.
-printf '{"type": "result", "is_error": false, "model": "fake-agent", "total_cost_usd": 0.035, "usage": {"input_tokens": 1000, "output_tokens": 200, "cache_read_input_tokens": 500}}\n'
+# The adapter runs the real CLI with `--output-format stream-json --verbose`, so
+# the fake streams the same shapes: an init line carrying the model, one
+# assistant line carrying a request_id and per-request usage, then the result
+# envelope last (usage capture and `_envelope_is_error` both read the last
+# line). KRAFT_FAKE_CLAUDE_STREAM_DELAY holds the stream open between the first
+# line and the rest, so a test can read the log while the child still runs.
+printf '{"type":"system","subtype":"init","model":"fake-agent","tools":[]}\n'
+sleep "${KRAFT_FAKE_CLAUDE_STREAM_DELAY:-0}"
+printf '{"type":"assistant","request_id":"req_1","message":{"model":"fake-agent","usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":500}}}\n'
+printf '{"type":"result","is_error":false,"total_cost_usd":0.035,"modelUsage":{"fake-agent":{"inputTokens":1500,"outputTokens":200}},"usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":500}}\n'

@@ -96,13 +96,26 @@ class Profile(NamedTuple):
     deny_tools: tuple[str, ...]
     permission_mode: tuple[str, ...]
     effort: tuple[str, ...]
+    #: How this CLI spells an allowlist, and the flag for a per-node
+    #: permission mode. `permission_mode` above is the *default* argv a binding
+    #: that names no mode still gets; this is the flag on its own, for one that
+    #: does.
+    allowed_tools: tuple[str, ...]
+    permission_mode_flag: tuple[str, ...]
+    permission_prompt_tool: tuple[str, ...]
 
 
 PROFILES: dict[str, Profile] = {
     "claude": Profile(
         prompt=("-p",),
         system_prompt=("--append-system-prompt",),
-        output_json=("--output-format", "json"),
+        # NDJSON as the agent works, not one object at exit. `--verbose` is
+        # mandatory, not decoration: without it the CLI exits 1 with
+        # "When using --print, --output-format=stream-json requires --verbose"
+        # (measured against claude 2.1.260). The last line is still the result
+        # envelope, so `_envelope_is_error` and `usage.read_envelope` keep
+        # reading `lines[-1]` unchanged.
+        output_json=("--output-format", "stream-json", "--verbose"),
         model=("--model",),
         # The CLI polices itself at Kraft's request, not a sandbox: this flag does
         # not stop the agent running a shell that ignores it, only tools the CLI
@@ -122,8 +135,22 @@ PROFILES: dict[str, Profile] = {
         # artifact check in `run_agent_task` is the load-bearing half.
         permission_mode=("--permission-mode", "auto"),
         effort=("--effort",),
+        allowed_tools=("--allowedTools",),
+        permission_mode_flag=("--permission-mode",),
+        # The CLI calls this MCP tool instead of prompting a human whenever
+        # `auto` decides it wants to ask. Kraft's own server (`kraft admin mcp`,
+        # registered by `kraft admin init`) answers it. On an install where that
+        # registration was never done the flag names a tool that does not
+        # exist, and the CLI completes normally (measured) -- degrading to
+        # today's behaviour rather than crashing, which is why no --mcp-config
+        # is passed.
+        permission_prompt_tool=("--permission-prompt-tool",),
     ),
 }
+
+#: The MCP tool `--permission-prompt-tool` names. `mcp__<server>__<tool>` is the
+#: CLI's addressing scheme; `kraft` is the server name `mcp.build()` registers.
+PERMISSION_TOOL = "mcp__kraft__permission_request"
 
 
 class Invocation(NamedTuple):
@@ -134,6 +161,8 @@ class Invocation(NamedTuple):
     steering_texts: tuple[str, ...]
     method_text: str | None = None
     effort: str | None = None
+    allowed_tools: tuple[str, ...] = ()
+    permission_mode: str | None = None
 
 
 def resolve_invocation(
@@ -201,6 +230,12 @@ def resolve_invocation(
         # Deliberately no `escalate_effort`: `escalate_model` is already the fix
         # loop's capability bump, and two bump knobs is one too many.
         effort=binding.get("effort"),
+        # Hook-level only, like `effort` and unlike `deny_tools`. Unioning a
+        # repo allowlist with a hook's would *widen* the narrower one, which is
+        # the opposite of what an allowlist is for; a deny list only ever
+        # narrows, which is why that one unions.
+        allowed_tools=tuple(binding.get("allowed_tools", ())),
+        permission_mode=binding.get("permission_mode"),
     )
 
 
@@ -264,6 +299,8 @@ async def run_agent_task(
     model: str | None = None,
     deny_tools: tuple[str, ...] = (),
     effort: str | None = None,
+    allowed_tools: tuple[str, ...] = (),
+    permission_mode: str | None = None,
     steering_texts: tuple[str, ...] = (),
     review_package: str | None = None,
     artifact: str | None = None,
@@ -324,12 +361,22 @@ async def run_agent_task(
         *prof.system_prompt,
         ctx,
         *prof.output_json,
-        *prof.permission_mode,
+        # The binding's mode when it names one, the profile's default when it
+        # does not -- so every shipped node keeps today's `auto` grant.
+        *(
+            [*prof.permission_mode_flag, permission_mode]
+            if permission_mode
+            else list(prof.permission_mode)
+        ),
+        *prof.permission_prompt_tool,
+        PERMISSION_TOOL,
     ]
     if model:
         cmd += [*prof.model, model]
     if deny_tools:
         cmd += [*prof.deny_tools, ",".join(deny_tools)]
+    if allowed_tools:
+        cmd += [*prof.allowed_tools, ",".join(allowed_tools)]
     if effort:
         cmd += [*prof.effort, effort]
     return await _subprocess.run_task(

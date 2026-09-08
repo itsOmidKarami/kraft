@@ -3,10 +3,16 @@ import json
 import os
 import shlex
 import signal
+import subprocess
+import threading
+import time
+from pathlib import Path
 
-from kraft import db, events, store
+from kraft import db, events, logs, store
 from kraft.adapters import subprocess as sp
 from kraft.paths import RunDirs
+
+_FAKE_CLAUDE = Path(__file__).resolve().parents[1] / "fixtures" / "fake-claude.sh"
 
 
 def _resolve_cases(tmp_path):
@@ -496,3 +502,188 @@ def test_resolve_result_file_survives_non_utf8_bytes(tmp_path):
     p = tmp_path / "r.json"
     p.write_bytes(b"\xff\xfe\x00binary")
     assert _resolve_result_file(p) == "failed"
+
+
+def _eventually(check, timeout=5.0):
+    """True as soon as `check()` is true, False if it never is. The watcher runs
+    on its own thread, so a fixed sleep is either flaky or slow."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if check():
+            return True
+        time.sleep(0.02)
+    return False
+
+
+def test_log_time_sidecar_holds_back_a_partial_line(tmp_path):
+    """A line without its newline is not a line yet.
+
+    The sidecar is keyed by line number, so stamping a number before the line
+    is complete gives that timestamp to whatever text lands next -- and
+    `logs.jsonl` would then read a different line under the same number.
+    """
+    log = tmp_path / "s.log"
+    log.write_text("")
+    times = logs.times_path(log)
+    stop = threading.Event()
+    watcher = threading.Thread(
+        target=sp._watch_log, args=(log, times, stop), kwargs={"poll_s": 0.02}, daemon=True
+    )
+    watcher.start()
+    try:
+        with open(log, "a") as fh:
+            fh.write("first\nsecond")  # 'second' has no newline yet
+            fh.flush()
+            assert _eventually(lambda: sorted(logs.read_times(times)) == [0])
+            time.sleep(0.1)
+            assert sorted(logs.read_times(times)) == [0], "a partial line was stamped"
+            fh.write("\n")
+            fh.flush()
+            assert _eventually(lambda: sorted(logs.read_times(times)) == [0, 1])
+    finally:
+        stop.set()
+        watcher.join(timeout=2)
+    assert [row["n"] for row in logs.jsonl(log)] == [0, 1]
+    assert all(row["t"] is not None for row in logs.jsonl(log))
+
+
+def test_child_stdin_is_devnull(tmp_path, monkeypatch):
+    """In stream-json mode the CLI waits on stdin before it starts, and the
+    child inherits the server's. Measured: `< /dev/null` removes the 3s
+    `no stdin data received` wait. No hook should read the server's stdin."""
+    seen = {}
+    real_popen = subprocess.Popen
+
+    def spy(cmd, **kw):
+        seen.update(kw)
+        return real_popen(cmd, **kw)
+
+    monkeypatch.setattr(sp.subprocess, "Popen", spy)
+
+    async def scenario():
+        rd = RunDirs(tmp_path).ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database)
+            await sp.run_task(
+                database,
+                rd,
+                session_id="s1",
+                work_item_id="w1",
+                node_id="verify",
+                hook_point="on.test.run",
+                cmd=["sh", "-c", "exit 0"],
+                cwd=tmp_path,
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    assert seen["stdin"] == subprocess.DEVNULL
+
+
+def test_log_is_readable_while_the_child_is_still_running(tmp_path):
+    """Kraft-77z: the log file was 0 bytes for the whole node, so `kraft view
+    logs -f` streamed nothing and the modal stayed empty.
+
+    Driven through `fixtures/fake-claude.sh` rather than a shell one-liner on
+    purpose: a shell writes its first line immediately whatever the adapter
+    does, so a shell child would make this test green against the very bug it
+    is here to pin. The fake stands in for the CLI, and before this task it
+    prints nothing until it exits.
+    """
+
+    async def scenario():
+        rd = RunDirs(tmp_path).ensure()
+        database = await db.Database.open(rd.db)
+        early = []
+        try:
+            await _seed(database)
+            task = asyncio.create_task(
+                sp.run_task(
+                    database,
+                    rd,
+                    session_id="s1",
+                    work_item_id="w1",
+                    node_id="verify",
+                    hook_point="on.test.run",
+                    cmd=[str(_FAKE_CLAUDE), "-p", "do it", "--append-system-prompt", "ctx"],
+                    cwd=tmp_path,
+                    env={"KRAFT_FAKE_CLAUDE": "noop", "KRAFT_FAKE_CLAUDE_STREAM_DELAY": "3"},
+                )
+            )
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + 10
+            while not task.done() and loop.time() < deadline:
+                rows = list(logs.jsonl(rd.logs / "s1.log"))
+                if rows:
+                    early = rows
+                    break
+                await asyncio.sleep(0.05)
+            assert await task == "done"
+        finally:
+            await database.close()
+        return early
+
+    early = asyncio.run(scenario())
+    assert early, "the log was empty while the child was still running"
+    assert "init" in early[0]["text"]
+
+
+def test_running_session_row_carries_tokens_before_exit(tmp_path):
+    """Kraft-54dk / Kraft-2r8s: usage was harvested once, at exit, so a live
+    node's row held NULL tokens and NULL model for its whole run -- and
+    `usage_rollup` reports 0 for exactly the node a human is watching."""
+    script = (
+        'printf \'{"type":"system","subtype":"init","model":"claude-opus-5"}\\n\'; '
+        'printf \'{"type":"assistant","request_id":"req_1","message":'
+        '{"model":"claude-opus-5","usage":{"input_tokens":1000,"output_tokens":200}}}\\n\'; '
+        "sleep 3; "
+        'printf \'{"type":"result","is_error":false,'
+        '"usage":{"input_tokens":1000,"output_tokens":200}}\\n\''
+    )
+
+    async def scenario():
+        rd = RunDirs(tmp_path).ensure()
+        database = await db.Database.open(rd.db)
+        live = None
+        try:
+            await _seed(database)
+            task = asyncio.create_task(
+                sp.run_task(
+                    database,
+                    rd,
+                    session_id="s1",
+                    work_item_id="w1",
+                    node_id="verify",
+                    hook_point="on.test.run",
+                    cmd=["sh", "-c", script],
+                    cwd=tmp_path,
+                    progress_s=0.2,
+                )
+            )
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + 10
+            while not task.done() and loop.time() < deadline:
+                row = database.read(
+                    lambda c: c.execute(
+                        "SELECT status, model, tokens_in, tokens_out FROM worker_sessions "
+                        "WHERE id = 's1'"
+                    ).fetchone()
+                )
+                if row is not None and row["status"] == "running" and row["tokens_in"]:
+                    live = dict(row)
+                    break
+                await asyncio.sleep(0.05)
+            assert await task == "done"
+        finally:
+            await database.close()
+        return live
+
+    live = asyncio.run(scenario())
+    assert live == {
+        "status": "running",
+        "model": "claude-opus-5",
+        "tokens_in": 1000,
+        "tokens_out": 200,
+    }

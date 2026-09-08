@@ -44,6 +44,75 @@ def test_no_usage_reads_as_none_rather_than_zeroes(envelope):
     assert usage.from_envelope(envelope) is None
 
 
+def test_model_falls_back_to_model_usage_key():
+    """The stream-json envelope has no top-level `model`; it has `modelUsage`,
+    keyed by model name. Reading only `model` is why every worker_sessions row
+    ever written had model NULL (Kraft-2r8s)."""
+    u = usage.from_envelope(
+        {
+            "usage": {"input_tokens": 100, "output_tokens": 20},
+            "modelUsage": {"claude-opus-5": {"inputTokens": 100, "outputTokens": 20}},
+            "total_cost_usd": 1.25,
+        }
+    )
+    assert u == Usage(tokens_in=100, tokens_out=20, cost_usd=1.25, model="claude-opus-5")
+
+
+def test_a_top_level_model_still_wins_over_model_usage():
+    """A result file written by a non-agent adapter names its model directly."""
+    u = usage.from_envelope(
+        {
+            "usage": {"tokens_in": 1, "tokens_out": 1},
+            "model": "stated",
+            "modelUsage": {"inferred": {}},
+        }
+    )
+    assert u.model == "stated"
+
+
+def _assistant(request_id: str, tokens_in: int, tokens_out: int) -> str:
+    return json.dumps(
+        {
+            "type": "assistant",
+            "request_id": request_id,
+            "message": {
+                "model": "claude-opus-5",
+                "usage": {"input_tokens": tokens_in, "output_tokens": tokens_out},
+            },
+        }
+    )
+
+
+def test_stream_usage_sums_distinct_requests():
+    """The CLI emits several `assistant` lines per API request, with the same
+    usage on each; summing lines rather than requests double-counts."""
+    seen: dict = {}
+    first = usage.from_stream([_assistant("req_1", 100, 10), _assistant("req_1", 100, 10)], seen)
+    assert (first.tokens_in, first.tokens_out) == (100, 10)
+    # a later call folds new lines into the same map and returns the total
+    second = usage.from_stream([_assistant("req_2", 50, 5)], seen)
+    assert (second.tokens_in, second.tokens_out) == (150, 15)
+    # cost is only ever the agent's own number, and no per-request cost exists
+    assert second.cost_usd is None
+
+
+def test_stream_usage_takes_model_from_the_init_line():
+    """The init line carries the model before the first token is spent, and it
+    has to survive the calls that follow it (Kraft-2r8s)."""
+    seen: dict = {}
+    init = usage.from_stream(
+        [json.dumps({"type": "system", "subtype": "init", "model": "claude-opus-5"})], seen
+    )
+    assert init == Usage(tokens_in=0, tokens_out=0, cost_usd=None, model="claude-opus-5")
+    later = usage.from_stream([_assistant("req_1", 7, 3)], seen)
+    assert later == Usage(tokens_in=7, tokens_out=3, cost_usd=None, model="claude-opus-5")
+
+
+def test_stream_usage_ignores_noise_and_reports_nothing_from_nothing():
+    seen: dict = {}
+    assert usage.from_stream(["", "not json", "{oops", "[]"], seen) is None
+
+
 def test_read_prefers_the_result_file_over_the_log_envelope(tmp_path):
     log = tmp_path / "s.log"
     result = tmp_path / "s.json"
