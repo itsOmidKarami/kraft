@@ -155,7 +155,14 @@ async def run_task(
                 start_new_session=True,
                 env=full_env,
             )
-        except FileNotFoundError:
+        except FileNotFoundError as exc:
+            # Popen raises this for a missing cwd as well as a missing
+            # executable, and the two are fixed in different places. Say which:
+            # the alternative is what this branch used to leave behind — a
+            # zero-byte log, a 5ms "failed", and no way to tell them apart.
+            # Safe to write: in this path the child never took the fd.
+            missing = "working directory" if not Path(cwd).is_dir() else f"command {cmd[0]!r}"
+            log.write(f"could not start {' '.join(cmd)} in {cwd}: no such {missing} ({exc})\n")
             await db.write(lambda c: store.session_exited(c, session_id, "failed"))
             return "failed"
     finally:
