@@ -13,5 +13,6 @@ hooks:
   on.mr.open:                { kind: forge, handler: open_mr, backend: glab }
   on.ci.poll:                { kind: forge, handler: ci_poll, backend: glab }
   on.review.mr.run:          { kind: builtin, handler: noop }
+  on.mr.sync:                { kind: forge, handler: sync_mr, backend: glab }
   on.human_review.requested: { kind: agent, command: claude, skill: review-brief, artifact: review_brief }
   on.merge:                  { kind: forge, handler: merge, backend: glab }

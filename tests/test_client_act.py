@@ -130,3 +130,17 @@ def test_every_act_function_refuses_a_worker_acting_on_itself(wired, tmp_path, m
 
     with pytest.raises(PermissionError, match="its own work item"):
         run_with_app(wired, scenario)
+
+
+def test_retry_on_an_item_that_is_not_stopped_is_a_readable_409(wired, tmp_path):
+    """A 409 proves the route resolved: a wrong URL would be a 404. `/retry` is
+    the only door back onto a `needs_human` stop — resume wants `paused`, pause
+    wants `running`, approve/reject want a pending gate (Kraft-5lpl)."""
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        created = await client.create_work_item("not stopped", repo=str(repo))
+        return await client.retry(work_item_id=created["id"])
+
+    with pytest.raises(ValueError, match="409"):
+        run_with_app(wired, scenario)

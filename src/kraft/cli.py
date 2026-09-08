@@ -293,10 +293,24 @@ def _cmd_resume(ns: argparse.Namespace) -> None:
     emit(asyncio.run(client.resume(ns.steer, ns.id)), _render_action, ns.json)
 
 
+def _cmd_retry(ns: argparse.Namespace) -> None:
+    emit(asyncio.run(client.retry(ns.steer, ns.id)), _render_action, ns.json)
+
+
 def _print_log(entry: dict, as_json: bool) -> None:
     """NDJSON under --json: one object per line, because a stream has no end to
     close an array on. `flush` because a follow that buffers is not a follow."""
     print(json.dumps(entry) if as_json else render.log_line(entry), flush=True)
+
+
+def _print_event(event: dict, as_json: bool) -> None:
+    """One event, one line. `_print_log`'s contract, for the other stream.
+
+    NDJSON under --json because a stream has no end to close an array on, and
+    `flush` because a followed stream through a pipe is block-buffered
+    otherwise — `emit` knows neither (Kraft-tom2, Kraft-owea).
+    """
+    print(json.dumps(event) if as_json else render.event_line([event], headers=False), flush=True)
 
 
 def _cmd_logs(ns: argparse.Namespace) -> None:
@@ -321,7 +335,7 @@ _CHAIN_ENDED = ("work_item_completed", "work_item_abandoned")
 
 def _cmd_events(ns: argparse.Namespace) -> None:
     async def run() -> None:
-        wid = await client._target(ns.id)
+        wid = await client.resolve_work_item(ns.id)
         rows = await client.events(wid, ns.after)
         shown = [row for row in rows if row.get("type") == ns.type] if ns.type else rows
         emit(shown, render.event_line, ns.json)
@@ -339,7 +353,7 @@ def _cmd_events(ns: argparse.Namespace) -> None:
             if ev["work_item_id"] != wid:
                 continue
             if not ns.type or ev.get("type") == ns.type:
-                emit([ev], render.event_line, ns.json)
+                _print_event(ev, ns.json)
             if ev["type"] in _CHAIN_ENDED:
                 return
 
@@ -485,6 +499,14 @@ def _cmd_connect(ns: argparse.Namespace) -> None:
     print(f"{verb}: {result['path']}")
 
 
+def _cmd_disconnect(ns: argparse.Namespace) -> None:
+    result = asyncio.run(client.disconnect_repo(ns.path))
+    if ns.json:
+        emit(result, str, True)
+        return
+    print(f"disconnected: {result['path']}")
+
+
 def _cmd_path(ns: argparse.Namespace) -> None:
     if ns.json:
         # Inherited from the shared parent parser, and meaningless here: one bare
@@ -551,6 +573,13 @@ def _add_verbs(subs, common: argparse.ArgumentParser) -> None:
     resume.add_argument("id", nargs="?")
     resume.add_argument("--steer", help="carried into the next attempt's prompt")
     resume.set_defaults(func=_cmd_resume)
+
+    retry = subs.add_parser(
+        "retry", parents=[common], help="re-run the node a stopped item stopped on"
+    )
+    retry.add_argument("id", nargs="?")
+    retry.add_argument("--steer", help="carried into the retry's prompt")
+    retry.set_defaults(func=_cmd_retry)
 
     abandon = subs.add_parser(
         "abandon", parents=[common], help="drop an item and reclaim its worktree"
@@ -622,6 +651,12 @@ def _add_verbs(subs, common: argparse.ArgumentParser) -> None:
     connect = subs.add_parser("connect", parents=[common], help="connect a repo (idempotent)")
     connect.add_argument("path", nargs="?", help="default: the current directory")
     connect.set_defaults(func=_cmd_connect)
+
+    disconnect = subs.add_parser(
+        "disconnect", parents=[common], help="forget a repo (work items are untouched)"
+    )
+    disconnect.add_argument("path", nargs="?", help="default: the current directory")
+    disconnect.set_defaults(func=_cmd_disconnect)
 
     path = subs.add_parser(
         "path", aliases=["cd"], parents=[common], help="print a work item's worktree path"
