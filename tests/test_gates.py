@@ -191,3 +191,41 @@ def test_reject_records_the_note_and_reopen_flips_the_row(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_a_spec_worker_that_wrote_no_artifact_opens_no_gate(tmp_path, monkeypatch):
+    """The empty gate from work item 6363c65e, end to end (Kraft-7lu).
+
+    The worker there was refused every Write, produced nothing, and still
+    exited 0 — so the chain completed `spec` and asked a human to approve
+    `spec_approval` with `kraft artifact` returning 404. The node must fail
+    instead, and no gate may open over an artifact that does not exist.
+    """
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_SKIP_ARTIFACT", "1")
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="make the failing test pass",
+                repo=str(repo),
+                template=_default_template(),
+                bd_cwd=str(tracker),
+            )
+            await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+            types = _events(database, wid)
+            assert "gate_requested" not in types
+            assert "node_completed" not in types
+            assert not (rd.worktrees / wid / ".engineering" / "specs" / f"{wid}.md").exists()
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())

@@ -456,6 +456,8 @@ def test_default_profile_reproduces_todays_command_line(monkeypatch):
         ctx,
         "--output-format",
         "json",
+        "--permission-mode",
+        "auto",
     ]
 
 
@@ -728,3 +730,159 @@ def test_resolve_invocation_without_a_skill_carries_no_method(tmp_path):
 def test_artifact_path_is_the_kind_pluralised():
     assert agent.artifact_path("spec", "w1") == ".engineering/specs/w1.md"
     assert agent.artifact_path("plan", "w1") == ".engineering/plans/w1.md"
+
+
+def test_permission_mode_is_always_passed(monkeypatch):
+    """Without it, `claude -p` has nobody to answer a prompt and denies instead.
+
+    Measured on work item 6363c65e: the spec worker logged 13 permission
+    denials, the Write of its own artifact among them, and the node still
+    reported success (Kraft-8pe, Kraft-7lu).
+    """
+    seen = _capture_cmd(monkeypatch)
+    _run()
+    cmd = seen["cmd"]
+    assert "--permission-mode" in cmd
+    assert cmd[cmd.index("--permission-mode") + 1] == "auto"
+
+
+def test_a_declared_artifact_that_was_never_written_fails_the_node(tmp_path, monkeypatch):
+    """A worker that produced no artifact did not do its job (Kraft-7lu).
+
+    On work item 6363c65e the spec worker was refused every Write, wrote
+    nothing, and still reported success — so the executor completed the node
+    and opened `spec_approval` over an empty gate, which cost $2.15 and asked
+    a human to approve nothing.
+    """
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_SKIP_ARTIFACT", "1")
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database, repo)
+            status = await agent.run_agent_task(
+                database,
+                rd,
+                session_id="s9",
+                work_item_id="w1",
+                node_id="spec",
+                hook_point="on.spec.requested",
+                command=f"{sys.executable} {_FAKE}",
+                title="t",
+                task_instruction="t",
+                repo_path=str(repo),
+                cwd=repo,
+                artifact="spec",
+            )
+            assert not (repo / agent.artifact_path("spec", "w1")).exists()
+            assert status == "failed"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_a_declared_artifact_that_was_written_keeps_the_node_green(tmp_path, monkeypatch):
+    """The other half: the guard must not fail a worker that did its job."""
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database, repo)
+            written = repo / agent.artifact_path("spec", "w1")
+            written.parent.mkdir(parents=True, exist_ok=True)
+            written.write_text("# spec\n")
+            status = await agent.run_agent_task(
+                database,
+                rd,
+                session_id="s10",
+                work_item_id="w1",
+                node_id="spec",
+                hook_point="on.spec.requested",
+                command=f"{sys.executable} {_FAKE}",
+                title="t",
+                task_instruction="t",
+                repo_path=str(repo),
+                cwd=repo,
+                artifact="spec",
+            )
+            assert status != "failed"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_effort_is_read_off_the_hook_binding():
+    assert agent.resolve_invocation({"command": "c", "effort": "high"}, {}, None).effort == "high"
+
+
+def test_no_effort_anywhere_leaves_it_unset():
+    assert agent.resolve_invocation({"command": "c"}, {}, None).effort is None
+
+
+def test_effort_becomes_a_flag(monkeypatch):
+    seen = _capture_cmd(monkeypatch)
+    _run(effort="high")
+    assert seen["cmd"][-2:] == ["--effort", "high"]
+
+
+def test_no_effort_emits_no_flag(monkeypatch):
+    """Regression guard: an unset effort must leave the CLI's own default."""
+    seen = _capture_cmd(monkeypatch)
+    _run()
+    assert "--effort" not in seen["cmd"]
+
+
+def test_needs_context_survives_the_artifact_guard(tmp_path, monkeypatch):
+    """A worker that stopped to ask a question wrote no artifact *because* it
+    stopped — rewriting that to `failed` loses the question.
+
+    `executor._needs_context_question` matches on the session row's status, so
+    a downgrade here makes the stop reason generic and `api._needs_context_stop`
+    false, which 409s both /steer and /resume. The guard is for a worker that
+    claimed success without producing its artifact, not for one that said
+    plainly it could not finish.
+    """
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_STATUS", "needs_context")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_QUESTION", "which editor policy?")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_SKIP_ARTIFACT", "1")
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database, repo)
+            status = await agent.run_agent_task(
+                database,
+                rd,
+                session_id="s11",
+                work_item_id="w1",
+                node_id="spec",
+                hook_point="on.spec.requested",
+                command=f"{sys.executable} {_FAKE}",
+                title="t",
+                task_instruction="t",
+                repo_path=str(repo),
+                cwd=repo,
+                artifact="spec",
+            )
+            assert not (repo / agent.artifact_path("spec", "w1")).exists()
+            assert status == "needs_context"
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT status, result_path FROM worker_sessions WHERE id='s11'"
+                ).fetchone()
+            )
+            assert row["status"] == "needs_context"
+            assert read_question(Path(row["result_path"])) == "which editor policy?"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
