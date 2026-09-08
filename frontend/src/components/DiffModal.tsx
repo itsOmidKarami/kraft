@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { X } from "@phosphor-icons/react";
 import * as api from "../api";
 import type { WorkItemDiff } from "../types";
@@ -25,6 +25,55 @@ const lineClass = (line: string) =>
   : line.startsWith("-") ? "diff-del"
   : "diff-ctx";
 
+/** A single file bigger than this arrives collapsed however small the diff is. */
+const MAX_FILE_LINES = 300;
+/** Total body lines opened on arrival, walked over the rows in order. */
+const MAX_OPEN_LINES = 600;
+
+/** One `<details>` row, or — when `body` is null — a body-less list row. */
+type Row = {
+  key: string;
+  path: string;
+  ins: number | null;
+  del: number | null;
+  body: string[] | null;
+  note: string | null;
+  open: boolean;
+};
+
+/**
+ * The path a `diff --git` chunk is about.
+ *
+ * Not read from the `diff --git a/x b/x` line: it names the path twice with no
+ * separator that survives a path containing a space. `rename to` comes first
+ * because a rename's `---`/`+++` pair names both ends; `+++ b/` before
+ * `--- a/` because a deletion's `+++` is `/dev/null` and matches neither. A
+ * chunk with none of the three (a pure mode change) is labelled by its header.
+ */
+function chunkPath(chunk: string): string {
+  const lines = chunk.split("\n");
+  for (const pattern of [
+    /^rename to (.+)$/,
+    /^\+\+\+ b\/(.+)$/,
+    /^--- a\/(.+)$/,
+    // a chunk with neither pair (no `---`/`+++` at all) still names its path
+    // on the `diff --git a/x b/x` line itself.
+    /^diff --git a\/(.+) b\/.+$/,
+  ]) {
+    for (const line of lines) {
+      const m = line.match(pattern);
+      if (m) return m[1];
+    }
+  }
+  return lines[0];
+}
+
+/** `+n −n` for a chunk `--numstat` does not name (a rename, under git's default detection). */
+const countOf = (body: string[]) => ({
+  ins: body.filter((l) => l.startsWith("+") && !l.startsWith("+++")).length,
+  del: body.filter((l) => l.startsWith("-") && !l.startsWith("---")).length,
+});
+
 export function DiffModal({
   workItemId,
   onClose,
@@ -48,13 +97,86 @@ export function DiffModal({
     { ins: 0, del: 0 },
   );
 
+  /**
+   * One list of "what changed": a section per diff chunk, then the files
+   * truncation cut, then the untracked ones. The backend only ever cuts on a
+   * `diff --git` boundary (`_truncate_at_file_boundary`, src/kraft/api.py:831),
+   * so splitting on a lookahead leaves every chunk headed.
+   */
+  const rows = useMemo<Row[]>(() => {
+    if (!diff) return [];
+    const chunks = diff.diff ? diff.diff.split(/\n(?=diff --git )/) : [];
+    const byPath = new Map(diff.files.map((f) => [f.path, f]));
+    const seen = new Set<string>();
+    const out: Omit<Row, "open">[] = [];
+
+    for (const chunk of chunks) {
+      const path = chunkPath(chunk);
+      const lines = chunk.split("\n");
+      const stat = byPath.get(path);
+      const derived = countOf(lines);
+      seen.add(path);
+      out.push({
+        key: `chunk:${path}`,
+        path,
+        ins: stat ? stat.insertions : derived.ins,
+        del: stat ? stat.deletions : derived.del,
+        body: lines,
+        note: null,
+      });
+    }
+
+    // Only when the body was actually cut: a rename reports `old => new` in
+    // --numstat and `new` in the chunk, so an unconditional rule would print a
+    // spurious "truncated" row for every renamed file.
+    if (diff.truncated) {
+      for (const f of diff.files) {
+        if (seen.has(f.path)) continue;
+        out.push({
+          key: `cut:${f.path}`,
+          path: f.path,
+          ins: f.insertions,
+          del: f.deletions,
+          body: null,
+          note: "not shown — diff truncated",
+        });
+      }
+    }
+
+    // No counts: --numstat never sees an untracked file.
+    for (const path of diff.untracked) {
+      out.push({
+        key: `new:${path}`,
+        path,
+        ins: null,
+        del: null,
+        body: null,
+        note: "new file — content not shown",
+      });
+    }
+
+    let opened = 0;
+    // A file that doesn't fit closes everything after it too, not just
+    // itself — a "the rest collapsed" cutoff rather than an independent
+    // per-file coin flip a later small file could still win.
+    let full = false;
+    return out.map((r) => {
+      const n = r.body?.length ?? 0;
+      const open = !full && r.body != null && n <= MAX_FILE_LINES && opened + n <= MAX_OPEN_LINES;
+      if (open) opened += n;
+      else if (r.body != null) full = true;
+      return { ...r, open };
+    });
+  }, [diff]);
+
   return (
     <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label="changes">
       <div className="dialog diff-modal" ref={ref}>
         <header className="diff-modal-head">
           <span className="mono">{diff?.base_ref?.slice(0, 10) ?? "—"}</span>
-          {totals && (
+          {totals && diff && (
             <span className="diff-totals">
+              <span>{diff.files.length} files ·</span>{" "}
               <span className="diff-add">+{totals.ins}</span>{" "}
               <span className="diff-del">−{totals.del}</span>
             </span>
@@ -77,26 +199,42 @@ export function DiffModal({
           </p>
         )}
 
-        {diff && diff.files.length > 0 && (
+        {rows.length > 0 && (
           <ul className="diff-files">
-            {diff.files.map((f) => (
-              <li key={f.path}>
-                <span className="mono">{f.path}</span>
-                <span className="diff-add">+{f.insertions}</span>
-                <span className="diff-del">−{f.deletions}</span>
+            {rows.map((r) => (
+              <li key={r.key}>
+                {r.body ? (
+                  /* `<details>` is the whole interaction: no state, no toggle
+                     handler, keyboard-accessible for free. `open` is a plain
+                     attribute, and `diff` is fetched once, so React never
+                     fights a reader's own toggling. */
+                  <details open={r.open}>
+                    <summary>
+                      <span className="diff-file-head">
+                        <span className="mono">{r.path}</span>
+                        <span className="diff-add">+{r.ins}</span>
+                        <span className="diff-del">−{r.del}</span>
+                      </span>
+                    </summary>
+                    <pre className="diff-body">
+                      {r.body.map((line, i) => (
+                        <div key={i} className={lineClass(line)}>
+                          {line}
+                        </div>
+                      ))}
+                    </pre>
+                  </details>
+                ) : (
+                  <span className="diff-file-head">
+                    <span className="mono">{r.path}</span>
+                    {r.ins != null && <span className="diff-add">+{r.ins}</span>}
+                    {r.del != null && <span className="diff-del">−{r.del}</span>}
+                    <span className="field-hint">{r.note}</span>
+                  </span>
+                )}
               </li>
             ))}
           </ul>
-        )}
-
-        {diff && diff.diff !== "" && (
-          <pre className="diff-body">
-            {diff.diff.split("\n").map((line, i) => (
-              <div key={i} className={lineClass(line)}>
-                {line}
-              </div>
-            ))}
-          </pre>
         )}
 
         {diff?.truncated && (
@@ -104,19 +242,6 @@ export function DiffModal({
             Diff truncated — the file list above is complete. Open the worktree for the
             full change.
           </p>
-        )}
-
-        {diff && diff.untracked.length > 0 && (
-          <div className="diff-untracked">
-            <span className="field-hint">New files (content not shown)</span>
-            <ul>
-              {diff.untracked.map((p) => (
-                <li key={p} className="mono">
-                  {p}
-                </li>
-              ))}
-            </ul>
-          </div>
         )}
       </div>
     </div>
