@@ -154,13 +154,52 @@ def test_open_document_launches_the_named_editor(tmp_path, monkeypatch):
         assert launched == [["/usr/bin/code", str(Path(doc["repo"]) / doc["path"])]]
 
 
-def test_retry_is_refused_on_a_node_with_no_fix_loop(tmp_path, monkeypatch):
+def test_retry_is_refused_on_an_item_that_is_not_stopped(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = _completed_item(client, repo)
         r = client.post(f"/work-items/{wid}/retry", json={"steer": "try harder"})
         assert r.status_code == 409
+        assert "not stopped" in r.json()["detail"]
         assert client.post("/work-items/nope/retry", json={}).status_code == 404
+
+
+def test_retry_restarts_a_stopped_node_that_has_no_fix_loop(tmp_path, monkeypatch):
+    """Retry is the only door back onto an item stopped by a task failure.
+
+    quick-task's nodes carry no fix_loop, so refusing them here left the item
+    with no route at all — resume wants paused, pause wants running, and
+    approve/reject want a pending gate (Kraft-bzwi).
+    """
+    import time
+
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        # KRAFT_FAIL steers the fake agent into failing its node
+        wid = client.post(
+            "/work-items",
+            json={"repo": str(repo), "title": "KRAFT_FAIL once", "chain_template": "quick-task"},
+        ).json()["id"]
+
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            item = client.get(f"/work-items/{wid}").json()
+            if item["status"] == "needs_human":
+                break
+            time.sleep(0.2)
+        assert item["status"] == "needs_human"
+        node_id = item["current_node_id"]
+        chain = item["chain_definition"]
+        assert not next(n for n in chain["nodes"] if n["id"] == node_id).get("fix_loop")
+
+        r = client.post(f"/work-items/{wid}/retry", json={"steer": "the tests pass now"})
+        assert r.status_code == 200, r.text
+        assert r.json()["node_id"] == node_id
+        assert r.json()["loop"] is None
+
+        evts = client.get(f"/work-items/{wid}/events").json()
+        retried = [e for e in evts if e["type"] == "work_item_retried"]
+        assert retried and retried[-1]["payload"]["steer"] == "the tests pass now"
 
 
 def test_log_lines_carry_the_time_the_parent_saw_them(tmp_path, monkeypatch):

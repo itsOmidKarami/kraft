@@ -306,6 +306,16 @@ describe("WorkItemDetail", () => {
     expect(screen.queryByTestId("capped-card")).toBeNull();
   });
 
+  it("offers retry on a task failure even though the node has no fix loop", () => {
+    // Kraft-bzwi: retry is the only door onto a needs_human stop — resume
+    // wants `paused`, pause wants `running`, approve/reject want a gate — so
+    // hiding it on a loopless node left the item with no control at all.
+    setup({ status: "needs_human", current_node_id: "verify" });
+    renderDetail();
+    expect(screen.getByTestId("capped-card")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+  });
+
   it("shows concerns at the review gate", () => {
     setup({
       status: "needs_human",
