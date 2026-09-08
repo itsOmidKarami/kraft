@@ -13,7 +13,8 @@ from kraft.adapters.subprocess import read_concerns, read_question
 from kraft.paths import RunDirs
 
 _FAKE = Path(__file__).parent / "support" / "fake_agent.py"
-_FAKE_CLAUDE = Path(__file__).resolve().parents[1] / "fixtures" / "fake-claude.sh"
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 
 
 async def _seed(database, repo):
@@ -429,6 +430,42 @@ def test_the_context_asks_for_one_question_per_stop():
     needs three facts must ask for all three at once rather than stopping three
     times."""
     assert "ask for all of them in that one question" in agent._CTX
+
+
+def test_every_agent_node_is_told_to_commit_its_work(monkeypatch):
+    """Kraft-brq. The only commit sentence used to live in `_ARTIFACT`, which
+    is appended only for a binding declaring `artifact:`. `on.implementation.start`
+    declares none, so the node that writes the code was never told to commit it
+    and the merge request carried the spec and the plan and nothing else.
+    """
+    seen = _capture_cmd(monkeypatch)
+    _run(artifact=None)
+    prompt = _system_prompt(seen["cmd"])
+    assert "Commit everything you change before you exit" in prompt
+    assert "destroyed with the worktree" in prompt
+
+
+def test_workers_are_told_not_to_push_or_merge(monkeypatch):
+    """The other half of the contract. A worker that pushes on its own defeats
+    the dirty-tree precondition on the next node and merges a head CI has never
+    seen; Kraft is the only pusher (spec §1, §4)."""
+    seen = _capture_cmd(monkeypatch)
+    _run(artifact=None)
+    assert "Do not push and do not merge" in _system_prompt(seen["cmd"])
+
+
+def test_the_artifact_contract_does_not_claim_the_gate_cannot_see_uncommitted_files(monkeypatch):
+    """Kraft-i47n. `_ARTIFACT` justified its commit sentence with "an
+    uncommitted file is invisible to them", which is false: `_gate_artifact`
+    (api.py:620) resolves the path and `GET /work-items/{wid}/artifact` reads
+    the file off disk from the worktree, deliberately. With the contract in
+    `_CTX` the artifact needs no commit rule of its own, and must not state one
+    twice."""
+    seen = _capture_cmd(monkeypatch)
+    _run(artifact="spec")
+    prompt = _system_prompt(seen["cmd"])
+    assert "invisible to them" not in prompt
+    assert prompt.count("Commit everything you change before you exit") == 1
 
 
 def test_default_profile_reproduces_todays_command_line(monkeypatch):
@@ -886,3 +923,25 @@ def test_needs_context_survives_the_artifact_guard(tmp_path, monkeypatch):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_repo_agent_docs_do_not_forbid_a_kraft_worker_from_committing():
+    """Kraft-f3mv. The implementation node is a bare `claude` in this repo, so
+    it reads CLAUDE.md's Conservative profile -- "Do not run git commits, git
+    pushes, or Dolt remote sync unless explicitly asked" -- and correctly
+    leaves the work uncommitted. Task 2's injected contract says the opposite;
+    the two must not argue.
+
+    The carve-out has to sit after every generated `bd` block: the Conservative
+    line lives inside a hashed block, and editing inside one invites `bd` to
+    regenerate it and drop the carve-out silently.
+    """
+    for name in ("CLAUDE.md", "AGENTS.md"):
+        text = (_REPO_ROOT / name).read_text()
+        assert "## Kraft Workers" in text, f"{name} has no Kraft-worker carve-out"
+        assert "KRAFT_WORK_ITEM_ID" in text, f"{name} does not say who the carve-out applies to"
+        assert "commit" in text[text.index("## Kraft Workers") :], name
+        assert text.index("## Kraft Workers") > text.rindex("<!-- END BEADS"), (
+            f"{name}: the carve-out is inside or above a generated bd block, "
+            "where a regeneration would drop it"
+        )

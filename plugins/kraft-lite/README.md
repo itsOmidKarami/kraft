@@ -41,7 +41,7 @@ supply a spec writer or a planner; it supplies the order, the gates, and the
 caps, and calls whatever you already use. Edit that file freely — it is meant to
 be read, diffed and committed.
 
-The chain itself is `chains/default.json`: ten nodes from spec through plan,
+The chain itself is `chains/default.json`: eleven nodes from spec through plan,
 implementation, verification, and review, with four gates where a human decides.
 
 ## State

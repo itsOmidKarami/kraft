@@ -149,6 +149,32 @@ def test_gh_open_mr_parses_the_number_and_url(tmp_path, monkeypatch):
     assert mr.url == "https://github.com/o/r/pull/7"
 
 
+def test_open_mr_refuses_a_dirty_worktree(tmp_path, monkeypatch):
+    """Kraft-brq/Kraft-fhd1. Observed on work item 5163dd1b: the implementation
+    node finished with 18 dirty files and 224 uncommitted insertions, and
+    open_mr pushed a branch carrying only the spec and plan commits. The node
+    must fail and name the files instead of opening a document-only MR."""
+    _stub(tmp_path, monkeypatch, "git", " M src/kraft/adapters/forge.py")
+    _stub(tmp_path, monkeypatch, "glab", GLAB_MR_VIEW)
+
+    with pytest.raises(forge.ForgeError, match="forge.py"):
+        asyncio.run(forge.GlabCli().open_mr(repo=tmp_path, branch="kraft/abc", title="t", body="b"))
+
+    assert _argv(tmp_path, "glab") == [], "glab ran over an uncommitted worktree"
+
+
+def test_open_mr_refuses_an_untracked_only_worktree(tmp_path, monkeypatch):
+    """Untracked files are deliberately not excused: a new source or test file
+    the agent never `git add`ed is exactly what went missing on 5163dd1b."""
+    _stub(tmp_path, monkeypatch, "git", "?? tests/test_new_thing.py")
+    _stub(tmp_path, monkeypatch, "gh", GH_PR_VIEW)
+
+    with pytest.raises(forge.ForgeError, match="test_new_thing.py"):
+        asyncio.run(forge.GhCli().open_mr(repo=tmp_path, branch="kraft/abc", title="t", body="b"))
+
+    assert _argv(tmp_path, "gh") == []
+
+
 def test_gh_ci_status_fails_when_any_check_failed(tmp_path, monkeypatch):
     """One red check is a red rollup: the fixture is green build, red lint."""
     _stub(tmp_path, monkeypatch, "gh", GH_PR_VIEW)
@@ -225,6 +251,43 @@ def test_ci_poll_records_done_when_the_pipeline_is_green(tmp_path, monkeypatch):
     returned, recorded = _forge_session(tmp_path, monkeypatch, fake, "ci_poll", "s2")
     assert returned == "done"
     assert recorded == "done"
+
+
+def test_sync_mr_pushes_before_it_rewrites_the_description(tmp_path, monkeypatch):
+    """Kraft-nh5m. `open_mr` pushed once and nothing after it ever pushed
+    again, so every commit verify, mr_checks and the review brief added was
+    local only and died with the worktree -- observed on MR !65 and !66, both
+    `[ahead 2]` and both pushed by hand before approval. Push first, so the
+    description and the branch the reviewer's forge shows describe the same
+    head."""
+    order: list[str] = []
+
+    class Recording(forge.FakeForge):
+        async def push(self, *, repo, branch):
+            order.append("push")
+            await super().push(repo=repo, branch=branch)
+
+        async def update_mr(self, *, repo, branch, body):
+            order.append("update")
+            await super().update_mr(repo=repo, branch=branch, body=body)
+
+    fake = Recording()
+    returned, recorded = _forge_session(tmp_path, monkeypatch, fake, "sync_mr", "s8")
+
+    assert (returned, recorded) == ("done", "done")
+    assert order == ["push", "update"], "the description was rewritten over an unpushed head"
+    assert fake.pushed == ["kraft/w1"]
+    assert fake.bodies["kraft/w1"]
+
+
+def test_push_sets_the_upstream_on_the_work_item_branch(tmp_path, monkeypatch):
+    """The line `open_mr` already ran, now reachable on its own so the nodes
+    after it can push too."""
+    _stub(tmp_path, monkeypatch, "git", "")
+
+    asyncio.run(forge.GlabCli().push(repo=tmp_path, branch="kraft/abc"))
+
+    assert _argv(tmp_path, "git") == ["push", "-u", "origin", "kraft/abc"]
 
 
 def _session_log(tmp_path, session_id: str) -> str:
@@ -400,8 +463,11 @@ def test_glab_merge_resolves_from_the_branch_when_no_number_is_known(tmp_path, m
     lets the CLI resolve from the checked-out branch. `glab mr merge 0` would
     target a merge request that does not exist."""
     argv_log = _recording_stub(tmp_path, monkeypatch, "glab", "")
+    _stub(tmp_path, monkeypatch, "git", "0")
 
-    asyncio.run(forge.GlabCli().merge(repo=tmp_path, mr=forge.MR(number=0, url="")))
+    asyncio.run(
+        forge.GlabCli().merge(repo=tmp_path, branch="kraft/abc", mr=forge.MR(number=0, url=""))
+    )
 
     called = argv_log.read_text().strip()
     assert "mr merge" in called
@@ -410,8 +476,11 @@ def test_glab_merge_resolves_from_the_branch_when_no_number_is_known(tmp_path, m
 
 def test_gh_merge_resolves_from_the_branch_when_no_number_is_known(tmp_path, monkeypatch):
     argv_log = _recording_stub(tmp_path, monkeypatch, "gh", "")
+    _stub(tmp_path, monkeypatch, "git", "0")
 
-    asyncio.run(forge.GhCli().merge(repo=tmp_path, mr=forge.MR(number=0, url="")))
+    asyncio.run(
+        forge.GhCli().merge(repo=tmp_path, branch="kraft/abc", mr=forge.MR(number=0, url=""))
+    )
 
     called = argv_log.read_text().strip()
     assert "pr merge" in called
@@ -420,8 +489,33 @@ def test_gh_merge_resolves_from_the_branch_when_no_number_is_known(tmp_path, mon
 
 def test_glab_merge_uses_the_number_when_one_is_known(tmp_path, monkeypatch):
     argv_log = _recording_stub(tmp_path, monkeypatch, "glab", "")
-    asyncio.run(forge.GlabCli().merge(repo=tmp_path, mr=forge.MR(number=54, url="")))
+    _stub(tmp_path, monkeypatch, "git", "0")
+    asyncio.run(
+        forge.GlabCli().merge(repo=tmp_path, branch="kraft/abc", mr=forge.MR(number=54, url=""))
+    )
     assert "54" in argv_log.read_text()
+
+
+def test_merge_refuses_a_branch_ahead_of_its_remote(tmp_path, monkeypatch):
+    """Kraft-nh5m. Merging a head the forge has never seen merges code CI never
+    ran. A stop a human reads beats a green merge of untested code."""
+    _stub(tmp_path, monkeypatch, "git", "2")
+    _stub(tmp_path, monkeypatch, "glab", "")
+
+    with pytest.raises(forge.ForgeError, match="ahead of origin/kraft/abc by 2"):
+        asyncio.run(forge.GlabCli().merge(repo=tmp_path, branch="kraft/abc", mr=forge.MR(0, "")))
+
+    assert _argv(tmp_path, "glab") == [], "glab merged a branch the forge has never seen"
+
+
+def test_merge_proceeds_when_the_branch_is_pushed(tmp_path, monkeypatch):
+    """Zero commits ahead is the ordinary path after the sync node pushes."""
+    _stub(tmp_path, monkeypatch, "git", "0")
+    _stub(tmp_path, monkeypatch, "glab", "")
+
+    asyncio.run(forge.GlabCli().merge(repo=tmp_path, branch="kraft/abc", mr=forge.MR(0, "")))
+
+    assert _argv(tmp_path, "glab")[:2] == ["mr", "merge"]
 
 
 def _back_half_template() -> Template:
