@@ -939,34 +939,32 @@ aside .row, .narrow .row {
 .diff-modal-head .btn { margin-left: auto; }
 .diff-totals { display: flex; gap: 4px; font-size: 12px; }
 .diff-files { list-style: none; margin: 0; padding: 10px 22px; gap: 6px;
-              display: flex; flex-direction: column;
-              border-bottom: 1px solid var(--color-divider); }
-.diff-files li { display: flex; align-items: center; gap: 10px; font-size: 12px; }
-.diff-files li .mono { flex: 1; min-width: 0; color: var(--color-neutral-300); }
-.diff-body { overflow: auto; padding: 16px 22px 22px;
-             font-size: 12px; line-height: 1.45; }
+              display: flex; flex-direction: column; overflow: auto; }
+.diff-files summary { cursor: pointer; }
+/* The flex row lives in a span inside <summary>, not on <summary> itself:
+   `display: flex` on a summary removes the native disclosure marker. */
+.diff-file-head { display: inline-flex; align-items: center; gap: 10px;
+                  font-size: 12px; width: calc(100% - 18px); }
+.diff-file-head .mono { flex: 1; min-width: 0; color: var(--color-neutral-300); }
+.diff-body { padding: 6px 0 14px; font-size: 12px; line-height: 1.45; }
 .diff-body > div { white-space: pre; }
 .diff-add  { color: var(--color-accent); }
 .diff-del  { color: var(--color-accent-2); }
 .diff-hunk { color: var(--color-neutral-500); }
 .diff-ctx  { color: var(--color-neutral-300); }
-.diff-untracked { padding: 0 22px 18px; display: flex; flex-direction: column; gap: 6px; }
-.diff-untracked ul { list-style: none; margin: 0; padding: 0;
-                     display: flex; flex-direction: column; gap: 4px; }
-.diff-untracked li { font-size: 12px; color: var(--color-neutral-400); }
 
 /* the diff viewer (Kraft-8mu.2) is the screen a notification links into, so
    it is the one modal that has to survive a 390px viewport. This duplicates
    the `@media (max-width: 640px)` selector from the main phone block above
    (design 1n) rather than living there: the rules it overrides — .diff-modal,
-   .diff-body, .diff-files, .diff-untracked — are declared unconditionally
+   .diff-body, .diff-files — are declared unconditionally
    further down the file than that block, so a same-specificity override
    placed up there would lose the cascade to these later base rules. Moving
    this block back up next to the rest of the phone rules would silently
    disable it again. */
 @media (max-width: 640px) {
   .diff-modal { max-height: calc(100vh - 24px); width: 100%; }
-  .diff-modal-head, .diff-files, .diff-body, .diff-untracked {
+  .diff-modal-head, .diff-files, .diff-body {
     padding-left: 12px; padding-right: 12px;
   }
   .diff-body { font-size: 11px; }
@@ -974,9 +972,9 @@ aside .row, .narrow .row {
      `pre-wrap` keeps the leading space that makes a diff readable and wraps the
      overflow; `anywhere` handles a minified line with no break opportunity. */
   .diff-body > div { white-space: pre-wrap; overflow-wrap: anywhere; }
-  .diff-files li { flex-wrap: wrap; }
+  .diff-file-head { flex-wrap: wrap; }
   /* Session paths are far longer than 390px and the modal clips them, so
      nothing overflows by scrollWidth — the path is just silently cut in half.
      `anywhere` breaks it mid-token, which for a path is the only place to. */
-  .diff-untracked li { overflow-wrap: anywhere; }
+  .diff-file-head .mono { overflow-wrap: anywhere; }
 }

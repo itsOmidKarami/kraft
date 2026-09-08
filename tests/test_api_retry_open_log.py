@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+import threading
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -122,6 +125,52 @@ def test_log_follow_streams_the_lines_then_ends(tmp_path, monkeypatch):
             if ln.startswith("data: ") and ln != "data: {}"
         ]
         assert payloads and payloads[0]["n"] == 0
+
+
+def test_log_follow_keeps_streaming_a_pending_session(tmp_path, monkeypatch):
+    """A session that has not started yet is followed, not closed on the first poll.
+
+    `_tail` only ever stopped on a status that was not exactly 'running', so a
+    log opened a beat early got one poll's worth of output and an `event: end`.
+    Driven from outside the app: a helper thread appends a line to the log a
+    second in (well past the 0.4s poll a pending session used to survive) and
+    only then marks the session done, so the stream terminates on its own.
+    """
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _completed_item(client, repo)
+        sid = client.get(f"/work-items/{wid}").json()["worker_sessions"][0]["id"]
+
+        db = tmp_path / "run" / "orchestrator.db"
+        conn = sqlite3.connect(db)
+        log_path = Path(
+            conn.execute("SELECT log_path FROM worker_sessions WHERE id = ?", (sid,)).fetchone()[0]
+        )
+        conn.execute("UPDATE worker_sessions SET status = 'pending' WHERE id = ?", (sid,))
+        conn.commit()
+
+        def finish():
+            time.sleep(1.0)
+            with log_path.open("a") as fh:
+                fh.write("late line from a pending session\n")
+            side = sqlite3.connect(db)
+            side.execute("UPDATE worker_sessions SET status = 'done' WHERE id = ?", (sid,))
+            side.commit()
+            side.close()
+
+        worker = threading.Thread(target=finish)
+        worker.start()
+        try:
+            with client.stream("GET", f"/worker-sessions/{sid}/log?format=jsonl&follow=1") as r:
+                body = "".join(r.iter_text())
+        finally:
+            worker.join()
+            conn.close()
+
+        # the line written a second in only arrives if the tail was still
+        # following a session in 'pending'
+        assert "late line from a pending session" in body
+        assert body.rstrip().endswith("event: end\ndata: {}")
 
 
 def test_open_document_reports_501_when_no_editor_is_installed(tmp_path, monkeypatch):

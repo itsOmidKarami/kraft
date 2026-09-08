@@ -27,10 +27,24 @@ import type {
 } from "./types";
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    ...init,
-    headers: { accept: "application/json", ...init?.headers },
-  });
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      ...init,
+      headers: { accept: "application/json", ...init?.headers },
+    });
+  } catch (e) {
+    // A transport-level failure rejects with a bare `TypeError: Failed to
+    // fetch`, which names neither the server nor the request — and every
+    // caller renders the message straight into the UI. Named here, once,
+    // rather than in each caller. Anything else rethrows untouched.
+    if (e instanceof TypeError) {
+      throw new Error(
+        `could not reach the Kraft server (${init?.method ?? "GET"} ${path}) — it may have stopped`,
+      );
+    }
+    throw e;
+  }
   if (!res.ok) {
     let detail = res.statusText;
     try {
