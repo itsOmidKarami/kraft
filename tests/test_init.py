@@ -41,7 +41,7 @@ def test_repo_scope_writes_mcp_json_and_the_plugin(tmp_path):
 
     config = json.loads((tmp_path / ".mcp.json").read_text())
     assert config["mcpServers"]["kraft"]["command"] == "kraft"
-    assert config["mcpServers"]["kraft"]["args"] == ["mcp"]
+    assert config["mcpServers"]["kraft"]["args"] == ["admin", "mcp"]
     assert _plugin_root(tmp_path / ".claude").is_dir()
     assert str(tmp_path / ".mcp.json") in written
 

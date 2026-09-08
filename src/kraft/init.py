@@ -1,4 +1,4 @@
-"""`kraft init` — install the agent-facing surface at user or repo scope.
+"""`kraft admin init` — install the agent-facing surface at user or repo scope.
 
 Design §8. User scope delegates MCP registration to the `claude` CLI:
 `~/.claude.json` is large, shared, agent-owned user state, and hand-editing it is
@@ -7,7 +7,7 @@ how an installer corrupts somebody's whole configuration. The repo-scope
 to the repo the human pointed Kraft at.
 
 Nothing here touches `CLAUDE.md`, `AGENTS.md`, or any other ambient repo file
-(§1.4 as amended in §8.1): every path written is one `kraft init` was asked for.
+(§1.4 as amended in §8.1): every path written is one `kraft admin init` was asked for.
 """
 
 from __future__ import annotations
@@ -133,7 +133,7 @@ it is waiting on if there is one. `next_node_id` is null on the last node of the
 chain, which renders as `done`; on an item nobody has started yet it is node
 zero, because that is what starting it will run.
 
-Drop the id to ask about the work item you are standing in: `kraft show --json`
+Drop the id to ask about the work item you are standing in: `kraft view show --json`
 resolves it from the worktree.
 
 ## Watching it until it ends
@@ -215,7 +215,7 @@ def _write_repo_mcp_json(cwd: Path) -> str:
         config = json.loads(path.read_text())
     except OSError, ValueError:
         config = {}
-    config.setdefault("mcpServers", {})["kraft"] = {"command": "kraft", "args": ["mcp"]}
+    config.setdefault("mcpServers", {})["kraft"] = {"command": "kraft", "args": ["admin", "mcp"]}
     path.write_text(json.dumps(config, indent=2) + "\n")
     return str(path)
 
@@ -230,7 +230,7 @@ def install(
     if repo_scope:
         return [_write_repo_mcp_json(cwd), *_write_plugin(cwd / ".claude")]
 
-    command = ["claude", "mcp", "add", "--scope", "user", "kraft", "--", "kraft", "mcp"]
+    command = ["claude", "mcp", "add", "--scope", "user", "kraft", "--", "kraft", "admin", "mcp"]
     try:
         result = run(command, capture_output=True, text=True)
     except FileNotFoundError:

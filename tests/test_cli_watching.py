@@ -112,7 +112,7 @@ def test_events_follow_filters_by_item_and_stops_on_completion(app, tmp_path, mo
         yield {"type": "node_started", "seq": 104, "work_item_id": wid}  # must never be reached
 
     monkeypatch.setattr(client, "stream_events", fake_stream)
-    cli.main(["events", wid, "-f"])
+    cli.main(["view", "events", wid, "-f"])
     out = capsys.readouterr().out
     assert "101" not in out  # foreign item filtered out
     assert "102" in out
@@ -146,7 +146,7 @@ def test_events_follow_returns_at_once_on_an_item_that_already_ended(
 
     asyncio.run(abandon())
 
-    cli.main(["events", wid, "-f"])
+    cli.main(["view", "events", wid, "-f"])
     out = capsys.readouterr().out
     assert "work_item_abandoned" in out
     assert "999" not in out
@@ -156,7 +156,7 @@ def test_logs_without_a_session_says_so(app, tmp_path, capsys):
     repo = make_repo(tmp_path)
     wid = _make_item(repo)
     with pytest.raises(SystemExit) as caught:
-        cli.main(["logs", wid])
+        cli.main(["view", "logs", wid])
     assert caught.value.code == 1
     assert "no worker session" in capsys.readouterr().err
 
@@ -182,7 +182,7 @@ def test_logs_backlog_renders_lines(app, tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr(client, "latest_session", fake_latest)
     monkeypatch.setattr(client, "_get", fake_get)
-    cli.main(["logs", wid])
+    cli.main(["view", "logs", wid])
     out = capsys.readouterr().out
     assert "first" in out and "second" in out
 
@@ -203,7 +203,7 @@ def test_logs_n_limits_the_backlog(app, tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr(client, "latest_session", fake_latest)
     monkeypatch.setattr(client, "_get", fake_get)
-    cli.main(["logs", wid, "-n", "3"])
+    cli.main(["view", "logs", wid, "-n", "3"])
     out = capsys.readouterr().out.strip().splitlines()
     assert len(out) == 3
     assert "line9" in out[-1]
@@ -221,7 +221,7 @@ def test_logs_json_is_ndjson(app, tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr(client, "latest_session", fake_latest)
     monkeypatch.setattr(client, "_get", fake_get)
-    cli.main(["logs", wid, "--json"])
+    cli.main(["view", "logs", wid, "--json"])
     out = capsys.readouterr().out.strip()
     # one JSON object per line, no enclosing array: a stream has no closing bracket
     assert json.loads(out)["text"] == "one"
@@ -231,7 +231,7 @@ def test_logs_json_is_ndjson(app, tmp_path, monkeypatch, capsys):
 def test_events_renders_a_table(app, tmp_path, capsys):
     repo = make_repo(tmp_path)
     wid = _make_item(repo)
-    cli.main(["events", wid])
+    cli.main(["view", "events", wid])
     out = capsys.readouterr().out
     assert "SEQ" in out.splitlines()[0]
     assert "TYPE" in out.splitlines()[0]
@@ -240,7 +240,7 @@ def test_events_renders_a_table(app, tmp_path, capsys):
 def test_events_filters_by_type(app, tmp_path, capsys):
     repo = make_repo(tmp_path)
     wid = _make_item(repo)
-    cli.main(["events", wid, "--type", "no-such-type", "--json"])
+    cli.main(["view", "events", wid, "--type", "no-such-type", "--json"])
     assert json.loads(capsys.readouterr().out) == []
 
 
@@ -254,7 +254,7 @@ def test_events_after_seq_is_passed_through(app, tmp_path, monkeypatch, capsys):
         return []
 
     monkeypatch.setattr(client, "events", fake_events)
-    cli.main(["events", wid, "--after", "7", "--json"])
+    cli.main(["view", "events", wid, "--after", "7", "--json"])
     assert seen["after_seq"] == 7
 
 
@@ -262,7 +262,7 @@ def test_watch_refuses_a_pipe(app, capsys, monkeypatch):
     """Redrawing into a pipe produces garbage; point at `events` instead."""
     monkeypatch.setattr("sys.stdout.isatty", lambda: False, raising=False)
     with pytest.raises(SystemExit) as caught:
-        cli.main(["watch"])
+        cli.main(["view", "watch"])
     assert caught.value.code == 1
     assert "events" in capsys.readouterr().err
 
@@ -270,7 +270,7 @@ def test_watch_refuses_a_pipe(app, capsys, monkeypatch):
 def test_watch_has_no_json_mode(app, capsys, monkeypatch):
     monkeypatch.setattr("sys.stdout.isatty", lambda: True, raising=False)
     with pytest.raises(SystemExit) as caught:
-        cli.main(["watch", "--json"])
+        cli.main(["view", "watch", "--json"])
     assert caught.value.code == 1
     assert "--json" in capsys.readouterr().err
 
@@ -322,7 +322,7 @@ def test_logs_n_zero_prints_no_backlog(app, tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr(client, "latest_session", fake_latest)
     monkeypatch.setattr(client, "_get", fake_get)
-    cli.main(["logs", wid, "-n", "0"])
+    cli.main(["view", "logs", wid, "-n", "0"])
     assert capsys.readouterr().out == ""
 
 
@@ -343,7 +343,7 @@ def test_watch_draws_a_frame_per_event_and_starts_at_the_live_cursor(
             yield {"type": "node_started", "seq": after_seq + 1}
 
     monkeypatch.setattr(client, "stream_events", fake_stream)
-    cli.main(["watch"])
+    cli.main(["view", "watch"])
     out = capsys.readouterr().out
     assert out.count("on the board") == 3  # the first frame plus one per event
     assert seen["after_seq"] > 0  # the live cursor, not a full replay
@@ -358,7 +358,7 @@ def test_a_closed_event_stream_is_a_kraft_message(app, monkeypatch, capsys):
 
     monkeypatch.setattr(client, "stream_events", dying_stream)
     with pytest.raises(SystemExit) as caught:
-        cli.main(["watch"])
+        cli.main(["view", "watch"])
     assert caught.value.code == 1
     assert "closed the event stream" in capsys.readouterr().err
 
@@ -390,7 +390,7 @@ def test_events_follow_json_is_one_object_per_line(app, tmp_path, monkeypatch, c
         yield {"type": "work_item_completed", "seq": 202, "work_item_id": wid}
 
     monkeypatch.setattr(client, "stream_events", fake_stream)
-    cli.main(["events", wid, "--after", "9999", "-f", "--json"])
+    cli.main(["view", "events", wid, "--after", "9999", "-f", "--json"])
     lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
     # --after 9999 empties the backlog, so every line here is a streamed frame
     parsed = [json.loads(line) for line in lines[1:]]
