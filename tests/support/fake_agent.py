@@ -1,5 +1,6 @@
 """Stand-in for `claude` headless. Invoked as:
-   python fake_agent.py -p <instr> --append-system-prompt <ctx> --output-format json
+   python fake_agent.py -p <instr> --append-system-prompt <ctx> \
+       --output-format stream-json --verbose
 CWD is the worktree. Mode via KRAFT_FAKE_AGENT: fix (default) | noop | error.
 
 Obeys the session-summary instructions in the injected context (03 §3, 04 §6):
@@ -165,12 +166,33 @@ def main() -> int:
                 }
             ]
         pathlib.Path(result_path).write_text(json.dumps(result))
-    # A real agent's final envelope carries its token usage; usage capture reads
-    # this line, so the fake carries it too.
+    # The adapter runs the real CLI in stream-json mode, so the fake streams the
+    # shapes the adapter now parses: an init line with the model, one assistant
+    # line with a request_id and per-request usage, then the envelope last.
+    print(json.dumps({"type": "system", "subtype": "init", "model": "fake-agent"}), flush=True)
+    print(
+        json.dumps(
+            {
+                "type": "assistant",
+                "request_id": "req_1",
+                "message": {
+                    "model": "fake-agent",
+                    "usage": {
+                        "input_tokens": 1000,
+                        "output_tokens": 200,
+                        "cache_read_input_tokens": 500,
+                    },
+                },
+            }
+        ),
+        flush=True,
+    )
     envelope = {
         "type": "result",
         "is_error": mode == "error",
-        "model": "fake-agent",
+        # no top-level `model`: the real envelope carries `modelUsage`, keyed by
+        # model name, which is why every worker_sessions row had model NULL
+        "modelUsage": {"fake-agent": {"inputTokens": 1500, "outputTokens": 200}},
         # a real agent CLI reports what it was billed; Kraft never computes it
         "total_cost_usd": 0.035,
         "usage": {"input_tokens": 1000, "output_tokens": 200, "cache_read_input_tokens": 500},

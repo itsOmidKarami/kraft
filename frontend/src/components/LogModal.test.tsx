@@ -39,17 +39,18 @@ const session = (over: Partial<WorkerSession> = {}): WorkerSession =>
     ...over,
   }) as WorkerSession;
 
-const line = (n: number, src: LogLine["src"], text: string): LogLine => ({
+const line = (n: number, src: LogLine["src"], text: string, summary?: string): LogLine => ({
   n,
   t: null,
   src,
   text,
+  summary,
 });
 
 const LINES = [
   line(0, "sys", "starting on.test.run"),
   line(1, "stdout", "collected 12 items"),
-  line(2, "agent", '{"type":"result"}'),
+  line(2, "agent", '{"type":"result"}', "result: success"),
 ];
 
 beforeEach(() => {
@@ -97,14 +98,24 @@ describe("LogModal", () => {
     expect(buttons[buttons.length - 1]).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("copies the whole log, not just the filtered view", async () => {
+  it("shows the readable summary when the server sent one", async () => {
+    render(<LogModal sessionId="s1" onClose={() => {}} />);
+    expect(await screen.findByText("result: success")).toBeInTheDocument();
+    expect(screen.queryByText('{"type":"result"}')).not.toBeInTheDocument();
+  });
+
+  it("copies the whole log from the plain-text endpoint, not the rendered view", async () => {
+    // the rendered rows are truncated at 2000 chars and summarised; a copied
+    // log has to be the file
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });
+    vi.spyOn(api, "getLogText").mockResolvedValue("the whole log\n");
     render(<LogModal sessionId="s1" onClose={() => {}} />);
     await screen.findByText("on.test.run");
     await userEvent.click(screen.getByRole("button", { name: "stdout" }));
     await userEvent.click(screen.getByRole("button", { name: /copy log/i }));
-    expect(writeText).toHaveBeenCalledWith(LINES.map((l) => l.text).join("\n"));
+    expect(api.getLogText).toHaveBeenCalledWith("s1");
+    expect(writeText).toHaveBeenCalledWith("the whole log\n");
   });
 
   it("surfaces a failed fetch rather than an empty modal", async () => {

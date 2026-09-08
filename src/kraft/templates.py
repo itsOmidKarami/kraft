@@ -45,6 +45,12 @@ _ARTIFACT_KIND = re.compile(r"[a-z][a-z0-9_-]*")
 #: already paid for a worktree and a session (Kraft-tff).
 _EFFORT_LEVELS = {"low", "medium", "high", "xhigh", "max"}
 
+#: The modes `claude --permission-mode` takes. Checked at config load for the
+#: same reason as `_EFFORT_LEVELS`: a typo in a permission grant that reaches
+#: the CLI fails the node after the work item has paid for a worktree and a
+#: session.
+_PERMISSION_MODES = {"default", "auto", "acceptEdits", "plan", "bypassPermissions"}
+
 
 class RegistryError(Exception):
     pass
@@ -165,6 +171,8 @@ def load_registry(
             "skill",
             "artifact",
             "effort",
+            "allowed_tools",
+            "permission_mode",
         )
         if kind == "agent":
             profiles = _agent_profiles()
@@ -182,7 +190,12 @@ def load_registry(
                     f"{path.name}: hook {hook!r} 'effort' must be one of "
                     f"{sorted(_EFFORT_LEVELS)}; got {binding['effort']!r}"
                 )
-            for key in ("deny_tools", "steering"):
+            if "permission_mode" in binding and binding["permission_mode"] not in _PERMISSION_MODES:
+                raise RegistryError(
+                    f"{path.name}: hook {hook!r} 'permission_mode' must be one of "
+                    f"{sorted(_PERMISSION_MODES)}; got {binding['permission_mode']!r}"
+                )
+            for key in ("deny_tools", "steering", "allowed_tools"):
                 v = binding.get(key, [])
                 if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
                     raise RegistryError(

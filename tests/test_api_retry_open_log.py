@@ -57,12 +57,94 @@ def _spy_on_launches(monkeypatch):
 
 def test_classify_separates_agent_tool_and_plain_output():
     assert logs.classify("running pytest") == ("stdout", None)
-    assert logs.classify('{"type": "result", "is_error": false}') == ("agent", None)
     assert logs.classify('{"type": "tool_use", "name": "Bash"}') == ("tool", None)
     # a JSON line that carries its own time keeps it
     assert logs.classify('{"type": "text", "timestamp": "12:00:01"}') == ("agent", "12:00:01")
     # not-quite-JSON is output, not a parse error
     assert logs.classify("{oops") == ("stdout", None)
+    # the stream's own bookkeeping lines are the session's, not the agent's
+    assert logs.classify('{"type": "result", "is_error": false}') == ("sys", None)
+    assert logs.classify('{"type": "system", "subtype": "init"}') == ("sys", None)
+
+
+def test_classify_reads_tool_use_out_of_a_stream_json_message():
+    """stream-json nests tool use inside `message.content[]`, so a top-level
+    check filed every line under `agent` and the modal's `tool` chip selected
+    nothing."""
+    line = json.dumps(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "thinking", "thinking": "..."},
+                    {
+                        "type": "tool_use",
+                        "name": "Read",
+                        "input": {"file_path": "src/kraft/api.py"},
+                    },
+                ]
+            },
+        }
+    )
+    assert logs.classify(line)[0] == "tool"
+    user = json.dumps(
+        {"type": "user", "message": {"content": [{"type": "tool_result", "content": "ok"}]}}
+    )
+    assert logs.classify(user)[0] == "tool"
+
+
+def test_jsonl_summarises_each_line_and_truncates_a_very_long_one(tmp_path):
+    """The modal renders every line; a tool_result for a large file read is
+    tens of KB of JSON. The summary is what a reader scans, `text` is the raw
+    line capped, and the plain-text endpoint keeps the whole thing."""
+    huge = "x" * 5000
+    p = tmp_path / "s.log"
+    p.write_text(
+        "\n".join(
+            [
+                json.dumps({"type": "system", "subtype": "init", "model": "claude-opus-5"}),
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "message": {
+                            "content": [
+                                {
+                                    "type": "tool_use",
+                                    "name": "Read",
+                                    "input": {"file_path": "src/kraft/api.py"},
+                                }
+                            ]
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "message": {
+                            "content": [{"type": "text", "text": "Reading the API.\nThen:"}]
+                        },
+                    }
+                ),
+                json.dumps(
+                    {"type": "user", "message": {"content": [{"type": "text", "text": huge}]}}
+                ),
+                json.dumps({"type": "result", "is_error": False}),
+                "plain stdout",
+            ]
+        )
+        + "\n"
+    )
+    rows = list(logs.jsonl(p))
+    assert [r["summary"] for r in rows][:3] == [
+        "init claude-opus-5",
+        "Read(src/kraft/api.py)",
+        "Reading the API.",
+    ]
+    assert rows[4]["summary"] == "result: success"
+    assert rows[5]["summary"] == "plain stdout"
+    assert len(rows[3]["text"]) == 2001 and rows[3]["text"].endswith("…")
+    # the plain-text endpoint serves the file itself, which is untouched
+    assert huge in p.read_text()
 
 
 def test_jsonl_numbers_lines_and_can_resume_mid_file(tmp_path):
@@ -71,6 +153,25 @@ def test_jsonl_numbers_lines_and_can_resume_mid_file(tmp_path):
     assert [line["n"] for line in logs.jsonl(p)] == [0, 1, 2]
     assert [line["text"] for line in logs.jsonl(p, start_line=2)] == ["three"]
     assert list(logs.jsonl(tmp_path / "gone.log")) == []
+
+
+def test_split_lines_is_the_one_numbering_rule(tmp_path):
+    """The writer counts bytes and the reader counts lines; they have to agree.
+
+    `str.splitlines()` splits on \\r, \\v, \\x1c and U+2028 as well as \\n. An
+    incremental reader watching a byte stream cannot, so a raw \\r inside a
+    line used to invent a line the sidecar had no timestamp for.
+    """
+    assert logs.split_lines("a\nb\n") == ["a", "b"]
+    assert logs.split_lines("a\nb") == ["a", "b"]  # a partial last line still counts
+    assert logs.split_lines("") == []
+    assert logs.split_lines("\n") == [""]
+    assert logs.split_lines("a\rb\n") == ["a\rb"]
+    assert logs.split_lines("a b\n") == ["a b"]
+
+    p = tmp_path / "s.log"
+    p.write_text("a\rb\nc\n")
+    assert [row["n"] for row in logs.jsonl(p)] == [0, 1]
 
 
 # ── endpoints ────────────────────────────────────────────────────────────────
