@@ -98,7 +98,8 @@ export function CappedCard({
               "Kraft crashed while running this node"
             ) : (
               <>
-                {node?.fix_loop ?? "the loop"} {item.cappedOut ? "hit its cap" : "needs a steer"}
+                {node?.fix_loop ?? node?.id ?? "this node"}{" "}
+                {item.cappedOut ? "hit its cap" : "needs a steer"}
                 {item.cappedOut && ` — ${item.cappedOut.attempts} attempts`}
                 {span && `, ${span}`}
               </>

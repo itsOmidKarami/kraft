@@ -97,6 +97,59 @@ def test_stream_log_follows_a_session_and_stops_when_it_stops(tmp_path, monkeypa
     assert [line["n"] for line in lines] == sorted(line["n"] for line in lines)
 
 
+def test_events_follow_filters_by_item_and_stops_on_completion(app, tmp_path, monkeypatch, capsys):
+    """The bus is instance-wide and never ends on its own: a foreign-item event
+    must not print, and work_item_completed must end the follow rather than
+    hang waiting for a frame that never comes."""
+    repo = make_repo(tmp_path)
+    wid = _make_item(repo)
+    other = _make_item(repo, "someone else's chain")
+
+    async def fake_stream(after_seq=0):
+        yield {"type": "node_started", "seq": 101, "work_item_id": other}
+        yield {"type": "node_started", "seq": 102, "work_item_id": wid}
+        yield {"type": "work_item_completed", "seq": 103, "work_item_id": wid}
+        yield {"type": "node_started", "seq": 104, "work_item_id": wid}  # must never be reached
+
+    monkeypatch.setattr(client, "stream_events", fake_stream)
+    cli.main(["events", wid, "-f"])
+    out = capsys.readouterr().out
+    assert "101" not in out  # foreign item filtered out
+    assert "102" in out
+    assert "103" in out
+    assert "104" not in out  # left the loop at work_item_completed, not run on
+
+
+def test_events_follow_returns_at_once_on_an_item_that_already_ended(
+    app, tmp_path, monkeypatch, capsys
+):
+    """A finished item's terminal event is in the backlog, not in the stream.
+
+    Without this the follow waits on a bus that has nothing left to say about
+    this item -- the exact "armed forever" failure the stop condition exists
+    to prevent, just reached from the other side.
+    """
+    repo = make_repo(tmp_path)
+    wid = _make_item(repo)
+
+    async def never_ends(after_seq=0):
+        yield {"type": "node_started", "seq": 999, "work_item_id": wid}
+        raise AssertionError("the follow should not have reached the stream")
+
+    monkeypatch.setattr(client, "stream_events", never_ends)
+
+    async def abandon():
+        async with client.http() as http:
+            assert (await http.post(f"/work-items/{wid}/abandon")).status_code == 200
+
+    asyncio.run(abandon())
+
+    cli.main(["events", wid, "-f"])
+    out = capsys.readouterr().out
+    assert "work_item_abandoned" in out
+    assert "999" not in out
+
+
 def test_logs_without_a_session_says_so(app, tmp_path, capsys):
     repo = make_repo(tmp_path)
     wid = _make_item(repo)

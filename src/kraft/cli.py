@@ -313,11 +313,40 @@ def _cmd_logs(ns: argparse.Namespace) -> None:
     asyncio.run(run())
 
 
+#: The events after which a chain produces no more of them. A follow that
+#: outlives the item is worse than no follow -- it is a monitor that stays
+#: armed forever on work that finished.
+_CHAIN_ENDED = ("work_item_completed", "work_item_abandoned")
+
+
 def _cmd_events(ns: argparse.Namespace) -> None:
-    rows = asyncio.run(client.events(ns.id, ns.after))
-    if ns.type:
-        rows = [row for row in rows if row.get("type") == ns.type]
-    emit(rows, render.event_line, ns.json)
+    async def run() -> None:
+        wid = await client._target(ns.id)
+        rows = await client.events(wid, ns.after)
+        shown = [row for row in rows if row.get("type") == ns.type] if ns.type else rows
+        emit(shown, render.event_line, ns.json)
+        if not ns.follow:
+            return
+        # An item that has already ended carries its terminal event in the
+        # backlog, not in the stream, so following it would wait for a frame
+        # that is never coming. The cursor is taken from the unfiltered rows
+        # for the same reason a --type follow must not replay: what was
+        # printed and what was seen are different questions.
+        if any(row["type"] in _CHAIN_ENDED for row in rows):
+            return
+        after = rows[-1]["seq"] if rows else ns.after
+        async for ev in client.stream_events(after):
+            if ev["work_item_id"] != wid:
+                continue
+            if not ns.type or ev.get("type") == ns.type:
+                emit([ev], render.event_line, ns.json)
+            if ev["type"] in _CHAIN_ENDED:
+                return
+
+    try:
+        asyncio.run(run())
+    except KeyboardInterrupt:
+        pass  # matches watch: Ctrl-C ends a follow cleanly, not with a traceback
 
 
 def _cmd_watch(ns: argparse.Namespace) -> None:
@@ -545,6 +574,12 @@ def _add_verbs(subs, common: argparse.ArgumentParser) -> None:
     events_p.add_argument("id", nargs="?")
     events_p.add_argument("--after", type=int, default=0, help="only events after this seq")
     events_p.add_argument("--type", help="only this event type")
+    events_p.add_argument(
+        "-f",
+        "--follow",
+        action="store_true",
+        help="stream until the item completes or is abandoned",
+    )
     events_p.set_defaults(func=_cmd_events)
 
     watch = subs.add_parser("watch", parents=[common], help="a live board, redrawn on each event")

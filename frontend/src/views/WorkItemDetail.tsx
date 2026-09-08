@@ -165,16 +165,17 @@ export function WorkItemDetail() {
 
   const nodes = item.chain_definition.nodes;
   const at = nodes.findIndex((n) => n.id === item.current_node_id);
-  const currentNode = at >= 0 ? nodes[at] : undefined;
   const runtime = nodeRuntime(events, item.current_node_id);
   const gate = item.pending_gate ?? null;
   const nodeSessions = sessions.filter((s) => s.node_id === item.current_node_id);
-  // A `no_progress` escalation stops the item exactly like a cap breach, but
-  // with `capped: null` (Kraft's own executor deliberately never fakes a cap
-  // it did not hit). Gate on the status + fix_loop, not on cappedOut alone,
-  // or the retry control disappears for the one stop where a human's steer
-  // is the only way to unstick the item.
-  const strandedInFixLoop = !gate && item.status === "needs_human" && !!currentNode?.fix_loop;
+  // Every non-gate `needs_human` stop, whatever put it there: a cap breach, a
+  // `no_progress` escalation (which carries `capped: null`, because the
+  // executor never fakes a cap it did not hit), or a plain task failure. All
+  // of them leave retry as the only door — resume wants `paused` and pause
+  // wants `running` — so gating this on `cappedOut`, or on the node having a
+  // fix_loop, is what took the control off the screen for the stops that
+  // needed it most (Kraft-bzwi).
+  const stranded = !gate && item.status === "needs_human";
 
   const pause = async () => {
     setPausing(true);
@@ -265,10 +266,10 @@ export function WorkItemDetail() {
       {!gate && <p className="phone-only open-on-desktop">Open on desktop to steer or retry.</p>}
 
       {/* Checked first: a `needs_context` stop is answerable through /resume
-          regardless of the current node's shape, and `strandedInFixLoop`
-          below fires for *any* needs_human on a fix-loop node — including
-          this one, since `mark_needs_human` never sets `capped` for a
-          needs_context reason. Routing it through CappedCard's "Steer and
+          regardless of the current node's shape, and `stranded`
+          below fires for *any* non-gate needs_human — including this one,
+          since `mark_needs_human` never sets `capped` for a needs_context
+          reason. Routing it through CappedCard's "Steer and
           retry" would go through /retry instead, which resets the loop
           counter and discards fix-loop progress spec §3 says must survive. */}
       {item.status === "needs_human" && item.needs_context_question && !gate ? (
@@ -276,8 +277,8 @@ export function WorkItemDetail() {
           <NeedsContextCard item={item} />
         </div>
       ) : /* Then budget: a spend cap stopped the item before it launched
-             anything, and `strandedInFixLoop` below would otherwise claim a
-             fix loop needs a steer when no fix agent ever ran. The two are
+             anything, and `stranded` below would otherwise claim the node
+             needs a steer when no agent ever ran. The two are
              mutually exclusive in practice — a budget stop's reason is never
              a needs_context question — so this order only decides which card
              wins if that ever stops being true. */
@@ -285,7 +286,7 @@ export function WorkItemDetail() {
         <div className="desktop-only">
           <BudgetCard item={item} />
         </div>
-      ) : item.cappedOut || strandedInFixLoop ? (
+      ) : item.cappedOut || stranded ? (
         <div className="desktop-only">
           <CappedCard item={item} sessions={sessions} events={events} />
         </div>

@@ -231,17 +231,24 @@ def bump_counter(
     )
 
 
-def retry_after_cap(conn: sqlite3.Connection, work_item_id: str, node_id: str, key: str, steer):
+def retry_after_cap(
+    conn: sqlite3.Connection, work_item_id: str, node_id: str, key: str | None, steer
+):
     """Clear a breached loop cap so the node can run again (handoff spec §8, 4b).
 
     The counter row is deleted rather than zeroed: `bump_counter` snapshots the
     cap and the wall-clock start on first fire, and a retry is a fresh budget,
     not a continuation of the exhausted one. The capped-out sessions stay as
     they are — they are the record of what was tried.
+
+    `key` is None for a node with no fix loop: there is no counter to clear, but
+    the item still has to be put back to work. A plain task failure strands an
+    item exactly as hard as a breached cap does (Kraft-bzwi).
     """
-    conn.execute(
-        "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?", (work_item_id, key)
-    )
+    if key is not None:
+        conn.execute(
+            "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?", (work_item_id, key)
+        )
     conn.execute(
         "UPDATE work_items SET status = 'active', updated_at = ? WHERE id = ?",
         (_now(), work_item_id),
