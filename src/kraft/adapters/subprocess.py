@@ -73,6 +73,22 @@ def read_question(path: Path) -> str | None:
     return _read_str_field(path, "question")
 
 
+def read_result_fields(path: Path) -> dict[str, str | None]:
+    """`session_summary_ref`/`concerns`/`question` together.
+
+    The one place the result-file contract's field list is spelled out.
+    `run_task` below and `reattach._exit_from_file` are independent readers of
+    the same file, on the two paths a session can exit by (in process, or
+    adopted after a restart); a field added to one and not the other would
+    reach the DB on one path and silently drop on the other (Kraft-k3d).
+    """
+    return {
+        "summary_ref": read_summary_ref(path),
+        "concerns": read_concerns(path),
+        "question": read_question(path),
+    }
+
+
 def _watch_log(
     log_path: Path, times_path: Path, stop: threading.Event, poll_s: float = 0.2
 ) -> None:
@@ -205,16 +221,17 @@ async def run_task(
     # "stopped on purpose" rather than "failed". The row is the authority.
     if await db.write(lambda c: store.session_status(c, session_id)) == "paused":
         return "paused"
-    summary_ref = read_summary_ref(result_path)
-    # Read unconditionally, same as summary_ref: each returns None when the
-    # result file doesn't carry that field, so a "failed" or "done" exit here
-    # costs nothing extra.
-    concerns = read_concerns(result_path)
-    question = read_question(result_path)
+    fields = read_result_fields(result_path)
     seen = _usage.read(log_path, result_path)
     await db.write(
         lambda c: store.session_exited(
-            c, session_id, status, summary_ref, seen, concerns=concerns, question=question
+            c,
+            session_id,
+            status,
+            fields["summary_ref"],
+            seen,
+            concerns=fields["concerns"],
+            question=fields["question"],
         )
     )
     return status

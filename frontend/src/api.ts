@@ -110,6 +110,12 @@ export const resumeWorkItem = (id: string, steer?: string) =>
     json("POST", { steer: steer ?? null }),
   );
 
+export const abandonWorkItem = (id: string) =>
+  req<{ id: string; status: string; worktree_removed: boolean }>(
+    `/work-items/${id}/abandon`,
+    json("POST", {}),
+  );
+
 export const retryWorkItem = (id: string, steer?: string) =>
   req<{ id: string; node_id: string; loop: string; steer: string | null }>(
     `/work-items/${id}/retry`,
