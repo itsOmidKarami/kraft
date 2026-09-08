@@ -18,6 +18,7 @@ over the single-shot env vars when both are set).
 import json
 import os
 import pathlib
+import re
 import sys
 
 
@@ -49,6 +50,41 @@ def _write_summary(fields: dict[str, str]) -> str | None:
         "---\n\nfake agent session\n"
     )
     return ref
+
+
+def _write_artifact(argv: list[str]) -> None:
+    """Honour the `artifact:` contract when the injected context states one.
+
+    A binding that declares an artifact now fails its node unless the file
+    exists (Kraft-7lu), so a fake that reported success without writing one
+    would stand in for a *broken* worker in every test that drives spec or
+    plan. The path is read back out of the prompt, exactly as the session
+    summary already is, rather than duplicating `agent.artifact_path()` here.
+
+    KRAFT_FAKE_AGENT_SKIP_ARTIFACT=1 suppresses it, for a test that wants the
+    empty-gate failure on purpose.
+    """
+    if os.environ.get("KRAFT_FAKE_AGENT_SKIP_ARTIFACT"):
+        return
+    if "--append-system-prompt" not in argv:
+        return
+    ctx = argv[argv.index("--append-system-prompt") + 1]
+    match = re.search(r"Write your (\w+) to (\S+?), relative to the repo root", ctx)
+    if not match:
+        return
+    kind, rel = match.group(1), match.group(2)
+    fields = _ctx_fields(argv)
+    path = pathlib.Path(rel)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "---\n"
+        f"work_item_ids: [{fields.get('Work item', '')}]\n"
+        f"node_id: {fields.get('Node', '')}\n"
+        f"hook_point: {fields.get('Hook point', '')}\n"
+        f"kind: {kind}s\n"
+        f"title: fake {kind}\n"
+        f"---\n\nfake agent {kind}\n"
+    )
 
 
 def _record_prompt(argv: list[str]) -> None:
@@ -99,6 +135,7 @@ def main() -> int:
         calc.write_text(calc.read_text().replace("a - b", "a + b"))
     result_path = os.environ.get("KRAFT_RESULT_PATH")
     if mode != "error" and result_path:
+        _write_artifact(sys.argv)
         ref = _write_summary(_ctx_fields(sys.argv))
         entry = _plan_entry()
         # KRAFT_FAKE_AGENT_STATUS/_CONCERNS/_QUESTION are the single-shot knobs;

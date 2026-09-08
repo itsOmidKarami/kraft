@@ -597,3 +597,30 @@ def test_poll_interval_must_be_positive(tmp_path, value):
     )
     with pytest.raises(templates.RegistryError, match="positive number"):
         templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_load_registry_accepts_effort_on_an_agent_hook(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.x: { kind: agent, command: claude, model: opus, effort: high }\n"
+    )
+    reg = templates.load_registry(tmp_path / "registry.yaml")
+    assert reg.hooks["on.x"]["effort"] == "high"
+
+
+def test_load_registry_rejects_an_effort_level_the_cli_does_not_take(tmp_path):
+    """Caught at config load, not mid-run: a typo here would otherwise reach
+    the CLI as an unknown flag value and fail a node that had already been
+    paid for."""
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.x: { kind: agent, command: claude, effort: highest }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="effort"):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_load_registry_rejects_effort_on_a_subprocess_hook(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.x: { kind: subprocess, command: [pytest], effort: high }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="effort"):
+        templates.load_registry(tmp_path / "registry.yaml")
