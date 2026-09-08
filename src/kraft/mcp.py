@@ -109,6 +109,17 @@ def build() -> MCPServer:
         that stopped for a human: resume only takes a paused item."""
         return await client.retry(steer, work_item_id)
 
+    @server.tool()
+    async def permission_request(
+        tool_name: str, input: dict, tool_use_id: str | None = None
+    ) -> dict:
+        """Not for you to call directly. Kraft passes this tool to the agent CLI
+        as `--permission-prompt-tool`, and the CLI calls it when it wants to ask
+        whether a tool use is allowed. It answers from the permission grant on
+        the node this session is running, and records the decision on the work
+        item."""
+        return await client.permission_request(tool_name, input, tool_use_id)
+
     return server
 
 

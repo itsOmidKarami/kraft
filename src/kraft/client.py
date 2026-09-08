@@ -332,6 +332,31 @@ async def stream_log(session_id: str, after_line: int = 0) -> AsyncIterator[dict
             raise ValueError(f"the Kraft server at {base_url()} closed the log stream") from exc
 
 
+async def permission_request(tool_name: str, input: dict, tool_use_id: str | None = None) -> dict:
+    """Ask Kraft whether this worker session may use `tool_name` (Kraft-oor).
+
+    Fails closed, and returns rather than raises: the caller is an MCP tool the
+    agent CLI is waiting on, and every failure has to come back in the CLI's own
+    contract shape. An unreachable server is a denial -- exactly what an
+    unanswered ask is today, where failing open would make a Kraft outage a
+    permission grant.
+    """
+    sid = os.environ.get("KRAFT_SESSION_ID")
+    if not sid:
+        return {"behavior": "deny", "message": "not a Kraft worker session"}
+    try:
+        status, body = await _post(
+            f"/worker-sessions/{sid}/permission",
+            {"tool_name": tool_name, "input": input, "tool_use_id": tool_use_id},
+        )
+    except ValueError as exc:  # `_send` raises this for a server that is not there
+        return {"behavior": "deny", "message": str(exc)}
+    if status >= 400 or not isinstance(body, dict) or "behavior" not in body:
+        detail = body.get("detail") if isinstance(body, dict) else body
+        return {"behavior": "deny", "message": f"kraft {status}: {detail}"}
+    return body
+
+
 async def stream_events(after_seq: int = 0) -> AsyncIterator[dict]:
     """The live event bus — the same stream the board's UI redraws from.
 

@@ -254,6 +254,41 @@ def test_load_registry_rejects_deny_tools_not_a_list(tmp_path):
         templates.load_registry(tmp_path / "registry.yaml")
 
 
+def test_load_registry_rejects_unknown_permission_mode(tmp_path):
+    """A typo in a permission grant must fail at config load, not at dispatch --
+    by dispatch the item has already paid for a worktree and a session."""
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.x: { kind: agent, command: claude, permission_mode: yolo }\n"
+    )
+    with pytest.raises(templates.RegistryError):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_load_registry_rejects_allowed_tools_not_a_list(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.x: { kind: agent, command: claude, allowed_tools: Read }\n"
+    )
+    with pytest.raises(templates.RegistryError):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_load_registry_accepts_a_per_node_grant(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.x: { kind: agent, command: claude, "
+        "allowed_tools: [Read, Grep], permission_mode: auto }\n"
+    )
+    hooks = templates.load_registry(tmp_path / "registry.yaml").hooks
+    assert hooks["on.x"]["allowed_tools"] == ["Read", "Grep"]
+
+
+def test_a_non_agent_hook_may_not_carry_a_permission_grant(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.x: { kind: builtin, handler: noop, allowed_tools: [Read] }\n"
+    )
+    with pytest.raises(templates.RegistryError):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
 def test_load_registry_rejects_steering_naming_a_missing_file(tmp_path):
     (tmp_path / "registry.yaml").write_text(
         "hooks:\n  on.x: { kind: agent, command: claude, steering: [missing] }\n"

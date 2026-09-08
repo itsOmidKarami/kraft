@@ -149,6 +149,14 @@ export const getLogLines = (sessionId: string) =>
 /** SSE tail; the server closes the stream when the session stops running. */
 export const logStreamUrl = (sessionId: string) => `${logUrl(sessionId)}?format=jsonl&follow=1`;
 
+/** The log as plain text, whole -- `getLogLines` truncates each line for
+ *  rendering, and a copied log has to be the file. */
+export const getLogText = async (sessionId: string): Promise<string> => {
+  const res = await fetch(logUrl(sessionId), { headers: { accept: "text/plain" } });
+  if (!res.ok) throw new Error(`could not read the log (${res.status})`);
+  return res.text();
+};
+
 export const search = (params: {
   q: string;
   source_kind?: string;

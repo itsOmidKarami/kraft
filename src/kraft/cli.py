@@ -116,7 +116,17 @@ def _serve() -> None:
     pid_path.write_text(str(os.getpid()))
     print(f"kraft: http://{host}:{port}")
     try:
-        uvicorn.run("kraft.api:app", host=host, port=port, log_level="warning")
+        # A backstop, not the fix: the fix is `ws_events` returning when the
+        # connection goes away (Kraft-9oab). This bounds the next endpoint that
+        # forgets, and an in-flight HTTP request that hangs. 10s is comfortably
+        # above the slowest ordinary request (a forge call).
+        uvicorn.run(
+            "kraft.api:app",
+            host=host,
+            port=port,
+            log_level="warning",
+            timeout_graceful_shutdown=10,
+        )
     finally:
         pid_path.unlink(missing_ok=True)
 
@@ -171,12 +181,14 @@ def _cmd_stop(ns: argparse.Namespace) -> None:
         print("kraft: no server running")
         return
     os.kill(pid, signal.SIGTERM)
-    for _ in range(50):
+    # 15s, not 5: the poll must not expire before the graceful-shutdown backstop
+    # it is waiting on (`_serve`, timeout_graceful_shutdown=10).
+    for _ in range(150):
         if _read_pid(pid_path) is None:
             print(f"kraft: stopped (pid {pid})")
             return
         time.sleep(0.1)
-    print(f"kraft: pid {pid} did not stop within 5s", file=sys.stderr)
+    print(f"kraft: pid {pid} did not stop within 15s", file=sys.stderr)
     raise SystemExit(1)
 
 

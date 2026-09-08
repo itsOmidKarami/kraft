@@ -400,6 +400,27 @@ def session_running(conn: sqlite3.Connection, session_id, pid, pid_start_time) -
     )
 
 
+def session_progress(conn: sqlite3.Connection, session_id, usage: Usage) -> None:
+    """Live token counts and model for a session that is still running (Kraft-54dk).
+
+    Deliberately no event. One of these lands every few seconds per running
+    worker, and an event fans out to the WebSocket, the indexer and the
+    notifier for a number nobody subscribes to. `usage_rollup` reads the row,
+    not the event stream, so "tokens this node" starts being true the moment
+    the row is.
+
+    Cost and wall time stay with `session_exited`, which writes the
+    authoritative final figures and corrects any live drift. `status =
+    'running'` guards the update: a paused or finished session's numbers are
+    settled, and a late progress write must not reopen them.
+    """
+    conn.execute(
+        "UPDATE worker_sessions SET model = ?, tokens_in = ?, tokens_out = ? "
+        "WHERE id = ? AND status = 'running'",
+        (usage.model, usage.tokens_in, usage.tokens_out, session_id),
+    )
+
+
 def session_exited(
     conn: sqlite3.Connection,
     session_id,

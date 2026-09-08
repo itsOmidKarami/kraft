@@ -57,3 +57,23 @@ def test_sigterm_shuts_down_cleanly_mid_task(tmp_path):
         assert row["status"] in ("active", "needs_human", "completed")
     finally:
         conn.close()
+
+
+@pytest.mark.slow
+def test_sigterm_exits_with_a_websocket_client_connected(tmp_path):
+    """A human with the board open holds `/ws/events` open.
+
+    Uvicorn's graceful shutdown waits for every open connection, and asks each
+    WebSocket to close by delivering a `websocket.disconnect` to `receive()`. A
+    handler that only ever sends never learns it was asked, so the server sat
+    there and `kraft admin stop` reported a failure that was real (Kraft-9oab).
+    """
+    from websockets.sync.client import connect
+
+    templates = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
+    tracker = isolated_bd(tmp_path)
+    with running_server(run_dir=tmp_path / "run", templates_dir=templates, bd_cwd=tracker) as srv:
+        with connect(f"ws://127.0.0.1:{srv.port}/ws/events?after_seq=0"):
+            srv.proc.terminate()
+            srv.proc.wait(timeout=10)
+        assert srv.proc.returncode in (0, -signal.SIGTERM)
