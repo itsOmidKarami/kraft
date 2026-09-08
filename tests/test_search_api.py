@@ -18,7 +18,7 @@ def _client(tmp_path, monkeypatch, *, index_repos: str | None = None):
     monkeypatch.setenv("KRAFT_INDEX_REPOS", index_repos or "")
     import kraft.api as api
 
-    return TestClient(api.app)
+    return TestClient(api.app, client=("127.0.0.1", 54321))
 
 
 def _commit(repo: Path, msg: str) -> None:

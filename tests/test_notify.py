@@ -551,7 +551,7 @@ def api_client(tmp_path, monkeypatch):
     monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "no-dist"))
     import kraft.api as api
 
-    with TestClient(api.app) as c:
+    with TestClient(api.app, client=("127.0.0.1", 54321)) as c:
         yield c
 
 
@@ -689,7 +689,7 @@ def test_notifier_stops_before_the_database_closes(tmp_path, monkeypatch):
     monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "no-dist"))
     import kraft.api as api
 
-    with TestClient(api.app):
+    with TestClient(api.app, client=("127.0.0.1", 54321)):
         pass
 
     assert order == ["notifier", "database"]
@@ -724,7 +724,7 @@ def test_a_malformed_notify_yaml_does_not_crash_startup(tmp_path, monkeypatch, c
     import kraft.api as api
 
     with caplog.at_level("WARNING"):
-        with TestClient(api.app) as c:  # must not raise
+        with TestClient(api.app, client=("127.0.0.1", 54321)) as c:  # must not raise
             assert c.app.state.notifier.config["enabled"] is False
 
     assert "t0ken" not in caplog.text
@@ -780,7 +780,7 @@ def test_get_notify_with_invalid_utf8_returns_a_clean_422_and_disables(
     import kraft.api as api
 
     with caplog.at_level("WARNING"):
-        with TestClient(api.app) as c:  # must not raise
+        with TestClient(api.app, client=("127.0.0.1", 54321)) as c:  # must not raise
             assert c.app.state.notifier.config["enabled"] is False
             res = c.get("/notify")
 
