@@ -25,7 +25,7 @@ def _api_client(tmp_path, monkeypatch):
 
     import kraft.api as api
 
-    return TestClient(api.app)
+    return TestClient(api.app, client=("127.0.0.1", 54321))
 
 
 async def _seed(database, wid="w1"):

@@ -48,7 +48,7 @@ def client(tmp_path, monkeypatch, prompt_log):
     )
     import kraft.api as api
 
-    with TestClient(api.app) as c:
+    with TestClient(api.app, client=("127.0.0.1", 54321)) as c:
         yield c
 
 

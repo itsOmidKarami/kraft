@@ -47,3 +47,8 @@ src/kraft/_bundled/
 .kraft-lite/chain.json
 .kraft-lite/chains/
 .kraft-lite/chain.jsonl
+
+# Per-worker-session summaries: one file per agent session, including sessions
+# that accomplished nothing. Operational telemetry, not the design record --
+# which is what specs/, plans/ and review_briefs/ under .engineering/ carry.
+.engineering/sessions/

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import ipaddress
 import json
 import logging
 import os
@@ -296,20 +297,53 @@ def _is_static_asset(app: FastAPI, path: str) -> bool:
     return dist.resolve() in candidate.parents and candidate.is_file()
 
 
-def _requires_auth(app: FastAPI) -> bool:
+#: Hostnames that can only mean this machine. `urlsplit().hostname` strips the
+#: brackets off an IPv6 literal, so "::1" covers "[::1]" as well.
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "[::1]", "::1"}
+
+
+def _client_is_local(request: Request | WebSocket) -> bool:
+    """True when the peer address is a loopback IP.
+
+    Fails closed: an absent peer, or one that is not an IP at all (starlette's
+    TestClient reports the literal "testclient"), is not local.
+
+    uvicorn resolves the peer through `proxy_headers`, on by default with
+    `forwarded_allow_ips="127.0.0.1"` — so a reverse proxy on this box surfaces
+    the real client here, and a forged `X-Forwarded-For` from a remote peer is
+    ignored because that peer is not trusted. Both directions only make this
+    stricter than reading the socket would be.
+    """
+    client = request.client
+    if client is None:
+        return False
+    try:
+        return ipaddress.ip_address(client.host).is_loopback
+    except ValueError:
+        return False
+
+
+def _requires_auth(app: FastAPI, request: Request | WebSocket) -> bool:
     """Auth is off on localhost and on for anything else (design 5e).
 
-    Two details this depends on:
+    Three details this depends on:
 
     * it is keyed to the address the process actually bound at startup, not the
       one saved in `access.yaml` — a bind change "takes effect on restart", so
       saving one must not lock the operator out of a server still on loopback;
+    * the short-circuit needs the *peer* to be loopback too. `bound_host` is a
+      claim, and a launch that widened the bind without going through
+      `cli._bind` (`uvicorn kraft.api:app --host 0.0.0.0`) does not update it —
+      so a remote caller reaching a server that believes it is on loopback still
+      has to log in;
     * with no password set there is nothing to authenticate *against*, so the
       gate stays open rather than bricking the API into a state where even
       setting the first password is refused. `__main__` will not start a
       non-loopback bind in that state, and the Access screen refuses to save one.
+      `_perimeter` is what stops that open gate from being reachable remotely.
     """
-    if getattr(app.state, "bound_host", "127.0.0.1") in config_mod.LOOPBACK:
+    local_bind = getattr(app.state, "bound_host", "127.0.0.1") in config_mod.LOOPBACK
+    if local_bind and _client_is_local(request):
         return False
     return bool((getattr(app.state, "access", None) or {}).get("password_hash"))
 
@@ -318,7 +352,7 @@ def _requires_auth(app: FastAPI) -> bool:
 async def _authenticate(request: Request, call_next):
     app = request.app
     if (
-        not _requires_auth(app)
+        not _requires_auth(app, request)
         or request.url.path in _PUBLIC_PATHS
         or _is_static_asset(app, request.url.path)
     ):
@@ -347,6 +381,68 @@ async def _authenticate(request: Request, call_next):
         lambda c, token=token: auth_mod.touch_session(c, token)
     ):
         return JSONResponse({"detail": "authentication required"}, status_code=401)
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def _perimeter(request: Request, call_next):
+    """Who may talk to this server at all, before any question of a session.
+
+    Declared *after* `_authenticate` on purpose. Starlette inserts each added
+    middleware at the front of the stack, so the last one declared is the
+    outermost and runs first — this has to be entered before the auth gate and
+    before the SPA-shell branch, or a refused request gets answered by them.
+    """
+    st = request.app.state
+    peer = request.client.host if request.client else "an unknown peer"
+    has_password = bool((getattr(st, "access", None) or {}).get("password_hash"))
+
+    # 1. The bind in access.yaml is a claim; the peer address is the fact. A
+    #    launch that widened the bind without going through `cli._bind` would
+    #    otherwise serve the whole API to the LAN with the auth gate wide open,
+    #    because `_requires_auth` has no password to demand.
+    if not _client_is_local(request) and not has_password:
+        return JSONResponse(
+            {"detail": f"this server is configured for a loopback bind; refusing {peer}"},
+            status_code=403,
+        )
+
+    # 2. DNS rebinding: a page on evil.com whose name flips to 127.0.0.1 is
+    #    same-origin with a local Kraft and can read every response, ids
+    #    included, then drive any route. A server that bound loopback may only
+    #    be addressed by a loopback name.
+    #
+    #    Keyed on `sec-fetch-site` because only a browser can be rebound, and
+    #    every other client — the CLI, MCP, httpx, curl — would otherwise need a
+    #    Host allowlist for no gain. Browsers older than the Fetch Metadata
+    #    rollout (pre-2020) do not send it and are not covered.
+    #
+    #    Restricted to a loopback bind because a `0.0.0.0` server is reached
+    #    under whatever address the client used, which is never `0.0.0.0`;
+    #    comparing the Host to `bound_host` there would 403 every LAN browser.
+    #    A non-loopback bind gets no rebinding protection from this rule.
+    if (
+        request.headers.get("sec-fetch-site")
+        and getattr(st, "bound_host", "127.0.0.1") in config_mod.LOOPBACK
+        and urlsplit(f"//{request.headers.get('host', '')}").hostname not in _LOCAL_HOSTS
+    ):
+        return JSONResponse(
+            {"detail": "unexpected Host for a server bound to loopback"}, status_code=403
+        )
+
+    # 3. Cross-site write. `_origin_ok` plus one clause, so that a LAN instance
+    #    serving its own SPA (Origin and Host both 192.168.1.5:8765) is not
+    #    locked out of its own board. Reads are left alone: this is about the
+    #    mutating routes that take no JSON body and so need no preflight.
+    origin = request.headers.get("origin")
+    if (
+        request.method not in ("GET", "HEAD")
+        and origin
+        and not _origin_ok(origin)
+        and urlsplit(origin).netloc != request.headers.get("host")
+    ):
+        return JSONResponse({"detail": "cross-site request refused"}, status_code=403)
+
     return await call_next(request)
 
 
@@ -1189,7 +1285,7 @@ async def open_worktree(wid: str, body: OpenDocument, request: Request):
     path = st.run_dirs.worktrees / wid
     if not path.is_dir():
         raise HTTPException(404, "this work item has no worktree yet")
-    return _launch_editor(body.editor, path)
+    return _launch_editor(request, body.editor, path)
 
 
 @app.post("/work-items/{wid}/retry")
@@ -1348,12 +1444,21 @@ def _os_open() -> list[str] | None:
     return None
 
 
-def _launch_editor(editor: str | None, path: Path) -> dict:
+def _launch_editor(request: Request, editor: str | None, path: Path) -> dict:
     """Open `path` in an editor, or say plainly that this server cannot.
 
+    Loopback callers only. This starts a process and opens a window on the
+    machine hosting the API, and Kraft has one shared password and no notion of
+    who is holding it — so "authenticated" is not "sitting at this keyboard".
+    The guard is here rather than in each route because both routes reach the
+    same `Popen`.
+
     501 rather than 500 when nothing here can open a window: that is the signal
-    the SPA falls back on, handing the path to the viewer's own machine.
+    the SPA falls back on, handing the path to the viewer's own machine. A 403
+    reaches the same fallback (`DocumentModal.tsx:112` catches any rejection).
     """
+    if not _client_is_local(request):
+        raise HTTPException(403, "this server only opens editors for a client on its own machine")
     name = editor or os.environ.get("KRAFT_EDITOR") or ""
     argv = _EDITORS.get(name) if name else None
     if name and argv is None:
@@ -1382,9 +1487,17 @@ async def open_document(doc_id: str, body: OpenDocument, request: Request):
     doc = st.indexer.get_document(doc_id)
     if doc is None:
         raise HTTPException(404, "unknown document")
+    # The row comes from the indexer, not the caller — but it is still the only
+    # thing between a stored `../..` and an editor opened outside the repo.
+    # Validate the resolved path, launch the unresolved one: a repo under a
+    # symlinked temp dir (/var on macOS) resolves to a different string, and the
+    # editor should get the path the rest of the UI shows.
+    root = Path(doc["repo"]).resolve()
     path = Path(doc["repo"]) / doc["path"]
+    if not path.resolve().is_relative_to(root):
+        raise HTTPException(400, f"document path escapes its repo: {doc['path']}")
 
-    return {"document_id": doc_id, **_launch_editor(body.editor, path)}
+    return {"document_id": doc_id, **_launch_editor(request, body.editor, path)}
 
 
 @app.get("/analytics")
@@ -1421,9 +1534,6 @@ async def index_rescan(request: Request, repo: str | None = None):
     }
 
 
-_LOCAL_HOSTS = {"localhost", "127.0.0.1", "[::1]", "::1"}
-
-
 def _origin_ok(origin: str | None) -> bool:
     if not origin:
         return True  # non-browser client
@@ -1435,6 +1545,14 @@ async def ws_events(websocket: WebSocket, after_seq: int = 0):
     if not _origin_ok(websocket.headers.get("origin")):
         await websocket.close(code=1008)
         return
+    # Rule 1 of `_perimeter`, restated: HTTP middleware does not run for
+    # websockets, so without this the live event stream is the one route that
+    # still answers a remote peer on a server that has no password to demand.
+    if not _client_is_local(websocket) and not (
+        (getattr(websocket.app.state, "access", None) or {}).get("password_hash")
+    ):
+        await websocket.close(code=1008)
+        return
     # HTTP middleware does not run for websockets, so the session check has to be
     # here too — otherwise a LAN bind would leave the live event stream open.
     #
@@ -1442,7 +1560,7 @@ async def ws_events(websocket: WebSocket, after_seq: int = 0):
     # browser has a session cookie, and a non-browser client (`kraft watch`, an
     # agent) has the bearer token from run/. Accepting only the cookie made the
     # live stream the one endpoint a CLI could not reach.
-    if _requires_auth(websocket.app):
+    if _requires_auth(websocket.app, websocket):
         bearer = websocket.headers.get("authorization", "")
         expected = getattr(websocket.app.state, "mcp_token", None)
         authorised = bool(
@@ -2000,7 +2118,7 @@ async def get_access(request: Request):
         "port": access["port"],
         "session_expiry_days": access["session_expiry_days"],
         "password_set": bool(access["password_hash"]),
-        "auth_required": _requires_auth(request.app),
+        "auth_required": _requires_auth(request.app, request),
     }
 
 

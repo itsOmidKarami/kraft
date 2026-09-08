@@ -40,7 +40,7 @@ def _client(tmp_path, monkeypatch, templates_dir, *, host: str | None = None):
     monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "no-dist"))
     import kraft.api as api
 
-    return TestClient(api.app)
+    return TestClient(api.app, client=("127.0.0.1", 54321))
 
 
 @pytest.fixture
@@ -573,7 +573,7 @@ def test_the_spa_bundle_loads_before_a_session_exists(tmp_path, monkeypatch, tem
     monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(dist))
     import kraft.api as api
 
-    with TestClient(api.app) as client:
+    with TestClient(api.app, client=("127.0.0.1", 54321)) as client:
         client.put("/access", json={"bind": "0.0.0.0", "password": "hunter2"})
         client.cookies.clear()
         assert client.get("/assets/app.js").status_code == 200
@@ -615,7 +615,7 @@ def test_a_forged_navigation_header_cannot_write(tmp_path, monkeypatch, template
     monkeypatch.setenv("KRAFT_HOST", "0.0.0.0")
     import kraft.api as api
 
-    with TestClient(api.app) as client:
+    with TestClient(api.app, client=("127.0.0.1", 54321)) as client:
         client.put("/access", json={"bind": "0.0.0.0", "password": "hunter2"})
         client.cookies.clear()
         forged = {"sec-fetch-dest": "document"}
@@ -834,7 +834,7 @@ def test_a_broken_repos_yaml_does_not_prevent_startup(tmp_path, monkeypatch):
     monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "no-dist"))
     import kraft.api as api
 
-    with TestClient(api.app) as client:  # must not raise
+    with TestClient(api.app, client=("127.0.0.1", 54321)) as client:  # must not raise
         assert client.get("/health").status_code == 200
 
 
