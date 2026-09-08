@@ -49,6 +49,14 @@ def test_create_work_item_tells_the_agent_it_will_not_run():
     assert "paused" in create.description.lower()
 
 
+def test_create_work_item_offers_a_description_and_says_what_it_is_for():
+    """An agent that cannot see the parameter keeps packing intent into the title,
+    which is the behavior this field exists to end."""
+    create = next(t for t in _tools() if t.name == "create_work_item")
+    assert "description" in create.input_schema["properties"]
+    assert "brief" in create.description.lower()
+
+
 def test_every_tool_has_a_description_an_agent_can_act_on():
     """The docstring is what an agent reads to decide whether to call the tool.
     A one-word description is a tool that never gets used correctly."""

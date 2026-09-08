@@ -35,6 +35,7 @@ def create_work_item(
     repo,
     chain_template,
     chain_definition,
+    description: str | None = None,
     submodules: list[str] | None = None,
     root_merge_policy: str | None = None,
     attachments: list[dict] | None = None,
@@ -52,14 +53,15 @@ def create_work_item(
     """
     now = _now()
     conn.execute(
-        "INSERT INTO work_items (id, bead_id, title, repo, chain_template, "
+        "INSERT INTO work_items (id, bead_id, title, description, repo, chain_template, "
         "chain_definition, current_node_id, status, created_at, updated_at, "
         "submodules, root_merge_policy, attachments, bead_cwd) "
-        "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)",
         (
             id,
             bead_id,
             title,
+            description or None,
             repo,
             chain_template,
             chain_definition,
@@ -606,6 +608,18 @@ def set_steer(conn: sqlite3.Connection, work_item_id: str, text: str) -> None:
         (text, _now(), work_item_id),
     )
     events.append(conn, work_item_id, "steer_context_set", {"steer": text})
+
+
+def set_description(conn: sqlite3.Connection, work_item_id: str, description: str) -> None:
+    """Replace the brief. Emits its own event: the description is prepended to
+    every agent instruction, so an edit changes what later nodes are told, and
+    `events` is where that has to be answerable from.
+    """
+    conn.execute(
+        "UPDATE work_items SET description = ?, updated_at = ? WHERE id = ?",
+        (description or None, _now(), work_item_id),
+    )
+    events.append(conn, work_item_id, "work_item_description_edited", {"description": description})
 
 
 def set_base_ref(conn: sqlite3.Connection, work_item_id: str, sha: str) -> None:

@@ -62,12 +62,26 @@ _STEER_PROMPT = "A human has steered this run: {steer}\n\n"
 #: at the next gate, not a control-flow change.
 _ADVANCING = ("done", "done_with_concerns")
 
-# What an agent is told about documents attached at intake. It follows the title
-# because the title is the task and these are how it was already decided.
+# What an agent is told about documents attached at intake. It follows the brief
+# because the brief is the task and these are how it was already decided.
 _ATTACHMENT_PROMPT = (
     "\n\n{lines}\nFollow the documents above; they are the agreed spec and plan "
     "for this work item. Do not re-plan."
 )
+
+
+def _brief(work_item_row) -> str:
+    """What the work item is, as an agent is told it.
+
+    The title is a label; the description is the actual brief, and the spec node
+    is expected to write a design from it. A work item with no description is
+    the title alone — exactly the string this returned before descriptions
+    existed.
+    """
+    description = work_item_row["description"]
+    if not description:
+        return work_item_row["title"]
+    return f"{work_item_row['title']}\n\n{description}"
 
 
 @dataclass(frozen=True)
@@ -115,6 +129,7 @@ async def intake(
     title: str,
     repo: str,
     template: Template,
+    description: str | None = None,
     bd_cwd: str | None = None,
     submodules: list[str] | None = None,
     root_merge_policy: str = "bump",
@@ -126,7 +141,7 @@ async def intake(
     work_item_id = uuid.uuid4().hex
     # An auto-intaken bead already exists; filing a second one for the same work
     # is the duplicate this parameter prevents.
-    bead_id = bead_id or await beads.intake(title, cwd=bd_cwd)
+    bead_id = bead_id or await beads.intake(title, description=description, cwd=bd_cwd)
     satisfied = frozenset(ATTACHMENT_GATES[a["kind"]] for a in attachments or [])
     chain_definition = json.dumps(materialize(template, satisfied_gates=satisfied))
     await db.write(
@@ -135,6 +150,7 @@ async def intake(
             id=work_item_id,
             bead_id=bead_id,
             title=title,
+            description=description,
             repo=repo,
             chain_template=template.id,
             chain_definition=chain_definition,
@@ -285,7 +301,7 @@ async def _dispatch(
             return BUDGET
         note = steer.take() if steer else None
         instruction = instruction_override or (
-            work_item_row["title"] + _attachment_note(_attachments(work_item_row))
+            _brief(work_item_row) + _attachment_note(_attachments(work_item_row))
         )
         inv = _agent.resolve_invocation(
             binding,

@@ -277,6 +277,86 @@ def test_get_unknown_work_item_404(tmp_path, monkeypatch):
         assert client.get("/worker-sessions/nope/log").status_code == 404
 
 
+def test_create_accepts_a_description_and_both_payloads_return_it(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        repo = make_repo(tmp_path)
+        r = client.post(
+            "/work-items",
+            json={
+                "title": "short label",
+                "description": "the brief the spec is written from",
+                "repo": str(repo),
+                "autostart": False,
+            },
+        )
+        assert r.status_code == 201
+        wid = r.json()["id"]
+
+        detail = client.get(f"/work-items/{wid}").json()
+        assert detail["description"] == "the brief the spec is written from"
+
+        listed = client.get("/work-items").json()["items"]
+        assert [i["description"] for i in listed if i["id"] == wid] == [
+            "the brief the spec is written from"
+        ]
+
+
+def test_create_without_a_description_returns_null(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        repo = make_repo(tmp_path)
+        wid = client.post(
+            "/work-items", json={"title": "t", "repo": str(repo), "autostart": False}
+        ).json()["id"]
+        assert client.get(f"/work-items/{wid}").json()["description"] is None
+        listed = client.get("/work-items").json()["items"]
+        assert [i["description"] for i in listed if i["id"] == wid] == [None]
+
+
+def test_patch_updates_the_description_and_records_an_event(tmp_path, monkeypatch):
+    """The description feeds every agent prompt, so an edit has to be answerable
+    from the timeline: `events` is the authoritative log."""
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        repo = make_repo(tmp_path)
+        wid = client.post(
+            "/work-items",
+            json={"title": "t", "description": "first", "repo": str(repo), "autostart": False},
+        ).json()["id"]
+        before = client.get(f"/work-items/{wid}").json()["updated_at"]
+
+        r = client.patch(f"/work-items/{wid}", json={"description": "second"})
+        assert r.status_code == 200
+        assert r.json()["description"] == "second"
+
+        after = client.get(f"/work-items/{wid}").json()
+        assert after["description"] == "second"
+        assert after["updated_at"] >= before
+
+        evs = client.get(f"/work-items/{wid}/events").json()
+        edits = [e for e in evs if e["type"] == "work_item_description_edited"]
+        assert [e["payload"]["description"] for e in edits] == ["second"]
+
+
+def test_patch_404s_on_an_unknown_work_item(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        assert client.patch("/work-items/nope", json={"description": "x"}).status_code == 404
+
+
+def test_patch_can_clear_the_description(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        repo = make_repo(tmp_path)
+        wid = client.post(
+            "/work-items",
+            json={"title": "t", "description": "first", "repo": str(repo), "autostart": False},
+        ).json()["id"]
+        assert client.patch(f"/work-items/{wid}", json={"description": ""}).status_code == 200
+        assert client.get(f"/work-items/{wid}").json()["description"] is None
+
+
 def _post_default(client, repo):
     return client.post(
         "/work-items",

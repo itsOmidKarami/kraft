@@ -549,6 +549,83 @@ def test_dispatch_puts_the_attachment_note_after_the_title(tmp_path, monkeypatch
     assert prompt.rstrip().endswith("Do not re-plan.")
 
 
+def test_dispatch_puts_the_description_after_the_title(tmp_path, monkeypatch):
+    """The description is the brief; the title is a label. Both reach the agent,
+    in that order. This is the assertion the whole feature exists for."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    prompts = tmp_path / "prompts.txt"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompts))
+    title = "make the failing test pass"
+    description = "test_widget_totals asserts a float; the code returns Decimal."
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database,
+                rd,
+                title=title,
+                description=description,
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            result = await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+            assert result == "completed"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+    sent = [p for p in prompts.read_text().split("\n\x00\n") if p.strip()]
+    assert len(sent) == 1
+    assert title in sent[0]
+    assert description in sent[0]
+    assert sent[0].index(title) < sent[0].index(description)
+
+
+def test_dispatch_without_a_description_sends_the_title_alone(tmp_path, monkeypatch):
+    """No description must reproduce today's instruction exactly — no stray blank
+    lines, no 'None' rendered into the prompt."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    prompts = tmp_path / "prompts.txt"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompts))
+    title = "make the failing test pass"
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database,
+                rd,
+                title=title,
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+    sent = [p for p in prompts.read_text().split("\n\x00\n") if p.strip()]
+    assert len(sent) == 1
+    assert sent[0].strip() == title
+
+
 # --- launch context: repo config reaches the agent launch -------------------
 
 

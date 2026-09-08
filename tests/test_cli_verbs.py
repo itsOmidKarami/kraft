@@ -176,6 +176,17 @@ def test_create_uses_the_cwd_repo_and_lands_paused(app, tmp_path, monkeypatch, c
     assert created["status"] == "paused"
 
 
+def test_create_carries_the_description(app, tmp_path, monkeypatch, capsys):
+    repo = make_repo(tmp_path)
+    _connect(repo)
+    monkeypatch.chdir(repo)
+    cli.main(["item", "create", "short label", "--description", "the brief", "--json"])
+    created = json.loads(capsys.readouterr().out)
+
+    cli.main(["view", "show", created["id"], "--json"])
+    assert json.loads(capsys.readouterr().out)["description"] == "the brief"
+
+
 def test_create_outside_a_connected_repo_says_how_to_fix_it(app, tmp_path, monkeypatch, capsys):
     stranger = make_repo(tmp_path, name="stranger")
     monkeypatch.chdir(stranger)

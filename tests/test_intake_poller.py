@@ -76,7 +76,9 @@ async def _stub(tmp_path, *, repo_entry=None, budget=policy.NO_BUDGET, **intake_
 
 def _work_items(app) -> list[dict]:
     rows = app.state.db.read(
-        lambda c: c.execute("SELECT id, bead_id, title, status FROM work_items").fetchall()
+        lambda c: c.execute(
+            "SELECT id, bead_id, title, description, status FROM work_items"
+        ).fetchall()
     )
     return [dict(r) for r in rows]
 
@@ -182,6 +184,23 @@ def test_starts_one_bead_when_enabled(tmp_path, monkeypatch):
         assert [(r["id"], r["bead_id"], r["title"]) for r in rows] == [
             (started[0], "B-1", "pick me up")
         ]
+
+    _run(lambda: _stub(tmp_path), body)
+
+
+def test_auto_intake_carries_the_beads_description(tmp_path, monkeypatch):
+    """The bead already carries the brief its author wrote. Auto-intake is the one
+    path with no human present to notice it being dropped."""
+    monkeypatch.setattr(
+        intake_mod.beads,
+        "ready",
+        _ready([{"id": "B-1", "title": "pick me up", "priority": 3, "description": "the brief"}]),
+    )
+
+    async def body(app):
+        started = await intake_mod.tick(app)
+        assert len(started) == 1
+        assert [r["description"] for r in _work_items(app)] == ["the brief"]
 
     _run(lambda: _stub(tmp_path), body)
 

@@ -51,6 +51,28 @@ def test_create_work_item_never_starts_it(wired, tmp_path):
     assert item["current_node_id"] is None
 
 
+def test_create_work_item_sends_the_description(wired, tmp_path):
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        created = await client.create_work_item(
+            "short label", repo=str(repo), description="the brief"
+        )
+        return await client.get_work_item(created["id"])
+
+    assert run_with_app(wired, scenario)["description"] == "the brief"
+
+
+def test_create_work_item_without_a_description_stores_none(wired, tmp_path):
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        created = await client.create_work_item("short label", repo=str(repo))
+        return await client.get_work_item(created["id"])
+
+    assert run_with_app(wired, scenario)["description"] is None
+
+
 def test_create_work_item_without_a_repo_or_a_context_says_so(wired, tmp_path, monkeypatch):
     """With no repo argument and no worktree, there is nothing to guess."""
 

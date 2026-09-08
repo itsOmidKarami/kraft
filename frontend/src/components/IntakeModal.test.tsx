@@ -68,6 +68,31 @@ describe("IntakeModal", () => {
     expect(await screen.findByText("detail for w9")).toBeInTheDocument();
   });
 
+  it("submits the description with the new work item", async () => {
+    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "quick-task", nodes: [], gates: 0 }]);
+    const create = vi.spyOn(api, "createWorkItem").mockResolvedValue({ id: "w9" });
+    render(
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <Routes>
+          <Route path="/" element={<IntakeModal onClose={() => {}} />} />
+          <Route path="/work-items/:id" element={<p>detail for w9</p>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await userEvent.type(screen.getByLabelText("repo"), "/r");
+    await userEvent.type(screen.getByLabelText("title"), "short label");
+    await userEvent.type(screen.getByLabelText("description"), "the brief");
+    await userEvent.click(screen.getByRole("button", { name: /create/i }));
+
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith({
+        repo: "/r",
+        title: "short label",
+        description: "the brief",
+      }),
+    );
+  });
+
   it("sends chain_template when a non-default template is picked", async () => {
     vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "quick-task", nodes: [], gates: 0 }, { id: "default", nodes: [], gates: 0 }]);
     const create = vi.spyOn(api, "createWorkItem").mockResolvedValue({ id: "w9" });

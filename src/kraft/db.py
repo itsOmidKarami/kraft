@@ -13,13 +13,15 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
   id               TEXT PRIMARY KEY,
   bead_id          TEXT,
   title            TEXT NOT NULL,
+  -- the brief this work item's agents are given, ahead of any attachment note
+  description      TEXT,
   repo             TEXT NOT NULL,
   chain_template   TEXT NOT NULL,
   chain_definition TEXT NOT NULL,
@@ -237,6 +239,7 @@ SELECT id, bead_id, title, repo, chain_template, chain_definition, current_node_
         "DROP TABLE work_items",
         "ALTER TABLE work_items_new RENAME TO work_items",
     ],
+    12: ["ALTER TABLE work_items ADD COLUMN description TEXT"],
 }
 
 
