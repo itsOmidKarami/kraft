@@ -8,12 +8,7 @@ from pathlib import Path
 import psutil
 
 from kraft import store
-from kraft.adapters.subprocess import (
-    _resolve_result_file,
-    read_concerns,
-    read_question,
-    read_summary_ref,
-)
+from kraft.adapters.subprocess import _resolve_result_file, read_result_fields
 
 logger = logging.getLogger(__name__)
 
@@ -53,15 +48,20 @@ async def _exit_from_file(db, session_id: str, result_path: Path, status: str) -
     """Record a session exit from what it left on disk, carrying every field
     `adapters.subprocess.run_task` carries — `concerns` and `question` reach the
     gate and the needs_context stop only through this event, so a restart that
-    dropped them would lose what the worker reported."""
+    dropped them would lose what the worker reported.
+
+    `read_result_fields` is the one place that field list is spelled out
+    (Kraft-k3d) — this and `adapters.subprocess.run_task` both call it rather
+    than each enumerating the fields by hand."""
+    fields = read_result_fields(result_path)
     await db.write(
         lambda c: store.session_exited(
             c,
             session_id,
             status,
-            read_summary_ref(result_path),
-            concerns=read_concerns(result_path),
-            question=read_question(result_path),
+            fields["summary_ref"],
+            concerns=fields["concerns"],
+            question=fields["question"],
         )
     )
 

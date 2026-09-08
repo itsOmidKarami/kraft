@@ -13,7 +13,7 @@ import os
 import pytest
 from support.harness import isolated_bd, make_repo
 
-from kraft import db, executor
+from kraft import db, executor, store
 from kraft.adapters import forge
 from kraft.paths import RunDirs
 from kraft.templates import Registry, Template
@@ -308,6 +308,55 @@ def test_poll_never_sleeps_past_its_deadline(tmp_path, monkeypatch):
     )
     assert timed_out is True
     assert slept and all(s <= 0.05 for s in slept)
+
+
+def test_a_session_row_exists_for_the_whole_ci_poll_wait(tmp_path, monkeypatch):
+    """Kraft-41b: pause and abandon key off `worker_sessions`, and the row used
+    to appear only when the node finished -- for the whole wait there was
+    nothing to find, so a pause silently no-op'd and the chain walked on into
+    merge. The row has to be visible to `running_sessions_for_node` (the same
+    lookup `api.pause_work_item` makes) *during* the poll, not just after."""
+    seen: list[list[str]] = []
+    fake = forge.FakeForge(ci_states=["pending", "success"])
+    monkeypatch.setattr(forge, "resolve", lambda name: fake)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        db_ = await db.Database.open(rd.db)
+
+        async def fake_sleep(seconds):
+            rows = db_.read(lambda c: store.running_sessions_for_node(c, "w1"))
+            seen.append([r["id"] for r in rows])
+
+        monkeypatch.setattr(forge.asyncio, "sleep", fake_sleep)
+        try:
+            await db_.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, current_node_id, created_at, updated_at) "
+                    "VALUES ('w1','t','/r','default','{}','active','mr_checks','now','now')"
+                )
+            )
+            await forge.run_task(
+                db_,
+                rd,
+                session_id="s1",
+                work_item_id="w1",
+                node_id="mr_checks",
+                hook_point="on.ci.poll",
+                handler="ci_poll",
+                backend="fake",
+                repo=tmp_path,
+                branch="kraft/w1",
+                title="t",
+                poll_interval=0,
+            )
+        finally:
+            await db_.close()
+
+    asyncio.run(scenario())
+    assert seen, "the poll never slept -- nothing was observed mid-wait"
+    assert seen[0] == ["s1"], "pause/abandon would have found nothing during the poll"
 
 
 def test_a_forge_error_mid_poll_fails_the_node_rather_than_escaping(tmp_path, monkeypatch):
