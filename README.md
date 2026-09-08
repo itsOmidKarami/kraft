@@ -40,13 +40,13 @@ Kraft can also be driven from a coding-agent session over MCP, so work can be
 filed, read, and unblocked without switching to the browser.
 
 ```bash
-kraft init          # register the MCP server for your user, install the skills
-kraft init --repo   # or write .mcp.json + .claude/skills/ into this repo
+kraft admin init          # register the MCP server for your user, install the skills
+kraft admin init --repo   # or write .mcp.json + .claude/skills/ into this repo
 ```
 
 User scope shells out to `claude mcp add` rather than editing `~/.claude.json`
 itself — that file is large, shared, agent-owned state. If `claude` is not on
-`PATH`, `kraft init` prints the command for you to run instead of guessing.
+`PATH`, `kraft admin init` prints the command for you to run instead of guessing.
 
 The skills install as a plugin, so they namespace: `/kraft:handoff` to file work
 after a spec and plan are agreed, `/kraft:board` to see what is running or
@@ -74,7 +74,7 @@ tokens until a person clicks it.
 work item running that session is refused before a request is sent. A gate is
 where a human decides; an agent approving its own would make the gate decorative.
 
-`kraft mcp` runs the server on stdio, and every tool is also a `kraft` subcommand,
+`kraft admin mcp` runs the server on stdio, and every tool is also a `kraft` subcommand,
 so hooks and non-MCP agents get the same surface. Design:
 [`docs/superpowers/specs/2026-09-05-agent-integration-design.md`](docs/superpowers/specs/2026-09-05-agent-integration-design.md).
 
@@ -98,41 +98,41 @@ See [`plugins/kraft-lite/README.md`](plugins/kraft-lite/README.md).
 `kraft` with no arguments serves. Subcommands talk to a running server.
 
 ```bash
-kraft list                      # the board, scoped to the repo you are in
-kraft list --all --status=paused
-kraft show                      # the work item whose worktree you are in
-kraft create "fix the flaky test"   # files it paused; a human starts it
-kraft approve                   # approve whichever gate is pending
-kraft reject --note "the plan skips migrations"
-kraft pause / kraft resume --steer "try the other adapter"
-kraft retry                     # re-run the node a stopped item stopped on
-kraft search "retry policy"
+kraft view list                      # the board, scoped to the repo you are in
+kraft view list --all --status=paused
+kraft view show                      # the work item whose worktree you are in
+kraft item create "fix the flaky test"   # files it paused; a human starts it
+kraft item approve                   # approve whichever gate is pending
+kraft item reject --note "the plan skips migrations"
+kraft item pause / kraft item resume --steer "try the other adapter"
+kraft item retry                     # re-run the node a stopped item stopped on
+kraft view search "retry policy"
 ```
 
 Every verb takes `--json`, which prints the raw API payload — the same value
-`kraft mcp` hands an agent. An id is optional wherever the work item can be
+`kraft admin mcp` hands an agent. An id is optional wherever the work item can be
 inferred from the directory you are standing in.
 
 Following a running item:
 
 ```bash
-kraft logs -f            # the current session's log, until it stops
-kraft logs --session <id> -n 0
-kraft events             # node transitions, gate decisions, escalations
-kraft watch              # a live board, redrawn on every event
+kraft view logs -f            # the current session's log, until it stops
+kraft view logs --session <id> -n 0
+kraft view events             # node transitions, gate decisions, escalations
+kraft view watch              # a live board, redrawn on every event
 ```
 
-`kraft logs --json` emits NDJSON — one object per line — because a stream has no
+`kraft view logs --json` emits NDJSON — one object per line — because a stream has no
 end to close an array on.
 
 Reviewing before you approve:
 
 ```bash
-kraft diff --stat        # how big is it
-kraft diff --name-only   # changed and untracked paths
-kraft diff               # the coloured body, through $PAGER
-kraft docs               # specs, plans and summaries linked to the item
-kraft doc <id> --open    # open one in an editor on the server's machine
+kraft view diff --stat        # how big is it
+kraft view diff --name-only   # changed and untracked paths
+kraft view diff               # the coloured body, through $PAGER
+kraft view docs               # specs, plans and summaries linked to the item
+kraft view doc <id> --open    # open one in an editor on the server's machine
 ```
 
 A truncated diff always says so on its last line, and files the agent wrote
@@ -141,12 +141,12 @@ without `git add` are listed separately — they are invisible in a unified diff
 Repos and worktrees:
 
 ```bash
-kraft repos              # what is connected; `*` marks the one you are in
-kraft connect            # connect the current repo (safe to repeat)
-kraft disconnect         # forget it again; work items are untouched
-cd "$(kraft path <id>)"  # into the item's worktree; `kraft cd` is an alias
-kraft path --shell       # a shell function that does the cd for you
-kraft open <id>          # the worktree in an editor
+kraft repo list              # what is connected; `*` marks the one you are in
+kraft repo connect            # connect the current repo (safe to repeat)
+kraft repo disconnect         # forget it again; work items are untouched
+cd "$(kraft repo path <id>)"  # into the item's worktree; `kraft repo cd` is an alias
+kraft repo path --shell       # a shell function that does the cd for you
+kraft repo open <id>          # the worktree in an editor
 ```
 
 Editing a repo's settings stays in the UI.
@@ -154,14 +154,21 @@ Editing a repo's settings stays in the UI.
 Service and admin:
 
 ```bash
-kraft serve --port 9000  # the same as bare `kraft`; flag > env > access.yaml
-kraft health             # exit 1 when degraded, reasons on stdout
-kraft doctor             # every check in one pass; exit 1 if any fails
-kraft reindex [--repo P] # rescan documents into the search index
+kraft admin start --port 9000  # the same as bare `kraft`; flag > env > access.yaml
+kraft admin stop               # SIGTERM to the pid in run/kraft.pid
+kraft admin health             # exit 1 when degraded, reasons on stdout
+kraft admin doctor             # every check in one pass; exit 1 if any fails
+kraft admin reindex [--repo P] # rescan documents into the search index
 ```
 
 A non-loopback bind still refuses to start without a password, flag or not.
-There is no `kraft stop`: the server runs in the foreground, Ctrl-C stops it.
+The server runs in the foreground, so Ctrl-C stops the one in front of you;
+`kraft admin stop` is for the one you started somewhere else. A second start
+against the same run directory is refused while the first is alive.
+
+The verbs live in four groups — `item` acts, `view` reads, `repo` is
+repositories and their worktrees, `admin` is this machine's server. Typing an
+old flat verb prints where it moved.
 
 ## Develop
 

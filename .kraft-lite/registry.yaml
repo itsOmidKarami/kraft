@@ -40,11 +40,11 @@ on.implementation.start:
 
 on.test.run:
   kind: subprocess
-  command: [pytest, tests/test_forge.py, tests/test_e2e.py, tests/test_budget.py, tests/test_api.py, tests/test_cli.py, tests/test_templates.py, tests/test_builtins.py, tests/test_executor.py, -q]
-  # Re-bound for kl-6ccd4360, which changes the Kraft backend rather than the
-  # plugin. The full `just test` is ~14min; these are the four files this
-  # chain's spec puts coverage in. Narrow back to plugins/kraft-lite/tests for
-  # a chain that only touches the plugin.
+  command: [pytest, tests/test_cli_verbs.py, tests/test_cli_repos.py, tests/test_cli_watching.py, tests/test_cli_doctor.py, tests/test_cli_admin.py, tests/test_cli_reviewing.py, tests/test_gates.py, tests/test_ws.py, tests/test_client_read.py, tests/test_client_act.py, tests/test_client_context.py, tests/test_api.py, -q]
+  # Re-bound at the chain_finalized gate of kl-d8cb9e1b. The previous binding was
+  # kl-6ccd4360's file list, which overlaps this chain's coverage only at
+  # test_api and (by prefix) test_cli. These are the files the CLI-grouping plan
+  # puts tests in. Full `just test` is ~14min.
 
 on.review.local.run:
   kind: skill

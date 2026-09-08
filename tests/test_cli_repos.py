@@ -52,7 +52,7 @@ def test_repos_marks_the_repo_you_are_standing_in(app, tmp_path, monkeypatch, ca
     asyncio.run(client.ensure_repo(str(here)))
     asyncio.run(client.ensure_repo(str(there)))
     monkeypatch.chdir(here)
-    cli.main(["repos"])
+    cli.main(["repo", "list"])
     lines = capsys.readouterr().out.splitlines()
     marked = [line for line in lines if line.startswith("*")]
     assert len(marked) == 1
@@ -62,23 +62,23 @@ def test_repos_marks_the_repo_you_are_standing_in(app, tmp_path, monkeypatch, ca
 def test_repos_json_is_the_raw_list(app, tmp_path, capsys):
     repo = make_repo(tmp_path)
     asyncio.run(client.ensure_repo(str(repo)))
-    cli.main(["repos", "--json"])
+    cli.main(["repo", "list", "--json"])
     assert json.loads(capsys.readouterr().out) == asyncio.run(client.repos())
 
 
 def test_connect_defaults_to_the_cwd(app, tmp_path, monkeypatch, capsys):
     repo = make_repo(tmp_path)
     monkeypatch.chdir(repo)
-    cli.main(["connect"])
+    cli.main(["repo", "connect"])
     assert str(repo) in capsys.readouterr().out
     assert [entry["path"] for entry in asyncio.run(client.repos())] == [str(repo)]
 
 
 def test_connect_twice_is_fine_and_says_so(app, tmp_path, capsys):
     repo = make_repo(tmp_path)
-    cli.main(["connect", str(repo)])
+    cli.main(["repo", "connect", str(repo)])
     capsys.readouterr()
-    cli.main(["connect", str(repo)])  # must not raise SystemExit
+    cli.main(["repo", "connect", str(repo)])  # must not raise SystemExit
     assert "already connected" in capsys.readouterr().out
 
 
@@ -86,7 +86,7 @@ def test_connect_a_non_git_directory_surfaces_the_api_error(app, tmp_path, capsy
     plain = tmp_path / "plain"
     plain.mkdir()
     with pytest.raises(SystemExit) as caught:
-        cli.main(["connect", str(plain)])
+        cli.main(["repo", "connect", str(plain)])
     assert caught.value.code == 1
     assert "not a git repository" in capsys.readouterr().err
 
@@ -94,7 +94,7 @@ def test_connect_a_non_git_directory_surfaces_the_api_error(app, tmp_path, capsy
 def test_path_prints_exactly_one_line(app, tmp_path, capsys):
     repo = make_repo(tmp_path)
     wid = _make_item(repo)
-    cli.main(["path", wid])
+    cli.main(["repo", "path", wid])
     out = capsys.readouterr().out
     # consumed by cd "$(kraft path ID)": one line, no decoration, nothing else
     assert out.endswith("\n")
@@ -105,9 +105,9 @@ def test_path_prints_exactly_one_line(app, tmp_path, capsys):
 def test_cd_is_an_alias_for_path(app, tmp_path, capsys):
     repo = make_repo(tmp_path)
     wid = _make_item(repo)
-    cli.main(["path", wid])
+    cli.main(["repo", "path", wid])
     expected = capsys.readouterr().out
-    cli.main(["cd", wid])
+    cli.main(["repo", "cd", wid])
     assert capsys.readouterr().out == expected
 
 
@@ -115,12 +115,12 @@ def test_path_defaults_to_the_resolved_work_item(app, tmp_path, monkeypatch, cap
     repo = make_repo(tmp_path)
     wid = _make_item(repo)
     monkeypatch.setenv("KRAFT_WORK_ITEM_ID", wid)
-    cli.main(["path"])
+    cli.main(["repo", "path"])
     assert wid in capsys.readouterr().out
 
 
 def test_path_shell_prints_a_function(capsys):
-    cli.main(["path", "--shell"])
+    cli.main(["repo", "path", "--shell"])
     out = capsys.readouterr().out
     assert "kcd()" in out or "function" in out
     assert "kraft path" in out
@@ -135,7 +135,7 @@ def test_open_on_a_headless_server_is_a_kraft_message(app, tmp_path, monkeypatch
 
     monkeypatch.setattr(client, "open_worktree", fake_open)
     with pytest.raises(SystemExit) as caught:
-        cli.main(["open", wid])
+        cli.main(["repo", "open", wid])
     assert caught.value.code == 1
     assert "501" in capsys.readouterr().err
 
@@ -150,7 +150,7 @@ def test_open_passes_the_editor_through(app, tmp_path, monkeypatch, capsys):
         return {"path": "/wt", "editor": editor or "system"}
 
     monkeypatch.setattr(client, "open_worktree", fake_open)
-    cli.main(["open", wid, "--editor", "zed"])
+    cli.main(["repo", "open", wid, "--editor", "zed"])
     assert seen == {"work_item_id": wid, "editor": "zed"}
 
 
@@ -158,7 +158,7 @@ def test_path_rejects_json_rather_than_ignoring_it(app, tmp_path, capsys):
     repo = make_repo(tmp_path)
     wid = _make_item(repo)
     with pytest.raises(SystemExit) as caught:
-        cli.main(["path", wid, "--json"])
+        cli.main(["repo", "path", wid, "--json"])
     assert caught.value.code == 1
     captured = capsys.readouterr()
     assert "kraft show --json" in captured.err
@@ -183,7 +183,7 @@ def test_repos_says_disabled_in_words_not_only_in_colour(app, tmp_path, monkeypa
         assert response.status_code < 400, response.text
 
     asyncio.run(go())
-    cli.main(["repos"])
+    cli.main(["repo", "list"])
     lines = capsys.readouterr().out.splitlines()
     assert "disabled" in next(line for line in lines if str(off) in line)
     assert "enabled" in next(line for line in lines if str(on) in line)
@@ -192,7 +192,7 @@ def test_repos_says_disabled_in_words_not_only_in_colour(app, tmp_path, monkeypa
 def test_disconnect_removes_the_connected_repo(app, tmp_path, capsys):
     repo = make_repo(tmp_path)
     asyncio.run(client.ensure_repo(str(repo)))
-    cli.main(["disconnect", str(repo)])
+    cli.main(["repo", "disconnect", str(repo)])
     assert str(repo) in capsys.readouterr().out
     assert asyncio.run(client.repos()) == []
 
@@ -202,7 +202,7 @@ def test_disconnect_of_an_unconnected_path_is_a_readable_404(app, tmp_path, caps
     parse one — and its 404 has to read as a sentence, like every other verb."""
     repo = make_repo(tmp_path)
     with pytest.raises(SystemExit) as caught:
-        cli.main(["disconnect", str(repo)])
+        cli.main(["repo", "disconnect", str(repo)])
     assert caught.value.code == 1
     err = capsys.readouterr().err
     assert "404" in err
@@ -226,5 +226,5 @@ def test_disconnect_from_inside_a_worktree_disconnects_the_repo(app, tmp_path, m
         capture_output=True,
     )
     monkeypatch.chdir(worktree)
-    cli.main(["disconnect"])
+    cli.main(["repo", "disconnect"])
     assert asyncio.run(client.repos()) == []

@@ -33,7 +33,7 @@ def test_a_dead_server_is_a_sentence_not_a_traceback(monkeypatch, tmp_path):
         asyncio.run(client.list_work_items())
     # the address is in the message: KRAFT_PORT means it is not always 8765
     assert "no Kraft server at http://127.0.0.1:8765" in str(caught.value)
-    assert "kraft serve" in str(caught.value)
+    assert "start one with `kraft`" in str(caught.value)
 
 
 @pytest.fixture

@@ -11,7 +11,9 @@ import asyncio
 import json
 import os
 import shutil
+import signal
 import sys
+import time
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
@@ -19,7 +21,7 @@ from pathlib import Path
 import uvicorn
 
 from kraft import client, config, render
-from kraft.paths import BUNDLED, default_templates_dir
+from kraft.paths import BUNDLED, RunDirs, default_run_dir, default_templates_dir
 
 
 def seed_home(templates_dir: Path) -> bool:
@@ -67,13 +69,56 @@ def _bind(templates_dir: Path) -> tuple[str, int]:
     return host, port
 
 
+def _pid_path() -> Path:
+    """Same run dir the API, the client and the doctor resolve."""
+    return RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())).pid
+
+
+def _read_pid(path: Path) -> int | None:
+    """The live pid in `path`, or None - clearing the file when it is stale.
+
+    A pidfile that outlived a SIGKILLed server names nothing, so no caller may
+    treat its existence alone as "a server is running".
+    """
+    # ponytail: a pid can be recycled, so a stale file could name an unrelated
+    # process; check the command name too if that ever bites. Same for the gap
+    # between this read and _serve's write - two starts racing still collide on
+    # the port unless they were given different ones.
+    try:
+        pid = int(path.read_text())
+    except FileNotFoundError, ValueError:
+        return None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        path.unlink(missing_ok=True)
+        return None
+    except PermissionError:
+        pass  # alive, and not ours to signal
+    return pid
+
+
 def _serve() -> None:
     templates_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
     if seed_home(templates_dir):
         print(f"kraft: seeded default config in {templates_dir}")
     host, port = _bind(templates_dir)
+    # After _bind, so a run refused for binding a LAN address without a password
+    # leaves no pidfile behind.
+    pid_path = _pid_path()
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    running = _read_pid(pid_path)
+    if running is not None:
+        # Two servers on one run dir share databases and worktrees, and only
+        # collide on the port if they were given the same one.
+        print(f"kraft: already running (pid {running}) - kraft admin stop", file=sys.stderr)
+        raise SystemExit(1)
+    pid_path.write_text(str(os.getpid()))
     print(f"kraft: http://{host}:{port}")
-    uvicorn.run("kraft.api:app", host=host, port=port, log_level="warning")
+    try:
+        uvicorn.run("kraft.api:app", host=host, port=port, log_level="warning")
+    finally:
+        pid_path.unlink(missing_ok=True)
 
 
 def emit(value, renderer, as_json: bool) -> None:
@@ -98,7 +143,7 @@ def _json_flag() -> argparse.ArgumentParser:
     return parent
 
 
-def _cmd_serve(ns: argparse.Namespace) -> None:
+def _cmd_start(ns: argparse.Namespace) -> None:
     """The same path as bare `kraft`, with two flags on top.
 
     The flags become the env vars `_bind()` already reads, so there is one
@@ -112,6 +157,27 @@ def _cmd_serve(ns: argparse.Namespace) -> None:
     if ns.port:
         os.environ["KRAFT_PORT"] = str(ns.port)
     _serve()
+
+
+def _cmd_stop(ns: argparse.Namespace) -> None:
+    """SIGTERM to the pid in the run dir, then wait for it to actually go.
+
+    Nothing running is not a failure: `kraft admin stop` in a teardown script
+    has to be safe to run twice.
+    """
+    pid_path = _pid_path()
+    pid = _read_pid(pid_path)
+    if pid is None:
+        print("kraft: no server running")
+        return
+    os.kill(pid, signal.SIGTERM)
+    for _ in range(50):
+        if _read_pid(pid_path) is None:
+            print(f"kraft: stopped (pid {pid})")
+            return
+        time.sleep(0.1)
+    print(f"kraft: pid {pid} did not stop within 5s", file=sys.stderr)
+    raise SystemExit(1)
 
 
 def _render_health(payload: dict) -> str:
@@ -178,22 +244,12 @@ def build_parser() -> argparse.ArgumentParser:
     # build that predated this file's argparse answered every subcommand by
     # serving, and nothing said so (Kraft-krd).
     parser.add_argument("--version", action="version", version=f"kraft {_version()}")
-    subs = parser.add_subparsers(dest="verb", required=True)
+    subs = parser.add_subparsers(dest="group", required=True)
     common = _json_flag()
 
-    serve = subs.add_parser("serve", help="run the server (the same as bare `kraft`)")
-    serve.add_argument("--host", help="bind address (default: access.yaml, or KRAFT_HOST)")
-    serve.add_argument("--port", type=int, help="port (default: access.yaml, or KRAFT_PORT)")
-    serve.set_defaults(func=_cmd_serve)
-
-    mcp = subs.add_parser("mcp", help="serve the MCP tools over stdio")
-    mcp.set_defaults(func=_cmd_mcp)
-
-    init = subs.add_parser("init", help="register Kraft's MCP server and skills with an agent")
-    init.add_argument("--repo", action="store_true", help="install into this repo, not the user")
-    init.set_defaults(func=_cmd_init)
-
-    _add_verbs(subs, common)
+    for name, help_text, adder in _GROUPS:
+        group = subs.add_parser(name, help=help_text)
+        adder(group.add_subparsers(dest="verb", required=True), common)
     return parser
 
 
@@ -525,29 +581,8 @@ def _cmd_open(ns: argparse.Namespace) -> None:
     emit(asyncio.run(client.open_worktree(ns.id, ns.editor)), _render_action, ns.json)
 
 
-def _add_verbs(subs, common: argparse.ArgumentParser) -> None:
-    """The verbs that talk to a running server. Split out so the framework has
-    one seam the later CLI sub-projects extend."""
-    listing = subs.add_parser("list", parents=[common], help="the board")
-    listing.add_argument("--status", help="active, needs_human, paused or completed")
-    listing.add_argument("--repo", help="only this repo (default: the repo you are standing in)")
-    listing.add_argument("--all", action="store_true", help="every repo, ignoring the cwd")
-    # Not folded into --all: that one widens the *repo* scope, and abandoning is
-    # a different axis. Overloading it would make `--all` mean two things.
-    listing.add_argument(
-        "--include-abandoned", action="store_true", help="also show abandoned items"
-    )
-    listing.set_defaults(func=_cmd_list)
-
-    show = subs.add_parser("show", parents=[common], help="one work item")
-    show.add_argument("id", nargs="?", help="default: the work item this session is standing in")
-    show.set_defaults(func=_cmd_show)
-
-    search = subs.add_parser("search", parents=[common], help="specs, plans and session summaries")
-    search.add_argument("query")
-    search.add_argument("--limit", type=int, default=20)
-    search.set_defaults(func=_cmd_search)
-
+def _add_item(subs, common: argparse.ArgumentParser) -> None:
+    """The verbs that change a work item."""
     create = subs.add_parser("create", parents=[common], help="file a work item (starts paused)")
     create.add_argument("title")
     create.add_argument("--repo", help="default: the repo you are standing in")
@@ -589,6 +624,29 @@ def _add_verbs(subs, common: argparse.ArgumentParser) -> None:
         "--yes", action="store_true", help="required: this destroys uncommitted work"
     )
     abandon.set_defaults(func=_cmd_abandon)
+
+
+def _add_view(subs, common: argparse.ArgumentParser) -> None:
+    """The verbs that only read: the board, one item, its documents and its streams."""
+    listing = subs.add_parser("list", parents=[common], help="the board")
+    listing.add_argument("--status", help="active, needs_human, paused or completed")
+    listing.add_argument("--repo", help="only this repo (default: the repo you are standing in)")
+    listing.add_argument("--all", action="store_true", help="every repo, ignoring the cwd")
+    # Not folded into --all: that one widens the *repo* scope, and abandoning is
+    # a different axis. Overloading it would make `--all` mean two things.
+    listing.add_argument(
+        "--include-abandoned", action="store_true", help="also show abandoned items"
+    )
+    listing.set_defaults(func=_cmd_list)
+
+    show = subs.add_parser("show", parents=[common], help="one work item")
+    show.add_argument("id", nargs="?", help="default: the work item this session is standing in")
+    show.set_defaults(func=_cmd_show)
+
+    search = subs.add_parser("search", parents=[common], help="specs, plans and session summaries")
+    search.add_argument("query")
+    search.add_argument("--limit", type=int, default=20)
+    search.set_defaults(func=_cmd_search)
 
     logs = subs.add_parser("logs", parents=[common], help="a worker session's log")
     logs.add_argument("id", nargs="?", help="default: the work item you are standing in")
@@ -645,7 +703,10 @@ def _add_verbs(subs, common: argparse.ArgumentParser) -> None:
     artifact.add_argument("--no-pager", action="store_true")
     artifact.set_defaults(func=_cmd_artifact)
 
-    repos = subs.add_parser("repos", parents=[common], help="connected repositories")
+
+def _add_repo(subs, common: argparse.ArgumentParser) -> None:
+    """Connected repositories, and getting into their worktrees."""
+    repos = subs.add_parser("list", parents=[common], help="connected repositories")
     repos.set_defaults(func=_cmd_repos)
 
     connect = subs.add_parser("connect", parents=[common], help="connect a repo (idempotent)")
@@ -670,6 +731,17 @@ def _add_verbs(subs, common: argparse.ArgumentParser) -> None:
     open_p.add_argument("--editor", help="code, cursor, zed, obsidian (default: system)")
     open_p.set_defaults(func=_cmd_open)
 
+
+def _add_admin(subs, common: argparse.ArgumentParser) -> None:
+    """This machine's server and its install. `start` is what bare `kraft` runs."""
+    start = subs.add_parser("start", help="run the server (the same as bare `kraft`)")
+    start.add_argument("--host", help="bind address (default: access.yaml, or KRAFT_HOST)")
+    start.add_argument("--port", type=int, help="port (default: access.yaml, or KRAFT_PORT)")
+    start.set_defaults(func=_cmd_start)
+
+    stop = subs.add_parser("stop", help="stop the running server")
+    stop.set_defaults(func=_cmd_stop)
+
     health = subs.add_parser("health", parents=[common], help="the server's own status")
     health.set_defaults(func=_cmd_health)
 
@@ -681,6 +753,62 @@ def _add_verbs(subs, common: argparse.ArgumentParser) -> None:
     reindex = subs.add_parser("reindex", parents=[common], help="rescan documents into the index")
     reindex.add_argument("--repo", help="one repo path (default: all)")
     reindex.set_defaults(func=_cmd_reindex)
+
+    init = subs.add_parser(
+        "init", parents=[common], help="register Kraft's MCP server and skills with an agent"
+    )
+    init.add_argument("--repo", action="store_true", help="install into this repo, not the user")
+    init.set_defaults(func=_cmd_init)
+
+    mcp = subs.add_parser("mcp", help="serve the MCP tools over stdio")
+    mcp.set_defaults(func=_cmd_mcp)
+
+
+#: The four groups, in help order. `build_parser` walks this, so adding a group
+#: is one tuple rather than a second place that has to agree with the first.
+_GROUPS = (
+    ("item", "act on a work item", _add_item),
+    ("view", "read a work item, or the board", _add_view),
+    ("repo", "connected repositories and their worktrees", _add_repo),
+    ("admin", "this machine's server and its install", _add_admin),
+)
+
+
+#: The verbs that were top-level before the groups, and where each one went.
+#: Data, not aliases: nothing here dispatches. It is checked before argparse
+#: sees argv because argparse's own "invalid choice" prints the four group
+#: names and says nothing about where `list` has gone.
+MOVED = {
+    "create": "item create",
+    "approve": "item approve",
+    "reject": "item reject",
+    "pause": "item pause",
+    "resume": "item resume",
+    "retry": "item retry",
+    "abandon": "item abandon",
+    "list": "view list",
+    "show": "view show",
+    "search": "view search",
+    "logs": "view logs",
+    "events": "view events",
+    "watch": "view watch",
+    "diff": "view diff",
+    "docs": "view docs",
+    "doc": "view doc",
+    "artifact": "view artifact",
+    "repos": "repo list",
+    "connect": "repo connect",
+    "disconnect": "repo disconnect",
+    "path": "repo path",
+    "cd": "repo cd",
+    "open": "repo open",
+    "serve": "admin start",
+    "health": "admin health",
+    "doctor": "admin doctor",
+    "reindex": "admin reindex",
+    "init": "admin init",
+    "mcp": "admin mcp",
+}
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -695,6 +823,9 @@ def main(argv: list[str] | None = None) -> None:
     if not args:
         _serve()
         return
+    if args[0] in MOVED:
+        print(f"kraft: '{args[0]}' moved to `kraft {MOVED[args[0]]}`", file=sys.stderr)
+        raise SystemExit(2)
     ns = build_parser().parse_args(args)
     try:
         ns.func(ns)

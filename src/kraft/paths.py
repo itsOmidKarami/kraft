@@ -61,6 +61,16 @@ class RunDirs:
         return self.base / "results"
 
     @property
+    def pid(self) -> Path:
+        """The running server's pid, for `kraft admin stop`.
+
+        Under the run dir rather than a fixed system path because it belongs to
+        one instance: a `just dev` server and an installed one must be able to
+        run at once, and they differ only by where this directory points.
+        """
+        return self.base / "kraft.pid"
+
+    @property
     def worktrees(self) -> Path:
         return self.base / "worktrees"
 

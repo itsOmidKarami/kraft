@@ -1560,7 +1560,7 @@ async def ws_events(websocket: WebSocket, after_seq: int = 0):
     # here too — otherwise a LAN bind would leave the live event stream open.
     #
     # Both credentials, for the same reason the HTTP middleware takes both: a
-    # browser has a session cookie, and a non-browser client (`kraft watch`, an
+    # browser has a session cookie, and a non-browser client (`kraft view watch`, an
     # agent) has the bearer token from run/. Accepting only the cookie made the
     # live stream the one endpoint a CLI could not reach.
     if _requires_auth(websocket.app, websocket):
