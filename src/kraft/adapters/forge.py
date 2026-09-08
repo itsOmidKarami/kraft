@@ -49,9 +49,10 @@ class CIStatus:
 
 class Forge(Protocol):
     async def open_mr(self, *, repo: Path, branch: str, title: str, body: str) -> MR: ...
+    async def push(self, *, repo: Path, branch: str) -> None: ...
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None: ...
     async def ci_status(self, *, repo: Path, mr: MR, branch: str) -> CIStatus: ...
-    async def merge(self, *, repo: Path, mr: MR) -> None: ...
+    async def merge(self, *, repo: Path, branch: str, mr: MR) -> None: ...
 
 
 @dataclass
@@ -68,11 +69,17 @@ class FakeForge:
     merged: list[int] = field(default_factory=list)
     #: Last description written per branch, so a test can see the sync land.
     bodies: dict[str, str] = field(default_factory=dict)
+    #: Branches pushed, in call order, so a test can see the push land without
+    #: a network or a git remote.
+    pushed: list[str] = field(default_factory=list)
 
     async def open_mr(self, *, repo: Path, branch: str, title: str, body: str) -> MR:
         number = len(self.opened) + 1
         self.opened[number] = branch
         return MR(number=number, url=f"http://fake.forge/{number}")
+
+    async def push(self, *, repo: Path, branch: str) -> None:
+        self.pushed.append(branch)
 
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None:
         self.bodies[branch] = body
@@ -81,7 +88,7 @@ class FakeForge:
         state = self.ci_states.pop(0) if len(self.ci_states) > 1 else self.ci_states[0]
         return CIStatus(state=state, url=f"{mr.url}/pipelines", jobs=(f"fake-job: {state}",))
 
-    async def merge(self, *, repo: Path, mr: MR) -> None:
+    async def merge(self, *, repo: Path, branch: str = "", mr: MR) -> None:
         # number 0 means "resolve from the checked-out branch", which is what
         # `run_task` passes and what both real CLIs do. A fake that rejected it
         # would fail on the one path production always takes.
@@ -108,6 +115,40 @@ async def _run(repo: Path, args: list[str]) -> str:
         detail = done.stderr.strip() or done.stdout.strip()
         raise ForgeError(f"{' '.join(args)} failed: {detail}")
     return done.stdout
+
+
+async def _assert_clean(repo: Path) -> None:
+    """Refuse to open a merge request over a worktree with uncommitted work.
+
+    Untracked files are included on purpose: a source or test file the agent
+    never `git add`ed is what went missing on work item 5163dd1b. Ignored files
+    are excluded by git itself, so `.pytest_cache/` and `.engineering/sessions/`
+    (.gitignore:54) do not trip it.
+    """
+    raw = await _run(repo, ["git", "status", "--porcelain"])
+    dirty = [line[3:] for line in raw.splitlines() if line.strip()]
+    if dirty:
+        shown = ", ".join(dirty[:5])
+        more = f" (+{len(dirty) - 5} more)" if len(dirty) > 5 else ""
+        raise ForgeError(
+            f"{len(dirty)} uncommitted path(s) in the worktree, which would not "
+            f"reach the merge request: {shown}{more}"
+        )
+
+
+async def _assert_pushed(repo: Path, branch: str) -> None:
+    """Refuse to merge a head the remote has never seen.
+
+    If `origin/<branch>` does not exist, `_run` raises ForgeError of its own and
+    the node fails loudly — the right answer for a merge with no pushed branch.
+    """
+    raw = await _run(repo, ["git", "rev-list", "--count", f"origin/{branch}..HEAD"])
+    ahead = int(raw.strip() or 0)
+    if ahead:
+        raise ForgeError(
+            f"local branch is ahead of origin/{branch} by {ahead} commit(s); "
+            "merging would merge a head the forge has never seen"
+        )
 
 
 async def _commits_on(repo: Path, branch: str) -> tuple[str, ...]:
@@ -179,10 +220,11 @@ class GlabCli:
     """GitLab through `glab`. Credentials stay in glab's own keyring."""
 
     async def open_mr(self, *, repo: Path, branch: str, title: str, body: str) -> MR:
+        await _assert_clean(repo)
         # Both forges refuse to create against an unpushed branch. `--fill --yes`
         # would push too, but pushing explicitly keeps the failure legible when
         # it is the push that fails rather than the create.
-        await _run(repo, ["git", "push", "-u", "origin", branch])
+        await self.push(repo=repo, branch=branch)
         # Not `--fill`: it derives the title from the commits, and with more
         # than one commit glab falls back to the branch name — which for Kraft
         # is always the work item id, so every MR read as a hex string
@@ -195,6 +237,9 @@ class GlabCli:
         raw = await _run(repo, ["glab", "mr", "view", "-F", "json"])
         data = _parse_json(raw, "glab mr view")
         return MR(number=int(data["iid"]), url=str(data["web_url"]))
+
+    async def push(self, *, repo: Path, branch: str) -> None:
+        await _run(repo, ["git", "push", "-u", "origin", branch])
 
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None:
         # No iid: `glab mr update` resolves the merge request from the
@@ -218,7 +263,8 @@ class GlabCli:
             jobs=(f"pipeline {top.get('id')}: {raw_state}",),
         )
 
-    async def merge(self, *, repo: Path, mr: MR) -> None:
+    async def merge(self, *, repo: Path, branch: str, mr: MR) -> None:
+        await _assert_pushed(repo, branch)
         # number 0 is "not known": `run_task` does not thread the MR between
         # nodes, and both CLIs resolve it from the checked-out branch. Passing
         # a literal 0 would target a merge request that does not exist.
@@ -230,12 +276,16 @@ class GhCli:
     """GitHub through `gh`. For the public repo after the v0.1.0 split."""
 
     async def open_mr(self, *, repo: Path, branch: str, title: str, body: str) -> MR:
-        await _run(repo, ["git", "push", "-u", "origin", branch])
+        await _assert_clean(repo)
+        await self.push(repo=repo, branch=branch)
         # `--fill` titles the PR from the commits; see GlabCli.open_mr.
         await _run(repo, ["gh", "pr", "create", "--title", mr_title(title), "--body", body])
         raw = await _run(repo, ["gh", "pr", "view", "--json", "number,url"])
         data = _parse_json(raw, "gh pr view")
         return MR(number=int(data["number"]), url=str(data["url"]))
+
+    async def push(self, *, repo: Path, branch: str) -> None:
+        await _run(repo, ["git", "push", "-u", "origin", branch])
 
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None:
         await _run(repo, ["gh", "pr", "edit", "--body", body])
@@ -258,7 +308,8 @@ class GhCli:
             state = "pending"
         return CIStatus(state=state, url=str(data.get("url", "")), jobs=jobs)
 
-    async def merge(self, *, repo: Path, mr: MR) -> None:
+    async def merge(self, *, repo: Path, branch: str, mr: MR) -> None:
+        await _assert_pushed(repo, branch)
         target = [str(mr.number)] if mr.number > 0 else []
         await _run(repo, ["gh", "pr", "merge", *target, "--squash"])
 
@@ -385,13 +436,18 @@ async def run_task(
                 log = f"{head}: {ci.url}\n" + "".join(f"  {j}\n" for j in ci.jobs)
                 status = "done" if ci.state == "success" else "failed"
             case "sync_mr":
+                # Push first: every commit after `open_mr` -- verify's fixes,
+                # mr_checks' findings, the review brief -- is local only until
+                # this runs, and `merge` refuses a branch ahead of its remote
+                # (Kraft-nh5m).
+                await forge.push(repo=repo, branch=branch)
                 # The description `open_mr` wrote predates every commit verify
                 # and mr_checks added, so it is rewritten from the branch head
                 # before a human is asked to read it (Kraft-c09h).
                 await forge.update_mr(repo=repo, branch=branch, body=body)
-                log, status = "merge request description synced\n", "done"
+                log, status = "pushed and synced the merge request description\n", "done"
             case "merge":
-                await forge.merge(repo=repo, mr=MR(number=0, url=""))
+                await forge.merge(repo=repo, branch=branch, mr=MR(number=0, url=""))
                 log, status = "merged\n", "done"
             case _:
                 log, status = f"unknown forge handler {handler!r}\n", "failed"

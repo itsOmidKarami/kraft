@@ -190,3 +190,12 @@ Installed Kraft keeps state in `$KRAFT_HOME` (default `~/.kraft`): `run/` for th
 databases, logs and worktrees, `templates/` for the YAML the Settings screens
 edit, seeded from the packaged defaults on first run and never overwritten after.
 Design: `docs/superpowers/specs/2026-09-04-packaging-and-dev-execution-design.md`.
+
+## Kraft Workers
+
+A session with `$KRAFT_WORK_ITEM_ID` set is a Kraft worker, running in a
+throwaway git worktree on its own branch. It commits everything it changes
+before it exits — uncommitted work never reaches the merge request and is
+destroyed with the worktree. This overrides the Conservative profile's
+"do not run git commits" for commits only: a worker still does not push,
+merge, sync Dolt, or close beads. Kraft does those itself.

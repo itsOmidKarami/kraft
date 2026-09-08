@@ -26,8 +26,15 @@ nodes:
     tasks: [on.ci.poll, on.review.mr.run]
     gate_after: null
   - id: human_review
-    tasks: [on.mr.sync, on.human_review.requested]
+    tasks: [on.human_review.requested]
     gate_after: human_review_approval
+  # After the gate, not before it: the gate has to stay on the node that
+  # carries the review brief (`_gate_artifact` scans the gate node's own
+  # tasks), and pushing after approval means the merged head includes the
+  # brief commit and anything the human committed while reviewing.
+  - id: mr_sync
+    tasks: [on.mr.sync]
+    gate_after: null
   - id: merge
     tasks: [on.merge]
     gate_after: null
