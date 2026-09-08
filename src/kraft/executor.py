@@ -305,6 +305,7 @@ async def _dispatch(
             profile=inv.profile,
             model=inv.model,
             deny_tools=inv.deny_tools,
+            effort=inv.effort,
             steering_texts=inv.steering_texts,
             artifact=binding.get("artifact"),
             method_text=inv.method_text,
