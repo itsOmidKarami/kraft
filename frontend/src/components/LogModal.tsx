@@ -44,33 +44,61 @@ export function LogModal({ sessionId, onClose }: { sessionId: string; onClose: (
   const bodyRef = useRef<HTMLDivElement>(null);
 
   const session = findSession(sessionId);
-  const running = session?.status === "running";
+  // a session still in 'pending' is about to write: follow it, do not wait
+  const live = session?.status === "running" || session?.status === "pending";
   // Follow is on while the session is live, and the user can switch it off.
-  const [follow, setFollow] = useState(running);
+  const [follow, setFollow] = useState(live);
+  // The stream is down but the browser is retrying it by itself.
+  const [reconnecting, setReconnecting] = useState(false);
 
   useEffect(() => {
-    let live = true;
+    // an error belongs to the session and follow-state it came from: without
+    // this, one session's failure stays on screen over the next one's lines
+    setError(null);
+    // While following, the server's tail (`_tail`, src/kraft/api.py:1350)
+    // starts at line 0 and sends everything -- a snapshot alongside it can
+    // only duplicate the stream or fail. Switching follow off fetches it then,
+    // which also picks up whatever the stream missed.
+    if (follow) return;
+    let alive = true;
     api
       .getLogLines(sessionId)
       // merge, never replace: the tail may already have delivered lines past the
       // end of this snapshot, and it never re-sends what it has sent
-      .then((r) => live && setLines((prev) => merge(prev, r.lines)))
-      .catch((e) => live && setError(e instanceof Error ? e.message : String(e)));
+      .then((r) => alive && setLines((prev) => merge(prev, r.lines)))
+      .catch((e) => alive && setError(e instanceof Error ? e.message : String(e)));
     return () => {
-      live = false;
+      alive = false;
     };
-  }, [sessionId]);
+  }, [sessionId, follow]);
 
   useEffect(() => {
     if (!follow || typeof EventSource === "undefined") return;
+    setReconnecting(false);
     const es = new EventSource(api.logStreamUrl(sessionId));
     es.onmessage = (e) => {
       const line = JSON.parse(e.data) as LogLine;
+      setReconnecting(false);
       // the tail replays from the top, so merge on the line number
       setLines((prev) => merge(prev, [line]));
     };
-    es.addEventListener("end", () => es.close());
-    es.onerror = () => es.close();
+    es.addEventListener("end", () => {
+      es.close();
+      // the session is over: stop the "following" strip claiming otherwise,
+      // and let the first effect pull a final snapshot
+      setFollow(false);
+    });
+    es.onerror = () => {
+      // EventSource reconnects itself; only CLOSED means it has given up.
+      // Closing on both discards the browser's own retry. A reconnect replays
+      // from line 0 and merge() drops the duplicates.
+      if (es.readyState === EventSource.CLOSED) {
+        setFollow(false);
+        setNote("log stream stopped — press Follow to retry");
+      } else {
+        setReconnecting(true);
+      }
+    };
     return () => es.close();
   }, [sessionId, follow]);
 
@@ -160,6 +188,12 @@ export function LogModal({ sessionId, onClose }: { sessionId: string; onClose: (
 
         <div className="log-body" ref={bodyRef}>
           {error && <p className="form-error">{error}</p>}
+          {shown.length === 0 && !error && live && (
+            <p className="empty">
+              no output yet — an agent running with <code>--output-format json</code> writes
+              its log when it exits
+            </p>
+          )}
           {shown.map((l) => (
             <div key={l.n} className="log-line" data-src={l.src}>
               <span className="log-t">{l.t ? clock(l.t) : ""}</span>
@@ -170,7 +204,7 @@ export function LogModal({ sessionId, onClose }: { sessionId: string; onClose: (
           {follow && (
             <div className="log-following">
               <span className="live-dot" />
-              following · new lines appear here
+              {reconnecting ? "reconnecting…" : "following · new lines appear here"}
             </div>
           )}
         </div>

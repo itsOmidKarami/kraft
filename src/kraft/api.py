@@ -1369,8 +1369,9 @@ def _session_row(st, sid: str):
 async def _tail(st, sid: str, path: Path, *, poll_s: float = 0.4):
     """SSE tail: every structured line, then new ones until the session ends.
 
-    Stops one poll *after* the session leaves 'running', so the lines written
-    between the last poll and the exit are not dropped on the floor.
+    Stops one poll *after* the session stops being pending or running, so the
+    lines written between the last poll and the exit are not dropped on the
+    floor.
     """
     sent = 0
     running = True
@@ -1380,7 +1381,10 @@ async def _tail(st, sid: str, path: Path, *, poll_s: float = 0.4):
             yield f"data: {json.dumps(line)}\n\n"
         if not running:
             break
-        running = _session_row(st, sid)["status"] == "running"
+        # not *finished* -- a session still in 'pending' has an agent about to
+        # write to this log, and a stream opened on it used to get one poll and
+        # an end event
+        running = _session_row(st, sid)["status"] in ("pending", "running")
         await asyncio.sleep(poll_s)
     yield "event: end\ndata: {}\n\n"
 
