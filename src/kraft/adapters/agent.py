@@ -90,6 +90,8 @@ class Profile(NamedTuple):
     output_json: tuple[str, ...]
     model: tuple[str, ...]
     deny_tools: tuple[str, ...]
+    permission_mode: tuple[str, ...]
+    effort: tuple[str, ...]
 
 
 PROFILES: dict[str, Profile] = {
@@ -103,6 +105,19 @@ PROFILES: dict[str, Profile] = {
         # itself dispatches. The real blast-radius containment is the per-item
         # worktree (spec §3) — deny_tools is defense in depth on top of it.
         deny_tools=("--disallowed-tools",),
+        # Without this the CLI runs in its default mode, which *asks* — and
+        # `-p` has nobody to ask, since `--permission-prompts` defaults to a
+        # host Kraft does not supply. Every ask becomes a silent denial: the
+        # spec worker on work item 6363c65e was refused the Write of its own
+        # artifact and still exited 0. `auto` decides for itself instead.
+        #
+        # Model-dependent, because the judgement is the model's own: sonnet-5
+        # and opus-5 complete a headless Write+Bash under `auto` with no
+        # denials, haiku-4.5 under identical flags is refused. A binding that
+        # pins a small model can still lose its artifact — which is why the
+        # artifact check in `run_agent_task` is the load-bearing half.
+        permission_mode=("--permission-mode", "auto"),
+        effort=("--effort",),
     ),
 }
 
@@ -114,6 +129,7 @@ class Invocation(NamedTuple):
     deny_tools: tuple[str, ...]
     steering_texts: tuple[str, ...]
     method_text: str | None = None
+    effort: str | None = None
 
 
 def resolve_invocation(
@@ -174,6 +190,13 @@ def resolve_invocation(
         deny_tools=tuple(deny),
         steering_texts=steering_texts,
         method_text=method_text,
+        # Hook-level only, like `skill` and unlike `model`: effort is a property
+        # of the work the node does — a spec is deliberated, an env_setup is
+        # mechanical — not of the repo it runs in. A repo-wide default would
+        # make the same node think harder in one checkout than another.
+        # Deliberately no `escalate_effort`: `escalate_model` is already the fix
+        # loop's capability bump, and two bump knobs is one too many.
+        effort=binding.get("effort"),
     )
 
 
@@ -193,6 +216,32 @@ def _envelope_is_error(_base_status: str, log_path: Path, _returncode: int) -> s
     return _base_status
 
 
+def _resolve_status(artifact: str | None, work_item_id: str, cwd: Path):
+    """`post_resolve` for an agent task: a bad envelope *or* a missing artifact.
+
+    A binding that declares `artifact:` is held to producing it — the contract
+    `_ARTIFACT` states in the prompt is otherwise only a request, and a worker
+    that ignores it reports success while leaving the gate with nothing to
+    approve. Checked here, in the one function every agent task returns
+    through, so no caller can forget it (Kraft-7lu).
+    """
+
+    def resolve(base_status: str, log_path: Path, returncode: int) -> str:
+        status = _envelope_is_error(base_status, log_path, returncode)
+        # Only a *claim of success* is held to the artifact. A worker that
+        # stopped to ask a question wrote nothing precisely because it
+        # stopped, and `executor._needs_context_question` matches on this
+        # status: downgrading it to `failed` loses the question, makes the
+        # stop reason generic, and 409s both /steer and /resume.
+        if artifact is None or status not in ("done", "done_with_concerns"):
+            return status
+        if (Path(cwd) / artifact_path(artifact, work_item_id)).is_file():
+            return status
+        return "failed"
+
+    return resolve
+
+
 async def run_agent_task(
     db,
     run_dirs,
@@ -210,6 +259,7 @@ async def run_agent_task(
     profile: str = "claude",
     model: str | None = None,
     deny_tools: tuple[str, ...] = (),
+    effort: str | None = None,
     steering_texts: tuple[str, ...] = (),
     review_package: str | None = None,
     artifact: str | None = None,
@@ -270,11 +320,14 @@ async def run_agent_task(
         *prof.system_prompt,
         ctx,
         *prof.output_json,
+        *prof.permission_mode,
     ]
     if model:
         cmd += [*prof.model, model]
     if deny_tools:
         cmd += [*prof.deny_tools, ",".join(deny_tools)]
+    if effort:
+        cmd += [*prof.effort, effort]
     return await _subprocess.run_task(
         db,
         run_dirs,
@@ -294,6 +347,6 @@ async def run_agent_task(
             "KRAFT_SESSION_ID": session_id,
             **({"KRAFT_REVIEW_PACKAGE": review_package} if review_package else {}),
         },
-        post_resolve=_envelope_is_error,
+        post_resolve=_resolve_status(artifact, work_item_id, cwd),
         round=round,
     )

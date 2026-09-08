@@ -40,6 +40,10 @@ ATTACHMENT_GATES = {"spec": "spec_approval", "plan": "plan_approval"}
 #: An `artifact:` value becomes a path segment (`.engineering/<kind>s/<id>.md`),
 #: so it is a bare lowercase identifier — not a path, not a pattern.
 _ARTIFACT_KIND = re.compile(r"[a-z][a-z0-9_-]*")
+#: The levels `claude --effort` takes. Checked at config load rather than at
+#: dispatch: a typo reaching the CLI fails the node *after* the work item has
+#: already paid for a worktree and a session (Kraft-tff).
+_EFFORT_LEVELS = {"low", "medium", "high", "xhigh", "max"}
 
 
 class RegistryError(Exception):
@@ -160,6 +164,7 @@ def load_registry(
             "steering",
             "skill",
             "artifact",
+            "effort",
         )
         if kind == "agent":
             profiles = _agent_profiles()
@@ -172,6 +177,11 @@ def load_registry(
             for key in ("model", "escalate_model"):
                 if binding.get(key) is not None and not isinstance(binding[key], str):
                     raise RegistryError(f"{path.name}: hook {hook!r} {key!r} must be a string")
+            if "effort" in binding and binding["effort"] not in _EFFORT_LEVELS:
+                raise RegistryError(
+                    f"{path.name}: hook {hook!r} 'effort' must be one of "
+                    f"{sorted(_EFFORT_LEVELS)}; got {binding['effort']!r}"
+                )
             for key in ("deny_tools", "steering"):
                 v = binding.get(key, [])
                 if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
