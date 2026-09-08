@@ -92,6 +92,7 @@ This section covers the state DB.
 | Column | Notes |
 |---|---|
 | `id` | bead ref (anchor bead for a multi-repo item) |
+| `description` | text, nullable — the work item's brief. Prepended to the task instruction of every agent node, ahead of the attachment note (`executor._brief`). A title is a label; this is the requirement, and the spec node writes its design from it. Mirrored into the bead's own description at intake. |
 | `repo` | the **root repo** — superproject for a submodule-nested item, sole repo otherwise |
 | `current_node_id` | the node the work item is in (chains are sequential — always exactly one) |
 | `chain_definition` | json — the resolved chain for this work item, seeded from a template at intake, possibly rewritten by chain review |

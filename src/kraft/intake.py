@@ -134,6 +134,7 @@ async def _start(app, repo: dict, row: dict) -> str | None:
             st.db,
             st.run_dirs,
             title=row["title"],
+            description=row.get("description"),
             repo=repo["path"],
             template=template,
             bd_cwd=_bd_cwd(),

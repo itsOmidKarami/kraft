@@ -23,7 +23,7 @@ Read, in this order:
 ## What the brief contains
 
 - **What changed**, in the terms of this repo: files, functions, behaviour. Not
-  a restatement of the work item title.
+  a restatement of the work item's title or description.
 - **What CI said**, plainly, including the job names. If the pipeline is red,
   say so in the first line — a brief that buries a failed pipeline is worse
   than no brief, because it converts a human check into a rubber stamp.
