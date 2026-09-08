@@ -469,10 +469,10 @@ def test_the_artifact_contract_does_not_claim_the_gate_cannot_see_uncommitted_fi
 
 
 def test_default_profile_reproduces_todays_command_line(monkeypatch):
-    """Regression guard, not a red-green test: it passes before this task too.
+    """The whole argv for a binding that sets none of the optional keys.
 
-    That is the point — the whole sub-project's compatibility claim is that a
-    config setting none of the new keys builds the same argv as before.
+    Pinned in full rather than by flag, so a change to what every worker is
+    launched with cannot land without being read.
     """
     seen = _capture_cmd(monkeypatch)
     _run(command="claude", task_instruction="do the thing")
@@ -492,10 +492,27 @@ def test_default_profile_reproduces_todays_command_line(monkeypatch):
         "--append-system-prompt",
         ctx,
         "--output-format",
-        "json",
+        "stream-json",
+        "--verbose",
         "--permission-mode",
         "auto",
+        "--permission-prompt-tool",
+        "mcp__kraft__permission_request",
     ]
+
+
+def test_agent_command_streams_ndjson(monkeypatch):
+    """`--output-format json` prints one object at exit and nothing before it:
+    no log to tail, no tokens to count, no model to record until the node is
+    already over (Kraft-77z, Kraft-54dk, Kraft-2r8s)."""
+    seen = _capture_cmd(monkeypatch)
+    _run()
+    cmd = seen["cmd"]
+    assert cmd[cmd.index("--output-format") + 1] == "stream-json"
+    # measured: without --verbose the CLI exits 1 rather than streaming
+    assert "--verbose" in cmd
+    assert cmd.count("--output-format") == 1
+    assert cmd.count("--verbose") == 1
 
 
 def test_model_is_passed_through_as_a_flag(monkeypatch):
@@ -522,6 +539,57 @@ def test_empty_deny_tools_emits_no_flag(monkeypatch):
     seen = _capture_cmd(monkeypatch)
     _run()
     assert "--disallowed-tools" not in seen["cmd"]
+
+
+def test_allowed_tools_and_permission_mode_come_from_the_binding(monkeypatch):
+    """A node that needs no shell should be able to say so (Kraft-3tw)."""
+    seen = _capture_cmd(monkeypatch)
+    _run(allowed_tools=("Read", "Grep"), permission_mode="acceptEdits")
+    cmd = seen["cmd"]
+    assert cmd[cmd.index("--allowedTools") + 1] == "Read,Grep"
+    assert cmd[cmd.index("--permission-mode") + 1] == "acceptEdits"
+    assert cmd.count("--permission-mode") == 1
+
+
+def test_a_silent_binding_keeps_todays_grant(monkeypatch):
+    """Regression guard: every shipped node still launches exactly as it did."""
+    seen = _capture_cmd(monkeypatch)
+    _run()
+    cmd = seen["cmd"]
+    assert cmd[cmd.index("--permission-mode") + 1] == "auto"
+    assert "--allowedTools" not in cmd
+
+
+def test_allowed_tools_and_permission_mode_are_read_off_the_hook_binding():
+    inv = agent.resolve_invocation(
+        {"command": "c", "allowed_tools": ["Read", "Grep"], "permission_mode": "plan"}, {}, None
+    )
+    assert inv.allowed_tools == ("Read", "Grep")
+    assert inv.permission_mode == "plan"
+    bare = agent.resolve_invocation({"command": "c"}, {}, None)
+    assert bare.allowed_tools == () and bare.permission_mode is None
+
+
+def test_allowed_tools_are_not_taken_from_the_repo_entry():
+    """Unioning two allowlists widens the narrower one, which is the opposite
+    of what an allowlist is for -- unlike deny_tools, which only ever narrows."""
+    inv = agent.resolve_invocation(
+        {"command": "c", "allowed_tools": ["Read"]},
+        {"allowed_tools": ["Bash"], "deny_tools": ["WebFetch"]},
+        None,
+    )
+    assert inv.allowed_tools == ("Read",)
+    assert inv.deny_tools == ("WebFetch",)  # deny_tools still unions, repo first
+
+
+def test_permission_prompt_tool_is_passed(monkeypatch):
+    """Every agent task, not just ones with an allowlist: the decision and its
+    event are the point, and a node with no allowlist still allows and still
+    records (Kraft-oor)."""
+    seen = _capture_cmd(monkeypatch)
+    _run()
+    cmd = seen["cmd"]
+    assert cmd[cmd.index("--permission-prompt-tool") + 1] == "mcp__kraft__permission_request"
 
 
 def test_unknown_profile_raises_naming_the_profile(monkeypatch):

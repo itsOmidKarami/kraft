@@ -33,7 +33,15 @@ def test_the_tools_are_registered():
         "pause_work_item",
         "resume_work_item",
         "retry_work_item",
+        "permission_request",
     }
+
+
+def test_the_permission_tool_says_it_is_not_for_the_agent_to_call():
+    """It is wired as `--permission-prompt-tool`; an agent calling it directly
+    would be asking Kraft's opinion about a tool use that is not happening."""
+    tool = next(t for t in _tools() if t.name == "permission_request")
+    assert "not for you to call" in tool.description.lower()
 
 
 def test_no_standalone_steer_tool_is_exposed():

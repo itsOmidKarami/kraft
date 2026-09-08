@@ -85,6 +85,22 @@ def test_log_line_survives_a_line_with_no_timestamp():
     assert "boom" in out
 
 
+def test_log_line_prefers_the_summary_over_the_raw_line():
+    """`kraft view logs` prints one readable line per entry; --json still emits
+    the row untouched (cli._print_log)."""
+    out = render.log_line(
+        {
+            "n": 1,
+            "t": "2026-09-06T12:00:00+00:00",
+            "src": "tool",
+            "text": '{"type":"assistant","message":{"content":[{"type":"tool_use"}]}}',
+            "summary": "Read(src/kraft/api.py)",
+        }
+    )
+    assert "Read(src/kraft/api.py)" in out
+    assert "tool_use" not in out
+
+
 _DIFF = {
     "work_item_id": "Kraft-x",
     "base_ref": "abc123",

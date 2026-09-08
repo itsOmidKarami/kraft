@@ -28,6 +28,7 @@ token counts, not smeared across every session row at write time.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -60,17 +61,99 @@ def _from_usage_block(block: object, model: object) -> Usage | None:
     return Usage(tokens_in, tokens_out, None, model if isinstance(model, str) else None)
 
 
+def _model_of(envelope: dict) -> str | None:
+    """The model an agent reported, in either shape it reports it.
+
+    `--output-format stream-json`'s result envelope has no top-level `model`:
+    it carries `modelUsage`, a mapping keyed by model name. Reading only
+    `model` is why `worker_sessions.model` was NULL on every row ever written
+    (Kraft-2r8s). A stated `model` still wins -- a result file written by a
+    non-agent adapter names its model directly.
+    """
+    model = envelope.get("model")
+    if isinstance(model, str) and model:
+        return model
+    by_model = envelope.get("modelUsage")
+    if isinstance(by_model, dict):
+        for name in by_model:
+            if isinstance(name, str) and name:
+                return name
+    return None
+
+
 def from_envelope(envelope: object) -> Usage | None:
     """Usage from a decoded agent result envelope, or None if it carries none."""
     if not isinstance(envelope, dict):
         return None
-    u = _from_usage_block(envelope.get("usage"), envelope.get("model"))
+    u = _from_usage_block(envelope.get("usage"), _model_of(envelope))
     if u is None:
         return None
     cost = envelope.get("total_cost_usd", envelope.get("cost_usd"))
     if isinstance(cost, int | float) and not isinstance(cost, bool):
         u = Usage(u.tokens_in, u.tokens_out, float(cost), u.model)
     return u
+
+
+#: Reserved key in the caller's `seen` map for the model the `system/init` line
+#: reported. A `request_id` can never look like this, and an entry with no
+#: tokens adds nothing to the sums, so one map carries both facts across calls
+#: -- which it has to, because the init line arrives in a different call from
+#: the `assistant` lines that follow it.
+_INIT_KEY = "\x00init"
+
+
+def from_stream(lines: Iterable[str], seen: dict[str, Usage]) -> Usage | None:
+    """Fold new stream-json lines into `seen` and return the running total.
+
+    `seen` maps `request_id` -> that request's usage and is owned by the
+    caller, which is what makes repeated calls over a growing log correct: the
+    CLI emits several `assistant` lines per API request, with identical usage
+    on each (measured: two lines, one request), so summing lines rather than
+    requests double-counts. The envelope's own totals are themselves the sum
+    over requests, so this converges on the number `session_exited` writes.
+
+    Returns None only when nothing has been seen at all, so a caller can tell
+    "no usage yet" from "zero tokens so far, model known".
+
+    No cost: no per-request cost is reported, and cost is only ever the agent's
+    own number (module docstring). A live row keeps `cost_usd` NULL until the
+    envelope lands.
+    """
+    for raw in lines:
+        line = raw.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        model = obj.get("model")
+        if obj.get("type") == "system" and isinstance(model, str) and model:
+            seen.setdefault(_INIT_KEY, Usage(model=model))
+            continue
+        message = obj.get("message")
+        if not isinstance(message, dict):
+            continue
+        u = _from_usage_block(message.get("usage"), message.get("model"))
+        if u is None:
+            continue
+        request_id = obj.get("request_id")
+        # A line with no request_id cannot be deduplicated against anything;
+        # key it on its own position so it is counted exactly once.
+        key = (
+            request_id if isinstance(request_id, str) and request_id else f"{_INIT_KEY}{len(seen)}"
+        )
+        seen[key] = u
+    if not seen:
+        return None
+    return Usage(
+        sum(u.tokens_in for u in seen.values()),
+        sum(u.tokens_out for u in seen.values()),
+        None,
+        next((u.model for u in seen.values() if u.model), None),
+    )
 
 
 def read_envelope(log_path: Path) -> dict | None:

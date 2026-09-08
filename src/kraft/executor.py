@@ -338,6 +338,8 @@ async def _dispatch(
             model=inv.model,
             deny_tools=inv.deny_tools,
             effort=inv.effort,
+            allowed_tools=inv.allowed_tools,
+            permission_mode=inv.permission_mode,
             steering_texts=inv.steering_texts,
             artifact=binding.get("artifact"),
             method_text=inv.method_text,

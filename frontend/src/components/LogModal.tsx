@@ -113,7 +113,7 @@ export function LogModal({ sessionId, onClose }: { sessionId: string; onClose: (
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(lines.map((l) => l.text).join("\n"));
+      await navigator.clipboard.writeText(await api.getLogText(sessionId));
       setNote("log copied");
     } catch {
       setNote("could not copy the log");
@@ -189,16 +189,13 @@ export function LogModal({ sessionId, onClose }: { sessionId: string; onClose: (
         <div className="log-body" ref={bodyRef}>
           {error && <p className="form-error">{error}</p>}
           {shown.length === 0 && !error && live && (
-            <p className="empty">
-              no output yet — an agent running with <code>--output-format json</code> writes
-              its log when it exits
-            </p>
+            <p className="empty">no output yet — this session has not written a line</p>
           )}
           {shown.map((l) => (
             <div key={l.n} className="log-line" data-src={l.src}>
               <span className="log-t">{l.t ? clock(l.t) : ""}</span>
               <span className="log-src">{l.src}</span>
-              <span className="log-text">{l.text}</span>
+              <span className="log-text">{l.summary ?? l.text}</span>
             </div>
           ))}
           {follow && (
