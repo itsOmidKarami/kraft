@@ -62,7 +62,7 @@ def test_open_document_404_is_a_readable_message(app):
 def test_diff_no_baseline_prints_the_explicit_line(app, tmp_path, capsys):
     repo = make_repo(tmp_path)
     wid = _make_item(repo)
-    cli.main(["diff", wid])
+    cli.main(["view", "diff", wid])
     assert "no baseline" in capsys.readouterr().out
 
 
@@ -81,7 +81,7 @@ def test_diff_stat_and_truncation_reach_stdout(app, tmp_path, monkeypatch, capsy
         }
 
     monkeypatch.setattr(client, "diff", fake_diff)
-    cli.main(["diff", wid, "--stat"])
+    cli.main(["view", "diff", wid, "--stat"])
     out = capsys.readouterr().out
     assert "x.py" in out
     assert "new.txt" in out
@@ -106,7 +106,7 @@ def test_diff_name_only_prints_paths_one_per_line(app, tmp_path, monkeypatch, ca
         }
 
     monkeypatch.setattr(client, "diff", fake_diff)
-    cli.main(["diff", wid, "--name-only"])
+    cli.main(["view", "diff", wid, "--name-only"])
     # untracked paths are included: they are files the agent touched
     assert capsys.readouterr().out.split() == ["a.py", "b.py", "c.py"]
 
@@ -114,7 +114,7 @@ def test_diff_name_only_prints_paths_one_per_line(app, tmp_path, monkeypatch, ca
 def test_diff_json_is_the_raw_payload(app, tmp_path, capsys):
     repo = make_repo(tmp_path)
     wid = _make_item(repo)
-    cli.main(["diff", wid, "--json"])
+    cli.main(["view", "diff", wid, "--json"])
     printed = json.loads(capsys.readouterr().out)
     assert printed == asyncio.run(client.diff(wid))
 
@@ -135,7 +135,7 @@ def test_docs_lists_linked_documents(app, tmp_path, monkeypatch, capsys):
         ]
 
     monkeypatch.setattr(client, "documents", fake_documents)
-    cli.main(["docs", wid])
+    cli.main(["view", "docs", wid])
     out = capsys.readouterr().out
     assert "doc-1" in out and "spec" in out and "docs/a.md" in out
 
@@ -143,7 +143,7 @@ def test_docs_lists_linked_documents(app, tmp_path, monkeypatch, capsys):
 def test_docs_empty_says_nothing_rather_than_crashing(app, tmp_path, capsys):
     repo = make_repo(tmp_path)
     wid = _make_item(repo)
-    cli.main(["docs", wid])
+    cli.main(["view", "docs", wid])
     assert "(nothing)" in capsys.readouterr().out
 
 
@@ -152,7 +152,7 @@ def test_doc_prints_content(app, monkeypatch, capsys):
         return {"id": doc_id, "title": "A spec", "path": "docs/a.md", "content": "# Hello\n"}
 
     monkeypatch.setattr(client, "document", fake_document)
-    cli.main(["doc", "doc-1"])
+    cli.main(["view", "doc", "doc-1"])
     assert "# Hello" in capsys.readouterr().out
 
 
@@ -164,7 +164,7 @@ def test_doc_open_hands_off_to_the_server(app, monkeypatch, capsys):
         return {"document_id": doc_id, "path": "/abs/docs/a.md", "editor": editor or "system"}
 
     monkeypatch.setattr(client, "open_document", fake_open)
-    cli.main(["doc", "doc-1", "--open", "code"])
+    cli.main(["view", "doc", "doc-1", "--open", "code"])
     assert seen == {"doc_id": "doc-1", "editor": "code"}
     assert "/abs/docs/a.md" in capsys.readouterr().out
 
@@ -175,7 +175,7 @@ def test_doc_open_on_a_headless_server_is_a_kraft_message(app, capsys, monkeypat
 
     monkeypatch.setattr(client, "open_document", fake_open)
     with pytest.raises(SystemExit) as caught:
-        cli.main(["doc", "doc-1", "--open"])
+        cli.main(["view", "doc", "doc-1", "--open"])
     assert caught.value.code == 1
     assert "501" in capsys.readouterr().err
 
@@ -184,7 +184,7 @@ def test_diff_name_only_without_a_baseline_says_so(app, tmp_path, capsys):
     """Empty and unknown are different answers in every view, --name-only too."""
     repo = make_repo(tmp_path)
     wid = _make_item(repo)
-    cli.main(["diff", wid, "--name-only"])
+    cli.main(["view", "diff", wid, "--name-only"])
     assert "no baseline" in capsys.readouterr().out
 
 
@@ -230,7 +230,7 @@ def test_artifact_json_is_the_raw_payload(app, monkeypatch, capsys):
         return payload
 
     monkeypatch.setattr(client, "artifact", fake_artifact)
-    cli.main(["artifact", "w1", "--json"])
+    cli.main(["view", "artifact", "w1", "--json"])
     assert json.loads(capsys.readouterr().out) == payload
 
 
@@ -239,7 +239,7 @@ def test_artifact_prints_the_document_content(app, monkeypatch, capsys):
         return {"path": ".engineering/specs/w1.md", "title": "fake spec", "content": "# Hello\n"}
 
     monkeypatch.setattr(client, "artifact", fake_artifact)
-    cli.main(["artifact", "w1"])
+    cli.main(["view", "artifact", "w1"])
     out = capsys.readouterr().out
     assert "# Hello" in out
     # the front-matter/plumbing keys are not the reviewer's business, only the content is
@@ -261,7 +261,7 @@ def test_artifact_truncation_reaches_stdout(app, monkeypatch, capsys):
         }
 
     monkeypatch.setattr(client, "artifact", fake_artifact)
-    cli.main(["artifact", "w1"])
+    cli.main(["view", "artifact", "w1"])
     out = capsys.readouterr().out
     assert "# Hello" in out
     assert "1000000 bytes" in out
@@ -279,5 +279,5 @@ def test_an_untruncated_artifact_says_nothing_about_a_limit(app, monkeypatch, ca
         }
 
     monkeypatch.setattr(client, "artifact", fake_artifact)
-    cli.main(["artifact", "w1"])
+    cli.main(["view", "artifact", "w1"])
     assert "1000000" not in capsys.readouterr().out

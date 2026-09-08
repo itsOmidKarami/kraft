@@ -76,7 +76,7 @@ def test_kraft_mcp_starts_over_real_stdio(tmp_path):
         + "\n"
     )
     proc = subprocess.run(
-        [sys.executable, "-m", "kraft", "mcp"],
+        [sys.executable, "-m", "kraft", "admin", "mcp"],
         input=request,
         capture_output=True,
         text=True,

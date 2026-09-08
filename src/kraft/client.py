@@ -1,6 +1,6 @@
 """The one place that knows how to talk to a local Kraft server.
 
-`kraft mcp` and the `kraft` subcommands are both dispatch tables over this
+`kraft admin mcp` and the `kraft` subcommands are both dispatch tables over this
 module; neither holds logic the other lacks. Validation is not duplicated here —
 it lives in `api.py`, where the UI already exercises it.
 """
@@ -130,7 +130,7 @@ async def _send(method: str, path: str, **kwargs) -> httpx.Response:
         async with http() as session:
             return await session.request(method, path, **kwargs)
     except httpx.ConnectError as exc:
-        raise ValueError(f"no Kraft server at {base_url()} — start one with `kraft serve`") from exc
+        raise ValueError(f"no Kraft server at {base_url()} — start one with `kraft`") from exc
 
 
 async def _get(path: str, **params) -> dict | list:
@@ -160,7 +160,7 @@ async def list_work_items(
     not ask for.
 
     Abandoned items are off the board by default. Without the flag there is no
-    way to see one again from the CLI, which makes `kraft abandon` look like a
+    way to see one again from the CLI, which makes `kraft item abandon` look like a
     delete.
     """
     path = "/work-items?include_abandoned=true" if include_abandoned else "/work-items"
@@ -255,7 +255,7 @@ async def worker_sessions(work_item_id: str | None = None) -> list[dict]:
 
 async def latest_session(work_item_id: str | None = None) -> dict:
     """The most recent session — "what is it doing now", which is the question
-    `kraft logs` is asked."""
+    `kraft view logs` is asked."""
     sessions = await worker_sessions(work_item_id)
     if not sessions:
         raise ValueError("no worker session has run for this work item yet")
@@ -324,9 +324,7 @@ async def stream_log(session_id: str, after_line: int = 0) -> AsyncIterator[dict
                             if line.get("n", 0) >= after_line:
                                 yield line
         except httpx.ConnectError as exc:
-            raise ValueError(
-                f"no Kraft server at {base_url()} — start one with `kraft serve`"
-            ) from exc
+            raise ValueError(f"no Kraft server at {base_url()} — start one with `kraft`") from exc
         except httpx.HTTPError as exc:
             # a follow outlives its request: a read error mid-stream is the
             # server going away, and reads as a sentence like any other failure
@@ -351,7 +349,7 @@ async def stream_events(after_seq: int = 0) -> AsyncIterator[dict]:
             async for message in socket:
                 yield json.loads(message)
     except (OSError, InvalidHandshake) as exc:
-        raise ValueError(f"no Kraft server at {base_url()} — start one with `kraft serve`") from exc
+        raise ValueError(f"no Kraft server at {base_url()} — start one with `kraft`") from exc
     except ConnectionClosed as exc:
         # mid-stream: the server went away while we were watching, which is a
         # sentence like any other failure, not a traceback out of the event loop
@@ -480,7 +478,7 @@ def _no_repo_message(cwd: Path | None = None) -> str:
 
     Standing in an ordinary git repo that is simply not connected is the common
     way to reach this, and "run from a Kraft worktree" is useless advice there —
-    the fix is one `kraft connect` away (spec A §8).
+    the fix is one `kraft repo connect` away (spec A §8).
     """
     toplevel = config.git_read(
         cwd or Path.cwd(), "rev-parse", "--show-toplevel", expected_failure=True
@@ -488,7 +486,7 @@ def _no_repo_message(cwd: Path | None = None) -> str:
     if toplevel:
         return (
             f"no repo: {toplevel} is a git repo but is not connected to Kraft — "
-            f"connect it with `kraft connect {toplevel}`, or name a repo explicitly"
+            f"connect it with `kraft repo connect {toplevel}`, or name a repo explicitly"
         )
     return (
         "no repo: name one explicitly, or run from a connected repo or a Kraft worktree "

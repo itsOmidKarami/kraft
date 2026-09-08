@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import signal
 
 import pytest
+from support.harness import fake_templates_dir
 
 from kraft import cli, client
+from kraft.paths import RunDirs
 
 # `app` fixture: tests/conftest.py (sub-project A Task 4). It wires client.http()
 # to the ASGI app with the lifespan entered per client.
@@ -55,18 +59,18 @@ def test_health_exit_code_follows_status(app, monkeypatch, capsys):
 
     monkeypatch.setattr(client, "health", degraded)
     with pytest.raises(SystemExit) as caught:
-        cli.main(["health"])
+        cli.main(["admin", "health"])
     assert caught.value.code == 1
     assert "x.yaml" in capsys.readouterr().out  # the reason is on stdout, it is not an error
 
 
 def test_health_ok_exits_zero(app, capsys):
-    cli.main(["health"])  # a fresh fixture home is healthy; no SystemExit
+    cli.main(["admin", "health"])  # a fresh fixture home is healthy; no SystemExit
     assert "ok" in capsys.readouterr().out
 
 
 def test_health_json_is_the_raw_payload(app, capsys):
-    cli.main(["health", "--json"])
+    cli.main(["admin", "health", "--json"])
     printed = json.loads(capsys.readouterr().out)
     direct = asyncio.run(client.health())
     # last_scan_at moves between two calls; everything else is the payload verbatim
@@ -76,7 +80,7 @@ def test_health_json_is_the_raw_payload(app, capsys):
 
 
 def test_reindex_prints_the_counts(app, capsys):
-    cli.main(["reindex"])
+    cli.main(["admin", "reindex"])
     out = capsys.readouterr().out
     for key in ("inserted", "updated", "renamed", "deleted"):
         assert key in out
@@ -84,6 +88,86 @@ def test_reindex_prints_the_counts(app, capsys):
 
 def test_reindex_unknown_repo_is_a_kraft_message(app, capsys):
     with pytest.raises(SystemExit) as caught:
-        cli.main(["reindex", "--repo", "/no/such/repo"])
+        cli.main(["admin", "reindex", "--repo", "/no/such/repo"])
     assert caught.value.code == 1
     assert "404" in capsys.readouterr().err
+
+
+def test_serve_writes_and_clears_the_pidfile(tmp_path, monkeypatch):
+    """`kraft admin stop` needs a pid, and a stopped server must leave none."""
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    seen = {}
+
+    def fake_run(*args, **kwargs):
+        seen["pid"] = RunDirs(tmp_path / "run").pid.read_text().strip()
+
+    monkeypatch.setattr(cli.uvicorn, "run", fake_run)
+    cli._serve()
+    assert seen["pid"] == str(os.getpid())
+    assert not RunDirs(tmp_path / "run").pid.exists()
+
+
+def test_a_second_serve_refuses_while_one_is_live(tmp_path, monkeypatch, capsys):
+    """Two servers on one KRAFT_HOME share databases and worktrees with no port
+    conflict to reveal it."""
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    pid_path = RunDirs(tmp_path / "run").pid
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    pid_path.write_text(str(os.getpid()))
+    monkeypatch.setattr(cli.uvicorn, "run", lambda *a, **k: pytest.fail("started anyway"))
+    with pytest.raises(SystemExit):
+        cli._serve()
+    assert "already running" in capsys.readouterr().err
+    assert pid_path.exists()
+
+
+def test_a_stale_pidfile_does_not_block_serve(tmp_path, monkeypatch):
+    """A pidfile that outlived a SIGKILLed server is stale, not a conflict."""
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    pid_path = RunDirs(tmp_path / "run").pid
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    pid_path.write_text("999999")
+    started = []
+    monkeypatch.setattr(cli.uvicorn, "run", lambda *a, **k: started.append(True))
+    cli._serve()
+    assert started == [True]
+
+
+def test_stop_signals_the_running_pid(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    pid_path = RunDirs(tmp_path / "run").pid
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    pid_path.write_text("4171")
+    signalled, alive = [], [True]
+
+    def fake_kill(pid, sig):
+        if sig == 0 and not alive[0]:
+            raise ProcessLookupError
+        if sig != 0:
+            signalled.append((pid, sig))
+            alive[0] = False
+
+    monkeypatch.setattr(cli.os, "kill", fake_kill)
+    cli.main(["admin", "stop"])
+    assert signalled == [(4171, signal.SIGTERM)]
+    assert "4171" in capsys.readouterr().out
+
+
+def test_stop_with_no_server_is_not_an_error(tmp_path, monkeypatch, capsys):
+    """Safe to run twice: a teardown script must not fail on the second call."""
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    cli.main(["admin", "stop"])
+    assert "no server running" in capsys.readouterr().out
+
+
+def test_stop_reports_a_stale_pidfile_and_clears_it(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    pid_path = RunDirs(tmp_path / "run").pid
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    pid_path.write_text("999999")
+    cli.main(["admin", "stop"])
+    assert "no server running" in capsys.readouterr().out
+    assert not pid_path.exists()

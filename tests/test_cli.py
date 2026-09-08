@@ -125,7 +125,7 @@ def test_serve_verb_reaches_uvicorn_with_the_configured_bind(monkeypatch, tmp_pa
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
     seen = {}
     monkeypatch.setattr(cli.uvicorn, "run", lambda app, **kw: seen.update(kw))
-    cli.main(["serve"])
+    cli.main(["admin", "start"])
     assert seen["host"] == "127.0.0.1"
     assert seen["port"] == 8765
 
@@ -134,7 +134,7 @@ def test_serve_flags_override_access_yaml(monkeypatch, tmp_path):
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
     seen = {}
     monkeypatch.setattr(cli.uvicorn, "run", lambda app, **kw: seen.update(kw))
-    cli.main(["serve", "--port", "9001"])
+    cli.main(["admin", "start", "--port", "9001"])
     assert seen["port"] == 9001
     assert seen["host"] == "127.0.0.1"  # untouched: only the flag given changes
 
@@ -144,7 +144,7 @@ def test_serve_flag_beats_env(monkeypatch, tmp_path):
     monkeypatch.setenv("KRAFT_PORT", "9002")
     seen = {}
     monkeypatch.setattr(cli.uvicorn, "run", lambda app, **kw: seen.update(kw))
-    cli.main(["serve", "--port", "9003"])
+    cli.main(["admin", "start", "--port", "9003"])
     assert seen["port"] == 9003
 
 
@@ -154,7 +154,7 @@ def test_serve_host_flag_cannot_bypass_the_password_check(monkeypatch, tmp_path)
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
     monkeypatch.setattr(cli.uvicorn, "run", lambda app, **kw: pytest.fail("must not bind"))
     with pytest.raises(SystemExit, match="refusing to bind 0.0.0.0"):
-        cli.main(["serve", "--host", "0.0.0.0"])
+        cli.main(["admin", "start", "--host", "0.0.0.0"])
 
 
 def test_bare_kraft_and_kraft_serve_are_the_same_path(monkeypatch, tmp_path):
@@ -162,7 +162,7 @@ def test_bare_kraft_and_kraft_serve_are_the_same_path(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(cli.uvicorn, "run", lambda app, **kw: calls.append(kw))
     cli.main([])
-    cli.main(["serve"])
+    cli.main(["admin", "start"])
     assert calls[0] == calls[1]
 
 
@@ -179,7 +179,7 @@ def test_version_flag_prints_a_version(capsys):
 
 def test_abandon_refuses_without_yes(monkeypatch):
     """The worktree goes with the item, so the destructive verb asks first."""
-    ns = cli.build_parser().parse_args(["abandon", "w1"])
+    ns = cli.build_parser().parse_args(["item", "abandon", "w1"])
     assert ns.yes is False
     with pytest.raises(ValueError, match="--yes"):
         ns.func(ns)

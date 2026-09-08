@@ -159,26 +159,32 @@ Every MCP tool is also a subcommand, so a hook or a non-MCP agent gets the same
 surface. `--json` on any verb prints the raw API payload.
 
 ```bash
-kraft list [--all] [--status=paused]   # the board, scoped to the cwd's repo
-kraft show [ID]                        # ID defaults to the worktree you are in
-kraft create "title"                   # files it paused; a human starts it
-kraft approve [ID] / kraft reject [ID] --note "why"
-kraft pause [ID] / kraft resume [ID] --steer "..."
-kraft retry [ID] [--steer "..."]       # the only door back onto a stopped item
-kraft search "query"
-kraft logs [ID] [-f] [-n N]            # a worker session's log; --json is NDJSON
-kraft events [ID] [--after N] [--type T]
-kraft watch                            # live board, needs a terminal
-kraft diff [ID] [--stat|--name-only]   # truncation and untracked always shown
-kraft docs [ID] / kraft doc DOC_ID [--open [EDITOR]]
-kraft repos                            # `*` marks the repo you are in
-kraft connect [PATH] / kraft disconnect [PATH]
-kraft path [ID] (alias cd) / kraft open [ID]
-kraft serve [--host H] [--port P]      # same as bare `kraft`
-kraft health                           # exit 1 when degraded
-kraft doctor                           # every check at once; exit 1 on any
-kraft reindex [--repo PATH]
+kraft view list [--all] [--status=paused]   # the board, scoped to the cwd's repo
+kraft view show [ID]                        # ID defaults to the worktree you are in
+kraft item create "title"                   # files it paused; a human starts it
+kraft item approve [ID] / kraft item reject [ID] --note "why"
+kraft item pause [ID] / kraft item resume [ID] --steer "..."
+kraft item retry [ID] [--steer "..."]       # the only door back onto a stopped item
+kraft view search "query"
+kraft view logs [ID] [-f] [-n N]            # a worker session's log; --json is NDJSON
+kraft view events [ID] [--after N] [--type T]
+kraft view watch                            # live board, needs a terminal
+kraft view diff [ID] [--stat|--name-only]   # truncation and untracked always shown
+kraft view docs [ID] / kraft view doc DOC_ID [--open [EDITOR]]
+kraft repo list                             # `*` marks the repo you are in
+kraft repo connect [PATH] / kraft repo disconnect [PATH]
+kraft repo path [ID] (alias cd) / kraft repo open [ID]
+kraft admin start [--host H] [--port P]      # same as bare `kraft`
+kraft admin stop                             # SIGTERM to run/kraft.pid
+kraft admin health                           # exit 1 when degraded
+kraft admin doctor                           # every check at once; exit 1 on any
+kraft admin reindex [--repo PATH]
+kraft admin init [--repo] / kraft admin mcp  # register Kraft with an agent
 ```
+
+Verbs live in four groups: `item` acts, `view` reads, `repo` is repositories and
+their worktrees, `admin` is this machine's server. Typing an old flat verb
+(`kraft list`) prints where it moved.
 
 Installed Kraft keeps state in `$KRAFT_HOME` (default `~/.kraft`): `run/` for the
 databases, logs and worktrees, `templates/` for the YAML the Settings screens

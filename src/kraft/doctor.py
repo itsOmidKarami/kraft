@@ -1,4 +1,4 @@
-"""`kraft doctor`: the checks a human runs when Kraft is misbehaving.
+"""`kraft admin doctor`: the checks a human runs when Kraft is misbehaving.
 
 One pass, one line per check, no `--fix` — doctor reports and the human decides.
 
@@ -119,7 +119,7 @@ def _hooks_check() -> dict:
     operator who installed before a hook was implemented keeps the placeholder
     forever — and a placeholder gate shows an empty card with nothing to read
     and no reason why. Always `ok`: which hooks to run is the operator's
-    decision, and `kraft doctor` exits 1 on any failed check.
+    decision, and `kraft admin doctor` exits 1 on any failed check.
     """
     shipped_path = BUNDLED / "templates" / "registry.yaml"
     # `KRAFT_TEMPLATES_DIR` first, exactly as `_config_checks` reads it above:

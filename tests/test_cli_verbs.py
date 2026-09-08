@@ -7,6 +7,8 @@ its own tests in test_client_*.py.
 from __future__ import annotations
 
 import json
+import pathlib
+import re
 
 import pytest
 from support.harness import make_repo
@@ -34,7 +36,7 @@ def test_mcp_still_dispatches(monkeypatch):
     import kraft.mcp as mcp
 
     monkeypatch.setattr(mcp, "serve_stdio", lambda: called.append(True))
-    cli.main(["mcp"])
+    cli.main(["admin", "mcp"])
     assert called == [True]
 
 
@@ -47,7 +49,7 @@ def test_init_still_dispatches_and_honours_repo_scope(monkeypatch, tmp_path, cap
         return [tmp_path / "written.json"]
 
     monkeypatch.setattr(init_mod, "install", fake_install)
-    cli.main(["init", "--repo"])
+    cli.main(["admin", "init", "--repo"])
     assert seen["repo_scope"] is True
     assert "written.json" in capsys.readouterr().out
 
@@ -77,7 +79,7 @@ def _connect(repo):
 def test_list_renders_a_table_with_a_header(app, tmp_path, capsys):
     repo = make_repo(tmp_path)
     _make_item(app, repo, "first thing")
-    cli.main(["list"])
+    cli.main(["view", "list"])
     out = capsys.readouterr().out
     assert "ID" in out.splitlines()[0] and "TITLE" in out.splitlines()[0]
     assert "first thing" in out
@@ -88,7 +90,7 @@ def test_list_json_matches_the_client_payload(app, tmp_path, capsys):
 
     repo = make_repo(tmp_path)
     _make_item(app, repo, "first thing")
-    cli.main(["list", "--json"])
+    cli.main(["view", "list", "--json"])
     printed = json.loads(capsys.readouterr().out)
     assert printed == asyncio.run(client.list_work_items())
 
@@ -96,7 +98,7 @@ def test_list_json_matches_the_client_payload(app, tmp_path, capsys):
 def test_list_filters_by_status(app, tmp_path, capsys):
     repo = make_repo(tmp_path)
     _make_item(app, repo, "first thing")
-    cli.main(["list", "--status", "completed", "--json"])
+    cli.main(["view", "list", "--status", "completed", "--json"])
     assert json.loads(capsys.readouterr().out) == []
 
 
@@ -107,7 +109,7 @@ def test_list_scopes_to_the_cwd_repo(app, tmp_path, monkeypatch, capsys):
     _make_item(app, here, "mine")
     _make_item(app, elsewhere, "theirs")
     monkeypatch.chdir(here)
-    cli.main(["list", "--json"])
+    cli.main(["view", "list", "--json"])
     titles = [item["title"] for item in json.loads(capsys.readouterr().out)]
     assert titles == ["mine"]
 
@@ -119,7 +121,7 @@ def test_list_all_ignores_the_cwd_scope(app, tmp_path, monkeypatch, capsys):
     _make_item(app, here, "mine")
     _make_item(app, elsewhere, "theirs")
     monkeypatch.chdir(here)
-    cli.main(["list", "--all", "--json"])
+    cli.main(["view", "list", "--all", "--json"])
     titles = sorted(item["title"] for item in json.loads(capsys.readouterr().out))
     assert titles == ["mine", "theirs"]
 
@@ -127,7 +129,7 @@ def test_list_all_ignores_the_cwd_scope(app, tmp_path, monkeypatch, capsys):
 def test_show_takes_an_explicit_id(app, tmp_path, capsys):
     repo = make_repo(tmp_path)
     wid = _make_item(app, repo, "detail me")
-    cli.main(["show", wid])
+    cli.main(["view", "show", wid])
     out = capsys.readouterr().out
     assert wid in out and "detail me" in out
 
@@ -136,26 +138,26 @@ def test_show_defaults_to_the_work_item_this_session_is_in(app, tmp_path, monkey
     repo = make_repo(tmp_path)
     wid = _make_item(app, repo, "implicit")
     monkeypatch.setenv("KRAFT_WORK_ITEM_ID", wid)
-    cli.main(["show"])
+    cli.main(["view", "show"])
     assert "implicit" in capsys.readouterr().out
 
 
 def test_show_with_no_context_names_both_ways_to_fix_it(app, capsys):
     with pytest.raises(SystemExit) as caught:
-        cli.main(["show"])
+        cli.main(["view", "show"])
     assert caught.value.code == 1
     assert "no work item" in capsys.readouterr().err
 
 
 def test_search_renders_results(app, capsys):
-    cli.main(["search", "anything", "--json"])
+    cli.main(["view", "search", "anything", "--json"])
     payload = json.loads(capsys.readouterr().out)
     assert payload["query"] == "anything"
 
 
 def test_an_operation_failure_is_a_kraft_message_on_stderr(app, capsys):
     with pytest.raises(SystemExit) as caught:
-        cli.main(["show", "no-such-item"])
+        cli.main(["view", "show", "no-such-item"])
     assert caught.value.code == 1
     captured = capsys.readouterr()
     assert captured.out == ""  # stdout stays clean so --json stays pipeable
@@ -167,7 +169,7 @@ def test_create_uses_the_cwd_repo_and_lands_paused(app, tmp_path, monkeypatch, c
     repo = make_repo(tmp_path)
     _connect(repo)
     monkeypatch.chdir(repo)
-    cli.main(["create", "filed from a terminal", "--json"])
+    cli.main(["item", "create", "filed from a terminal", "--json"])
     created = json.loads(capsys.readouterr().out)
     assert created["title"] == "filed from a terminal"
     # an agent (or a human) files work; a human starts it from the board
@@ -178,12 +180,12 @@ def test_create_outside_a_connected_repo_says_how_to_fix_it(app, tmp_path, monke
     stranger = make_repo(tmp_path, name="stranger")
     monkeypatch.chdir(stranger)
     with pytest.raises(SystemExit) as caught:
-        cli.main(["create", "nowhere"])
+        cli.main(["item", "create", "nowhere"])
     assert caught.value.code == 1
     err = capsys.readouterr().err
     # the advice matches the situation: this is a git repo, it just is not
     # connected, so `kraft connect` is the fix and the message must name it
-    assert "kraft connect" in err
+    assert "kraft repo connect" in err
     assert str(stranger) in err
 
 
@@ -192,7 +194,7 @@ def test_create_outside_any_git_repo_says_something_else(app, tmp_path, monkeypa
     plain.mkdir()
     monkeypatch.chdir(plain)
     with pytest.raises(SystemExit) as caught:
-        cli.main(["create", "nowhere"])
+        cli.main(["item", "create", "nowhere"])
     assert caught.value.code == 1
     err = capsys.readouterr().err
     assert "kraft connect" not in err  # there is nothing here to connect
@@ -213,7 +215,7 @@ def test_create_through_the_mcp_door_resolves_the_cwd_repo(app, tmp_path, monkey
 
 def test_reject_requires_a_note(app, capsys):
     with pytest.raises(SystemExit) as caught:
-        cli.main(["reject", "Kraft-whatever"])
+        cli.main(["item", "reject", "Kraft-whatever"])
     assert caught.value.code == 2  # missing required argument is a usage error
     assert "--note" in capsys.readouterr().err
 
@@ -224,7 +226,7 @@ def test_a_worker_cannot_act_on_its_own_work_item(app, tmp_path, monkeypatch, ca
     wid = _make_item(app, repo, "mine to do, not to approve")
     monkeypatch.setenv("KRAFT_WORK_ITEM_ID", wid)
     with pytest.raises(SystemExit) as caught:
-        cli.main(["approve"])
+        cli.main(["item", "approve"])
     assert caught.value.code == 1
     assert "cannot act on its own work item" in capsys.readouterr().err
 
@@ -232,7 +234,7 @@ def test_a_worker_cannot_act_on_its_own_work_item(app, tmp_path, monkeypatch, ca
 def test_resume_starts_a_paused_item(app, tmp_path, capsys):
     repo = make_repo(tmp_path)
     wid = _make_item(app, repo, "start me")
-    cli.main(["resume", wid, "--steer", "go left", "--json"])
+    cli.main(["item", "resume", wid, "--steer", "go left", "--json"])
     assert capsys.readouterr().out.strip()  # the API's response, whatever shape it has
 
 
@@ -240,7 +242,7 @@ def test_pause_on_a_paused_item_surfaces_the_api_error(app, tmp_path, capsys):
     repo = make_repo(tmp_path)
     wid = _make_item(app, repo, "already paused")
     with pytest.raises(SystemExit) as caught:
-        cli.main(["pause", wid])
+        cli.main(["item", "pause", wid])
     assert caught.value.code == 1
     assert capsys.readouterr().err.startswith("kraft: ")
 
@@ -253,6 +255,108 @@ def test_retry_passes_the_id_and_steer_through(app, monkeypatch, capsys):
         return {"id": work_item_id, "node_id": "n", "steer": steer}
 
     monkeypatch.setattr(client, "retry", fake_retry)
-    cli.main(["retry", "w1", "--steer", "try the other adapter"])
+    cli.main(["item", "retry", "w1", "--steer", "try the other adapter"])
     assert seen == {"steer": "try the other adapter", "work_item_id": "w1"}
     assert "w1" in capsys.readouterr().out
+
+
+GROUPS = {
+    "item": ["create", "approve", "reject", "pause", "resume", "retry", "abandon"],
+    "view": [
+        "list",
+        "show",
+        "search",
+        "logs",
+        "events",
+        "watch",
+        "diff",
+        "docs",
+        "doc",
+        "artifact",
+    ],
+    "repo": ["list", "connect", "disconnect", "path", "cd", "open"],
+    "admin": ["start", "stop", "health", "doctor", "reindex", "init", "mcp"],
+}
+
+
+@pytest.mark.parametrize("group,verb", [(g, v) for g, verbs in GROUPS.items() for v in verbs])
+def test_every_grouped_verb_parses_to_a_handler(group, verb):
+    """The tree is the interface. Each leaf must reach a callable."""
+    args = [group, verb]
+    if verb == "search":
+        args.append("query")
+    if verb == "doc":
+        args.append("doc-1")
+    if verb == "create":
+        args.append("a title")
+    if verb == "reject":
+        args += ["--note", "why"]
+    ns = cli.build_parser().parse_args(args)
+    assert callable(ns.func)
+
+
+@pytest.mark.parametrize("group", sorted(GROUPS))
+def test_a_group_with_no_verb_is_a_usage_error(group, capsys):
+    with pytest.raises(SystemExit) as caught:
+        cli.main([group])
+    assert caught.value.code == 2
+
+
+def test_every_moved_verb_names_its_new_path(capsys):
+    """A removed verb must say where it went. argparse's own error does not."""
+    for old, new in cli.MOVED.items():
+        with pytest.raises(SystemExit) as caught:
+            cli.main([old])
+        assert caught.value.code == 2
+        err = capsys.readouterr().err
+        assert old in err and f"kraft {new}" in err
+
+
+def test_moved_covers_every_verb_that_existed():
+    """A verb dropped from MOVED is a verb that vanishes silently."""
+    expected = {
+        "create",
+        "approve",
+        "reject",
+        "pause",
+        "resume",
+        "retry",
+        "abandon",
+        "list",
+        "show",
+        "search",
+        "logs",
+        "events",
+        "watch",
+        "diff",
+        "docs",
+        "doc",
+        "artifact",
+        "repos",
+        "connect",
+        "disconnect",
+        "path",
+        "cd",
+        "open",
+        "health",
+        "doctor",
+        "reindex",
+        "init",
+        "mcp",
+        "serve",
+    }
+    assert set(cli.MOVED) == expected
+
+
+def test_no_source_string_tells_a_user_to_run_a_removed_verb():
+    """A hint that names a dead command is worse than no hint at all."""
+    src = pathlib.Path(cli.__file__).parent
+    pattern = re.compile(r"`kraft (" + "|".join(sorted(cli.MOVED)) + r")\b")
+    offenders = []
+    for path in sorted(src.rglob("*.py")):
+        if path.name == "cli.py":  # MOVED itself lists every one of them
+            continue
+        for n, line in enumerate(path.read_text().splitlines(), 1):
+            if pattern.search(line):
+                offenders.append(f"{path.relative_to(src)}:{n}: {line.strip()}")
+    assert not offenders, "\n".join(offenders)
