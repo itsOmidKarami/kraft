@@ -691,3 +691,11 @@ describe("Settings → Notifications", () => {
     expect(within(urlRow).queryByText(/^saved$/i)).toBeNull();
   });
 });
+
+describe("Settings · sidebar nav", () => {
+  it("replaces the section in the URL rather than appending to it", async () => {
+    renderAt("/settings/access");
+    const link = await screen.findByRole("link", { name: "Auto-intake" });
+    expect(link).toHaveAttribute("href", "/settings/intake");
+  });
+});
