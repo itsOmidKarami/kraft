@@ -138,7 +138,7 @@ def test_approving_all_four_gates_completes_chain(tmp_path):
             types = _events(database, wid)
             assert types.count("gate_requested") == 4
             assert types.count("gate_approved") == 4
-            assert types.count("node_completed") == 10
+            assert types.count("node_completed") == 11
         finally:
             await database.close()
 

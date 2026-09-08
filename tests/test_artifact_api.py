@@ -7,15 +7,19 @@ indexer has caught up.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
 from fastapi.testclient import TestClient
 from support.harness import fake_templates_dir, isolated_bd, make_repo
+
+from kraft import api, templates
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
@@ -229,3 +233,24 @@ def test_artifact_over_the_cap_truncates_without_500ing_on_a_split_codepoint(
     body = resp.json()
     assert body["truncated"] is True
     assert len(body["content"]) <= DIFF_MAX_BYTES
+
+
+def test_the_review_gate_still_resolves_its_brief(tmp_path):
+    """§5. Splitting `on.mr.sync` onto its own node must not move the gate off
+    the node that carries the review brief: `_gate_artifact` scans the gate
+    node's own tasks, so a gate on a sync-only node would resolve nothing and
+    the human would be asked to approve a merge request with no document."""
+    reg = templates.load_registry(_REPO_ROOT / "templates" / "registry.yaml")
+    chain = templates.materialize(
+        templates.load_templates(_REPO_ROOT / "templates", reg).valid["default"]
+    )
+    brief = tmp_path / "w1" / ".engineering" / "review_briefs" / "w1.md"
+    brief.parent.mkdir(parents=True)
+    brief.write_text("---\ntitle: The brief\n---\n\nbody\n")
+
+    st = SimpleNamespace(run_dirs=SimpleNamespace(worktrees=tmp_path), registry=reg)
+    row = {"id": "w1", "chain_definition": json.dumps(chain)}
+
+    assert (
+        api._gate_artifact(st, row, "human_review_approval") == ".engineering/review_briefs/w1.md"
+    )
