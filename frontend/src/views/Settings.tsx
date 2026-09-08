@@ -1302,7 +1302,7 @@ export function Settings() {
         <div className="facet">
           <SectionLabel>Settings</SectionLabel>
           {PAGES.map((p) => (
-            <NavLink key={p.to} to={p.to} className="facet-opt settings-link">
+            <NavLink key={p.to} to={`/settings/${p.to}`} className="facet-opt settings-link">
               {p.label}
             </NavLink>
           ))}
