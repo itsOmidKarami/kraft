@@ -118,6 +118,27 @@ async def ensure_worktree(
         detail = done.stderr.strip() or done.stdout.strip()
         raise RuntimeError(f"git worktree add failed for {work_item_id}: {detail}")
     _copy_attachments(Path(repo), worktree, attachments or [])
+    # Every node from `spec` on can commit, and the shared pre-commit hook
+    # (`.beads/hooks/pre-commit`) needs `pre-commit` on PATH -- via `uv run
+    # --no-sync` -- to catch a formatting slip before it reaches CI. A
+    # freshly created worktree has no `.venv` yet, so the very first commit
+    # an agent made hit `Failed to spawn: pre-commit` and fell back to
+    # `--no-verify`, skipping the check it most needed for the doc it had
+    # just written (Kraft-i047). Sync once here, before any node dispatches,
+    # so the safety net is live for that first commit too. Best-effort: a
+    # sync failure (offline, first-run download taking too long) logs and
+    # falls back to today's `--no-verify` behavior rather than failing the
+    # whole worktree over tooling, not content.
+    if (worktree / "pyproject.toml").is_file():
+        synced = await asyncio.to_thread(
+            subprocess.run, ["uv", "sync"], cwd=worktree, capture_output=True, text=True
+        )
+        if synced.returncode != 0:
+            logger.warning(
+                "uv sync failed for %s: %s",
+                work_item_id,
+                synced.stderr.strip() or synced.stdout.strip(),
+            )
     return worktree
 
 
