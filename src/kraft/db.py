@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -244,6 +244,18 @@ SELECT id, bead_id, title, repo, chain_template, chain_definition, current_node_
     ],
     12: ["ALTER TABLE work_items ADD COLUMN description TEXT"],
     13: ["ALTER TABLE work_items ADD COLUMN branch TEXT"],
+    # Data only, no schema change: every worker_sessions row was written with the
+    # literal attempt = 1 (Kraft-kq8m). Number each (work item, node, hook point)
+    # 1..N in (created_at, id) order — the row-value comparison breaks a shared
+    # timestamp, so the numbering has no duplicates and no gaps.
+    14: [
+        """UPDATE worker_sessions SET attempt = (
+  SELECT COUNT(*) FROM worker_sessions p
+   WHERE p.work_item_id = worker_sessions.work_item_id
+     AND p.node_id      = worker_sessions.node_id
+     AND p.hook_point   = worker_sessions.hook_point
+     AND (p.created_at, p.id) <= (worker_sessions.created_at, worker_sessions.id))"""
+    ],
 }
 
 

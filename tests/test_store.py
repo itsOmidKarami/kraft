@@ -343,6 +343,7 @@ def test_session_lifecycle(tmp_path):
                 "node_id": "env_setup",
                 "hook_point": "on.env.prepare",
                 "round": 0,
+                "attempt": 1,
             }
 
             await database.write(lambda c: store.session_running(c, "s1", 4321, 111.5))
@@ -359,6 +360,7 @@ def test_session_lifecycle(tmp_path):
                 # the round rides both session events: the client merges them, and
                 # without it here the merge would reset a fix cycle to round 0
                 "round": 0,
+                "attempt": 1,
                 "pid": 4321,
             }
 
@@ -509,6 +511,7 @@ def test_create_session_announces_the_session(tmp_path):
                 "node_id": "chain_review",
                 "hook_point": "on.chain.review_ready",
                 "round": 0,
+                "attempt": 1,
             }
         finally:
             await database.close()
@@ -745,6 +748,97 @@ def test_local_midnight_is_utc_and_sorts_against_stored_timestamps():
     # string comparison is the whole point: it is what the SQL does
     assert "2026-09-04T15:00:00.123456+00:00" >= midnight
     assert "2026-09-04T14:59:59.999999+00:00" < midnight
+
+
+def _mk_session(database, sid, *, wid="w1", node_id="verify", hook_point="on.test.run"):
+    """One session row through the real writer, with the defaults every attempt
+    test shares: work item w1, node verify, hook point on.test.run."""
+    return database.write(
+        lambda c: store.create_session(
+            c,
+            id=sid,
+            work_item_id=wid,
+            node_id=node_id,
+            hook_point=hook_point,
+            log_path=f"/l/{sid}",
+            result_path=f"/r/{sid}",
+        )
+    )
+
+
+def test_create_session_numbers_attempts_per_hook_point(tmp_path):
+    """Re-running one node's hook point — a resumed pause, a retry, each on.ci.poll
+    pass — has to count up. Every row used to read attempt 1 (Kraft-kq8m)."""
+
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await _mk_item(database)
+            for sid in ("s1", "s2", "s3"):
+                await _mk_session(database, sid)
+            got = database.read(
+                lambda c: [
+                    (r["id"], r["attempt"])
+                    for r in c.execute("SELECT id, attempt FROM worker_sessions ORDER BY id")
+                ]
+            )
+            assert got == [("s1", 1), ("s2", 2), ("s3", 3)]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_create_session_attempts_are_scoped_to_node_and_hook_point(tmp_path):
+    """The count is per (work_item_id, node_id, hook_point) — the scope
+    CurrentNodePanel's per-row 'attempt N' already assumes. A sibling hook point on
+    the same node, and the same hook point on another work item, both start at 1."""
+
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await _mk_item(database)
+            await _mk_item(database, "w2")
+            for sid in ("s1", "s2", "s3"):
+                await _mk_session(database, sid)
+            await _mk_session(database, "sibling", hook_point="on.implementation.start")
+            await _mk_session(database, "other", wid="w2")
+            got = database.read(
+                lambda c: {
+                    r["id"]: r["attempt"]
+                    for r in c.execute("SELECT id, attempt FROM worker_sessions")
+                }
+            )
+            assert got == {"s1": 1, "s2": 2, "s3": 3, "sibling": 1, "other": 1}
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_worker_session_events_carry_the_attempt(tmp_path):
+    """Both session events carry the number, or the live board shows blankSession's
+    hardcoded 1 until the next hydrate."""
+
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await _mk_item(database)
+            await _mk_session(database, "s1")
+            await _mk_session(database, "s2")
+            created = database.read(lambda c: events.read_after(c, 0, "w1"))[-1]
+            assert created["type"] == "worker_session_created"
+            assert created["payload"]["session_id"] == "s2"
+            assert created["payload"]["attempt"] == 2
+
+            await database.write(lambda c: store.session_running(c, "s2", 4321, 111.5))
+            started = database.read(lambda c: events.read_after(c, 0, "w1"))[-1]
+            assert started["type"] == "worker_session_started"
+            assert started["payload"]["attempt"] == 2
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
 
 
 def test_branch_name_slugs_the_title_and_stays_a_legal_ref(tmp_path):
