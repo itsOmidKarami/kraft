@@ -232,7 +232,11 @@ release:
     - apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl
     - curl -LsSf https://astral.sh/uv/install.sh | sh
     - export PATH="$HOME/.local/bin:$PATH"
-    - curl -fsSL "https://github.com/casey/just/releases/latest/download/just-x86_64-unknown-linux-musl.tar.gz" | tar -xz -C /usr/local/bin just
+    # `uv tool install`, not a release tarball: just's assets carry the version in
+    # their filename (just-1.58.0-x86_64-...), so /latest/download/ 404s on every
+    # architecture, and the runner is arm64 besides. uv is already here and
+    # resolves both without a URL to rot.
+    - uv tool install rust-just
   script:
     - export PATH="$HOME/.local/bin:$PATH"
     - cd frontend && npm ci && cd ..
