@@ -1056,10 +1056,11 @@ def _truncate_at_file_boundary(diff: str, limit: int) -> tuple[str, bool]:
 async def get_work_item_diff(wid: str, request: Request):
     """The changes an agent made, for a reviewer with no filesystem access.
 
-    Diffs the working tree against `base_ref`, not `base_ref...HEAD`: an agent
-    that wrote files without committing them is the normal mid-chain state, and
-    a committed-only diff would show an empty change set while the work sat on
-    disk.
+    Two ranges, kept apart (Kraft-nceo). `landed` is `base_ref..HEAD` -- what
+    earlier nodes committed, the chain's own spec and plan documents among it.
+    The top level is `HEAD`..working tree, the change actually under review:
+    one combined range spent the viewer's open-line budget on paperwork before
+    the code was reached.
     """
     st = request.app.state
     row = _work_item_row(st, wid)  # 404s on an unknown work item
@@ -1076,6 +1077,7 @@ async def get_work_item_diff(wid: str, request: Request):
             "diff": "",
             "untracked": [],
             "truncated": False,
+            "landed": {"commits": [], "files": [], "diff": "", "truncated": False},
             "diff_max_bytes": DIFF_MAX_BYTES,
             "worktree_path": str(st.run_dirs.worktrees / wid),
         }
@@ -1083,8 +1085,9 @@ async def get_work_item_diff(wid: str, request: Request):
     if not worktree.is_dir():
         raise HTTPException(404, "this work item has no worktree yet")
 
-    change = review.read_change(worktree, base)
-    if change is None:
+    change = review.read_change(worktree, "HEAD")
+    landed = review.read_change(worktree, base, head="HEAD")
+    if change is None or landed is None:
         # None means git itself failed (and git_read has already logged the
         # command and stderr). Returning an empty diff here would be
         # indistinguishable from "no changes" to the human approving the gate,
@@ -1093,6 +1096,10 @@ async def get_work_item_diff(wid: str, request: Request):
         raise HTTPException(500, "git could not read this work item's worktree")
 
     diff, truncated = _truncate_at_file_boundary(change.diff, DIFF_MAX_BYTES)
+    # Each side against the whole cap, independently: the in-flight change is
+    # what the reviewer is deciding about and must not be squeezed by the size
+    # of the documents ahead of it.
+    landed_diff, landed_truncated = _truncate_at_file_boundary(landed.diff, DIFF_MAX_BYTES)
     return {
         "work_item_id": wid,
         "base_ref": base,
@@ -1100,6 +1107,12 @@ async def get_work_item_diff(wid: str, request: Request):
         "diff": diff,
         "untracked": change.untracked,
         "truncated": truncated,
+        "landed": {
+            "commits": landed.commits,
+            "files": landed.files,
+            "diff": landed_diff,
+            "truncated": landed_truncated,
+        },
         # A reviewer told the diff is partial and not told how much is missing
         # or where the rest is has been given half a warning (spec F §2.2).
         # `worktree_path` is no new disclosure: GET /work-items/{wid} has always

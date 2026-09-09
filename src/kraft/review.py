@@ -7,11 +7,12 @@ the reviewer that produced it must be looking at the same change, and two
 separately-written producers are two things that eventually disagree about what
 the change is.
 
-Like the endpoint it was factored out of, the range is the working tree against
-`base_ref` rather than `base_ref..HEAD`: an agent that wrote files without
-committing them is the normal mid-chain state, and a committed-only diff would
-show an empty change set while the work sat on disk. The commit list is the one
-part that is genuinely `base_ref..HEAD`, because uncommitted work has no commit.
+Two ranges, not one. `read_change(wt, base)` is the working tree against `base`
+-- an agent that wrote files without committing them is the normal mid-chain
+state, and a committed-only diff would show an empty change set while the work
+sat on disk. `read_change(wt, base, head="HEAD")` is `base..HEAD`, what earlier
+nodes finished and committed. The gate viewer shows both, apart (Kraft-nceo);
+`write_package` still hands a review agent the one combined range.
 """
 
 from __future__ import annotations
@@ -35,22 +36,34 @@ class Change(NamedTuple):
     untracked: list[str]
 
 
-def read_change(worktree: Path, base: str, *, context: int | None = None) -> Change | None:
+def read_change(
+    worktree: Path, base: str, *, head: str | None = None, context: int | None = None
+) -> Change | None:
     """The change in `worktree` against `base`, or None if git itself failed.
+
+    With `head` set the range is `base..head` and nothing uncommitted is in it,
+    so `untracked` is `[]`: `git status --porcelain` describes the working tree
+    and has no meaning for a committed range.
 
     None is not "no changes": returning an empty diff for a git failure is
     indistinguishable from a clean tree to whoever is about to approve it.
     """
-    diff_args = ["diff"] + ([f"-U{context}"] if context is not None else []) + [base]
+    rev = [base] + ([head] if head else [])
+    diff_args = ["diff"] + ([f"-U{context}"] if context is not None else []) + rev
     # strip=False: a diff whose last line is blank context is still that diff
     body = _config.git_read(worktree, *diff_args, strip=False)
-    numstat = _config.git_read(worktree, "diff", "--numstat", base)
-    status = _config.git_read(worktree, "status", "--porcelain", "-uall")
-    if body is None or numstat is None or status is None:
+    numstat = _config.git_read(worktree, "diff", "--numstat", *rev)
+    if body is None or numstat is None:
         return None
+    untracked: list[str] = []
+    if head is None:
+        status = _config.git_read(worktree, "status", "--porcelain", "-uall")
+        if status is None:
+            return None
+        untracked = [ln[3:] for ln in status.splitlines() if ln.startswith("?? ")]
     # A repo with no commits past `base` is normal, not a failure, so an empty
     # log is not folded in with the None checks above.
-    log = _config.git_read(worktree, "log", "--oneline", f"{base}..HEAD") or ""
+    log = _config.git_read(worktree, "log", "--oneline", f"{base}..{head or 'HEAD'}") or ""
 
     files = []
     for line in numstat.splitlines():
@@ -64,12 +77,7 @@ def read_change(worktree: Path, base: str, *, context: int | None = None) -> Cha
                     "deletions": int(dels) if dels.isdigit() else 0,
                 }
             )
-    return Change(
-        commits=log.splitlines(),
-        files=files,
-        diff=body,
-        untracked=[ln[3:] for ln in status.splitlines() if ln.startswith("?? ")],
-    )
+    return Change(commits=log.splitlines(), files=files, diff=body, untracked=untracked)
 
 
 def render_package(change: Change, base: str) -> str:
