@@ -315,6 +315,62 @@ def test_mark_needs_human_and_completed(tmp_path):
     asyncio.run(scenario())
 
 
+def test_needs_human_names_the_stop_it_is_about_not_an_older_failure(tmp_path):
+    """Kraft-eh6p's "view log" button hangs off `session_id`. A node that failed
+    once, was retried, and then stopped for a *question* must not hand the human
+    the older failure's log: it looks like the answer and is not. And a stop with
+    no session to explain it (a budget breach) must offer no button at all."""
+
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await _mk_item(database, "wh")
+            for sid, status in (("older", "failed"), ("asked", "needs_context")):
+                await database.write(
+                    lambda c, sid=sid: store.create_session(
+                        c,
+                        id=sid,
+                        work_item_id="wh",
+                        node_id="verify",
+                        hook_point="on.test.run",
+                        log_path="/l",
+                        result_path="/r",
+                    )
+                )
+                await database.write(
+                    lambda c, sid=sid, status=status: store.session_exited(c, sid, status)
+                )
+
+            await database.write(
+                lambda c: store.mark_needs_human(c, "wh", "verify", "needs_context: which db?")
+            )
+            asked = database.read(lambda c: events.read_after(c, 0, "wh"))[-1]
+
+            # A later session that explains nothing (a budget-refused launch) —
+            # the button goes away rather than pointing back at "asked".
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="refused",
+                    work_item_id="wh",
+                    node_id="verify",
+                    hook_point="on.implementation.start",
+                    log_path="/l",
+                    result_path="/r",
+                )
+            )
+            await database.write(lambda c: store.mark_needs_human(c, "wh", "verify", "over budget"))
+            broke = database.read(lambda c: events.read_after(c, 0, "wh"))[-1]
+            return asked["payload"], broke["payload"]
+        finally:
+            await database.close()
+
+    asked, broke = asyncio.run(scenario())
+
+    assert asked["session_id"] == "asked", "the stop names an older, unrelated failure"
+    assert "session_id" not in broke, "a stop no session explains still offered a log"
+
+
 def test_session_lifecycle(tmp_path):
     async def scenario():
         database = await _open(tmp_path)

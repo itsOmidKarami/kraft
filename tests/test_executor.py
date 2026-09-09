@@ -908,3 +908,258 @@ def test_a_steered_node_with_no_artifact_yet_keeps_the_plain_steer_prompt(tmp_pa
     )
 
     assert with_binding == no_binding == "A human has steered this run: go left\n\n"
+
+
+def test_agent_node_commits_what_the_worker_left_behind(tmp_path, monkeypatch):
+    """Kraft-7fip. The fake agent edits calc.py and never commits it, which is
+    exactly what a real worker did on work item 2506daf4: `verify` passed on the
+    files on disk, then `on.mr.open` refused the dirty worktree two nodes later
+    and a human had to `git commit` by hand. Kraft owns the worktree, so the
+    edit must be in a commit by the time the node is done."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="make the failing test pass",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            assert (
+                await executor.run(
+                    database,
+                    rd,
+                    work_item_id=wid,
+                    registry=fake_registry(sys.executable, _FAKE_AGENT),
+                    bd_cwd=str(tracker),
+                )
+                == "completed"
+            )
+            return rd.worktrees / wid
+        finally:
+            await database.close()
+
+    worktree = asyncio.run(scenario())
+
+    def git(*args):
+        return subprocess.run(
+            ["git", *args], cwd=worktree, capture_output=True, text=True, check=True
+        ).stdout
+
+    assert "a + b" in git("show", "HEAD:calc.py"), "the commit does not carry the edit"
+    # Kraft's own session note is the one thing deliberately left behind, and it
+    # is left behind in a repo that has not gitignored it too (Kraft-z8gj) --
+    # anything else still uncommitted is work about to be destroyed.
+    # -uall: porcelain collapses an untracked directory to its name, which would
+    # hide a stranded source file sitting next to the session note.
+    left = [line[3:] for line in git("status", "--porcelain", "-uall").splitlines() if line.strip()]
+    assert all(p.startswith(".engineering/sessions/") for p in left), (
+        f"the worker's work never reached a commit: {left}"
+    )
+
+
+def test_needs_human_names_the_session_that_failed(tmp_path, monkeypatch):
+    """Kraft-eh6p. `work_item_needs_human` is the event a human lands on, and
+    its reason names the hook ('task failed in node open_mr: on.mr.open'), not
+    the failure — which lives in the failed session's log. Without the session
+    id on this event the timeline has nothing to hang a 'view log' button on,
+    and the only route to the reason is noticing the preceding
+    worker_session_exited row."""
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "error")
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="make the failing test pass",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            assert (
+                await executor.run(
+                    database,
+                    rd,
+                    work_item_id=wid,
+                    registry=fake_registry(sys.executable, _FAKE_AGENT),
+                    bd_cwd=str(tracker),
+                )
+                == "needs_human"
+            )
+            evts = database.read(lambda c: events.read_after(c, 0, wid))
+            stopped = next(e for e in evts if e["type"] == "work_item_needs_human")
+            failed = [
+                e["payload"]["session_id"]
+                for e in evts
+                if e["type"] == "worker_session_exited" and e["payload"]["status"] == "failed"
+            ]
+            return stopped["payload"], failed
+        finally:
+            await database.close()
+
+    payload, failed = asyncio.run(scenario())
+
+    assert failed, "the scenario did not produce a failed session"
+    assert payload.get("session_id") == failed[-1], (
+        "needs_human does not name the session whose log holds the reason"
+    )
+
+
+def test_a_failed_straggler_sweep_does_not_fail_a_good_agent_run(tmp_path, monkeypatch):
+    """The sweep is a courtesy, not the task. An index lock a co-task holds or
+    an unset user.email would otherwise turn a successful agent run into a
+    failed node — and losing the sweep only puts us back where Kraft-7fip
+    found us, with the work on disk and `_assert_clean` naming it at open_mr."""
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def boom(*args, **kwargs):
+        raise executor._forge.ForgeError("git commit failed: .git/index.lock exists")
+
+    monkeypatch.setattr(executor._forge, "commit_stragglers", boom)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="make the failing test pass",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            return await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=fake_registry(sys.executable, _FAKE_AGENT),
+                bd_cwd=str(tracker),
+            )
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario()) == "completed"
+
+
+def _gate_check(flag: Path) -> list[str]:
+    """A command that fails until `flag` exists — a stand-in for `on.ci.poll`
+    against a pipeline that is red for a reason outside the code."""
+    return [
+        sys.executable,
+        "-c",
+        f"import pathlib, sys; sys.exit(0 if pathlib.Path({str(flag)!r}).exists() else 1)",
+    ]
+
+
+def _touch(flag: Path) -> list[str]:
+    return [sys.executable, "-c", f"import pathlib; pathlib.Path({str(flag)!r}).touch()"]
+
+
+def _run_one_node(tmp_path, template: Template, registry: Registry) -> tuple[str, list[dict]]:
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="a pipeline that is red for a reason outside the code",
+                repo=str(repo),
+                template=template,
+                bd_cwd=str(tracker),
+            )
+            result = await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+            return result, database.read(lambda c: events.read_after(c, 0, wid))
+        finally:
+            await database.close()
+
+    return asyncio.run(scenario())
+
+
+def _recovering(measure: list[str], repair: list[str]) -> tuple[Template, Registry]:
+    """A one-node chain whose node measures itself, and repairs on failure."""
+    return (
+        Template(
+            id="recovering",
+            nodes=[{"id": "checks", "tasks": ["on.ci.poll"], "on_failure": ["on.mr.sync"]}],
+        ),
+        Registry(
+            hooks={
+                "on.ci.poll": {"kind": "subprocess", "command": measure},
+                "on.mr.sync": {"kind": "subprocess", "command": repair},
+            }
+        ),
+    )
+
+
+def test_a_failed_node_repairs_itself_and_measures_again(tmp_path):
+    """Kraft-rv6i. A node's tasks run concurrently, so nothing in the node can
+    react to what another task in it found, and there was no step at all
+    between a task failing and the item dropping to needs_human. With
+    `on_failure` the node gets one repair pass — believed only because the
+    node's own task passes on the re-measure."""
+    flag = tmp_path / "labelled"
+    result, evts = _run_one_node(tmp_path, *_recovering(_gate_check(flag), _touch(flag)))
+
+    assert result == "completed", "a repaired node did not carry the chain to the end"
+    assert [e["type"] for e in evts].count("node_recovery_started") == 1
+    recovery = next(e for e in evts if e["type"] == "node_recovery_started")
+    assert recovery["payload"] == {
+        "node_id": "checks",
+        "failed_tasks": ["on.ci.poll"],
+        "tasks": ["on.mr.sync"],
+    }
+    assert not [e for e in evts if e["type"] == "work_item_needs_human"]
+
+
+def test_a_repair_that_did_not_take_still_stops_for_a_human(tmp_path):
+    """The re-measure is the point: a repair task exiting 0 is not evidence
+    that the thing it was repairing is fixed."""
+    flag = tmp_path / "never-written"
+    result, evts = _run_one_node(
+        tmp_path, *_recovering(_gate_check(flag), [sys.executable, "-c", "pass"])
+    )
+
+    assert result == "needs_human"
+    assert [e["type"] for e in evts].count("node_recovery_started") == 1, (
+        "the repair pass ran more than once for one entry into the node"
+    )
+    stopped = next(e for e in evts if e["type"] == "work_item_needs_human")
+    assert "after on_failure" in stopped["payload"]["reason"], (
+        "the stop does not say a repair was already tried"
+    )
+
+
+def test_a_node_without_on_failure_stops_exactly_as_before(tmp_path):
+    """The repair pass is opt-in per node: a chain that declares no
+    `on_failure` must not gain a second measurement or a recovery event."""
+    flag = tmp_path / "never-written"
+    result, evts = _run_one_node(
+        tmp_path,
+        Template(id="plain", nodes=[{"id": "checks", "tasks": ["on.ci.poll"]}]),
+        Registry(hooks={"on.ci.poll": {"kind": "subprocess", "command": _gate_check(flag)}}),
+    )
+
+    assert result == "needs_human"
+    assert not [e for e in evts if e["type"] == "node_recovery_started"]
+    stopped = next(e for e in evts if e["type"] == "work_item_needs_human")
+    assert "after on_failure" not in stopped["payload"]["reason"]

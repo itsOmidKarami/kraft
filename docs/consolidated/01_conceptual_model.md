@@ -375,6 +375,17 @@ invocation time only, never written to a repo file.
   backward-motion coordinator. `current_node_id` does not move; this is an instance
   of the attempt+wall-clock principle above, not a revision of it. Gate rejection
   (§8) uses the same coordinator with `<gate>_reject_loop` counters.
+- **Node-level repair pass** (`on_failure`, Kraft-rv6i): a node whose tasks fail
+  may declare a second list of tasks that runs *once*, after the failure and
+  before the item drops to `needs_human` — for a blocker that is not the code,
+  such as a merge request missing a label its pipeline requires. The node then
+  measures itself again, and only that second measurement decides: a repair task
+  exiting 0 is not evidence that the thing it repaired is fixed. One pass, not a
+  loop, and no counter of its own — a repair that did not take is a blocker Kraft
+  does not understand, and stopping for a human beats pulling the same lever
+  twice. Mutually exclusive with `fix_loop`, which is already its node's
+  remediation. A `needs_context` question skips the repair entirely: it is
+  addressed to a human and no task can answer it.
 - Cost/token usage is logged per work item from the start, even before hard budgets
   are enforced — parallel/team execution can get expensive fast, and the data should
   exist before the cap does. A hard cost cap is a later addition once there is a

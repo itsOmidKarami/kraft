@@ -373,6 +373,7 @@ def test_materialize_quick_task_from_shipped_templates():
                 "tasks": ["on.env.prepare"],
                 "gate_after": None,
                 "fix_loop": None,
+                "on_failure": None,
                 "reject_to": None,
             },
             {
@@ -380,6 +381,7 @@ def test_materialize_quick_task_from_shipped_templates():
                 "tasks": ["on.implementation.start"],
                 "gate_after": None,
                 "fix_loop": None,
+                "on_failure": None,
                 "reject_to": None,
             },
             {
@@ -387,6 +389,7 @@ def test_materialize_quick_task_from_shipped_templates():
                 "tasks": ["on.test.run"],
                 "gate_after": None,
                 "fix_loop": None,
+                "on_failure": None,
                 "reject_to": None,
             },
         ],
@@ -444,6 +447,83 @@ def test_fix_loop_with_no_tasks_quarantines_template(tmp_path):
     ts = templates.load_templates(d, reg)
     assert "emptyloop" in ts.invalid
     assert "fix_loop" in ts.invalid["emptyloop"]
+
+
+def test_materialize_carries_on_failure(tmp_path):
+    """Kraft-rv6i. The walker reads the node dicts out of the materialized
+    chain, so a repair list the template declares and materialize drops is a
+    repair that never runs."""
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "recovering.yaml": (
+                "id: recovering\nnodes:\n"
+                "  - { id: n1, tasks: [on.test.run], on_failure: [on.env.prepare] }\n"
+                "  - { id: n2, tasks: [on.test.run] }\n"
+            ),
+        },
+    )
+    reg = templates.load_registry(d / "registry.yaml")
+    mat = templates.materialize(templates.load_templates(d, reg).valid["recovering"])
+    by_id = {n["id"]: n for n in mat["nodes"]}
+    assert by_id["n1"]["on_failure"] == ["on.env.prepare"]
+    assert by_id["n2"]["on_failure"] is None
+
+
+def test_bad_on_failure_quarantines_template(tmp_path):
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "quick-task.yaml": GOOD_TEMPLATE,
+            "badrecover.yaml": (
+                "id: badrecover\nnodes:\n"
+                "  - { id: n1, tasks: [on.test.run], on_failure: on.env.prepare }\n"
+            ),
+        },
+    )
+    reg = templates.load_registry(d / "registry.yaml")
+    ts = templates.load_templates(d, reg)
+    assert "quick-task" in ts.valid
+    assert "on_failure" in ts.invalid["badrecover"]
+
+
+def test_an_unknown_hook_in_on_failure_quarantines_template(tmp_path):
+    """The same check the task list gets: a repair bound to nothing would only
+    be discovered by a node failing, which is the worst moment to find out."""
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "ghost.yaml": (
+                "id: ghost\nnodes:\n  - { id: n1, tasks: [on.test.run], on_failure: [on.bogus] }\n"
+            ),
+        },
+    )
+    reg = templates.load_registry(d / "registry.yaml")
+    ts = templates.load_templates(d, reg)
+    assert "on.bogus" in ts.invalid["ghost"]
+
+
+def test_a_node_may_not_have_both_fix_loop_and_on_failure(tmp_path):
+    """A fix_loop already re-measures its node after its fix task runs. Two
+    remediations would race for the same failure."""
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "both.yaml": (
+                "id: both\nnodes:\n"
+                "  - { id: n1, tasks: [on.test.run], fix_loop: n1_fix, "
+                "on_failure: [on.env.prepare] }\n"
+            ),
+        },
+    )
+    reg = templates.load_registry(d / "registry.yaml")
+    ts = templates.load_templates(d, reg)
+    assert "both" in ts.invalid
+    assert "fix_loop" in ts.invalid["both"] and "on_failure" in ts.invalid["both"]
 
 
 def test_config_files_in_the_templates_dir_are_not_read_as_templates(tmp_path):

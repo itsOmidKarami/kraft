@@ -379,7 +379,7 @@ async def _dispatch(
             skills_dir=launch.skills_dir if launch else None,
             escalate=escalate,
         )
-        return await _agent.run_agent_task(
+        status = await _agent.run_agent_task(
             db,
             run_dirs,
             hook_point=task_hook,
@@ -403,6 +403,26 @@ async def _dispatch(
             cwd=worktree,
             **common,
         )
+        # The agent is told to commit everything it changes before it exits.
+        # When it does not, the work is still on disk -- so `verify` passes,
+        # and only `_assert_clean` two nodes later notices, by which point the
+        # failure names a hook rather than the cause and a human has to type
+        # `git commit` in someone else's worktree (Kraft-7fip). Kraft owns the
+        # worktree, so it takes the work rather than reporting it missing.
+        #
+        # Never at the cost of the run itself: an index lock a co-task holds, an
+        # unset user.email, a submodule that `add -A` finds nothing to stage in
+        # -- any of those would turn a *successful* agent task into a failed
+        # node, and on the fix-loop's direct dispatch would escape `run()`
+        # entirely. Losing the sweep only puts us back where Kraft-7fip found
+        # us: the work is still on disk and `_assert_clean` names it at open_mr.
+        try:
+            await _forge.commit_stragglers(
+                Path(worktree), message=f"wip: uncommitted work from {node['id']}"
+            )
+        except _forge.ForgeError as exc:
+            logger.warning("could not commit stragglers after %s: %r", task_hook, exc)
+        return status
     if kind == "subprocess":
         return await _subprocess.run_task(
             db,
@@ -622,6 +642,75 @@ def _last_measurement(db, work_item_id: str, node_id: str) -> tuple[list[str] | 
     return None, False
 
 
+async def _recover_node(
+    db,
+    run_dirs,
+    work_item_id: str,
+    node: dict,
+    row,
+    registry: Registry,
+    worktree,
+    *,
+    failed: list[str],
+    steer: Steer | None,
+    launch: LaunchContext | None,
+    budget: _policy.Budget,
+) -> tuple[str, list[str], list[BaseException]]:
+    """One repair pass over a node whose tasks failed (Kraft-rv6i).
+
+    Runs the node's `on_failure` tasks, then lets the node measure itself
+    again, and reports that second measurement. The re-measure is the point:
+    a node's contract is its own tasks passing, so a repair is believed only
+    when they do -- `on.ci.poll` going green, not a remediator claiming it
+    labelled something.
+
+    Once per entry into the node, not a loop. A repair that did not take is a
+    blocker Kraft does not understand, and the honest move is to stop for a
+    human rather than to keep pulling the same lever.
+    """
+    hooks = list(node["on_failure"])
+    await db.write(
+        lambda c: events.append(
+            c,
+            work_item_id,
+            "node_recovery_started",
+            {"node_id": node["id"], "failed_tasks": failed, "tasks": hooks},
+        )
+    )
+    # `round=1` separates the repair's sessions and the re-measure's from the
+    # first attempt's, so per-round usage reads back without joining the events.
+    # Safe to borrow the fix-loop's counter here because a node may not have
+    # both `fix_loop` and `on_failure` (templates.py).
+    verdict, r_failed, r_excs = await _measure_node(
+        db,
+        run_dirs,
+        work_item_id,
+        {**node, "tasks": hooks},
+        row,
+        registry,
+        worktree,
+        round=1,
+        steer=steer,
+        launch=launch,
+        budget=budget,
+    )
+    if verdict != "ok":
+        return verdict, r_failed, r_excs
+    return await _measure_node(
+        db,
+        run_dirs,
+        work_item_id,
+        node,
+        row,
+        registry,
+        worktree,
+        round=1,
+        steer=steer,
+        launch=launch,
+        budget=budget,
+    )
+
+
 async def _walk_node(
     db,
     run_dirs,
@@ -659,14 +748,44 @@ async def _walk_node(
             return await _stop_for_budget(db, work_item_id, node, budget)
         if verdict == "failed":
             question = _needs_context_question(db, work_item_id, node, round=0)
-            if question is not None:
-                reason = f"needs_context: {question}"
-            else:
-                reason = f"task failed in node {node['id']}: {', '.join(failed)}"
-                if excs:
-                    reason += f" ({', '.join(repr(e) for e in excs)})"
-            await db.write(lambda c: store.mark_needs_human(c, work_item_id, node["id"], reason))
-            return "needs_human"
+            recovered = False
+            if question is None and node.get("on_failure"):
+                # Deliberately not reached on needs_context: a question an agent
+                # asked is addressed to a human, and no repair task can answer
+                # it (Kraft-rv6i).
+                verdict, failed, excs = await _recover_node(
+                    db,
+                    run_dirs,
+                    work_item_id,
+                    node,
+                    row,
+                    registry,
+                    worktree,
+                    failed=failed,
+                    steer=steer,
+                    launch=launch,
+                    budget=budget,
+                )
+                if verdict == "paused":
+                    return "paused"
+                if verdict == BUDGET:
+                    return await _stop_for_budget(db, work_item_id, node, budget)
+                recovered = verdict == "ok"
+                if not recovered:
+                    question = _needs_context_question(db, work_item_id, node, round=1)
+            if not recovered:
+                if question is not None:
+                    reason = f"needs_context: {question}"
+                else:
+                    reason = f"task failed in node {node['id']}: {', '.join(failed)}"
+                    if excs:
+                        reason += f" ({', '.join(repr(e) for e in excs)})"
+                    if node.get("on_failure"):
+                        reason += " (after on_failure)"
+                await db.write(
+                    lambda c: store.mark_needs_human(c, work_item_id, node["id"], reason)
+                )
+                return "needs_human"
         await db.write(lambda c: store.complete_node(c, work_item_id, node["id"]))
         return "ok"
 
@@ -949,7 +1068,13 @@ async def _reconcile_current_node(
         ).fetchall()
     )
 
-    if node.get("fix_loop"):
+    if node.get("fix_loop") or node.get("on_failure"):
+        # A node that can remediate itself is its own reconciliation: re-entering
+        # `_walk_node` re-measures it, and a failure then reaches the repair the
+        # template declared. The session-count check below would instead read
+        # the crash as "did not resolve cleanly" and stop for a human with the
+        # repair never tried (Kraft-rv6i).
+        #
         # A fix_loop node that has run >=1 cycle keeps cycle-0's permanently-failed
         # measuring session plus extra fix / re-measure sessions, so the
         # len(final)==len(tasks) & all-done clean-check below is structurally
@@ -1013,6 +1138,8 @@ async def _reconcile_current_node(
     # node (fewer sessions than tasks, none failed) -> needs_human, no partial
     # re-dispatch. Upgrade with per-task session reconciliation if multi-task
     # nodes ship.
+    # Nodes declaring `on_failure` never reach here; they took the re-measuring
+    # branch above.
     if len(final) == len(node["tasks"]) and all(r["status"] in _ADVANCING for r in final):
         await db.write(lambda c: store.complete_node(c, work_item_id, node_id))
         return "ok"

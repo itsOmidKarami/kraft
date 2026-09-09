@@ -326,6 +326,42 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
             )
             continue
 
+        # The step between "a task in this node failed" and needs_human
+        # (Kraft-rv6i): somewhere to put a blocker that is not the code -- a
+        # merge request missing a label its pipeline requires -- and then let
+        # the node measure itself again.
+        bad_recover = next(
+            (
+                n["id"]
+                for n in nodes
+                if "on_failure" in n
+                and n["on_failure"] is not None
+                and not (
+                    isinstance(n["on_failure"], list)
+                    and n["on_failure"]
+                    and all(isinstance(t, str) for t in n["on_failure"])
+                )
+            ),
+            None,
+        )
+        if bad_recover is not None:
+            invalid[tid] = (
+                f"template {tid!r}: node {bad_recover!r} 'on_failure' must be a "
+                f"non-empty list of strings or null"
+            )
+            continue
+
+        # Not both: a fix_loop node already re-measures itself after its fix
+        # task runs, so a second remediation would race the first for the same
+        # failure and neither would know what the other changed.
+        both = next((n["id"] for n in nodes if n.get("on_failure") and n.get("fix_loop")), None)
+        if both is not None:
+            invalid[tid] = (
+                f"template {tid!r}: node {both!r} has both 'fix_loop' and 'on_failure'; "
+                f"the fix loop is already that node's remediation"
+            )
+            continue
+
         # Where a rejected gate sends the chain (Kraft-ko7j). At or before the
         # declaring node, because a rejection is backward motion: a forward
         # target would let a gate skip the nodes between it and the target
@@ -347,7 +383,14 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
             )
             continue
 
-        unknown = sorted({t for n in nodes for t in n["tasks"] if t not in registry.hooks})
+        unknown = sorted(
+            {
+                t
+                for n in nodes
+                for t in list(n["tasks"]) + list(n.get("on_failure") or [])
+                if t not in registry.hooks
+            }
+        )
         if unknown:
             invalid[tid] = f"template {tid!r}: hook(s) {unknown} are not in the registry"
             continue
@@ -369,6 +412,7 @@ def materialize(template: Template, *, satisfied_gates: frozenset[str] = frozens
                 "tasks": list(n["tasks"]),
                 "gate_after": n.get("gate_after"),
                 "fix_loop": n.get("fix_loop"),
+                "on_failure": list(n["on_failure"]) if n.get("on_failure") else None,
                 "reject_to": n.get("reject_to"),
             }
             for n in template.nodes
