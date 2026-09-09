@@ -336,6 +336,31 @@ def test_saving_the_policy_preserves_the_budget_block(client, templates_dir):
     assert on_disk["budget"]["work_item_usd"] == 20.0
 
 
+# ── theme ────────────────────────────────────────────────────────────────────
+
+
+def test_get_theme_defaults_to_nocturne_dark(client):
+    assert client.get("/theme").json() == {"palette": "nocturne", "mode": "dark"}
+
+
+def test_put_theme_round_trips_through_the_yaml(client, templates_dir):
+    body = {"palette": "forest", "mode": "light"}
+    assert client.put("/theme", json=body).status_code == 200
+    assert client.get("/theme").json() == body
+    assert yaml.safe_load((templates_dir / "theme.yaml").read_text()) == body
+
+
+def test_put_theme_rejects_an_unknown_palette(client):
+    resp = client.put("/theme", json={"palette": "cerulean", "mode": "dark"})
+    assert resp.status_code == 422
+    assert client.get("/theme").json()["palette"] == "nocturne"
+
+
+def test_put_theme_rejects_an_unknown_mode(client):
+    resp = client.put("/theme", json={"palette": "nocturne", "mode": "twilight"})
+    assert resp.status_code == 422
+
+
 # ── access + auth (5e, 1m) ───────────────────────────────────────────────────
 
 
