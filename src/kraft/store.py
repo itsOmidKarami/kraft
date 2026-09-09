@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,6 +13,38 @@ from kraft.usage import Usage
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+#: How much of the title goes into the branch name. A Kraft title is a
+#: paragraph, not a headline (`forge.mr_title` notes a 360-character one), and
+#: a branch name has to stay something a human can read in `git log --oneline`.
+BRANCH_SLUG_MAX = 48
+
+
+def branch_name(title: str, work_item_id: str) -> str:
+    """`kraft/<slug>-<id[:8]>` — readable, unique, always a legal git ref.
+
+    The `[a-z0-9-]` charset is what makes the result legal by construction: no
+    `..`, no `@{`, no `.lock`, no control characters, no trailing dot. Two items
+    collide only if their ids share an 8-hex prefix, and then `git worktree add
+    -b` fails loudly rather than silently sharing a branch.
+
+    A title that slugs to nothing — punctuation only, wholly non-ASCII, empty —
+    falls back to `kraft/<id>`, which is what every branch looked like before
+    Kraft-nhps: ugly, but always valid.
+    """
+    head = title.strip().splitlines()[0] if title.strip() else ""
+    slug = re.sub(r"[^a-z0-9]+", "-", head.lower()).strip("-")[:BRANCH_SLUG_MAX].rstrip("-")
+    return f"kraft/{slug}-{work_item_id[:8]}" if slug else f"kraft/{work_item_id}"
+
+
+def branch_for(row) -> str:
+    """The branch a work item's worktree lives on. The row is the truth.
+
+    Rows written before the `branch` column existed hold NULL and keep the
+    `kraft/<id>` branch their worktree, MR and abandon path already point at.
+    """
+    return row["branch"] or f"kraft/{row['id']}"
 
 
 def _span_ms(start: str | None, end: str) -> int | None:
@@ -55,8 +88,8 @@ def create_work_item(
     conn.execute(
         "INSERT INTO work_items (id, bead_id, title, description, repo, chain_template, "
         "chain_definition, current_node_id, status, created_at, updated_at, "
-        "submodules, root_merge_policy, attachments, bead_cwd) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)",
+        "submodules, root_merge_policy, attachments, bead_cwd, branch) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             id,
             bead_id,
@@ -72,6 +105,7 @@ def create_work_item(
             root_merge_policy if submodules else None,
             json.dumps(attachments) if attachments else None,
             bead_cwd,
+            branch_name(title, id),
         ),
     )
     events.append(

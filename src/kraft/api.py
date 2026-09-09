@@ -1168,8 +1168,8 @@ def _terminate(pid: int | None) -> None:
         pass  # already gone, or not ours — the row still moves to paused
 
 
-async def _remove_worktree(repo: Path, worktree: Path, wid: str) -> bool:
-    """Reclaim the worktree and the `kraft/<id>` branch.
+async def _remove_worktree(repo: Path, worktree: Path, wid: str, branch: str) -> bool:
+    """Reclaim the worktree and the item's branch.
 
     Best-effort: the row is already abandoned by the time this runs, and a git
     failure here must not leave the item in a state the board cannot show. The
@@ -1180,7 +1180,7 @@ async def _remove_worktree(repo: Path, worktree: Path, wid: str) -> bool:
     for args in (
         ["git", "worktree", "remove", "--force", str(worktree)],
         ["git", "worktree", "prune"],
-        ["git", "branch", "-D", f"kraft/{wid}"],
+        ["git", "branch", "-D", branch],
     ):
         done = await asyncio.to_thread(
             subprocess.run, args, cwd=repo, capture_output=True, text=True
@@ -1206,7 +1206,9 @@ async def abandon_work_item(wid: str, request: Request):
     if row["status"] == "abandoned":
         return {"id": wid, "status": "abandoned", "worktree_removed": False}
     await st.db.write(lambda c: store.abandon_work_item(c, wid))
-    removed = await _remove_worktree(Path(row["repo"]), st.run_dirs.worktrees / wid, wid)
+    removed = await _remove_worktree(
+        Path(row["repo"]), st.run_dirs.worktrees / wid, wid, store.branch_for(row)
+    )
     return {"id": wid, "status": "abandoned", "worktree_removed": removed}
 
 

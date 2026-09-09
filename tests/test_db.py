@@ -127,6 +127,8 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         drop_lines = (*drop_lines, "bead_cwd")
     if version < 13:
         drop_lines = (*drop_lines, "description", "-- the brief this work item's")
+    if version < 14:
+        drop_lines = (*drop_lines, "branch")
     schema = "\n".join(
         rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
     )
@@ -660,6 +662,31 @@ def test_migrate_v12_to_v13_adds_description(tmp_path):
     row = conn2.execute("SELECT title, description FROM work_items WHERE id='w1'").fetchone()
     assert row["title"] == "t"
     assert row["description"] is None
+
+
+def test_migrate_v13_to_v14_adds_branch(tmp_path):
+    """The branch migration adds the column via ALTER TABLE; a pre-existing row
+    survives with a NULL branch, which is what keeps in-flight items on the
+    `kraft/<id>` branch their worktree is already checked out on."""
+    path = tmp_path / "orchestrator.db"
+    conn = db._connect(path)
+    _build_old_db(conn, 13)
+    conn.execute(
+        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
+        "'active','now','now')"
+    )
+    conn.commit()
+    conn.close()
+
+    conn2 = db._connect(path)
+    db.migrate(conn2)
+    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    cols = {r["name"] for r in conn2.execute("PRAGMA table_info(work_items)")}
+    assert "branch" in cols
+    row = conn2.execute("SELECT title, branch FROM work_items WHERE id='w1'").fetchone()
+    assert row["title"] == "t"
+    assert row["branch"] is None
 
 
 def test_fresh_schema_has_description(tmp_path):
