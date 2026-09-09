@@ -17,6 +17,7 @@ from pathlib import Path
 import yaml
 
 from kraft import auth, client, config
+from kraft.adapters import forge
 from kraft.paths import BUNDLED, RunDirs, default_run_dir, default_templates_dir
 
 #: The agent CLI a chain launches. A fact about the shipped registry, not
@@ -214,10 +215,51 @@ def _completion_check() -> dict:
     )
 
 
+def _binds_auto_forge() -> bool:
+    """Does the registry the server actually loaded bind a forge hook to `auto`?
+
+    `KRAFT_TEMPLATES_DIR` first, exactly as `_hooks_check` reads it. A registry
+    that cannot be read means no forge checks: `templates` and `hooks` already
+    report that failure, and a second copy of it per repo helps nobody.
+    """
+    live = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir()) / "registry.yaml"
+    try:
+        hooks = yaml.safe_load(live.read_text())["hooks"]
+    except OSError, ValueError, KeyError, TypeError, yaml.YAMLError:
+        return False
+    return any(
+        isinstance(b, dict) and b.get("kind") == "forge" and b.get("backend") == "auto"
+        for b in hooks.values()
+    )
+
+
+def _forge_check(repo: dict) -> dict:
+    """Can this repo's `backend: auto` forge nodes actually run?
+
+    Fails rather than reporting with detail, unlike `_hooks_check`: an operator
+    who does not want these hooks has bound them to something else, so `auto`
+    in the live registry means they intend to run them — and the alternative is
+    finding out three nodes into a work item.
+    """
+    name = f"forge {repo.get('name') or repo['path']}"
+    try:
+        # The same call `run_task` makes, so doctor and the runtime cannot
+        # disagree about either the answer or the wording of the failure.
+        cli = forge.backend_for("auto", repo.get("forge"))
+    except forge.ForgeError as exc:
+        return _check(name, False, str(exc))
+    if not shutil.which(cli):
+        return _check(name, False, f"`{cli}` is not on PATH — the forge nodes cannot run")
+    return _check(name, True, f"{repo['forge']} · {cli}")
+
+
 async def _repo_checks() -> list[dict]:
     """Through `GET /repos`, not `repos.yaml`: spec D §4 keeps one reader of the
     repo list on this side of the wire, and doctor is not an exception to it."""
     checks = []
+    # Read once, not per repo: which backend the hooks are bound to is a fact
+    # about the install, and every repo is measured against the same answer.
+    auto = _binds_auto_forge()
     for repo in await client.repos():
         path = Path(repo["path"])
         name = f"repo {repo.get('name') or repo['path']}"
@@ -228,6 +270,8 @@ async def _repo_checks() -> list[dict]:
             checks.append(_check(name, False, f"{path} is no longer a git repo"))
         else:
             checks.append(_check(name, True, str(path)))
+        if auto:
+            checks.append(_forge_check(repo))
     return checks or [_check("repos", True, "none connected")]
 
 

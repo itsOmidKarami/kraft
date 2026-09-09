@@ -191,13 +191,32 @@ def test_resolve_returns_each_named_backend():
     assert isinstance(forge.resolve("fake"), forge.FakeForge)
 
 
+def test_auto_resolves_to_glab_for_a_gitlab_repo():
+    """`auto` is still a *name*: it resolves against the forge recorded for the
+    repo in repos.yaml, never against which CLI happens to be installed."""
+    assert forge.backend_for("auto", "gitlab") == "glab"
+
+
+def test_auto_resolves_to_gh_for_a_github_repo():
+    assert forge.backend_for("auto", "github") == "gh"
+
+
+def test_an_explicit_backend_ignores_the_repo_forge():
+    """A registry that pins a backend wins over the repo entry — that is the
+    escape hatch for a self-hosted host `config._FORGES` cannot recognise."""
+    assert forge.backend_for("glab", "github") == "glab"
+    assert forge.backend_for("fake", None) == "fake"
+
+
 def _forge_session(
-    tmp_path, monkeypatch, fake, handler: str, session_id: str, **extra
+    tmp_path, monkeypatch, fake, handler: str, session_id: str, backend: str = "fake", **extra
 ) -> tuple[str, str]:
     """Run one forge node against `fake`. Returns (returned status, recorded status).
 
     `extra` goes straight to `run_task`, which is how the poll tests set a
-    zero interval and keep themselves off the clock.
+    zero interval and keep themselves off the clock. `backend` is explicit
+    rather than part of `extra` because `run_task` already takes it: the
+    `auto` test passes a name `resolve` never sees.
     """
     monkeypatch.setattr(forge, "resolve", lambda name: fake)
 
@@ -220,7 +239,7 @@ def _forge_session(
                 node_id="mr_checks",
                 hook_point="on.ci.poll",
                 handler=handler,
-                backend="fake",
+                backend=backend,
                 repo=tmp_path,
                 branch="kraft/w1",
                 title="t",
@@ -321,6 +340,26 @@ def test_ci_poll_red_pipeline_is_not_reported_as_a_timeout(tmp_path, monkeypatch
     log = _session_log(tmp_path, "s6")
     assert "timed out" not in log
     assert "pipeline failed" in log
+
+
+def test_auto_with_no_recorded_forge_fails_the_node_rather_than_escaping(tmp_path, monkeypatch):
+    """The one that pins `resolve` moving inside the `try`.
+
+    Resolution can fail at runtime now. Outside the `try` that exception escapes
+    `run_task` past `finish_session`, leaving a started session row with no
+    result and no log — pause, abandon and reattach all key off that row. Inside,
+    it is an ordinary failed node with a readable line in the log.
+    """
+    fake = forge.FakeForge()
+    returned, recorded = _forge_session(
+        tmp_path, monkeypatch, fake, "open_mr", "s-auto", backend="auto"
+    )
+
+    assert returned == "failed"
+    assert recorded == "failed", "the session row must be finished, not left running"
+    log = _session_log(tmp_path, "s-auto")
+    assert "repos.yaml" in log, f"the log must name the fix, got: {log!r}"
+    assert not fake.opened, "no merge request may be opened with no forge resolved"
 
 
 def test_poll_backs_off_and_caps_the_interval(tmp_path, monkeypatch):
@@ -533,18 +572,18 @@ def _back_half_template() -> Template:
     )
 
 
-def _forge_registry(**poll) -> Registry:
+def _forge_registry(backend: str = "fake", **poll) -> Registry:
     return Registry(
         hooks={
             "on.env.prepare": {"kind": "builtin", "handler": "env_setup"},
-            "on.mr.open": {"kind": "forge", "handler": "open_mr", "backend": "fake"},
-            "on.ci.poll": {"kind": "forge", "handler": "ci_poll", "backend": "fake", **poll},
-            "on.merge": {"kind": "forge", "handler": "merge", "backend": "fake"},
+            "on.mr.open": {"kind": "forge", "handler": "open_mr", "backend": backend},
+            "on.ci.poll": {"kind": "forge", "handler": "ci_poll", "backend": backend, **poll},
+            "on.merge": {"kind": "forge", "handler": "merge", "backend": backend},
         }
     )
 
 
-def _run_back_half(tmp_path, monkeypatch, fake, **poll):
+def _run_back_half(tmp_path, monkeypatch, fake, *, backend="fake", launch=None, **poll):
     monkeypatch.setattr(forge, "resolve", lambda name: fake)
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
@@ -565,8 +604,9 @@ def _run_back_half(tmp_path, monkeypatch, fake, **poll):
                 database,
                 rd,
                 work_item_id=wid,
-                registry=_forge_registry(**poll),
+                registry=_forge_registry(backend, **poll),
                 bd_cwd=str(tracker),
+                launch=launch,
             )
             row = database.read(
                 lambda c: c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()
@@ -613,6 +653,31 @@ def test_the_executor_forwards_the_registry_poll_keys(tmp_path, monkeypatch):
 
     assert fake.opened, "the merge request should still have been opened"
     assert fake.merged == [], "a pipeline that never settled reached the merge node"
+    assert status == "needs_human"
+
+
+def test_the_executor_passes_the_repo_forge_to_a_forge_node(tmp_path, monkeypatch):
+    """Companion to test_the_executor_forwards_the_registry_poll_keys: one more
+    argument in `_dispatch`'s forge branch, and without it every node of a
+    `backend: auto` chain fails on a repo whose forge is recorded perfectly well.
+    """
+    fake = forge.FakeForge(ci_states=["success"])
+    launch = executor.LaunchContext(repo_entry={"forge": "gitlab"}, steering_dir=None)
+
+    _run_back_half(tmp_path, monkeypatch, fake, backend="auto", launch=launch)
+
+    assert fake.opened, "open_mr did not run: the repo's forge never reached the node"
+    assert fake.merged == [1], "the chain did not reach merge"
+
+
+def test_a_forge_node_fails_when_auto_has_no_repo_entry(tmp_path, monkeypatch):
+    """The other half: `launch=None` is a repo Kraft holds no entry for, and
+    `auto` must fail the node rather than guess a CLI."""
+    fake = forge.FakeForge(ci_states=["success"])
+
+    status = _run_back_half(tmp_path, monkeypatch, fake, backend="auto")
+
+    assert not fake.opened, "a merge request was opened with no forge resolved"
     assert status == "needs_human"
 
 
