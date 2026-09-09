@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -42,6 +42,9 @@ CREATE TABLE work_items (
   -- KRAFT_BD_CWD: an auto-intaken bead is adopted from its own repo's .beads
   -- and can only be closed there (Kraft-8mu.5.2). NULL means KRAFT_BD_CWD.
   bead_cwd         TEXT,
+  -- the git branch this item's worktree lives on (Kraft-nhps): a slug of the
+  -- title, NULL on rows written before the column existed
+  branch           TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
@@ -240,6 +243,7 @@ SELECT id, bead_id, title, repo, chain_template, chain_definition, current_node_
         "ALTER TABLE work_items_new RENAME TO work_items",
     ],
     12: ["ALTER TABLE work_items ADD COLUMN description TEXT"],
+    13: ["ALTER TABLE work_items ADD COLUMN branch TEXT"],
 }
 
 
