@@ -101,11 +101,11 @@ def fake_registry(python_exe: str, fake_agent_path: Path) -> Registry:
     # missing binary would land the item in needs_human rather than at a gate.
     for hook in ("on.spec.requested", "on.plan.requested"):
         hooks[hook] = {**hooks[hook], "command": fake}
-    # The shipped registry's back half is real now (Kraft-33j): three forge
-    # hooks bound to `backend: glab`, and a human_review hook bound to the
-    # operator's `claude`. A test driving the default chain must reach neither
-    # gitlab.com nor a real agent, so they go back to noop here — the same
-    # reason the spec and plan commands are swapped above.
+    # The shipped registry's back half is real now (Kraft-33j): four forge
+    # hooks on `backend: auto`, and a human_review hook bound to the operator's
+    # `claude`. A test driving the default chain must reach neither a forge CLI
+    # nor a real agent, so they go back to noop here — the same reason the spec
+    # and plan commands are swapped above.
     for hook in (
         "on.mr.open",
         "on.mr.sync",
