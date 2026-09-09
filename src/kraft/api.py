@@ -35,6 +35,7 @@ from kraft import policy as policy_mod
 from kraft import steering as steering_mod
 from kraft.adapters import agent as agent_mod
 from kraft.adapters import beads as beads_mod
+from kraft.adapters import forge as forge_mod
 from kraft.db import Database
 from kraft.index import db as index_db
 from kraft.index import ingest as ingest_mod
@@ -752,6 +753,10 @@ class GateReject(BaseModel):
 
 class Retry(BaseModel):
     steer: str | None = None
+
+
+class MrLabels(BaseModel):
+    labels: list[str]
 
 
 class Steer(BaseModel):
@@ -1491,6 +1496,39 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         ),
     )
     return {"id": wid, "node_id": node_id, "loop": key, "steer": steer}
+
+
+@app.post("/work-items/{wid}/mr-labels")
+async def set_mr_labels(wid: str, body: MrLabels, request: Request):
+    """Label this item's merge request and re-create its pipeline (Kraft-xh0q
+    layer 3).
+
+    The mechanism, not the policy: this is the thing an `on_failure` repair
+    agent calls once it has read a red `on.ci.poll` and decided which labels
+    the trace is asking for. No `_forbid_self_action` here on purpose — that
+    guard exists for gates, where a worker deciding for itself would collapse
+    the human-gate model (design §6 rule 2). This is the opposite shape: the
+    chain fixing metadata on its own merge request is exactly what `open_mr`
+    and `ci_poll` already do from inside the same worktree, just triggered by
+    an agent's judgement call instead of the executor's own dispatch.
+    """
+    st = request.app.state
+    row = _work_item_row(st, wid)
+    worktree = st.run_dirs.worktrees / wid
+    if not worktree.is_dir():
+        raise HTTPException(404, "this work item has no worktree yet")
+    labels = tuple(label.strip() for label in body.labels if label.strip())
+    if not labels:
+        raise HTTPException(422, "no labels given")
+    repo_entry = _launch(st, row["repo"]).repo_entry
+    try:
+        backend = forge_mod.backend_for("auto", (repo_entry or {}).get("forge"))
+        forge = forge_mod.resolve(backend)
+        await forge.set_labels(repo=worktree, mr=forge_mod.MR(number=0, url=""), labels=labels)
+    except forge_mod.ForgeError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    await st.db.write(lambda c: events.append(c, wid, "mr_labels_set", {"labels": list(labels)}))
+    return {"work_item_id": wid, "labels": list(labels)}
 
 
 def _session_row(st, sid: str):
