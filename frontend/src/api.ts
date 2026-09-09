@@ -14,6 +14,7 @@ import type {
   Notify,
   Policy,
   Repo,
+  Theme,
   RepoProbe,
   SearchResponse,
   TemplateNode,
@@ -218,6 +219,9 @@ export const putRegistry = (hooks: Record<string, HookBinding>) =>
 
 export const getPolicy = () => req<Policy>("/policy");
 export const putPolicy = (policy: Policy) => req<Policy>("/policy", json("PUT", policy));
+
+export const getTheme = () => req<Theme>("/theme");
+export const putTheme = (theme: Theme) => req<Theme>("/theme", json("PUT", theme));
 
 export const getSteering = () => req<SteeringList>("/steering");
 export const getSteeringFile = (name: string) =>

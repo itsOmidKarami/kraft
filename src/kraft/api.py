@@ -2322,6 +2322,31 @@ async def put_policy(body: PolicyBody, request: Request):
     return data
 
 
+PALETTE_IDS = frozenset({"nocturne", "rose", "forest", "amber", "slate"})
+THEME_DEFAULT: dict = {"palette": "nocturne", "mode": "dark"}
+
+
+class ThemeBody(BaseModel):
+    palette: str
+    mode: Literal["light", "dark", "system"]
+
+
+@app.get("/theme")
+async def get_theme(request: Request):
+    st = request.app.state
+    return config_mod.read_yaml(st.templates_dir / "theme.yaml", THEME_DEFAULT)
+
+
+@app.put("/theme")
+async def put_theme(body: ThemeBody, request: Request):
+    if body.palette not in PALETTE_IDS:
+        raise HTTPException(422, f"unknown palette: {body.palette!r}")
+    st = request.app.state
+    data = {"palette": body.palette, "mode": body.mode}
+    config_mod.write_yaml(st.templates_dir / "theme.yaml", data)
+    return data
+
+
 class SteeringBody(BaseModel):
     body: str
 
