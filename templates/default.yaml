@@ -25,6 +25,11 @@ nodes:
   - id: mr_checks
     tasks: [on.ci.poll, on.review.mr.run]
     gate_after: null
+    # One repair pass before this node gives up (Kraft-xh0q): read why the
+    # pipeline went red and, when it's a fixable MR-level thing like a
+    # missing label, fix it and let on.ci.poll re-measure for real rather
+    # than trust the repair's own word (Kraft-rv6i's on_failure).
+    on_failure: [on.mr_checks.repair]
   - id: human_review
     tasks: [on.human_review.requested]
     gate_after: human_review_approval

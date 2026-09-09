@@ -125,6 +125,14 @@ def build() -> MCPServer:
         return await client.retry(steer, work_item_id)
 
     @server.tool()
+    async def set_mr_labels(labels: list[str], work_item_id: str | None = None) -> dict:
+        """Label this Kraft work item's merge request and re-create its
+        pipeline. For an `on_failure` repair task that has read a red
+        `on.ci.poll` and worked out which labels the pipeline wants — this
+        applies that decision, it does not make it."""
+        return await client.mr_labels(labels, work_item_id)
+
+    @server.tool()
     async def permission_request(
         tool_name: str, input: dict, tool_use_id: str | None = None
     ) -> dict:
