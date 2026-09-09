@@ -39,22 +39,24 @@ def test_shipped_yaml_parses_and_matches_spec():
         "skill": "plan",
         "artifact": "plan",
     }
-    # The back half is no longer noop (Kraft-33j). backend is glab because this
-    # repo's origin is gitlab.com; the public repo after the split uses gh.
+    # The back half is no longer noop (Kraft-33j). `auto` and not a CLI name:
+    # the registry is per install, the forge is a property of the repo, and
+    # `forge.backend_for` resolves it per dispatch from the repo's repos.yaml
+    # entry.
     assert registry["hooks"]["on.merge"] == {
         "kind": "forge",
         "handler": "merge",
-        "backend": "glab",
+        "backend": "auto",
     }
     assert registry["hooks"]["on.mr.open"] == {
         "kind": "forge",
         "handler": "open_mr",
-        "backend": "glab",
+        "backend": "auto",
     }
     assert registry["hooks"]["on.ci.poll"] == {
         "kind": "forge",
         "handler": "ci_poll",
-        "backend": "glab",
+        "backend": "auto",
     }
     assert registry["hooks"]["on.human_review.requested"] == {
         "kind": "agent",
@@ -598,6 +600,15 @@ def test_forge_binding_needs_a_known_backend(tmp_path):
     p.write_text("hooks:\n  on.mr.open: {kind: forge, handler: open_mr, backend: bitbucket}\n")
     with pytest.raises(templates.RegistryError, match="bitbucket"):
         templates.load_registry(p)
+
+
+def test_forge_binding_accepts_the_auto_backend(tmp_path):
+    """`auto` is a name the registry may carry and `forge.resolve` never sees:
+    `forge.backend_for` translates it at dispatch against the repo's entry."""
+    p = tmp_path / "registry.yaml"
+    p.write_text("hooks:\n  on.mr.open: {kind: forge, handler: open_mr, backend: auto}\n")
+    registry = templates.load_registry(p)
+    assert registry.hooks["on.mr.open"]["backend"] == "auto"
 
 
 # ── poll keys on a ci_poll forge hook ─────────────────────────────────────────

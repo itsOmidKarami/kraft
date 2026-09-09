@@ -330,7 +330,9 @@ def resolve(name: str) -> Forge:
     looks available and then fails deep inside a node.
 
     The accepted names are duplicated in `templates._FORGE_BACKENDS`, which
-    validates a registry file without importing this module. Edit both together.
+    validates a registry file without importing this module. Edit both together;
+    that set also carries `auto`, which `backend_for` has already translated by
+    the time anything calls this.
     """
     match name:
         case "glab":
@@ -341,6 +343,32 @@ def resolve(name: str) -> Forge:
             return FakeForge()
         case _:
             raise ForgeError(f"unknown forge backend {name!r}; known: gh, glab, fake")
+
+
+#: repos.yaml's `forge` (config._FORGES) -> the CLI that talks to it. Two
+#: vocabularies on purpose: `forge` is a fact about the remote, the backend is
+#: a fact about this machine, and a self-hosted GitLab is `gitlab` with `glab`.
+_FORGE_CLI = {"gitlab": "glab", "github": "gh"}
+
+
+def backend_for(backend: str, repo_forge: str | None) -> str:
+    """`auto` means the forge recorded for this repo; any other name is itself.
+
+    The registry is per install and the forge is a property of the repo, so one
+    backend name in one file cannot be right for two `kraft repo connect`s. This
+    is the only place that gap is closed; `resolve` stays named and never sees
+    `auto`.
+    """
+    if backend != "auto":
+        return backend
+    cli = _FORGE_CLI.get(repo_forge or "")
+    if cli is None:
+        raise ForgeError(
+            "backend: auto, but no forge is recorded for this repo — set "
+            "`forge: gitlab` or `forge: github` on it in Settings → Repos "
+            "(or repos.yaml), or pin a `backend:` in registry.yaml"
+        )
+    return cli
 
 
 async def _poll_ci(
@@ -380,6 +408,9 @@ async def run_task(
     hook_point: str,
     handler: str,
     backend: str,
+    #: The repo entry's `forge` (`repos.yaml`), for `backend: auto`. None means
+    #: nothing recorded, which `backend_for` turns into a failed node.
+    repo_forge: str | None = None,
     repo: Path,
     branch: str,
     title: str,
@@ -409,8 +440,11 @@ async def run_task(
         round=round,
     )
     body = mr_body(work_item_id, branch, await _commits_on(repo, branch))
-    forge = resolve(backend)
     try:
+        # Inside the try: `backend_for` can raise, and an exception escaping
+        # here would skip `finish_session` and strand the session row started
+        # above (Kraft-41b, Kraft-7xt are the same wound from the other side).
+        forge = resolve(backend_for(backend, repo_forge))
         match handler:
             case "open_mr":
                 mr = await forge.open_mr(repo=repo, branch=branch, title=title, body=body)
