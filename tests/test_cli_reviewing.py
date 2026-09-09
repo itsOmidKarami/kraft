@@ -281,3 +281,41 @@ def test_an_untruncated_artifact_says_nothing_about_a_limit(app, monkeypatch, ca
     monkeypatch.setattr(client, "artifact", fake_artifact)
     cli.main(["view", "artifact", "w1"])
     assert "1000000" not in capsys.readouterr().out
+
+
+def test_view_diff_prints_landed_and_in_flight_sections(app, tmp_path, monkeypatch, capsys):
+    """Kraft-nceo from the CLI side: not printing `landed` would drop committed
+    work from `kraft view diff` — the same bug from the other direction."""
+    repo = make_repo(tmp_path)
+    wid = _make_item(repo)
+
+    async def fake_diff(work_item_id=None):
+        return {
+            "work_item_id": wid,
+            "base_ref": "abc",
+            "files": [{"path": "flight.py", "insertions": 1, "deletions": 0}],
+            "diff": "diff --git a/flight.py b/flight.py\n+in flight\n",
+            "untracked": [],
+            "truncated": False,
+            "landed": {
+                "commits": ["abc1234 land the doc"],
+                "files": [{"path": "doc.md", "insertions": 3, "deletions": 0}],
+                "diff": "diff --git a/doc.md b/doc.md\n+landed\n",
+                "truncated": False,
+            },
+        }
+
+    monkeypatch.setattr(client, "diff", fake_diff)
+
+    cli.main(["view", "diff", wid, "--stat"])
+    out = capsys.readouterr().out
+    assert "doc.md" in out and "flight.py" in out
+    assert "1 commit already on this branch" in out
+    assert "in flight" in out
+
+    cli.main(["view", "diff", wid])
+    body = capsys.readouterr().out
+    assert body.index("+landed") < body.index("+in flight"), "landed must lead"
+
+    cli.main(["view", "diff", wid, "--name-only"])
+    assert capsys.readouterr().out.split() == ["flight.py", "doc.md"]

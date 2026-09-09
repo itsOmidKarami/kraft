@@ -244,24 +244,51 @@ def _diff_trailer(payload: dict) -> list[str]:
     return lines
 
 
+def _landed_head(payload: dict) -> str:
+    n = len((payload.get("landed") or {}).get("commits") or [])
+    return f"landed — {n} commit{'' if n == 1 else 's'} already on this branch"
+
+
+def _colour_diff(diff: str) -> list[str]:
+    out = []
+    for line in diff.splitlines():
+        code = next((c for prefix, c in _DIFF_LINE_COLORS if line.startswith(prefix)), "")
+        out.append(paint(line, code))
+    return out
+
+
 def diff_stat(payload: dict) -> str:
     """ "How big is this" — the question asked before deciding to read it."""
     if payload.get("base_ref") is None:
         return "no baseline recorded for this work item"
-    files = payload.get("files", [])
-    rows = [
-        {
-            "path": f["path"],
-            "ins": paint(f"+{f['insertions']}", "\033[32m"),
-            "del": paint(f"-{f['deletions']}", "\033[31m"),
-        }
-        for f in files
-    ]
-    body = table(rows, [("PATH", "path"), ("", "ins"), ("", "del")]) if rows else "(no changes)"
-    total_ins = sum(f["insertions"] for f in files)
-    total_del = sum(f["deletions"] for f in files)
-    summary = f"{len(files)} files, +{total_ins} -{total_del}"
-    return "\n".join([body, summary, *_diff_trailer(payload)])
+
+    def block(files: list[dict]) -> str:
+        rows = [
+            {
+                "path": f["path"],
+                "ins": paint(f"+{f['insertions']}", "\033[32m"),
+                "del": paint(f"-{f['deletions']}", "\033[31m"),
+            }
+            for f in files
+        ]
+        body = table(rows, [("PATH", "path"), ("", "ins"), ("", "del")]) if rows else "(no changes)"
+        ins = sum(f["insertions"] for f in files)
+        dels = sum(f["deletions"] for f in files)
+        return f"{body}\n{len(files)} files, +{ins} -{dels}"
+
+    out: list[str] = []
+    landed_files = (payload.get("landed") or {}).get("files") or []
+    if landed_files:
+        # Landed leads: it is what the reader scrolls past, and saying so is
+        # the whole point (Kraft-nceo).
+        out += [
+            paint(_landed_head(payload), DIM),
+            block(landed_files),
+            "",
+            paint("in flight — the change under review", DIM),
+        ]
+    out.append(block(payload.get("files", [])))
+    return "\n".join([*out, *_diff_trailer(payload)])
 
 
 def diff_body(payload: dict) -> str:
@@ -269,11 +296,13 @@ def diff_body(payload: dict) -> str:
     if payload.get("base_ref") is None:
         return "no baseline recorded for this work item"
     out: list[str] = []
-    for line in payload.get("diff", "").splitlines():
-        code = next((c for prefix, c in _DIFF_LINE_COLORS if line.startswith(prefix)), "")
-        out.append(paint(line, code))
-    if not out:
-        out.append("(no changes)")
+    landed = (payload.get("landed") or {}).get("diff") or ""
+    if landed:
+        out.append(paint(_landed_head(payload), DIM))
+        out += _colour_diff(landed)
+        out += ["", paint("in flight — the change under review", DIM)]
+    body = _colour_diff(payload.get("diff", ""))
+    out += body or ["(no changes)"]
     return "\n".join([*out, *_diff_trailer(payload)])
 
 

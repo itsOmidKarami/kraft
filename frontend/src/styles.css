@@ -321,6 +321,10 @@ aside .row, .narrow .row {
   font-size: 12px; color: var(--color-accent-300);
 }
 .gate-actions { display: flex; gap: 8px; }
+.gate-artifacts { display: flex; gap: 8px; flex-wrap: wrap; }
+.current-node > details > summary { cursor: pointer; padding: 8px 0; }
+.node-group-head { display: inline-flex; align-items: baseline; gap: 10px; }
+.current-node > details[open] > summary .row-title { color: var(--color-text); }
 .gate-actions .btn { font-size: 13px; }
 .gate-reject { display: flex; flex-direction: column; gap: 8px; width: 100%; }
 .gate-reject textarea.input { min-height: 68px; font-size: 13px; }
@@ -355,6 +359,8 @@ aside .row, .narrow .row {
   font-size: 12px; color: var(--color-neutral-500); white-space: nowrap;
 }
 .detail-meta code { font-family: ui-monospace, Menlo, monospace; }
+.mr-link { color: var(--color-accent-300); text-decoration: none; }
+.mr-link:hover { text-decoration: underline; }
 .detail-status { margin-left: auto; }
 /* The item's own title is the headline: it is the words the person wrote and
    the only thing that tells two open items apart. The node is where that work
@@ -402,6 +408,10 @@ aside .row, .narrow .row {
   display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; font-size: 12px;
 }
 .etype { font-family: ui-monospace, Menlo, monospace; color: var(--color-neutral-300); }
+/* The hook point is what the row is about; the event type is the identifier
+   behind it and takes the muted position the type used to hold alone. */
+.event-title { color: var(--color-text); }
+.event-title + .etype { color: var(--color-text-muted); font-size: 11px; }
 .event-detail { color: var(--color-neutral-500); }
 .event-log { font-size: 11px; }
 .event-row time {
@@ -989,6 +999,11 @@ aside .row, .narrow .row {
 .diff-files { list-style: none; margin: 0; padding: 10px 22px; gap: 6px;
               display: flex; flex-direction: column; overflow: auto; }
 .diff-files summary { cursor: pointer; }
+/* Two sections in one scroll container (Kraft-nceo): in-flight, then landed.
+   The label is the only thing between them, so it carries the separation. */
+.diff-section + .diff-section { border-top: 1px solid var(--color-divider); }
+.diff-section .section-label { margin: 14px 22px 0; }
+.diff-landed-totals { font-size: 11px; color: var(--color-neutral-500); }
 /* The flex row lives in a span inside <summary>, not on <summary> itself:
    `display: flex` on a summary removes the native disclosure marker. */
 .diff-file-head { display: inline-flex; align-items: center; gap: 10px;

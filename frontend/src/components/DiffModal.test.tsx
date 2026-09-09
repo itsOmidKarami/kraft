@@ -216,4 +216,36 @@ describe("DiffModal", () => {
     expect(summary).toHaveTextContent("+1");
     expect(summary).toHaveTextContent("−1");
   });
+
+  it("shows in-flight changes expanded and landed commits collapsed", async () => {
+    // Kraft-nceo: 1042 lines of plan doc ahead of a 531-line code change spent
+    // the whole MAX_OPEN_LINES budget before the code was reached.
+    vi.spyOn(api, "getWorkItemDiff").mockResolvedValue({
+      ...body,
+      untracked: [],
+      files: [{ path: "calc.py", insertions: 2, deletions: 1 }],
+      diff: "diff --git a/calc.py b/calc.py\n--- a/calc.py\n+++ b/calc.py\n@@ -1 +1,2 @@\n-old\n+new\n",
+      landed: {
+        commits: ["abc1234 Plan: make it readable"],
+        files: [{ path: ".engineering/plans/w1.md", insertions: 40, deletions: 0 }],
+        diff: "diff --git a/.engineering/plans/w1.md b/.engineering/plans/w1.md\n--- a/.engineering/plans/w1.md\n+++ b/.engineering/plans/w1.md\n@@ -1 +1,2 @@\n+the plan\n",
+        truncated: false,
+      },
+    });
+    const { container } = render(<DiffModal workItemId="w1" onClose={() => {}} />);
+    await screen.findByText("calc.py");
+
+    const inFlight = container.querySelectorAll('[data-section="in-flight"] details');
+    const landed = container.querySelectorAll('[data-section="landed"] details');
+    expect(inFlight).toHaveLength(1);
+    expect(inFlight[0]).toHaveAttribute("open");
+    expect(landed).toHaveLength(1);
+    expect(landed[0]).not.toHaveAttribute("open");
+    expect(landed[0].querySelector("summary")).toHaveTextContent(".engineering/plans/w1.md");
+
+    // the header totals are the in-flight totals — what the reviewer decides
+    // about — not the two sides summed
+    expect(container.querySelector(".diff-totals")).toHaveTextContent("+2 −1");
+    expect(screen.getByText(/1 commit already on this branch/)).toBeInTheDocument();
+  });
 });

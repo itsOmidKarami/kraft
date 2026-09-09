@@ -8,7 +8,7 @@ import { CappedCard } from "../components/CappedCard";
 import { CurrentNodePanel } from "../components/CurrentNodePanel";
 import { DiffModal } from "../components/DiffModal";
 import { EventTimeline } from "../components/EventTimeline";
-import { Gate } from "../components/Gate";
+import { ARTIFACT_LABELS, Gate } from "../components/Gate";
 import { LinkedDocuments } from "../components/LinkedDocuments";
 import { PausedCard } from "../components/PausedCard";
 import { ChainBar, Row, RowState, RowText, StatusGlyph, Tabs } from "../components/ui";
@@ -223,6 +223,14 @@ export function WorkItemDetail() {
   const [worktreeErr, setWorktreeErr] = useState<string | null>(null);
   const local = onServerMachine();
 
+  // Keyed on the event existing, not on the current node being one of
+  // {open_mr, mr_checks, human_review, merge}: the link is correct exactly
+  // when an MR exists, it survives a rejection walking the item back to
+  // implementation, and it is one condition instead of a set to keep in step
+  // with the chain template (Kraft-d2sq, a deliberate deviation from the
+  // bead's wording with the same intent).
+  const mr = [...events].reverse().find((e) => e.type === "mr_opened");
+
   useEffect(() => {
     if (item?.status === "paused") setPausing(false);
   }, [item?.status]);
@@ -302,6 +310,11 @@ export function WorkItemDetail() {
             </span>
           )}
           <span>{item.chain_template}</span>
+          {mr && (
+            <a className="mr-link" href={String(mr.payload.url)} target="_blank" rel="noreferrer">
+              !{String(mr.payload.number)}
+            </a>
+          )}
           {item.bead_id && <code title={`work item ${item.id}`}>{item.bead_id}</code>}
           {item.attachments?.length ? (
             <span className="tag tag-outline tag-tight">
@@ -428,15 +441,23 @@ export function WorkItemDetail() {
           gate={gate}
           sub={`${nodeSessions.map((s) => s.hook_point).join(", ")} completed clean`}
           artifact={
-            gate === "human_review_approval" ? (
-              <button className="btn btn-secondary" onClick={() => setShowDiff(true)}>
-                Review changes
-              </button>
-            ) : item.gate_artifact ? (
-              <button className="btn btn-secondary" onClick={() => setShowArtifact(true)}>
-                {gate === "spec_approval" ? "Review spec" : "Review plan"}
-              </button>
-            ) : undefined
+            /* Both, not one (Kraft-yytk): the brief is the agent's argument,
+               the diff is the evidence, and a reviewer needs to check one
+               against the other. Every other gate has only a document. */
+            (item.gate_artifact || gate === "human_review_approval") && (
+              <div className="gate-artifacts">
+                {item.gate_artifact && (
+                  <button className="btn btn-secondary" onClick={() => setShowArtifact(true)}>
+                    {ARTIFACT_LABELS[gate] ?? "Review document"}
+                  </button>
+                )}
+                {gate === "human_review_approval" && (
+                  <button className="btn btn-secondary" onClick={() => setShowDiff(true)}>
+                    Review changes
+                  </button>
+                )}
+              </div>
+            )
           }
           deferred={gate === "human_review_approval" ? item.deferred_findings : undefined}
           // Not gate-specific, unlike `deferred`: spec §2 puts concerns at the
@@ -507,7 +528,10 @@ export function WorkItemDetail() {
         value={tab}
         onChange={setTab}
         tabs={[
-          { id: "tasks", label: "Tasks", count: nodeSessions.length },
+          // the tab shows every session now (Kraft-n9gw), so the count is
+          // every session. `usageLine`'s task count stays current-node scoped:
+          // it sits on the control row and is a statement about now.
+          { id: "tasks", label: "Tasks", count: sessions.length },
           { id: "timeline", label: "Timeline", count: events.length },
           { id: "documents", label: "Documents" },
         ]}
@@ -515,7 +539,7 @@ export function WorkItemDetail() {
 
       <div className="tab-body">
         {tab === "tasks" && <CurrentNodePanel item={item} sessions={sessions} />}
-        {tab === "timeline" && <EventTimeline events={events} />}
+        {tab === "timeline" && <EventTimeline events={events} sessions={sessions} />}
         {tab === "documents" && (
           <LinkedDocuments workItemId={id} eventCount={events.length} />
         )}

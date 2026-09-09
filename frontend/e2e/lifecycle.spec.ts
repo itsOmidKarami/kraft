@@ -102,5 +102,9 @@ test("a deep link to a work item loads it, not an empty husk", async ({ page }) 
     timeout: 30_000,
   });
   await page.getByRole("tab", { name: /Tasks/ }).click();
-  await expect(page.locator(".current-node .row").first()).toBeVisible();
+  // Sessions are grouped by node now (Kraft-n9gw), with only the most
+  // recently active group open — `.first()` in DOM order is the earliest
+  // node's group, which is a real row but a closed one. Any visible row
+  // proves the tab isn't the empty husk this test guards against.
+  await expect(page.locator(".current-node .row:visible").first()).toBeVisible();
 });

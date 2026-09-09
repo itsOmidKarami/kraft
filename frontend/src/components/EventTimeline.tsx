@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { clock } from "../format";
-import type { KraftEvent } from "../types";
+import { clock, elapsed } from "../format";
+import type { KraftEvent, WorkerSession } from "../types";
 import { LogModal } from "./LogModal";
 
 /**
@@ -21,10 +21,20 @@ function detailOf(e: KraftEvent): string | null {
   if (e.type === "work_item_rate_limited" && typeof p.retry_at === "string") {
     return `retries at ${p.retry_at}`;
   }
-  // Concerns reach the UI only through the gate panel, so a chain with no
-  // review gate stored them and showed them nowhere; the timeline is the one
-  // surface every chain has.
-  if (e.type === "worker_session_exited" && typeof p.concerns === "string") return p.concerns;
+  // A done and a failed exit looked identical, and the 6ms noop-handler exit
+  // was invisible for what it is (Kraft-zxu4). Concerns keep their place at
+  // the end — they are the longest part of the line.
+  if (e.type === "worker_session_exited") {
+    const bits: string[] = [];
+    if (typeof p.status === "string") bits.push(p.status);
+    if (typeof p.wall_ms === "number") bits.push(elapsed(p.wall_ms));
+    if (typeof p.concerns === "string") bits.push(p.concerns);
+    return bits.length > 0 ? bits.join(" · ") : null;
+  }
+  if (e.type === "findings_measured" && Array.isArray(p.findings)) {
+    const n = (p.findings as unknown[]).length;
+    return n > 0 ? `${n} findings` : "no findings";
+  }
   // A dead webhook has to be tellable from a quiet one, which is the whole
   // reason `notify` records this event rather than only logging it.
   if (e.type === "notification_failed") {
@@ -42,6 +52,38 @@ function detailOf(e: KraftEvent): string | null {
     return `${failed} failed → ${(p.tasks as string[]).join(", ")}`;
   }
   return null;
+}
+
+/**
+ * The three worker-session events, in words. Only these three: a label table
+ * for all ~20 event types goes stale the first time an event is added, and the
+ * real problem is that the payload was never rendered (Kraft-zxu4).
+ */
+const VERBS: Record<string, string> = {
+  worker_session_created: "created",
+  worker_session_started: "started",
+  worker_session_exited: "exited",
+};
+
+/**
+ * "<hook_point> <verb>", or null when the row cannot name itself.
+ *
+ * `worker_session_exited` carries only session_id/status/wall_ms, so its hook
+ * point comes from the sessions the detail payload already holds. A miss (a
+ * session pruned from the payload) returns null and the row keeps the raw
+ * type — the behaviour today, never a blank title.
+ */
+function titleOf(e: KraftEvent, hooks: Map<string, string>): string | null {
+  const verb = VERBS[e.type];
+  if (!verb) return null;
+  const p = e.payload as Record<string, unknown>;
+  const hook =
+    typeof p.hook_point === "string"
+      ? p.hook_point
+      : typeof p.session_id === "string"
+        ? hooks.get(p.session_id)
+        : undefined;
+  return hook ? `${hook} ${verb}` : null;
 }
 
 interface Group {
@@ -78,9 +120,18 @@ function groupByNode(events: KraftEvent[]): Group[] {
     });
 }
 
-export function EventTimeline({ events }: { events: KraftEvent[] }) {
+export function EventTimeline({
+  events,
+  sessions = [],
+}: {
+  events: KraftEvent[];
+  /** For resolving an exit row's hook point. Optional so a caller with no
+   *  sessions in hand still renders the timeline it renders today. */
+  sessions?: WorkerSession[];
+}) {
   const [sid, setSid] = useState<string | null>(null);
   const groups = groupByNode(events);
+  const hooks = new Map(sessions.map((s) => [s.id, s.hook_point]));
 
   if (groups.length === 0) return <p className="empty">no events yet</p>;
 
@@ -98,7 +149,17 @@ export function EventTimeline({ events }: { events: KraftEvent[] }) {
               <div key={e.seq} className="event-row" data-type={e.type}>
                 <span className="event-dot" data-age={Math.min(gi, 3)} />
                 <div className="event-body">
-                  <span className="etype">{e.type}</span>
+                  {(() => {
+                    const title = titleOf(e, hooks);
+                    return title ? (
+                      <>
+                        <span className="event-title">{title}</span>
+                        <span className="etype">{e.type}</span>
+                      </>
+                    ) : (
+                      <span className="etype">{e.type}</span>
+                    );
+                  })()}
                   {detailOf(e) && <span className="event-detail">{detailOf(e)}</span>}
                   {/* any event that names a session, not just worker_session_*:
                       work_item_needs_human is the one a human lands on, and its
