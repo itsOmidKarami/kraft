@@ -8,6 +8,7 @@ from pathlib import Path
 import psutil
 
 from kraft import store
+from kraft import usage as _usage
 from kraft.adapters.subprocess import _resolve_result_file, read_result_fields
 
 logger = logging.getLogger(__name__)
@@ -44,22 +45,28 @@ def _identity_ok(pid: int, pid_start_time) -> bool:
         return False
 
 
-async def _exit_from_file(db, session_id: str, result_path: Path, status: str) -> None:
+async def _exit_from_file(
+    db, session_id: str, log_path: Path, result_path: Path, status: str
+) -> None:
     """Record a session exit from what it left on disk, carrying every field
     `adapters.subprocess.run_task` carries — `concerns` and `question` reach the
     gate and the needs_context stop only through this event, so a restart that
-    dropped them would lose what the worker reported.
+    dropped them would lose what the worker reported. Usage is the same story
+    (Kraft-7co4): a session adopted across a restart used to write NULL tokens
+    and NULL cost, dropping the node out of every rollup that sums them.
 
     `read_result_fields` is the one place that field list is spelled out
     (Kraft-k3d) — this and `adapters.subprocess.run_task` both call it rather
     than each enumerating the fields by hand."""
     fields = read_result_fields(result_path)
+    seen = _usage.read(log_path, result_path)
     await db.write(
         lambda c: store.session_exited(
             c,
             session_id,
             status,
             fields["summary_ref"],
+            seen,
             concerns=fields["concerns"],
             question=fields["question"],
         )
@@ -71,11 +78,17 @@ async def _adopt(db, session_id: str, pid: int, poll_s: float = 0.1) -> None:
         await asyncio.sleep(poll_s)
     row = db.read(
         lambda c: c.execute(
-            "SELECT result_path FROM worker_sessions WHERE id = ?", (session_id,)
+            "SELECT log_path, result_path FROM worker_sessions WHERE id = ?", (session_id,)
         ).fetchone()
     )
     result_path = Path(row["result_path"])
-    await _exit_from_file(db, session_id, result_path, _resolve_file(result_path) or "failed")
+    await _exit_from_file(
+        db,
+        session_id,
+        Path(row["log_path"]),
+        result_path,
+        _resolve_file(result_path) or "failed",
+    )
 
 
 async def reattach(db, run_dirs, registry) -> tuple[ReattachSummary, dict[str, asyncio.Task]]:
@@ -112,7 +125,7 @@ async def reattach(db, run_dirs, registry) -> tuple[ReattachSummary, dict[str, a
         status = _resolve_file(Path(r["result_path"]))
         if status is not None:
             await db.write(lambda c, sid=sid: store.session_reattached(c, sid))
-            await _exit_from_file(db, sid, Path(r["result_path"]), status)
+            await _exit_from_file(db, sid, Path(r["log_path"]), Path(r["result_path"]), status)
             summary.resolved_from_file.append(sid)
         else:
             await db.write(lambda c, sid=sid: store.session_unknown(c, sid))

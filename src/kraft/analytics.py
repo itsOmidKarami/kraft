@@ -95,6 +95,10 @@ def compute(
 
     totals = {
         "work_items": len(items),
+        # items with at least one worker_sessions row. `work_items` counts the
+        # backlog too, and dividing money by the backlog understates the
+        # average by every item that never started a node (Kraft-g2pi).
+        "work_items_run": 0,
         "by_status": {},
         "mrs_merged": 0,
         "wall_ms": 0,
@@ -185,6 +189,7 @@ def compute(
     totals["rounds"] = sum(
         max((r for _, r in seen), default=0) for seen in item_node_rounds.values()
     )
+    totals["work_items_run"] = len(item_node_rounds)
 
     # ── events: merges and human wait ────────────────────────────────────────
     merge_nodes = {

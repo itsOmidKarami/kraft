@@ -355,3 +355,24 @@ def test_a_rejection_note_quoting_a_rejection_is_still_one_rejection(chain):
     out = kl.summary(records, chain)
     assert out["totals"]["rejections"] == 1
     assert out["nodes"][0]["rejected"] == "Rejected: by CI, see run 12"
+
+
+def test_two_nodes_closed_in_the_same_second_are_not_billed_the_whole_run(chain):
+    """`BD_TIME` has one-second granularity, so two nodes closed inside the same
+    second carry the same stamp. Compared with a strict `<` the second finds no
+    earlier event at all and falls back to the epic — billing a node that took
+    no measurable time for the entire run (Kraft-ao6)."""
+    count = len(chain["nodes"])
+    # epic at 10:00, the first two nodes both at 10:05, then a minute each
+    stamps = [stamp(0), stamp(5), stamp(5)] + [stamp(m) for m in range(6, 6 + count - 2)]
+    records = walked(chain, stamps)
+
+    out = kl.summary(records, chain)
+    seconds = [n["seconds"] for n in out["nodes"]]
+    # the first node genuinely took the five minutes since the chain started
+    assert seconds[0] == 300, out["nodes"]
+    # the second shared its second, so its truth floored to the second is zero —
+    # not the 300 it reports today, and not the 0 the first would wrongly report
+    # if ties were merely allowed to match without being ordered
+    assert seconds[1] == 0, out["nodes"]
+    assert seconds[2] == 60, out["nodes"]

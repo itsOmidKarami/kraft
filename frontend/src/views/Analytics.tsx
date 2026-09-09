@@ -178,8 +178,8 @@ export function AnalyticsView() {
                 sub={
                   !t.cost_complete
                     ? "a floor — some runs reported no cost"
-                    : t.work_items
-                      ? `${usd(t.cost_usd / t.work_items)} per work item`
+                    : t.work_items_run
+                      ? `${usd(t.cost_usd / t.work_items_run)} per work item run`
                       : "nothing spent yet"
                 }
               />
