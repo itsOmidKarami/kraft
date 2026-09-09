@@ -11,11 +11,28 @@ worktrees. Design docs: [`docs/consolidated/`](docs/consolidated/00_overview.md)
 
 ## Install and run
 
+No clone needed. This fetches the wheel from the newest tagged release, and
+installs `uv` first if you do not have it:
+
+```bash
+curl -fsSL https://gitlab.com/itsOmidKarami/kraft/-/raw/main/install.sh | sh
+kraft admin init   # register the MCP server and skills with your agent
+kraft              # http://127.0.0.1:8765
+```
+
+[`install.sh`](install.sh) is short and worth reading before you pipe it to a
+shell. `kraft admin update` installs the newest release later on, and
+`kraft --version` says what you have.
+
+### From source (development)
+
 ```bash
 just setup      # uv sync + npm install
 just install    # build the SPA, install the `kraft` command
 kraft           # http://127.0.0.1:8765
 ```
+
+Releasing, and the labels a merge request needs: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 State lives in `$KRAFT_HOME` (default `~/.kraft`):
 
@@ -47,6 +64,9 @@ kraft admin init --repo   # or write .mcp.json + .claude/skills/ into this repo
 User scope shells out to `claude mcp add` rather than editing `~/.claude.json`
 itself — that file is large, shared, agent-owned state. If `claude` is not on
 `PATH`, `kraft admin init` prints the command for you to run instead of guessing.
+
+They also publish as a marketplace plugin, alongside Kraft Lite:
+`/plugin marketplace add itsOmidKarami/kraft`.
 
 The skills install as a plugin, so they namespace: `/kraft:handoff` to file work
 after a spec and plan are agreed, `/kraft:board` to see what is running or

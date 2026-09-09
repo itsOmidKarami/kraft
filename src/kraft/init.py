@@ -18,149 +18,35 @@ from collections.abc import Callable
 from importlib import metadata
 from pathlib import Path
 
-#: One skill per moment you would reach for Kraft, rather than one skill listing
-#: every tool. The manifest below turns this directory into a namespace, so these
-#: are invoked as `/kraft:handoff`, `/kraft:board`, `/kraft:gates`.
-SKILLS = {
-    "handoff": """---
-name: handoff
-description: Use when work agreed in this session should be handed to Kraft instead of
-  done here - after a spec and plan are settled, when the task is too big for this
-  session, or when the current repo needs connecting to Kraft first.
----
+from kraft.paths import BUNDLED
 
-# Handing work to Kraft
+#: Where the source tree keeps the skills. Also one half of the published
+#: marketplace: `plugins/` splits to a repo whose root holds `kraft/` and
+#: `kraft-lite/`, so the plugin lives beside its sibling rather than inside the
+#: Python package.
+SOURCE_SKILLS = Path(__file__).resolve().parents[2] / "plugins" / "kraft" / "skills"
 
-Kraft runs semi-autonomous work items as chains, with human gates. Hand work off
-rather than doing it inline when it is large enough to want that structure.
 
-1. `ensure_repo()` - connects the current repo if Kraft has not seen it.
-   Idempotent, so call it every time rather than checking first.
-2. `create_work_item(title, description=...)` - files the work. The title is a
-   label; the description is the brief, and it is what the spec node writes its
-   design from. Put the intent in the description rather than packing it into
-   the title.
+def skills_dir() -> Path:
+    """The skills to install, bundled copy first.
 
-**`create_work_item` does not start anything.** The item lands paused and a
-person starts it from the board. When you report back, say the work is *filed*,
-not that it is underway - telling someone their work is running when nothing is
-running is the one failure this whole surface is built to avoid.
+    One skill per moment you would reach for Kraft, rather than one skill listing
+    every tool. The manifest in `_plugin_manifest` turns the written directory
+    into a namespace, so these are invoked as `/kraft:handoff`, `/kraft:board`,
+    `/kraft:gates`, `/kraft:status`.
 
-## When the spec and plan already exist
+    Files rather than string literals because this same directory is published as
+    a marketplace plugin, and the same content maintained in two places is the
+    same content that starts disagreeing.
 
-If documents were written in this session or already live in the repo, attach
-them at intake instead of letting Kraft re-run those phases. Attaching a spec or
-plan trims the node whose gate it satisfies, so the person is not asked to
-re-approve what they just agreed with you, and the implementing agent is told to
-follow the documents rather than guess.
-""",
-    "board": """---
-name: board
-description: Use when you need to know what Kraft is doing - what work is running, what
-  is blocked or waiting on a person, the state of one work item, or whether a decision
-  was already made in a spec or plan somewhere across the repos.
----
-
-# Reading Kraft
-
-- `list_work_items(status)` - the board. `status="paused"` is what is waiting on
-  a person; `status="active"` is what is running now.
-- `get_work_item()` - one item in full: its chain, its current node, any gate it
-  is waiting on. With no argument it resolves the item this session is standing
-  in, which is correct when the cwd is a Kraft worktree.
-- `search(q)` - specs, plans, and session summaries across every connected repo.
-
-**Search before writing a spec.** The decision you are about to make may already
-have been made and written down in another repo. That is the whole reason the
-index spans them.
-""",
-    "gates": """---
-name: gates
-description: Use when a Kraft work item needs a human decision or has gone wrong -
-  approving or rejecting the gate it is waiting on, or pausing and resuming work that
-  is heading in the wrong direction.
----
-
-# Gates and steering
-
-## Gates
-
-- `approve_gate()` - let the chain continue past the gate it is waiting on.
-- `reject_gate(note="...")` - send it back to be re-planned. The note is
-  required, because a rejection with no reason strands whoever picks the work up
-  next.
-
-**Ask the person before calling either.** A gate exists precisely because this is
-a decision a human makes. Read them the diff or the plan, get an answer, then act
-on it. Approving a gate because it seemed obvious is how the gate stops meaning
-anything.
-
-## Steering
-
-There is no channel into a running agent, so redirecting work means stopping it
-and starting it again with new context:
-
-- `pause_work_item()` - stop the current attempt.
-- `resume_work_item(steer="...")` - start again, with the steer leading the next
-  attempt's prompt.
-
-`resume_work_item()` is also how a freshly filed work item is started for the
-first time.
-
-## If you are a Kraft worker session
-
-You cannot act on the work item that is running you - approve, reject, pause and
-resume against your own item are all refused. Report what you found and let the
-person decide.
-""",
-    "status": r"""---
-name: status
-description: Use when someone needs to know where a Kraft work item has got to, or
-  when a handed-off item should be watched until it finishes - the phase it is in, the
-  node coming next, any gate it is waiting on, and a follow that ends by itself.
----
-
-# Where a Kraft work item has got to
-
-## The phase line
-
-```bash
-kraft show ID --json | jq -r '
-  "\(.status): \(.current_node_id) → next \(.next_node_id // "done")" +
-  (if .pending_gate then " · gate \(.pending_gate)" else "" end)
-'
-```
-
-One line: the status, the node running now, the node coming next, and the gate
-it is waiting on if there is one. `next_node_id` is null on the last node of the
-chain, which renders as `done`; on an item nobody has started yet it is node
-zero, because that is what starting it will run.
-
-Drop the id to ask about the work item you are standing in: `kraft view show --json`
-resolves it from the worktree.
-
-## Watching it until it ends
-
-Arm a monitor on:
-
-```bash
-kraft events ID -f
-```
-
-Do not pass `--type`. `-f` ends itself on `work_item_completed` or
-`work_item_abandoned`, so the monitor disarms on its own; a type filter would go
-silent through exactly the escalation the person needs to hear about. A chain
-emits tens of events over its life, not thousands.
-
-`--json` makes that stream NDJSON, one object per line.
-
-## What to report
-
-Say the phase and the next node. If a gate is pending, say which one and that it
-is waiting on a person - a work item sitting at a gate is not stuck, and calling
-it stuck sends someone looking for a fault that is not there.
-""",
-}
+    An installed Kraft has no `plugins/` beside it, so `just bundle` copies these
+    into `_bundled/plugin-skills` exactly as it copies the built SPA, and
+    package-data ships them. The source fallback is for a checkout that has not
+    run `just bundle` - under site-packages that path does not exist, which is
+    what stops it resolving to something meaningless (paths.py:9).
+    """
+    bundled = BUNDLED / "plugin-skills"
+    return bundled if bundled.is_dir() else SOURCE_SKILLS
 
 
 def _plugin_manifest() -> dict:
@@ -199,10 +85,10 @@ def _write_plugin(root: Path) -> list[str]:
     manifest.write_text(json.dumps(_plugin_manifest(), indent=2) + "\n")
     written = [str(manifest)]
 
-    for name, body in SKILLS.items():
-        path = plugin_root / "skills" / name / "SKILL.md"
+    for source in sorted(skills_dir().glob("*/SKILL.md")):
+        path = plugin_root / "skills" / source.parent.name / "SKILL.md"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(body)
+        path.write_text(source.read_text())
         written.append(str(path))
 
     # Earlier versions wrote one flat SKILL.md here. Left behind it lingers as a

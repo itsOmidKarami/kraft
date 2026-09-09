@@ -171,3 +171,55 @@ def test_stop_reports_a_stale_pidfile_and_clears_it(tmp_path, monkeypatch, capsy
     cli.main(["admin", "stop"])
     assert "no server running" in capsys.readouterr().out
     assert not pid_path.exists()
+
+
+def test_admin_update_when_current_does_nothing(monkeypatch, capsys):
+    from kraft import update
+
+    monkeypatch.setattr(update, "latest", lambda **_: update.Release("v0.4.0", "u"))
+    monkeypatch.setattr(update, "installed", lambda: "0.4.0")
+    monkeypatch.setattr(
+        update, "perform", lambda *_a, **_k: pytest.fail("installed over a current version")
+    )
+    cli.main(["admin", "update"])
+    assert "up to date" in capsys.readouterr().out
+
+
+def test_admin_update_force_installs_anyway(monkeypatch, capsys):
+    from kraft import update
+
+    called = []
+    monkeypatch.setattr(update, "latest", lambda **_: update.Release("v0.4.0", "u"))
+    monkeypatch.setattr(update, "installed", lambda: "0.4.0")
+    monkeypatch.setattr(update, "perform", lambda *a, **k: called.append(a) or 0)
+    cli.main(["admin", "update", "--force"])
+    assert called
+
+
+def test_admin_update_with_no_release_known_exits_1(monkeypatch, capsys):
+    from kraft import update
+
+    monkeypatch.setattr(update, "latest", lambda **_: None)
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["admin", "update"])
+    assert exc.value.code == 1
+    assert "could not reach" in capsys.readouterr().err
+
+
+def test_start_prints_the_update_notice(monkeypatch, capsys):
+    from kraft import update
+
+    monkeypatch.delenv("KRAFT_NO_UPDATE_CHECK", raising=False)
+    monkeypatch.setattr(update, "latest", lambda **_: update.Release("v9.9.9", "u"))
+    monkeypatch.setattr(update, "installed", lambda: "0.1.0")
+    cli._update_notice()
+    assert "9.9.9" in capsys.readouterr().out
+
+
+def test_start_notice_is_silenced_by_the_env_var(monkeypatch, capsys):
+    from kraft import update
+
+    monkeypatch.setenv("KRAFT_NO_UPDATE_CHECK", "1")
+    monkeypatch.setattr(update, "latest", lambda **_: pytest.fail("checked with the env var set"))
+    cli._update_notice()
+    assert capsys.readouterr().out == ""

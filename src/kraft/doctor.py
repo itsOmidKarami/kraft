@@ -50,6 +50,8 @@ async def run_checks() -> list[dict]:
     checks.extend(_config_checks())
     checks.append(_agent_check())
     checks.append(_completion_check())
+    checks.append(_bundle_check())
+    checks.append(_version_check())
     if health is None:
         checks.append(_check("repos", True, "skipped: no server", skipped=True))
         checks.append(_check("worktrees", True, "skipped: no server", skipped=True))
@@ -293,3 +295,39 @@ async def _orphan_check() -> dict:
             f"{len(orphans)} under {worktrees} with no work item: {', '.join(orphans)}",
         )
     return _check("worktrees", True, str(worktrees))
+
+
+def _bundle_check() -> dict:
+    """Is the built SPA actually in this install?
+
+    `just bundle` is what puts it there. A wheel built by anything else matches
+    the `_bundled/**/*` package-data glob against nothing, and the result is an
+    API that serves JSON and no UI - visible only to whoever opens the browser.
+    """
+    index = BUNDLED / "web" / "index.html"
+    if index.is_file():
+        return _check("spa bundle", True, str(index.parent))
+    return _check("spa bundle", False, f"no SPA at {index} - built without `just bundle`")
+
+
+def _version_check() -> dict:
+    """Informational, and `ok` even when behind.
+
+    `doctor` exits 1 on any failed check, and a release landing must not start
+    failing somebody's `kraft admin doctor && deploy`. Being out of date is a
+    thing to know, not a thing that is broken.
+    """
+    from kraft import update
+
+    here = update.installed()
+    if os.environ.get("KRAFT_NO_UPDATE_CHECK"):
+        # The same switch `cli._update_notice` honours: one env var turns off
+        # every version check, so an air-gapped machine never reaches for the
+        # network and a test suite never depends on gitlab.com being up.
+        return _check("version", True, f"{here} (skipped: KRAFT_NO_UPDATE_CHECK)", skipped=True)
+    release = update.latest()
+    if release is None:
+        return _check("version", True, f"{here} (skipped: no release feed)", skipped=True)
+    if update.is_behind(release):
+        return _check("version", True, f"{here} installed, {release.tag} available")
+    return _check("version", True, f"{here} (the newest release)")

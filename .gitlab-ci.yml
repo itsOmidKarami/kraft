@@ -8,6 +8,10 @@ workflow:
     - if: $CI_COMMIT_TAG
     - when: never
 
+# Declared so the release stage exists; every pre-existing job is `test`, which
+# was the implicit default before this.
+stages: [test, release]
+
 default:
   image: ghcr.io/astral-sh/uv:python3.14-bookworm-slim
 
@@ -40,6 +44,7 @@ cache:
 # never fires. That guarantee is only needed where something waits on the result, so
 # on the default branch it path-gates like the rest.
 lint-and-test:
+  stage: test
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - changes:
@@ -53,6 +58,10 @@ lint-and-test:
         - pyproject.toml
         - uv.lock
         - .gitlab-ci.yml
+  variables:
+    # setuptools-scm derives the version from tags; a shallow clone has none and
+    # every build in it silently versions itself 0.1.dev1.
+    GIT_DEPTH: 0
   before_script: *py-before-script
   script:
     - uv sync --frozen
@@ -72,6 +81,7 @@ lint-and-test:
 # Blocking, but runs in parallel so it doesn't hold up the fast signal.
 # Subprocess servers, real uvicorn, multi-second sleeps (see pyproject `slow` marker).
 slow-tests:
+  stage: test
   needs: []
   rules:
     - changes:
@@ -96,23 +106,11 @@ slow-tests:
 # are the only fixed points in that history. A plugin change merged without a
 # version bump has no tag it can be released under: `just lite-publish` refuses,
 # and until somebody tries, main here holds plugin content matching no release.
-# MR-only: it compares against the target branch, which a branch pipeline has no
-# notion of. The script owns the definition of "published surface" so that docs
-# and tests do not demand a release.
-lite-version:
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-      changes:
-        - plugins/kraft-lite/**/*
-  variables:
-    # `git diff base...head` needs the merge base, and guessing a --depth that
-    # always contains it is how this job would start failing on long branches.
-    GIT_DEPTH: 0
-  before_script:
-    - apt-get update && apt-get install -y --no-install-recommends git ca-certificates
-  script:
-    - git fetch -q origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
-    - python3 dev/check_lite_version.py FETCH_HEAD "$CI_COMMIT_SHA"
+# `lite-version` lived here: it failed a merge request that changed
+# plugins/kraft-lite's published surface without bumping the version committed in
+# its plugin.json. Both plugins now take their version from the release tag,
+# written into plugin.json by `auto-tag` below, so there is no committed number
+# left for anyone to forget. The `release::` label is the guard that replaced it.
 
 # The plugin claims to need "python3 and nothing else", and its own workflow pins
 # that floor at 3.10 -- but that workflow only runs on the published repo, which
@@ -126,6 +124,7 @@ lite-version:
 # this runs 124 passed / 3 skipped rather than paying for the bd download. The
 # skipped three are covered by lint-and-test, which installs it.
 lite-floor:
+  stage: test
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       changes:
@@ -136,6 +135,7 @@ lite-floor:
     - uv run --python 3.10 --no-project --with pytest pytest plugins/kraft-lite/tests -q
 
 frontend:
+  stage: test
   image: node:20-bookworm-slim
   rules:
     - changes:
@@ -176,6 +176,7 @@ frontend:
 # The image tag and frontend/package.json's exact "@playwright/test" pin must
 # move together: the image ships only the browsers its own version expects.
 frontend-e2e:
+  stage: test
   image: mcr.microsoft.com/playwright:v1.62.1-noble
   rules:
     - changes:
@@ -211,3 +212,132 @@ frontend-e2e:
     - cd frontend && npm run e2e
   after_script:
     - cat e2e-server.log || true
+
+
+# A tag is the only thing that publishes. The workflow rules at the top already
+# admit tag pipelines, so this job's rule is the whole gate.
+release:
+  stage: release
+  # The same node the `frontend` job builds on. bookworm's `apt-get install
+  # nodejs` is still Node 18, and a release must not be the one build that runs
+  # the SPA through a different toolchain than every check that passed it.
+  image: node:20-bookworm-slim
+  rules:
+    - if: $CI_COMMIT_TAG
+  variables:
+    # setuptools-scm reads the version from tags. Without this the wheel would be
+    # versioned 0.1.dev1 no matter what tag triggered the pipeline.
+    GIT_DEPTH: 0
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+    - export PATH="$HOME/.local/bin:$PATH"
+    - curl -fsSL "https://github.com/casey/just/releases/latest/download/just-x86_64-unknown-linux-musl.tar.gz" | tar -xz -C /usr/local/bin just
+  script:
+    - export PATH="$HOME/.local/bin:$PATH"
+    - cd frontend && npm ci && cd ..
+    - just bundle
+    - uv build --wheel
+    - WHEEL=$(ls dist/*.whl)
+    # Smoke test: a wheel that lost the SPA, or that versioned itself from a
+    # shallow clone, must not become a release. This is the guard that makes
+    # `just bundle` living outside the build backend survivable.
+    - uv venv /tmp/smoke
+    - VIRTUAL_ENV=/tmp/smoke uv pip install "$WHEEL"
+    - /tmp/smoke/bin/kraft --version | grep -qF "${CI_COMMIT_TAG#v}"
+    # Ask the installed package where its bundle is, rather than guessing a
+    # site-packages path that a python version bump would silently invalidate.
+    - >
+      /tmp/smoke/bin/python -c
+      "from kraft.paths import BUNDLED; import sys;
+      sys.exit(0 if (BUNDLED / 'web' / 'index.html').is_file() else 1)"
+    - |
+      curl --fail --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file "$WHEEL" \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/kraft/${CI_COMMIT_TAG#v}/$(basename "$WHEEL")"
+    - echo "WHEEL_URL=${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/kraft/${CI_COMMIT_TAG#v}/$(basename "$WHEEL")" >> release.env
+    - echo "WHEEL_NAME=$(basename "$WHEEL")" >> release.env
+  artifacts:
+    paths: [dist/*.whl]
+    reports:
+      dotenv: release.env
+  release:
+    tag_name: $CI_COMMIT_TAG
+    description: "Kraft $CI_COMMIT_TAG"
+    assets:
+      links:
+        # The name must end in .whl: update._parse picks the wheel out of a
+        # release by that suffix, and a link named otherwise makes every release
+        # look uninstallable.
+        - name: "$WHEEL_NAME"
+          url: "$WHEEL_URL"
+
+# Every merge request declares what it ships. The version comes from the git tag
+# now, so there is no bump commit left to forget -- which means the only place
+# anyone can be asked is here, while the author still knows what the change is
+# worth. `release::none` is a first-class answer and the expected one for docs,
+# comments, CI config and test-only changes.
+#
+# Needs the four scoped labels to exist in the project first; see CONTRIBUTING.md.
+release-impact:
+  stage: test
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    - >
+      python3 dev/next_tag.py "" "$CI_MERGE_REQUEST_LABELS" > /dev/null ||
+      { echo "This MR needs one of: release::major, release::minor, release::patch, release::none"; exit 1; }
+    # Quoted: an unquoted `: ` would make YAML read this line as a mapping, and
+    # GitLab then rejects the whole config with an empty, failed pipeline.
+    - 'echo "declared: $CI_MERGE_REQUEST_LABELS"'
+
+# The merge landed. Read the label off the merge request that produced this
+# commit and tag, which fires the `release` job above via a fresh tag pipeline.
+#
+# This job must never run on a tag pipeline, or the tag it pushes triggers it
+# again forever. The workflow rules at the top separate $CI_COMMIT_TAG from
+# $CI_COMMIT_BRANCH and the rule below is branch-only, so that holds -- but it is
+# the failure worth naming rather than trusting.
+#
+# RELEASE_TOKEN is a project access token with the api scope and permission to
+# push protected tags; CI_JOB_TOKEN cannot. See CONTRIBUTING.md.
+auto-tag:
+  stage: release
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  variables:
+    # `git describe` needs the tags, and a shallow clone has none -- every
+    # release would compute as the first one.
+    GIT_DEPTH: 0
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends git curl jq ca-certificates
+  script:
+    - |
+      LABELS=$(curl -fsSL --header "PRIVATE-TOKEN: $RELEASE_TOKEN" \
+        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/repository/commits/$CI_COMMIT_SHA/merge_requests" \
+        | jq -r '.[0].labels // [] | join(",")')
+    # A commit that reached main without a merge request -- a direct push, the
+    # revert button, a cherry-pick -- has no labels to read. That is `none`, and
+    # saying so is what stops it looking like a broken job.
+    - if [ -z "$LABELS" ]; then echo "no merge request for $CI_COMMIT_SHA; not releasing"; exit 0; fi
+    - PREVIOUS=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+    # No `|| true`: next_tag exits 0 with no output for release::none, and
+    # non-zero only when it cannot read the previous tag. Swallowing that would
+    # turn a broken tag history into a silently skipped release.
+    - TAG=$(python3 dev/next_tag.py "$PREVIOUS" "$LABELS")
+    - if [ -z "$TAG" ]; then echo "release::none; not releasing"; exit 0; fi
+    - git remote set-url origin "https://oauth2:${RELEASE_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+    # Both plugins are published by `git subtree split`, which publishes what is
+    # committed -- so the number has to be in the files before the tag exists,
+    # not stamped onto a copy afterwards. That is what buys the published repo a
+    # real history instead of one regenerated commit.
+    #
+    # This commit arrives on main with no merge request behind it, which the
+    # no-labels branch above reads as `none`, so it cannot trigger a second
+    # release. Do not remove that guard without replacing it.
+    - python3 dev/stamp_plugin_versions.py "${TAG#v}"
+    - git add plugins/kraft/.claude-plugin/plugin.json plugins/kraft-lite/.claude-plugin/plugin.json
+    - 'git -c user.email=ci@kraft.invalid -c user.name="Kraft CI" commit -qm "chore: plugins $TAG"'
+    - git push origin "HEAD:$CI_COMMIT_BRANCH"
+    - git tag -a "$TAG" -m "$TAG"
+    - git push origin "$TAG"
+    - echo "tagged $TAG"
