@@ -55,6 +55,11 @@ describe("StatusGlyph / RowState", () => {
     expect(screen.getByRole("img", { name: "running" })).toHaveAttribute("data-status", "running");
     expect(screen.getByText("capped 3/3")).toHaveAttribute("data-status", "capped_out");
   });
+
+  it("has a glyph for rate_limited, not the unknown-status fallback", () => {
+    render(<StatusGlyph status="rate_limited" />);
+    expect(screen.getByRole("img", { name: "rate_limited" })).toBeInTheDocument();
+  });
 });
 
 describe("OverflowMenu", () => {

@@ -214,7 +214,8 @@ def mark_needs_human(
     row, so the numbers ride the event for the same reason.
     """
     conn.execute(
-        "UPDATE work_items SET status = 'needs_human', updated_at = ? WHERE id = ?",
+        "UPDATE work_items SET status = 'needs_human', retry_at = NULL, updated_at = ? "
+        "WHERE id = ?",
         (_now(), work_item_id),
     )
     payload = {"node_id": node_id, "reason": reason}
@@ -242,6 +243,20 @@ def mark_needs_human(
     if budget is not None:
         payload["budget"] = budget
     events.append(conn, work_item_id, "work_item_needs_human", payload)
+
+
+def mark_rate_limited(
+    conn: sqlite3.Connection, work_item_id: str, node_id: str, retry_at: str
+) -> None:
+    """The item hit an API rate limit; `rate_limit_retry.poller` relaunches it
+    once `retry_at` passes, with nobody paged (unlike `mark_needs_human`)."""
+    conn.execute(
+        "UPDATE work_items SET status = 'rate_limited', retry_at = ?, updated_at = ? WHERE id = ?",
+        (retry_at, _now(), work_item_id),
+    )
+    events.append(
+        conn, work_item_id, "work_item_rate_limited", {"node_id": node_id, "retry_at": retry_at}
+    )
 
 
 def mark_completed(conn: sqlite3.Connection, work_item_id) -> None:
@@ -333,7 +348,7 @@ def retry_after_cap(
                 (work_item_id, counter),
             )
     conn.execute(
-        "UPDATE work_items SET status = 'active', updated_at = ? WHERE id = ?",
+        "UPDATE work_items SET status = 'active', retry_at = NULL, updated_at = ? WHERE id = ?",
         (_now(), work_item_id),
     )
     events.append(

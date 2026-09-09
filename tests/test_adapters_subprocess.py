@@ -687,3 +687,41 @@ def test_running_session_row_carries_tokens_before_exit(tmp_path):
         "tokens_in": 1000,
         "tokens_out": 200,
     }
+
+
+def test_rate_limit_rejection_reads_a_rejected_event(tmp_path):
+    log = tmp_path / "s.log"
+    log.write_text(
+        '{"type":"assistant","message":{}}\n'
+        '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected",'
+        '"resetsAt":1788968400,"rateLimitType":"five_hour"}}\n'
+        '{"type":"result","is_error":true}\n'
+    )
+    got = sp._rate_limit_rejection(log)
+    assert got == {
+        "rate_limit_type": "five_hour",
+        "resets_at": 1788968400,
+        "resets_at_iso": "2026-09-09T15:40:00+00:00",
+    }
+
+
+def test_rate_limit_rejection_ignores_allowed_events(tmp_path):
+    """`overageStatus` can read "rejected" while the turn itself was allowed --
+    only a top-level `status: "rejected"` means the launch was refused."""
+    log = tmp_path / "s.log"
+    log.write_text(
+        '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed",'
+        '"overageStatus":"rejected","resetsAt":1788986400,"rateLimitType":"five_hour"}}\n'
+        '{"type":"result","is_error":false}\n'
+    )
+    assert sp._rate_limit_rejection(log) is None
+
+
+def test_rate_limit_rejection_none_without_the_event(tmp_path):
+    log = tmp_path / "s.log"
+    log.write_text('{"type":"result","is_error":true}\n')
+    assert sp._rate_limit_rejection(log) is None
+
+
+def test_rate_limit_rejection_best_effort_on_unreadable_log(tmp_path):
+    assert sp._rate_limit_rejection(tmp_path / "missing.log") is None

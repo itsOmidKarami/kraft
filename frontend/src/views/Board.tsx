@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Prohibit } from "@phosphor-icons/react";
+import { Clock, Prohibit } from "@phosphor-icons/react";
 import { ChainBar } from "../components/ui";
 import { Gate } from "../components/Gate";
-import { ago, repoName } from "../format";
+import { ago, clock, repoName } from "../format";
 import { useStore } from "../store";
 import type { WorkItem } from "../types";
 
@@ -72,7 +72,14 @@ function needsYou(i: WorkItem) {
 
 const STATUS_GROUPS: { id: string; label: string; test: (i: WorkItem) => boolean }[] = [
   { id: "needs", label: "Needs you", test: needsYou },
-  { id: "running", label: "Running", test: (i) => i.status === "active" },
+  {
+    id: "running",
+    label: "Running",
+    // A rate-limited item is not mid-agent-call, but it is not waiting on a
+    // person either -- the poller drives it forward on its own, the same
+    // story "Running" already tells for an active item.
+    test: (i) => i.status === "active" || i.status === "rate_limited",
+  },
   { id: "not_started", label: "Not started", test: notStarted },
   { id: "done", label: "Done", test: (i) => i.status === "completed" },
 ];
@@ -223,6 +230,7 @@ export function Board() {
 function BoardRow({ item }: { item: WorkItem }) {
   const gate = item.status === "needs_human" ? (item.pending_gate ?? null) : null;
   const capped = item.status === "completed" ? null : item.cappedOut;
+  const retryAt = item.status === "rate_limited" ? item.retry_at : null;
   return (
     <div className="board-row" data-testid="board-card">
       <div className="board-row-main">
@@ -256,6 +264,12 @@ function BoardRow({ item }: { item: WorkItem }) {
           <span className="tag tag-outline tag-tight">
             <Prohibit size={10} />
             capped {capped.cycles}/{capped.attempts}
+          </span>
+        )}
+        {retryAt && (
+          <span className="tag tag-outline tag-tight">
+            <Clock size={10} />
+            retry {clock(retryAt)}
           </span>
         )}
       </div>

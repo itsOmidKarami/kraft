@@ -49,6 +49,11 @@ class Policy:
     default: Cap
     loop_severities: frozenset[str] = DEFAULT_LOOP_SEVERITIES
     budget: Budget = NO_BUDGET
+    #: How many times `rate_limit_retry.poller` may auto-relaunch the same node
+    #: after a rejected rate limit before it falls back to `needs_human`. Not a
+    #: `Cap`: a rate-limit wait can run for hours, and `Cap.wall_clock_s` would
+    #: read that as an immediate breach.
+    rate_limit_retries: int = 5
 
 
 def _cap(name: str, raw: object) -> Cap:
@@ -122,11 +127,15 @@ def load_policy(path: str | Path) -> Policy:
             )
         severities = frozenset(sev_raw)
     budget = _budget(f"{path.name}: 'budget'", data.get("budget"))
+    raw_retries = data.get("rate_limit_retries", 5)
+    if not isinstance(raw_retries, int) or isinstance(raw_retries, bool) or raw_retries < 1:
+        raise PolicyError(f"{path.name}: 'rate_limit_retries' must be a positive int")
     return Policy(
         loops=loops,
         default=_cap("default", data["default"]),
         loop_severities=severities,
         budget=budget,
+        rate_limit_retries=raw_retries,
     )
 
 
