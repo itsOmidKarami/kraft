@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   ArrowSquareOut,
   CaretDown,
@@ -199,7 +200,7 @@ export function DocumentModal({
         <div className="doc-modal-body">
           {error && <p className="form-error">{error}</p>}
           {!doc && !error && <p className="empty">loading…</p>}
-          {doc && <Markdown>{doc.content}</Markdown>}
+          {doc && <Markdown remarkPlugins={[remarkGfm]}>{doc.content}</Markdown>}
           {doc && (
             <p className="doc-modal-foot">
               Read-only here. Edits happen in your editor; the index picks them up on the next

@@ -68,8 +68,9 @@ async def ensure_worktree(
     attachments — the worktree is gone but the copy already landed on the
     branch's prior commits, and `_copy_attachments`'s own `dest.exists()` guard
     makes a second copy onto a survived worktree a no-op rather than a
-    clobber), and an existing `kraft/<id>` branch (a rejected gate removes the
-    worktree but keeps the branch) is checked out rather than re-created.
+    clobber), and an existing branch — the one on the row (a rejected gate
+    removes the worktree but keeps the branch) is checked out rather than
+    re-created.
     """
     worktree = run_dirs.worktrees / work_item_id
     if worktree.is_dir():
@@ -78,7 +79,7 @@ async def ensure_worktree(
     # guarantees a crashed-and-retried run never re-pins to a moved HEAD.
     row = db.read(
         lambda c: c.execute(
-            "SELECT base_ref FROM work_items WHERE id = ?", (work_item_id,)
+            "SELECT id, base_ref, branch FROM work_items WHERE id = ?", (work_item_id,)
         ).fetchone()
     )
     if row is not None and row["base_ref"] is None:
@@ -90,7 +91,10 @@ async def ensure_worktree(
             # for the rest of the item's life; the reason belongs in the log
             # rather than in a reviewer's guesswork.
             logger.warning("no base_ref for %s: rev-parse HEAD failed in %s", work_item_id, repo)
-    branch = f"kraft/{work_item_id}"
+    # The row is the truth. It is None only when the caller asked for a worktree
+    # before intake committed the row — tests do, and `env_setup` is reachable
+    # that way — and then the id is all there is to name a branch with.
+    branch = store.branch_for(row) if row is not None else f"kraft/{work_item_id}"
     exists = git_read(
         Path(repo),
         "rev-parse",

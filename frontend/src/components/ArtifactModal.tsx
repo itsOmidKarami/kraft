@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { X } from "@phosphor-icons/react";
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import * as api from "../api";
 import type { WorkItemArtifact } from "../types";
 import { useModal } from "../useModal";
@@ -45,7 +46,7 @@ export function ArtifactModal({
         </header>
         <div className="doc-modal-body">
           {err && <p className="form-error">{err}</p>}
-          {doc && <Markdown>{doc.content}</Markdown>}
+          {doc && <Markdown remarkPlugins={[remarkGfm]}>{doc.content}</Markdown>}
           {doc?.truncated && (
             <p className="control-hint">
               This document is too large to show whole; the rest is in the worktree.

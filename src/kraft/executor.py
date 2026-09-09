@@ -378,7 +378,7 @@ async def _dispatch(
             # request from the *current branch*, and the repo is on whatever
             # the human has checked out.
             repo=worktree,
-            branch=f"kraft/{work_item_row['id']}",
+            branch=store.branch_for(work_item_row),
             title=work_item_row["title"],
             **poll,
             **common,

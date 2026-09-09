@@ -95,6 +95,17 @@ describe("DocumentModal", () => {
     expect(container.querySelector(".doc-modal-body h1")).toHaveTextContent("WS transport");
   });
 
+  it("renders a GFM pipe table as an actual table, not a paragraph of pipes", async () => {
+    vi.spyOn(api, "getDocument").mockResolvedValue({
+      ...doc,
+      content: "| a | b |\n| --- | --- |\n| 1 | 2 |\n",
+    });
+    const { container } = wrap(<DocumentModal id="d1" onClose={() => {}} />);
+    await screen.findByText("a");
+    expect(container.querySelector(".doc-modal-body table")).not.toBeNull();
+    expect(screen.getByText("2")).toBeInTheDocument();
+  });
+
   it("opens in the chosen editor and remembers it as the default", async () => {
     vi.spyOn(api, "getDocument").mockResolvedValue(doc);
     const spy = vi.spyOn(api, "openDocument").mockResolvedValue({

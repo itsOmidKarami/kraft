@@ -41,13 +41,13 @@ def test_env_setup_creates_worktree_and_branch(tmp_path):
             worktree = rd.worktrees / "w1"
             assert (worktree / "calc.py").is_file()
             branches = subprocess.run(
-                ["git", "branch", "--list", "kraft/w1"],
+                ["git", "branch", "--list", "kraft/t-w1"],
                 cwd=repo,
                 capture_output=True,
                 text=True,
                 check=True,
             ).stdout
-            assert "kraft/w1" in branches
+            assert "kraft/t-w1" in branches
             row = database.read(
                 lambda c: c.execute(
                     "SELECT hook_point, status FROM worker_sessions WHERE id='s1'"
@@ -406,8 +406,9 @@ def test_ensure_worktree_is_idempotent_and_pins_base_ref_once(tmp_path):
 
 
 def test_ensure_worktree_reattaches_an_existing_branch(tmp_path):
-    """A rejected gate can leave `kraft/<id>` behind with no worktree. The next
-    run must check that branch out, not fail on `-b` for a name in use."""
+    """A rejected gate can leave the item's branch behind with no worktree.
+    The next run must check that branch out, not fail on `-b` for a name in
+    use."""
     repo = make_repo(tmp_path)
 
     async def scenario():
@@ -424,7 +425,71 @@ def test_ensure_worktree_reattaches_an_existing_branch(tmp_path):
                 database, rd, repo=str(repo), work_item_id="w1"
             )
             assert again.is_dir()
-            assert git_read(again, "rev-parse", "--abbrev-ref", "HEAD") == "kraft/w1"
+            assert git_read(again, "rev-parse", "--abbrev-ref", "HEAD") == "kraft/t-w1"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_ensure_worktree_branch_is_a_title_slug(tmp_path):
+    """The branch on `main` after the merge has to say what was merged."""
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="b63d95be41884b6e83a423c114a97ce3",
+                    bead_id="B",
+                    title="Readable merge records: branch slugs & GFM tables!",
+                    repo=str(repo),
+                    chain_template="quick-task",
+                    chain_definition="{}",
+                )
+            )
+            wt = await kraft_builtins.ensure_worktree(
+                database,
+                rd,
+                repo=str(repo),
+                work_item_id="b63d95be41884b6e83a423c114a97ce3",
+            )
+            expected = "kraft/readable-merge-records-branch-slugs-gfm-tables-b63d95be"
+            assert git_read(wt, "rev-parse", "--abbrev-ref", "HEAD") == expected
+            branches = subprocess.run(
+                ["git", "branch", "--list", expected],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+            assert expected in branches
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_ensure_worktree_keeps_the_legacy_uuid_branch(tmp_path):
+    """No stranding: an item whose row predates the `branch` column keeps
+    `kraft/<id>`, which is the branch its worktree and open MR already use."""
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            await database.write(
+                lambda c: c.execute("UPDATE work_items SET branch = NULL WHERE id='w1'")
+            )
+            wt = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id="w1"
+            )
+            assert git_read(wt, "rev-parse", "--abbrev-ref", "HEAD") == "kraft/w1"
         finally:
             await database.close()
 
