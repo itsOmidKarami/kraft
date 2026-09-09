@@ -1276,3 +1276,144 @@ def test_merge_fails_when_the_mr_was_closed_rather_than_merged(tmp_path, monkeyp
 
     assert (returned, recorded) == ("failed", "failed")
     assert "closed" in _session_log(tmp_path, "m3")
+
+
+# `glab ci get -F json` for the pipeline in GLAB_CI_FAILED, trimmed to the
+# fields this code reads. Captured against glab 1.117.0 on 2026-09-09: the
+# pipeline object carries its jobs inline, so one call names every job.
+GLAB_CI_GET_FAILED = (
+    '{"id":2826926700,"status":"failed","jobs":['
+    '{"id":16392037101,"name":"lint-and-test","status":"success"},'
+    '{"id":16392037104,"name":"release-impact","status":"failed"}]}'
+)
+# The tail of `glab ci trace release-impact`, which is the only place the
+# reason for MR !89's red pipeline was ever written down.
+GLAB_CI_TRACE = (
+    '$ python3 dev/next_tag.py "" "$CI_MERGE_REQUEST_LABELS" > /dev/null\n'
+    "no release:: label; expected one of ('major', 'minor', 'patch', 'none')\n"
+    "This MR needs one of: release::major, release::minor, release::patch, release::none\n"
+    "ERROR: Job failed: exit code 1\n"
+)
+
+
+def test_glab_ci_status_names_the_failed_job_and_why(tmp_path, monkeypatch):
+    """Kraft-xh0q. 'pipeline 2826926700: failed' tells a reader nothing they can
+    act on, and tells a remediator less. The failed job's name and the tail of
+    its trace are what say the blocker is a missing label rather than the code."""
+    _stub_routed(
+        tmp_path,
+        monkeypatch,
+        "glab",
+        {
+            "mr view": GLAB_MR_VIEW,
+            "ci list": GLAB_CI_FAILED,
+            "ci get": GLAB_CI_GET_FAILED,
+            "ci trace": GLAB_CI_TRACE,
+        },
+    )
+    _stub(tmp_path, monkeypatch, "git", "")
+
+    status = asyncio.run(
+        forge.GlabCli().ci_status(repo=tmp_path, mr=forge.MR(number=54, url="u"), branch="")
+    )
+
+    assert status.state == "failed"
+    joined = "\n".join(status.jobs)
+    assert "release-impact" in joined
+    assert "no release:: label" in joined, "the trace tail never reached the caller"
+    assert "lint-and-test" not in joined, "a passing job is not a diagnosis"
+    assert "trace" in _argv(tmp_path, "glab")
+
+
+def test_glab_ci_status_does_not_chase_a_green_pipeline(tmp_path, monkeypatch):
+    """Diagnosis costs two extra round trips per job. A pipeline that passed has
+    nothing to diagnose, so it must not pay for them."""
+    _stub_routed(
+        tmp_path,
+        monkeypatch,
+        "glab",
+        {"mr view": GLAB_MR_VIEW, "ci list": GLAB_CI_SUCCESS, "ci get": GLAB_CI_GET_FAILED},
+    )
+    _stub(tmp_path, monkeypatch, "git", "")
+
+    status = asyncio.run(
+        forge.GlabCli().ci_status(repo=tmp_path, mr=forge.MR(number=54, url="u"), branch="")
+    )
+
+    assert status.state == "success"
+    argv = _argv(tmp_path, "glab")
+    assert "trace" not in argv and "get" not in argv
+
+
+def test_glab_set_labels_labels_the_mr_and_starts_a_new_pipeline(tmp_path, monkeypatch):
+    """A label added to an MR does not reach the pipeline that already ran:
+    CI_MERGE_REQUEST_LABELS is fixed when the pipeline is created, so retrying
+    the job re-reads the old value. Labelling without re-creating looks fixed
+    and is still red."""
+    _stub_routed(tmp_path, monkeypatch, "glab", {"mr update": "", "api": "{}"})
+
+    asyncio.run(
+        forge.GlabCli().set_labels(
+            repo=tmp_path, mr=forge.MR(number=54, url="u"), labels=("release::patch",)
+        )
+    )
+
+    argv = _argv(tmp_path, "glab")
+    assert argv[:2] == ["mr", "update"]
+    assert "release::patch" in argv
+    assert "POST" in argv, "the pipeline was never re-created"
+    assert any("merge_requests/54/pipelines" in a for a in argv)
+
+
+def test_glab_set_labels_re_creates_the_pipeline_for_the_sentinel_number(tmp_path, monkeypatch):
+    """`run_task` passes number 0 — "resolve from the checked-out branch" — to
+    every forge handler, so 0 is the number the only real caller supplies.
+    Skipping the re-create for it would leave that caller with a labelled merge
+    request and the same red pipeline."""
+    _stub_routed(
+        tmp_path,
+        monkeypatch,
+        "glab",
+        {"mr update": "", "mr view": GLAB_MR_VIEW, "api": "{}"},
+    )
+
+    asyncio.run(
+        forge.GlabCli().set_labels(
+            repo=tmp_path, mr=forge.MR(number=0, url=""), labels=("release::patch",)
+        )
+    )
+
+    argv = _argv(tmp_path, "glab")
+    assert "POST" in argv, "the pipeline was never re-created"
+    assert any("/pipelines" in a for a in argv)
+    assert not any("merge_requests/0/" in a for a in argv), (
+        "the sentinel 0 was used as a merge request id"
+    )
+
+
+def test_gh_set_labels_edits_the_pull_request(tmp_path, monkeypatch):
+    """GitHub re-evaluates `pull_request: types: [labeled]` itself, so there is
+    no pipeline to re-create here — only the label to add."""
+    _stub(tmp_path, monkeypatch, "gh", "")
+
+    asyncio.run(
+        forge.GhCli().set_labels(
+            repo=tmp_path, mr=forge.MR(number=7, url="u"), labels=("release::patch", "bug")
+        )
+    )
+
+    argv = _argv(tmp_path, "gh")
+    assert argv[:2] == ["pr", "edit"]
+    assert "--add-label" in argv
+    assert "release::patch,bug" in argv
+
+
+def test_fake_forge_records_labels(tmp_path):
+    """The fake is what every chain-level test runs against, so a capability it
+    does not have is a capability no node can be tested through."""
+    f = forge.FakeForge(ci_states=["success"])
+    mr = asyncio.run(f.open_mr(repo=tmp_path, branch="kraft/abc", title="t", body="b"))
+
+    asyncio.run(f.set_labels(repo=tmp_path, mr=mr, labels=("release::patch",)))
+
+    assert f.labels == ["release::patch"]
