@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sqlite3
+import subprocess
 import time
 from pathlib import Path
 
@@ -36,6 +37,18 @@ def _client(tmp_path, monkeypatch, *, templates_dir=None):
     import kraft.api as api
 
     return TestClient(api.app, client=("127.0.0.1", 54321))
+
+
+def _linked_worktree(repo, tmp_path, name="wt"):
+    """A second working tree of `repo` — what an agent hands work over from."""
+    worktree = tmp_path / name
+    subprocess.run(
+        ["git", "worktree", "add", "-q", str(worktree), "-b", name],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    return worktree
 
 
 def _poll_events(client, wid, want, timeout=30, count=1):
@@ -952,6 +965,86 @@ def test_intake_accepts_an_uncommitted_attachment(tmp_path, monkeypatch):
             },
         )
         assert r.status_code == 201, r.text
+
+
+def test_intake_accepts_an_attachment_from_another_worktree_of_the_repo(tmp_path, monkeypatch):
+    """Kraft-85wk. The document exists only in the working tree the caller is
+    standing in — which for a Kraft worker is always true, because the
+    registered repo is the main checkout by construction (config.probe_repo
+    normalizes a worktree to it). Resolving under the repo alone 422s the exact
+    handoff attachments exist for."""
+    repo = make_repo(tmp_path)
+    worktree = _linked_worktree(repo, tmp_path)
+    spec = worktree / ".engineering" / "specs" / "s.md"
+    spec.parent.mkdir(parents=True)
+    spec.write_text("# written in the worktree\n")
+    assert not (repo / ".engineering" / "specs" / "s.md").exists()
+    with _client(tmp_path, monkeypatch) as client:
+        r = client.post(
+            "/work-items",
+            json={
+                "title": "t",
+                "repo": str(repo),
+                "autostart": False,
+                "cwd": str(worktree),
+                "attachments": [{"kind": "spec", "path": ".engineering/specs/s.md"}],
+            },
+        )
+        assert r.status_code == 201, r.text
+        stored = client.get(f"/work-items/{r.json()['id']}").json()["attachments"]
+        # repo-relative path, unchanged in shape: it is what the prompt note,
+        # the board badge and index/service._attachment_docs all read.
+        assert stored[0]["kind"] == "spec"
+        assert stored[0]["path"] == ".engineering/specs/s.md"
+        # and the absolute source, because `repo / path` does not exist
+        assert stored[0]["source"] == str(spec.resolve())
+
+
+def test_intake_without_a_cwd_still_scopes_attachments_to_the_repo(tmp_path, monkeypatch):
+    """The browser sends no cwd, so its reachable set stays exactly the repo,
+    as Kraft-7izl set it. Same file, same request, minus one field."""
+    repo = make_repo(tmp_path)
+    worktree = _linked_worktree(repo, tmp_path)
+    spec = worktree / ".engineering" / "specs" / "s.md"
+    spec.parent.mkdir(parents=True)
+    spec.write_text("# written in the worktree\n")
+    with _client(tmp_path, monkeypatch) as client:
+        r = client.post(
+            "/work-items",
+            json={
+                "title": "t",
+                "repo": str(repo),
+                "autostart": False,
+                "attachments": [{"kind": "spec", "path": ".engineering/specs/s.md"}],
+            },
+        )
+        assert r.status_code == 422
+        assert "not found" in r.text
+
+
+def test_intake_ignores_a_cwd_in_a_different_repo(tmp_path, monkeypatch):
+    """`cwd` is not "read any file on this machine": a second root is added only
+    when it is another working tree of the *same* repository. An unrelated repo
+    holding a file at the same relative path proves the check is the shared
+    `.git` and not the path string."""
+    repo = make_repo(tmp_path)
+    stranger = make_repo(tmp_path, name="stranger")
+    spec = stranger / ".engineering" / "specs" / "s.md"
+    spec.parent.mkdir(parents=True)
+    spec.write_text("# not this repo's spec\n")
+    with _client(tmp_path, monkeypatch) as client:
+        r = client.post(
+            "/work-items",
+            json={
+                "title": "t",
+                "repo": str(repo),
+                "autostart": False,
+                "cwd": str(stranger),
+                "attachments": [{"kind": "spec", "path": ".engineering/specs/s.md"}],
+            },
+        )
+        assert r.status_code == 422
+        assert "not found" in r.text
 
 
 def test_deferred_minor_findings_reach_the_detail_payload(tmp_path, monkeypatch):

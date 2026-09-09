@@ -14,7 +14,55 @@ from kraft.config import git_read
 logger = logging.getLogger(__name__)
 
 
-def _copy_attachments(repo: Path, worktree: Path, attachments: list[dict]) -> None:
+def _commit_paths(worktree: Path, paths: list[str], message: str) -> None:
+    """Commit exactly `paths` in `worktree`, or commit nothing.
+
+    Kraft's own commit primitive. A document Kraft put in the worktree is not a
+    change any agent made, so no agent is told to commit it, and it sits
+    untracked until `forge._assert_clean` refuses to open the merge request over
+    it (Kraft-8iw6). Kraft-xwen needs the same primitive so a document node can
+    be given an allowlist with no Bash, which is why the pathspec is explicit
+    and an unrelated dirty file is left exactly as it was.
+
+    `--no-verify`: this runs before `ensure_worktree`'s `uv sync`, so the repo's
+    `pre-commit` hook has no environment to spawn from yet (Kraft-i047 is the
+    same failure seen from the other side), and the content is a file Kraft
+    copied unmodified — there is nothing here for the hook to catch. No `-c
+    user.email` override either: the worktree inherits the repo's git config,
+    which is where every other commit on this branch gets its author.
+
+    Best effort. A failure logs a warning and returns: a document that did not
+    commit becomes a dirty-tree failure at `open_mr` with git's own message
+    already in the log, which is strictly better than failing worktree creation.
+    """
+    if not paths:
+        return
+
+    def git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", *args], cwd=str(worktree), capture_output=True, text=True)
+
+    added = git("add", "--", *paths)
+    if added.returncode != 0:
+        logger.warning("could not stage %s in %s: %s", paths, worktree, added.stderr.strip())
+        return
+    # Exit 0 means no staged difference for these paths — an ignored or an
+    # unchanged path stages nothing, and `git commit` on an empty commit exits
+    # non-zero. Skip it rather than log a failure that is really a no-op.
+    if git("diff", "--cached", "--quiet", "--", *paths).returncode == 0:
+        return
+    done = git("commit", "--no-verify", "-m", message, "--", *paths)
+    if done.returncode != 0:
+        logger.warning(
+            "could not commit %s in %s: %s",
+            paths,
+            worktree,
+            done.stderr.strip() or done.stdout.strip(),
+        )
+
+
+def _copy_attachments(
+    repo: Path, worktree: Path, attachments: list[dict], work_item_id: str
+) -> None:
     """Intake attachments that are not committed do not exist in a fresh
     worktree (`git worktree add` branches from HEAD), so copy them in. A
     committed one arrived through git and is left exactly as git wrote it.
@@ -25,11 +73,21 @@ def _copy_attachments(repo: Path, worktree: Path, attachments: list[dict]) -> No
     reports False and `shutil.copyfile` would then write through it to
     wherever it points. So a symlinked destination, dangling or not, is
     always skipped, and the resolved destination must stay inside the
-    worktree."""
+    worktree.
+
+    `source`, when the validator set it, is the absolute path the document was
+    actually found at — a working tree of the repo that is not `repo` itself
+    (Kraft-85wk). Without it the copy would look under `repo`, find nothing,
+    and skip.
+
+    Whatever actually gets copied is committed once, here, so an uncommitted
+    attachment does not sit untracked and trip `open_mr`'s dirty-worktree guard
+    (Kraft-8iw6) — no agent is told to commit a file it never wrote."""
     worktree_root = worktree.resolve()
+    written: list[dict] = []
     for attachment in attachments:
         dest = worktree / attachment["path"]
-        src = repo / attachment["path"]
+        src = Path(attachment["source"]) if attachment.get("source") else repo / attachment["path"]
         if dest.is_symlink():
             continue
         resolved = dest.resolve()
@@ -39,6 +97,16 @@ def _copy_attachments(repo: Path, worktree: Path, attachments: list[dict]) -> No
             continue
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, dest)
+        written.append(attachment)
+
+    if written:
+        # One commit for the whole intake, not one per document, and no commit
+        # at all when every copy was skipped.
+        _commit_paths(
+            worktree,
+            [a["path"] for a in written],
+            f"chore: attach {'+'.join(a['kind'] for a in written)} for {work_item_id}",
+        )
 
 
 async def ensure_worktree(
@@ -118,7 +186,9 @@ async def ensure_worktree(
         # needs_human with the git stderr in the reason.
         detail = done.stderr.strip() or done.stdout.strip()
         raise RuntimeError(f"git worktree add failed for {work_item_id}: {detail}")
-    _copy_attachments(Path(repo), worktree, attachments or [])
+    await asyncio.to_thread(
+        _copy_attachments, Path(repo), worktree, attachments or [], work_item_id
+    )
     # Every node from `spec` on can commit, and the shared pre-commit hook
     # (`.beads/hooks/pre-commit`) needs `pre-commit` on PATH -- via `uv run
     # --no-sync` -- to catch a formatting slip before it reaches CI. A

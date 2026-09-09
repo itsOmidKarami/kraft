@@ -221,6 +221,9 @@ async def get_work_item(work_item_id: str | None = None) -> dict:
         "gate_artifact",
         "worktree_path",
         "bead_id",
+        # what an attached spec/plan trimmed, and the trim itself — an agent
+        # confirming a handoff landed needs to see both (Kraft-82gz).
+        "attachments",
     )
     return {**{k: item[k] for k in keep if k in item}, "next_node_id": _next_node_id(item)}
 
@@ -476,11 +479,21 @@ async def create_work_item(
     repo: str | None = None,
     chain_template: str = "default",
     description: str | None = None,
+    attachments: list[dict] | None = None,
 ) -> dict:
     """Create a work item. It lands paused: an agent files work, a human starts it.
 
     `repo` defaults to the repo of the work item this session is standing in,
     which is the common case for a worker filing follow-up work.
+
+    `attachments` are documents that already exist —
+    `[{"kind": "spec"|"plan", "path": "..."}]`, at most one of each. Each trims
+    the gate it satisfies, so nobody is asked to re-approve what was already
+    agreed. `cwd` rides along with them so the server can resolve a path
+    against the working tree this call is made from, which for a worker is a
+    Kraft worktree and not the registered repo (Kraft-85wk). It is sent only
+    when there is a path to resolve: a call with no attachments names no file,
+    so it hands over no directory either.
     """
     if repo is None:
         work_item_id, _origin = resolve_context()
@@ -501,6 +514,7 @@ async def create_work_item(
             "chain_template": chain_template,
             "autostart": False,
             **({"description": description} if description else {}),
+            **({"attachments": attachments, "cwd": str(Path.cwd())} if attachments else {}),
         },
     )
     if status >= 400:
