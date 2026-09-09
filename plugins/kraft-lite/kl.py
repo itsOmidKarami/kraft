@@ -501,7 +501,8 @@ def summary(records: list[dict], chain: dict) -> dict:
     ceilings are worth knowing about:
 
     ponytail: one second is the granularity of every stamp here, so a chain walked
-    faster than that reports zeros. Nothing sub-second is recoverable.
+    faster than that reports zeros, including two nodes that closed inside the same
+    second. Nothing sub-second is recoverable.
 
     ponytail: a rewind rewrites the tail's stamps, so a node redone after a
     rejection is timed from the redo, not from the attempt that was rejected. Time
@@ -530,12 +531,22 @@ def summary(records: list[dict], chain: dict) -> dict:
     #: last before it closed rather than from its predecessor's close. After a
     #: rewind those differ: the predecessor still holds its stamp from the first
     #: pass, and timing from it charges the redo for the whole walk in between.
-    events = sorted(x for x in (_at(r) for r in records) if x)
+    #: Each stamp is paired with its record's position in the walk, because
+    #: `BD_TIME` resolves to the second and two nodes closed inside one second
+    #: are otherwise indistinguishable — the later of the two then finds nothing
+    #: earlier and falls all the way back to the epic (Kraft-ao6). Position
+    #: breaks ties only; it never picks the predecessor.
+    order = {r["id"]: i for i, r in enumerate([epic, *walk])}
+    events = sorted((x, order.get(r["id"], -1)) for r in records if (x := _at(r)))
 
     def since(record: dict) -> str | None:
         closed_at = _at(record)
-        earlier = [e for e in events if e < closed_at] if closed_at else []
-        return earlier[-1] if earlier else _at(epic)
+        if not closed_at:
+            return _at(epic)
+        key = (closed_at, order.get(record["id"], -1))
+        # `< key` excludes the record's own entry without a separate id test.
+        earlier = [e for e in events if e < key]
+        return earlier[-1][0] if earlier else _at(epic)
 
     rows = []
     for record in walk:
