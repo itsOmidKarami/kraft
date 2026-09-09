@@ -75,6 +75,17 @@ fi
 # artifact endpoint and the indexer all see the real inputs.
 hook="$(field 'Hook point')"
 item="$(field 'Work item')"
+
+# chain_review's own decision (ready_for_approval/error) lives inside its
+# artifact envelope below, not in this outer per-task result -- a test's
+# KRAFT_FAKE_CLAUDE_STATUS knob is for the node under test (e.g.
+# `implementation` asking a needs_context question), not every node the fake
+# happens to run before it. Forcing this node's own report to "done" keeps
+# that knob from starving chain_finalized of the gate it needs to reach.
+if [ "$hook" = "on.chain.review_ready" ]; then
+  status="done"
+fi
+
 case "$hook" in
   on.spec.requested) kind="spec" ;;
   on.plan.requested) kind="plan" ;;
@@ -96,6 +107,44 @@ EOF
   git add ".engineering/${kind}s/${item}.md" >/dev/null 2>&1 || true
   git -c user.name=fake -c user.email=fake@kraft \
       commit -q -m "fake ${kind}" -- ".engineering/${kind}s/${item}.md" >/dev/null 2>&1 || true
+fi
+
+# chain_review's artifact is a `{status, revised_chain_nodes, rationale}`
+# envelope (skills/chain-review/SKILL.md), not free prose -- the orchestrator
+# splices `revised_chain_nodes` into `chain_definition` at chain_finalized
+# approval (Kraft-hm0). The fake default is the honest "no change" answer:
+# read the item's own chain back out of the run's db and echo its unexecuted
+# tail unchanged, so a caller that never touches chain review still walks the
+# rest of the chain exactly as before this hook grew teeth.
+if [ "$hook" = "on.chain.review_ready" ] && [ -n "$item" ] && [ -n "${KRAFT_RUN_DIR:-}" ]; then
+  mkdir -p .engineering/chain_reviews
+  python3 - "$item" "${KRAFT_RUN_DIR}/orchestrator.db" \
+      > ".engineering/chain_reviews/${item}.md" <<'PY'
+import json
+import sqlite3
+import sys
+
+item, db_path = sys.argv[1], sys.argv[2]
+conn = sqlite3.connect(db_path)
+row = conn.execute(
+    "SELECT chain_definition, current_node_id FROM work_items WHERE id = ?", (item,)
+).fetchone()
+chain = json.loads(row[0])
+nodes = chain["nodes"]
+idx = next((i for i, n in enumerate(nodes) if n["id"] == row[1]), len(nodes) - 1)
+tail = nodes[idx + 1 :]
+envelope = {"status": "ready_for_approval", "revised_chain_nodes": tail, "rationale": "no change"}
+print("---")
+print(f"work_item_ids: [{item}]")
+print("kind: chain_reviews")
+print("title: fake chain review")
+print("---")
+print()
+print(json.dumps(envelope))
+PY
+  git add ".engineering/chain_reviews/${item}.md" >/dev/null 2>&1 || true
+  git -c user.name=fake -c user.email=fake@kraft \
+      commit -q -m "fake chain_review" -- ".engineering/chain_reviews/${item}.md" >/dev/null 2>&1 || true
 fi
 
 if [ -n "${KRAFT_RESULT_PATH:-}" ]; then

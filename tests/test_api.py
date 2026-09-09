@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sqlite3
 import subprocess
@@ -391,6 +392,26 @@ def _post_default(client, repo):
     ).json()["id"]
 
 
+def test_no_explicit_chain_template_still_runs_default_and_is_distinguishable(
+    tmp_path, monkeypatch
+):
+    """Kraft-cd47: an item created with no `chain_template` runs the `default`
+    template's chain like it always did, but its row stores that nothing was
+    chosen -- not the string "default", which an item that named that template
+    outright also stores. The two must not collide."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        unset_wid = client.post("/work-items", json={"title": "t", "repo": str(repo)}).json()["id"]
+        named_wid = client.post(
+            "/work-items", json={"title": "t", "repo": str(repo), "chain_template": "default"}
+        ).json()["id"]
+        unset = client.get(f"/work-items/{unset_wid}").json()
+        named = client.get(f"/work-items/{named_wid}").json()
+        assert unset["chain_template"] is None
+        assert named["chain_template"] == "default"
+        assert unset["chain_definition"]["nodes"] == named["chain_definition"]["nodes"]
+
+
 def test_gate_approve_advances_chain(tmp_path, monkeypatch):
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     repo = make_repo(tmp_path)
@@ -407,6 +428,137 @@ def test_gate_approve_advances_chain(tmp_path, monkeypatch):
             e["type"] == "node_started" and e["payload"]["node_id"] == "plan"
             for e in client.get(f"/work-items/{wid}/events").json()
         )
+
+
+def _chain_review_path(client, wid):
+    run_dir = Path(client.app.state.run_dirs.base)
+    return run_dir / "worktrees" / wid / ".engineering" / "chain_reviews" / f"{wid}.md"
+
+
+def _write_chain_review(client, wid, envelope):
+    path = _chain_review_path(client, wid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    front_matter = f"---\nwork_item_ids: [{wid}]\nkind: chain_reviews\ntitle: t\n---\n\n"
+    path.write_text(front_matter + json.dumps(envelope) + "\n")
+
+
+def test_chain_review_splice_runs_the_revised_tail(tmp_path, monkeypatch):
+    """Kraft-hm0: a genuinely revised tail is spliced into `chain_definition`
+    on `chain_finalized` approval, and the next node runs the added task, not
+    whatever the template originally had there."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        for gate in ("spec_approval", "plan_approval"):
+            _await_gate(client, wid, gate)
+            assert client.post(f"/work-items/{wid}/gates/{gate}/approve").status_code == 200
+        _await_gate(client, wid, "chain_finalized")
+
+        tail = client.get(f"/work-items/{wid}").json()["chain_definition"]["nodes"]
+        original = [n for n in tail if n["id"] not in ("spec", "plan", "chain_review")]
+        revised = [
+            {"id": "extra_check", "tasks": ["on.review.local.run"], "gate_after": None},
+            *original,
+        ]
+        _write_chain_review(
+            client,
+            wid,
+            {"status": "ready_for_approval", "revised_chain_nodes": revised, "rationale": "t"},
+        )
+
+        r = client.post(f"/work-items/{wid}/gates/chain_finalized/approve")
+        assert r.status_code == 200, r.text
+        _await_gate(client, wid, "human_review_approval")
+        started = [
+            e["payload"]["node_id"]
+            for e in client.get(f"/work-items/{wid}/events").json()
+            if e["type"] == "node_started"
+        ]
+        assert "extra_check" in started
+        assert client.get(f"/work-items/{wid}").json()["chain_definition"]["nodes"][3]["id"] == (
+            "extra_check"
+        )
+
+
+def test_chain_review_unchanged_tail_round_trips(tmp_path, monkeypatch):
+    """The skill's own documented common case: emitting the tail unchanged is
+    a no-op in effect, the same code path as a real splice (Kraft-hm0)."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        for gate in ("spec_approval", "plan_approval"):
+            _await_gate(client, wid, gate)
+            assert client.post(f"/work-items/{wid}/gates/{gate}/approve").status_code == 200
+        _await_gate(client, wid, "chain_finalized")
+        before = client.get(f"/work-items/{wid}").json()["chain_definition"]["nodes"]
+
+        # fake-claude.sh's default answer for on.chain.review_ready is the
+        # unchanged tail — no override needed here.
+        r = client.post(f"/work-items/{wid}/gates/chain_finalized/approve")
+        assert r.status_code == 200, r.text
+        after = client.get(f"/work-items/{wid}").json()["chain_definition"]["nodes"]
+        assert after == before
+
+
+@pytest.mark.parametrize(
+    ("envelope", "reason_has"),
+    [
+        (
+            {"status": "error", "revised_chain_nodes": [], "rationale": "cannot decide"},
+            "cannot decide",
+        ),
+        (
+            {"status": "ready_for_approval", "revised_chain_nodes": [{"bad": "shape"}]},
+            "chain_review",
+        ),
+    ],
+)
+def test_chain_review_error_or_invalid_tail_stops_at_needs_human(
+    tmp_path, monkeypatch, envelope, reason_has
+):
+    """Kraft-hm0/unk: `status: "error"` and an invalid `revised_chain_nodes`
+    both stop the item at needs_human rather than advancing, and never touch
+    `chain_definition`."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        for gate in ("spec_approval", "plan_approval"):
+            _await_gate(client, wid, gate)
+            assert client.post(f"/work-items/{wid}/gates/{gate}/approve").status_code == 200
+        _await_gate(client, wid, "chain_finalized")
+        before = client.get(f"/work-items/{wid}").json()["chain_definition"]["nodes"]
+
+        _write_chain_review(client, wid, envelope)
+        r = client.post(f"/work-items/{wid}/gates/chain_finalized/approve")
+        assert r.status_code == 200, r.text
+        item = client.get(f"/work-items/{wid}").json()
+        assert item["status"] == "needs_human"
+        assert item["chain_definition"]["nodes"] == before
+        stops = [
+            e
+            for e in client.get(f"/work-items/{wid}/events").json()
+            if e["type"] == "work_item_needs_human"
+        ]
+        assert stops and reason_has in stops[-1]["payload"]["reason"]
+
+
+def test_chain_review_missing_artifact_stops_at_needs_human(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        for gate in ("spec_approval", "plan_approval"):
+            _await_gate(client, wid, gate)
+            assert client.post(f"/work-items/{wid}/gates/{gate}/approve").status_code == 200
+        _await_gate(client, wid, "chain_finalized")
+        _chain_review_path(client, wid).unlink()
+
+        r = client.post(f"/work-items/{wid}/gates/chain_finalized/approve")
+        assert r.status_code == 200, r.text
+        assert client.get(f"/work-items/{wid}").json()["status"] == "needs_human"
 
 
 def test_gate_approve_wrong_gate_409(tmp_path, monkeypatch):
