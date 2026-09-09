@@ -1,7 +1,8 @@
 """Stand-in for `claude` headless. Invoked as:
    python fake_agent.py -p <instr> --append-system-prompt <ctx> \
        --output-format stream-json --verbose
-CWD is the worktree. Mode via KRAFT_FAKE_AGENT: fix (default) | noop | error.
+CWD is the worktree. Mode via KRAFT_FAKE_AGENT: fix (default) | noop | error |
+rate_limit (rejects with KRAFT_FAKE_AGENT_RESETS_AT, default 1788968400).
 
 Obeys the session-summary instructions in the injected context (03 §3, 04 §6):
 reads the linkage fields back out of the prompt, writes
@@ -135,7 +136,7 @@ def main() -> int:
         calc = pathlib.Path("calc.py")
         calc.write_text(calc.read_text().replace("a - b", "a + b"))
     result_path = os.environ.get("KRAFT_RESULT_PATH")
-    if mode != "error" and result_path:
+    if mode not in ("error", "rate_limit") and result_path:
         _write_artifact(sys.argv)
         fields = _ctx_fields(sys.argv)
         ref = _write_summary(fields)
@@ -194,9 +195,23 @@ def main() -> int:
         ),
         flush=True,
     )
+    if mode == "rate_limit":
+        print(
+            json.dumps(
+                {
+                    "type": "rate_limit_event",
+                    "rate_limit_info": {
+                        "status": "rejected",
+                        "resetsAt": int(os.environ.get("KRAFT_FAKE_AGENT_RESETS_AT", "1788968400")),
+                        "rateLimitType": "five_hour",
+                    },
+                }
+            ),
+            flush=True,
+        )
     envelope = {
         "type": "result",
-        "is_error": mode == "error",
+        "is_error": mode in ("error", "rate_limit"),
         # no top-level `model`: the real envelope carries `modelUsage`, keyed by
         # model name, which is why every worker_sessions row had model NULL
         "modelUsage": {"fake-agent": {"inputTokens": 1500, "outputTokens": 200}},

@@ -192,4 +192,18 @@ describe("EventTimeline", () => {
     );
     expect(screen.getByRole("button", { name: "view log" })).toBeInTheDocument();
   });
+
+  it("surfaces the retry time on a rate-limit stop", () => {
+    render(
+      <EventTimeline
+        events={[
+          ev({
+            type: "work_item_rate_limited",
+            payload: { node_id: "implementation", retry_at: "2026-09-10T05:00:00Z" },
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText(/2026-09-10T05:00:00Z/)).toBeInTheDocument();
+  });
 });

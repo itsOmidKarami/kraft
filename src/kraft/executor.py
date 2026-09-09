@@ -323,6 +323,12 @@ def _attachment_note(attachments: list[dict]) -> str:
 #: outranks a co-task's failure for exactly that reason.
 BUDGET = "budget"
 
+#: `"rate_limited"` (`_subprocess.run_task`, via Task 4's `_rate_limit_rejection`).
+#: Ranked above `BUDGET`/`"failed"` in `_measure_node` -- a rate limit is not
+#: evidence of bad code -- but below `"paused"`, which is always a human's own
+#: SIGTERM.
+RATE_LIMITED = "rate_limited"
+
 
 def _budget_breach(db, work_item_id: str, budget: _policy.Budget) -> dict | None:
     """The breached cap, or None. Evaluated fresh: it is a query, not a counter.
@@ -365,6 +371,27 @@ async def _stop_for_budget(db, work_item_id: str, node: dict, budget: _policy.Bu
         lambda c: store.mark_needs_human(c, work_item_id, node["id"], reason, None, breach)
     )
     return "needs_human"
+
+
+def _latest_rate_limit(db, work_item_id: str) -> dict | None:
+    """The most recently appended `rate_limit_hit` event's payload, or None.
+
+    Same reverse-scan idiom as `_last_measurement`/`_needs_context_question`:
+    the event was just written by `_subprocess.run_task` in the same session
+    this verdict came from, so the latest one is always the right one.
+    """
+    evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
+    for e in reversed(evts):
+        if e["type"] == "rate_limit_hit":
+            return e["payload"]
+    return None
+
+
+async def _stop_for_rate_limit(db, work_item_id: str, node: dict) -> str:
+    info = _latest_rate_limit(db, work_item_id) or {}
+    retry_at = info.get("resets_at_iso") or _now()
+    await db.write(lambda c: store.mark_rate_limited(c, work_item_id, node["id"], retry_at))
+    return RATE_LIMITED
 
 
 #: The hooks whose job is to judge a change rather than make one. They are the
@@ -577,14 +604,18 @@ async def _measure_node(
     # certainly the same SIGTERM arriving on a different row.
     if any(r == "paused" for r in results):
         return "paused", [], []
+    if any(r == RATE_LIMITED for r in results):
+        return RATE_LIMITED, [], []
     # Logged before the BUDGET rung returns: a co-task can raise in the same node
     # as a budget-refused agent, and that traceback is the only record of it.
     excs = [r for r in results if isinstance(r, BaseException)]
     for exc in excs:
         logger.error("measuring task raised in node %s: %r", node["id"], exc)
-    # paused > budget > failed. A pause is a human's instruction and outranks
-    # everything. A budget breach outranks a co-task's failure because the agent
-    # never ran, so its "failure" is not evidence about the code.
+    # paused > rate_limited > budget > failed. A pause is a human's instruction
+    # and outranks everything. A rate limit and a budget breach both outrank a
+    # co-task's failure because the agent's "failure" is not evidence about the
+    # code; a rate limit outranks a budget breach because it is Kraft's own
+    # spend policy refusing to start, not an external constraint the agent hit.
     if any(r == BUDGET for r in results):
         return BUDGET, [], []
     failed = [
@@ -815,6 +846,8 @@ async def _walk_node(
         )
         if verdict == "paused":
             return "paused"
+        if verdict == RATE_LIMITED:
+            return await _stop_for_rate_limit(db, work_item_id, node)
         if verdict == BUDGET:
             return await _stop_for_budget(db, work_item_id, node, budget)
         if verdict == "failed":
@@ -883,6 +916,8 @@ async def _walk_node(
         )
         if verdict == "paused":
             return "paused"
+        if verdict == RATE_LIMITED:
+            return await _stop_for_rate_limit(db, work_item_id, node)
         if verdict == BUDGET:
             return await _stop_for_budget(db, work_item_id, node, budget)
 
@@ -1103,6 +1138,8 @@ async def run(
             return "paused"
         if result == "needs_human":
             return "needs_human"
+        if result == RATE_LIMITED:
+            return RATE_LIMITED
         if await _maybe_gate(db, work_item_id, node):
             return "awaiting_gate"
 
@@ -1294,21 +1331,21 @@ async def resume(
         return "awaiting_gate"
 
     for node in nodes[start + 1 :]:
-        if (
-            await _walk_node(
-                db,
-                run_dirs,
-                work_item_id,
-                node,
-                row,
-                registry,
-                worktree,
-                policy=policy,
-                launch=launch,
-            )
-            == "needs_human"
-        ):
+        tail_result = await _walk_node(
+            db,
+            run_dirs,
+            work_item_id,
+            node,
+            row,
+            registry,
+            worktree,
+            policy=policy,
+            launch=launch,
+        )
+        if tail_result == "needs_human":
             return "needs_human"
+        if tail_result == RATE_LIMITED:
+            return RATE_LIMITED
         if await _maybe_gate(db, work_item_id, node):
             return "awaiting_gate"
 

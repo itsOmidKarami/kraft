@@ -27,7 +27,7 @@ from starlette.websockets import WebSocketDisconnect
 from kraft import analytics as analytics_mod
 from kraft import auth as auth_mod
 from kraft import config as config_mod
-from kraft import events, executor, findings, reattach, review, store
+from kraft import events, executor, findings, rate_limit_retry, reattach, review, store
 from kraft import intake as intake_mod
 from kraft import logs as logs_mod
 from kraft import notify as notify_mod
@@ -226,6 +226,9 @@ async def lifespan(app: FastAPI):
         asyncio.ensure_future(intake_mod.poller(app)) if app.state.intake["enabled"] else None
     )
     app.state.intake_task = intake_task
+    # Always on, unlike auto-intake: waiting out a rate limit is not optional
+    # behaviour an operator enables, it is what this feature promises.
+    app.state.rate_limit_task = asyncio.ensure_future(rate_limit_retry.poller(app))
     # PUT /intake swaps this task, and the swap has to await the cancellation of
     # the old one. Without the lock two overlapping saves both read the same old
     # task, both start a poller, and only the last assignment is reachable --
@@ -248,6 +251,8 @@ async def lifespan(app: FastAPI):
         if live_intake_task is not None:
             live_intake_task.cancel()
             await asyncio.gather(live_intake_task, return_exceptions=True)
+        app.state.rate_limit_task.cancel()
+        await asyncio.gather(app.state.rate_limit_task, return_exceptions=True)
         tasks = list(app.state.tasks.values())
         for task in tasks:
             task.cancel()
@@ -701,6 +706,7 @@ _STOP_BOUNDARY = (
     "work_item_resumed",
     "work_item_retried",
     "work_item_completed",
+    "work_item_rate_limited",
 )
 
 
@@ -882,6 +888,7 @@ async def list_work_items(request: Request):
             "updated_at": r["updated_at"],
             "pending_gate": pending.get(r["id"]),
             "attachments": json.loads(r["attachments"]) if r["attachments"] else [],
+            "retry_at": r["retry_at"],
         }
         for r in rows
     ]

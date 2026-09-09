@@ -203,4 +203,17 @@ describe("Board", () => {
     renderBoard();
     expect(screen.getByText("from plan")).toBeInTheDocument();
   });
+
+  it("groups a rate_limited item under Running, not Needs you", () => {
+    setItems(wi({ id: "w3", status: "rate_limited", current_node_id: "implementation" }));
+    renderBoard();
+    expect(within(group("Running")).getByText("Item")).toBeInTheDocument();
+    expect(within(group("Needs you")).queryByText("Item")).not.toBeInTheDocument();
+  });
+
+  it("shows the retry time on a rate_limited card", () => {
+    setItems(wi({ id: "w3", status: "rate_limited", retry_at: "2026-09-10T05:00:00Z" }));
+    renderBoard();
+    expect(screen.getByText(/retry/i)).toBeInTheDocument();
+  });
 });

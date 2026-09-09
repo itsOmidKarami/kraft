@@ -189,6 +189,9 @@ const STATUS_TAG: Record<WorkItem["status"], string> = {
   // Same muted treatment as completed: both are terminal, and neither is a
   // state the reader needs drawn to.
   abandoned: "tag tag-neutral",
+  // Same treatment as active: the poller is driving it, not waiting on a
+  // person -- the same story Board.tsx's "Running" group tells for it.
+  rate_limited: "tag tag-outline",
 };
 
 export function WorkItemDetail() {

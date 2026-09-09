@@ -18,7 +18,10 @@ export type WorkItemStatus =
   | "completed"
   | "paused"
   // Terminal, and off the board unless explicitly asked for (Kraft-x85).
-  | "abandoned";
+  | "abandoned"
+  // Waiting on an API rate limit to reset; the poller relaunches it, no
+  // human paged.
+  | "rate_limited";
 
 export interface WorkItemAttachment {
   kind: "spec" | "plan";
@@ -40,6 +43,8 @@ export interface WorkItem {
   bead_id: string | null;
   /** Steer text left while paused; consumed by the next agent launch. */
   pending_steer_context?: string | null;
+  /** Set while `status === "rate_limited"`: when the poller may relaunch it. */
+  retry_at?: string | null;
   created_at: string;
   updated_at: string;
   /** The gate waiting on a person, straight from the server — a rejected gate
@@ -92,7 +97,8 @@ export type SessionStatus =
   | "failed"
   | "capped_out"
   | "paused"
-  | "unknown";
+  | "unknown"
+  | "rate_limited";
 
 export interface WorkerSession {
   id: string;

@@ -12,6 +12,7 @@ import {
   Check,
   ChatText,
   Circle,
+  Clock,
   CircleNotch,
   DotsThree,
   Pause,
@@ -75,6 +76,7 @@ const GLYPHS: Record<SessionStatus, typeof Check> = {
   // Design gap: `pending` is not in the spec's status table. It takes the
   // quietest ring in the vocabulary rather than inventing a glyph.
   pending: Circle,
+  rate_limited: Clock,
 };
 
 /** 20px ring, 1px border, Phosphor glyph. Only `running` animates. */

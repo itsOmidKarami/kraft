@@ -1072,3 +1072,78 @@ def test_retry_after_cap_clears_the_gate_reject_counter_too(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_mark_rate_limited_sets_status_and_retry_at(tmp_path):
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await _mk_item(database)
+            await database.write(
+                lambda c: store.mark_rate_limited(c, "w1", "implementation", "2026-09-10T00:00:00Z")
+            )
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT status, retry_at FROM work_items WHERE id='w1'"
+                ).fetchone()
+            )
+            assert row["status"] == "rate_limited"
+            assert row["retry_at"] == "2026-09-10T00:00:00Z"
+            ev = database.read(lambda c: events.read_after(c, 0))[-1]
+            assert ev["type"] == "work_item_rate_limited"
+            assert ev["payload"] == {
+                "node_id": "implementation",
+                "retry_at": "2026-09-10T00:00:00Z",
+            }
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_mark_needs_human_clears_retry_at(tmp_path):
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await _mk_item(database)
+            await database.write(
+                lambda c: store.mark_rate_limited(c, "w1", "implementation", "2026-09-10T00:00:00Z")
+            )
+            await database.write(
+                lambda c: store.mark_needs_human(c, "w1", "implementation", "boom")
+            )
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT status, retry_at FROM work_items WHERE id='w1'"
+                ).fetchone()
+            )
+            assert row["status"] == "needs_human"
+            assert row["retry_at"] is None
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_retry_after_cap_clears_retry_at(tmp_path):
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await _mk_item(database)
+            await database.write(
+                lambda c: store.mark_rate_limited(c, "w1", "implementation", "2026-09-10T00:00:00Z")
+            )
+            await database.write(
+                lambda c: store.retry_after_cap(c, "w1", "implementation", None, "go")
+            )
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT status, retry_at FROM work_items WHERE id='w1'"
+                ).fetchone()
+            )
+            assert row["status"] == "active"
+            assert row["retry_at"] is None
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
