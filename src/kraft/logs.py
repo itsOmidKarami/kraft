@@ -136,6 +136,14 @@ def summary(obj: dict | None, line: str) -> str:
             text = block.get("text")
             if isinstance(text, str) and text.strip():
                 return _shorten(text.strip().splitlines()[0], 200)
+        if btype in ("thinking", "redacted_thinking"):
+            # `thinking` carries the model's private reasoning -- often empty
+            # under extended thinking + prompt caching -- and its `signature`
+            # is a base64 blob no reader wants dumped raw.
+            thinking = block.get("thinking")
+            if isinstance(thinking, str) and thinking.strip():
+                return _shorten("thinking: " + thinking.strip().splitlines()[0], 200)
+            return "thinking"
     return _shorten(line)
 
 
