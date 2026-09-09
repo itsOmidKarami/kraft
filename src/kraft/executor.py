@@ -57,6 +57,29 @@ def _format_findings(found: list[_findings.Finding], repeats: set[str]) -> str:
 # running again.
 _STEER_PROMPT = "A human has steered this run: {steer}\n\n"
 
+#: The same note, over a document this node has already written. A bare steer
+#: made a rejected plan cost a full re-plan: nothing in the dispatch said the
+#: file existed or that the human objected to one paragraph of it (Kraft-bol).
+_REVISE_PROMPT = (
+    "A human read {path} and sent it back with this note: {steer}\n"
+    "Revise that document in place: change what the note objects to, and "
+    "leave the rest of it alone.\n\n"
+)
+
+
+def _steer_prefix(binding: dict, work_item_row, worktree, note: str) -> str:
+    """What a steered agent launch leads with.
+
+    Keys on the artifact being on disk rather than on which gate was rejected,
+    so it covers the spec gate and any future `artifact:` binding for free.
+    """
+    artifact_kind = binding.get("artifact")
+    rel = _agent.artifact_path(artifact_kind, work_item_row["id"]) if artifact_kind else None
+    if rel and (Path(worktree) / rel).is_file():
+        return _REVISE_PROMPT.format(path=rel, steer=note)
+    return _STEER_PROMPT.format(steer=note)
+
+
 #: Statuses that let the chain advance. `done_with_concerns` is deliberately
 #: here: the agent finished the work — its doubts are information for the human
 #: at the next gate, not a control-flow change.
@@ -344,7 +367,8 @@ async def _dispatch(
             artifact=binding.get("artifact"),
             method_text=inv.method_text,
             title=work_item_row["title"],
-            task_instruction=(_STEER_PROMPT.format(steer=note) if note else "") + instruction,
+            task_instruction=(_steer_prefix(binding, work_item_row, worktree, note) if note else "")
+            + instruction,
             repo_path=work_item_row["repo"],
             cwd=worktree,
             **common,

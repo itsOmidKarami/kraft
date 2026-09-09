@@ -86,3 +86,29 @@ def test_spec_gate_offers_the_document_then_reject_and_approve(client, tmp_path,
         client.get(f"/work-items/{wid}").json()["gate_artifact"] == f".engineering/plans/{wid}.md"
     )
     assert client.get(f"/work-items/{wid}/artifact").json()["title"] == "fake plan"
+
+
+@pytest.mark.slow
+def test_a_rejected_plan_rerun_is_framed_as_a_revision(client, tmp_path, prompt_log):
+    """Kraft-bol end to end: the plan node's re-run is told to edit the file it
+    already wrote, not to start again from the brief."""
+    repo = make_repo(tmp_path)
+    wid = client.post(
+        "/work-items",
+        json={"title": "add a flag", "repo": str(repo), "chain_template": "default"},
+    ).json()["id"]
+
+    _await_gate(client, wid, "spec_approval")
+    client.post(f"/work-items/{wid}/gates/spec_approval/approve")
+    _await_gate(client, wid, "plan_approval")
+
+    client.post(
+        f"/work-items/{wid}/gates/plan_approval/reject", json={"note": "task 4 has no test"}
+    )
+    _await_gate(client, wid, "plan_approval")
+
+    sent = [p for p in prompt_log.read_text().split("\n\x00\n") if p.strip()]
+    revised = [p for p in sent if "task 4 has no test" in p]
+    assert len(revised) == 1
+    assert f".engineering/plans/{wid}.md" in revised[0]
+    assert not revised[0].startswith("A human has steered this run:")

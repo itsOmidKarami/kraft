@@ -128,7 +128,13 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
     if version < 13:
         drop_lines = (*drop_lines, "description", "-- the brief this work item's")
     if version < 14:
-        drop_lines = (*drop_lines, "branch")
+        drop_lines = (
+            *drop_lines,
+            "branch           TEXT,",
+            "-- the git branch this item's",
+            "-- Computed once at intake",
+            "-- NULL on items created before the column",
+        )
     schema = "\n".join(
         rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
     )
@@ -736,3 +742,16 @@ def test_migration_14_backfills_worker_session_attempts(tmp_path):
     assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
     got = {r["id"]: r["attempt"] for r in conn2.execute("SELECT id, attempt FROM worker_sessions")}
     assert got == {"s1": 1, "s2": 2, "s3": 3, "s4": 1}
+
+
+def test_migrating_v13_adds_the_branch_column(tmp_path):
+    conn = db._connect(tmp_path / "orchestrator.db")
+    db.migrate(conn)
+    conn.execute("PRAGMA user_version = 13")
+    conn.execute("ALTER TABLE work_items DROP COLUMN branch")
+
+    db.migrate(conn)
+
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(work_items)").fetchall()}
+    assert "branch" in cols
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
