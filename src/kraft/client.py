@@ -505,7 +505,10 @@ async def create_work_item(
     )
     if status >= 400:
         raise ValueError(f"kraft {status}: {body.get('detail', body)}")
-    return {"id": body["id"], "status": body.get("status", "paused"), "title": title}
+    result = {"id": body["id"], "status": body.get("status", "paused"), "title": title}
+    if body.get("bead_warning"):
+        result["bead_warning"] = body["bead_warning"]
+    return result
 
 
 def _no_repo_message(cwd: Path | None = None) -> str:

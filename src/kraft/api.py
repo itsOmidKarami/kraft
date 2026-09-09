@@ -82,6 +82,18 @@ def _bd_cwd() -> str | None:
     return os.environ.get("KRAFT_BD_CWD") or None
 
 
+def _bead_warning(st, wid: str) -> str | None:
+    """Why intake filed no bead, or None — read back from the event
+    `executor.intake` wrote in the same transaction as the row (Kraft-7gy)."""
+    row = st.db.read(
+        lambda c: c.execute(
+            "SELECT payload FROM events WHERE work_item_id = ? AND type = 'bead_not_filed'",
+            (wid,),
+        ).fetchone()
+    )
+    return json.loads(row["payload"])["reason"] if row else None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.tasks = {}
@@ -520,13 +532,20 @@ async def create_work_item(body: NewWorkItem, request: Request):
             attachments=attachments,
             status="active" if body.autostart else "paused",
         )
-    except Exception as exc:  # noqa: BLE001 -- beads.intake raises several unrelated types
-        raise HTTPException(502, f"bd intake failed: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001 -- executor.intake raises several unrelated types
+        # No longer reachable for a bd failure — `executor.intake` degrades
+        # instead (Kraft-7gy). A 502 here is now a template or a DB problem.
+        raise HTTPException(502, f"intake failed: {exc}") from exc
+
+    # Present only when there is one: a null field on every successful create is
+    # noise in `kraft item create`'s kv block and in the API.
+    warning = _bead_warning(st, wid)
+    extra = {"bead_warning": warning} if warning else {}
 
     if not body.autostart:
         # Created, not started. `/resume` begins it at node zero, because a NULL
         # current_node_id falls through that handler's `next(..., 0)` default.
-        return {"id": wid, "status": "paused"}
+        return {"id": wid, "status": "paused", **extra}
 
     _spawn(
         request.app,
@@ -559,6 +578,7 @@ async def create_work_item(body: NewWorkItem, request: Request):
             # the run task advances this asynchronously; before its first write the
             # chain still starts at node 0 by definition.
             "current_node_id": row["current_node_id"] or chain["nodes"][0]["id"],
+            **extra,
         },
     )
 
@@ -1546,7 +1566,36 @@ async def beads_search(request: Request, q: str = "", limit: int = 5):
     """The live strip under the search results (design 1h)."""
     if not q.strip():
         return {"query": q, "beads": []}
-    return {"query": q, "beads": await beads_mod.search(q, cwd=_bd_cwd(), limit=limit)}
+    return {"query": q, "beads": await _beads_search(request.app.state, q, limit)}
+
+
+async def _beads_search(st, q: str, limit: int) -> list[dict]:
+    """KRAFT_BD_CWD when it is set; otherwise every connected repo that has a
+    `.beads` (Kraft-ibwj).
+
+    The strip is the one repo-less bd caller and there is no repo to scope it
+    to — `SearchOverlay` is global and sends only `q`. The `.beads` test is what
+    keeps this from spawning a bd per keystroke per repo for nothing; the
+    overlay debounces, and an instance has a handful of repos, not hundreds.
+    """
+    override = _bd_cwd()
+    if override:
+        return await beads_mod.search(q, cwd=override, limit=limit)
+    try:
+        repos = config_mod.load_repos(_repos_path(st), validate_steering=False)
+    except config_mod.ConfigError:
+        # Best-effort by contract, same as `beads.search` itself: a malformed
+        # repos.yaml is a missing footer strip, not a 500 on the search route.
+        return []
+    cwds = [r["path"] for r in repos if (Path(r["path"]) / ".beads").is_dir()]
+    if not cwds:
+        return []
+    merged: dict[str, dict] = {}
+    for hits in await asyncio.gather(*(beads_mod.search(q, cwd=c, limit=limit) for c in cwds)):
+        for hit in hits:
+            # Dedupe by bead id: two connected repos can share one workspace.
+            merged.setdefault(hit["id"], hit)
+    return list(merged.values())[:limit]
 
 
 @app.get("/documents/{doc_id}")
