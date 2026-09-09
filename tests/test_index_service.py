@@ -331,6 +331,47 @@ def test_documents_for_work_item_includes_intake_attachments(tmp_path):
     asyncio.run(scenario())
 
 
+def test_documents_for_work_item_sorted_by_time_desc(tmp_path):
+    """Newest-indexed first, not alphabetical by path — a rescan's arrival
+    order is the only time signal common to every document kind."""
+
+    async def scenario():
+        state = await Database.open(tmp_path / "state.db")
+        conn = index_db.open_index(tmp_path / "index.db")
+        try:
+            repo = make_repo_with_engineering(
+                tmp_path,
+                {
+                    ".engineering/specs/a-first.md": "---\nwork_item_ids: [w1]\n---\nA\n",
+                    ".engineering/specs/z-second.md": "---\nwork_item_ids: [w1]\n---\nZ\n",
+                },
+            )
+            await _seed_work_item(state, str(repo))
+            ix = Indexer(conn, state, repos_env=str(repo))
+            await ix.rescan_repo(str(repo))
+            # Pin indexed_at directly: both rows land in the same rescan, so their
+            # real timestamps can tie at second resolution.
+            conn.execute(
+                "UPDATE documents SET indexed_at = ? WHERE path = ?",
+                ("2020-01-01T00:00:00Z", ".engineering/specs/a-first.md"),
+            )
+            conn.execute(
+                "UPDATE documents SET indexed_at = ? WHERE path = ?",
+                ("2020-06-01T00:00:00Z", ".engineering/specs/z-second.md"),
+            )
+            conn.commit()
+            docs = ix.documents_for_work_item("w1")
+            assert [d["path"] for d in docs] == [
+                ".engineering/specs/z-second.md",
+                ".engineering/specs/a-first.md",
+            ]
+        finally:
+            conn.close()
+            await state.close()
+
+    asyncio.run(scenario())
+
+
 def test_documents_for_work_item_survives_a_rescan(tmp_path):
     """Attachments are joined at read time, so re-ingesting the document — which
     rewrites its document_links wholesale — cannot drop them."""
