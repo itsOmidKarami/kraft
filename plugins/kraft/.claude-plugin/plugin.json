@@ -1,0 +1,11 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "kraft",
+  "version": "0.0.0",
+  "description": "Drive Kraft from an agent session: file work, read the board, act on gates.",
+  "author": {
+    "name": "Omid Karami",
+    "url": "https://github.com/itsOmidKarami"
+  },
+  "skills": ["./skills"]
+}

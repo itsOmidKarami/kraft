@@ -61,23 +61,34 @@ dev-seed: _dev-home
 dev-reset:
     rm -rf .dev
 
-# ponytail: the bundle is copied here rather than by a setuptools build hook, so a
-# wheel built any other way ships no SPA (the API degrades to JSON-only, visibly).
-# Upgrade to a build_py subclass the day a wheel is built anywhere but this laptop.
-# Install `kraft` as a real command (then just run `kraft` from anywhere).
-# State lands in ~/.kraft, seeded from templates/ on first run.
-install:
+# ponytail: only a `just bundle` build produces a correct wheel -- a bare
+# `uv build` still matches the `_bundled/**/*` glob against nothing. The two
+# guards are `admin doctor`'s spa bundle check and the release job's smoke
+# install; a `build_py` subclass is the upgrade if a wheel is ever built by
+# something that calls neither.
+#
+# Build the SPA and default config into the package tree. `install` and the
+# release pipeline both call this, so the two cannot drift.
+bundle:
     cd frontend && npm run build
     rm -rf src/kraft/_bundled
     mkdir -p src/kraft/_bundled
     cp -R frontend/dist src/kraft/_bundled/web
     cp -R templates src/kraft/_bundled/templates
+    # The agent skills live in plugins/kraft/ so they can be published beside
+    # kraft-lite in one marketplace. An installed Kraft has no plugins/ beside
+    # it, so they ride into the wheel here with the SPA.
+    cp -R plugins/kraft/skills src/kraft/_bundled/plugin-skills
     # never ship a local access.yaml or notify.yaml: one holds this machine's
     # password hash, the other a webhook URL that usually embeds a bearer
     # token. `cp -R` does not know either is secret -- `.gitignore` only keeps
     # them out of the commit, not out of the wheel or the homes it seeds.
     rm -f src/kraft/_bundled/templates/access.yaml
     rm -f src/kraft/_bundled/templates/notify.yaml
+
+# Install `kraft` as a real command (then just run `kraft` from anywhere).
+# State lands in ~/.kraft, seeded from templates/ on first run.
+install: bundle
     uv tool install --from . kraft --force
     @echo "installed. run: kraft"
     @grep -q "register-python-argcomplete kraft" ~/.zshrc 2>/dev/null || echo 'tip: add eval "$(register-python-argcomplete kraft)" to ~/.zshrc for tab completion'
@@ -89,71 +100,6 @@ test *ARGS:
 # Regenerate the Lite plugin's chain artifact from the YAML templates.
 lite-build:
     uv run python dev/build_lite_chain.py
-
-# The published history is REGENERATED each time and force-pushed. That is
-# deliberate: this repo's own release will rewrite its history, which changes
-# every commit a split derives from, and a preserved history would stop
-# fast-forwarding the moment that lands.
-#
-# It is also why this recipe has an expiry. The day the public repo has an
-# external contributor, force-pushing destroys their merge base: stop running
-# this, and make the public repo the source instead.
-#
-# One-way. An outside PR comes back by cherry-pick into this repo, never by
-# pulling into the public one.
-#
-# Publish plugins/kraft-lite/ to its own public repo; regenerates and force-pushes.
-# Has the version in plugin.json actually been published? `lite-version` in CI
-# stops a plugin change without a bump; this is the other half — a bump that
-# never reached the remote. Deliberately manual: CI has no credentials for the
-# lite remote, and the window between a bump merging and a publish running is a
-# normal state a per-merge job would fail main throughout.
-lite-check:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    version=$(python3 -c "import json;print(json.load(open('plugins/kraft-lite/.claude-plugin/plugin.json'))['version'])")
-    tag="kraft-lite--v$version"
-    # Same exit-code reading as lite-publish, opposite polarity: there, an existing
-    # tag means the bump is missing; here, a missing tag means the publish is.
-    # Anything but 0 or 2 is a remote that could not be reached, which must not
-    # read as an answer either way.
-    rc=0; git ls-remote --exit-code --tags lite "$tag" >/dev/null || rc=$?
-    case $rc in
-        0) echo "kraft-lite v$version is published as $tag" ;;
-        2) echo "kraft-lite v$version has no $tag on the lite remote — run 'just lite-publish'"; exit 1 ;;
-        *) echo "cannot reach the lite remote: git ls-remote exited $rc"; exit 1 ;;
-    esac
-
-lite-publish:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    just lite-build
-    git diff --exit-code plugins/kraft-lite/chains/default.json
-    uv run pytest plugins/kraft-lite/tests -q
-    test -f plugins/kraft-lite/LICENSE
-    claude plugin validate plugins/kraft-lite --strict
-    version=$(python3 -c "import json;print(json.load(open('plugins/kraft-lite/.claude-plugin/plugin.json'))['version'])")
-    tag="kraft-lite--v$version"
-    # `main` is force-pushed, so the tags are the only fixed points in the
-    # published history: one already at this version means the bump is missing.
-    # --exit-code says 2 for "no such tag", and anything else is a remote that
-    # could not be reached -- which must not read as a clean bump.
-    rc=0; git ls-remote --exit-code --tags lite "$tag" >/dev/null || rc=$?
-    case $rc in
-        0) echo "kraft-lite v$version is already published -- bump plugin.json"; exit 1 ;;
-        2) ;;
-        *) echo "cannot reach the lite remote: git ls-remote exited $rc"; exit 1 ;;
-    esac
-    git branch -D lite-publish 2>/dev/null || true
-    git tag -d "$tag" 2>/dev/null || true
-    git subtree split --prefix=plugins/kraft-lite -b lite-publish
-    git tag "$tag" lite-publish
-    # Atomic: a tag push that fails after main moved would leave the release
-    # untagged, and the next force-push makes that commit unreachable.
-    git push --force --atomic lite lite-publish:main "$tag"
-    # Both point into the split history, which is disjoint from this repo's.
-    git tag -d "$tag"
-    git branch -D lite-publish
 
 # Frontend typecheck + unit tests. `npm test` is vitest, which does NOT typecheck;
 # CI's `npm run build` runs `tsc -b` and will fail on errors vitest sails past. Keep
@@ -175,3 +121,66 @@ lint:
 fix:
     uv run ruff check --fix .
     uv run ruff format .
+
+# Publish plugins/ as one marketplace holding both plugins, tagged per release.
+#
+# A real `git subtree split`, so the published history is the monorepo's own
+# commits, not one regenerated commit: `plugins/` already has the layout the
+# marketplace needs (`kraft/`, `kraft-lite/`, and `.claude-plugin/` at its root),
+# which is the whole reason the kraft plugin lives there rather than inside the
+# Python package. `just bundle` is what carries its skills into the wheel.
+#
+# Force-pushed, because a split is derived from this repo's history and rewriting
+# that history changes every commit here. It replaces `lite-publish`, which
+# published plugins/kraft-lite/ alone to its own repo. That repo keeps its last
+# release and a README pointing here; it receives no more.
+#
+# The expiry is the same one lite-publish carried: the day the public repo has an
+# external contributor,
+# force-pushing destroys their merge base, so stop running this and make the
+# public repo the source instead.
+#
+# The versions published are whatever is committed in each plugin.json. The
+# auto-tag job writes them from the release tag before tagging, so a split
+# publishes a truthful number rather than one stamped after the fact.
+#
+# The remote is called `plugins`, but the GitHub repo is `itsOmidKarami/kraft` -
+# deliberately the same name the monorepo will take when it migrates off GitLab,
+# so `/plugin marketplace add itsOmidKarami/kraft` is correct now and stays
+# correct afterwards. Until then GitHub `kraft` holds only the split plugins and
+# GitLab `kraft` holds the source; they share a name and nothing else.
+#
+# Prerequisite: git remote add plugins git@github.com:itsOmidKarami/kraft.git
+plugins-publish:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # A tag must exist: the published plugin.json versions are written from it by
+    # the auto-tag job, so publishing before the first release would ship 0.0.0.
+    version=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//') || true
+    if [ -z "${version:-}" ]; then echo "no release tag yet -- nothing to publish"; exit 1; fi
+    just lite-build
+    git diff --exit-code plugins/kraft-lite/chains/default.json
+    uv run pytest tests/test_init.py plugins/kraft-lite/tests -q
+    test -f plugins/kraft/LICENSE
+    test -f plugins/kraft-lite/LICENSE
+    claude plugin validate plugins --strict
+    tag="v$version"
+    # Same exit-code reading as lite-publish: 0 means this version is already
+    # out, 2 means it is not, and anything else is a remote that could not be
+    # reached -- which must not read as a clean publish.
+    rc=0; git ls-remote --exit-code --tags plugins "$tag" >/dev/null || rc=$?
+    case $rc in
+        0) echo "kraft plugins $tag is already published -- tag a new release first"; exit 1 ;;
+        2) ;;
+        *) echo "cannot reach the plugins remote: git ls-remote exited $rc"; exit 1 ;;
+    esac
+    # No local tag or branch is created. The published tag has the same name as
+    # this repo's own release tag, so `git tag "$tag"` here would collide with it
+    # -- and the `git tag -d` that lite-publish uses to clear the way would
+    # delete the real release tag. Pushing the split sha straight to the remote's
+    # refs avoids touching this repo's ref namespace at all.
+    split=$(git subtree split --prefix=plugins)
+    # Atomic: a tag push that fails after main moved would leave the release
+    # untagged, and the next force-push makes that commit unreachable.
+    git push --force --atomic plugins "$split:refs/heads/main" "$split:refs/tags/$tag"
+    echo "published kraft plugins $tag"

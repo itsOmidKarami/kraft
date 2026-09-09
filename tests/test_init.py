@@ -156,3 +156,24 @@ def test_the_status_skill_carries_the_phase_line_and_a_bounded_follow(tmp_path):
     assert "next_node_id" in body
     assert "kraft events ID -f" in body
     assert "Do not pass `--type`" in body
+
+
+def test_skills_dir_prefers_the_bundled_copy(monkeypatch, tmp_path):
+    """An installed Kraft has no `plugins/` beside it - only what the wheel ships.
+
+    `just bundle` copies plugins/kraft/skills into `_bundled/plugin-skills`, the
+    same way it copies the built SPA, so package-data carries it.
+    """
+    bundled = tmp_path / "plugin-skills"
+    (bundled / "board").mkdir(parents=True)
+    (bundled / "board" / "SKILL.md").write_text("bundled\n")
+    monkeypatch.setattr(init, "BUNDLED", tmp_path)
+    assert init.skills_dir() == bundled
+
+
+def test_skills_dir_falls_back_to_the_source_tree(monkeypatch, tmp_path):
+    """A checkout that never ran `just bundle` still has the real skills."""
+    monkeypatch.setattr(init, "BUNDLED", tmp_path / "never-bundled")
+    found = init.skills_dir()
+    assert found.name == "skills"
+    assert (found / "board" / "SKILL.md").is_file()

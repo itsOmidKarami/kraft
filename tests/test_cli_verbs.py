@@ -286,7 +286,7 @@ GROUPS = {
         "artifact",
     ],
     "repo": ["list", "connect", "disconnect", "path", "cd", "open"],
-    "admin": ["start", "stop", "health", "doctor", "reindex", "init", "mcp"],
+    "admin": ["start", "stop", "health", "doctor", "reindex", "init", "mcp", "update"],
 }
 
 
