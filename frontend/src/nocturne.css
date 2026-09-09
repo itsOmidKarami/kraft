@@ -278,6 +278,11 @@ textarea.input { min-height: 90px; resize: vertical; }
 .dialog-backdrop {
   position: fixed; inset: 0; display: grid; place-items: center;
   padding: var(--space-4);
+  /* A fixed backdrop does not scroll with the page, so without this a dialog
+     taller than the viewport has its bottom simply clipped — on the intake
+     modal that is the Create button, unreachable at any window height short
+     enough. Every e2e that submits the intake form died here. */
+  overflow-y: auto;
   background: color-mix(in srgb, var(--color-neutral-900) 50%, transparent);
 }
 .dialog {

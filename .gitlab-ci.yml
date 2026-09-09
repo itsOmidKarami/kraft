@@ -153,15 +153,43 @@ frontend:
     - npm run build
     - npm test
 
-# Manual / non-blocking, the browser counterpart to the gated Python e2e
-# (`pytest -m e2e`, KRAFT_E2E=1) — the blocking job runs `-m "not e2e"`.
-# Needs a live orchestrator + a browser, so it stays out of the blocking gate.
+# The browser counterpart to the gated Python e2e (`pytest -m e2e`,
+# KRAFT_E2E=1) — the blocking Python job runs `-m "not e2e"`.
+#
+# Automatic when a change touches what the specs actually drive, manual
+# otherwise. It used to be manual unconditionally, and that is how
+# `chain.spec.ts` merged broken: flipping the intake default from `quick-task`
+# to `default` left the one spec that never picks a template waiting for a
+# chain that now stops at spec_approval. Nothing ran it.
+#
+# Blocking on the automatic path. The suite had never had a green run before
+# this — every spec that submits the intake form died on a dialog clipped by
+# the viewport — so this job earns the gate only because that is now fixed and
+# it passes 22/23 (1 skipped) in ~23s. If it starts costing more than it
+# catches, widen the manual fallback rather than deleting the rule.
+#
+# The paths are the spec's real blast radius, not "anything Python": the SPA it
+# clicks, the specs and their server harness, the HTTP API they drive, and the
+# chain templates they run. Listing all of src/kraft here would fire on nearly
+# every MR, which is the same as having no manual fallback at all.
+#
 # The image tag and frontend/package.json's exact "@playwright/test" pin must
 # move together: the image ships only the browsers its own version expects.
 frontend-e2e:
   image: mcr.microsoft.com/playwright:v1.62.1-noble
-  when: manual
-  allow_failure: true
+  rules:
+    - changes:
+        - frontend/src/**/*
+        - frontend/e2e/**/*
+        - frontend/package.json
+        - src/kraft/api.py
+        - templates/**/*
+        - .gitlab-ci.yml
+      when: on_success
+      allow_failure: false
+    # Everything else: still there to click, still cannot fail the pipeline.
+    - when: manual
+      allow_failure: true
   before_script:
     - apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl python3
     # Arch-aware so the same config runs on a self-hosted arm64 runner. GitLab's
