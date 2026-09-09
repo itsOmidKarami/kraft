@@ -85,6 +85,18 @@ describe("applyEvent", () => {
     expect(rows[0].status).toBe("done");
   });
 
+  it("worker_session_created carries the attempt", () => {
+    // The row is numbered per (work item, node, hook point) in the DB; without the
+    // field on the event the live board fell back to blankSession's hardcoded 1
+    // and showed "attempt 1" for every re-run until the next hydrate (Kraft-kq8m).
+    const st = useStore.getState();
+    st.applyEvent(ev({ seq: 2, type: "worker_session_created", payload: { session_id: "s7", node_id: "mr_checks", hook_point: "on.ci.poll", attempt: 3 } }));
+    st.applyEvent(ev({ seq: 3, type: "worker_session_created", payload: { session_id: "s8", node_id: "mr_checks", hook_point: "on.mr.open" } }));
+    const rows = useStore.getState().sessionsByItem.w1;
+    expect(rows.find((r) => r.id === "s7")!.attempt).toBe(3);
+    expect(rows.find((r) => r.id === "s8")!.attempt).toBe(1);
+  });
+
   it("session_unknown sets the session row status to unknown", () => {
     const st = useStore.getState();
     st.applyEvent(ev({ seq: 2, type: "worker_session_started", payload: { session_id: "s1", node_id: "env_setup", hook_point: "on.env.prepare" } }));
