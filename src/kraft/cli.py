@@ -99,6 +99,24 @@ def _read_pid(path: Path) -> int | None:
     return pid
 
 
+def _update_notice() -> None:
+    """One line at boot when a newer release exists.
+
+    Reads the 24h cache, so an ordinary start pays nothing. A cold cache on a
+    machine with no route out costs `update.TIMEOUT` once a day, and
+    `KRAFT_NO_UPDATE_CHECK=1` costs nothing ever.
+    """
+    if os.environ.get("KRAFT_NO_UPDATE_CHECK"):
+        return
+    from kraft import update
+
+    release = update.latest()
+    if update.is_behind(release):
+        print(
+            f"kraft: {update.installed()} installed, {release.tag} available - kraft admin update"
+        )
+
+
 def _serve() -> None:
     templates_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
     if seed_home(templates_dir):
@@ -115,6 +133,7 @@ def _serve() -> None:
         print(f"kraft: already running (pid {running}) - kraft admin stop", file=sys.stderr)
         raise SystemExit(1)
     pid_path.write_text(str(os.getpid()))
+    _update_notice()
     print(f"kraft: http://{host}:{port}")
     try:
         # A backstop, not the fix: the fix is `ws_events` returning when the
@@ -246,6 +265,28 @@ def _version() -> str:
         # traceback: `--version` exists to diagnose an install, so it has to
         # survive not being one.
         return "0.0.0+source"
+
+
+def _cmd_update(ns: argparse.Namespace) -> None:
+    from kraft import update
+
+    release = update.latest(force=True)
+    if release is None:
+        print(
+            "kraft admin update: could not reach the release feed. Try again, "
+            "or install by hand from the releases page.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    here = update.installed()
+    if not update.is_behind(release) and not ns.force:
+        print(f"kraft {here} is up to date ({release.tag} is the newest release)")
+        return
+    print(f"kraft {here} -> {release.tag}")
+    code = update.perform(release)
+    if code != 0:
+        raise SystemExit(code)
+    print(f"kraft {release.tag} installed. Restart a running server: kraft admin stop && kraft")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -766,6 +807,10 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
         "doctor", parents=[common], help="check the whole install, one line per check"
     )
     doctor_p.set_defaults(func=_cmd_doctor)
+
+    update_p = subs.add_parser("update", help="install the newest released kraft")
+    update_p.add_argument("--force", action="store_true", help="install even when already current")
+    update_p.set_defaults(func=_cmd_update)
 
     reindex = subs.add_parser("reindex", parents=[common], help="rescan documents into the index")
     reindex.add_argument("--repo", help="one repo path (default: all)")

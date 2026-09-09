@@ -255,6 +255,67 @@ def test_hooks_check_is_skipped_without_a_bundled_registry(tmp_path, monkeypatch
     assert check["skipped"] is True
 
 
+def test_bundle_check_fails_when_the_spa_is_missing(monkeypatch, tmp_path):
+    """A wheel built without `just bundle` serves JSON and no UI. Nothing said so."""
+    monkeypatch.setattr(doctor, "BUNDLED", tmp_path / "absent")
+    row = doctor._bundle_check()
+    assert not row["ok"]
+    assert "just bundle" in row["detail"]
+
+
+def test_bundle_check_passes_when_the_spa_is_there(monkeypatch, tmp_path):
+    web = tmp_path / "_bundled" / "web"
+    web.mkdir(parents=True)
+    (web / "index.html").write_text("<html></html>")
+    monkeypatch.setattr(doctor, "BUNDLED", tmp_path / "_bundled")
+    assert doctor._bundle_check()["ok"]
+
+
+def test_version_check_is_never_a_failure(monkeypatch):
+    """A release day must not start failing `kraft admin doctor && deploy`."""
+    from kraft import update
+
+    monkeypatch.delenv("KRAFT_NO_UPDATE_CHECK", raising=False)
+    monkeypatch.setattr(update, "latest", lambda **_: update.Release("v9.9.9", "u"))
+    monkeypatch.setattr(update, "installed", lambda: "0.1.0")
+    row = doctor._version_check()
+    assert row["ok"]
+    assert "9.9.9" in row["detail"] and "available" in row["detail"]
+
+
+def test_version_check_says_so_when_current(monkeypatch):
+    from kraft import update
+
+    monkeypatch.delenv("KRAFT_NO_UPDATE_CHECK", raising=False)
+    monkeypatch.setattr(update, "latest", lambda **_: update.Release("v0.4.0", "u"))
+    monkeypatch.setattr(update, "installed", lambda: "0.4.0")
+    assert "newest" in doctor._version_check()["detail"]
+
+
+def test_version_check_with_no_network_skips(monkeypatch):
+    from kraft import update
+
+    monkeypatch.delenv("KRAFT_NO_UPDATE_CHECK", raising=False)
+    monkeypatch.setattr(update, "latest", lambda **_: None)
+    row = doctor._version_check()
+    assert row["ok"] and row["skipped"]
+
+
+def test_version_check_honours_the_no_check_env_var(monkeypatch):
+    """One switch silences every version check, not only the one at boot.
+
+    Without this, `run_checks()` reaches the network - which is a test suite that
+    depends on gitlab.com being up, and an air-gapped operator paying the timeout
+    every time they run doctor.
+    """
+    from kraft import update
+
+    monkeypatch.setenv("KRAFT_NO_UPDATE_CHECK", "1")
+    monkeypatch.setattr(update, "latest", lambda **_: pytest.fail("checked with the env var set"))
+    row = doctor._version_check()
+    assert row["ok"] and row["skipped"]
+
+
 def test_completion_check_is_skipped_outside_zsh(monkeypatch):
     monkeypatch.setenv("SHELL", "/bin/bash")
     check = _by_name(asyncio.run(doctor.run_checks()), "shell completion")
