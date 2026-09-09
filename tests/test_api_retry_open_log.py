@@ -93,6 +93,30 @@ def test_classify_reads_tool_use_out_of_a_stream_json_message():
     assert logs.classify(user)[0] == "tool"
 
 
+def test_summary_of_a_thinking_block_skips_the_raw_signature_blob():
+    """A thinking block's `signature` is a base64 blob no reader wants dumped
+    raw -- and under extended thinking + prompt caching `thinking` itself is
+    routinely empty, so both cases need a summary, not a fallthrough."""
+    empty = json.dumps(
+        {
+            "type": "assistant",
+            "message": {"content": [{"type": "thinking", "thinking": "", "signature": "Ep0F..."}]},
+        }
+    )
+    assert logs.classify(empty)[0] == "agent"
+    assert logs.summary(json.loads(empty), empty) == "thinking"
+
+    worded = json.dumps(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [{"type": "thinking", "thinking": "Checking the test first.\nThen fix."}]
+            },
+        }
+    )
+    assert logs.summary(json.loads(worded), worded) == "thinking: Checking the test first."
+
+
 def test_jsonl_summarises_each_line_and_truncates_a_very_long_one(tmp_path):
     """The modal renders every line; a tool_result for a large file read is
     tens of KB of JSON. The summary is what a reader scans, `text` is the raw
