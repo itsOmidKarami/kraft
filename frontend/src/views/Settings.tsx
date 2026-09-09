@@ -4,7 +4,7 @@ import { Check, Plus, WarningCircle } from "@phosphor-icons/react";
 import * as api from "../api";
 import { ago, until } from "../format";
 import { OverflowMenu, Row, RowText, SectionLabel } from "../components/ui";
-import { useModal } from "../useModal";
+import { backdropProps, useModal } from "../useModal";
 import type {
   Access,
   AuthSession,
@@ -153,7 +153,7 @@ function AddRepo({ onClose, onAdded }: { onClose: () => void; onAdded: () => voi
   };
 
   return (
-    <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label="Add repo">
+    <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label="Add repo" {...backdropProps(onClose)}>
       <form className="dialog intake" onSubmit={submit} ref={ref}>
         <div className="dialog-title">Add repo</div>
         <div className="field">

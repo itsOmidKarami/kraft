@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { X } from "@phosphor-icons/react";
 import * as api from "../api";
 import type { WorkItemDiff } from "../types";
-import { useModal } from "../useModal";
+import { backdropProps, useModal } from "../useModal";
 
 /**
  * The changes an agent made, read-only, over the work item. Sibling to
@@ -170,7 +170,7 @@ export function DiffModal({
   }, [diff]);
 
   return (
-    <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label="changes">
+    <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label="changes" {...backdropProps(onClose)}>
       <div className="dialog diff-modal" ref={ref}>
         <header className="diff-modal-head">
           <span className="mono">{diff?.base_ref?.slice(0, 10) ?? "—"}</span>

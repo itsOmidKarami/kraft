@@ -4,7 +4,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import * as api from "../api";
 import type { WorkItemArtifact } from "../types";
-import { useModal } from "../useModal";
+import { backdropProps, useModal } from "../useModal";
 
 /**
  * The spec or plan the pending gate is a decision about, read-only.
@@ -35,7 +35,7 @@ export function ArtifactModal({
   }, [workItemId]);
 
   return (
-    <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label="document">
+    <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label="document" {...backdropProps(onClose)}>
       <div className="dialog diff-modal" ref={ref}>
         <header className="diff-modal-head">
           <span>{doc?.title ?? "—"}</span>
