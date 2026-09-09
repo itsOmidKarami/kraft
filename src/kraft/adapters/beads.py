@@ -22,8 +22,15 @@ async def intake(title: str, *, description: str | None = None, cwd: str | None 
         cwd=cwd,
         capture_output=True,
         text=True,
-        check=True,
     )
+    if proc.returncode != 0:
+        # Not check=True: CalledProcessError's message names the argv and the
+        # exit status and not `proc.stderr`, so "no beads database found" never
+        # reached the caller (Kraft-ibwj). Raise bd's own words instead — at the
+        # source, so the log line, the event payload and every future caller get
+        # the cause, not just the one call site that formats the exception.
+        detail = (proc.stderr or proc.stdout or "").strip() or "no output"
+        raise RuntimeError(f"bd create failed (exit {proc.returncode}): {detail}")
     out = proc.stdout
     # --json prints the issue object to stdout; slice from the first "{" in case
     # bd prepends an advisory line.

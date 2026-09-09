@@ -41,6 +41,8 @@ CREATE TABLE work_items (
   -- the bd workspace this item's bead lives in, when it is not the instance-wide
   -- KRAFT_BD_CWD: an auto-intaken bead is adopted from its own repo's .beads
   -- and can only be closed there (Kraft-8mu.5.2). NULL means KRAFT_BD_CWD.
+  -- Rows created since Kraft-ibwj always set it, to the resolved workspace --
+  -- KRAFT_BD_CWD if set, else the item's repo. Only older rows are NULL.
   bead_cwd         TEXT,
   -- the git branch this item's worktree, merge request and merge all name.
   -- Computed once at intake (Kraft-nhps) so the three call sites cannot drift.

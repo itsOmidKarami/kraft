@@ -245,8 +245,10 @@ docs/consolidated/  the design this implements
 
 ## Requirements
 
-Python 3.14+, [uv](https://docs.astral.sh/uv/), Node 20+, git,
-[`bd`](https://github.com/gastownhall/beads) for work-graph intake, and `claude` for
-real runs (not needed for `just dev`). Semantic search is opt-in:
+Python 3.14+, [uv](https://docs.astral.sh/uv/), Node 20+, git, and `claude` for
+real runs (not needed for `just dev`).
+[`bd`](https://github.com/gastownhall/beads) is optional: with it, every work
+item gets a tracked bead, and without it Kraft files work anyway and says so.
+Semantic search is opt-in:
 `just setup-vector` (downloads a ~130MB model on first search); without it `/search`
 still works in FTS mode.
