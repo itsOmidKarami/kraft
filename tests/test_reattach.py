@@ -21,6 +21,27 @@ _CHAIN = json.dumps(
 )
 _REG = Registry(hooks={})
 
+#: What a Claude Code worker leaves as its log's last line. Cache reads are
+#: input tokens that were billed, so `usage.read` folds them into tokens_in:
+#: 100 + 300 = 400.
+_ENVELOPE = json.dumps(
+    {
+        "type": "result",
+        "usage": {"input_tokens": 100, "output_tokens": 20, "cache_read_input_tokens": 300},
+        "modelUsage": {"claude-opus-5": {}},
+        "total_cost_usd": 1.25,
+    }
+)
+
+
+def _usage_row(database, sid="s1"):
+    return database.read(
+        lambda c: c.execute(
+            "SELECT model, tokens_in, tokens_out, cost_usd FROM worker_sessions WHERE id = ?",
+            (sid,),
+        ).fetchone()
+    )
+
 
 async def _seed_item(database, wid="w1"):
     await database.write(
@@ -275,6 +296,101 @@ def test_resolved_from_file_carries_concerns_and_question(tmp_path):
             assert exited[-1]["payload"]["concerns"] == "the migration is untested"
             assert exited[-1]["payload"]["question"] == "which db?"
         finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_a_session_resolved_from_file_records_its_usage(tmp_path):
+    """A worker that outlived a Kraft restart spent real money. Recording the
+    exit without its usage leaves all four columns NULL forever, and the run
+    reads as free in every place Kraft reports money (Kraft-7co4)."""
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed_item(database)
+            # the result file carries no usage block, so the log envelope is
+            # the only source — which is where an agent's numbers actually are
+            (rd.results / "s1.json").write_text('{"status": "done"}')
+            (rd.logs / "s1.log").write_text(_ENVELOPE + "\n")
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="implementation",
+                    hook_point="on.implementation.start",
+                    log_path=str(rd.logs / "s1.log"),
+                    result_path=str(rd.results / "s1.json"),
+                )
+            )
+            await database.write(lambda c: store.session_running(c, "s1", 2_000_000_000, 123.0))
+            summary, adopted = await reattach.reattach(database, rd, _REG)
+            assert summary.resolved_from_file == ["s1"]
+
+            row = _usage_row(database)
+            assert row["model"] == "claude-opus-5"
+            assert (row["tokens_in"], row["tokens_out"]) == (400, 20)
+            assert row["cost_usd"] == 1.25
+
+            exited = next(
+                e
+                for e in database.read(lambda c: events.read_after(c, 0, "w1"))
+                if e["type"] == "worker_session_exited"
+            )
+            assert exited["payload"]["tokens_in"] == 400
+            assert exited["payload"]["tokens_out"] == 20
+            assert exited["payload"]["cost_usd"] == 1.25
+            assert exited["payload"]["model"] == "claude-opus-5"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_an_adopted_session_records_its_usage(tmp_path):
+    """The `_adopt` path, whose own SELECT has to grow a log_path column — the
+    file-resolved test above passes without that and would not catch it."""
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        proc = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(2)"],
+            start_new_session=True,
+        )
+        try:
+            import psutil
+
+            pst = psutil.Process(proc.pid).create_time()
+            await _seed_item(database)
+            (rd.results / "s1.json").write_text('{"status": "done"}')
+            (rd.logs / "s1.log").write_text(_ENVELOPE + "\n")
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="implementation",
+                    hook_point="on.implementation.start",
+                    log_path=str(rd.logs / "s1.log"),
+                    result_path=str(rd.results / "s1.json"),
+                )
+            )
+            await database.write(lambda c: store.session_running(c, "s1", proc.pid, pst))
+            summary, adopted = await reattach.reattach(database, rd, _REG)
+            assert summary.adopted == ["s1"]
+            await adopted["s1"]
+            proc.wait()
+
+            row = _usage_row(database)
+            assert row["model"] == "claude-opus-5"
+            assert (row["tokens_in"], row["tokens_out"]) == (400, 20)
+            assert row["cost_usd"] == 1.25
+        finally:
+            proc.wait()
             await database.close()
 
     asyncio.run(scenario())
