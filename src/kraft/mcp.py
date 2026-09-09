@@ -81,12 +81,17 @@ def build() -> MCPServer:
 
     @server.tool()
     async def reject_gate(
-        note: str, gate: str | None = None, work_item_id: str | None = None
+        note: str,
+        gate: str | None = None,
+        work_item_id: str | None = None,
+        node: str | None = None,
     ) -> dict:
-        """Reject the human gate a Kraft work item is waiting on, sending it back
-        to be re-planned. `note` says what is wrong and is required. Only a human
-        should decide this — ask first."""
-        return await client.reject_gate(note, gate, work_item_id)
+        """Reject the human gate a Kraft work item is waiting on, sending the
+        chain back to the node that can address the note. `note` says what is
+        wrong and is required. `node` overrides where the chain re-enters and
+        must name a node at or before the gate's own; the default is the one
+        the chain declares. Only a human should decide this — ask first."""
+        return await client.reject_gate(note, gate, work_item_id, node)
 
     @server.tool()
     async def pause_work_item(work_item_id: str | None = None) -> dict:

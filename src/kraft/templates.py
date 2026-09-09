@@ -326,6 +326,27 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
             )
             continue
 
+        # Where a rejected gate sends the chain (Kraft-ko7j). At or before the
+        # declaring node, because a rejection is backward motion: a forward
+        # target would let a gate skip the nodes between it and the target
+        # without ever running them.
+        at = {n["id"]: i for i, n in enumerate(nodes)}
+        bad_reject = next(
+            (
+                n["id"]
+                for i, n in enumerate(nodes)
+                if n.get("reject_to") is not None
+                and (not isinstance(n["reject_to"], str) or at.get(n["reject_to"], len(nodes)) > i)
+            ),
+            None,
+        )
+        if bad_reject is not None:
+            invalid[tid] = (
+                f"template {tid!r}: node {bad_reject!r} 'reject_to' must name a node "
+                f"of this template at or before it"
+            )
+            continue
+
         unknown = sorted({t for n in nodes for t in n["tasks"] if t not in registry.hooks})
         if unknown:
             invalid[tid] = f"template {tid!r}: hook(s) {unknown} are not in the registry"
@@ -348,6 +369,7 @@ def materialize(template: Template, *, satisfied_gates: frozenset[str] = frozens
                 "tasks": list(n["tasks"]),
                 "gate_after": n.get("gate_after"),
                 "fix_loop": n.get("fix_loop"),
+                "reject_to": n.get("reject_to"),
             }
             for n in template.nodes
             if n.get("gate_after") not in satisfied_gates

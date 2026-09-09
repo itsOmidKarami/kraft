@@ -814,3 +814,160 @@ def test_commits_on_a_branch_without_origin_main_is_empty_not_an_error(tmp_path)
     repo = make_repo(tmp_path)
 
     assert asyncio.run(forge._commits_on(repo, "kraft/nope")) == ()
+
+
+# Captured against glab 1.117.0 and gh 2.100.0 on 2026-09-09.
+GLAB_MR_LIST_MERGED = (
+    '[{"iid":54,"state":"merged","source_branch":"kraft/abc",'
+    '"web_url":"https://gitlab.com/itsOmidKarami/kraft/-/merge_requests/54"}]'
+)
+GLAB_MR_LIST_OPEN = (
+    '[{"iid":62,"state":"opened","source_branch":"kraft/abc",'
+    '"web_url":"https://gitlab.com/itsOmidKarami/kraft/-/merge_requests/62"}]'
+)
+GH_PR_LIST_MERGED = '[{"number":7,"url":"https://github.com/o/r/pull/7","state":"MERGED"}]'
+
+
+def test_glab_find_mr_reads_the_state_of_an_existing_merge_request(tmp_path, monkeypatch):
+    _stub(tmp_path, monkeypatch, "glab", GLAB_MR_LIST_MERGED)
+
+    found = asyncio.run(forge.GlabCli().find_mr(repo=tmp_path, branch="kraft/abc"))
+
+    assert found == forge.MRRef(
+        number=54,
+        url="https://gitlab.com/itsOmidKarami/kraft/-/merge_requests/54",
+        state="merged",
+    )
+    # --all, or a merged MR reads as "no MR at all"; --source-branch, or this
+    # answers about whatever the project merged most recently.
+    argv = _argv(tmp_path, "glab")
+    assert argv[:2] == ["mr", "list"]
+    assert "--all" in argv
+    assert argv[argv.index("--source-branch") + 1] == "kraft/abc"
+
+
+def test_gh_find_mr_reads_the_state_of_an_existing_pull_request(tmp_path, monkeypatch):
+    _stub(tmp_path, monkeypatch, "gh", GH_PR_LIST_MERGED)
+
+    found = asyncio.run(forge.GhCli().find_mr(repo=tmp_path, branch="kraft/abc"))
+
+    assert found == forge.MRRef(number=7, url="https://github.com/o/r/pull/7", state="merged")
+    argv = _argv(tmp_path, "gh")
+    assert argv[argv.index("--head") + 1] == "kraft/abc"
+    assert argv[argv.index("--state") + 1] == "all"
+
+
+def test_find_mr_is_none_when_the_branch_has_no_merge_request(tmp_path, monkeypatch):
+    """A list, not a view: an empty list is an unambiguous 'no MR', where
+    `view`'s non-zero exit would force the caller to swallow real errors to
+    read the same fact."""
+    _stub(tmp_path, monkeypatch, "glab", "[]")
+    assert asyncio.run(forge.GlabCli().find_mr(repo=tmp_path, branch="kraft/abc")) is None
+
+
+def test_find_mr_prefers_the_open_merge_request(tmp_path, monkeypatch):
+    """One branch can carry a closed MR and an open one. The open one is the
+    one every caller means."""
+    _stub(
+        tmp_path,
+        monkeypatch,
+        "glab",
+        '[{"iid":54,"state":"closed","web_url":"http://x/54"},'
+        '{"iid":62,"state":"opened","web_url":"http://x/62"}]',
+    )
+    found = asyncio.run(forge.GlabCli().find_mr(repo=tmp_path, branch="kraft/abc"))
+    assert (found.number, found.state) == (62, "open")
+
+
+def test_fake_forge_find_mr_tracks_its_own_opened_and_merged_lists(tmp_path):
+    f = forge.FakeForge()
+    assert asyncio.run(f.find_mr(repo=tmp_path, branch="kraft/w1")) is None
+
+    mr = asyncio.run(f.open_mr(repo=tmp_path, branch="kraft/w1", title="t", body="b"))
+    assert asyncio.run(f.find_mr(repo=tmp_path, branch="kraft/w1")).state == "open"
+    assert asyncio.run(f.find_mr(repo=tmp_path, branch="kraft/other")) is None
+
+    asyncio.run(f.merge(repo=tmp_path, branch="kraft/w1", mr=mr))
+    assert asyncio.run(f.find_mr(repo=tmp_path, branch="kraft/w1")).state == "merged"
+
+
+def test_merge_treats_an_already_merged_mr_as_done(tmp_path, monkeypatch):
+    """Kraft-xron, from work item af0fb78e: MR !62 was auto-merged when its
+    pipeline went green, Kraft's merge node ran eight minutes later and
+    recorded `No open merge request available`. The node's stated end state --
+    this branch is in main -- was already true."""
+    _stub(tmp_path, monkeypatch, "glab", GLAB_MR_LIST_MERGED)
+
+    returned, recorded = _forge_session(tmp_path, monkeypatch, forge.GlabCli(), "merge", "x1")
+
+    assert (returned, recorded) == ("done", "done")
+    assert "already merged (!54)" in _session_log(tmp_path, "x1")
+    assert "merge" not in _argv(tmp_path, "glab"), "it tried to merge an already-merged MR"
+
+
+def test_merge_treats_an_already_merged_pr_as_done_on_gh(tmp_path, monkeypatch):
+    _stub(tmp_path, monkeypatch, "gh", GH_PR_LIST_MERGED)
+
+    returned, recorded = _forge_session(tmp_path, monkeypatch, forge.GhCli(), "merge", "x2")
+
+    assert (returned, recorded) == ("done", "done")
+    assert "already merged (!7)" in _session_log(tmp_path, "x2")
+    assert "merge" not in _argv(tmp_path, "gh")
+
+
+def test_merge_still_fails_on_a_closed_mr(tmp_path, monkeypatch):
+    """A closed merge request is not a merged one, and nothing about it is
+    resolved."""
+    _stub(
+        tmp_path,
+        monkeypatch,
+        "glab",
+        '[{"iid":54,"state":"closed","web_url":"http://x/54"}]',
+    )
+    returned, recorded = _forge_session(tmp_path, monkeypatch, forge.GlabCli(), "merge", "x3")
+
+    assert (returned, recorded) == ("failed", "failed")
+    assert "closed" in _session_log(tmp_path, "x3")
+
+
+def test_merge_still_fails_when_the_forge_refuses(tmp_path, monkeypatch):
+    """Conflicts and unmet approval rules must still stop the chain: the fix
+    must not swallow a real refusal."""
+
+    class Refusing(forge.FakeForge):
+        async def merge(self, *, repo, branch="", mr):
+            raise forge.ForgeError("merge blocked: 1 approval required")
+
+    fake = Refusing()
+    asyncio.run(fake.open_mr(repo=tmp_path, branch="kraft/w1", title="t", body="b"))
+
+    returned, recorded = _forge_session(tmp_path, monkeypatch, fake, "merge", "x4")
+
+    assert (returned, recorded) == ("failed", "failed")
+    assert "1 approval required" in _session_log(tmp_path, "x4")
+
+
+def test_open_mr_reuses_an_open_mr_for_the_branch(tmp_path, monkeypatch):
+    """Kraft-ko7j's re-entry walks back through this node, and a retry of an
+    open_mr that crashed after the create hits the same wall: `mr create` for a
+    branch that already has one is an error on both CLIs."""
+    fake = forge.FakeForge()
+    asyncio.run(fake.open_mr(repo=tmp_path, branch="kraft/w1", title="t", body="b"))
+
+    returned, recorded = _forge_session(tmp_path, monkeypatch, fake, "open_mr", "x5")
+
+    assert (returned, recorded) == ("done", "done")
+    assert list(fake.opened) == [1], "it opened a second merge request for one branch"
+    assert fake.pushed == ["kraft/w1"]
+    assert fake.bodies["kraft/w1"], "the description was not rewritten from the branch head"
+    assert "reusing !1" in _session_log(tmp_path, "x5")
+
+
+def test_open_mr_still_creates_one_when_the_branch_has_none(tmp_path, monkeypatch):
+    fake = forge.FakeForge()
+
+    returned, recorded = _forge_session(tmp_path, monkeypatch, fake, "open_mr", "x6")
+
+    assert (returned, recorded) == ("done", "done")
+    assert fake.opened == {1: "kraft/w1"}
+    assert "opened http://fake.forge/1" in _session_log(tmp_path, "x6")

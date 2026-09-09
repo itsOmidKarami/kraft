@@ -433,7 +433,11 @@ def test_gate_reject_requires_note_and_re_runs_the_producer(tmp_path, monkeypatc
         assert r.status_code == 200, r.text
         evts = client.get(f"/work-items/{wid}/events").json()
         rej = [e for e in evts if e["type"] == "gate_rejected"]
-        assert rej and rej[0]["payload"] == {"gate": "spec_approval", "note": "too vague"}
+        assert rej and rej[0]["payload"] == {
+            "gate": "spec_approval",
+            "note": "too vague",
+            "node": "spec",
+        }
 
         # the spec node runs again and asks for its gate a second time
         _poll_events(client, wid, "gate_requested", count=2)
@@ -476,9 +480,14 @@ def test_gate_reject_is_bounded_by_its_reject_loop(tmp_path, monkeypatch):
         assert stops and "spec_approval_reject_loop" in stops[-1]["payload"]["reason"]
 
 
-def test_human_review_reject_stops_the_item(tmp_path, monkeypatch):
-    """The last gate has nothing to loop back to, so rejecting it is terminal."""
+def test_rejecting_the_final_gate_re_enters_at_implementation(tmp_path, monkeypatch):
+    """Kraft-ko7j. `human_review_approval` used to be terminal: the note went
+    into an event nothing read and the item sat in needs_human with approve
+    or abandon as its only exits. It now routes to the node named by the
+    chain's `reject_to`, carrying the note as that node's steer."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    prompts = tmp_path / "prompts.log"
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_PROMPT_LOG", str(prompts))
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = _post_default(client, repo)
@@ -486,13 +495,131 @@ def test_human_review_reject_stops_the_item(tmp_path, monkeypatch):
             _await_gate(client, wid, gate)
             assert client.post(f"/work-items/{wid}/gates/{gate}/approve").status_code == 200
         _await_gate(client, wid, "human_review_approval")
+
         r = client.post(
-            f"/work-items/{wid}/gates/human_review_approval/reject", json={"note": "start over"}
+            f"/work-items/{wid}/gates/human_review_approval/reject",
+            json={"note": "the retry path is untested"},
         )
         assert r.status_code == 200, r.text
+
+        # the chain went back to work rather than stopping
+        rejected = [
+            e for e in _poll_events(client, wid, "gate_rejected") if e["type"] == "gate_rejected"
+        ]
+        assert rejected[-1]["payload"]["node"] == "implementation"
+
+        # ...walked implementation -> verify -> open_mr -> mr_checks -> human_review
+        # and asked for the same gate a second time
+        _poll_events(client, wid, "gate_requested", count=5)
+        starts = [
+            e["payload"]["node_id"]
+            for e in client.get(f"/work-items/{wid}/events").json()
+            if e["type"] == "node_started"
+        ]
+        assert starts.count("implementation") == 2
+        assert client.get(f"/work-items/{wid}").json()["pending_gate"] == ("human_review_approval")
+
+        # and the note led the re-run's instruction rather than dying in an event
+        assert "the retry path is untested" in prompts.read_text()
+
+
+def test_reject_refuses_a_node_after_its_gate(tmp_path, monkeypatch):
+    """A rejection is backward motion. Naming a later node would let the human
+    skip every node between the gate and the target."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _await_gate(client, wid, "spec_approval")
+        assert client.post(f"/work-items/{wid}/gates/spec_approval/approve").status_code == 200
+        _await_gate(client, wid, "plan_approval")
+
+        r = client.post(
+            f"/work-items/{wid}/gates/plan_approval/reject",
+            json={"note": "wrong", "node": "merge"},
+        )
+        assert r.status_code == 400, r.text
+        assert "merge" in r.json()["detail"]
+        # nothing was spawned and nothing was recorded
         item = client.get(f"/work-items/{wid}").json()
         assert item["status"] == "needs_human"
-        assert item["pending_gate"] is None
+        assert item["pending_gate"] == "plan_approval"
+        assert not [
+            e
+            for e in client.get(f"/work-items/{wid}/events").json()
+            if e["type"] == "gate_rejected"
+        ]
+
+
+def test_reject_refuses_a_node_that_is_not_in_this_chain(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _await_gate(client, wid, "spec_approval")
+        r = client.post(
+            f"/work-items/{wid}/gates/spec_approval/reject",
+            json={"note": "wrong", "node": "no_such_node"},
+        )
+        assert r.status_code == 400, r.text
+
+
+def test_a_rejection_note_is_the_default_steer_for_the_next_retry(tmp_path, monkeypatch):
+    """Kraft-ko7j: a human who typed a reason should not have to retype it to
+    make it count."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    templates = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
+    (templates / "policy.yaml").write_text(
+        "loops: {}\ndefault: {attempts: 1, wall_clock_s: 3600}\n"
+    )
+    with _client(tmp_path, monkeypatch, templates_dir=templates) as client:
+        wid = _post_default(client, repo)
+        _await_gate(client, wid, "spec_approval")
+        client.post(f"/work-items/{wid}/gates/spec_approval/reject", json={"note": "again"})
+        _await_gate(client, wid, "spec_approval")
+        client.post(f"/work-items/{wid}/gates/spec_approval/reject", json={"note": "still no"})
+        _wait_for_status(client, wid, "needs_human")
+
+        r = client.post(f"/work-items/{wid}/retry", json={})
+        assert r.status_code == 200, r.text
+        assert r.json()["steer"] == "still no"
+        retried = [
+            e
+            for e in client.get(f"/work-items/{wid}/events").json()
+            if e["type"] == "work_item_retried"
+        ]
+        assert retried[-1]["payload"]["steer"] == "still no"
+
+
+def test_retry_clears_the_gate_reject_counter(tmp_path, monkeypatch):
+    """Kraft-ko7j §A4. Retry is the human's override of the reject cap: after
+    it, the re-opened gate can be rejected again rather than 'exhausted'
+    forever."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    templates = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
+    (templates / "policy.yaml").write_text(
+        "loops: {}\ndefault: {attempts: 1, wall_clock_s: 3600}\n"
+    )
+    with _client(tmp_path, monkeypatch, templates_dir=templates) as client:
+        wid = _post_default(client, repo)
+        _await_gate(client, wid, "spec_approval")
+        for note in ("again", "still no"):
+            client.post(f"/work-items/{wid}/gates/spec_approval/reject", json={"note": note})
+            if note == "again":
+                _await_gate(client, wid, "spec_approval")
+        _wait_for_status(client, wid, "needs_human")
+
+        assert client.post(f"/work-items/{wid}/retry", json={}).status_code == 200
+        _await_gate(client, wid, "spec_approval")
+        r = client.post(
+            f"/work-items/{wid}/gates/spec_approval/reject", json={"note": "third time"}
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["status"] == "active", (
+            "the cleared cap did not give the gate a fresh budget"
+        )
 
 
 def test_gate_approve_unknown_work_item_404(tmp_path, monkeypatch):

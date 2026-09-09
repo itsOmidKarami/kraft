@@ -42,8 +42,9 @@ CREATE TABLE work_items (
   -- KRAFT_BD_CWD: an auto-intaken bead is adopted from its own repo's .beads
   -- and can only be closed there (Kraft-8mu.5.2). NULL means KRAFT_BD_CWD.
   bead_cwd         TEXT,
-  -- the git branch this item's worktree lives on (Kraft-nhps): a slug of the
-  -- title, NULL on rows written before the column existed
+  -- the git branch this item's worktree, merge request and merge all name.
+  -- Computed once at intake (Kraft-nhps) so the three call sites cannot drift.
+  -- NULL on items created before the column, which keep `kraft/<uuid>`.
   branch           TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL

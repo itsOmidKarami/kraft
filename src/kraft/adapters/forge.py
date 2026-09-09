@@ -39,6 +39,20 @@ class MR:
 
 
 @dataclass(frozen=True)
+class MRRef:
+    """A merge request the forge already has for a branch, and its state.
+
+    Distinct from `MR`, which is what `open_mr` just created and what `merge`
+    and `ci_status` are handed: neither has any use for a state that was true
+    one CLI call ago.
+    """
+
+    number: int
+    url: str
+    state: Literal["open", "merged", "closed"]
+
+
+@dataclass(frozen=True)
 class CIStatus:
     state: CIState
     url: str
@@ -53,6 +67,7 @@ class Forge(Protocol):
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None: ...
     async def ci_status(self, *, repo: Path, mr: MR, branch: str) -> CIStatus: ...
     async def merge(self, *, repo: Path, branch: str, mr: MR) -> None: ...
+    async def find_mr(self, *, repo: Path, branch: str) -> MRRef | None: ...
 
 
 @dataclass
@@ -96,6 +111,17 @@ class FakeForge:
         if number not in self.opened:
             raise ForgeError(f"no such merge request: {mr.number}")
         self.merged.append(number)
+
+    async def find_mr(self, *, repo: Path, branch: str) -> MRRef | None:
+        numbers = [n for n, b in self.opened.items() if b == branch]
+        if not numbers:
+            return None
+        number = next((n for n in numbers if n not in self.merged), numbers[0])
+        return MRRef(
+            number=number,
+            url=f"http://fake.forge/{number}",
+            state="merged" if number in self.merged else "open",
+        )
 
 
 async def _run(repo: Path, args: list[str]) -> str:
@@ -216,6 +242,24 @@ _GLAB_STATES: dict[str, CIState] = {
 }
 
 
+#: glab's merge request vocabulary (`glab mr list -F json`, glab 1.117.0).
+#: 'locked' is an open merge request with discussion locked, so it is open
+#: here; anything unrecognised is 'closed', which fails the merge node loudly
+#: rather than guessing in the one direction that cannot be walked back.
+_GLAB_MR_STATES: dict[str, str] = {
+    "opened": "open",
+    "locked": "open",
+    "merged": "merged",
+    "closed": "closed",
+}
+_GH_MR_STATES: dict[str, str] = {"OPEN": "open", "MERGED": "merged", "CLOSED": "closed"}
+
+
+def _pick_mr(rows: list[MRRef]) -> MRRef | None:
+    """The open merge request for a branch, else the first one the forge listed."""
+    return next((r for r in rows if r.state == "open"), rows[0] if rows else None)
+
+
 class GlabCli:
     """GitLab through `glab`. Credentials stay in glab's own keyring."""
 
@@ -271,6 +315,24 @@ class GlabCli:
         target = [str(mr.number)] if mr.number > 0 else []
         await _run(repo, ["glab", "mr", "merge", *target, "--yes"])
 
+    async def find_mr(self, *, repo: Path, branch: str) -> MRRef | None:
+        # --all, or a merged merge request reads as no merge request at all.
+        raw = await _run(
+            repo,
+            ["glab", "mr", "list", "--all", "--source-branch", branch, "-F", "json", "-P", "5"],
+        )
+        rows = _parse_json(raw, "glab mr list")
+        return _pick_mr(
+            [
+                MRRef(
+                    number=int(r["iid"]),
+                    url=str(r.get("web_url", "")),
+                    state=_GLAB_MR_STATES.get(str(r.get("state", "")), "closed"),
+                )
+                for r in rows
+            ]
+        )
+
 
 class GhCli:
     """GitHub through `gh`. For the public repo after the v0.1.0 split."""
@@ -312,6 +374,35 @@ class GhCli:
         await _assert_pushed(repo, branch)
         target = [str(mr.number)] if mr.number > 0 else []
         await _run(repo, ["gh", "pr", "merge", *target, "--squash"])
+
+    async def find_mr(self, *, repo: Path, branch: str) -> MRRef | None:
+        raw = await _run(
+            repo,
+            [
+                "gh",
+                "pr",
+                "list",
+                "--head",
+                branch,
+                "--state",
+                "all",
+                "--json",
+                "number,url,state",
+                "-L",
+                "5",
+            ],
+        )
+        rows = _parse_json(raw, "gh pr list")
+        return _pick_mr(
+            [
+                MRRef(
+                    number=int(r["number"]),
+                    url=str(r.get("url", "")),
+                    state=_GH_MR_STATES.get(str(r.get("state", "")), "closed"),
+                )
+                for r in rows
+            ]
+        )
 
 
 def _parse_json(raw: str, what: str):
@@ -447,8 +538,22 @@ async def run_task(
         forge = resolve(backend_for(backend, repo_forge))
         match handler:
             case "open_mr":
-                mr = await forge.open_mr(repo=repo, branch=branch, title=title, body=body)
-                log, status = f"opened {mr.url}\n", "done"
+                # Ask first: a rejected review re-entering the chain at
+                # implementation walks back through this node, and a retry of
+                # an open_mr that crashed after the create lands here too. A
+                # second `mr create` for one branch is an error on both CLIs
+                # (Kraft-xron).
+                existing = await forge.find_mr(repo=repo, branch=branch)
+                if existing is not None and existing.state == "open":
+                    # The same two calls `sync_mr` makes, for the same reason:
+                    # the description has to describe the head a reviewer will
+                    # see, and the head has to be pushed.
+                    await forge.push(repo=repo, branch=branch)
+                    await forge.update_mr(repo=repo, branch=branch, body=body)
+                    log, status = f"reusing !{existing.number}: {existing.url}\n", "done"
+                else:
+                    mr = await forge.open_mr(repo=repo, branch=branch, title=title, body=body)
+                    log, status = f"opened {mr.url}\n", "done"
             case "ci_poll":
                 # Both CLIs resolve the merge request from the checked-out
                 # branch, so the number is not threaded between nodes.
@@ -481,8 +586,26 @@ async def run_task(
                 await forge.update_mr(repo=repo, branch=branch, body=body)
                 log, status = "pushed and synced the merge request description\n", "done"
             case "merge":
-                await forge.merge(repo=repo, branch=branch, mr=MR(number=0, url=""))
-                log, status = "merged\n", "done"
+                # "Someone merged it first" and "the merge was refused" were
+                # indistinguishable while this only ever shelled out: both
+                # arrived as a non-zero exit and stopped the item at the last
+                # node with the work already on main (Kraft-xron). Auto-merge
+                # reaching the branch first is an ordinary event, and this
+                # node's stated end state is already true.
+                existing = await forge.find_mr(repo=repo, branch=branch)
+                if existing is not None and existing.state == "merged":
+                    log = f"already merged (!{existing.number}); nothing to do\n"
+                    status = "done"
+                elif existing is not None and existing.state == "open":
+                    # A genuine refusal -- conflicts, unmet approval rules --
+                    # still raises inside forge.merge and still fails the node.
+                    await forge.merge(repo=repo, branch=branch, mr=MR(number=0, url=""))
+                    log, status = "merged\n", "done"
+                else:
+                    raise ForgeError(
+                        f"no open merge request for {branch!r}"
+                        + (f": !{existing.number} is {existing.state}" if existing else "")
+                    )
             case _:
                 log, status = f"unknown forge handler {handler!r}\n", "failed"
     except ForgeError as exc:

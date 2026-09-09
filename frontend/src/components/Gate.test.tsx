@@ -38,10 +38,36 @@ describe("Gate", () => {
     expect(approve).toBeEnabled();
   });
 
-  it("labels the reject action 'Reject and stop' when there is nothing to loop back to", async () => {
-    render(<Gate item={item} gate="human_review_approval" />);
+  const reviewItem = {
+    id: "w1",
+    chain_definition: {
+      template_id: "default",
+      nodes: [
+        { id: "implementation", tasks: [], gate_after: null },
+        {
+          id: "human_review",
+          tasks: [],
+          gate_after: "human_review_approval",
+          reject_to: "implementation",
+        },
+      ],
+    },
+  } as never;
+
+  it("names the node a rejection sends the chain back to", async () => {
+    render(<Gate item={reviewItem} gate="human_review_approval" />);
     await userEvent.click(screen.getByRole("button", { name: /^reject/i }));
-    expect(screen.getByRole("button", { name: /reject and stop/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /reject and send back/i }),
+    ).toBeInTheDocument();
+    // exact string, so this matches the <code> and not every ancestor of it
+    expect(screen.getByText("implementation").tagName).toBe("CODE");
+  });
+
+  it("keeps 'Reject and re-plan' for a gate that re-runs its own node", async () => {
+    render(<Gate item={item} gate="spec_approval" />);
+    await userEvent.click(screen.getByRole("button", { name: /^reject/i }));
+    expect(screen.getByRole("button", { name: /reject and re-plan/i })).toBeInTheDocument();
   });
 
   it("the inline variant names the gate and offers the same two actions", async () => {

@@ -586,14 +586,26 @@ async def approve_gate(gate: str | None = None, work_item_id: str | None = None)
     return await _act(f"/work-items/{target}/gates/{gate}/approve")
 
 
-async def reject_gate(note: str, gate: str | None = None, work_item_id: str | None = None) -> dict:
+async def reject_gate(
+    note: str,
+    gate: str | None = None,
+    work_item_id: str | None = None,
+    node: str | None = None,
+) -> dict:
     """Reject the gate a work item is waiting on. The note is required — a
-    rejection with no reason strands whoever picks the work up next."""
+    rejection with no reason strands whoever picks the work up next.
+
+    `node` overrides where the chain re-enters; the default is the gate node's
+    own `reject_to`, and failing that the gate node itself (Kraft-ko7j).
+    """
     if not note or not note.strip():
         raise ValueError("a reject note is required: say what is wrong")
     target = _forbid_self_action(work_item_id)
     gate = gate or await _pending_gate_of(target)
-    return await _act(f"/work-items/{target}/gates/{gate}/reject", {"note": note.strip()})
+    payload: dict = {"note": note.strip()}
+    if node:
+        payload["node"] = node
+    return await _act(f"/work-items/{target}/gates/{gate}/reject", payload)
 
 
 async def pause(work_item_id: str | None = None) -> dict:
