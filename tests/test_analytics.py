@@ -210,3 +210,45 @@ def test_an_unpriced_session_makes_the_cost_a_floor_not_a_total(conn):
     assert merge["cost_complete"] is True
     repo_a = next(r for r in a["by_repo"] if r["repo"] == "/a")
     assert repo_a["cost_complete"] is False
+
+
+def test_cost_per_item_counts_only_items_that_ran(tmp_path):
+    """The Cost tile's subtitle divides money by items. An item that never
+    started a node contributed nothing to the numerator, so counting it in the
+    denominator understates the average by exactly the size of the backlog."""
+    conn = db._connect(tmp_path / "orchestrator.db")
+    db.migrate(conn)
+    _item(conn, "ran", repo="/a", status="completed", created=_at(1))
+    _item(conn, "idle1", repo="/a", status="paused", created=_at(1))
+    _item(conn, "idle2", repo="/a", status="paused", created=_at(1))
+    _session(conn, "s1", "ran", "verify", u=Usage(1000, 100, 4.0))
+    conn.commit()
+    try:
+        t = analytics.compute(conn, range_="7d", now=NOW)["totals"]
+    finally:
+        conn.close()
+
+    assert t["work_items"] == 3, "every item in the range, unchanged"
+    assert t["work_items_run"] == 1, "only the one with a worker_sessions row"
+    assert t["cost_usd"] == pytest.approx(4.0)
+    assert t["cost_usd"] / t["work_items_run"] == pytest.approx(4.0)
+
+
+def test_work_items_run_is_zero_when_nothing_ran(tmp_path):
+    """Zero, not a missing key: the view reads it on every render, including
+    the empty-range early return that never reaches the session loop."""
+    conn = db._connect(tmp_path / "orchestrator.db")
+    db.migrate(conn)
+    _item(conn, "idle", repo="/a", status="paused", created=_at(1))
+    _item(conn, "old", repo="/a", status="completed", created=_at(40))
+    _session(conn, "s-old", "old", "verify", u=Usage(1, 1, 9.0))
+    conn.commit()
+    try:
+        in_range = analytics.compute(conn, range_="7d", now=NOW)["totals"]
+        # nothing at all inside the range: the early return at analytics.py:116
+        empty = analytics.compute(conn, range_="7d", now=NOW + timedelta(days=60))["totals"]
+    finally:
+        conn.close()
+
+    assert (in_range["work_items"], in_range["work_items_run"]) == (1, 0)
+    assert (empty["work_items"], empty["work_items_run"]) == (0, 0)

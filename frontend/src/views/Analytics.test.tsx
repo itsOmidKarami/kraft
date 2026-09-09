@@ -10,6 +10,7 @@ import { AnalyticsView } from "./Analytics";
 const report: Analytics = {
   totals: {
     work_items: 9,
+    work_items_run: 6,
     by_status: { completed: 6, needs_human: 3 },
     mrs_merged: 4,
     wall_ms: 3 * 3_600_000,
@@ -67,7 +68,8 @@ describe("AnalyticsView", () => {
     expect(screen.getByText("6 completed · 3 needs human")).toBeInTheDocument();
     expect(screen.getByText("+ 12h waiting on people")).toBeInTheDocument();
     expect(screen.getByText("1.2M in · 200k out")).toBeInTheDocument();
-    expect(screen.getByText("$2.00 per work item")).toBeInTheDocument();
+    // $18.00 over the 6 items that ran, not over all 9 — 9 is the backlog
+    expect(screen.getByText("$3.00 per work item run")).toBeInTheDocument();
     expect(screen.getByText("2 sessions capped out")).toBeInTheDocument();
   });
 

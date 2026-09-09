@@ -240,6 +240,7 @@ export interface LogLine {
 export interface Analytics {
   totals: {
     work_items: number;
+    work_items_run: number;
     by_status: Record<string, number>;
     mrs_merged: number;
     wall_ms: number;
