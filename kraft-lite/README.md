@@ -12,10 +12,14 @@ endless. No service, no port, no database process.
 
 ## Install
 
-This repo is its own marketplace:
+Kraft Lite ships in the Kraft marketplace, beside the `kraft` plugin:
 
-    /plugin marketplace add itsOmidKarami/kraft-lite
-    /plugin install kraft-lite@kraft-lite
+    /plugin marketplace add itsOmidKarami/kraft
+    /plugin install kraft-lite@kraft
+
+It used to publish from `itsOmidKarami/kraft-lite`, which is frozen at 0.5.2 and
+receives no more releases. Installing it from there still works; it just stops
+moving.
 
 That is what namespaces the commands as `/kraft-lite:*`. `/plugin update
 kraft-lite` afterwards — Claude Code owns the clone, so the force-push below

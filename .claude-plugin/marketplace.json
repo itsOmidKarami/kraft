@@ -1,0 +1,23 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "kraft",
+  "description": "Kraft and Kraft Lite: run agent work as a chain, with or without the orchestrator.",
+  "owner": {
+    "name": "Omid Karami",
+    "url": "https://github.com/itsOmidKarami"
+  },
+  "plugins": [
+    {
+      "name": "kraft",
+      "description": "Drive Kraft from an agent session: file work, read the board, act on gates.",
+      "source": "./kraft",
+      "category": "productivity"
+    },
+    {
+      "name": "kraft-lite",
+      "description": "Run a Kraft chain in this session: ordered nodes, human gates, capped fix loops. No orchestrator.",
+      "source": "./kraft-lite",
+      "category": "productivity"
+    }
+  ]
+}
