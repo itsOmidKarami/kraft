@@ -14,7 +14,10 @@
      the accent now reads as an accent rather than another neutral. */
   --color-accent-2: #a7a1db; /* the machine-derived stand-in follows: same
      hue, same L 0.734, chroma at the same 2:3 proportion it held */
-  --color-divider: color-mix(in srgb, #e9e9ed 16%, transparent);
+  /* `var()`, not the literal hex: this makes the divider automatically
+     correct for every palette and mode once palettes.css overrides
+     --color-text — one less token every palette override has to restate. */
+  --color-divider: color-mix(in srgb, var(--color-text) 16%, transparent);
 
   /* Tonal ramps — generated in OKLCH on one shared lightness scale, so the
      same step of any role matches the others in visual value. */

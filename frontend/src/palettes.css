@@ -1,0 +1,252 @@
+/* Palettes — alternate hues for Nocturne's token system (see
+   nocturne.css). Values here come straight from `dev/gen_palette.py`
+   (`tests/test_palette_contrast.py` is what actually verifies them).
+
+   Structure, cascade-order matters:
+   1. Ramp blocks (`[data-palette="X"]`) — ONE per non-Nocturne palette.
+      Mode-independent: a `.tag-accent` chip needs its own internal
+      contrast (dark bg, light text) regardless of whether the *page* is
+      in light or dark mode, so the ramp doesn't change with mode.
+      Nocturne's own ramp needs no block here — it's nocturne.css's
+      unscoped `:root`, which stays the fallback for any palette/mode
+      combination nothing here overrides.
+   2. Mode blocks (`[data-mode="dark"]` / `[data-mode="light"]`) — ONE
+      EACH, for every palette. Only reference ramp `var()`s or a fixed
+      semantic value, so a single rule serves all 5 palettes. Must come
+      AFTER the ramp blocks: `--color-accent`/`--color-accent-2` are set
+      in both the ramp blocks and here, and both selectors have equal
+      specificity (`:root` + one attribute) — source order breaks the
+      tie, and light mode's override has to win. palettes.order.test.ts
+      pins this.
+   3. Role blocks (`[data-palette="X"][data-mode="Y"]`) — bg/surface/text/
+      text-muted only. These four don't derive from anything else, so
+      each (palette, mode) pair needs its own literal values. Two
+      attributes beats one, so these always win regardless of order.
+*/
+
+/* ── 1. ramp blocks ─────────────────────────────────────────────────────── */
+
+:root[data-palette="rose"] {
+  --color-accent: #b876bc;
+  --color-accent-2: #c498c7;
+  --color-neutral-100: #f8f3fc;
+  --color-neutral-200: #ece4f1;
+  --color-neutral-300: #d9d0e0;
+  --color-neutral-400: #bdb2c5;
+  --color-neutral-500: #9e93a6;
+  --color-neutral-600: #807587;
+  --color-neutral-700: #625a69;
+  --color-neutral-800: #45404a;
+  --color-neutral-900: #2d2a30;
+  --color-accent-100: #fbf2fb;
+  --color-accent-200: #f4e1f5;
+  --color-accent-300: #eac6ec;
+  --color-accent-400: #dc9ee0;
+  --color-accent-500: #be7cc3;
+  --color-accent-600: #9e5ea3;
+  --color-accent-700: #7b477e;
+  --color-accent-800: #58325a;
+  --color-accent-900: #372338;
+  --color-accent-2-100: #fbf2fb;
+  --color-accent-2-200: #f4e1f5;
+  --color-accent-2-300: #eac6ec;
+  --color-accent-2-400: #d2a6d4;
+  --color-accent-2-500: #b287b5;
+  --color-accent-2-600: #946996;
+  --color-accent-2-700: #715074;
+  --color-accent-2-800: #513952;
+  --color-accent-2-900: #332634;
+  --color-text-muted: #918998;
+}
+
+:root[data-palette="forest"] {
+  --color-accent: #53a768;
+  --color-accent-2: #84b88d;
+  --color-neutral-100: #f2f8f0;
+  --color-neutral-200: #e2ebdf;
+  --color-neutral-300: #cdd8c8;
+  --color-neutral-400: #afbcaa;
+  --color-neutral-500: #909d8b;
+  --color-neutral-600: #727e6d;
+  --color-neutral-700: #586153;
+  --color-neutral-800: #3e453b;
+  --color-neutral-900: #292c27;
+  --color-accent-100: #eff8f0;
+  --color-accent-200: #d9efdd;
+  --color-accent-300: #b7e1be;
+  --color-accent-400: #80cc90;
+  --color-accent-500: #5aad6d;
+  --color-accent-600: #3a8e50;
+  --color-accent-700: #296e3d;
+  --color-accent-800: #1d4e2b;
+  --color-accent-900: #19321f;
+  --color-accent-2-100: #eff8f0;
+  --color-accent-2-200: #d9efdd;
+  --color-accent-2-300: #b7e1be;
+  --color-accent-2-400: #92c69c;
+  --color-accent-2-500: #73a77c;
+  --color-accent-2-600: #558860;
+  --color-accent-2-700: #406948;
+  --color-accent-2-800: #2e4b34;
+  --color-accent-2-900: #203023;
+  --color-text-muted: #879082;
+}
+
+:root[data-palette="amber"] {
+  --color-accent: #cc7c40;
+  --color-accent-2: #d39b77;
+  --color-neutral-100: #fdf3ef;
+  --color-neutral-200: #f4e4de;
+  --color-neutral-300: #e3cfc7;
+  --color-neutral-400: #c8b2a9;
+  --color-neutral-500: #a9938a;
+  --color-neutral-600: #8a756d;
+  --color-neutral-700: #6b5954;
+  --color-neutral-800: #4c3f3b;
+  --color-neutral-900: #312927;
+  --color-accent-100: #fef3ec;
+  --color-accent-200: #fbe3d3;
+  --color-accent-300: #f7caad;
+  --color-accent-400: #f0a36e;
+  --color-accent-500: #d38146;
+  --color-accent-600: #b26326;
+  --color-accent-700: #894b19;
+  --color-accent-800: #623511;
+  --color-accent-900: #3d2513;
+  --color-accent-2-100: #fef3ec;
+  --color-accent-2-200: #fbe3d3;
+  --color-accent-2-300: #f7caad;
+  --color-accent-2-400: #e0aa86;
+  --color-accent-2-500: #c18a66;
+  --color-accent-2-600: #a16d49;
+  --color-accent-2-700: #7d5236;
+  --color-accent-2-800: #583b27;
+  --color-accent-2-900: #38281d;
+  --color-text-muted: #9b8882;
+}
+
+:root[data-palette="slate"] {
+  /* the 600/700/800 accent steps sit at the edge of the sRGB gamut at this
+     hue and clip slightly more saturated than their L/C target — cosmetic
+     only, contrast is unaffected (verified by test_palette_contrast.py).
+     ponytail: gamut-mapped clamping, not gamut-aware chroma reduction; fix
+     by lowering this palette's chroma if the clipped steps look off. */
+  --color-accent: #04a1cb;
+  --color-accent-2: #6cb5d0;
+  --color-neutral-100: #edf8fa;
+  --color-neutral-200: #daecef;
+  --color-neutral-300: #c2d9dd;
+  --color-neutral-400: #a3bcc2;
+  --color-neutral-500: #849da3;
+  --color-neutral-600: #677f84;
+  --color-neutral-700: #4e6265;
+  --color-neutral-800: #374648;
+  --color-neutral-900: #252d2e;
+  --color-accent-100: #ecf8fd;
+  --color-accent-200: #d1eef9;
+  --color-accent-300: #a6def4;
+  --color-accent-400: #58c7ee;
+  --color-accent-500: #13a7d1;
+  --color-accent-600: #0088b1;
+  --color-accent-700: #006989;
+  --color-accent-800: #004a62;
+  --color-accent-900: #0b303d;
+  --color-accent-2-100: #ecf8fd;
+  --color-accent-2-200: #d1eef9;
+  --color-accent-2-300: #a6def4;
+  --color-accent-2-400: #7cc3de;
+  --color-accent-2-500: #5aa3bf;
+  --color-accent-2-600: #3a85a0;
+  --color-accent-2-700: #2a667b;
+  --color-accent-2-800: #204958;
+  --color-accent-2-900: #1a2f37;
+  --color-text-muted: #7c9195;
+}
+
+/* ── 2. mode blocks — must stay AFTER the ramp blocks above ─────────────── */
+
+:root[data-mode="dark"] {
+  --color-danger: #e5849a;
+  --shadow-sm: 0 0 0 1px var(--color-neutral-800);
+  --shadow-md: 0 0 0 1px var(--color-neutral-700), 0 6px 18px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 0 0 1px var(--color-neutral-500), 0 16px 40px rgba(0, 0, 0, 0.65);
+}
+
+:root[data-mode="light"] {
+  /* Nocturne's accent (L 0.66) was tuned to read on a dark ground; on
+     white it falls short of 4.5:1 as link/button text. The ramp's own
+     700 step (L ~0.48) is dark enough to hold contrast on any palette's
+     light ground without a second hand-tuned value — verified by
+     test_palette_contrast.py. */
+  --color-accent: var(--color-accent-700);
+  --color-accent-2: var(--color-accent-2-700);
+  --color-danger: #a92e55;
+  --shadow-sm: 0 1px 2px color-mix(in srgb, var(--color-neutral-900) 10%, transparent);
+  --shadow-md:
+    0 1px 2px color-mix(in srgb, var(--color-neutral-900) 10%, transparent),
+    0 6px 18px color-mix(in srgb, var(--color-neutral-900) 16%, transparent);
+  --shadow-lg:
+    0 1px 2px color-mix(in srgb, var(--color-neutral-900) 10%, transparent),
+    0 16px 40px color-mix(in srgb, var(--color-neutral-900) 22%, transparent);
+}
+
+/* ── 3. (palette, mode) role blocks ──────────────────────────────────────── */
+
+:root[data-palette="nocturne"][data-mode="light"] {
+  --color-bg: #f2f3f8;
+  --color-surface: #fbfcfe;
+  --color-text: #15151f;
+  --color-text-muted: #545460;
+}
+
+:root[data-palette="rose"][data-mode="dark"] {
+  --color-bg: #1e1522;
+  --color-surface: #2a232f;
+  --color-text: #ebe8ec;
+  --color-text-muted: #918998;
+}
+:root[data-palette="rose"][data-mode="light"] {
+  --color-bg: #f5f2f6;
+  --color-surface: #fdfbfe;
+  --color-text: #1a131b;
+  --color-text-muted: #5b525c;
+}
+
+:root[data-palette="forest"][data-mode="dark"] {
+  --color-bg: #131c10;
+  --color-surface: #20291d;
+  --color-text: #e7eae7;
+  --color-text-muted: #879082;
+}
+:root[data-palette="forest"][data-mode="light"] {
+  --color-bg: #f1f4f0;
+  --color-surface: #fafcfa;
+  --color-text: #101911;
+  --color-text-muted: #4e584f;
+}
+
+:root[data-palette="amber"][data-mode="dark"] {
+  --color-bg: #24150f;
+  --color-surface: #30221c;
+  --color-text: #ede9e6;
+  --color-text-muted: #9b8882;
+}
+:root[data-palette="amber"][data-mode="light"] {
+  --color-bg: #f7f2f0;
+  --color-surface: #fefbfa;
+  --color-text: #1d140e;
+  --color-text-muted: #5f524b;
+}
+
+:root[data-palette="slate"][data-mode="dark"] {
+  --color-bg: #081d21;
+  --color-surface: #18292d;
+  --color-text: #e6eaec;
+  --color-text-muted: #7c9195;
+}
+:root[data-palette="slate"][data-mode="light"] {
+  --color-bg: #eff5f6;
+  --color-surface: #f9fcfd;
+  --color-text: #0b181d;
+  --color-text-muted: #4a585d;
+}
