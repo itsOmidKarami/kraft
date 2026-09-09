@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 
 import pytest
 from support.harness import isolated_bd, make_repo
@@ -66,6 +67,27 @@ GH_PR_VIEW = (
     '"statusCheckRollup":[{"name":"build","conclusion":"SUCCESS"},'
     '{"name":"lint","conclusion":"FAILURE"}]}'
 )
+# glab includes the pipeline's commit in every row; the fixtures above predate
+# this code caring about it. A sha that is not the worktree's HEAD is the
+# few-second window after a push in which `glab ci list` still answers with the
+# previous commit's pipeline (Kraft-bxj8).
+GLAB_CI_SUCCESS_OTHER_SHA = (
+    '[{"id":2826926702,"iid":144,"status":"success","ref":"kraft/abc",'
+    '"sha":"1111111111111111111111111111111111111111",'
+    '"web_url":"https://gitlab.com/itsOmidKarami/kraft/-/pipelines/2826926702"}]'
+)
+# `glab mr view -F json` for a branch that conflicts with main. Captured
+# against glab 1.117.0; `detailed_merge_status` is the field that says *why*,
+# `merge_status` the older, coarser one.
+GLAB_MR_VIEW_CONFLICT = (
+    '{"iid":54,"state":"opened","source_branch":"kraft/abc",'
+    '"merge_status":"cannot_be_merged","detailed_merge_status":"conflict",'
+    '"web_url":"https://gitlab.com/itsOmidKarami/kraft/-/merge_requests/54"}'
+)
+GH_PR_VIEW_CONFLICT = (
+    '{"number":7,"url":"https://github.com/o/r/pull/7","mergeable":"CONFLICTING",'
+    '"mergeStateStatus":"DIRTY","statusCheckRollup":[{"name":"build","conclusion":"SUCCESS"}]}'
+)
 
 
 def _stub(tmp_path, monkeypatch, name: str, stdout: str, rc: int = 0):
@@ -90,6 +112,26 @@ def _stub(tmp_path, monkeypatch, name: str, stdout: str, rc: int = 0):
 def _argv(tmp_path, name: str) -> list[str]:
     path = tmp_path / f"{name}.argv"
     return path.read_text().splitlines() if path.exists() else []
+
+
+def _stub_routed(tmp_path, monkeypatch, name: str, routes: dict[str, str], default: str = "{}"):
+    """A stub CLI whose stdout depends on its first two arguments.
+
+    `ci_status` reads the merge request *and* the pipeline list in one node
+    now, and the two answer with different JSON shapes — an object and an
+    array — so one stdout cannot stand in for both. Keys are `"<verb> <sub>"`,
+    e.g. `"mr view"`. Argv is recorded exactly as `_stub` records it.
+    """
+    argv = tmp_path / f"{name}.argv"
+    cases = "".join(f"  '{k}') cat <<'STUBEOF'\n{v}\nSTUBEOF\n  ;;\n" for k, v in routes.items())
+    p = tmp_path / name
+    p.write_text(
+        f'#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a" >> {argv}; done\n'
+        f"case \"$1 $2\" in\n{cases}  *) cat <<'STUBEOF'\n{default}\nSTUBEOF\n  ;;\nesac\nexit 0\n"
+    )
+    p.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+    return p
 
 
 def test_glab_open_mr_parses_the_number_and_url(tmp_path, monkeypatch):
@@ -971,3 +1013,266 @@ def test_open_mr_still_creates_one_when_the_branch_has_none(tmp_path, monkeypatc
     assert (returned, recorded) == ("done", "done")
     assert fake.opened == {1: "kraft/w1"}
     assert "opened http://fake.forge/1" in _session_log(tmp_path, "x6")
+
+
+def test_ci_poll_pushes_before_it_polls(tmp_path, monkeypatch):
+    """Kraft-bxj8. The worker commits in the worktree and is told not to push
+    (adapters/agent.py:45); only open_mr and sync_mr ever pushed, and sync_mr
+    runs *after* human review. So a commit made after open_mr stayed local and
+    ci_poll polled the previous head's pipeline — the same pipeline id on every
+    retry, forever. Work items b63d95be and 1c039982 both hit this in one
+    session and both needed a manual `git push`."""
+    order: list[str] = []
+
+    class Recording(forge.FakeForge):
+        async def push(self, *, repo, branch):
+            order.append("push")
+            await super().push(repo=repo, branch=branch)
+
+        async def ci_status(self, *, repo, mr, branch=""):
+            order.append("ci")
+            return await super().ci_status(repo=repo, mr=mr, branch=branch)
+
+    fake = Recording(ci_states=["success"])
+    returned, recorded = _forge_session(
+        tmp_path, monkeypatch, fake, "ci_poll", "b1", poll_interval=0
+    )
+
+    assert (returned, recorded) == ("done", "done")
+    assert order[:2] == ["push", "ci"], "the pipeline was polled over an unpushed head"
+    assert fake.pushed == ["kraft/w1"]
+
+
+def test_merge_pushes_before_it_merges(tmp_path, monkeypatch):
+    """The mirror symptom: `_assert_pushed` correctly refuses a head the remote
+    has never seen, but it failed the node three times rather than pushing, and
+    a retry of `merge` alone never re-runs `mr_sync`, so it could never clear
+    itself."""
+    order: list[str] = []
+
+    class Recording(forge.FakeForge):
+        async def push(self, *, repo, branch):
+            order.append("push")
+            await super().push(repo=repo, branch=branch)
+
+        async def merge(self, *, repo, branch="", mr):
+            order.append("merge")
+            await super().merge(repo=repo, branch=branch, mr=mr)
+
+    fake = Recording()
+    asyncio.run(fake.open_mr(repo=tmp_path, branch="kraft/w1", title="t", body="b"))
+
+    returned, recorded = _forge_session(tmp_path, monkeypatch, fake, "merge", "b2")
+
+    assert (returned, recorded) == ("done", "done")
+    assert order == ["push", "merge"], "it merged a head that was never pushed"
+
+
+def test_glab_ci_status_ignores_a_pipeline_for_an_older_commit(tmp_path, monkeypatch):
+    """Now that ci_poll pushes, the gap between the push and GitLab creating the
+    pipeline is on the hot path: for a few seconds `glab ci list -P 1` still
+    returns the *previous* commit's pipeline, which may be green. A pipeline
+    that is not for this head is not a result."""
+    repo = make_repo(tmp_path)
+    _stub(tmp_path, monkeypatch, "glab", GLAB_CI_SUCCESS_OTHER_SHA)
+
+    status = asyncio.run(
+        forge.GlabCli().ci_status(repo=repo, mr=forge.MR(0, ""), branch="kraft/abc")
+    )
+
+    assert status.state == "pending", "a green pipeline for another commit passed the check"
+    assert "no pipeline for" in status.jobs[0]
+
+
+def test_glab_ci_status_accepts_a_pipeline_for_the_current_head(tmp_path, monkeypatch):
+    """The other half: the sha check must not reject the ordinary case."""
+    repo = make_repo(tmp_path)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    _stub(
+        tmp_path,
+        monkeypatch,
+        "glab",
+        f'[{{"id":1,"status":"success","ref":"kraft/abc","sha":"{head}","web_url":"http://x/1"}}]',
+    )
+
+    status = asyncio.run(
+        forge.GlabCli().ci_status(repo=repo, mr=forge.MR(0, ""), branch="kraft/abc")
+    )
+
+    assert status.state == "success"
+
+
+def test_glab_ci_status_reads_the_mr_merge_state(tmp_path, monkeypatch):
+    """Kraft-ejj9. A branch with a green pipeline and a real conflict against
+    main passed mr_checks as done, walked through human_review, and only met
+    the conflict at the merge node — which reported success anyway."""
+    _stub_routed(
+        tmp_path,
+        monkeypatch,
+        "glab",
+        {"mr view": GLAB_MR_VIEW_CONFLICT, "ci list": GLAB_CI_SUCCESS},
+    )
+
+    status = asyncio.run(
+        forge.GlabCli().ci_status(repo=tmp_path, mr=forge.MR(0, ""), branch="kraft/abc")
+    )
+
+    assert status.state == "success", "the pipeline really is green — that is the whole bug"
+    assert status.mergeable is False
+    assert status.merge_detail == "conflict"
+
+
+@pytest.mark.parametrize(
+    "detail",
+    ["not_approved", "ci_still_running", "discussions_not_resolved", "draft_status", "checking"],
+)
+def test_glab_ci_status_leaves_a_state_that_needs_a_person_undecided(tmp_path, monkeypatch, detail):
+    """Deliberately the opposite of `_GLAB_STATES`' unknown-is-failure rule:
+    mr_checks runs *before* the human_review gate, so these are the ordinary
+    states of a healthy merge request here. Failing on them would fail the node
+    on every repo with an approval rule."""
+    _stub_routed(
+        tmp_path,
+        monkeypatch,
+        "glab",
+        {
+            "mr view": '{"iid":54,"detailed_merge_status":"' + detail + '"}',
+            "ci list": GLAB_CI_SUCCESS,
+        },
+    )
+
+    status = asyncio.run(
+        forge.GlabCli().ci_status(repo=tmp_path, mr=forge.MR(0, ""), branch="kraft/abc")
+    )
+
+    assert status.mergeable is None
+
+
+def test_gh_ci_status_reads_mergeable_from_the_same_pr_view(tmp_path, monkeypatch):
+    """No extra process on GitHub: the fields go on the `gh pr view` call the
+    node already makes."""
+    _stub(tmp_path, monkeypatch, "gh", GH_PR_VIEW_CONFLICT)
+
+    status = asyncio.run(forge.GhCli().ci_status(repo=tmp_path, mr=forge.MR(0, "")))
+
+    argv = _argv(tmp_path, "gh")
+    fields = argv[argv.index("--json") + 1]
+    assert "mergeable" in fields and "mergeStateStatus" in fields
+    assert argv.count("--json") == 1, "a second round trip for a fact one call already carries"
+    assert (status.state, status.mergeable) == ("success", False)
+    assert "CONFLICTING" in status.merge_detail
+
+
+def test_ci_poll_fails_when_the_mr_cannot_be_merged(tmp_path, monkeypatch):
+    """Green pipeline, unmergeable branch: the node fails and the log names the
+    state, so the human_review brief has something to act on."""
+    fake = forge.FakeForge(ci_states=["success"], mergeable=False, merge_detail="conflict")
+
+    returned, recorded = _forge_session(
+        tmp_path, monkeypatch, fake, "ci_poll", "e1", poll_interval=0
+    )
+
+    assert (returned, recorded) == ("failed", "failed")
+    assert "not mergeable: conflict" in _session_log(tmp_path, "e1")
+
+
+def test_ci_poll_does_not_fail_on_an_undecided_merge_state(tmp_path, monkeypatch):
+    """`mergeable is None` is not `mergeable is False`. An unapproved MR with a
+    green pipeline is exactly what this node is supposed to hand to the gate."""
+    fake = forge.FakeForge(ci_states=["success"], mergeable=None, merge_detail="not_approved")
+
+    returned, recorded = _forge_session(
+        tmp_path, monkeypatch, fake, "ci_poll", "e2", poll_interval=0
+    )
+
+    assert (returned, recorded) == ("done", "done")
+
+
+def test_poll_returns_early_on_a_conflict_rather_than_waiting_out_the_pipeline(
+    tmp_path, monkeypatch
+):
+    """A conflict will not resolve itself in thirty minutes."""
+    slept: list[float] = []
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+
+    monkeypatch.setattr(forge.asyncio, "sleep", fake_sleep)
+    fake = forge.FakeForge(ci_states=["pending"], mergeable=False, merge_detail="conflict")
+
+    ci, timed_out = asyncio.run(
+        forge._poll_ci(fake, repo=tmp_path, branch="b", timeout=10_000, interval=5)
+    )
+
+    assert (ci.state, ci.mergeable, timed_out) == ("pending", False, False)
+    assert slept == [], "it waited out a pipeline for a branch that cannot merge"
+
+
+def test_merge_is_done_only_when_the_forge_reports_merged(tmp_path, monkeypatch):
+    """The good path, now decided by a read rather than by an exit code."""
+    fake = forge.FakeForge()
+    asyncio.run(fake.open_mr(repo=tmp_path, branch="kraft/w1", title="t", body="b"))
+
+    returned, recorded = _forge_session(tmp_path, monkeypatch, fake, "merge", "m1")
+
+    assert (returned, recorded) == ("done", "done")
+    assert fake.merged == [1]
+    assert "merged !1" in _session_log(tmp_path, "m1")
+
+
+def test_merge_fails_when_the_mr_is_still_open_afterwards(tmp_path, monkeypatch):
+    """Kraft-79x3, from work item 0853ea31 / MR !76. GitLab treats `mr merge`
+    as async: with the head's pipeline still running it enables "merge when all
+    merge checks pass", exits 0, and merges nothing. Kraft logged `merged`,
+    marked the node done and completed the work item; the pipeline then failed,
+    the auto-merge never fired, and the MR is still open and conflicted."""
+
+    class AutoMergeScheduled(forge.FakeForge):
+        async def merge(self, *, repo, branch="", mr):
+            return None  # exit 0, merged nothing
+
+    fake = AutoMergeScheduled()
+    asyncio.run(fake.open_mr(repo=tmp_path, branch="kraft/w1", title="t", body="b"))
+
+    returned, recorded = _forge_session(
+        tmp_path, monkeypatch, fake, "merge", "m2", merge_timeout=0, merge_interval=0
+    )
+
+    assert (returned, recorded) == ("failed", "failed")
+    log = _session_log(tmp_path, "m2")
+    assert "still open" in log, log
+    assert "auto-merge" in log, "the human is not told where to look"
+    assert fake.merged == [], "the fake did not merge, and the node must not claim it did"
+
+
+def test_merge_fails_when_the_mr_was_closed_rather_than_merged(tmp_path, monkeypatch):
+    """Closed is not merged: nothing landed, and the branch is gone."""
+
+    class ClosedAfterwards(forge.FakeForge):
+        # The first read is run_task's own `find_mr`, which has to say open or
+        # the node never reaches the merge at all; every read after it is the
+        # verification poll.
+        reads = 0
+
+        async def merge(self, *, repo, branch="", mr):
+            return None
+
+        async def find_mr(self, *, repo, branch):
+            ref = await super().find_mr(repo=repo, branch=branch)
+            if ref is None:
+                return None
+            self.reads += 1
+            state = "open" if self.reads == 1 else "closed"
+            return forge.MRRef(number=ref.number, url=ref.url, state=state)
+
+    fake = ClosedAfterwards()
+    asyncio.run(fake.open_mr(repo=tmp_path, branch="kraft/w1", title="t", body="b"))
+
+    returned, recorded = _forge_session(
+        tmp_path, monkeypatch, fake, "merge", "m3", merge_timeout=0, merge_interval=0
+    )
+
+    assert (returned, recorded) == ("failed", "failed")
+    assert "closed" in _session_log(tmp_path, "m3")
