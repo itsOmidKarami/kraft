@@ -513,11 +513,10 @@ def _cmd_watch(ns: argparse.Namespace) -> None:
             *now*: connecting at seq 0 would replay every event the server has
             ever committed, redrawing the board once per historical row.
             """
-            payload = await client._get("/work-items")
-            items = client.trim_work_items(payload["items"])
+            items, cursor = await client.board()
             if repo:
                 items = [item for item in items if item["repo"] == repo]
-            return render.redraw(_render_list(items), drawn), payload["cursor"]
+            return render.redraw(_render_list(items), drawn), cursor
 
         drawn, cursor = await frame(drawn)
         async for _event in client.stream_events(cursor):

@@ -603,6 +603,16 @@ async def create_work_item(body: NewWorkItem, request: Request):
         raise HTTPException(422, "unknown or invalid template")
     if body.root_merge_policy not in store.ROOT_MERGE_POLICIES:
         raise HTTPException(422, f"unknown root_merge_policy {body.root_merge_policy!r}")
+    # Before `executor.intake`, which no longer 502s on a bd failure (Kraft-7gy)
+    # and would file the item with no bead and a warning nobody reads. An
+    # explicit check rather than `Field(max_length=...)`: pydantic's 422 body is
+    # a list of error dicts, and `kraft item create` prints `detail` straight
+    # through -- one sentence is the contract every other CLI error keeps.
+    if len(body.title) > beads_mod.MAX_TITLE:
+        raise HTTPException(
+            422,
+            f"title is {len(body.title)} characters; the tracker's limit is {beads_mod.MAX_TITLE}",
+        )
     if not Path(body.repo).is_dir():
         raise HTTPException(422, f"repo path does not exist: {body.repo}")
     attachments = _validated_attachments(body.repo, body.attachments, body.cwd)
@@ -997,17 +1007,33 @@ async def get_work_item(wid: str, request: Request):
 
 
 class WorkItemPatch(BaseModel):
-    #: The only editable field. This route is not a general work item update —
-    #: a body carrying anything else is ignored, not applied.
-    description: str
+    #: Absent means untouched, in both fields. This route is still not a general
+    #: table editor -- a body carrying anything else is ignored, not applied --
+    #: but a screen that edits one field must not blank the other, so neither
+    #: field has a default that means "clear it". `description: ""` clears the
+    #: brief; `description` omitted leaves it alone.
+    title: str | None = None
+    description: str | None = None
 
 
 @app.patch("/work-items/{wid}")
 async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
     st = request.app.state
-    _work_item_row(st, wid)  # 404s on an unknown work item
-    await st.db.write(lambda c: store.set_description(c, wid, body.description))
-    return {"id": wid, "description": body.description}
+    _work_item_row(st, wid)  # 404s on an unknown work item, before any 422
+    if body.title is None and body.description is None:
+        raise HTTPException(422, "nothing to patch: send a title, a description, or both")
+    if body.title is not None and not body.title.strip():
+        raise HTTPException(422, "title cannot be empty")
+
+    def apply(c):
+        # One write, so a two-field patch is one transaction and cannot land half.
+        if body.title is not None:
+            store.set_title(c, wid, body.title)
+        if body.description is not None:
+            store.set_description(c, wid, body.description)
+
+    await st.db.write(apply)
+    return {"id": wid, **body.model_dump(exclude_none=True)}
 
 
 @app.get("/work-items/{wid}/events")
@@ -2229,19 +2255,22 @@ def _validate_template(st, tid: str, nodes: list[dict]) -> dict:
         (scratch / "registry.yaml").write_text((st.templates_dir / "registry.yaml").read_text())
         (scratch / f"{tid}.yaml").write_text(yaml.safe_dump({"id": tid, "nodes": nodes}))
         result = load_templates(scratch, st.registry)
-    hooks = {t for n in nodes for t in (n.get("tasks") or [])}
-    repos = config_mod.load_repos(_repos_path(st), validate_steering=False)
     return {
         "id": tid,
         "valid": tid in result.valid,
         "error": result.invalid.get(tid),
-        # a hook disabled for a repo makes any template using it unresolvable there
-        "by_repo": [
-            {
-                "repo": r["path"],
-                "resolvable": all(h in st.registry.hooks for h in hooks),
-            }
-            for r in repos
+        # Per node and per task, not per repo. `by_repo.resolvable` was
+        # `all(h in st.registry.hooks for h in hooks)` -- one bit of information
+        # repeated once per connected repo, computed without consulting the repo
+        # at all, despite the comment that used to sit above it. "unresolvable"
+        # named a repo; the human editing a chain needs the node. Replaced, not
+        # repaired: two answers to one question, one of them wrong, is worse
+        # than one.
+        "unresolved": [
+            {"node": n.get("id"), "task": task}
+            for n in nodes
+            for task in (n.get("tasks") or [])
+            if task not in st.registry.hooks
         ],
     }
 
@@ -2383,6 +2412,12 @@ def _check_steering_change(st, name: str, body: str | None) -> None:
     failures it anticipated. Note the inversion versus `_validate_repos`: there
     the config is the candidate and the steering dir is real; here it is the
     other way round, which is why both loaders take a `steering_dir`.
+
+    Synchronous and directory-sized, so both callers run it through
+    `asyncio.to_thread` (Kraft-e9a) -- an `HTTPException` raised here propagates
+    out of the thread unchanged. The real write (`config_mod.write_text`) and
+    `path.unlink()` stay on the loop: one file, one syscall, and moving those
+    would be cargo.
     """
     real = _steering_dir(st)
     with tempfile.TemporaryDirectory() as tmp:
@@ -2455,7 +2490,7 @@ async def put_steering(name: str, body: SteeringBody, request: Request):
         path = steering_mod.path_for(steering_dir, name, where="steering")
     except steering_mod.SteeringError as exc:
         raise HTTPException(400, str(exc)) from exc
-    _check_steering_change(st, name, body.body)
+    await asyncio.to_thread(_check_steering_change, st, name, body.body)
     config_mod.write_text(path, body.body)
     # Nothing to reload: no `app.state` holds steering bodies. They are read
     # from disk at dispatch, and `resolve_invocation` re-checks the assembled
@@ -2472,7 +2507,7 @@ async def delete_steering(name: str, request: Request):
         raise HTTPException(400, str(exc)) from exc
     if not path.is_file():
         raise HTTPException(404, f"unknown steering file {name!r}")
-    _check_steering_change(st, name, None)
+    await asyncio.to_thread(_check_steering_change, st, name, None)
     path.unlink()
     return {"deleted": name}
 

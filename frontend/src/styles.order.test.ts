@@ -27,3 +27,24 @@ describe("styles.css cascade order", () => {
     expect(overridePos).toBeGreaterThan(basePos);
   });
 });
+
+// Specificity, not order: `textarea.input { min-height: 90px }` in
+// nocturne.css is one element + one class, which outranks a bare
+// `.template-yaml` no matter which file is imported first. The two sibling
+// rules in this file that do work (`.gate-reject textarea.input`,
+// `.paused-card textarea.input`) both qualify with the element. Asserted
+// against the source rather than a computed style for the same reason the
+// block above is: jsdom's cascade is not a thing to build a regression test
+// on, and the failure mode here is exactly a selector that lost.
+describe("styles.css specificity", () => {
+  it("qualifies .template-yaml with the element so textarea.input cannot outrank it", () => {
+    const css = readFileSync(join(here, "styles.css"), "utf-8");
+
+    const rule = css
+      .split("\n")
+      .find((line) => line.includes(".template-yaml") && line.includes("min-height"));
+
+    expect(rule).toBeDefined();
+    expect(rule).toMatch(/textarea\.template-yaml/);
+  });
+});

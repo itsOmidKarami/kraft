@@ -89,7 +89,28 @@ describe("WorkItemDetail", () => {
     await userEvent.type(box, "the revised brief");
     await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
 
-    await waitFor(() => expect(update).toHaveBeenCalledWith("w1", "the revised brief"));
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith("w1", { description: "the revised brief" }),
+    );
+  });
+
+  it("edits the title and re-reads the item", async () => {
+    const update = vi
+      .spyOn(api, "updateWorkItem")
+      .mockResolvedValue({ id: "w1", title: "a better label" });
+    setup({ title: "typed in a hurry" });
+    renderDetail();
+
+    await userEvent.click(
+      within(screen.getByTestId("item-title")).getByRole("button", { name: /edit/i }),
+    );
+    const box = screen.getByLabelText("title");
+    await userEvent.clear(box);
+    await userEvent.type(box, "a better label");
+    await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => expect(update).toHaveBeenCalledWith("w1", { title: "a better label" }));
+    expect(useStore.getState().hydrateItem).toHaveBeenCalledWith("w1");
   });
 
   it("tags the work-item status in the meta line", () => {

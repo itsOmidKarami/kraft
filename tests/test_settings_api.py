@@ -10,6 +10,7 @@ import asyncio
 import json
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -212,6 +213,28 @@ def test_an_unknown_gate_is_refused(client):
     nodes = [{"id": "a", "tasks": ["on.test.run"], "gate_after": "made_up_gate"}]
     r = client.post("/templates/scratch/validate", json={"nodes": nodes})
     assert r.json()["valid"] is False and "gate_after" in r.json()["error"]
+
+
+def test_validate_names_the_node_and_task_that_do_not_resolve(client):
+    """Kraft-3e6e. The old `by_repo.resolvable` was
+    `all(h in st.registry.hooks for h in hooks)` -- the same bit repeated once
+    per connected repo, computed without consulting the repo at all -- and
+    "unresolvable" named a repo, when the human editing a chain needs the node.
+    """
+    nodes = [
+        {"id": "measure", "tasks": ["on.test.run"], "gate_after": None},
+        {"id": "x", "tasks": ["on.does.not.exist"], "gate_after": None},
+    ]
+    body = client.post("/templates/scratch/validate", json={"nodes": nodes}).json()
+    assert body["unresolved"] == [{"node": "x", "task": "on.does.not.exist"}]
+    assert "by_repo" not in body
+
+    ok = client.post(
+        "/templates/scratch/validate",
+        json={"nodes": [{"id": "measure", "tasks": ["on.test.run"], "gate_after": None}]},
+    ).json()
+    assert ok["valid"] is True
+    assert ok["unresolved"] == []
 
 
 # ── registry (5c) ────────────────────────────────────────────────────────────
@@ -1214,6 +1237,56 @@ def test_saving_steering_reloads_nothing(client, templates_dir, monkeypatch):
     called = []
     monkeypatch.setattr(api_mod, "_reload_templates", lambda st: called.append(True))
     assert client.put("/steering/fresh", json={"body": "hi\n"}).status_code == 200
+    assert called == []
+
+
+def test_the_steering_validation_runs_off_the_event_loop(client, templates_dir, monkeypatch):
+    """`_check_steering_change` copies every `*.md` in the steering directory
+    into a scratch dir and runs two config loaders over the copy. That is
+    directory-sized blocking I/O in an `async def`, and the directory's size is
+    the operator's to grow.
+
+    Asserted with `asyncio.get_running_loop()` rather than by comparing against
+    `threading.main_thread()`: `TestClient` runs the event loop in an anyio
+    portal *worker* thread, so "not the main thread" is true even when the code
+    does run on the loop, and that assertion would pass without the fix. A
+    thread that is not running the loop has no running loop, which is exact.
+    """
+    (_steering_dir(templates_dir) / "house-style.md").write_text("prefer stdlib\n")
+    on_loop, off_loop = [], []
+    real = api_mod._check_steering_change
+
+    def record(st, name, body):
+        try:
+            on_loop.append(asyncio.get_running_loop())
+        except RuntimeError:
+            off_loop.append(threading.current_thread().name)
+        return real(st, name, body)
+
+    monkeypatch.setattr(api_mod, "_check_steering_change", record)
+
+    assert client.put("/steering/house-style", json={"body": "prefer native\n"}).status_code == 200
+    assert client.delete("/steering/house-style").status_code == 200
+
+    assert on_loop == []
+    assert len(off_loop) == 2
+
+
+def test_deleting_steering_reloads_nothing(client, templates_dir, monkeypatch):
+    """The DELETE-side mirror of `test_saving_steering_reloads_nothing`, and a
+    deliberate change-detector on an implementation detail.
+
+    That is the point: no `app.state` holds steering bodies -- dispatch reads
+    them straight off disk, and `resolve_invocation` re-checks the assembled
+    budget at every launch -- so a `_reload_templates` call added here would be
+    dead code whose only effect is to tell the next reader that state caches
+    them. The reason is non-obvious enough that someone adds it back.
+    """
+    (_steering_dir(templates_dir) / "orphan.md").write_text("unused\n")
+    called = []
+    monkeypatch.setattr(api_mod, "_reload_templates", lambda st: called.append(True))
+
+    assert client.delete("/steering/orphan").status_code == 200
     assert called == []
 
 

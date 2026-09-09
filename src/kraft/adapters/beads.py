@@ -4,6 +4,12 @@ import asyncio
 import json
 import subprocess
 
+#: `bd create` refuses a title longer than this. A fact about the tracker, kept
+#: next to the call that hits it rather than in the API that guards it, so the
+#: number and the reason for it live together. Not asked of `bd` at runtime: a
+#: subprocess round trip to learn a constant.
+MAX_TITLE = 500
+
 
 async def intake(title: str, *, description: str | None = None, cwd: str | None = None) -> str:
     proc = await asyncio.to_thread(
