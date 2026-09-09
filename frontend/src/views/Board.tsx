@@ -47,11 +47,38 @@ function Facet({
 
 const DONE_PREVIEW = 5;
 
+/** A created-but-never-resumed item: `paused` with no current node (api.py:527-529).
+ *  Distinct from a mid-chain pause, which is still `paused` but has run at least
+ *  one node — that one is waiting on the same person as `needs_human`, so it groups
+ *  with "Needs you" instead. */
+function notStarted(i: WorkItem) {
+  return i.status === "paused" && i.current_node_id === null;
+}
+
+function needsYou(i: WorkItem) {
+  return i.status === "needs_human" || (i.status === "paused" && !notStarted(i));
+}
+
+const STATUS_GROUPS: { id: string; label: string; test: (i: WorkItem) => boolean }[] = [
+  { id: "needs", label: "Needs you", test: needsYou },
+  { id: "running", label: "Running", test: (i) => i.status === "active" },
+  { id: "not_started", label: "Not started", test: notStarted },
+  { id: "done", label: "Done", test: (i) => i.status === "completed" },
+];
+
+const SORTS: Record<string, (a: WorkItem, b: WorkItem) => number> = {
+  updated: (a, b) => b.updated_at.localeCompare(a.updated_at),
+  title: (a, b) => a.title.localeCompare(b.title),
+  repo: (a, b) => a.repo.localeCompare(b.repo),
+};
+
 export function Board() {
   const items = useStore((s) => Object.values(s.workItems));
   const connection = useStore((s) => s.connection);
   const [repo, setRepo] = useState<string | null>(null);
   const [tpl, setTpl] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const [sort, setSort] = useState<keyof typeof SORTS>("updated");
   const [allDone, setAllDone] = useState(false);
 
   // A board that cannot reach the server rendered as a board with no work on
@@ -67,43 +94,58 @@ export function Board() {
       );
   }, []);
 
-  // Each facet's counts are taken with the *other* facet applied, so the two
-  // filters read as combining rather than as two independent views.
+  const matchesStatus = (i: WorkItem, label: string | null) =>
+    !label || (STATUS_GROUPS.find((g) => g.label === label)?.test(i) ?? true);
+
+  // Each facet's counts are taken with the *other two* applied, so all three
+  // filters read as combining rather than as independent views.
   const repoRows = useMemo(
-    () => tally(tpl ? items.filter((i) => i.chain_template === tpl) : items, (i) => i.repo),
-    [items, tpl],
+    () =>
+      tally(
+        items.filter((i) => (!tpl || i.chain_template === tpl) && matchesStatus(i, status)),
+        (i) => i.repo,
+      ),
+    [items, tpl, status],
   );
   const tplRows = useMemo(
-    () => tally(repo ? items.filter((i) => i.repo === repo) : items, (i) => i.chain_template),
-    [items, repo],
+    () =>
+      tally(
+        items.filter((i) => (!repo || i.repo === repo) && matchesStatus(i, status)),
+        (i) => i.chain_template,
+      ),
+    [items, repo, status],
   );
+  const statusRows = useMemo(() => {
+    const base = items.filter(
+      (i) => (!repo || i.repo === repo) && (!tpl || i.chain_template === tpl),
+    );
+    return STATUS_GROUPS.map((g) => [g.label, base.filter(g.test).length] as [string, number]);
+  }, [items, repo, tpl]);
 
   const shown = useMemo(
     () =>
       items.filter(
-        (i) => (!repo || i.repo === repo) && (!tpl || i.chain_template === tpl),
+        (i) =>
+          (!repo || i.repo === repo) &&
+          (!tpl || i.chain_template === tpl) &&
+          matchesStatus(i, status),
       ),
-    [items, repo, tpl],
+    [items, repo, tpl, status],
   );
 
-  const groups = [
-    {
-      id: "needs",
-      label: "Needs you",
-      tone: "accent" as const,
-      // paused belongs here too: nothing moves until a person resumes it, and this
-      // board is grouped by who is being waited on
-      items: shown.filter((i) => i.status === "needs_human" || i.status === "paused"),
-    },
-    { id: "running", label: "Running", items: shown.filter((i) => i.status === "active") },
-    { id: "done", label: "Done", items: shown.filter((i) => i.status === "completed") },
-  ];
+  const groups = STATUS_GROUPS.map((g) => ({
+    id: g.id,
+    label: g.label,
+    tone: g.id === "needs" ? ("accent" as const) : undefined,
+    items: shown.filter(g.test).sort(SORTS[sort]),
+  }));
 
   return (
     <div className="board">
       <aside className="board-sidebar">
         <Facet label="Repos" rows={repoRows} value={repo} onPick={setRepo} />
         <Facet label="Template" rows={tplRows} value={tpl} onPick={setTpl} />
+        <Facet label="Status" rows={statusRows} value={status} onPick={setStatus} />
         <div className="board-foot">
           {/* the header's ConnBadge names the exact state; here it is just a pulse */}
           <span className="live" data-connection={connection} title={connection}>
@@ -116,6 +158,18 @@ export function Board() {
       </aside>
 
       <div className="board-groups">
+        <div className="board-sort">
+          <label htmlFor="board-sort">Sort by</label>
+          <select
+            id="board-sort"
+            value={sort}
+            onChange={(e) => setSort(e.target.value as keyof typeof SORTS)}
+          >
+            <option value="updated">Recently updated</option>
+            <option value="title">Title (A–Z)</option>
+            <option value="repo">Repo</option>
+          </select>
+        </div>
         {loadErr && (
           <p className="form-error" role="alert">
             could not load the board — {loadErr}

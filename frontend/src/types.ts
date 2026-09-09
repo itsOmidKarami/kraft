@@ -148,6 +148,8 @@ export interface WorkItemDocument {
   worker_session_id: string | null;
   /** Set when this row is an intake attachment rather than an agent-written link. */
   attachment_kind: "spec" | "plan" | null;
+  /** Server-sorted newest first; the only time field every document kind has. */
+  indexed_at: string;
 }
 
 export interface WorkItemDiff {

@@ -47,8 +47,9 @@ const renderBoard = () =>
     </MemoryRouter>,
   );
 
+// selector pins this to the group heading, not the same-named Status facet button
 const group = (label: string) =>
-  screen.getByText(label).closest("section") as HTMLElement;
+  screen.getByText(label, { selector: ".group-label" }).closest("section") as HTMLElement;
 
 describe("Board", () => {
   it("groups by attention rather than showing a status column", () => {
@@ -123,11 +124,44 @@ describe("Board", () => {
     expect(screen.getByText(/capped 3\/3/)).toBeInTheDocument();
   });
 
-  it("keeps a paused item on the board, in the group that is waiting on you", () => {
-    setItems(wi({ id: "w5", status: "paused", title: "Paused item" }));
+  it("puts a paused-mid-chain item in Needs you, and a never-started item in Not started", () => {
+    setItems(
+      wi({ id: "w5", status: "paused", current_node_id: "verify", title: "Paused mid-chain" }),
+      wi({ id: "w7", status: "paused", current_node_id: null, title: "Never started" }),
+    );
     renderBoard();
-    expect(within(group("Needs you")).getByText("Paused item")).toBeInTheDocument();
+    expect(within(group("Needs you")).getByText("Paused mid-chain")).toBeInTheDocument();
+    expect(within(group("Not started")).getByText("Never started")).toBeInTheDocument();
+    expect(within(group("Needs you")).queryByText("Never started")).not.toBeInTheDocument();
     expect(within(group("Running")).queryAllByTestId("board-card")).toHaveLength(0);
+  });
+
+  it("filters on the status facet", async () => {
+    setItems(
+      wi({ id: "w1", status: "active" }),
+      wi({ id: "w7", status: "paused", current_node_id: null, title: "Never started" }),
+    );
+    renderBoard();
+    expect(screen.getAllByTestId("board-card")).toHaveLength(2);
+    await userEvent.click(screen.getByRole("button", { name: /^Not started/ }));
+    expect(screen.getAllByTestId("board-card")).toHaveLength(1);
+    expect(screen.getByText("Never started")).toBeInTheDocument();
+  });
+
+  it("sorts within a group by the chosen key", async () => {
+    setItems(
+      wi({ id: "w1", status: "active", title: "Bravo", updated_at: "2024-01-01T00:00:00Z" }),
+      wi({ id: "w2", status: "active", title: "Alfa", updated_at: "2024-06-01T00:00:00Z" }),
+    );
+    renderBoard();
+    // default: recently updated first
+    let rows = within(group("Running")).getAllByTestId("board-card");
+    expect(within(rows[0]).getByText("Alfa")).toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByLabelText(/sort/i), "title");
+    rows = within(group("Running")).getAllByTestId("board-card");
+    expect(within(rows[0]).getByText("Alfa")).toBeInTheDocument();
+    expect(within(rows[1]).getByText("Bravo")).toBeInTheDocument();
   });
 
   it("marks an item that started from existing documents", () => {
