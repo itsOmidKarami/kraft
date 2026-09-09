@@ -339,7 +339,7 @@ auto-tag:
     - git add plugins/kraft/.claude-plugin/plugin.json plugins/kraft-lite/.claude-plugin/plugin.json
     - 'git -c user.email=ci@kraft.invalid -c user.name="Kraft CI" commit -qm "chore: plugins $TAG"'
     - git push origin "HEAD:$CI_COMMIT_BRANCH"
-    - git tag -a "$TAG" -m "$TAG"
+    - 'git -c user.email=ci@kraft.invalid -c user.name="Kraft CI" tag -a "$TAG" -m "$TAG"'
     - git push origin "$TAG"
     - echo "tagged $TAG"
 
