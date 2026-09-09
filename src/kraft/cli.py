@@ -374,8 +374,21 @@ def _cmd_search(ns: argparse.Namespace) -> None:
 
 
 def _cmd_create(ns: argparse.Namespace) -> None:
+    # Resolved here rather than sent as typed: the server joins the path onto a
+    # candidate root (the repo, or the worktree we are standing in), never onto
+    # the cwd, so `--spec specs/x.md` from a subdirectory of either would miss
+    # both. Absolute, it is still accepted only if it lands inside one of them.
+    attachments = [
+        {"kind": kind, "path": str(Path(value).expanduser().resolve())}
+        for kind, value in (("spec", ns.spec), ("plan", ns.plan))
+        if value
+    ]
     emit(
-        asyncio.run(client.create_work_item(ns.title, _repo_scope(ns), ns.chain, ns.description)),
+        asyncio.run(
+            client.create_work_item(
+                ns.title, _repo_scope(ns), ns.chain, ns.description, attachments or None
+            )
+        ),
         _render_action,
         ns.json,
     )
@@ -649,6 +662,11 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     )
     create.add_argument("--repo", help="default: the repo you are standing in")
     create.add_argument("--chain", default="default", help="chain template (default `default`)")
+    # Two flags rather than a repeatable `--attach kind=path`: there are exactly
+    # two kinds, the server refuses a duplicate kind, and these document
+    # themselves in --help.
+    create.add_argument("--spec", help="attach a spec that already exists; skips the spec node")
+    create.add_argument("--plan", help="attach a plan that already exists; skips the plan node")
     create.set_defaults(func=_cmd_create, all=False)
 
     approve = subs.add_parser("approve", parents=[common], help="approve the pending gate")

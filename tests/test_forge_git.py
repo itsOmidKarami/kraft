@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 from support.harness import make_repo
 
+from kraft import builtins as kraft_builtins
 from kraft.adapters import forge
 
 BRANCH = "kraft/abc"
@@ -93,6 +94,24 @@ def test_open_mr_ignores_gitignored_paths_against_real_git(tmp_path, monkeypatch
     (repo / "junk").mkdir()
     (repo / "junk" / "cache.txt").write_text("noise\n")
     _stub_glab(tmp_path, monkeypatch)
+
+    mr = asyncio.run(forge.GlabCli().open_mr(repo=repo, branch=BRANCH, title="t", body="b"))
+
+    assert mr.number == 54
+    assert _glab_argv(tmp_path)[:2] == ["mr", "create"]
+
+
+def test_open_mr_accepts_a_worktree_whose_attachment_was_copied_in(tmp_path, monkeypatch):
+    """Kraft-8iw6's symptom against the real binary: the document Kraft copied
+    in is committed by Kraft's own primitive, so `_assert_clean` passes and glab
+    is reached instead of the node failing with "1 uncommitted path(s)"."""
+    repo = _repo_with_origin(tmp_path)
+    _stub_glab(tmp_path, monkeypatch)
+    doc = repo / ".engineering" / "specs" / "s.md"
+    doc.parent.mkdir(parents=True)
+    doc.write_text("# the attached spec\n")
+
+    kraft_builtins._commit_paths(repo, [".engineering/specs/s.md"], "chore: attach spec for w1")
 
     mr = asyncio.run(forge.GlabCli().open_mr(repo=repo, branch=BRANCH, title="t", body="b"))
 
