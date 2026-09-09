@@ -148,6 +148,35 @@ describe("Board", () => {
     expect(screen.getByText("Never started")).toBeInTheDocument();
   });
 
+  it("hides groups the status facet did not pick", async () => {
+    setItems(
+      wi({ id: "w1", status: "active" }),
+      wi({ id: "w7", status: "paused", current_node_id: null, title: "Never started" }),
+    );
+    renderBoard();
+    await userEvent.click(screen.getByRole("button", { name: /^Not started/ }));
+    expect(screen.queryByText("Running", { selector: ".group-label" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Done", { selector: ".group-label" })).not.toBeInTheDocument();
+    expect(group("Not started")).toBeInTheDocument();
+  });
+
+  it("cmd-clicking a second status facet adds it instead of replacing the first", async () => {
+    setItems(
+      wi({ id: "w1", status: "active" }),
+      wi({ id: "w7", status: "paused", current_node_id: null, title: "Never started" }),
+    );
+    renderBoard();
+    // held modifiers only persist across calls on the same instance (v14)
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^Not started/ }));
+    await user.keyboard("{Meta>}");
+    await user.click(screen.getByRole("button", { name: /^Running/ }));
+    await user.keyboard("{/Meta}");
+    expect(group("Running")).toBeInTheDocument();
+    expect(group("Not started")).toBeInTheDocument();
+    expect(screen.getAllByTestId("board-card")).toHaveLength(2);
+  });
+
   it("sorts within a group by the chosen key", async () => {
     setItems(
       wi({ id: "w1", status: "active", title: "Bravo", updated_at: "2024-01-01T00:00:00Z" }),

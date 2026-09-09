@@ -187,6 +187,10 @@ aside .row, .narrow .row {
   gap: 10px;
   padding: 8px 16px;
   border-bottom: 1px solid var(--color-divider);
+  /* pinned so it survives scrolling the board/detail body under it (main's
+     45px offset above assumes this height) */
+  position: sticky; top: 0; z-index: 30;
+  background: var(--color-bg);
 }
 .app-nav .nav-brand { font-size: 16px; }
 /* One type treatment across the whole bar. `.nav-back` and `.nav-link` asked
@@ -217,6 +221,10 @@ aside .row, .narrow .row {
   border-right: 1px solid var(--color-divider);
   display: flex; flex-direction: column; gap: 18px;
   font-size: 13px;
+  /* pinned under the sticky header; scrolls internally rather than off-screen
+     once the board list runs past the viewport */
+  position: sticky; top: 45px; align-self: start;
+  max-height: calc(100vh - 45px); overflow-y: auto;
 }
 .facet { display: flex; flex-direction: column; gap: 2px; }
 .facet .section-label { margin: 0 0 6px; color: var(--color-text-muted); }

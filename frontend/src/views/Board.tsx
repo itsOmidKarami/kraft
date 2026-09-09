@@ -14,6 +14,18 @@ function tally(items: WorkItem[], key: (i: WorkItem) => string) {
   return [...counts].sort(([a], [b]) => a.localeCompare(b));
 }
 
+/** Plain click: select only this row (replace), or clear if it was the only
+ *  one already selected. Cmd/Ctrl-click: toggle this row into/out of the
+ *  selection, leaving the rest alone — the Finder convention. */
+function toggleFacet(current: Set<string>, name: string, additive: boolean): Set<string> {
+  if (additive) {
+    const next = new Set(current);
+    next.has(name) ? next.delete(name) : next.add(name);
+    return next;
+  }
+  return current.size === 1 && current.has(name) ? new Set<string>() : new Set([name]);
+}
+
 function Facet({
   label,
   rows,
@@ -22,8 +34,8 @@ function Facet({
 }: {
   label: string;
   rows: [string, number][];
-  value: string | null;
-  onPick: (v: string | null) => void;
+  value: Set<string>;
+  onPick: (v: string, additive: boolean) => void;
 }) {
   return (
     <div className="facet">
@@ -32,9 +44,8 @@ function Facet({
         <button
           key={name}
           className="facet-opt"
-          aria-pressed={name === value}
-          // clicking the selected facet clears it — there is no explicit "all" row
-          onClick={() => onPick(name === value ? null : name)}
+          aria-pressed={value.has(name)}
+          onClick={(e) => onPick(name, e.metaKey || e.ctrlKey)}
           title={name}
         >
           {label === "Repos" ? repoName(name) : name}
@@ -75,9 +86,11 @@ const SORTS: Record<string, (a: WorkItem, b: WorkItem) => number> = {
 export function Board() {
   const items = useStore((s) => Object.values(s.workItems));
   const connection = useStore((s) => s.connection);
-  const [repo, setRepo] = useState<string | null>(null);
-  const [tpl, setTpl] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
+  // Empty set = no filter on that facet. Cmd/ctrl-click lets more than one
+  // value be picked per facet (Facet's toggleFacet); facets still AND together.
+  const [repo, setRepo] = useState<Set<string>>(new Set());
+  const [tpl, setTpl] = useState<Set<string>>(new Set());
+  const [status, setStatus] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<keyof typeof SORTS>("updated");
   const [allDone, setAllDone] = useState(false);
 
@@ -94,46 +107,39 @@ export function Board() {
       );
   }, []);
 
-  const matchesStatus = (i: WorkItem, label: string | null) =>
-    !label || (STATUS_GROUPS.find((g) => g.label === label)?.test(i) ?? true);
+  // A facet with nothing picked matches everything; otherwise an item needs
+  // only one of the picked values (OR within a facet, AND across facets).
+  const matchesRepo = (i: WorkItem) => repo.size === 0 || repo.has(i.repo);
+  const matchesTpl = (i: WorkItem) => tpl.size === 0 || tpl.has(i.chain_template);
+  const matchesStatus = (i: WorkItem) =>
+    status.size === 0 || STATUS_GROUPS.some((g) => status.has(g.label) && g.test(i));
 
   // Each facet's counts are taken with the *other two* applied, so all three
   // filters read as combining rather than as independent views.
   const repoRows = useMemo(
-    () =>
-      tally(
-        items.filter((i) => (!tpl || i.chain_template === tpl) && matchesStatus(i, status)),
-        (i) => i.repo,
-      ),
+    () => tally(items.filter((i) => matchesTpl(i) && matchesStatus(i)), (i) => i.repo),
     [items, tpl, status],
   );
   const tplRows = useMemo(
-    () =>
-      tally(
-        items.filter((i) => (!repo || i.repo === repo) && matchesStatus(i, status)),
-        (i) => i.chain_template,
-      ),
+    () => tally(items.filter((i) => matchesRepo(i) && matchesStatus(i)), (i) => i.chain_template),
     [items, repo, status],
   );
   const statusRows = useMemo(() => {
-    const base = items.filter(
-      (i) => (!repo || i.repo === repo) && (!tpl || i.chain_template === tpl),
-    );
+    const base = items.filter((i) => matchesRepo(i) && matchesTpl(i));
     return STATUS_GROUPS.map((g) => [g.label, base.filter(g.test).length] as [string, number]);
   }, [items, repo, tpl]);
 
   const shown = useMemo(
-    () =>
-      items.filter(
-        (i) =>
-          (!repo || i.repo === repo) &&
-          (!tpl || i.chain_template === tpl) &&
-          matchesStatus(i, status),
-      ),
+    () => items.filter((i) => matchesRepo(i) && matchesTpl(i) && matchesStatus(i)),
     [items, repo, tpl, status],
   );
 
-  const groups = STATUS_GROUPS.map((g) => ({
+  // With one or more status facets picked, only their groups render — an
+  // unpicked group would show as an empty "nothing here" section otherwise.
+  const visibleStatusGroups =
+    status.size === 0 ? STATUS_GROUPS : STATUS_GROUPS.filter((g) => status.has(g.label));
+
+  const groups = visibleStatusGroups.map((g) => ({
     id: g.id,
     label: g.label,
     tone: g.id === "needs" ? ("accent" as const) : undefined,
@@ -143,9 +149,24 @@ export function Board() {
   return (
     <div className="board">
       <aside className="board-sidebar">
-        <Facet label="Repos" rows={repoRows} value={repo} onPick={setRepo} />
-        <Facet label="Template" rows={tplRows} value={tpl} onPick={setTpl} />
-        <Facet label="Status" rows={statusRows} value={status} onPick={setStatus} />
+        <Facet
+          label="Repos"
+          rows={repoRows}
+          value={repo}
+          onPick={(name, additive) => setRepo((cur) => toggleFacet(cur, name, additive))}
+        />
+        <Facet
+          label="Template"
+          rows={tplRows}
+          value={tpl}
+          onPick={(name, additive) => setTpl((cur) => toggleFacet(cur, name, additive))}
+        />
+        <Facet
+          label="Status"
+          rows={statusRows}
+          value={status}
+          onPick={(name, additive) => setStatus((cur) => toggleFacet(cur, name, additive))}
+        />
         <div className="board-foot">
           {/* the header's ConnBadge names the exact state; here it is just a pulse */}
           <span className="live" data-connection={connection} title={connection}>
