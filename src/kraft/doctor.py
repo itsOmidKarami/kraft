@@ -48,6 +48,7 @@ async def run_checks() -> list[dict]:
     )
     checks.extend(_config_checks())
     checks.append(_agent_check())
+    checks.append(_completion_check())
     if health is None:
         checks.append(_check("repos", True, "skipped: no server", skipped=True))
         checks.append(_check("worktrees", True, "skipped: no server", skipped=True))
@@ -191,6 +192,26 @@ def _agent_check() -> dict:
     if "fixtures" in Path(real).parts:
         return _check("agent cli", True, f"{found} -> {real} (the dev fake: it spends no tokens)")
     return _check("agent cli", True, found)
+
+
+def _completion_check() -> dict:
+    """Tab completion is convenience, not health: always `ok`, like `_hooks_check`
+    — a missing `eval` line is a line to add, not a reason to exit 1."""
+    shell = os.environ.get("SHELL", "")
+    if "zsh" not in shell:
+        return _check("shell completion", True, "skipped: not zsh", skipped=True)
+    rc = Path.home() / ".zshrc"
+    try:
+        registered = "register-python-argcomplete kraft" in rc.read_text()
+    except OSError:
+        registered = False
+    if registered:
+        return _check("shell completion", True, f"registered in {rc}")
+    return _check(
+        "shell completion",
+        True,
+        f'not registered — add eval "$(register-python-argcomplete kraft)" to {rc}',
+    )
 
 
 async def _repo_checks() -> list[dict]:
