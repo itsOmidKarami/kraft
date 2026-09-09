@@ -80,6 +80,7 @@ install:
     rm -f src/kraft/_bundled/templates/notify.yaml
     uv tool install --from . kraft --force
     @echo "installed. run: kraft"
+    @grep -q "register-python-argcomplete kraft" ~/.zshrc 2>/dev/null || echo 'tip: add eval "$(register-python-argcomplete kraft)" to ~/.zshrc for tab completion'
 
 # Backend tests (add args, e.g. `just test -k search`)
 test *ARGS:
