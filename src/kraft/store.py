@@ -213,6 +213,25 @@ def mark_needs_human(
         (_now(), work_item_id),
     )
     payload = {"node_id": node_id, "reason": reason}
+    # The reason names the hook that failed, never why -- that is in the failed
+    # session's log. Naming the session here is what lets the timeline offer
+    # "view log" on the one event a human actually lands on, instead of asking
+    # them to notice the worker_session_exited row above it (Kraft-eh6p). Read
+    # rather than threaded through every caller: a session id nobody passed is
+    # a button nobody gets, and there are eight call sites.
+    #
+    # The node's *latest* session, and only if that one has something to explain.
+    # Scanning for the latest `failed` session instead would hand a
+    # needs_context stop -- or a budget stop, where no session ran at all -- the
+    # log of some earlier, unrelated failure in the same node, which is worse
+    # than no button: it looks like the answer and is not.
+    last = conn.execute(
+        "SELECT id, status FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
+        "ORDER BY created_at DESC, rowid DESC LIMIT 1",
+        (work_item_id, node_id),
+    ).fetchone()
+    if last is not None and last[1] in ("failed", "needs_context"):
+        payload["session_id"] = last[0]
     if capped is not None:
         payload["capped"] = capped
     if budget is not None:

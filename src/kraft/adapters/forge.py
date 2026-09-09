@@ -84,6 +84,7 @@ class Forge(Protocol):
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None: ...
     async def ci_status(self, *, repo: Path, mr: MR, branch: str) -> CIStatus: ...
     async def merge(self, *, repo: Path, branch: str, mr: MR) -> None: ...
+    async def set_labels(self, *, repo: Path, mr: MR, labels: tuple[str, ...]) -> None: ...
     async def find_mr(self, *, repo: Path, branch: str) -> MRRef | None: ...
 
 
@@ -109,6 +110,8 @@ class FakeForge:
     #: this are unaffected.
     mergeable: bool | None = None
     merge_detail: str = ""
+    #: Labels `set_labels` put on the merge request, in call order.
+    labels: list[str] = field(default_factory=list)
 
     async def open_mr(self, *, repo: Path, branch: str, title: str, body: str) -> MR:
         number = len(self.opened) + 1
@@ -130,6 +133,9 @@ class FakeForge:
             mergeable=self.mergeable,
             merge_detail=self.merge_detail,
         )
+
+    async def set_labels(self, *, repo: Path, mr: MR, labels: tuple[str, ...]) -> None:
+        self.labels.extend(labels)
 
     async def merge(self, *, repo: Path, branch: str = "", mr: MR) -> None:
         # number 0 means "resolve from the checked-out branch", which is what
@@ -171,15 +177,30 @@ async def _run(repo: Path, args: list[str]) -> str:
     return done.stdout
 
 
+#: Kraft's own per-session bookkeeping, which lands in the worktree because the
+#: agent is told to write its summary there (`adapters/agent.py`). It is not the
+#: agent's work product, so neither the clean check nor the straggler sweep may
+#: treat it as such.
+#:
+#: A pathspec rather than a .gitignore line: this repo ignores
+#: `.engineering/sessions/` (.gitignore:54), but a repo Kraft was pointed at
+#: five minutes ago does not, and Kraft must not put its own logs into that
+#: repo's first merge request — or refuse to open one over them (Kraft-z8gj).
+#: `specs/`, `plans/` and `review_briefs/` under `.engineering/` stay in: those
+#: are work product and belong in the diff a human reviews.
+_WORK_PRODUCT = [".", ":(exclude).engineering/sessions"]
+
+
 async def _assert_clean(repo: Path) -> None:
     """Refuse to open a merge request over a worktree with uncommitted work.
 
     Untracked files are included on purpose: a source or test file the agent
     never `git add`ed is what went missing on work item 5163dd1b. Ignored files
-    are excluded by git itself, so `.pytest_cache/` and `.engineering/sessions/`
-    (.gitignore:54) do not trip it.
+    are excluded by git itself, so `.pytest_cache/` does not trip it, and
+    `_WORK_PRODUCT` drops Kraft's own session notes in a repo that has not
+    ignored them.
     """
-    raw = await _run(repo, ["git", "status", "--porcelain"])
+    raw = await _run(repo, ["git", "status", "--porcelain", "--", *_WORK_PRODUCT])
     dirty = [line[3:] for line in raw.splitlines() if line.strip()]
     if dirty:
         shown = ", ".join(dirty[:5])
@@ -188,6 +209,37 @@ async def _assert_clean(repo: Path) -> None:
             f"{len(dirty)} uncommitted path(s) in the worktree, which would not "
             f"reach the merge request: {shown}{more}"
         )
+
+
+async def commit_stragglers(repo: Path, *, message: str) -> bool:
+    """Commit whatever an agent left behind in the worktree. True if it did.
+
+    A worker is told to commit everything it changes before it exits, and one
+    that does not leaves work `_assert_clean` refuses two nodes later and a
+    worktree prune destroys — with `verify` passing in between, because the
+    files are on disk (Kraft-7fip). Kraft owns the worktree and the branch is
+    throwaway, so there is nothing to protect by refusing: commit it, and let
+    the merge request carry it.
+
+    Ignored files stay out, the same exclusion `_assert_clean` relies on, so a
+    `.pytest_cache/` left behind is not mistaken for work — and `_WORK_PRODUCT`
+    keeps Kraft's own session notes out of the merge request even in a repo that
+    has never heard of them.
+    """
+    if not (await _run(repo, ["git", "status", "--porcelain", "--", *_WORK_PRODUCT])).strip():
+        return False
+    await _run(repo, ["git", "add", "-A", "--", *_WORK_PRODUCT])
+    try:
+        await _run(repo, ["git", "commit", "-m", message])
+    except ForgeError:
+        # A commit hook that reformats what it is given exits non-zero with the
+        # files rewritten under it. Re-adding takes its edits; --no-verify then
+        # refuses to let a second opinion cost us the work, which is the whole
+        # point of this function. A hook that fails for any other reason loses
+        # nothing either -- the commit is what keeps the work reachable.
+        await _run(repo, ["git", "add", "-A", "--", *_WORK_PRODUCT])
+        await _run(repo, ["git", "commit", "--no-verify", "-m", message])
+    return True
 
 
 async def _assert_pushed(repo: Path, branch: str) -> None:
@@ -410,7 +462,79 @@ class GlabCli:
                 state = _GLAB_STATES.get(raw_state, "failed")
                 url = str(top.get("web_url", ""))
                 jobs = (f"pipeline {top.get('id')}: {raw_state}",)
+                if state == "failed":
+                    jobs += await self._failure_detail(repo, top.get("id"))
         return CIStatus(state=state, url=url, jobs=jobs, mergeable=mergeable, merge_detail=detail)
+
+    async def _failure_detail(self, repo: Path, pipeline_id) -> tuple[str, ...]:
+        """The failed jobs of a red pipeline, and the tail of what each printed.
+
+        "pipeline 2832908143: failed" is the whole of what this node used to
+        report, which is not enough for a human to act on and not enough for
+        anything to remediate: MR !89 was red because a job wanted a
+        `release::` label, and that sentence existed only in the job's trace
+        (Kraft-xh0q).
+
+        Best effort throughout. A diagnosis that cannot be fetched must not
+        turn a pipeline result that *was* read into a node failure -- the
+        pipeline is red either way, and that is the answer the caller needs.
+        """
+        if not pipeline_id:
+            return ()
+        pid = str(pipeline_id)
+        try:
+            raw = await _run(repo, ["glab", "ci", "get", "--pipeline-id", pid, "-F", "json"])
+            data = _parse_json(raw, "glab ci get")
+        except ForgeError:
+            return ()
+        if not isinstance(data, dict):
+            return ()
+        failed = [
+            str(j.get("name", ""))
+            for j in (data.get("jobs") or [])
+            if isinstance(j, dict) and str(j.get("status", "")) == "failed"
+        ]
+        detail: tuple[str, ...] = ()
+        # ponytail: first two failed jobs, last 15 lines each. A pipeline where
+        # everything failed is one story, told twice over; the cap keeps this
+        # out of the review brief's way. Widen it if a real pipeline needs it.
+        for name in failed[:2]:
+            detail += (f"job {name}: failed",)
+            try:
+                trace = await _run(repo, ["glab", "ci", "trace", name, "--pipeline-id", pid])
+            except ForgeError:
+                continue
+            detail += tuple(f"  {line}" for line in trace.strip().splitlines()[-15:])
+        return detail
+
+    async def set_labels(self, *, repo: Path, mr: MR, labels: tuple[str, ...]) -> None:
+        """Label the merge request, then start a pipeline that can see it.
+
+        `CI_MERGE_REQUEST_LABELS` is fixed when a pipeline is created, so a job
+        that failed for a missing label re-reads the old, empty value on retry.
+        Labelling alone therefore leaves the merge request looking fixed and
+        still red -- the re-create is part of the capability, not the caller's
+        homework (Kraft-xh0q).
+        """
+        if not labels:
+            return
+        target = [str(mr.number)] if mr.number > 0 else []
+        await _run(repo, ["glab", "mr", "update", *target, "--label", ",".join(labels)])
+        # `run_task` passes number 0 -- "resolve it from the checked-out branch"
+        # -- to every forge handler, so that is the number this gets on the path
+        # production actually takes. Skipping the re-create for it would leave
+        # the one real caller with a labelled merge request and the same red
+        # pipeline, which is exactly what the re-create exists to prevent.
+        number = mr.number
+        if number <= 0:
+            raw = await _run(repo, ["glab", "mr", "view", "-F", "json"])
+            number = int(_parse_json(raw, "glab mr view")["iid"])
+        # `projects/:id` is glab's own placeholder for the repo the command is
+        # run in, so this stays as repo-agnostic as every other call here.
+        await _run(
+            repo,
+            ["glab", "api", "-X", "POST", f"projects/:id/merge_requests/{number}/pipelines"],
+        )
 
     async def merge(self, *, repo: Path, branch: str, mr: MR) -> None:
         await _assert_pushed(repo, branch)
@@ -503,6 +627,18 @@ class GhCli:
             mergeable=mergeable,
             merge_detail=detail,
         )
+
+    async def set_labels(self, *, repo: Path, mr: MR, labels: tuple[str, ...]) -> None:
+        """Label the pull request.
+
+        No pipeline to re-create, unlike GitLab: a workflow that cares about
+        labels keys on `pull_request: types: [labeled]` and GitHub re-evaluates
+        it on the edit.
+        """
+        if not labels:
+            return
+        target = [str(mr.number)] if mr.number > 0 else []
+        await _run(repo, ["gh", "pr", "edit", *target, "--add-label", ",".join(labels)])
 
     async def merge(self, *, repo: Path, branch: str, mr: MR) -> None:
         await _assert_pushed(repo, branch)

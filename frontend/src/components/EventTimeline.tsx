@@ -31,6 +31,13 @@ function detailOf(e: KraftEvent): string | null {
   if (e.type === "fix_cycle_started" && Array.isArray(p.failed_tasks)) {
     return `cycle ${p.cycle}: ${(p.failed_tasks as string[]).join(", ")}`;
   }
+  // A node that repairs itself runs its own tasks twice, so without this the
+  // timeline shows the same measurement happening again and no reason for it
+  // (Kraft-rv6i).
+  if (e.type === "node_recovery_started" && Array.isArray(p.tasks)) {
+    const failed = Array.isArray(p.failed_tasks) ? (p.failed_tasks as string[]).join(", ") : "";
+    return `${failed} failed → ${(p.tasks as string[]).join(", ")}`;
+  }
   return null;
 }
 
@@ -90,8 +97,10 @@ export function EventTimeline({ events }: { events: KraftEvent[] }) {
                 <div className="event-body">
                   <span className="etype">{e.type}</span>
                   {detailOf(e) && <span className="event-detail">{detailOf(e)}</span>}
-                  {e.type.startsWith("worker_session_") &&
-                    typeof e.payload.session_id === "string" && (
+                  {/* any event that names a session, not just worker_session_*:
+                      work_item_needs_human is the one a human lands on, and its
+                      reason names the hook rather than the failure (Kraft-eh6p) */}
+                  {typeof e.payload.session_id === "string" && (
                       <button
                         className="btn btn-ghost event-log"
                         onClick={() => setSid(e.payload.session_id as string)}

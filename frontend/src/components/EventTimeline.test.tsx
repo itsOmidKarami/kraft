@@ -65,6 +65,26 @@ describe("EventTimeline", () => {
     expect(screen.getByText(/on\.test\.run/)).toBeInTheDocument();
   });
 
+  it("says what a node's repair pass is repairing", () => {
+    // The repair re-runs the node's own tasks, so the timeline would otherwise
+    // show the same measurement twice with nothing to explain it (Kraft-rv6i).
+    render(
+      <EventTimeline
+        events={[
+          ev({
+            type: "node_recovery_started",
+            payload: {
+              node_id: "mr_checks",
+              failed_tasks: ["on.ci.poll"],
+              tasks: ["on.mr.remediate"],
+            },
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText(/on\.ci\.poll failed → on\.mr\.remediate/)).toBeInTheDocument();
+  });
+
   it("says which webhook failed and why, not just that one did", () => {
     // The point of the event is diagnosis: a dead webhook has to be
     // distinguishable from a quiet one (Kraft-8mu.11).
@@ -143,7 +163,7 @@ describe("EventTimeline", () => {
     expect(container.querySelector(".event-dot")).toHaveAttribute("data-age", "0");
   });
 
-  it("offers a log link only on worker-session events", () => {
+  it("offers a log link on any event that names a session", () => {
     render(
       <EventTimeline
         events={[
@@ -153,5 +173,23 @@ describe("EventTimeline", () => {
       />,
     );
     expect(screen.getAllByRole("button", { name: "view log" })).toHaveLength(1);
+  });
+
+  it("offers a log link on work_item_needs_human, where a human actually lands", () => {
+    // Kraft-eh6p: the reason names the hook, not the failure. The failure is in
+    // the session's log, and this button is the only route to it that does not
+    // require noticing the worker_session_exited row above.
+    render(
+      <EventTimeline
+        events={[
+          ev({
+            seq: 1,
+            type: "work_item_needs_human",
+            payload: { node_id: "open_mr", reason: "task failed in node open_mr: on.mr.open", session_id: "s9" },
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "view log" })).toBeInTheDocument();
   });
 });

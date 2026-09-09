@@ -123,3 +123,76 @@ def test_merge_accepts_a_pushed_head_against_real_git(tmp_path, monkeypatch):
     asyncio.run(forge.GlabCli().merge(repo=repo, branch=BRANCH, mr=forge.MR(0, "")))
 
     assert _glab_argv(tmp_path)[:2] == ["mr", "merge"]
+
+
+def test_commit_stragglers_commits_everything_the_agent_left(tmp_path):
+    """Kraft-7fip. A worker that edits a tracked file, adds a new one and exits
+    without committing leaves work that `_assert_clean` refuses two nodes later
+    and a worktree prune destroys. Kraft owns the worktree, so it commits."""
+    repo = _repo_with_origin(tmp_path)
+    (repo / "work.txt").write_text("edited, never committed\n")
+    (repo / "forgotten.py").write_text("never added\n")
+
+    committed = asyncio.run(forge.commit_stragglers(repo, message="wip: implementation"))
+
+    assert committed is True
+    assert _git(repo, "status", "--porcelain") == ""
+    assert "wip: implementation" in _git(repo, "log", "-1", "--format=%s")
+    assert set(_git(repo, "show", "--name-only", "--format=", "HEAD").split()) == {
+        "work.txt",
+        "forgotten.py",
+    }
+
+
+def test_commit_stragglers_leaves_a_clean_worktree_alone(tmp_path):
+    """No empty commit, and no lie in the log: a worker that committed its own
+    work must not gain a second, empty commit on top of it."""
+    repo = _repo_with_origin(tmp_path)
+    before = _git(repo, "rev-parse", "HEAD")
+
+    committed = asyncio.run(forge.commit_stragglers(repo, message="wip: implementation"))
+
+    assert committed is False
+    assert _git(repo, "rev-parse", "HEAD") == before
+
+
+def test_kraft_session_notes_are_not_the_agents_work_product(tmp_path):
+    """Kraft-z8gj. The agent is told to write its summary to
+    `.engineering/sessions/`, and Kraft's own repo gitignores that — a repo
+    Kraft was pointed at five minutes ago does not. Sweeping it up puts Kraft's
+    logs in that repo's first merge request; refusing to open one over it is the
+    same bug wearing the other hat. Work product under `.engineering/` still
+    goes in."""
+    repo = _repo_with_origin(tmp_path)
+    before = _git(repo, "rev-parse", "HEAD")
+    (repo / ".engineering" / "sessions").mkdir(parents=True)
+    (repo / ".engineering" / "sessions" / "abc.md").write_text("what I did today\n")
+
+    assert asyncio.run(forge.commit_stragglers(repo, message="wip: implementation")) is False
+    assert _git(repo, "rev-parse", "HEAD") == before
+    # ... and open_mr is not blocked by it either
+    asyncio.run(forge._assert_clean(repo))
+
+    (repo / ".engineering" / "specs").mkdir()
+    (repo / ".engineering" / "specs" / "abc.md").write_text("the design\n")
+
+    assert asyncio.run(forge.commit_stragglers(repo, message="wip: implementation")) is True
+    tracked = _git(repo, "ls-files", ".engineering").split()
+    assert tracked == [".engineering/specs/abc.md"]
+
+
+def test_commit_stragglers_ignores_gitignored_paths(tmp_path):
+    """Same exclusion `_assert_clean` relies on: a `.pytest_cache/` left behind
+    is not work, and committing it would put junk in the merge request."""
+    repo = _repo_with_origin(tmp_path)
+    (repo / ".gitignore").write_text("junk/\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "ignore junk")
+    before = _git(repo, "rev-parse", "HEAD")
+    (repo / "junk").mkdir()
+    (repo / "junk" / "cache.txt").write_text("noise\n")
+
+    committed = asyncio.run(forge.commit_stragglers(repo, message="wip: implementation"))
+
+    assert committed is False
+    assert _git(repo, "rev-parse", "HEAD") == before
