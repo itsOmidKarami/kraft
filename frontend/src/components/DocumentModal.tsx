@@ -15,7 +15,7 @@ import {
 import * as api from "../api";
 import { ago } from "../format";
 import type { DocumentDetail } from "../types";
-import { useModal } from "../useModal";
+import { backdropProps, useModal } from "../useModal";
 
 /**
  * A document, read-only, over the work item (design 6a). Not a route: the
@@ -130,7 +130,7 @@ export function DocumentModal({
   const current = EDITORS.find((e) => e.id === preferred) ?? EDITORS[EDITORS.length - 1];
 
   return (
-    <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label="document">
+    <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label="document" {...backdropProps(onClose)}>
       <div className="dialog doc-modal" ref={ref}>
         <header className="doc-modal-head">
           <Icon size={20} className="doc-modal-icon" />
