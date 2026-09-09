@@ -18,6 +18,9 @@ function detailOf(e: KraftEvent): string | null {
   const p = e.payload as Record<string, unknown>;
   if (e.type === "gate_rejected" && typeof p.note === "string") return p.note;
   if (e.type === "work_item_needs_human" && typeof p.reason === "string") return p.reason;
+  if (e.type === "work_item_rate_limited" && typeof p.retry_at === "string") {
+    return `retries at ${p.retry_at}`;
+  }
   // Concerns reach the UI only through the gate panel, so a chain with no
   // review gate stored them and showed them nowhere; the timeline is the one
   // surface every chain has.

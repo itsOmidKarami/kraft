@@ -79,6 +79,7 @@ export function repoName(path: string): string {
 const STATUS_WORDS: Record<string, string> = {
   capped_out: "capped out",
   needs_human: "needs you",
+  rate_limited: "rate limited",
 };
 
 export function statusWord(status: string): string {
