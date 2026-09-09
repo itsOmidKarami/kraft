@@ -546,7 +546,18 @@ def _cmd_diff(ns: argparse.Namespace) -> None:
             # empty and unknown are different answers, in every view
             print("no baseline recorded for this work item")
             return
-        paths = [f["path"] for f in payload.get("files", [])] + list(payload.get("untracked", []))
+        # landed paths too: --name-only that answered only for the in-flight
+        # side would drop committed work from the CLI, which is Kraft-nceo from
+        # the other direction. dict.fromkeys dedupes a path that is on both
+        # sides while keeping in-flight-first order.
+        landed = (payload.get("landed") or {}).get("files") or []
+        paths = list(
+            dict.fromkeys(
+                [f["path"] for f in payload.get("files", [])]
+                + [f["path"] for f in landed]
+                + list(payload.get("untracked", []))
+            )
+        )
         print("\n".join(paths))
         return
     text = render.diff_stat(payload) if ns.stat else render.diff_body(payload)

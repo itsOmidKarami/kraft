@@ -158,13 +158,28 @@ export interface WorkItemDocument {
   indexed_at: string;
 }
 
+export interface DiffFile {
+  path: string;
+  insertions: number;
+  deletions: number;
+}
+
 export interface WorkItemDiff {
   work_item_id: string;
   base_ref: string | null;
-  files: { path: string; insertions: number; deletions: number }[];
+  /** In-flight: `HEAD`..working tree, the change under review. */
+  files: DiffFile[];
   diff: string;
   untracked: string[];
   truncated: boolean;
+  /** `base_ref..HEAD` — what earlier nodes committed. Optional: an older
+   *  server, and every fixture written before Kraft-nceo, has no such key. */
+  landed?: {
+    commits: string[];
+    files: DiffFile[];
+    diff: string;
+    truncated: boolean;
+  };
 }
 
 /** The document a gate is a decision about, read off the worktree. */

@@ -7,6 +7,7 @@ and the package a review agent is handed by path.
 
 import asyncio
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -226,3 +227,49 @@ def test_a_non_review_hook_gets_no_package(tmp_path, monkeypatch):
 
     rd = asyncio.run(scenario())
     assert list(rd.results.glob("*.review.md")) == []
+
+
+def test_read_change_with_head_excludes_uncommitted_work(tmp_path):
+    """Kraft-nceo. `base..HEAD` is what earlier nodes committed; the working
+    tree is what the current node is doing. One range showed them as one
+    change."""
+    repo = make_repo(tmp_path)
+    base = _head(repo)
+    (repo / "doc.md").write_text("landed paperwork\n")
+    config.git_read(repo, "add", "-A")
+    subprocess.run(
+        ["git", "commit", "-m", "land the doc"], cwd=repo, capture_output=True, check=True
+    )
+    (repo / "calc.py").write_text("in flight code\n")
+    (repo / "brand_new.py").write_text("x = 1\n")
+
+    landed = review.read_change(repo, base, head="HEAD")
+    assert landed is not None
+    assert [f["path"] for f in landed.files] == ["doc.md"]
+    assert "landed paperwork" in landed.diff
+    assert "in flight code" not in landed.diff
+    # `git status --porcelain` is only meaningful for the working tree
+    assert landed.untracked == []
+    assert len(landed.commits) == 1 and "land the doc" in landed.commits[0]
+
+
+def test_write_package_still_spans_base_to_working_tree(tmp_path):
+    """The split is for the human at the gate. A review agent reading a file
+    has no collapse to be defeated by, so its package keeps the one combined
+    range (spec §1, "write_package is not changed")."""
+    repo = make_repo(tmp_path)
+    base = _head(repo)
+    (repo / "doc.md").write_text("landed paperwork\n")
+    config.git_read(repo, "add", "-A")
+    subprocess.run(
+        ["git", "commit", "-m", "land the doc"], cwd=repo, capture_output=True, check=True
+    )
+    (repo / "calc.py").write_text("in flight code\n")
+    results = tmp_path / "results"
+    results.mkdir()
+
+    path = review.write_package(results, repo, base, "sess-span")
+    assert path is not None
+    body = path.read_text()
+    assert "landed paperwork" in body
+    assert "in flight code" in body

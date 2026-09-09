@@ -21,6 +21,18 @@ const PROMPTS: Record<string, string> = {
 };
 
 /**
+ * What the gate's artifact *is*, per gate. A map rather than a ternary on
+ * `gate`: a new artifact-carrying gate should be a new line here, not a new
+ * branch in the caller (Kraft-yytk).
+ */
+export const ARTIFACT_LABELS: Record<string, string> = {
+  spec_approval: "Review spec",
+  plan_approval: "Review plan",
+  chain_finalized: "Review chain",
+  human_review_approval: "Review brief",
+};
+
+/**
  * The node a rejection re-enters the chain at, when that is not the gate's own
  * node. Read from the item's chain rather than hard-coded per gate: the
  * routing is chain shape, and the server resolves it from the same field.

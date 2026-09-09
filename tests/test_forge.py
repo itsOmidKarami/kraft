@@ -8,7 +8,9 @@ stubbed CLI on PATH; nothing in this file touches the network.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import sqlite3
 import subprocess
 
 import pytest
@@ -353,6 +355,42 @@ def test_push_sets_the_upstream_on_the_work_item_branch(tmp_path, monkeypatch):
 
 def _session_log(tmp_path, session_id: str) -> str:
     return (tmp_path / "run" / "logs" / f"{session_id}.log").read_text()
+
+
+def _events(tmp_path) -> list[tuple[str, dict]]:
+    """(type, payload) for every event the run wrote, in order."""
+    conn = sqlite3.connect(str(RunDirs(tmp_path / "run").db))
+    try:
+        rows = conn.execute("SELECT type, payload FROM events ORDER BY seq").fetchall()
+    finally:
+        conn.close()
+    return [(t, json.loads(p)) for t, p in rows]
+
+
+def test_open_mr_records_an_mr_opened_event(tmp_path, monkeypatch):
+    """Kraft-d2sq. The URL went into the session log text and nowhere else:
+    not on the work item row, not in an event, not in the session result. Past
+    open_mr there was no way to reach the merge request but to open the forge
+    and search for the branch."""
+    fake = forge.FakeForge()
+    returned, recorded = _forge_session(tmp_path, monkeypatch, fake, "open_mr", "s-mr1")
+
+    assert (returned, recorded) == ("done", "done")
+    assert [p for t, p in _events(tmp_path) if t == "mr_opened"] == [
+        {"number": 1, "url": "http://fake.forge/1"}
+    ]
+
+
+def test_reused_mr_records_an_mr_opened_event(tmp_path, monkeypatch):
+    """The reuse path too: a rejected review walks the item back through
+    open_mr, and the item must still carry a current record of its MR."""
+    fake = forge.FakeForge(opened={7: "kraft/w1"})
+    returned, recorded = _forge_session(tmp_path, monkeypatch, fake, "open_mr", "s-mr2")
+
+    assert (returned, recorded) == ("done", "done")
+    assert [p for t, p in _events(tmp_path) if t == "mr_opened"] == [
+        {"number": 7, "url": "http://fake.forge/7"}
+    ]
 
 
 def test_ci_poll_waits_out_a_pending_pipeline(tmp_path, monkeypatch):

@@ -430,4 +430,67 @@ describe("WorkItemDetail", () => {
     renderDetail();
     expect(screen.queryByText(/Review spec/)).toBeNull();
   });
+
+  it("offers both the review brief and the diff at the human_review gate", async () => {
+    // Kraft-yytk: `human_review_approval` short-circuited to the diff, so the
+    // one page the review-brief skill spent a session writing had no button
+    // anywhere and the last gate before merge was approved on raw diff alone.
+    vi.spyOn(api, "getWorkItemArtifact").mockResolvedValue({
+      work_item_id: "w1",
+      path: ".engineering/reviews/w1.md",
+      title: "Review brief",
+      content: "CI is green. One minor finding left in.",
+      truncated: false,
+    });
+    setup({
+      status: "needs_human",
+      pending_gate: "human_review_approval",
+      gate_artifact: ".engineering/reviews/w1.md",
+    });
+    renderDetail();
+
+    const brief = await screen.findByRole("button", { name: /review brief/i });
+    expect(screen.getByRole("button", { name: /review changes/i })).toBeInTheDocument();
+
+    await userEvent.click(brief);
+    expect(await screen.findByText(/one minor finding left in/i)).toBeInTheDocument();
+    expect(api.getWorkItemArtifact).toHaveBeenCalledWith("w1");
+  });
+
+  it("still offers the diff when the review brief is missing", async () => {
+    // The agent reported done without honouring the artifact contract. Rare
+    // (agent.py's post_resolve fails the node), and the gate stays answerable.
+    setup({
+      status: "needs_human",
+      pending_gate: "human_review_approval",
+      gate_artifact: null,
+    });
+    renderDetail();
+    expect(await screen.findByRole("button", { name: /review changes/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /review brief/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /^approve$/i })).toBeEnabled();
+  });
+
+  it("links to the merge request once an mr_opened event exists", () => {
+    const mrEvent = {
+      seq: 9,
+      work_item_id: "w1",
+      type: "mr_opened",
+      payload: { number: 76, url: "https://gitlab.example.com/x/y/-/merge_requests/76" },
+      created_at: "2026-09-09T10:00:00Z",
+    };
+
+    setup({ current_node_id: "human_review" });
+    const { unmount } = renderDetail();
+    expect(screen.queryByRole("link", { name: "!76" })).toBeNull();
+    unmount();
+
+    setup({ current_node_id: "human_review" });
+    useStore.setState({ eventsByItem: { w1: [mrEvent] } } as never);
+    renderDetail();
+    const link = screen.getByRole("link", { name: "!76" });
+    expect(link).toHaveAttribute("href", "https://gitlab.example.com/x/y/-/merge_requests/76");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noreferrer");
+  });
 });

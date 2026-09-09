@@ -92,28 +92,83 @@ def item_without_base_ref(client, seeded_item, tmp_path):
     return seeded_item
 
 
-def test_diff_shows_committed_and_uncommitted_changes(client, seeded_item, worktree):
-    _write(worktree / "calc.py", "committed\n")
+def test_diff_splits_landed_commits_from_in_flight_work(client, seeded_item, worktree):
+    """Kraft-nceo. The chain's own committed docs are not the change under
+    review, and must not spend the viewer's open-line budget ahead of it."""
+    _write(worktree / "doc.md", "landed paperwork\n")
     subprocess.run(["git", "add", "-A"], cwd=worktree, check=True)
-    subprocess.run(["git", "commit", "-m", "c"], cwd=worktree, check=True)
-    _write(worktree / "calc.py", "committed\nuncommitted\n")
+    subprocess.run(["git", "commit", "-m", "land the doc"], cwd=worktree, check=True)
+    _write(worktree / "calc.py", "in flight code\n")
 
     body = client.get(f"/work-items/{seeded_item}/diff").json()
-    assert "committed" in body["diff"]
-    assert "uncommitted" in body["diff"]
-    # not files[0]: the real chain's own session summary (.engineering/...) is
-    # also a genuine tracked change here, and sorts before "calc.py".
+
+    assert "in flight code" in body["diff"]
+    assert "landed paperwork" not in body["diff"]
     assert "calc.py" in {f["path"] for f in body["files"]}
+    assert "doc.md" not in {f["path"] for f in body["files"]}
     assert body["truncated"] is False
+
+    assert "landed paperwork" in body["landed"]["diff"]
+    assert "in flight code" not in body["landed"]["diff"]
+    assert "doc.md" in {f["path"] for f in body["landed"]["files"]}
+    assert any("land the doc" in c for c in body["landed"]["commits"])
+
+
+def test_diff_landed_is_empty_when_nothing_is_committed(client, seeded_item, worktree):
+    """A worktree whose HEAD is where the chain left it: `landed` is empty and
+    the page reads exactly as it did before the split."""
+    # roll the worktree back to base_ref so nothing at all is committed past it
+    base = client.get(f"/work-items/{seeded_item}/diff").json()["base_ref"]
+    subprocess.run(["git", "reset", "--hard", base], cwd=worktree, check=True)
+    _write(worktree / "calc.py", "in flight code\n")
+
+    body = client.get(f"/work-items/{seeded_item}/diff").json()
+    assert body["landed"]["files"] == []
+    assert body["landed"]["diff"] == ""
+    assert body["landed"]["commits"] == []
+    assert body["landed"]["truncated"] is False
+    assert "in flight code" in body["diff"]
+
+
+def test_diff_landed_and_in_flight_truncate_independently(
+    client, seeded_item, worktree, monkeypatch
+):
+    """Each side gets the whole DIFF_MAX_BYTES budget and its own flag: the
+    in-flight change must not be squeezed by the size of the paperwork."""
+    import kraft.api as api_mod
+
+    monkeypatch.setattr(api_mod, "DIFF_MAX_BYTES", 200)
+    for i in range(20):
+        _write(worktree / f"landed{i}.py", "x = 1\n" * 100)
+    subprocess.run(["git", "add", "-A"], cwd=worktree, check=True)
+    subprocess.run(["git", "commit", "-m", "bulk"], cwd=worktree, check=True)
+    for i in range(20):
+        _write(worktree / f"flight{i}.py", "y = 2\n" * 100)
+    subprocess.run(["git", "add", "-A"], cwd=worktree, check=True)
+
+    body = client.get(f"/work-items/{seeded_item}/diff").json()
+    assert body["truncated"] is True
+    assert body["landed"]["truncated"] is True
+    # Each side is cut against the cap on its own, not against a shared budget:
+    # both still carry a diff, and neither carries the other's files. Under one
+    # combined range the landed bulk consumed the cap and the in-flight change
+    # arrived as nothing but a file list.
+    assert body["diff"] and body["landed"]["diff"]
+    assert "landed" not in body["diff"]
+    assert "flight" not in body["landed"]["diff"]
+    # the file lists are never truncated, on either side
+    assert {f"flight{i}.py" for i in range(20)} <= {f["path"] for f in body["files"]}
+    assert {f"landed{i}.py" for i in range(20)} <= {f["path"] for f in body["landed"]["files"]}
 
 
 def test_diff_keeps_a_trailing_blank_context_line(client, seeded_item, worktree):
     """git_read strips, which is right for `rev-parse` and wrong for a diff: a
     hunk whose last line is blank would lose it to the strip, and the reviewer
-    would read a change one line shorter than it is."""
-    _write(worktree / "calc.py", "first\n\n")
-    subprocess.run(["git", "add", "-A"], cwd=worktree, check=True)
-    subprocess.run(["git", "commit", "-m", "blank tail"], cwd=worktree, check=True)
+    would read a change one line shorter than it is.
+
+    Uncommitted end to end (nothing landed): the added line is new to HEAD, so
+    it is a genuine `+`, not a context line the split would have re-labelled.
+    """
     _write(worktree / "calc.py", "changed\n\n")
 
     body = client.get(f"/work-items/{seeded_item}/diff").json()["diff"]
