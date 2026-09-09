@@ -4,7 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import * as api from "../api";
 import { useStore } from "../store";
 import type { SearchResult, TemplateSummary } from "../types";
-import { useModal } from "../useModal";
+import { backdropProps, useModal } from "../useModal";
 
 /**
  * New work item (design 1g). The "Advanced · cross-repo" disclosure is collapsed
@@ -146,7 +146,7 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label="New work item">
+    <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label="New work item" {...backdropProps(onClose)}>
       <form className="dialog intake" onSubmit={submit} ref={ref}>
         <div className="dialog-title">New work item</div>
 

@@ -4,7 +4,7 @@ import * as api from "../api";
 import { clock, elapsed, tokens, usd } from "../format";
 import { findSession } from "../store";
 import type { LogLine } from "../types";
-import { useModal } from "../useModal";
+import { backdropProps, useModal } from "../useModal";
 import { StatusGlyph } from "./ui";
 
 /**
@@ -141,7 +141,7 @@ export function LogModal({ sessionId, onClose }: { sessionId: string; onClose: (
   }
 
   return (
-    <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label="session log">
+    <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label="session log" {...backdropProps(onClose)}>
       <div className="dialog log-modal elev-lg" ref={ref}>
         <header className="log-head">
           <StatusGlyph status={session?.status ?? "unknown"} />

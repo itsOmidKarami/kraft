@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { useModal } from "./useModal";
+import { backdropProps, useModal } from "./useModal";
 
 function Dialog({ onClose }: { onClose: () => void }) {
   const ref = useModal<HTMLDivElement>(onClose);
@@ -57,5 +57,45 @@ describe("useModal", () => {
     expect(screen.getByRole("button", { name: "first" })).toHaveFocus();
     unmount();
     expect(opener).toHaveFocus();
+  });
+});
+
+function Backdrop({ onClose }: { onClose: () => void }) {
+  return (
+    <div data-testid="backdrop" {...backdropProps(onClose)}>
+      <div className="dialog">
+        <button>inside</button>
+      </div>
+    </div>
+  );
+}
+
+describe("backdropProps", () => {
+  it("closes on a press on the backdrop itself", async () => {
+    const onClose = vi.fn();
+    render(<Backdrop onClose={onClose} />);
+    await userEvent.click(screen.getByTestId("backdrop"));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("ignores a press that started inside the dialog", async () => {
+    const onClose = vi.fn();
+    render(<Backdrop onClose={onClose} />);
+    await userEvent.click(screen.getByRole("button", { name: "inside" }));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("ignores a drag released over the backdrop", async () => {
+    const onClose = vi.fn();
+    render(<Backdrop onClose={onClose} />);
+    const backdrop = screen.getByTestId("backdrop");
+    // text selected inside the dialog and released outside it: mousedown lands
+    // on the dialog, so only the bubbled click reaches the backdrop
+    await userEvent.pointer([
+      { keys: "[MouseLeft>]", target: screen.getByRole("button", { name: "inside" }) },
+      { target: backdrop },
+      { keys: "[/MouseLeft]" },
+    ]);
+    expect(onClose).not.toHaveBeenCalled();
   });
 });
