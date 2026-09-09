@@ -53,6 +53,7 @@ from kraft.templates import (
     RegistryError,
     load_registry,
     load_templates,
+    validate_nodes,
 )
 from kraft.ws import Broadcaster
 
@@ -471,7 +472,11 @@ class NewWorkItem(BaseModel):
     #: only a label.
     description: str = ""
     repo: str
-    chain_template: str = "default"
+    #: None means no explicit template was chosen (Kraft-cd47) -- resolved to
+    #: the `default` template below, at lookup time, and stored as None so it
+    #: stays distinguishable from an item that named `chain_template:
+    #: "default"` outright.
+    chain_template: str | None = None
     #: cross-repo (design 1g "Advanced · cross-repo"): submodule paths from the
     #: repo's .gitmodules, and what happens to the root pointer when they land
     submodules: list[str] = []
@@ -586,7 +591,9 @@ async def create_work_item(body: NewWorkItem, request: Request):
         # posture as an invalid registry — do not accept a run we cannot bound.
         detail = "; ".join(st.invalid_policy)
         raise HTTPException(503, f"policy config invalid, refusing work: {detail}")
-    template = st.templates.valid.get(body.chain_template)
+    template = st.templates.valid.get(
+        body.chain_template if body.chain_template is not None else "default"
+    )
     if template is None:
         raise HTTPException(422, "unknown or invalid template")
     if body.root_merge_policy not in store.ROOT_MERGE_POLICIES:
@@ -602,6 +609,12 @@ async def create_work_item(body: NewWorkItem, request: Request):
             description=body.description,
             repo=body.repo,
             template=template,
+            # The raw request value, not the resolved template's id (Kraft-cd47):
+            # None here means no explicit template was chosen, and must stay
+            # None in the row -- `intake`'s own default would otherwise store
+            # `template.id`, indistinguishable from an item that named
+            # `chain_template: "default"` outright.
+            chain_template=body.chain_template,
             bd_cwd=_bd_cwd(),
             submodules=body.submodules,
             root_merge_policy=body.root_merge_policy,
@@ -742,6 +755,60 @@ def _gate_artifact(st, row, gate: str | None) -> str | None:
         if (worktree / rel).is_file():
             return rel
     return None
+
+
+def _strip_front_matter(text: str) -> str:
+    """The body of an artifact file, after its mandatory YAML front matter
+    (`agent._ARTIFACT`'s contract, shared by every artifact-carrying hook).
+    The whole text back if there is no front-matter block, so a hand-edited
+    or malformed file still gets a chance to parse as-is."""
+    if not text.startswith("---\n"):
+        return text
+    end = text.find("\n---\n", 4)
+    return text[end + 5 :] if end != -1 else text
+
+
+def _splice_chain_review(st, row) -> tuple[dict | None, str | None]:
+    """The chain_finalized gate's approval decision (Kraft-hm0).
+
+    Reads the `chain_review` artifact, parses its `{status,
+    revised_chain_nodes, rationale}` envelope (JSON in the artifact body,
+    after the shared front-matter block), and validates a revision through
+    Kraft-unk's splice-tier `validate_nodes` before it is trusted anywhere
+    near `chain_definition`.
+
+    Returns `(spliced_chain, None)` when the gate may advance, or `(None,
+    reason)` when it must not — approving a gate must never be the thing
+    that lets a corrupt chain through, so every failure here stops the item
+    at needs_human instead of silently keeping the old tail.
+    """
+    rel = agent_mod.artifact_path("chain_review", row["id"])
+    path = st.run_dirs.worktrees / row["id"] / rel
+    if not path.is_file():
+        return None, "chain_review: no artifact found; the worker did not write one"
+    try:
+        envelope = json.loads(_strip_front_matter(path.read_text()))
+    except (OSError, ValueError) as exc:
+        return None, f"chain_review: could not parse artifact: {exc}"
+    if not isinstance(envelope, dict) or envelope.get("status") not in (
+        "ready_for_approval",
+        "error",
+    ):
+        return None, "chain_review: artifact is missing a valid 'status'"
+    if envelope["status"] == "error":
+        return None, envelope.get("rationale") or "chain_review: reported status 'error'"
+
+    nodes = envelope.get("revised_chain_nodes")
+    errs = validate_nodes(nodes, st.registry) if isinstance(nodes, list) else ["not a list"]
+    if errs:
+        return None, f"chain_review: revised_chain_nodes invalid: {errs[0]}"
+
+    chain = json.loads(row["chain_definition"])
+    tail_start = _gate_node_index(chain, "chain_finalized") + 1
+    # No special-case for an unchanged tail (spec: splicing the same list back
+    # in is a no-op in effect) -- one code path for both, not two that drift.
+    chain["nodes"][tail_start:] = nodes
+    return chain, None
 
 
 class GateReject(BaseModel):
@@ -1154,8 +1221,19 @@ async def approve_gate(wid: str, gate: str, request: Request):
         raise HTTPException(404, f"unknown gate {gate!r}")
     if _pending_gate(st, wid) != gate:
         raise HTTPException(409, f"gate {gate!r} is not pending")
+
+    if gate == "chain_finalized":
+        chain, reason = _splice_chain_review(st, row)
+        if chain is None:
+            await st.db.write(
+                lambda c: store.mark_needs_human(c, wid, row["current_node_id"], reason)
+            )
+            return {k: v for k, v in dict(_work_item_row(st, wid)).items()}
+        await st.db.write(lambda c: store.splice_chain(c, wid, json.dumps(chain)))
+    else:
+        chain = json.loads(row["chain_definition"])
+
     await st.db.write(lambda c: store.approve_gate(c, wid, gate))
-    chain = json.loads(row["chain_definition"])
     start = _gate_node_index(chain, gate) + 1
     _spawn(
         request.app,

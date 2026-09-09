@@ -99,7 +99,7 @@ def fake_registry(python_exe: str, fake_agent_path: Path) -> Registry:
     # The shipped registry binds these to `claude`. A test that drives the
     # default chain must not shell out to the operator's real agent, and a
     # missing binary would land the item in needs_human rather than at a gate.
-    for hook in ("on.spec.requested", "on.plan.requested"):
+    for hook in ("on.spec.requested", "on.plan.requested", "on.chain.review_ready"):
         hooks[hook] = {**hooks[hook], "command": fake}
     # The shipped registry's back half is real now (Kraft-33j): four forge
     # hooks on `backend: auto`, and a human_review hook bound to the operator's
@@ -125,6 +125,14 @@ def fake_templates_dir(tmp_path: Path, agent_command: str, *, planning_hooks: bo
     Pass `planning_hooks=True` to bind them to `agent_command` instead, the way
     `fake_registry` above does: spread the shipped binding and swap only the
     command, so its `skill:`/`artifact:` keys survive.
+
+    `on.chain.review_ready` is always bound to `agent_command`, unlike spec and
+    plan: `POST .../gates/chain_finalized/approve` reads and parses its
+    artifact unconditionally now (Kraft-hm0), so a `noop` binding would leave
+    every caller that approves that gate stuck at needs_human for a missing
+    artifact. `fixtures/fake-claude.sh` answers with the chain's own unchanged
+    tail, read back out of `chain_definition`, so a caller that never touches
+    chain review still walks the rest of the chain exactly as before.
     """
     d = tmp_path / "templates"
     d.mkdir(parents=True, exist_ok=True)
@@ -138,8 +146,8 @@ def fake_templates_dir(tmp_path: Path, agent_command: str, *, planning_hooks: bo
         # byte diff rather than a real one.
         return {"kind": "builtin", "handler": "noop"}
 
+    shipped = load_registry(_REPO_ROOT / "templates" / "registry.yaml").hooks
     if planning_hooks:
-        shipped = load_registry(_REPO_ROOT / "templates" / "registry.yaml").hooks
         spec_hook = {**shipped["on.spec.requested"], "command": agent_command}
         plan_hook = {**shipped["on.plan.requested"], "command": agent_command}
     else:
@@ -158,7 +166,10 @@ def fake_templates_dir(tmp_path: Path, agent_command: str, *, planning_hooks: bo
                     },
                     "on.spec.requested": spec_hook,
                     "on.plan.requested": plan_hook,
-                    "on.chain.review_ready": noop(),
+                    "on.chain.review_ready": {
+                        **shipped["on.chain.review_ready"],
+                        "command": agent_command,
+                    },
                     "on.review.local.run": noop(),
                     "on.mr.open": noop(),
                     "on.ci.poll": noop(),

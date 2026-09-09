@@ -13,6 +13,14 @@ def _tables(conn):
     return {r[0] for r in rows}
 
 
+def test_migrations_keys_are_contiguous():
+    """Two branches adding a migration under the same key merge as a silent
+    last-write-wins dict literal, not a guaranteed git conflict -- nothing else
+    catches a collision or a gap in the numbering (Kraft-cd47 hit this)."""
+    keys = sorted(db._MIGRATIONS)
+    assert keys == list(range(min(keys), db.SCHEMA_VERSION))
+
+
 def test_migrate_creates_schema_from_empty(tmp_path):
     conn = db._connect(tmp_path / "orchestrator.db")
     db.migrate(conn)
@@ -729,6 +737,52 @@ def test_migrate_v15_to_v16_adds_implements_beads(tmp_path):
     row = conn2.execute("SELECT title, implements_beads FROM work_items WHERE id='w1'").fetchone()
     assert row["title"] == "t"
     assert row["implements_beads"] is None
+
+
+def test_migrate_v16_to_v17_drops_chain_template_not_null(tmp_path):
+    """SQLite cannot alter a column constraint, so v16's `chain_template TEXT
+    NOT NULL` is rebuilt the same 4-step way migration 11 was (Kraft-cd47).
+    Existing rows keep their value; a new row may now write NULL. The rebuild
+    also carries `implements_beads` (migration 15) forward, since v16 already
+    has it."""
+    path = tmp_path / "orchestrator.db"
+    conn = db._connect(path)
+    _build_old_db(
+        conn,
+        16,
+        replace=(("chain_template   TEXT,", "chain_template   TEXT NOT NULL,"),),
+    )
+    conn.execute(
+        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
+        "'active','now','now')"
+    )
+    conn.commit()
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+            "status, created_at, updated_at) VALUES ('w2','t','/r',NULL,'{}',"
+            "'active','now','now')"
+        )
+    conn.close()
+
+    conn2 = db._connect(path)
+    db.migrate(conn2)
+    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    # the pre-existing row survived the rebuild with its value intact
+    row = conn2.execute("SELECT chain_template FROM work_items WHERE id='w1'").fetchone()
+    assert row["chain_template"] == "quick-task"
+    # and implements_beads (migration 15) survived the rebuild too
+    cols = {r["name"] for r in conn2.execute("PRAGMA table_info(work_items)")}
+    assert "implements_beads" in cols
+    # and the column now accepts NULL
+    conn2.execute(
+        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+        "status, created_at, updated_at) VALUES ('w2','t','/r',NULL,'{}',"
+        "'active','now','now')"
+    )
+    row2 = conn2.execute("SELECT chain_template FROM work_items WHERE id='w2'").fetchone()
+    assert row2[0] is None
 
 
 def test_fresh_schema_has_description(tmp_path):
