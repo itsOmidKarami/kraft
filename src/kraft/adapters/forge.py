@@ -27,6 +27,15 @@ DEFAULT_POLL_TIMEOUT = 1800.0
 DEFAULT_POLL_INTERVAL = 5.0
 _MAX_POLL_INTERVAL = 60.0
 
+#: How long the merge node waits for the forge to report the merge request
+#: actually merged, and how long it sleeps between reads. Five minutes rather
+#: than DEFAULT_POLL_TIMEOUT's thirty: the pipeline was already green at
+#: mr_checks, so a merge that has not landed by now is waiting on something a
+#: person has to see. Deliberately not registry-tunable — nothing has asked,
+#: and these are one edit away if something does.
+MERGE_VERIFY_TIMEOUT = 300.0
+MERGE_VERIFY_INTERVAL = 5.0
+
 
 class ForgeError(RuntimeError):
     """The forge could not be reached, or answered something unusable."""
@@ -59,6 +68,14 @@ class CIStatus:
     #: One line per job, for the human_review brief to render. A pipeline result
     #: with no detail leaves a reviewer nothing to act on.
     jobs: tuple[str, ...] = ()
+    #: Whether the *merge request* can land, which is a different question from
+    #: whether its pipeline is green: a branch that conflicts with main is green
+    #: right up to the merge that fails (Kraft-ejj9). None means the forge has
+    #: not decided, or does not say — see `_mergeable`. Defaulted so FakeForge
+    #: and every existing caller are unaffected.
+    mergeable: bool | None = None
+    #: The raw state the forge gave, for the log line a human reads.
+    merge_detail: str = ""
 
 
 class Forge(Protocol):
@@ -87,6 +104,11 @@ class FakeForge:
     #: Branches pushed, in call order, so a test can see the push land without
     #: a network or a git remote.
     pushed: list[str] = field(default_factory=list)
+    #: What `ci_status` says about the merge request itself, as distinct from
+    #: its pipeline. None (undecided) is the default, so tests that predate
+    #: this are unaffected.
+    mergeable: bool | None = None
+    merge_detail: str = ""
 
     async def open_mr(self, *, repo: Path, branch: str, title: str, body: str) -> MR:
         number = len(self.opened) + 1
@@ -101,7 +123,13 @@ class FakeForge:
 
     async def ci_status(self, *, repo: Path, mr: MR, branch: str = "") -> CIStatus:
         state = self.ci_states.pop(0) if len(self.ci_states) > 1 else self.ci_states[0]
-        return CIStatus(state=state, url=f"{mr.url}/pipelines", jobs=(f"fake-job: {state}",))
+        return CIStatus(
+            state=state,
+            url=f"{mr.url}/pipelines",
+            jobs=(f"fake-job: {state}",),
+            mergeable=self.mergeable,
+            merge_detail=self.merge_detail,
+        )
 
     async def merge(self, *, repo: Path, branch: str = "", mr: MR) -> None:
         # number 0 means "resolve from the checked-out branch", which is what
@@ -175,6 +203,18 @@ async def _assert_pushed(repo: Path, branch: str) -> None:
             f"local branch is ahead of origin/{branch} by {ahead} commit(s); "
             "merging would merge a head the forge has never seen"
         )
+
+
+async def _head_sha(repo: Path) -> str:
+    """The worktree's HEAD, or empty when git will not say.
+
+    Empty means "do not compare": a repo git cannot read is no reason to
+    report a pipeline that was read perfectly well as missing.
+    """
+    try:
+        return (await _run(repo, ["git", "rev-parse", "HEAD"])).strip()
+    except ForgeError:
+        return ""
 
 
 async def _commits_on(repo: Path, branch: str) -> tuple[str, ...]:
@@ -255,6 +295,42 @@ _GLAB_MR_STATES: dict[str, str] = {
 _GH_MR_STATES: dict[str, str] = {"OPEN": "open", "MERGED": "merged", "CLOSED": "closed"}
 
 
+#: Merge-request states that need a *code* change before anything can land:
+#: glab's `detailed_merge_status`/`merge_status`, gh's `mergeable` and
+#: `mergeStateStatus`.
+_UNMERGEABLE = {
+    "conflict",
+    "need_rebase",
+    "broken_status",
+    "cannot_be_merged",
+    "CONFLICTING",
+    "DIRTY",
+}
+_MERGEABLE = {"mergeable", "can_be_merged", "MERGEABLE"}
+
+
+def _mergeable(*states: str) -> bool | None:
+    """Can this merge request land, as far as the forge will say.
+
+    Deliberately the opposite convention to `_GLAB_STATES`, where unknown is
+    failure: `mr_checks` runs *before* the human_review gate, so `not_approved`,
+    `ci_still_running`, `discussions_not_resolved`, `draft_status`, `checking`,
+    `unchecked` and `UNKNOWN` are the ordinary states of a healthy merge request
+    at this node, and mapping them to failure would fail the node on every repo
+    with an approval rule. Only states that need a code change fail here. States
+    that need a *person* are the gate's business, and the merge node reads the
+    merge back rather than letting one through silently (Kraft-79x3).
+
+    Variadic because GitHub answers in two fields and either can carry the bad
+    news.
+    """
+    if any(s in _UNMERGEABLE for s in states):
+        return False
+    if any(s in _MERGEABLE for s in states):
+        return True
+    return None
+
+
 def _pick_mr(rows: list[MRRef]) -> MRRef | None:
     """The open merge request for a branch, else the first one the forge listed."""
     return next((r for r in rows if r.state == "open"), rows[0] if rows else None)
@@ -290,22 +366,51 @@ class GlabCli:
         # checked-out branch, the way merge and ci already do.
         await _run(repo, ["glab", "mr", "update", "--description", body])
 
+    async def _merge_state(self, repo: Path) -> str:
+        """The merge request's own view of whether it can merge.
+
+        `glab mr view -F json` is the call `open_mr` already makes, resolved
+        from the checked-out branch. `detailed_merge_status` says *why*;
+        `merge_status` is the older, coarser field, kept as a fallback for an
+        older GitLab. Anything else — including a payload that is not an object
+        — is "the forge did not say", which `_mergeable` reads as undecided.
+        """
+        data = _parse_json(await _run(repo, ["glab", "mr", "view", "-F", "json"]), "glab mr view")
+        if not isinstance(data, dict):
+            return ""
+        return str(data.get("detailed_merge_status") or data.get("merge_status") or "")
+
     async def ci_status(self, *, repo: Path, mr: MR, branch: str = "") -> CIStatus:
+        # The merge request's own state first: a conflict fails the check node
+        # whatever colour the pipeline is, and `_poll_ci` must not wait out a
+        # pipeline to learn it (Kraft-ejj9).
+        detail = await self._merge_state(repo)
+        mergeable = _mergeable(detail)
         # --ref, or this returns the newest pipeline in the whole project: a
         # green run on main would pass the gate for a red branch.
         ref = ["--ref", branch] if branch else []
         raw = await _run(repo, ["glab", "ci", "list", "-F", "json", "-P", "1", *ref])
         rows = _parse_json(raw, "glab ci list")
-        if not rows:
-            # No pipeline yet is not a green one.
-            return CIStatus(state="pending", url="", jobs=("no pipeline yet",))
-        top = rows[0]
-        raw_state = str(top.get("status", ""))
-        return CIStatus(
-            state=_GLAB_STATES.get(raw_state, "failed"),
-            url=str(top.get("web_url", "")),
-            jobs=(f"pipeline {top.get('id')}: {raw_state}",),
-        )
+        # No pipeline yet is not a green one.
+        state: CIState = "pending"
+        url, jobs = "", ("no pipeline yet",)
+        if rows:
+            top = rows[0]
+            # For a few seconds after a push, this list still answers with the
+            # *previous* commit's pipeline — green, for code the branch no
+            # longer has. ci_poll pushes now (Kraft-bxj8), so that window is on
+            # the hot path, and a pipeline that is not for this head is not a
+            # result. Same answer as no pipeline at all: pending.
+            sha = str(top.get("sha", ""))
+            head = await _head_sha(repo) if sha else ""
+            if sha and head and sha != head:
+                jobs = (f"no pipeline for {head[:7]} yet",)
+            else:
+                raw_state = str(top.get("status", ""))
+                state = _GLAB_STATES.get(raw_state, "failed")
+                url = str(top.get("web_url", ""))
+                jobs = (f"pipeline {top.get('id')}: {raw_state}",)
+        return CIStatus(state=state, url=url, jobs=jobs, mergeable=mergeable, merge_detail=detail)
 
     async def merge(self, *, repo: Path, branch: str, mr: MR) -> None:
         await _assert_pushed(repo, branch)
@@ -355,11 +460,34 @@ class GhCli:
     async def ci_status(self, *, repo: Path, mr: MR, branch: str = "") -> CIStatus:
         # `gh pr view` with no argument already resolves from the current
         # branch, so `branch` is accepted for one Forge shape and unused here.
-        raw = await _run(repo, ["gh", "pr", "view", "--json", "number,url,statusCheckRollup"])
+        # `mergeable,mergeStateStatus` ride along on the call the node already
+        # makes: the check node has to know whether the PR can land, and one
+        # round trip already carries it (Kraft-ejj9).
+        raw = await _run(
+            repo,
+            [
+                "gh",
+                "pr",
+                "view",
+                "--json",
+                "number,url,statusCheckRollup,mergeable,mergeStateStatus",
+            ],
+        )
         data = _parse_json(raw, "gh pr view")
+        # Either field can carry the bad news: `mergeable` is
+        # MERGEABLE/CONFLICTING/UNKNOWN, `mergeStateStatus` adds DIRTY.
+        states = (str(data.get("mergeable") or ""), str(data.get("mergeStateStatus") or ""))
+        mergeable = _mergeable(*states)
+        detail = "/".join(s for s in states if s)
         checks = data.get("statusCheckRollup") or []
         if not checks:
-            return CIStatus(state="pending", url=str(data.get("url", "")), jobs=("no checks yet",))
+            return CIStatus(
+                state="pending",
+                url=str(data.get("url", "")),
+                jobs=("no checks yet",),
+                mergeable=mergeable,
+                merge_detail=detail,
+            )
         jobs = tuple(f"{c.get('name')}: {c.get('conclusion') or 'PENDING'}" for c in checks)
         conclusions = [str(c.get("conclusion") or "") for c in checks]
         if any(c in ("FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED") for c in conclusions):
@@ -368,7 +496,13 @@ class GhCli:
             state = "success"
         else:
             state = "pending"
-        return CIStatus(state=state, url=str(data.get("url", "")), jobs=jobs)
+        return CIStatus(
+            state=state,
+            url=str(data.get("url", "")),
+            jobs=jobs,
+            mergeable=mergeable,
+            merge_detail=detail,
+        )
 
     async def merge(self, *, repo: Path, branch: str, mr: MR) -> None:
         await _assert_pushed(repo, branch)
@@ -480,11 +614,39 @@ async def _poll_ci(
     cap = max(_MAX_POLL_INTERVAL, interval)
     while True:
         ci = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
-        if ci.state != "pending":
+        # A branch that cannot merge is an answer, not a wait: a conflict will
+        # not resolve itself in thirty minutes (Kraft-ejj9).
+        if ci.state != "pending" or ci.mergeable is False:
             return ci, False
         remaining = deadline - loop.time()
         if remaining <= 0:
             return ci, True
+        await asyncio.sleep(min(interval, remaining))
+        interval = min(interval * 2, cap)
+
+
+async def _poll_merged(
+    forge: Forge, *, repo: Path, branch: str, timeout: float, interval: float
+) -> MRRef | None:
+    """Read the merge request back until it stops being open.
+
+    `glab mr merge --yes` exits 0 both for "merged" and for "merge when all
+    merge checks pass", and the second one merges nothing (Kraft-79x3, MR !76);
+    `gh pr merge` has the same shape. The exit code is not the answer — the
+    merge request's own state is. Returns the last `MRRef` read, or None if the
+    branch has no merge request at all any more; the caller decides from the
+    state. Same backoff as `_poll_ci`, for the same reason.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    cap = max(_MAX_POLL_INTERVAL, interval)
+    while True:
+        ref = await forge.find_mr(repo=repo, branch=branch)
+        if ref is None or ref.state != "open":
+            return ref
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            return ref
         await asyncio.sleep(min(interval, remaining))
         interval = min(interval * 2, cap)
 
@@ -508,6 +670,11 @@ async def run_task(
     round: int = 0,
     poll_timeout: float = DEFAULT_POLL_TIMEOUT,
     poll_interval: float = DEFAULT_POLL_INTERVAL,
+    #: The merge node's read-back, not the pipeline poll: separate names
+    #: because they answer different questions and are tuned differently.
+    #: Keyword arguments only so tests can run them at zero; no registry key.
+    merge_timeout: float = MERGE_VERIFY_TIMEOUT,
+    merge_interval: float = MERGE_VERIFY_INTERVAL,
 ) -> str:
     """One forge node.
 
@@ -555,6 +722,14 @@ async def run_task(
                     mr = await forge.open_mr(repo=repo, branch=branch, title=title, body=body)
                     log, status = f"opened {mr.url}\n", "done"
             case "ci_poll":
+                # The worker commits in the worktree and is told not to push
+                # (adapters/agent.py:45), and only open_mr and sync_mr ever
+                # pushed — sync_mr *after* human review. Without this, a commit
+                # made after open_mr is local, so the pipeline polled below is
+                # the previous head's: the same id on every retry, green or
+                # red, forever (Kraft-bxj8). `git push -u` is a no-op when the
+                # branch is up to date, so this costs one git call.
+                await forge.push(repo=repo, branch=branch)
                 # Both CLIs resolve the merge request from the checked-out
                 # branch, so the number is not threaded between nodes.
                 ci, timed_out = await _poll_ci(
@@ -573,7 +748,15 @@ async def run_task(
                     else f"pipeline {ci.state}"
                 )
                 log = f"{head}: {ci.url}\n" + "".join(f"  {j}\n" for j in ci.jobs)
-                status = "done" if ci.state == "success" else "failed"
+                if ci.mergeable is False:
+                    # Green *and* unmergeable is the exact shape of the bug: the
+                    # pipeline passes, the gate passes, and the merge node meets
+                    # the conflict (Kraft-ejj9). `is False` and not falsiness:
+                    # None is undecided, and undecided is this node's normal.
+                    log += f"merge request is not mergeable: {ci.merge_detail or 'unknown'}\n"
+                    status = "failed"
+                else:
+                    status = "done" if ci.state == "success" else "failed"
             case "sync_mr":
                 # Push first: every commit after `open_mr` -- verify's fixes,
                 # mr_checks' findings, the review brief -- is local only until
@@ -597,10 +780,42 @@ async def run_task(
                     log = f"already merged (!{existing.number}); nothing to do\n"
                     status = "done"
                 elif existing is not None and existing.state == "open":
+                    # The same push ci_poll makes, for the same reason: a
+                    # commit made after the last sync is local only, and
+                    # `_assert_pushed` inside forge.merge refuses a head origin
+                    # has never seen — three failed nodes, and a retry of
+                    # `merge` alone never re-runs mr_sync to clear it
+                    # (Kraft-bxj8). Below the already-merged check: a branch
+                    # already in main needs nothing pushed to it.
+                    await forge.push(repo=repo, branch=branch)
                     # A genuine refusal -- conflicts, unmet approval rules --
                     # still raises inside forge.merge and still fails the node.
                     await forge.merge(repo=repo, branch=branch, mr=MR(number=0, url=""))
-                    log, status = "merged\n", "done"
+                    # And a refusal the CLI reported as success does not get
+                    # through either. This node's stated end state is "this
+                    # branch is in main", so it is read off the forge rather
+                    # than inferred from an exit code (Kraft-79x3).
+                    landed = await _poll_merged(
+                        forge,
+                        repo=repo,
+                        branch=branch,
+                        timeout=merge_timeout,
+                        interval=merge_interval,
+                    )
+                    state = landed.state if landed is not None else "gone"
+                    if state == "merged":
+                        log, status = f"merged !{landed.number}\n", "done"
+                    elif state == "open":
+                        log = (
+                            f"!{landed.number} is still open {merge_timeout:g}s after the "
+                            "merge command returned: nothing has landed on main. The forge "
+                            "may have scheduled an auto-merge for when its checks pass — "
+                            f"look at {landed.url}\n"
+                        )
+                        status = "failed"
+                    else:
+                        log = f"the merge request is {state}, not merged; nothing landed\n"
+                        status = "failed"
                 else:
                     raise ForgeError(
                         f"no open merge request for {branch!r}"
