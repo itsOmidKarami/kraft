@@ -1,5 +1,6 @@
 import asyncio
 import json
+import subprocess
 import uuid
 
 from kraft import db, events, store
@@ -744,3 +745,100 @@ def test_local_midnight_is_utc_and_sorts_against_stored_timestamps():
     # string comparison is the whole point: it is what the SQL does
     assert "2026-09-04T15:00:00.123456+00:00" >= midnight
     assert "2026-09-04T14:59:59.999999+00:00" < midnight
+
+
+def test_branch_name_slugs_the_title_and_stays_a_legal_ref(tmp_path):
+    """Every branch this produces has to survive `git check-ref-format`, over
+    the shapes a Kraft title actually takes: punctuation, non-ASCII, git's
+    reserved characters, and the 360-character paragraph `mr_title` notes."""
+    wid = "b63d95be41884b6e83a423c114a97ce3"
+    readable_merge_records = (
+        "Readable merge records: branch slugs & GFM tables!",
+        "kraft/readable-merge-records-branch-slugs-gfm-tables-b63d95be",
+    )
+    # git refuses ~ ^ : and spaces in a ref; .. is reserved
+    caret_and_colon = (
+        "Fix ~caret^ and :colon and .. spaces",
+        "kraft/fix-caret-and-colon-and-spaces-b63d95be",
+    )
+    # clipped at 48 characters, with no trailing separator left behind
+    clipped_title = (
+        "Kraft-8mu.5.2 — session lifecycle: pause, abandon and reattach must run",
+        "kraft/kraft-8mu-5-2-session-lifecycle-pause-abandon-an-b63d95be",
+    )
+    cases = dict(
+        (
+            readable_merge_records,
+            caret_and_colon,
+            clipped_title,
+            ("A" * 360, "kraft/" + "a" * 48 + "-b63d95be"),
+            # only the first line of a multi-line title
+            ("Branch slugs\n\nand a second paragraph", "kraft/branch-slugs-b63d95be"),
+            # nothing to slug: the pre-Kraft-nhps name, which is always valid
+            ("我的任务", f"kraft/{wid}"),
+            ("...", f"kraft/{wid}"),
+            ("   ", f"kraft/{wid}"),
+            ("", f"kraft/{wid}"),
+        )
+    )
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    for title, expected in cases.items():
+        got = store.branch_name(title, wid)
+        assert got == expected, f"{title!r} -> {got!r}"
+        assert (
+            subprocess.run(
+                ["git", "check-ref-format", "--branch", got],
+                cwd=repo,
+                capture_output=True,
+            ).returncode
+            == 0
+        ), f"{got!r} is not a legal branch name"
+
+
+def test_create_work_item_stores_the_branch(tmp_path):
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="w1",
+                    bead_id="B-1",
+                    title="Readable merge records",
+                    repo="/r",
+                    chain_template="quick-task",
+                    chain_definition=_CHAIN,
+                )
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
+            )
+            assert row["branch"] == "kraft/readable-merge-records-w1"
+            assert store.branch_for(row) == "kraft/readable-merge-records-w1"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_branch_for_falls_back_when_the_row_predates_the_column(tmp_path):
+    """The no-stranding guarantee: an in-flight item whose row was written
+    before the migration keeps the `kraft/<id>` branch its worktree is on."""
+
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await _mk_item(database)
+            await database.write(
+                lambda c: c.execute("UPDATE work_items SET branch = NULL WHERE id='w1'")
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
+            )
+            assert store.branch_for(row) == "kraft/w1"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
