@@ -33,6 +33,7 @@ def test_the_tools_are_registered():
         "pause_work_item",
         "resume_work_item",
         "retry_work_item",
+        "set_mr_labels",
         "permission_request",
     }
 

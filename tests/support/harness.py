@@ -163,6 +163,7 @@ def fake_templates_dir(tmp_path: Path, agent_command: str, *, planning_hooks: bo
                     "on.mr.open": noop(),
                     "on.ci.poll": noop(),
                     "on.review.mr.run": noop(),
+                    "on.mr_checks.repair": noop(),
                     "on.mr.sync": noop(),
                     "on.human_review.requested": noop(),
                     "on.merge": noop(),

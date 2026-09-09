@@ -424,6 +424,10 @@ def _cmd_retry(ns: argparse.Namespace) -> None:
     emit(asyncio.run(client.retry(ns.steer, ns.id)), _render_action, ns.json)
 
 
+def _cmd_mr_label(ns: argparse.Namespace) -> None:
+    emit(asyncio.run(client.mr_labels(ns.labels, ns.id)), _render_action, ns.json)
+
+
 def _print_log(entry: dict, as_json: bool) -> None:
     """NDJSON under --json: one object per line, because a stream has no end to
     close an array on. `flush` because a follow that buffers is not a follow."""
@@ -698,6 +702,18 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     retry.add_argument("id", nargs="?")
     retry.add_argument("--steer", help="carried into the retry's prompt")
     retry.set_defaults(func=_cmd_retry)
+
+    mr_label = subs.add_parser(
+        "mr-label",
+        parents=[common],
+        help="label this item's merge request and re-create its pipeline",
+    )
+    # `--id`, not a positional: a positional `id` ahead of `labels` (nargs="+")
+    # is ambiguous the moment two labels are given with no id — argparse's
+    # greedy match eats the first label as the id.
+    mr_label.add_argument("--id", help="default: the work item you are standing in")
+    mr_label.add_argument("labels", nargs="+", help="e.g. release::patch")
+    mr_label.set_defaults(func=_cmd_mr_label)
 
     abandon = subs.add_parser(
         "abandon", parents=[common], help="drop an item and reclaim its worktree"

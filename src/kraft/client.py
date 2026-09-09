@@ -441,6 +441,18 @@ async def open_worktree(work_item_id: str | None = None, editor: str | None = No
     return await _act(f"/work-items/{target}/open-worktree", {"editor": editor} if editor else {})
 
 
+async def mr_labels(labels: list[str], work_item_id: str | None = None) -> dict:
+    """Label this item's merge request and re-create its pipeline (Kraft-xh0q).
+
+    `resolve_work_item`, not `_forbid_self_action`: the caller this exists for
+    is an `on_failure` repair agent fixing its own item's merge request, the
+    same shape as `open_mr`/`ci_poll` acting on it from inside the executor —
+    not a gate decision, which is the thing the self-action guard protects.
+    """
+    target = await resolve_work_item(work_item_id)
+    return await _act(f"/work-items/{target}/mr-labels", {"labels": labels})
+
+
 async def health() -> dict:
     """The server's own view of itself: invalid config, index state, reattach."""
     return await _get("/health")
