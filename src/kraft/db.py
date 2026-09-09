@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -48,6 +48,10 @@ CREATE TABLE work_items (
   -- Computed once at intake (Kraft-nhps) so the three call sites cannot drift.
   -- NULL on items created before the column, which keep `kraft/<uuid>`.
   branch           TEXT,
+  -- sub-bead ids this item's description names (Kraft-p8q1): JSON list, extracted
+  -- from `description` at intake, e.g. ["Kraft-p8q1", "Kraft-ikze"]. Closed
+  -- alongside `bead_id` on completion -- see `_close_beads`.
+  implements_beads TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
@@ -259,6 +263,7 @@ SELECT id, bead_id, title, repo, chain_template, chain_definition, current_node_
      AND p.hook_point   = worker_sessions.hook_point
      AND (p.created_at, p.id) <= (worker_sessions.created_at, worker_sessions.id))"""
     ],
+    15: ["ALTER TABLE work_items ADD COLUMN implements_beads TEXT"],
 }
 
 
