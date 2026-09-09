@@ -336,9 +336,14 @@ class Indexer:
                 (row["repo"], attachment["path"]),
             ).fetchone()
             if doc is None:
-                # Not indexed yet: scan_repo lists via `git ls-files`, so an
-                # uncommitted attachment appears here only once it is committed
-                # and rescanned. The timeline event names it meanwhile.
+                # Not indexed yet: scan_repo lists via `git ls-files` against the
+                # registered main checkout, so a committed-but-unmerged attachment
+                # doesn't show up there. Read it live from the item's own worktree
+                # instead — same fallback `_summary_path` already does above.
+                synthesized = self._synthesize_attachment_doc(work_item_id, row["repo"], attachment)
+                if synthesized is None:
+                    continue
+                out.append(synthesized)
                 continue
             out.append(
                 {
@@ -350,6 +355,34 @@ class Indexer:
                 }
             )
         return out
+
+    def _synthesize_attachment_doc(
+        self, work_item_id: str, repo: str, attachment: dict
+    ) -> dict | None:
+        """Read an unindexed attachment straight from the item's own worktree
+        and shape it like a `documents` row, so an attach-based item shows its
+        spec/plan before the branch that carries them ever merges."""
+        path = self._summary_path(attachment["path"], work_item_id, repo)
+        if path is None:
+            return None
+        try:
+            text = path.read_text()
+        except OSError:
+            return None
+        fm, body = ingest.split_front_matter(text)
+        return {
+            "document_id": f"attachment:{work_item_id}:{attachment['kind']}",
+            "repo": repo,
+            "title": ingest.derive_title(attachment["path"], fm, body),
+            "kind": ingest.derive_kind(attachment["path"], fm),
+            "source_kind": ingest.source_kind_for(attachment["path"]),
+            "path": attachment["path"],
+            "indexed_at": _now(),
+            "node_id": None,
+            "hook_point": None,
+            "worker_session_id": None,
+            "attachment_kind": attachment["kind"],
+        }
 
     def _filter_sql(self, source_kind, kind, repo) -> tuple[str, list]:
         clauses, params = [], []
@@ -530,7 +563,50 @@ class Indexer:
             for r in rows
         ]
 
+    def _get_synthetic_attachment_document(self, doc_id: str) -> dict | None:
+        """Content fetch for the synthetic `attachment:{work_item_id}:{kind}` ids
+        `_synthesize_attachment_doc` hands out — there's no `documents` row to
+        join against, so read the file straight from the worktree again."""
+        _, work_item_id, kind = doc_id.split(":", 2)
+        row = self._state.read(
+            lambda c: c.execute(
+                "SELECT repo, attachments FROM work_items WHERE id = ?", (work_item_id,)
+            ).fetchone()
+        )
+        if row is None or not row["attachments"]:
+            return None
+        attachment = next((a for a in json.loads(row["attachments"]) if a["kind"] == kind), None)
+        if attachment is None:
+            return None
+        doc = self._synthesize_attachment_doc(work_item_id, row["repo"], attachment)
+        if doc is None:
+            return None
+        path = self._summary_path(attachment["path"], work_item_id, row["repo"])
+        try:
+            text = path.read_text() if path is not None else None
+        except OSError:
+            text = None
+        if text is None:
+            return None
+        _, content = ingest.split_front_matter(text)
+        return {
+            "id": doc["document_id"],
+            "repo": doc["repo"],
+            "source_kind": doc["source_kind"],
+            "kind": doc["kind"],
+            "title": doc["title"],
+            "path": doc["path"],
+            "content": content,
+            "metadata": {},
+            "source_created_at": None,
+            "source_updated_at": None,
+            "indexed_at": doc["indexed_at"],
+            "links": [],
+        }
+
     def get_document(self, doc_id: str) -> dict | None:
+        if doc_id.startswith("attachment:"):
+            return self._get_synthetic_attachment_document(doc_id)
         r = self._conn.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
         if r is None:
             return None
