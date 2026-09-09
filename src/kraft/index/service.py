@@ -293,26 +293,29 @@ class Indexer:
         return out
 
     def documents_for_work_item(self, work_item_id: str) -> list[dict]:
-        """04 §9: what is linked to this work item. No content — the UI fetches
-        that per document via GET /documents/{id}."""
+        """04 §9: what is linked to this work item, newest-indexed first. No
+        content — the UI fetches that per document via GET /documents/{id}."""
         # The work-item rows and the node/hook/session row are siblings (04 §6),
         # so the triple has to be joined in from the document's session row
         # rather than read off the row that matched work_item_id.
         rows = self._conn.execute(
             "SELECT d.id AS document_id, d.repo, d.title, d.kind, d.source_kind, d.path, "
-            "       s.node_id, s.hook_point, s.worker_session_id "
+            "       d.indexed_at, s.node_id, s.hook_point, s.worker_session_id "
             "FROM document_links l "
             "JOIN documents d ON d.id = l.document_id "
             "LEFT JOIN document_links s ON s.document_id = l.document_id "
             "     AND s.worker_session_id IS NOT NULL "
-            "WHERE l.work_item_id = ? ORDER BY d.path",
+            "WHERE l.work_item_id = ?",
             (work_item_id,),
         ).fetchall()
         docs = [{**{k: r[k] for k in r.keys()}, "attachment_kind": None} for r in rows]
         seen = {d["document_id"] for d in docs}
-        return docs + [
-            d for d in self._attachment_docs(work_item_id) if d["document_id"] not in seen
-        ]
+        docs += [d for d in self._attachment_docs(work_item_id) if d["document_id"] not in seen]
+        # source_created_at/updated_at aren't populated for every document kind
+        # (session summaries never carry them); indexed_at is the one time field
+        # every row has, so it's what "sorted by time" sorts on.
+        docs.sort(key=lambda d: d["indexed_at"], reverse=True)
+        return docs
 
     def _attachment_docs(self, work_item_id: str) -> list[dict]:
         """Intake attachments (Kraft-dgh), joined at read time rather than stored
@@ -328,7 +331,7 @@ class Indexer:
         out = []
         for attachment in json.loads(row["attachments"]):
             doc = self._conn.execute(
-                "SELECT id AS document_id, repo, title, kind, source_kind, path "
+                "SELECT id AS document_id, repo, title, kind, source_kind, path, indexed_at "
                 "FROM documents WHERE repo = ? AND path = ?",
                 (row["repo"], attachment["path"]),
             ).fetchone()
