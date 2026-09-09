@@ -30,7 +30,18 @@ running is the one failure this whole surface is built to avoid.
 ## When the spec and plan already exist
 
 If documents were written in this session or already live in the repo, attach
-them at intake instead of letting Kraft re-run those phases. Attaching a spec or
-plan trims the node whose gate it satisfies, so the person is not asked to
-re-approve what they just agreed with you, and the implementing agent is told to
-follow the documents rather than guess.
+them at intake instead of letting Kraft re-run those phases:
+
+    create_work_item(title, description=..., attachments=[
+        {"kind": "spec", "path": ".engineering/specs/x.md"},
+        {"kind": "plan", "path": ".engineering/plans/x.md"},
+    ])
+
+Kind is `spec` or `plan`, at most one of each. A path is resolved against the
+repo and against the working tree you are standing in, so a document written in
+a worktree can be attached exactly as you wrote it — relative to that tree, or
+absolute.
+
+Attaching a spec or plan trims the node whose gate it satisfies, so the person
+is not asked to re-approve what they just agreed with you, and the implementing
+agent is told to follow the documents rather than guess.
