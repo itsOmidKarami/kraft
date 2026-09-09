@@ -357,6 +357,16 @@ export interface Policy {
   budget?: { work_item_usd: number | null; daily_usd: number | null };
 }
 
+export type PaletteId = "nocturne" | "rose" | "forest" | "amber" | "slate";
+export type ThemeMode = "light" | "dark" | "system";
+
+/** `GET/PUT /theme`. Instance-wide, like every other Settings-backed value —
+ *  see the theme-palettes design doc for why this isn't per-user. */
+export interface Theme {
+  palette: PaletteId;
+  mode: ThemeMode;
+}
+
 export interface Access {
   bind: string;
   port: number;
