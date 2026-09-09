@@ -18,6 +18,7 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
+import argcomplete
 import uvicorn
 
 from kraft import client, config, render
@@ -836,13 +837,20 @@ def main(argv: list[str] | None = None) -> None:
     was the whole dispatch. That stopped being true at eight verbs with flags.)
     """
     args = sys.argv[1:] if argv is None else list(argv)
+    parser = build_parser()
+    # No-ops unless COMP_LINE etc are set, i.e. unless a shell completion
+    # script (see `register-python-argcomplete kraft`) is asking for
+    # completions; in that case it prints them and exits, never reaching the
+    # code below. Built before the zero-arg short-circuit so `kraft <TAB>`
+    # completes rather than serving.
+    argcomplete.autocomplete(parser)
     if not args:
         _serve()
         return
     if args[0] in MOVED:
         print(f"kraft: '{args[0]}' moved to `kraft {MOVED[args[0]]}`", file=sys.stderr)
         raise SystemExit(2)
-    ns = build_parser().parse_args(args)
+    ns = parser.parse_args(args)
     try:
         ns.func(ns)
     except (ValueError, PermissionError) as exc:
