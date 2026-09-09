@@ -16,6 +16,7 @@ const doc = {
   hook_point: "on.implementation.start",
   worker_session_id: "s1",
   attachment_kind: null,
+  indexed_at: "2020-01-01T00:00:00Z",
 };
 
 const wrap = (ui: React.ReactNode) => render(<MemoryRouter>{ui}</MemoryRouter>);
