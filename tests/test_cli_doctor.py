@@ -31,7 +31,15 @@ def test_doctor_on_a_live_instance_reaches_every_check(app, tmp_path):
     _prime(tmp_path)
     rows = asyncio.run(doctor.run_checks())
     assert _by_name(rows, "server")["ok"]
-    for name in ("health", "templates", "access.yaml", "mcp token", "agent cli", "worktrees"):
+    for name in (
+        "health",
+        "templates",
+        "access.yaml",
+        "mcp token",
+        "agent cli",
+        "shell completion",
+        "worktrees",
+    ):
         assert name in _names(rows)
 
 
@@ -181,3 +189,27 @@ def test_hooks_check_is_skipped_without_a_bundled_registry(tmp_path, monkeypatch
     monkeypatch.setattr(doctor, "BUNDLED", tmp_path / "absent")
     check = _by_name(asyncio.run(doctor.run_checks()), "hooks")
     assert check["skipped"] is True
+
+
+def test_completion_check_is_skipped_outside_zsh(monkeypatch):
+    monkeypatch.setenv("SHELL", "/bin/bash")
+    check = _by_name(asyncio.run(doctor.run_checks()), "shell completion")
+    assert check["skipped"] is True
+
+
+def test_completion_check_names_the_missing_eval_line(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHELL", "/bin/zsh")
+    monkeypatch.setattr(doctor.Path, "home", lambda: tmp_path)
+    (tmp_path / ".zshrc").write_text("# nothing relevant here\n")
+    check = _by_name(asyncio.run(doctor.run_checks()), "shell completion")
+    assert check["ok"] is True
+    assert "register-python-argcomplete kraft" in check["detail"]
+
+
+def test_completion_check_passes_once_registered(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHELL", "/bin/zsh")
+    monkeypatch.setattr(doctor.Path, "home", lambda: tmp_path)
+    (tmp_path / ".zshrc").write_text('eval "$(register-python-argcomplete kraft)"\n')
+    check = _by_name(asyncio.run(doctor.run_checks()), "shell completion")
+    assert check["ok"] is True
+    assert "registered in" in check["detail"]
