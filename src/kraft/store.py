@@ -375,12 +375,32 @@ def create_session(
     round: int = 0,
 ) -> None:
     """`round` is the fix-cycle index this session was dispatched in (0 = first pass)."""
+    # The attempt is the count of this (work item, node, hook point)'s sessions,
+    # computed in the INSERT rather than passed in: no caller knows better than the
+    # table does, and two callers would each re-implement the same query
+    # (Kraft-kq8m). Every write goes through Database.write — one connection,
+    # serialised — so the count cannot race a concurrent insert.
     conn.execute(
         "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, pid, "
         "pid_start_time, log_path, result_path, status, attempt, created_at, exited_at, round) "
-        "VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, 'pending', 1, ?, NULL, ?)",
-        (id, work_item_id, node_id, hook_point, log_path, result_path, _now(), round),
+        "VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, 'pending', "
+        "(SELECT COUNT(*) + 1 FROM worker_sessions "
+        "WHERE work_item_id = ? AND node_id = ? AND hook_point = ?), ?, NULL, ?)",
+        (
+            id,
+            work_item_id,
+            node_id,
+            hook_point,
+            log_path,
+            result_path,
+            work_item_id,
+            node_id,
+            hook_point,
+            _now(),
+            round,
+        ),
     )
+    (attempt,) = conn.execute("SELECT attempt FROM worker_sessions WHERE id = ?", (id,)).fetchone()
     # Announce the session here, where every session is born, rather than in
     # session_running — only the subprocess adapter calls that, so a builtin hook
     # (create_session -> session_exited) never told the SPA the session existed.
@@ -391,7 +411,13 @@ def create_session(
         conn,
         work_item_id,
         "worker_session_created",
-        {"session_id": id, "node_id": node_id, "hook_point": hook_point, "round": round},
+        {
+            "session_id": id,
+            "node_id": node_id,
+            "hook_point": hook_point,
+            "round": round,
+            "attempt": attempt,
+        },
     )
 
 
@@ -417,7 +443,8 @@ def session_running(conn: sqlite3.Connection, session_id, pid, pid_start_time) -
         (pid, pid_start_time, _now(), session_id),
     )
     row = conn.execute(
-        "SELECT work_item_id, node_id, hook_point, round FROM worker_sessions WHERE id = ?",
+        "SELECT work_item_id, node_id, hook_point, round, attempt FROM worker_sessions "
+        "WHERE id = ?",
         (session_id,),
     ).fetchone()
     events.append(
@@ -429,6 +456,7 @@ def session_running(conn: sqlite3.Connection, session_id, pid, pid_start_time) -
             "node_id": row["node_id"],
             "hook_point": row["hook_point"],
             "round": row["round"],
+            "attempt": row["attempt"],
             "pid": pid,
         },
     )

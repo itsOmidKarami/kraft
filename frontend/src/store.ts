@@ -134,6 +134,7 @@ export const useStore = create<State>((set, get) => ({
             hook_point: p.hook_point,
             status: "pending",
             round: p.round ?? 0,
+            attempt: p.attempt ?? 1,
           };
           return { ...base, sessionsByItem: { ...s.sessionsByItem, [id]: upsert(rows, row) } };
         }
@@ -146,6 +147,7 @@ export const useStore = create<State>((set, get) => ({
             hook_point: p.hook_point,
             status: "running",
             round: p.round ?? 0,
+            attempt: p.attempt ?? 1,
             started_at: ev.created_at,
           };
           // upsert merges this over the created row; `round` is carried on both
