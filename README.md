@@ -170,6 +170,20 @@ The verbs live in four groups — `item` acts, `view` reads, `repo` is
 repositories and their worktrees, `admin` is this machine's server. Typing an
 old flat verb prints where it moved.
 
+### Shell completion
+
+`kraft` ships tab completion for zsh (and any other shell `argcomplete`
+supports) via [`argcomplete`](https://github.com/kislyuk/argcomplete). Add
+one line to `~/.zshrc`:
+
+```zsh
+eval "$(register-python-argcomplete kraft)"
+```
+
+then `kraft it<TAB>` completes to `kraft item`, `kraft item <TAB>` lists
+`create approve reject pause resume retry abandon`, and so on down the verb
+tree. Takes effect after your next `kraft` install or `uv sync`.
+
 ## Develop
 
 ```bash
