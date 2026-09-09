@@ -9,6 +9,7 @@ only thing that stops a doctor command from growing output nobody reads
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import stat
@@ -53,6 +54,7 @@ async def run_checks() -> list[dict]:
     )
     checks.extend(_config_checks())
     checks.append(_agent_check())
+    checks.append(await _mcp_check(health is not None))
     checks.append(_completion_check())
     checks.append(_bundle_check())
     checks.append(_version_check())
@@ -200,6 +202,59 @@ def _agent_check() -> dict:
     if "fixtures" in Path(real).parts:
         return _check("agent cli", True, f"{found} -> {real} (the dev fake: it spends no tokens)")
     return _check("agent cli", True, found)
+
+
+#: Where `claude mcp add --scope user` records its servers -- what
+#: `init.install` runs for a user-scope install (init.py:122).
+CLAUDE_USER_CONFIG = ".claude.json"
+
+
+def _names_kraft(path: Path) -> bool:
+    """Does this agent config register a server called `kraft`?
+
+    The file is read directly rather than shelling out to `claude mcp list`: the
+    subprocess's output format is not ours to depend on, and the file it reads
+    is right there.
+    """
+    try:
+        return "kraft" in (json.loads(path.read_text()).get("mcpServers") or {})
+    except OSError, ValueError, AttributeError:
+        return False
+
+
+async def _mcp_check(server_up: bool) -> dict:
+    """Is the Kraft MCP server registered with the agent CLI?
+
+    Next to `_agent_check` because it answers the same question: can this
+    machine actually launch a worker. Every launch passes
+    `--permission-prompt-tool mcp__kraft__permission_request`
+    (`adapters/agent.py`), and on an install where `kraft admin init` was never
+    run that tool does not exist -- the CLI exits 0 and ignores the flag, and
+    permission asks go silently unanswered with nothing reporting it.
+
+    `ok=False`, unlike `bd` or shell completion: those are choices an operator
+    made, this one silently breaks a chain that is already running.
+
+    Rejected, as the bead records: passing `--mcp-config` on every launch, which
+    would make Kraft write the operator's agent config.
+    """
+    user = Path.home() / CLAUDE_USER_CONFIG
+    if _names_kraft(user):
+        return _check("mcp server", True, f"registered in {user}")
+    if not server_up:
+        # The repo-scope half needs `GET /repos`, like every other
+        # server-dependent check here.
+        return _check("mcp server", True, "skipped: no server", skipped=True)
+    for repo in await client.repos():
+        path = Path(repo["path"]) / ".mcp.json"
+        if _names_kraft(path):
+            return _check("mcp server", True, f"registered in {path}")
+    return _check(
+        "mcp server",
+        False,
+        "no kraft MCP server registered — workers' permission prompts go unanswered; "
+        "run `kraft admin init`",
+    )
 
 
 def _beads_check() -> dict:

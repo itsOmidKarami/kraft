@@ -22,7 +22,7 @@ import {
   XCircle,
 } from "@phosphor-icons/react";
 import { statusWord } from "../format";
-import type { SessionStatus, WorkItem } from "../types";
+import type { ChainNode, SessionStatus } from "../types";
 
 /* — rows ————————————————————————————————————————————————————————————— */
 
@@ -94,25 +94,42 @@ export function StatusGlyph({ status, size = 13 }: { status: SessionStatus; size
 /**
  * One segment per node, equal width. Fix cycles and concurrent tasks are
  * deliberately not drawn here — they appear beside the current-node name.
+ *
+ * Takes the node list rather than a `WorkItem`: the chain-template editor draws
+ * a draft that has no work item behind it (Kraft-3e6e). Explicit props rather
+ * than an optional `nodes` override beside `item`, so there is one way to call
+ * this.
+ *
+ * Segment state precedence: invalid, then current, then done, then todo. In the
+ * editor nothing is current, so `invalid` is what shows.
  */
 export function ChainBar({
-  item,
+  nodes,
+  currentNodeId = null,
+  done = [],
+  invalid = [],
   size,
   paused = false,
 }: {
-  item: WorkItem;
+  nodes: ChainNode[];
+  currentNodeId?: string | null;
+  done?: string[];
+  invalid?: string[];
   size: "sm" | "lg";
   paused?: boolean;
 }) {
-  const done = new Set(item.completedNodes ?? []);
+  const doneIds = new Set(done);
+  const invalidIds = new Set(invalid);
   return (
     <div className={`chain-bar ${size}`} data-testid="chain-bar">
-      {item.chain_definition.nodes.map((n) => {
-        const state = n.id === item.current_node_id
-          ? (paused ? "paused" : "current")
-          : done.has(n.id)
-            ? "done"
-            : "todo";
+      {nodes.map((n) => {
+        const state = invalidIds.has(n.id)
+          ? "invalid"
+          : n.id === currentNodeId
+            ? (paused ? "paused" : "current")
+            : doneIds.has(n.id)
+              ? "done"
+              : "todo";
         return (
           <span
             key={n.id}

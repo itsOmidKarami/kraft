@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
 import yaml
@@ -40,6 +42,7 @@ def test_doctor_on_a_live_instance_reaches_every_check(app, tmp_path):
         "access.yaml",
         "mcp token",
         "agent cli",
+        "mcp server",
         "shell completion",
         "bd",
         "worktrees",
@@ -350,3 +353,37 @@ def test_completion_check_passes_once_registered(tmp_path, monkeypatch):
     check = _by_name(asyncio.run(doctor.run_checks()), "shell completion")
     assert check["ok"] is True
     assert "registered in" in check["detail"]
+
+
+def test_mcp_check_passes_on_a_user_scope_registration(app, tmp_path):
+    """What `kraft admin init` produces via `claude mcp add --scope user`
+    (init.py:122). `HOME` is already a throwaway directory (conftest's autouse
+    `_isolated_kraft_home`), so this writes the real file the check reads."""
+    home = Path.home()
+    home.mkdir(parents=True, exist_ok=True)
+    (home / ".claude.json").write_text(
+        json.dumps({"mcpServers": {"kraft": {"command": "kraft", "args": ["admin", "mcp"]}}})
+    )
+    check = _by_name(asyncio.run(doctor.run_checks()), "mcp server")
+    assert check["ok"] is True
+    assert ".claude.json" in check["detail"]
+
+
+def test_mcp_check_passes_on_a_repo_scope_mcp_json(app, tmp_path):
+    """What `kraft admin init --repo` writes (init._write_repo_mcp_json)."""
+    repo = make_repo(tmp_path)
+    asyncio.run(client.ensure_repo(str(repo)))
+    (repo / ".mcp.json").write_text(json.dumps({"mcpServers": {"kraft": {"command": "kraft"}}}))
+    check = _by_name(asyncio.run(doctor.run_checks()), "mcp server")
+    assert check["ok"] is True
+    assert ".mcp.json" in check["detail"]
+
+
+def test_mcp_check_fails_when_nothing_registers_kraft(app, tmp_path):
+    """A real failure, not an advisory like `bd` or shell completion: every
+    worker launch passes `--permission-prompt-tool mcp__kraft__permission_request`,
+    and with no registration the agent CLI exits 0 ignoring the flag while a
+    running chain's permission asks go unanswered."""
+    check = _by_name(asyncio.run(doctor.run_checks()), "mcp server")
+    assert check["ok"] is False
+    assert "kraft admin init" in check["detail"]

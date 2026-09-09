@@ -173,6 +173,14 @@ describe("Settings · repos (5a)", () => {
     const dialog = await renderProbe({ forge: "gitea", project: null });
     expect(await within(dialog).findByText("gitea")).toBeInTheDocument();
   });
+
+  it("lands on Repos when /settings is opened with no page", async () => {
+    // The router's `<Route index>` does this. A `useEffect` reading
+    // window.location.pathname used to do it as well; this pins the surviving
+    // half so the deletion of the other one stays honest.
+    renderAt("/settings");
+    expect(await screen.findByRole("heading", { name: "Repos" })).toBeInTheDocument();
+  });
 });
 
 describe("Settings · templates (5b)", () => {
@@ -181,7 +189,7 @@ describe("Settings · templates (5b)", () => {
       id: "quick-task",
       valid: false,
       error: "hook(s) ['on.nope'] are not in the registry",
-      by_repo: [{ repo: "/repo-a", resolvable: false }],
+      unresolved: [{ node: "verify", task: "on.nope" }],
     });
     const put = vi.spyOn(api, "putTemplate");
     renderAt("/settings/templates");
@@ -190,7 +198,7 @@ describe("Settings · templates (5b)", () => {
     await userEvent.click(screen.getByRole("button", { name: "Validate" }));
     expect(validate).toHaveBeenCalled();
     expect(await screen.findByText(/not in the registry/)).toBeInTheDocument();
-    expect(screen.getByText("/repo-a: unresolvable")).toBeInTheDocument();
+    expect(screen.getByText("verify: on.nope does not resolve")).toBeInTheDocument();
     expect(put).not.toHaveBeenCalled();
   });
 
@@ -250,6 +258,35 @@ describe("Settings · templates (5b)", () => {
     // give the slow re-fetch every chance to land on top of the new edit
     await new Promise((r) => setTimeout(r, 80));
     expect(box.value).toBe('[{"id":"two"}]');
+  });
+
+  it("shows the unsaved template change", async () => {
+    renderAt("/settings/templates");
+    const box = (await screen.findByLabelText("template nodes")) as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: `${box.value}\n` } });
+
+    await userEvent.click(screen.getByRole("button", { name: "Changes" }));
+    expect(await screen.findByTestId("draft-diff")).toBeInTheDocument();
+  });
+
+  it("draws the parsed draft as a chain bar and marks the node that does not resolve", async () => {
+    vi.spyOn(api, "validateTemplate").mockResolvedValue({
+      id: "quick-task",
+      valid: false,
+      error: "hook(s) ['on.nope'] are not in the registry",
+      unresolved: [{ node: "verify", task: "on.nope" }],
+    });
+    renderAt("/settings/templates");
+    await screen.findByRole("button", { name: /quick-task/ });
+
+    // the diagram tracks what is typed, before any validation has run
+    expect(screen.getByTestId("chain-bar")).toBeInTheDocument();
+    expect(screen.getByTestId("node-verify")).toHaveAttribute("data-state", "todo");
+
+    await userEvent.click(screen.getByRole("button", { name: "Validate" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("node-verify")).toHaveAttribute("data-state", "invalid"),
+    );
   });
 });
 
@@ -413,6 +450,23 @@ describe("Settings · steering", () => {
     await userEvent.click(screen.getByRole("button", { name: "Delete" }));
     expect(await screen.findByText(/does not resolve/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /house-style/ })).toBeInTheDocument();
+  });
+
+  it("shows the unsaved steering change and discards it back to the saved body", async () => {
+    renderAt("/settings/steering");
+    await userEvent.click(await screen.findByRole("button", { name: /house-style/ }));
+    const box = (await screen.findByLabelText("steering body")) as HTMLTextAreaElement;
+    await waitFor(() => expect(box.value).toBe("prefer stdlib\n"));
+
+    fireEvent.change(box, { target: { value: "prefer stdlib\nthen native\n" } });
+    await userEvent.click(screen.getByRole("button", { name: "Changes" }));
+    const diff = await screen.findByTestId("draft-diff");
+    expect(within(diff).getByText("+then native")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(box.value).toBe("prefer stdlib\n");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(await screen.findByText("no unsaved changes")).toBeInTheDocument();
   });
 });
 

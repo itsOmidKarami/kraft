@@ -5,6 +5,8 @@
 # The reported status defaults to "done"; KRAFT_FAKE_CLAUDE_STATUS overrides it,
 # and KRAFT_FAKE_CLAUDE_CONCERNS / KRAFT_FAKE_CLAUDE_QUESTION set the field that
 # goes with done_with_concerns / needs_context.
+# The planning artifact is written only when the reported status advances the
+# chain; KRAFT_FAKE_CLAUDE_SKIP_ARTIFACT=1 suppresses it even then.
 # Always writes $KRAFT_RESULT_PATH so an adopted session can resolve after a restart.
 set -eu
 
@@ -91,7 +93,20 @@ case "$hook" in
   on.plan.requested) kind="plan" ;;
   *) kind="" ;;
 esac
-if [ -n "$kind" ] && [ -n "$item" ]; then
+# Only on a status that advances the chain (executor._ADVANCING), mirroring
+# tests/support/fake_agent.py. A real worker that reports needs_context or a
+# failure has written nothing, and `agent._resolve_status` holds only a claim of
+# success to the artifact -- a fake that writes it regardless is the reason the
+# needs_context downgrade bug in MR !58 passed every needs_context test.
+# `$status` is already resolved here, including the on.chain.review_ready
+# override above, so this is a guard and not a reordering.
+write_artifact=""
+case "$status" in
+  done|done_with_concerns) write_artifact=1 ;;
+esac
+if [ -n "${KRAFT_FAKE_CLAUDE_SKIP_ARTIFACT:-}" ]; then write_artifact=""; fi
+
+if [ -n "$kind" ] && [ -n "$item" ] && [ -n "$write_artifact" ]; then
   mkdir -p ".engineering/${kind}s"
   cat > ".engineering/${kind}s/${item}.md" <<EOF
 ---
