@@ -90,10 +90,13 @@ export const createWorkItem = (body: {
   attachments?: { kind: "spec" | "plan"; path: string }[];
 }) => req<{ id: string }>("/work-items", json("POST", body));
 
-export const updateWorkItem = (id: string, description: string) =>
-  req<{ id: string; description: string }>(
+/** Absent fields are untouched, not cleared: the title editor and the
+ *  description editor each send one field and must not blank the other. The
+ *  response echoes only the fields that were set. */
+export const updateWorkItem = (id: string, patch: { title?: string; description?: string }) =>
+  req<{ id: string; title?: string; description?: string }>(
     `/work-items/${id}`,
-    json("PATCH", { description }),
+    json("PATCH", patch),
   );
 
 export const approveGate = (id: string, gate: string) =>

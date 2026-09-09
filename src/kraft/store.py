@@ -811,6 +811,26 @@ def set_description(conn: sqlite3.Connection, work_item_id: str, description: st
     events.append(conn, work_item_id, "work_item_description_edited", {"description": description})
 
 
+def set_title(conn: sqlite3.Connection, work_item_id: str, title: str) -> None:
+    """Replace the label.
+
+    Its own event type, not one shared with `set_description`: the description
+    is prepended to every agent instruction and the title is a label, so the two
+    edits mean different things and a `work_item_edited` that covered both would
+    answer neither question from the timeline.
+
+    Nothing downstream derives from the title. The worktree branch name was
+    derived from it at intake and is deliberately not renamed — a live branch
+    cannot be renamed under a running chain, and `base_ref` and the MR already
+    point at it. Search indexes documents, not work-item rows, so no reindex.
+    """
+    conn.execute(
+        "UPDATE work_items SET title = ?, updated_at = ? WHERE id = ?",
+        (title, _now(), work_item_id),
+    )
+    events.append(conn, work_item_id, "work_item_title_edited", {"title": title})
+
+
 def set_base_ref(conn: sqlite3.Connection, work_item_id: str, sha: str) -> None:
     """Pin the commit a work item's diff is measured against.
 

@@ -109,6 +109,75 @@ function NeedsContextCard({ item }: { item: WorkItem }) {
   );
 }
 
+/** The label. Read-only until asked, the same read-then-edit shape as
+ *  `Description` below. Deliberately not sharing a component with it: two
+ *  callers, one field each, and the two edits mean different enough things
+ *  that the server records them as different events. */
+function Title({ item }: { item: WorkItem }) {
+  const hydrateItem = useStore((s) => s.hydrateItem);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(item.title);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const save = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.updateWorkItem(item.id, { title: draft });
+      await hydrateItem(item.id);
+      setEditing(false);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div className="field">
+        <label htmlFor="item-title-edit">Title</label>
+        <input
+          id="item-title-edit"
+          className="input"
+          aria-label="title"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+        />
+        <div className="gate-actions capped-actions">
+          <button className="btn btn-primary" disabled={busy || !draft.trim()} onClick={save}>
+            Save
+          </button>
+          <button className="btn" disabled={busy} onClick={() => setEditing(false)}>
+            Cancel
+          </button>
+        </div>
+        {err && <p className="form-error">{err}</p>}
+      </div>
+    );
+  }
+
+  return (
+    // The button is a sibling, not a child: `.detail h2` is asserted with an
+    // exact-text match across most of the e2e suite (it's the one element
+    // that names which work item is on screen), so anything nested inside it
+    // — however it renders visually — breaks every one of those assertions.
+    <div className="control-row" data-testid="item-title">
+      <h2 className="detail-title">{item.title}</h2>
+      <button
+        className="btn btn-quiet"
+        onClick={() => {
+          setDraft(item.title);
+          setEditing(true);
+        }}
+      >
+        Edit
+      </button>
+    </div>
+  );
+}
+
 /** The brief. Read-only until asked, because editing it changes what every
  *  later node is told — the same reason the edit is recorded as an event. */
 function Description({ item }: { item: WorkItem }) {
@@ -122,7 +191,7 @@ function Description({ item }: { item: WorkItem }) {
     setBusy(true);
     setErr(null);
     try {
-      await api.updateWorkItem(item.id, draft);
+      await api.updateWorkItem(item.id, { description: draft });
       await hydrateItem(item.id);
       setEditing(false);
     } catch (e) {
@@ -325,7 +394,7 @@ export function WorkItemDetail() {
             {statusWord(item.status)}
           </span>
         </div>
-        <h2 className="detail-title">{item.title}</h2>
+        <Title item={item} />
         <Description item={item} />
         <div className="detail-hero">
           <span className="hero-node">{item.current_node_id ?? "—"}</span>
@@ -348,7 +417,12 @@ export function WorkItemDetail() {
         </div>
       </div>
 
-      <ChainBar item={item} size="lg" />
+      <ChainBar
+        nodes={item.chain_definition.nodes}
+        currentNodeId={item.current_node_id}
+        done={item.completedNodes}
+        size="lg"
+      />
 
       {/* Multi-repo only (design 3a): a single-repo item's `repos` is empty. */}
       {!!item.repos?.length && (

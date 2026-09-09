@@ -254,7 +254,12 @@ function BoardRow({ item }: { item: WorkItem }) {
           <Gate item={item} gate={gate} variant="inline" />
         )}
       </div>
-      <ChainBar item={item} size="sm" />
+      <ChainBar
+        nodes={item.chain_definition.nodes}
+        currentNodeId={item.current_node_id}
+        done={item.completedNodes}
+        size="sm"
+      />
       <div className="board-row-current">
         {item.current_node_id}
         {item.fixCycle != null && (

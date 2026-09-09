@@ -1147,3 +1147,28 @@ def test_retry_after_cap_clears_retry_at(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_set_title_records_an_event(tmp_path):
+    """A title edit gets its own event type. Not a shared `work_item_edited`
+    with `set_description`: the description is prepended to every agent
+    instruction and the title is a label, so a timeline that cannot tell them
+    apart answers neither question."""
+
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await _mk_item(database)
+            await database.write(lambda c: store.set_title(c, "w1", "a better label"))
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
+            )
+            assert row["title"] == "a better label"
+
+            evs = database.read(lambda c: events.read_after(c, 0, "w1"))
+            edits = [e for e in evs if e["type"] == "work_item_title_edited"]
+            assert [e["payload"]["title"] for e in edits] == ["a better label"]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())

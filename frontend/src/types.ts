@@ -332,7 +332,8 @@ export interface TemplateValidation {
   id: string;
   valid: boolean;
   error: string | null;
-  by_repo: { repo: string; resolvable: boolean }[];
+  /** Every node task that is not in the registry, named by node. */
+  unresolved: { node: string; task: string }[];
 }
 
 export interface HookBinding {

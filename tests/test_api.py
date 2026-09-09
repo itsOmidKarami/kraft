@@ -18,6 +18,7 @@ from support.harness import (
 )
 
 from kraft import events
+from kraft.adapters import beads
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
@@ -295,6 +296,40 @@ def test_post_nonexistent_repo_422(tmp_path, monkeypatch):
         assert r.status_code == 422
 
 
+def test_a_title_over_the_tracker_limit_is_refused_before_bd(tmp_path, monkeypatch):
+    """Half of Kraft-cy30 landed already: `beads.intake` raises bd's own stderr
+    (Kraft-ibwj) and `executor.intake` catches every bd failure into a
+    `bead_warning` rather than a 502 (Kraft-7gy). What is left is quieter and
+    worse -- an over-long title now *succeeds*, and the item exists with no bead
+    and a warning line the caller may never read. Refuse it at the door.
+
+    The offending title is not echoed back: the length and the limit are the
+    actionable part, and this `detail` is printed straight through by
+    `kraft item create`.
+    """
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        repo = make_repo(tmp_path)
+        long_title = "x" * 711
+        r = client.post(
+            "/work-items", json={"title": long_title, "repo": str(repo), "autostart": False}
+        )
+        assert r.status_code == 422
+        detail = r.json()["detail"]
+        assert "711" in detail
+        assert str(beads.MAX_TITLE) in detail
+        assert long_title not in detail
+
+        assert client.get("/work-items").json()["items"] == []
+
+        # the boundary itself is accepted
+        ok = client.post(
+            "/work-items",
+            json={"title": "x" * beads.MAX_TITLE, "repo": str(repo), "autostart": False},
+        )
+        assert ok.status_code == 201, ok.text
+
+
 def test_get_unknown_work_item_404(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
         assert client.get("/work-items/does-not-exist").status_code == 404
@@ -379,6 +414,62 @@ def test_patch_can_clear_the_description(tmp_path, monkeypatch):
         ).json()["id"]
         assert client.patch(f"/work-items/{wid}", json={"description": ""}).status_code == 200
         assert client.get(f"/work-items/{wid}").json()["description"] is None
+
+
+def test_patch_sets_the_title_without_clobbering_the_description(tmp_path, monkeypatch):
+    """Absent means untouched, in both directions. A screen that patches only
+    the title must not blank the brief, and vice versa."""
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        repo = make_repo(tmp_path)
+        wid = client.post(
+            "/work-items",
+            json={
+                "title": "typed in a hurry",
+                "description": "the brief",
+                "repo": str(repo),
+                "autostart": False,
+            },
+        ).json()["id"]
+
+        r = client.patch(f"/work-items/{wid}", json={"title": "a better label"})
+        assert r.status_code == 200, r.text
+        assert r.json() == {"id": wid, "title": "a better label"}
+        after = client.get(f"/work-items/{wid}").json()
+        assert after["title"] == "a better label"
+        assert after["description"] == "the brief"
+
+        r = client.patch(f"/work-items/{wid}", json={"description": "a better brief"})
+        assert r.status_code == 200, r.text
+        after = client.get(f"/work-items/{wid}").json()
+        assert after["title"] == "a better label"
+        assert after["description"] == "a better brief"
+
+        evs = client.get(f"/work-items/{wid}/events").json()
+        assert [e["payload"]["title"] for e in evs if e["type"] == "work_item_title_edited"] == [
+            "a better label"
+        ]
+
+
+def test_patch_refuses_an_empty_body_and_a_blank_title(tmp_path, monkeypatch):
+    """`{}` is a caller bug, not a no-op to absorb; a blank title would leave the
+    board with an unlabelled row and nothing to search on."""
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        repo = make_repo(tmp_path)
+        wid = client.post(
+            "/work-items", json={"title": "t", "repo": str(repo), "autostart": False}
+        ).json()["id"]
+
+        empty = client.patch(f"/work-items/{wid}", json={})
+        assert empty.status_code == 422
+        assert "nothing to patch" in empty.json()["detail"]
+
+        blank = client.patch(f"/work-items/{wid}", json={"title": "   "})
+        assert blank.status_code == 422
+        assert "title cannot be empty" in blank.json()["detail"]
+
+        assert client.get(f"/work-items/{wid}").json()["title"] == "t"
 
 
 def _post_default(client, repo):

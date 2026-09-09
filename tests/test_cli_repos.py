@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+from pathlib import Path
 
 import pytest
+import yaml
 from support.harness import make_repo
 
 from kraft import cli, client
@@ -228,3 +231,38 @@ def test_disconnect_from_inside_a_worktree_disconnects_the_repo(app, tmp_path, m
     monkeypatch.chdir(worktree)
     cli.main(["repo", "disconnect"])
     assert asyncio.run(client.repos()) == []
+
+
+def test_disconnect_removes_an_entry_registered_under_a_worktree_path(
+    app, tmp_path, monkeypatch, capsys
+):
+    """Kraft-7qgb, the gap Kraft-sws6 + Kraft-97e left between them. An entry
+    written before 97e is keyed by a *worktree* path, and every CLI door probes
+    now, so the probe rewrites the argument to the main checkout and no door can
+    address the stale entry -- removing one needed a raw
+    `curl -X DELETE /repos?path=...`.
+
+    Written into repos.yaml by hand because that is the only way the state
+    exists: `POST /repos` stores git's resolved toplevel, so the API cannot
+    create this row any more.
+    """
+    import subprocess
+
+    repo = make_repo(tmp_path)
+    asyncio.run(client.ensure_repo(str(repo)))
+    worktree = tmp_path / "wt"
+    subprocess.run(
+        ["git", "worktree", "add", "-q", str(worktree), "-b", "wt-branch"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+
+    repos_yaml = Path(os.environ["KRAFT_TEMPLATES_DIR"]) / "repos.yaml"
+    on_disk = yaml.safe_load(repos_yaml.read_text())
+    on_disk["repos"].append({"path": str(worktree), "name": "stale", "enabled": True})
+    repos_yaml.write_text(yaml.safe_dump(on_disk))
+
+    cli.main(["repo", "disconnect", str(worktree)])
+    assert str(worktree) in capsys.readouterr().out
+    assert [entry["path"] for entry in asyncio.run(client.repos())] == [str(repo)]

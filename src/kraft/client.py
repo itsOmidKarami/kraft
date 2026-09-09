@@ -150,6 +150,26 @@ async def _delete(url: str, **params) -> None:
         raise ValueError(f"kraft {response.status_code}: {_detail(response)}")
 
 
+async def board(
+    status: str | None = None, *, include_abandoned: bool = False
+) -> tuple[list[dict], int]:
+    """The trimmed board rows, and the event cursor they reflect.
+
+    The cursor comes back with the rows so a live view can start its stream at
+    *now*: connecting at seq 0 replays every event the server ever committed,
+    redrawing the board once per historical row. `GET /work-items` has always
+    carried it in the envelope; `list_work_items` drops it, which is why
+    `_cmd_watch` used to reach for `_get` directly (Kraft-8okl).
+
+    A tuple rather than a `Board` dataclass, and a second function rather than a
+    `with_cursor=True` flag on `list_work_items` that returns two different
+    types: two fields, one caller that needs both.
+    """
+    path = "/work-items?include_abandoned=true" if include_abandoned else "/work-items"
+    payload = await _get(path)
+    return trim_work_items(payload["items"], status), payload["cursor"]
+
+
 async def list_work_items(
     status: str | None = None, *, include_abandoned: bool = False
 ) -> list[dict]:
@@ -163,9 +183,7 @@ async def list_work_items(
     way to see one again from the CLI, which makes `kraft item abandon` look like a
     delete.
     """
-    path = "/work-items?include_abandoned=true" if include_abandoned else "/work-items"
-    payload = await _get(path)
-    return trim_work_items(payload["items"], status)
+    return (await board(status, include_abandoned=include_abandoned))[0]
 
 
 def trim_work_items(items: list[dict], status: str | None = None) -> list[dict]:
@@ -579,19 +597,27 @@ async def ensure_repo(path: str | None = None) -> dict:
 async def disconnect_repo(path: str | None = None) -> dict:
     """Forget a repo. No repo file is touched and no work item is dropped.
 
-    The path is resolved through the probe first, for the same reason
-    `ensure_repo` probes on a 409: after Kraft-97e `POST /repos` stores the main
-    checkout, and an agent standing in a worktree of that repo would otherwise
-    send the worktree path and get a 404 — `api._connected` matches the raw path
-    or its `resolve()` and knows nothing about worktrees. A probe that fails (not
-    a git directory) falls back to the path as given, so the 404 still says what
+    The literal path wins when it is itself a connected entry; only when it is
+    not is the probe consulted. Probing unconditionally is right for the common
+    case -- after Kraft-97e `POST /repos` stores the main checkout, so an agent
+    standing in a worktree must send the main path -- but it made an entry
+    *registered under a worktree path* unaddressable from every CLI door, which
+    is the case this verb was added for (Kraft-7qgb). A probe that fails (not a
+    git directory) falls back to the path as given, so the 404 still says what
     is wrong rather than being swallowed here.
+
+    The extra `GET /repos` goes through `repos()`, the sanctioned reader (spec
+    D §4), and only runs the probe when the literal path is not connected.
+    Server-side `_connected` still matches a path against its `resolve()`, so a
+    path differing only by `/var` -> `/private/var` behaves as before.
     """
     path = path or os.getcwd()
-    status, probed = await _post("/repos/probe", {"path": path})
-    target = probed["path"] if status < 400 else path
-    await _delete("/repos", path=target)
-    return {"path": target}
+    if path not in {entry["path"] for entry in await repos()}:
+        status, probed = await _post("/repos/probe", {"path": path})
+        if status < 400:
+            path = probed["path"]
+    await _delete("/repos", path=path)
+    return {"path": path}
 
 
 async def _pending_gate_of(work_item_id: str) -> str:
