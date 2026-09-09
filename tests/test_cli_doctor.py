@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import subprocess
 
 import pytest
+import yaml
 from support.harness import make_repo
 
 from kraft import auth, cli, client, doctor
@@ -77,6 +80,67 @@ def test_a_disconnected_repo_path_fails(app, tmp_path, monkeypatch):
     row = next(r for r in asyncio.run(doctor.run_checks()) if r["name"].startswith("repo "))
     assert not row["ok"]
     assert "no longer a git repo" in row["detail"]
+
+
+def _bind_auto_forge(tmp_path):
+    """Put a `backend: auto` forge hook in the registry the server loaded.
+
+    `conftest.app` points KRAFT_TEMPLATES_DIR at `fake_templates_dir`, whose
+    back half is all `builtin: noop` — so without this the forge check is
+    correctly silent and neither test below would exercise anything.
+    """
+    path = tmp_path / "templates" / "registry.yaml"
+    data = yaml.safe_load(path.read_text())
+    data["hooks"]["on.mr.open"] = {"kind": "forge", "handler": "open_mr", "backend": "auto"}
+    path.write_text(yaml.safe_dump(data))
+
+
+def test_doctor_fails_when_an_auto_hook_has_no_forge_recorded(app, tmp_path):
+    """make_repo never adds an origin, so `probe_repo` records forge: None —
+    the state every pre-forge repos.yaml entry is already in."""
+    repo = make_repo(tmp_path, name="noforge")
+    asyncio.run(client.ensure_repo(str(repo)))
+    _bind_auto_forge(tmp_path)
+
+    row = _by_name(asyncio.run(doctor.run_checks()), "forge noforge")
+
+    assert not row["ok"]
+    assert "repos.yaml" in row["detail"]
+
+
+def test_doctor_reports_the_resolved_forge_cli(app, tmp_path, monkeypatch):
+    repo = make_repo(tmp_path, name="onforge")
+    subprocess.run(
+        ["git", "remote", "add", "origin", "git@gitlab.com:group/repo.git"],
+        cwd=repo,
+        check=True,
+    )
+    asyncio.run(client.ensure_repo(str(repo)))
+    _bind_auto_forge(tmp_path)
+    stub_dir = tmp_path / "bin"
+    stub_dir.mkdir()
+    glab = stub_dir / "glab"
+    glab.write_text("#!/bin/sh\nexit 0\n")
+    glab.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{stub_dir}:{os.environ['PATH']}")
+
+    row = _by_name(asyncio.run(doctor.run_checks()), "forge onforge")
+
+    assert row["ok"]
+    assert row["detail"] == "gitlab · glab"
+
+
+def test_no_forge_check_when_nothing_is_bound_to_auto(app, tmp_path):
+    """The check is about a binding the operator actually has: a registry with
+    no `auto` forge hook must not grow a row per repo telling them to fix
+    something they are not using."""
+    repo = make_repo(tmp_path, name="quiet")
+    asyncio.run(client.ensure_repo(str(repo)))
+
+    names = _names(asyncio.run(doctor.run_checks()))
+
+    assert "repo quiet" in names
+    assert "forge quiet" not in names
 
 
 def test_an_orphaned_worktree_is_reported(app, tmp_path):

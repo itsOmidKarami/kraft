@@ -14,8 +14,10 @@ from kraft.paths import default_skills_dir
 _VALID_KINDS = {"builtin", "agent", "subprocess", "forge"}
 _FORGE_HANDLERS = {"open_mr", "sync_mr", "ci_poll", "merge"}
 #: Duplicated in `adapters.forge.resolve`, deliberately: config validation must
-#: not import the adapter layer. Edit both together.
-_FORGE_BACKENDS = {"glab", "gh", "fake"}
+#: not import the adapter layer. Edit both together. `auto` is the exception —
+#: `adapters.forge.backend_for` translates it to one of the others at dispatch,
+#: so `resolve` never sees it.
+_FORGE_BACKENDS = {"auto", "glab", "gh", "fake"}
 # Config files that share the templates directory but are not chain templates.
 # One definition: `load_templates` skips them, and the registry save copies the
 # templates around them. Without this, every settings file the UI writes would be

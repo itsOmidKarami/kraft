@@ -374,6 +374,10 @@ async def _dispatch(
             hook_point=task_hook,
             handler=binding["handler"],
             backend=binding["backend"],
+            # `backend: auto` resolves against the forge recorded for this repo
+            # (repos.yaml), because the registry is per install and the forge is
+            # a property of the repo. Same source the agent branch reads above.
+            repo_forge=(launch.repo_entry or {}).get("forge") if launch else None,
             # The worktree, not the repo: every forge CLI resolves the merge
             # request from the *current branch*, and the repo is on whatever
             # the human has checked out.
