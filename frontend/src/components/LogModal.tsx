@@ -188,8 +188,19 @@ export function LogModal({ sessionId, onClose }: { sessionId: string; onClose: (
 
         <div className="log-body" ref={bodyRef}>
           {error && <p className="form-error">{error}</p>}
-          {shown.length === 0 && !error && live && (
-            <p className="empty">no output yet — this session has not written a line</p>
+          {/* On `lines`, not `shown`: a session writes one family of `src`
+              (an agent stream is sys/tool/agent, a subprocess is stdout), so
+              every chip but its own filters the whole log away — and the old
+              check read that as "wrote nothing". */}
+          {lines.length === 0 && !error && (
+            <p className="empty">
+              {live
+                ? "no output yet — this session has not written a line"
+                : "this session wrote no log"}
+            </p>
+          )}
+          {lines.length > 0 && shown.length === 0 && !error && (
+            <p className="empty">no {filter} lines — this session logged {lines.length}</p>
           )}
           {shown.map((l) => (
             <div key={l.n} className="log-line" data-src={l.src}>
