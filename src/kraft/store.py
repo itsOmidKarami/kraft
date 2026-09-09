@@ -268,7 +268,13 @@ def bump_counter(
 
 
 def retry_after_cap(
-    conn: sqlite3.Connection, work_item_id: str, node_id: str, key: str | None, steer
+    conn: sqlite3.Connection,
+    work_item_id: str,
+    node_id: str,
+    key: str | None,
+    steer,
+    *,
+    gate_key: str | None = None,
 ):
     """Clear a breached loop cap so the node can run again (handoff spec §8, 4b).
 
@@ -280,11 +286,18 @@ def retry_after_cap(
     `key` is None for a node with no fix loop: there is no counter to clear, but
     the item still has to be put back to work. A plain task failure strands an
     item exactly as hard as a breached cap does (Kraft-bzwi).
+
+    `gate_key` is the `<gate>_reject_loop` of the node's own gate, when it has
+    one. Retry is the human's override of the reject cap too (Kraft-ko7j §A4);
+    without clearing it, the retried node re-opens its gate onto a spent
+    counter and every rejection after that is refused forever.
     """
-    if key is not None:
-        conn.execute(
-            "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?", (work_item_id, key)
-        )
+    for counter in (key, gate_key):
+        if counter is not None:
+            conn.execute(
+                "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?",
+                (work_item_id, counter),
+            )
     conn.execute(
         "UPDATE work_items SET status = 'active', updated_at = ? WHERE id = ?",
         (_now(), work_item_id),
@@ -352,15 +365,45 @@ def approve_gate(conn: sqlite3.Connection, work_item_id, gate) -> None:
     events.append(conn, work_item_id, "gate_approved", {"gate": gate})
 
 
-def reject_gate(conn: sqlite3.Connection, work_item_id, gate, note, *, reopen: bool) -> None:
+def reject_gate(
+    conn: sqlite3.Connection, work_item_id, gate, note, *, reopen: bool, node: str | None = None
+) -> None:
     """Record the rejection. `reopen` flips the item back to active for the
-    backward-motion re-run (02 §7.2); a terminal reject leaves it needs_human."""
+    backward-motion re-run (02 §7.2); a rejection that breached the gate's
+    reject loop leaves it needs_human.
+
+    `node` is the chain node the re-run enters at (Kraft-ko7j). It rides the
+    event rather than a column: the events table is already append-only and
+    already holds the note, and `store.last_rejection` reads both back.
+    """
     status = "'active'" if reopen else "status"
     conn.execute(
         f"UPDATE work_items SET status = {status}, updated_at = ? WHERE id = ?",
         (_now(), work_item_id),
     )
-    events.append(conn, work_item_id, "gate_rejected", {"gate": gate, "note": note})
+    events.append(conn, work_item_id, "gate_rejected", {"gate": gate, "note": note, "node": node})
+
+
+#: Events that mean the newest rejection has already been acted on, so its note
+#: is spent. Newest-wins, the same shape of boundary `api._stop_reason` uses:
+#: without one, an old addressed rejection would steer an unrelated retry many
+#: nodes later.
+_REJECTION_SPENT = ("node_started", "work_item_retried", "gate_requested", "gate_approved")
+
+
+def last_rejection(conn: sqlite3.Connection, work_item_id: str) -> dict | None:
+    """The `gate_rejected` payload the item is currently sitting on, or None.
+
+    Read back out of the append-only events table rather than stored a second
+    time on the row: the note is already durable there, it just had no reader
+    (Kraft-ko7j).
+    """
+    for e in reversed(events.read_after(conn, 0, work_item_id)):
+        if e["type"] == "gate_rejected":
+            return e["payload"]
+        if e["type"] in _REJECTION_SPENT:
+            return None
+    return None
 
 
 def create_session(

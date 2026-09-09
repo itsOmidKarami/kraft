@@ -20,9 +20,18 @@ const PROMPTS: Record<string, string> = {
   human_review_approval: "approve the merge request to continue",
 };
 
-/** `human_review_approval` has nowhere to loop back to, so rejecting it stops. */
-const rejectLabel = (gate: string) =>
-  gate === "human_review_approval" ? "Reject and stop" : "Reject and re-plan";
+/**
+ * The node a rejection re-enters the chain at, when that is not the gate's own
+ * node. Read from the item's chain rather than hard-coded per gate: the
+ * routing is chain shape, and the server resolves it from the same field.
+ */
+const rejectTarget = (item: WorkItem, gate: string): string | null => {
+  const nodes = item.chain_definition?.nodes ?? [];
+  const at = nodes.findIndex((n) => n.gate_after === gate);
+  if (at < 0) return null;
+  const to = nodes[at].reject_to;
+  return to && nodes.slice(0, at).some((n) => n.id === to) ? to : null;
+};
 
 export function Gate({
   item,
@@ -50,6 +59,7 @@ export function Gate({
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const target = rejectTarget(item, gate);
 
   const act = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -87,13 +97,18 @@ export function Gate({
         value={note}
         onChange={(e) => setNote(e.target.value)}
       />
+      {target && (
+        <p className="field-hint">
+          re-enters at <code>{target}</code> with this note as its steer
+        </p>
+      )}
       <div className="gate-actions">
         <button
           className="btn btn-primary"
           disabled={busy || note.trim() === ""}
           onClick={() => act(() => api.rejectGate(item.id, gate, note))}
         >
-          {rejectLabel(gate)}
+          {target ? "Reject and send back" : "Reject and re-plan"}
         </button>
         <button className="btn btn-ghost" disabled={busy} onClick={() => setRejecting(false)}>
           Cancel

@@ -3,7 +3,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from support.harness import _git, make_repo, make_repo_with_engineering
+from support.harness import _git, isolated_bd, make_repo, make_repo_with_engineering
 
 from kraft import builtins as kraft_builtins
 from kraft import db, store
@@ -40,14 +40,19 @@ def test_env_setup_creates_worktree_and_branch(tmp_path):
             assert status == "done"
             worktree = rd.worktrees / "w1"
             assert (worktree / "calc.py").is_file()
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
+            )
+            branch = store.branch_for(row)
+            assert branch == "kraft/t-w1"
             branches = subprocess.run(
-                ["git", "branch", "--list", "kraft/t-w1"],
+                ["git", "branch", "--list", branch],
                 cwd=repo,
                 capture_output=True,
                 text=True,
                 check=True,
             ).stdout
-            assert "kraft/t-w1" in branches
+            assert branch in branches
             row = database.read(
                 lambda c: c.execute(
                     "SELECT hook_point, status FROM worker_sessions WHERE id='s1'"
@@ -425,7 +430,10 @@ def test_ensure_worktree_reattaches_an_existing_branch(tmp_path):
                 database, rd, repo=str(repo), work_item_id="w1"
             )
             assert again.is_dir()
-            assert git_read(again, "rev-parse", "--abbrev-ref", "HEAD") == "kraft/t-w1"
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
+            )
+            assert git_read(again, "rev-parse", "--abbrev-ref", "HEAD") == store.branch_for(row)
         finally:
             await database.close()
 
@@ -559,6 +567,72 @@ def test_ensure_worktree_raises_when_git_fails(tmp_path):
                 await kraft_builtins.ensure_worktree(
                     database, rd, repo=str(not_a_repo), work_item_id="w1"
                 )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_the_worktree_and_the_forge_agree_on_the_branch(tmp_path, monkeypatch):
+    """Kraft-nhps. Three places used to build `kraft/<uuid>` and none of them
+    shared a line. They now read the one value written at intake, which is the
+    only way two derivations of one string cannot drift."""
+    from kraft import api as kraft_api
+    from kraft import executor
+    from kraft.templates import Registry, Template
+
+    repo = make_repo(tmp_path)
+    tracker = isolated_bd(tmp_path)
+    captured: dict = {}
+
+    async def fake_forge_run_task(db_, run_dirs_, **kw):
+        captured.update(kw)
+        return "done"
+
+    monkeypatch.setattr(executor._forge, "run_task", fake_forge_run_task)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="Teach probe_repo about worktrees",
+                repo=str(repo),
+                template=Template(
+                    id="one-forge-node",
+                    nodes=[{"id": "open_mr", "tasks": ["on.mr.open"], "gate_after": None}],
+                ),
+                bd_cwd=str(tracker),
+            )
+            registry = Registry(
+                hooks={"on.mr.open": {"kind": "forge", "handler": "open_mr", "backend": "fake"}}
+            )
+            # one node, no gate: the chain completes and closes its own bead in
+            # `tracker`, which is why intake and run are handed the same one
+            await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+            branch = store.branch_for(row)
+            assert branch == f"kraft/teach-probe-repo-about-worktrees-{wid[:8]}"
+            # what git created
+            assert git_read(rd.worktrees / wid, "rev-parse", "--abbrev-ref", "HEAD") == branch
+            # what the forge adapter was handed
+            assert captured["branch"] == branch
+            # and what abandon reclaims
+            assert await kraft_api._remove_worktree(repo, rd.worktrees / wid, branch)
+            listed = subprocess.run(
+                ["git", "branch", "--list", branch],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+            assert listed.strip() == ""
         finally:
             await database.close()
 

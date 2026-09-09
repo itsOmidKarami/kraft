@@ -872,3 +872,38 @@ def test_the_first_node_runs_before_env_setup_and_still_has_a_worktree(tmp_path)
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_a_steered_rerun_over_an_existing_artifact_is_framed_as_a_revision(tmp_path):
+    """Kraft-bol: a rejected plan cost a full re-plan because the dispatch
+    never mentioned the document the agent had already written."""
+    (tmp_path / ".engineering" / "plans").mkdir(parents=True)
+    (tmp_path / ".engineering" / "plans" / "w1.md").write_text("# the plan\n")
+
+    prefix = executor._steer_prefix(
+        {"kind": "agent", "command": "claude", "skill": "plan", "artifact": "plan"},
+        {"id": "w1"},
+        tmp_path,
+        "task 4 has no test",
+    )
+
+    assert ".engineering/plans/w1.md" in prefix
+    assert "evise" in prefix  # "Revise that document in place"
+    assert "task 4 has no test" in prefix
+    assert not prefix.startswith("A human has steered this run:")
+
+
+def test_a_steered_node_with_no_artifact_yet_keeps_the_plain_steer_prompt(tmp_path):
+    """The branch fires on the document's existence, not on any gate name: a
+    node whose artifact was never written has nothing to revise."""
+    with_binding = executor._steer_prefix(
+        {"kind": "agent", "command": "claude", "skill": "plan", "artifact": "plan"},
+        {"id": "w1"},
+        tmp_path,
+        "go left",
+    )
+    no_binding = executor._steer_prefix(
+        {"kind": "agent", "command": "claude"}, {"id": "w1"}, tmp_path, "go left"
+    )
+
+    assert with_binding == no_binding == "A human has steered this run: go left\n\n"

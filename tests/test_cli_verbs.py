@@ -271,6 +271,35 @@ def test_retry_passes_the_id_and_steer_through(app, monkeypatch, capsys):
     assert "w1" in capsys.readouterr().out
 
 
+def test_reject_passes_the_node_through(app, monkeypatch, capsys):
+    seen = {}
+
+    async def fake_reject(note, gate=None, work_item_id=None, node=None):
+        seen.update(note=note, gate=gate, work_item_id=work_item_id, node=node)
+        return {"id": work_item_id, "status": "active"}
+
+    monkeypatch.setattr(client, "reject_gate", fake_reject)
+    cli.main(
+        [
+            "item",
+            "reject",
+            "w1",
+            "--note",
+            "the retry path is untested",
+            "--gate",
+            "human_review_approval",
+            "--node",
+            "implementation",
+        ]
+    )
+    assert seen == {
+        "note": "the retry path is untested",
+        "gate": "human_review_approval",
+        "work_item_id": "w1",
+        "node": "implementation",
+    }
+
+
 GROUPS = {
     "item": ["create", "approve", "reject", "pause", "resume", "retry", "abandon"],
     "view": [

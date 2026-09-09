@@ -373,14 +373,22 @@ def test_materialize_quick_task_from_shipped_templates():
                 "tasks": ["on.env.prepare"],
                 "gate_after": None,
                 "fix_loop": None,
+                "reject_to": None,
             },
             {
                 "id": "implementation",
                 "tasks": ["on.implementation.start"],
                 "gate_after": None,
                 "fix_loop": None,
+                "reject_to": None,
             },
-            {"id": "verify", "tasks": ["on.test.run"], "gate_after": None, "fix_loop": None},
+            {
+                "id": "verify",
+                "tasks": ["on.test.run"],
+                "gate_after": None,
+                "fix_loop": None,
+                "reject_to": None,
+            },
         ],
     }
     assert "current_node_id" not in chain
@@ -693,3 +701,69 @@ def test_load_registry_rejects_effort_on_a_subprocess_hook(tmp_path):
     )
     with pytest.raises(templates.RegistryError, match="effort"):
         templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_reject_to_must_name_an_earlier_node_of_the_same_template(tmp_path):
+    """A rejection routes backwards. A `reject_to` pointing forwards would let
+    a gate skip the nodes between it and its target."""
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "quick-task.yaml": GOOD_TEMPLATE,
+            "forward.yaml": (
+                "id: forward\n"
+                "nodes:\n"
+                "  - { id: plan,  tasks: [on.test.run], reject_to: merge }\n"
+                "  - { id: merge, tasks: [on.test.run] }\n"
+            ),
+        },
+    )
+    reg = templates.load_registry(d / "registry.yaml")
+    ts = templates.load_templates(d, reg)
+    assert "quick-task" in ts.valid
+    assert "forward" in ts.invalid
+    assert "reject_to" in ts.invalid["forward"]
+
+
+def test_reject_to_naming_no_node_at_all_quarantines_the_template(tmp_path):
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "nosuch.yaml": (
+                "id: nosuch\nnodes:\n  - { id: n1, tasks: [on.test.run], reject_to: ghost }\n"
+            ),
+        },
+    )
+    reg = templates.load_registry(d / "registry.yaml")
+    ts = templates.load_templates(d, reg)
+    assert "nosuch" in ts.invalid
+    assert "reject_to" in ts.invalid["nosuch"]
+
+
+def test_a_node_may_name_itself_as_its_own_reject_target(tmp_path):
+    """`reject_to` at the declaring node's own index is today's behaviour
+    written down, not an error."""
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "self.yaml": (
+                "id: self\nnodes:\n  - { id: n1, tasks: [on.test.run], reject_to: n1 }\n"
+            ),
+        },
+    )
+    reg = templates.load_registry(d / "registry.yaml")
+    ts = templates.load_templates(d, reg)
+    assert "self" in ts.valid, ts.invalid
+
+
+def test_the_default_chain_sends_a_rejected_review_back_to_implementation():
+    """Kraft-ko7j: the last gate is no longer a dead end, and where it goes is
+    chain shape, so it lives in the template."""
+    reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
+    tmpl = templates.load_templates(TEMPLATES_DIR, reg).valid["default"]
+    by_id = {n["id"]: n for n in templates.materialize(tmpl)["nodes"]}
+    assert by_id["human_review"]["reject_to"] == "implementation"
+    assert by_id["plan"]["reject_to"] is None

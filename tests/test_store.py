@@ -4,6 +4,7 @@ import subprocess
 import uuid
 
 from kraft import db, events, store
+from kraft.policy import Cap
 
 _CHAIN = json.dumps(
     {
@@ -932,6 +933,85 @@ def test_branch_for_falls_back_when_the_row_predates_the_column(tmp_path):
                 lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
             )
             assert store.branch_for(row) == "kraft/w1"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_last_rejection_reads_the_note_and_the_target_back(tmp_path):
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await _mk_item(database)
+            await database.write(
+                lambda c: store.reject_gate(
+                    c, "w1", "plan_approval", "task 4 has no test", reopen=False, node="plan"
+                )
+            )
+            got = database.read(lambda c: store.last_rejection(c, "w1"))
+            assert got == {
+                "gate": "plan_approval",
+                "note": "task 4 has no test",
+                "node": "plan",
+            }
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_a_rejection_is_spent_once_a_node_starts_on_it(tmp_path):
+    """The note is the *pending* rejection's, not the newest one ever. A
+    rejection whose re-run already launched has had its note delivered; handing
+    it to an unrelated retry three nodes later would steer with stale text."""
+
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await _mk_item(database)
+            await database.write(
+                lambda c: store.reject_gate(
+                    c, "w1", "plan_approval", "old news", reopen=True, node="plan"
+                )
+            )
+            await database.write(lambda c: store.enter_node(c, "w1", "plan"))
+            assert database.read(lambda c: store.last_rejection(c, "w1")) is None
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_retry_after_cap_clears_the_gate_reject_counter_too(tmp_path):
+    """Kraft-ko7j §A4: without this the cap becomes a dead end one step out —
+    the counter is spent, the gate re-opens after every retry, and every
+    rejection after that is refused forever."""
+
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await _mk_item(database)
+            cap = Cap(attempts=1, wall_clock_s=3600)
+            await database.write(
+                lambda c: store.bump_counter(c, "w1", "spec_approval_reject_loop", cap)
+            )
+            await database.write(lambda c: store.bump_counter(c, "w1", "verify_fix_loop", cap))
+            await database.write(
+                lambda c: store.retry_after_cap(
+                    c,
+                    "w1",
+                    "spec",
+                    "verify_fix_loop",
+                    None,
+                    gate_key="spec_approval_reject_loop",
+                )
+            )
+            assert database.read(lambda c: store.read_counter(c, "w1", "verify_fix_loop")) is None
+            assert (
+                database.read(lambda c: store.read_counter(c, "w1", "spec_approval_reject_loop"))
+                is None
+            )
         finally:
             await database.close()
 

@@ -650,6 +650,9 @@ def _gate_artifact(st, row, gate: str | None) -> str | None:
 
 class GateReject(BaseModel):
     note: str
+    #: Where the chain re-enters. Defaults to the gate node's `reject_to`, and
+    #: failing that to the gate node itself (Kraft-ko7j).
+    node: str | None = None
 
 
 class Retry(BaseModel):
@@ -1075,19 +1078,39 @@ async def approve_gate(wid: str, gate: str, request: Request):
     return {k: v for k, v in dict(_work_item_row(st, wid)).items()}
 
 
-#: `human_review_approval` sits at the end of the chain with nothing to loop back
-#: to, so rejecting it stops the item (design 01 §7.2). Every other gate re-runs
-#: its producer node with the note injected — "reject and re-plan".
-TERMINAL_REJECT_GATES = {"human_review_approval"}
+def _reject_target(chain: dict, gate_index: int, requested: str | None) -> int:
+    """The index a rejection re-enters the chain at (Kraft-ko7j).
+
+    `requested`, else the gate node's `reject_to`, else the gate node itself.
+    A `reject_to` that `materialize` dropped — an intake attachment satisfied
+    that node's gate — falls back to the gate node rather than 500-ing; a bad
+    `node` in the request body is the caller's error and is a 400.
+    """
+    nodes = chain["nodes"]
+    name = requested or nodes[gate_index].get("reject_to")
+    if not name:
+        return gate_index
+    index = next((i for i, n in enumerate(nodes) if n["id"] == name), None)
+    if index is None or index > gate_index:
+        if requested:
+            raise HTTPException(
+                400,
+                f"cannot reject to {name!r}: not a node of this chain at or before "
+                f"{nodes[gate_index]['id']!r}",
+            )
+        return gate_index
+    return index
 
 
 @app.post("/work-items/{wid}/gates/{gate}/reject")
 async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
     """Reject a gate and put the chain back to work (02 §7.2, backward motion).
 
-    Without the re-run below a rejection is a dead end: the gate stops being
-    pending, the node has no fix loop to retry and the item is not running, so
-    approve/retry/pause/resume all 409 and the work item is stranded.
+    Every gate takes this one path now. `human_review_approval` used to be
+    terminal: the note landed in an event nothing read, no node was re-run, and
+    the only exits left were approving the thing just rejected or abandoning
+    the item (Kraft-ko7j). The single thing that may park an item at a rejected
+    gate is the reject loop's own cap.
     """
     st = request.app.state
     row = _work_item_row(st, wid)
@@ -1097,38 +1120,42 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
         raise HTTPException(409, f"gate {gate!r} is not pending")
 
     chain = json.loads(row["chain_definition"])
-    node_id = chain["nodes"][_gate_node_index(chain, gate)]["id"]
+    gate_index = _gate_node_index(chain, gate)
+    node_id = chain["nodes"][gate_index]["id"]
+    # Resolved before anything is written: a bad target must leave the gate
+    # pending and the events table untouched.
+    target = _reject_target(chain, gate_index, body.node)
     key = f"{gate}_reject_loop"
-    replan = gate not in TERMINAL_REJECT_GATES
-    if replan:
-        if st.invalid_policy:
-            # Same posture as intake (§9): a re-run we cannot bound is not started.
-            raise HTTPException(
-                503, f"policy config invalid, refusing work: {'; '.join(st.invalid_policy)}"
-            )
-        # Same counter machinery as a fix loop: rejections are bounded, and the
-        # cap is snapshotted on first fire rather than re-resolved per attempt.
-        cap = policy_mod.resolve_cap(st.policy, key)
-        count, started_at, cap = await st.db.write(
-            lambda c, cap=cap: store.bump_counter(c, wid, key, cap)
-        )
-        replan = (
-            policy_mod.check(count=count, started_at=started_at, cap=cap, now=executor._now())
-            == "ok"
-        )
 
-    await st.db.write(lambda c: store.reject_gate(c, wid, gate, body.note, reopen=replan))
+    if st.invalid_policy:
+        # Same posture as intake (§9): a re-run we cannot bound is not started.
+        raise HTTPException(
+            503, f"policy config invalid, refusing work: {'; '.join(st.invalid_policy)}"
+        )
+    # Same counter machinery as a fix loop: rejections are bounded, and the
+    # cap is snapshotted on first fire rather than re-resolved per attempt.
+    cap = policy_mod.resolve_cap(st.policy, key)
+    count, started_at, cap = await st.db.write(
+        lambda c, cap=cap: store.bump_counter(c, wid, key, cap)
+    )
+    replan = (
+        policy_mod.check(count=count, started_at=started_at, cap=cap, now=executor._now()) == "ok"
+    )
+
+    target_id = chain["nodes"][target]["id"]
+    await st.db.write(
+        lambda c: store.reject_gate(c, wid, gate, body.note, reopen=replan, node=target_id)
+    )
     if not replan:
-        if gate not in TERMINAL_REJECT_GATES:
-            await st.db.write(
-                lambda c: store.mark_needs_human(
-                    c,
-                    wid,
-                    node_id,
-                    f"{key} exhausted after {count - 1} rejection(s)",
-                    {"cycles": count - 1, "attempts": cap.attempts},
-                )
+        await st.db.write(
+            lambda c: store.mark_needs_human(
+                c,
+                wid,
+                node_id,
+                f"{key} exhausted after {count - 1} rejection(s)",
+                {"cycles": count - 1, "attempts": cap.attempts},
             )
+        )
         return {k: v for k, v in dict(_work_item_row(st, wid)).items()}
 
     _spawn(
@@ -1143,7 +1170,7 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
                 work_item_id=wid,
                 registry=st.registry,
                 bd_cwd=_bd_cwd(),
-                start_index=_gate_node_index(chain, gate),
+                start_index=target,
                 policy=st.policy,
                 steer=body.note,
                 launch=_launch(st, row["repo"]),
@@ -1168,8 +1195,12 @@ def _terminate(pid: int | None) -> None:
         pass  # already gone, or not ours — the row still moves to paused
 
 
-async def _remove_worktree(repo: Path, worktree: Path, wid: str, branch: str) -> bool:
-    """Reclaim the worktree and the item's branch.
+async def _remove_worktree(repo: Path, worktree: Path, branch: str) -> bool:
+    """Reclaim the worktree and its branch.
+
+    Takes the branch rather than the work item id: the name is stored on the
+    row now, and rebuilding it here would be a second derivation that can
+    disagree with the one git actually created (Kraft-nhps).
 
     Best-effort: the row is already abandoned by the time this runs, and a git
     failure here must not leave the item in a state the board cannot show. The
@@ -1186,7 +1217,7 @@ async def _remove_worktree(repo: Path, worktree: Path, wid: str, branch: str) ->
             subprocess.run, args, cwd=repo, capture_output=True, text=True
         )
         if done.returncode != 0:
-            logger.warning("abandon %s: %s failed: %s", wid, args[1], done.stderr.strip())
+            logger.warning("abandon %s: %s failed: %s", branch, args[1], done.stderr.strip())
             ok = False
     return ok
 
@@ -1207,7 +1238,7 @@ async def abandon_work_item(wid: str, request: Request):
         return {"id": wid, "status": "abandoned", "worktree_removed": False}
     await st.db.write(lambda c: store.abandon_work_item(c, wid))
     removed = await _remove_worktree(
-        Path(row["repo"]), st.run_dirs.worktrees / wid, wid, store.branch_for(row)
+        Path(row["repo"]), st.run_dirs.worktrees / wid, store.branch_for(row)
     )
     return {"id": wid, "status": "abandoned", "worktree_removed": removed}
 
@@ -1329,11 +1360,21 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     if node is None:
         raise HTTPException(409, "work item has no current node to retry")
     key = node.get("fix_loop") or None
+    gate = node.get("gate_after")
+    gate_key = f"{gate}_reject_loop" if gate else None
     if row["status"] != "needs_human":
         raise HTTPException(409, "work item is not stopped")
 
     steer = (body.steer or "").strip() or None
-    await st.db.write(lambda c: store.retry_after_cap(c, wid, node_id, key, steer))
+    if steer is None:
+        # The reason the human already typed at the gate. Without this a
+        # rejection that exhausted its cap makes them type it twice for it to
+        # reach an agent at all (Kraft-ko7j).
+        last = st.db.read(lambda c: store.last_rejection(c, wid))
+        steer = (last or {}).get("note") or None
+    await st.db.write(
+        lambda c: store.retry_after_cap(c, wid, node_id, key, steer, gate_key=gate_key)
+    )
     start = next(i for i, n in enumerate(chain["nodes"]) if n["id"] == node_id)
     _spawn(
         request.app,

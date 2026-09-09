@@ -185,7 +185,9 @@ def test_reject_records_the_note_and_reopen_flips_the_row(tmp_path):
             )
             assert status() == "active"
             rej = _payloads(database, wid, "gate_rejected")
-            assert rej == [{"gate": "spec_approval", "note": "not specific enough"}] * 2
+            assert (
+                rej == [{"gate": "spec_approval", "note": "not specific enough", "node": None}] * 2
+            )
             assert "gate_approved" not in _events(database, wid)
         finally:
             await database.close()
