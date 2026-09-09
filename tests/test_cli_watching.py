@@ -349,6 +349,54 @@ def test_watch_draws_a_frame_per_event_and_starts_at_the_live_cursor(
     assert seen["after_seq"] > 0  # the live cursor, not a full replay
 
 
+def test_watch_reads_the_board_through_the_public_client(app, tmp_path, monkeypatch, capsys):
+    """Kraft-8okl, the same class as Kraft-t5s9: `_cmd_watch` reached for
+    `client._get("/work-items")` because `list_work_items` drops the cursor the
+    stream has to start from. `board()` returns both, so there is no reason left
+    to go under the public surface.
+
+    `_get` is spied rather than forbidden outright: `resolve_repo` legitimately
+    calls it for `/repos`, and the claim being pinned is that the *board* is not
+    fetched that way.
+    """
+    repo = make_repo(tmp_path)
+    _make_item(repo, "through the front door")
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True, raising=False)
+
+    boards = []
+    real_board = client.board
+
+    async def spy_board(*args, **kwargs):
+        rows, cursor = await real_board(*args, **kwargs)
+        boards.append(cursor)
+        return rows, cursor
+
+    got = []
+    real_get = client._get
+
+    async def spy_get(path, **params):
+        got.append(path)
+        return await real_get(path, **params)
+
+    monkeypatch.setattr(client, "board", spy_board)
+    monkeypatch.setattr(client, "_get", spy_get)
+
+    async def one_event(after_seq=0):
+        yield {"type": "node_started", "seq": after_seq + 1}
+
+    monkeypatch.setattr(client, "stream_events", one_event)
+    cli.main(["view", "watch"])
+
+    assert len(boards) == 2  # the first frame, plus one per event
+    # `board()` itself does one `_get("/work-items")` per call -- that request
+    # is unavoidable, since it is how the board is fetched. What is pinned is
+    # that `frame()` makes no *second*, redundant one of its own: if it still
+    # reached for `client._get("/work-items")` directly (the bug), this count
+    # would be double `len(boards)` rather than equal to it.
+    assert [p for p in got if p.startswith("/work-items")].count("/work-items") == len(boards)
+    assert "through the front door" in capsys.readouterr().out
+
+
 def test_a_closed_event_stream_is_a_kraft_message(app, monkeypatch, capsys):
     monkeypatch.setattr("sys.stdout.isatty", lambda: True, raising=False)
 

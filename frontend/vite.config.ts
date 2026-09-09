@@ -21,6 +21,13 @@ const proxy: Record<string, ProxyOptions> = Object.fromEntries(
     "/login",
     "/logout",
     "/beads",
+    // Four Settings screens were dev-only broken without these. `/theme` was
+    // traced while writing the spec and is not in the bead. `src/vite.proxy.test.ts`
+    // fails when the next route is added without a line here.
+    "/steering",
+    "/intake",
+    "/notify",
+    "/theme",
   ].map((p) => [
     p,
     { target: API, changeOrigin: true },

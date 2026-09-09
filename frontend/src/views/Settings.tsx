@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { NavLink, Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { Check, Plus, WarningCircle } from "@phosphor-icons/react";
 import * as api from "../api";
 import { ago, until } from "../format";
-import { OverflowMenu, Row, RowText, SectionLabel } from "../components/ui";
+import { DraftDiff } from "../components/DraftDiff";
+import { ChainBar, OverflowMenu, Row, RowText, SectionLabel } from "../components/ui";
 import { backdropProps, useModal } from "../useModal";
 import { PALETTES, applyTheme } from "../theme";
 import type {
@@ -320,6 +321,7 @@ function TemplatesPage() {
   const [report, setReport] = useState<TemplateValidation | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showDiff, setShowDiff] = useState(false);
 
   const current = templates.find((t) => t.id === selected) ?? templates[0];
   useEffect(() => {
@@ -397,12 +399,24 @@ function TemplatesPage() {
             onChange={(e) => setDraft(e.target.value)}
           />
           {!parsed && <p className="form-error">not valid JSON — nothing will be saved</p>}
+          {/* The diagram tracks what is typed: `parsed` is the draft, so it
+              updates as the textarea changes and vanishes into the "not valid
+              JSON" line below when it cannot be read. No graph library — a
+              chain is a list with gates, and ChainBar already draws one. */}
+          {parsed && (
+            <ChainBar
+              nodes={parsed}
+              invalid={(report?.unresolved ?? []).map((u) => u.node)}
+              size="lg"
+            />
+          )}
+          {showDiff && <DraftDiff before={original} after={draft} />}
           {report && (
             <div className="validation" data-valid={report.valid}>
               <span>{report.valid ? "valid" : report.error}</span>
-              {report.by_repo.map((r) => (
-                <span key={r.repo} className="row-sub">
-                  {r.repo}: {r.resolvable ? "resolvable" : "unresolvable"}
+              {report.unresolved.map((u) => (
+                <span key={`${u.node}/${u.task}`} className="row-sub">
+                  {u.node}: {u.task} does not resolve
                 </span>
               ))}
             </div>
@@ -414,6 +428,9 @@ function TemplatesPage() {
             </button>
             <button className="btn btn-secondary" disabled={!parsed} onClick={check}>
               Validate
+            </button>
+            <button className="btn btn-secondary" onClick={() => setShowDiff((v) => !v)}>
+              Changes
             </button>
             <button className="btn btn-ghost" onClick={() => setDraft(original)}>
               Discard
@@ -672,6 +689,7 @@ function SteeringPage() {
   const [loaded, setLoaded] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showDiff, setShowDiff] = useState(false);
   const list: SteeringList = value ?? { files: [], max_bytes: 0 };
 
   // The body is fetched per file rather than shipped with the list: the list is
@@ -784,6 +802,7 @@ function SteeringPage() {
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
               />
+              {showDiff && <DraftDiff before={loaded} after={draft} />}
               <div className="save-row">
                 <button
                   className="btn btn-primary"
@@ -792,6 +811,16 @@ function SteeringPage() {
                 >
                   <Check size={14} />
                   Save
+                </button>
+                <button className="btn btn-secondary" onClick={() => setShowDiff((v) => !v)}>
+                  Changes
+                </button>
+                <button
+                  className="btn btn-ghost"
+                  disabled={busy || draft === loaded}
+                  onClick={() => setDraft(loaded)}
+                >
+                  Discard
                 </button>
                 <button className="btn btn-ghost" disabled={busy} onClick={remove}>
                   Delete
@@ -1386,12 +1415,6 @@ function AccessPage() {
 /* ── shell ────────────────────────────────────────────────────────────────── */
 
 export function Settings() {
-  const nav = useNavigate();
-  useEffect(() => {
-    // land on a page rather than an empty shell
-    if (window.location.pathname === "/settings") nav("/settings/repos", { replace: true });
-  }, [nav]);
-
   return (
     <div className="board settings">
       <aside className="board-sidebar">

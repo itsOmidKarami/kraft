@@ -115,3 +115,51 @@ def test_fix_mode_writes_session_summary_from_injected_context(tmp_path):
     summary = (tmp_path / ".engineering" / "sessions" / "s9.md").read_text()
     assert "work_item_ids: [w1]" in summary
     assert "worker_session_id: s9" in summary
+
+
+def test_a_needs_context_report_writes_no_artifact(tmp_path):
+    """A real worker that stops to ask a question has written nothing, and
+    `agent._resolve_status` holds only a *claim* of success to the artifact.
+    A fake that writes the document whatever it reports masks exactly the
+    regressions that guard exists to catch -- the needs_context downgrade bug in
+    MR !58 passed every needs_context test for this reason.
+
+    The session summary is still written: a stopped worker is told to write one,
+    and `run_agent_task` reads it back the same way.
+    """
+    ctx = "Work item: w1\nNode: spec\nHook point: on.spec.requested\nWorker session: s9\n"
+    proc = _run(
+        tmp_path,
+        {
+            "KRAFT_FAKE_CLAUDE": "noop",
+            "KRAFT_FAKE_CLAUDE_STATUS": "needs_context",
+            "KRAFT_FAKE_CLAUDE_QUESTION": "which repo?",
+        },
+        ctx=ctx,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert not (tmp_path / ".engineering" / "specs" / "w1.md").exists()
+    assert json.loads((tmp_path / "result.json").read_text())["status"] == "needs_context"
+    assert (tmp_path / ".engineering" / "sessions" / "s9.md").is_file()
+
+
+def test_the_skip_knob_suppresses_the_artifact_on_a_done_report(tmp_path):
+    """The positive control and the knob in one test: `done` writes the plan,
+    and `KRAFT_FAKE_CLAUDE_SKIP_ARTIFACT=1` suppresses it for a test that wants
+    the empty-gate failure on purpose (the same knob `fake_agent.py` has)."""
+    ctx = "Work item: w2\nNode: plan\nHook point: on.plan.requested\nWorker session: s7\n"
+    artifact = tmp_path / ".engineering" / "plans" / "w2.md"
+
+    proc = _run(tmp_path, {"KRAFT_FAKE_CLAUDE": "noop"}, ctx=ctx)
+    assert proc.returncode == 0, proc.stderr
+    assert artifact.is_file()
+
+    artifact.unlink()
+    proc = _run(
+        tmp_path,
+        {"KRAFT_FAKE_CLAUDE": "noop", "KRAFT_FAKE_CLAUDE_SKIP_ARTIFACT": "1"},
+        ctx=ctx,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert not artifact.exists()
+    assert json.loads((tmp_path / "result.json").read_text())["status"] == "done"
