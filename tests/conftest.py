@@ -39,6 +39,12 @@ def _isolated_kraft_home(tmp_path, monkeypatch):
     # depend on that host being up and cost every offline run a timeout. The
     # tests that exercise the check set their own stubs and unset this.
     monkeypatch.setenv("KRAFT_NO_UPDATE_CHECK", "1")
+    # Nor the operator's real `~/.beads` (Kraft-t5g): bd's fallback when it finds
+    # no `.beads/` walking up from cwd is a hardcoded `~/.beads`, not KRAFT_HOME.
+    # Every throwaway repo the suite builds sets its own local git user config
+    # (make_repo, _bd_template), so bd's `--actor` default never needs the real
+    # `$HOME`'s global one.
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
 
 
 @pytest.fixture

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import sqlite3
 import uuid
 from dataclasses import asdict, dataclass
@@ -204,6 +205,7 @@ async def intake(
             logger.warning("bead not filed for %r in %s: %s", title, cwd, bead_warning)
     satisfied = frozenset(ATTACHMENT_GATES[a["kind"]] for a in attachments or [])
     chain_definition = json.dumps(materialize(template, satisfied_gates=satisfied))
+    implements_beads = _extract_beads(description, exclude=bead_id)
 
     def _create(c):
         store.create_work_item(
@@ -222,6 +224,7 @@ async def intake(
             root_merge_policy=root_merge_policy,
             attachments=attachments,
             status=status,
+            implements_beads=implements_beads,
         )
         if bead_warning:
             # Same transaction as the row: an item with no bead and no record of
@@ -238,6 +241,62 @@ def _attachments(work_item_row) -> list[dict]:
         return []
     raw = work_item_row["attachments"]
     return json.loads(raw) if raw else []
+
+
+#: A sub-bead id as it appears in a work item's description, e.g. `Kraft-p8q1`.
+_BEAD_ID_RE = re.compile(r"Kraft-[a-z0-9]+")
+
+
+def _extract_beads(description: str | None, *, exclude: str | None = None) -> list[str]:
+    """Sub-bead ids named in `description` (Kraft-p8q1), deduped, order preserved.
+
+    Free data: every item on the board already writes its beads as
+    `- Kraft-xxxx — ...` bullets. `exclude` drops the tracking bead itself, in
+    case it happens to be quoted back in its own description.
+    """
+    seen: list[str] = []
+    for match in _BEAD_ID_RE.findall(description or ""):
+        if match != exclude and match not in seen:
+            seen.append(match)
+    return seen
+
+
+def _implements_beads(work_item_row) -> list[str]:
+    """The row's sub-bead ids, tolerating a row that predates the column."""
+    if "implements_beads" not in work_item_row.keys():
+        return []
+    raw = work_item_row["implements_beads"]
+    return json.loads(raw) if raw else []
+
+
+async def _close_beads(db, row, bd_cwd: str | None) -> None:
+    """Close `row['bead_id']` plus every id in `row['implements_beads']`.
+
+    An item filed while bd was down has no `bead_id` (Kraft-7gy); this backfills
+    one via a late `beads.intake` before closing, rather than leaving it open
+    forever (Kraft-dr3n) -- and persists it to the row, same as if intake had
+    filed it originally. Each id's failure is logged, not raised -- one bad bead
+    must not stop the others from closing, same as the single-bead path before.
+    """
+    cwd = row["bead_cwd"] or bd_cwd
+    bead_id = row["bead_id"]
+    if bead_id is None:
+        try:
+            bead_id = await beads.intake(row["title"], description=row["description"], cwd=cwd)
+        except Exception as exc:  # noqa: BLE001 -- any bd failure degrades, same as intake
+            logger.warning("late bead intake failed for %r: %r", row["title"], exc)
+        else:
+            await db.write(lambda c: store.set_bead_id(c, row["id"], bead_id))
+    if bead_id:
+        try:
+            await beads.complete(bead_id, cwd=cwd)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("bead close failed for %s: %r", bead_id, exc)
+    for sub_id in _implements_beads(row):
+        try:
+            await beads.complete(sub_id, cwd=cwd)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("bead close failed for %s: %r", sub_id, exc)
 
 
 def _attachment_note(attachments: list[dict]) -> str:
@@ -1036,14 +1095,7 @@ async def run(
             return "awaiting_gate"
 
     await db.write(lambda c: store.mark_completed(c, work_item_id))
-    # An item filed while bd was down has no bead to close (Kraft-7gy); without
-    # this, `bd close None` raises TypeError inside the except below and gets
-    # logged as a failure that never happened.
-    if row["bead_id"]:
-        try:
-            await beads.complete(row["bead_id"], cwd=row["bead_cwd"] or bd_cwd)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("bead close failed for %s: %r", row["bead_id"], exc)
+    await _close_beads(db, row, bd_cwd)
     return "completed"
 
 
@@ -1205,11 +1257,7 @@ async def resume(
         start += 1
         if start >= len(nodes):
             await db.write(lambda c: store.mark_completed(c, work_item_id))
-            if row["bead_id"]:
-                try:
-                    await beads.complete(row["bead_id"], cwd=row["bead_cwd"] or bd_cwd)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("bead close failed for %s: %r", row["bead_id"], exc)
+            await _close_beads(db, row, bd_cwd)
             return "completed"
         # fall through: reconcile from the post-gate node instead
 
@@ -1253,9 +1301,5 @@ async def resume(
             return "awaiting_gate"
 
     await db.write(lambda c: store.mark_completed(c, work_item_id))
-    if row["bead_id"]:
-        try:
-            await beads.complete(row["bead_id"], cwd=row["bead_cwd"] or bd_cwd)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("bead close failed for %s: %r", row["bead_id"], exc)
+    await _close_beads(db, row, bd_cwd)
     return "completed"
