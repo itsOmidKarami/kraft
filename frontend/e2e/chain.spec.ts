@@ -17,7 +17,14 @@ test("create a work item and watch it complete", async ({ page }) => {
   // Explicit: this spec watches a chain run to completion unattended, which
   // only the gateless quick-task chain does. `default` is what the modal now
   // pre-selects, and it stops at spec_approval.
-  await modal.getByRole("radio", { name: "quick-task" }).click();
+  //
+  // By label text, not `getByRole("radio")`: the input itself is visually
+  // hidden behind the segmented control, so a real browser refuses to click it
+  // even though jsdom is happy to. Same shape as lifecycle.spec.ts's helper.
+  await modal
+    .getByRole("radiogroup", { name: "template" })
+    .getByText("quick-task", { exact: true })
+    .click();
   await modal.getByRole("button", { name: /create/i }).click();
 
   // Navigated to the detail route.
