@@ -40,11 +40,16 @@ on.implementation.start:
 
 on.test.run:
   kind: subprocess
-  command: [pytest, tests/test_cli_verbs.py, tests/test_cli_repos.py, tests/test_cli_watching.py, tests/test_cli_doctor.py, tests/test_cli_admin.py, tests/test_cli_reviewing.py, tests/test_gates.py, tests/test_ws.py, tests/test_client_read.py, tests/test_client_act.py, tests/test_client_context.py, tests/test_api.py, -q]
-  # Re-bound at the chain_finalized gate of kl-d8cb9e1b. The previous binding was
-  # kl-6ccd4360's file list, which overlaps this chain's coverage only at
-  # test_api and (by prefix) test_cli. These are the files the CLI-grouping plan
-  # puts tests in. Full `just test` is ~14min.
+  command: [pytest, tests/test_version.py, tests/test_update.py, tests/test_next_tag.py, tests/test_check_plugin_version.py, tests/test_init.py, tests/test_cli_admin.py, tests/test_cli_doctor.py, tests/test_cli.py, tests/test_cli_verbs.py, tests/test_autostart.py, -q]
+  # Re-bound at the chain_finalized gate of kl-be0ad7ef. The previous binding was
+  # kl-d8cb9e1b's CLI-grouping file list, which covers this chain's work at only
+  # two files (test_cli_admin, test_cli_doctor) and misses every file the
+  # installation-artefacts plan actually creates: test_version, test_update,
+  # test_next_tag, test_check_plugin_version. A verify node that runs the wrong
+  # files is worse than a slow one -- it goes green having tested nothing.
+  # test_cli/test_cli_verbs/test_autostart are here because the plan adds an
+  # `admin update` subparser and a boot notice in `_serve`, which those three
+  # assert against. Full `just test` is ~14min.
 
 on.review.local.run:
   kind: skill

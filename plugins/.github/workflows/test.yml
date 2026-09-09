@@ -1,3 +1,8 @@
+# Runs in the PUBLISHED marketplace repo, not in the monorepo this file is
+# committed to. `git subtree split --prefix=plugins` puts it at that repo's root,
+# which is the only place GitHub looks for workflows -- at
+# plugins/kraft-lite/.github/ it would land one directory too deep and silently
+# never run.
 name: test
 on: [push, pull_request]
 
@@ -18,4 +23,7 @@ jobs:
       # No requirements file on purpose: the shipped helper is stdlib-only, and
       # a dependency appearing here would be the first sign that stopped being true.
       - run: pip install pytest
-      - run: pytest tests -q
+      # kraft-lite/, not tests/: the published root holds both plugins side by
+      # side. Only kraft-lite is testable here -- the kraft plugin is skills and
+      # manifests, and what validates it lives in the monorepo.
+      - run: pytest kraft-lite/tests -q

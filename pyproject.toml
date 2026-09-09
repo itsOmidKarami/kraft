@@ -1,6 +1,6 @@
 [project]
 name = "kraft"
-version = "0.0.0"
+dynamic = ["version"]
 description = "Kraft orchestrator walking skeleton"
 requires-python = ">=3.14"
 dependencies = [
@@ -36,8 +36,13 @@ dev = [
 kraft = "kraft.cli:main"
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=68", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
+
+# The version is the git tag, so a release cannot ship a number nobody bumped.
+# An untagged checkout builds `0.1.dev4+g1a2b3c`: the last release, the distance
+# from it, and the commit -- which is what a bug report actually wants.
+[tool.setuptools_scm]
 
 [tool.setuptools.packages.find]
 where = ["src"]

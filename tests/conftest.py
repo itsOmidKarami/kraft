@@ -34,6 +34,11 @@ def _isolated_kraft_home(tmp_path, monkeypatch):
     part of `app`, so a test cannot reach the home by not opting in.
     """
     monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "kraft-home"))
+    # No test may reach the release feed either. `doctor`'s version check and the
+    # notice at boot both call out to gitlab.com, which would make this suite
+    # depend on that host being up and cost every offline run a timeout. The
+    # tests that exercise the check set their own stubs and unset this.
+    monkeypatch.setenv("KRAFT_NO_UPDATE_CHECK", "1")
 
 
 @pytest.fixture
