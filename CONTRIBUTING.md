@@ -68,12 +68,19 @@ Neither of the first two can be done by code in this repo. Until both exist,
    GitLab, so `/plugin marketplace add itsOmidKarami/kraft` is correct now and
    stays correct afterwards. Until that migration, GitHub `kraft` holds only the
    split plugins and GitLab `kraft` holds the source.
-5. **Make the first tag `v0.6.0` or higher.** `plugins/kraft-lite` has already
+5. **Stamp the manifests before the first tag.** `auto-tag` runs
+   `dev/stamp_plugin_versions.py` and commits the result *before* it tags, so
+   every automatic release publishes a truthful version. A tag created by hand
+   skips that, and `just plugins-publish` would then publish whatever number is
+   committed - `0.0.0` for the kraft plugin. For the first release only, run
+   `python3 dev/stamp_plugin_versions.py <version>`, merge that, and tag the
+   merge commit.
+6. **Make the first tag `v0.6.0` or higher.** `plugins/kraft-lite` has already
    been published at `0.5.2` from its old repo. Both plugins now take their
    version from this repo's tag, so a first release below that number would ship
    kraft-lite *backwards* to anyone who has it installed. There are no tags yet,
    so the first one is a free choice - use it.
-6. **Leave a redirect on `itsOmidKarami/kraft-lite`.** It stops receiving
+7. **Leave a redirect on `itsOmidKarami/kraft-lite`.** It stops receiving
    releases; its README should point at the combined marketplace. Its last
    release stays installable for anyone who already added it.
 
