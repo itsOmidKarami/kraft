@@ -74,6 +74,7 @@ def create_work_item(
     attachments: list[dict] | None = None,
     status: str = "active",
     bead_cwd: str | None = None,
+    implements_beads: list[str] | None = None,
 ) -> None:
     """`submodules` are the cross-repo paths chosen at intake (06, design 1g).
 
@@ -83,13 +84,16 @@ def create_work_item(
     `attachments` are the spec/plan documents chosen at intake (Kraft-dgh),
     stored as JSON for the same reason `submodules` is: chosen once, never
     queried across items.
+
+    `implements_beads` are the sub-bead ids this item's description names
+    (Kraft-p8q1) -- closed alongside `bead_id` on completion.
     """
     now = _now()
     conn.execute(
         "INSERT INTO work_items (id, bead_id, title, description, repo, chain_template, "
         "chain_definition, current_node_id, status, created_at, updated_at, "
-        "submodules, root_merge_policy, attachments, bead_cwd, branch) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "submodules, root_merge_policy, attachments, bead_cwd, branch, implements_beads) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             id,
             bead_id,
@@ -106,6 +110,7 @@ def create_work_item(
             json.dumps(attachments) if attachments else None,
             bead_cwd,
             branch_name(title, id),
+            json.dumps(implements_beads) if implements_beads else None,
         ),
     )
     events.append(
@@ -245,6 +250,16 @@ def mark_completed(conn: sqlite3.Connection, work_item_id) -> None:
         (_now(), work_item_id),
     )
     events.append(conn, work_item_id, "work_item_completed", {})
+
+
+def set_bead_id(conn: sqlite3.Connection, work_item_id, bead_id: str) -> None:
+    """A late backfill (Kraft-dr3n): bd was down at intake, and a bead only
+    exists for this item from completion time on -- record it, same as if
+    intake had filed it in the first place."""
+    conn.execute(
+        "UPDATE work_items SET bead_id = ?, updated_at = ? WHERE id = ?",
+        (bead_id, _now(), work_item_id),
+    )
 
 
 def bump_counter(

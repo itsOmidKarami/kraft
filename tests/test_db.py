@@ -135,6 +135,14 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
             "-- Computed once at intake",
             "-- NULL on items created before the column",
         )
+    if version < 16:
+        drop_lines = (
+            *drop_lines,
+            "implements_beads TEXT,",
+            "-- sub-bead ids this item's description names",
+            "-- from `description` at intake",
+            "-- alongside `bead_id` on completion",
+        )
     schema = "\n".join(
         rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
     )
@@ -698,6 +706,31 @@ def test_migrate_v13_to_v14_adds_branch(tmp_path):
     assert row["branch"] is None
 
 
+def test_migrate_v15_to_v16_adds_implements_beads(tmp_path):
+    """The `implements_beads` migration adds the column via ALTER TABLE; a
+    pre-existing row survives with it NULL, meaning "no sub-beads extracted"
+    (Kraft-p8q1)."""
+    path = tmp_path / "orchestrator.db"
+    conn = db._connect(path)
+    _build_old_db(conn, 15)
+    conn.execute(
+        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
+        "'active','now','now')"
+    )
+    conn.commit()
+    conn.close()
+
+    conn2 = db._connect(path)
+    db.migrate(conn2)
+    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    cols = {r["name"] for r in conn2.execute("PRAGMA table_info(work_items)")}
+    assert "implements_beads" in cols
+    row = conn2.execute("SELECT title, implements_beads FROM work_items WHERE id='w1'").fetchone()
+    assert row["title"] == "t"
+    assert row["implements_beads"] is None
+
+
 def test_fresh_schema_has_description(tmp_path):
     """SCHEMA_SQL and the migration path must agree — a fresh install and an
     upgraded one are the same database."""
@@ -749,6 +782,10 @@ def test_migrating_v13_adds_the_branch_column(tmp_path):
     db.migrate(conn)
     conn.execute("PRAGMA user_version = 13")
     conn.execute("ALTER TABLE work_items DROP COLUMN branch")
+    # Replaying from v13 re-applies every later step too, including the
+    # implements_beads ALTER (Kraft-p8q1) -- drop it as well, or that step
+    # collides with the column the earlier full migrate() already added.
+    conn.execute("ALTER TABLE work_items DROP COLUMN implements_beads")
 
     db.migrate(conn)
 
