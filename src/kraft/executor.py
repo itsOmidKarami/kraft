@@ -177,13 +177,36 @@ async def intake(
     bead_cwd: str | None = None,
 ) -> str:
     work_item_id = uuid.uuid4().hex
+    # A daemon's cwd is an accident of how it was launched — launchd, a login
+    # item, `kraft admin start` typed in $HOME — and nothing records it, so the work
+    # item's own repo is the default bd workspace (Kraft-ibwj). KRAFT_BD_CWD
+    # still wins: it is documented as the instance-wide tracker, `just dev` and
+    # the e2e harness set it, and an operator who set it as the workaround for
+    # this very bug must not silently start filing per-repo on upgrade.
+    cwd = bd_cwd or repo
     # An auto-intaken bead already exists; filing a second one for the same work
     # is the duplicate this parameter prevents.
-    bead_id = bead_id or await beads.intake(title, description=description, cwd=bd_cwd)
+    bead_warning: str | None = None
+    if bead_id is None:
+        try:
+            bead_id = await beads.intake(title, description=description, cwd=cwd)
+        except OSError as exc:
+            # bd is not on PATH, or `cwd` no longer exists.
+            bead_warning = f"bd is not installed: {exc}"
+        except Exception as exc:  # noqa: BLE001 -- any bd failure degrades
+            # Deliberately "any bd failure", not "the two we can name":
+            # separating "no workspace" from "dolt is wedged" means
+            # string-matching bd's stderr, and the bead is a tracking
+            # side-effect while Kraft's own DB runs the chain (Kraft-7gy).
+            # `beads.intake` already puts bd's own words in this message.
+            bead_warning = str(exc)
+        if bead_warning:
+            logger.warning("bead not filed for %r in %s: %s", title, cwd, bead_warning)
     satisfied = frozenset(ATTACHMENT_GATES[a["kind"]] for a in attachments or [])
     chain_definition = json.dumps(materialize(template, satisfied_gates=satisfied))
-    await db.write(
-        lambda c: store.create_work_item(
+
+    def _create(c):
+        store.create_work_item(
             c,
             id=work_item_id,
             bead_id=bead_id,
@@ -192,13 +215,20 @@ async def intake(
             repo=repo,
             chain_template=template.id,
             chain_definition=chain_definition,
-            bead_cwd=bead_cwd,
+            # Recorded on every new row, so a bead is closed where it was filed
+            # whatever KRAFT_BD_CWD says months later.
+            bead_cwd=bead_cwd or cwd,
             submodules=submodules,
             root_merge_policy=root_merge_policy,
             attachments=attachments,
             status=status,
         )
-    )
+        if bead_warning:
+            # Same transaction as the row: an item with no bead and no record of
+            # why is the silent swallow this degrade is not.
+            events.append(c, work_item_id, "bead_not_filed", {"reason": bead_warning, "cwd": cwd})
+
+    await db.write(_create)
     return work_item_id
 
 
@@ -887,10 +917,14 @@ async def run(
             return "awaiting_gate"
 
     await db.write(lambda c: store.mark_completed(c, work_item_id))
-    try:
-        await beads.complete(row["bead_id"], cwd=row["bead_cwd"] or bd_cwd)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("bead close failed for %s: %r", row["bead_id"], exc)
+    # An item filed while bd was down has no bead to close (Kraft-7gy); without
+    # this, `bd close None` raises TypeError inside the except below and gets
+    # logged as a failure that never happened.
+    if row["bead_id"]:
+        try:
+            await beads.complete(row["bead_id"], cwd=row["bead_cwd"] or bd_cwd)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("bead close failed for %s: %r", row["bead_id"], exc)
     return "completed"
 
 
@@ -1044,10 +1078,11 @@ async def resume(
         start += 1
         if start >= len(nodes):
             await db.write(lambda c: store.mark_completed(c, work_item_id))
-            try:
-                await beads.complete(row["bead_id"], cwd=row["bead_cwd"] or bd_cwd)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("bead close failed for %s: %r", row["bead_id"], exc)
+            if row["bead_id"]:
+                try:
+                    await beads.complete(row["bead_id"], cwd=row["bead_cwd"] or bd_cwd)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("bead close failed for %s: %r", row["bead_id"], exc)
             return "completed"
         # fall through: reconcile from the post-gate node instead
 
@@ -1091,8 +1126,9 @@ async def resume(
             return "awaiting_gate"
 
     await db.write(lambda c: store.mark_completed(c, work_item_id))
-    try:
-        await beads.complete(row["bead_id"], cwd=row["bead_cwd"] or bd_cwd)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("bead close failed for %s: %r", row["bead_id"], exc)
+    if row["bead_id"]:
+        try:
+            await beads.complete(row["bead_id"], cwd=row["bead_cwd"] or bd_cwd)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("bead close failed for %s: %r", row["bead_id"], exc)
     return "completed"

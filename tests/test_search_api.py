@@ -181,3 +181,24 @@ def test_connecting_a_repo_indexes_it_immediately(tmp_path, monkeypatch):
         assert not client.get("/search", params={"q": "laminated oak", "mode": "fts"}).json()[
             "results"
         ]
+
+
+def test_the_bead_strip_searches_connected_repos_when_no_override(tmp_path, monkeypatch):
+    """Kraft-ibwj: with no KRAFT_BD_CWD the strip searched the daemon's cwd and
+    was permanently empty. It degrades quietly — `beads.search` answers [] on
+    any failure — so nobody filed it; it just never worked."""
+    one = isolated_bd(tmp_path, name="alpha")
+    two = isolated_bd(tmp_path, name="beta")
+    for repo, title in ((one, "caulk the alpha transom"), (two, "caulk the beta transom")):
+        subprocess.run(
+            ["bd", "create", "--title", title, "-d", "x", "--type", "task"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        )
+    with _client(tmp_path, monkeypatch) as client:
+        monkeypatch.delenv("KRAFT_BD_CWD", raising=False)
+        for repo in (one, two):
+            assert client.post("/repos", json={"path": str(repo)}).status_code == 201
+        hits = client.get("/beads/search", params={"q": "caulk the", "limit": 10}).json()["beads"]
+    assert {h["title"] for h in hits} == {"caulk the alpha transom", "caulk the beta transom"}

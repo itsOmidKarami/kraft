@@ -4,7 +4,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 from support.harness import fake_registry, isolated_bd, make_repo
 
 from kraft import db, events, executor, store
@@ -67,7 +66,10 @@ def test_intake_creates_bead_and_row(tmp_path):
     asyncio.run(scenario())
 
 
-def test_intake_bead_failure_writes_no_row(tmp_path):
+def test_intake_bead_failure_still_writes_a_row(tmp_path):
+    """Kraft-7gy: a bd failure degrades intake, it does not fail it — the row is
+    written with bead_id NULL rather than raising. See tests/test_bd_workspace.py
+    for the full degrade coverage (the event, the API's bead_warning, doctor)."""
     bare = tmp_path / "bare"
     bare.mkdir()
 
@@ -75,19 +77,18 @@ def test_intake_bead_failure_writes_no_row(tmp_path):
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            with pytest.raises(subprocess.CalledProcessError):
-                await executor.intake(
-                    database,
-                    rd,
-                    title="x",
-                    repo="/r",
-                    template=_quick_task(),
-                    bd_cwd=str(bare),
-                )
-            count = database.read(
-                lambda c: c.execute("SELECT count(*) FROM work_items").fetchone()[0]
+            wid = await executor.intake(
+                database,
+                rd,
+                title="x",
+                repo="/r",
+                template=_quick_task(),
+                bd_cwd=str(bare),
             )
-            assert count == 0
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+            assert row["bead_id"] is None
         finally:
             await database.close()
 

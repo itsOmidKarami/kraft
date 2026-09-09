@@ -24,6 +24,10 @@ from kraft.paths import BUNDLED, RunDirs, default_run_dir, default_templates_dir
 #: configuration — `adapters/agent.py` has one profile and it is this one.
 AGENT_COMMAND = "claude"
 
+#: The work-graph CLI. Optional by design (Kraft-7gy): intake files a work item
+#: with no bead when it is absent, and nothing else about an item needs one.
+BEADS_COMMAND = "bd"
+
 
 def _check(name: str, ok: bool, detail: str = "", *, skipped: bool = False) -> dict:
     """A skipped check is `ok`: it did not fail, it did not run. Only a real
@@ -52,6 +56,7 @@ async def run_checks() -> list[dict]:
     checks.append(_completion_check())
     checks.append(_bundle_check())
     checks.append(_version_check())
+    checks.append(_beads_check())
     if health is None:
         checks.append(_check("repos", True, "skipped: no server", skipped=True))
         checks.append(_check("worktrees", True, "skipped: no server", skipped=True))
@@ -197,6 +202,17 @@ def _agent_check() -> dict:
     return _check("agent cli", True, found)
 
 
+def _beads_check() -> dict:
+    """Always `ok`: `_check(ok=False)` sets `kraft admin doctor`'s exit code,
+    and an install with no work-graph tracker is a choice, not a fault (Kraft-7gy)."""
+    found = shutil.which(BEADS_COMMAND)
+    if not found:
+        return _check(
+            "bd", True, f"`{BEADS_COMMAND}` not installed — work items will run without beads"
+        )
+    return _check("bd", True, found)
+
+
 def _completion_check() -> dict:
     """Tab completion is convenience, not health: always `ok`, like `_hooks_check`
     — a missing `eval` line is a line to add, not a reason to exit 1."""
@@ -270,6 +286,9 @@ async def _repo_checks() -> list[dict]:
         elif not (path / ".git").exists():
             # a file in a linked worktree, a directory in a normal clone
             checks.append(_check(name, False, f"{path} is no longer a git repo"))
+        elif not (path / ".beads").is_dir():
+            # Not a failure either: work items here simply file no bead.
+            checks.append(_check(name, True, f"{path} — no .beads: work items here file no bead"))
         else:
             checks.append(_check(name, True, str(path)))
         if auto:
