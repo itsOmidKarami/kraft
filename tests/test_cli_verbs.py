@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import pathlib
 import re
+import subprocess
 
 import pytest
 from support.harness import make_repo
@@ -222,6 +223,84 @@ def test_create_through_the_mcp_door_resolves_the_cwd_repo(app, tmp_path, monkey
     monkeypatch.chdir(repo)
     created = asyncio.run(client.create_work_item("filed by an agent"))
     assert created["status"] == "paused"
+
+
+def test_create_attaches_a_spec_from_the_flag(app, tmp_path, monkeypatch, capsys):
+    """Kraft-82gz end to end: a spec that exists only in the worktree the agent
+    is standing in, named by a relative path, reaching the stored item.
+
+    `--repo` is explicit because `client.resolve_repo` walks the *parents* of a
+    linked worktree and finds no connected repo there (Kraft-tc33); a Kraft
+    worker does not hit that, it inherits its repo from $KRAFT_WORK_ITEM_ID.
+    """
+    repo = make_repo(tmp_path)
+    _connect(repo)
+    worktree = tmp_path / "wt"
+    subprocess.run(
+        ["git", "worktree", "add", "-q", str(worktree), "-b", "wt"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    spec = worktree / ".engineering" / "specs" / "s.md"
+    spec.parent.mkdir(parents=True)
+    spec.write_text("# settled in this session\n")
+    monkeypatch.chdir(worktree)
+
+    cli.main(
+        [
+            "item",
+            "create",
+            "handed over",
+            "--repo",
+            str(repo),
+            "--spec",
+            ".engineering/specs/s.md",
+            "--json",
+        ]
+    )
+    created = json.loads(capsys.readouterr().out)
+
+    cli.main(["view", "show", created["id"], "--json"])
+    item = json.loads(capsys.readouterr().out)
+    assert [a["kind"] for a in item["attachments"]] == ["spec"]
+    assert item["attachments"][0]["path"] == ".engineering/specs/s.md"
+
+    # the attached spec trims the gate it satisfies — `view show` trims the
+    # chain itself away, so check the untrimmed item straight from the API
+    import asyncio
+
+    async def _fetch_full():
+        async with client.http() as http:
+            return (await http.get(f"/work-items/{created['id']}")).json()
+
+    full = asyncio.run(_fetch_full())
+    assert "spec_approval" not in [n["gate_after"] for n in full["chain_definition"]["nodes"]]
+
+
+def test_create_through_the_mcp_door_attaches(app, tmp_path, monkeypatch):
+    """The MCP tool's whole body is this client call (mcp.py is a dispatch table
+    and nothing more), so the round-trip is tested here and the tool's own
+    schema is tested in test_mcp.py."""
+    import asyncio
+
+    repo = make_repo(tmp_path)
+    _connect(repo)
+    plan = repo / ".engineering" / "plans" / "p.md"
+    plan.parent.mkdir(parents=True)
+    plan.write_text("# the plan\n")
+    monkeypatch.chdir(repo)
+
+    created = asyncio.run(
+        client.create_work_item(
+            "filed by an agent",
+            attachments=[{"kind": "plan", "path": ".engineering/plans/p.md"}],
+        )
+    )
+    item = asyncio.run(client.get_work_item(created["id"]))
+    # found under the repo root, so no `source` key: the stored shape is
+    # byte-for-byte what the browser already produces
+    assert item["attachments"] == [{"kind": "plan", "path": ".engineering/plans/p.md"}]
 
 
 def test_reject_requires_a_note(app, capsys):

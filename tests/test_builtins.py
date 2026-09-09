@@ -145,6 +145,139 @@ def test_ensure_worktree_alone_copies_attachments_before_any_node_runs(tmp_path)
     asyncio.run(scenario())
 
 
+def test_an_attachment_from_another_worktree_is_copied_from_its_source(tmp_path):
+    """Kraft-85wk's other half. The validator accepted a path that does not
+    exist under `repo`, so the copy has to read the absolute `source` it stored.
+    Reading `repo / path` here hits the `src.is_file()` guard and skips
+    silently — a trimmed spec gate with no spec, which is worse than the 422
+    this replaces."""
+    repo = make_repo(tmp_path)
+    other = tmp_path / "other-wt"
+    subprocess.run(
+        ["git", "worktree", "add", "-q", str(other), "-b", "other"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    spec = other / ".engineering" / "specs" / "s.md"
+    spec.parent.mkdir(parents=True)
+    spec.write_text("# from the other worktree\n")
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="w1",
+                    bead_id="B",
+                    title="t",
+                    repo=str(repo),
+                    chain_template="quick-task",
+                    chain_definition="{}",
+                )
+            )
+            worktree = await kraft_builtins.ensure_worktree(
+                database,
+                rd,
+                repo=str(repo),
+                work_item_id="w1",
+                attachments=[
+                    {
+                        "kind": "spec",
+                        "path": ".engineering/specs/s.md",
+                        "source": str(spec),
+                    }
+                ],
+            )
+            copied = worktree / ".engineering" / "specs" / "s.md"
+            assert copied.read_text() == "# from the other worktree\n"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def _porcelain(cwd):
+    return subprocess.run(
+        ["git", "status", "--porcelain"], cwd=cwd, capture_output=True, text=True, check=True
+    ).stdout.splitlines()
+
+
+def test_commit_paths_stages_and_commits_only_the_named_paths(tmp_path):
+    """The primitive on its own (Kraft-xwen). Named path committed, an unrelated
+    dirty file untouched, and a second call with nothing left to stage is a
+    no-op rather than git's "nothing to commit" failure."""
+    repo = make_repo(tmp_path)
+    (repo / "wanted.md").write_text("attached\n")
+    (repo / "unrelated.py").write_text("an agent is mid-edit\n")
+
+    kraft_builtins._commit_paths(repo, ["wanted.md"], "chore: attach spec for w1")
+
+    assert _porcelain(repo) == ["?? unrelated.py"]
+    committed = subprocess.run(
+        ["git", "show", "HEAD:wanted.md"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout
+    assert committed == "attached\n"
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout
+
+    kraft_builtins._commit_paths(repo, ["wanted.md"], "chore: attach spec for w1")
+
+    again = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout
+    assert again == head, "a second call made an empty commit"
+
+
+def test_an_attached_document_is_committed_in_the_worktree(tmp_path):
+    """Kraft-8iw6. An uncommitted attachment lands in the worktree as an
+    untracked file that no agent changed and so no agent commits, and
+    forge._assert_clean then refuses to open the merge request over it."""
+    repo = make_repo(tmp_path)
+    spec = repo / ".engineering" / "specs" / "s.md"
+    spec.parent.mkdir(parents=True)
+    spec.write_text("# never committed\n")
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="w1",
+                    bead_id="B",
+                    title="t",
+                    repo=str(repo),
+                    chain_template="quick-task",
+                    chain_definition="{}",
+                )
+            )
+            worktree = await kraft_builtins.ensure_worktree(
+                database,
+                rd,
+                repo=str(repo),
+                work_item_id="w1",
+                attachments=[{"kind": "spec", "path": ".engineering/specs/s.md"}],
+            )
+            assert _porcelain(worktree) == []
+            in_head = subprocess.run(
+                ["git", "show", "HEAD:.engineering/specs/s.md"],
+                cwd=worktree,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+            assert in_head == "# never committed\n"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 def test_env_setup_leaves_a_committed_attachment_alone(tmp_path):
     repo = make_repo_with_engineering(tmp_path, {".engineering/plans/p.md": "# committed\n"})
     (repo / ".engineering" / "plans" / "p.md").write_text("# dirty working tree\n")

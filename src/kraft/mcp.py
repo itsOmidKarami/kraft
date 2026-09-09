@@ -52,6 +52,7 @@ def build() -> MCPServer:
         repo: str | None = None,
         chain_template: str = "default",
         description: str | None = None,
+        attachments: list[dict] | None = None,
     ) -> dict:
         """File a new Kraft work item. It is created **paused** and does not run:
         a human starts it from the board. Use this to hand finished work off to
@@ -61,8 +62,17 @@ def build() -> MCPServer:
         `description` is the brief — what the work actually is, in prose. The
         title is only a label; the spec node writes its design from the
         description, so put the intent there rather than packing it into the
-        title."""
-        return await client.create_work_item(title, repo, chain_template, description)
+        title.
+
+        `attachments` hands over documents that already exist:
+        `[{"kind": "spec", "path": ".engineering/specs/x.md"}]`, kind `spec` or
+        `plan`, at most one of each. An attached document trims the node whose
+        gate it satisfies, so nobody re-approves what you already agreed, and
+        the implementing agent is told to follow it rather than guess. A path
+        is resolved against the repo and against the working tree you are
+        standing in, so a spec you just wrote in a worktree can be attached as
+        it is — relative to that tree, or absolute."""
+        return await client.create_work_item(title, repo, chain_template, description, attachments)
 
     @server.tool()
     async def ensure_repo(path: str | None = None) -> dict:
