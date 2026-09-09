@@ -23,6 +23,14 @@ from kraft.templates import ATTACHMENT_GATES, Registry, Template, materialize
 
 logger = logging.getLogger(__name__)
 
+#: `intake`'s `chain_template` default (Kraft-cd47). Distinct from `None`,
+#: which a caller passes to mean "no explicit template was chosen" and store
+#: as such -- `_UNSET` means the caller (most of them, today: everything but
+#: the `/work-items` endpoint) does not care and gets the old behaviour,
+#: `template.id`, so a chain built straight from a `Template` still records
+#: which one without every internal caller having to say so.
+_UNSET = object()
+
 _FIX_PROMPT = (
     "The checks in node {node_id} failed for this work item. Fix the code so they "
     "pass. Make no unrelated changes. Failing hook points: {failed}"
@@ -176,6 +184,10 @@ async def intake(
     status: str = "active",
     bead_id: str | None = None,
     bead_cwd: str | None = None,
+    #: The value to store in the row's `chain_template` column. `_UNSET`
+    #: (default) stores `template.id`; `None` stores `None` -- the caller
+    #: that wants that distinction (Kraft-cd47) has to say so explicitly.
+    chain_template: str | None | object = _UNSET,
 ) -> str:
     work_item_id = uuid.uuid4().hex
     # A daemon's cwd is an accident of how it was launched — launchd, a login
@@ -215,7 +227,7 @@ async def intake(
             title=title,
             description=description,
             repo=repo,
-            chain_template=template.id,
+            chain_template=template.id if chain_template is _UNSET else chain_template,
             chain_definition=chain_definition,
             # Recorded on every new row, so a bead is closed where it was filed
             # whatever KRAFT_BD_CWD says months later.

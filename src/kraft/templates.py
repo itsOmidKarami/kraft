@@ -254,6 +254,67 @@ def load_registry(
     return Registry(hooks=data["hooks"])
 
 
+def validate_nodes(nodes: list, registry: Registry) -> list[str]:
+    """The per-node rules a chain's node list is held to: shape, hook set
+    membership, `GATE_NAMES` membership, and a `fix_loop` node needing at
+    least one task. Takes a bare node list and a registry rather than a whole
+    `Template` so the chain-review splice path (Kraft-hm0) can run the same
+    checks over an agent's revised tail before it reaches `chain_definition`
+    -- one rule set, two callers, not a second, drifting copy of it
+    (Kraft-unk). `load_templates` below calls it once per template at load
+    time; `api.approve_gate` calls it once per `revised_chain_nodes` payload
+    at gate-approval time.
+
+    Returns error strings, empty if valid. Stops at the first failing rule
+    category rather than collecting every node's every problem -- the same
+    one-message-at-a-time shape `load_templates` produced before this was
+    factored out of it.
+    """
+    if not isinstance(nodes, list) or not all(
+        isinstance(n, dict)
+        and isinstance(n.get("id"), str)
+        and isinstance(n.get("tasks"), list)
+        and all(isinstance(t, str) for t in n["tasks"])
+        for n in nodes
+    ):
+        return ["each node needs a string 'id' and a list-of-strings 'tasks'"]
+
+    bad_gates = sorted(
+        {
+            n["gate_after"]
+            for n in nodes
+            if n.get("gate_after") is not None and n["gate_after"] not in GATE_NAMES
+        }
+    )
+    if bad_gates:
+        return [f"unknown gate_after value(s) {bad_gates}"]
+
+    empty_loop = next((n["id"] for n in nodes if n.get("fix_loop") and not n["tasks"]), None)
+    if empty_loop is not None:
+        return [f"node {empty_loop!r} has 'fix_loop' but no tasks to measure"]
+
+    unknown = sorted(
+        {
+            t
+            for n in nodes
+            # A malformed `on_failure` (not a list of strings) is not this
+            # function's rule to enforce -- `load_templates`'s own shape
+            # check catches that, after this one, with a sharper message.
+            # Folding it in here would misread a malformed string as a list
+            # of one-character "hooks".
+            for t in [
+                *n["tasks"],
+                *(n["on_failure"] if isinstance(n.get("on_failure"), list) else []),
+            ]
+            if t not in registry.hooks
+        }
+    )
+    if unknown:
+        return [f"hook(s) {unknown} are not in the registry"]
+
+    return []
+
+
 def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
     valid: dict[str, Template] = {}
     invalid: dict[str, str] = {}
@@ -280,27 +341,10 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
         if not isinstance(nodes, list) or not nodes:
             invalid[tid] = f"template {tid!r}: 'nodes' must be a non-empty list"
             continue
-        if not all(
-            isinstance(n, dict)
-            and isinstance(n.get("id"), str)
-            and isinstance(n.get("tasks"), list)
-            and all(isinstance(t, str) for t in n["tasks"])
-            for n in nodes
-        ):
-            invalid[tid] = (
-                f"template {tid!r}: each node needs a string 'id' and a list-of-strings 'tasks'"
-            )
-            continue
 
-        bad_gates = sorted(
-            {
-                n["gate_after"]
-                for n in nodes
-                if n.get("gate_after") is not None and n["gate_after"] not in GATE_NAMES
-            }
-        )
-        if bad_gates:
-            invalid[tid] = f"template {tid!r}: unknown gate_after value(s) {bad_gates}"
+        node_errors = validate_nodes(nodes, registry)
+        if node_errors:
+            invalid[tid] = f"template {tid!r}: {node_errors[0]}"
             continue
 
         bad_loop = next(
@@ -316,13 +360,6 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
         if bad_loop is not None:
             invalid[tid] = (
                 f"template {tid!r}: node {bad_loop!r} 'fix_loop' must be a non-empty string or null"
-            )
-            continue
-
-        empty_loop = next((n["id"] for n in nodes if n.get("fix_loop") and not n["tasks"]), None)
-        if empty_loop is not None:
-            invalid[tid] = (
-                f"template {tid!r}: node {empty_loop!r} has 'fix_loop' but no tasks to measure"
             )
             continue
 
@@ -381,18 +418,6 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
                 f"template {tid!r}: node {bad_reject!r} 'reject_to' must name a node "
                 f"of this template at or before it"
             )
-            continue
-
-        unknown = sorted(
-            {
-                t
-                for n in nodes
-                for t in list(n["tasks"]) + list(n.get("on_failure") or [])
-                if t not in registry.hooks
-            }
-        )
-        if unknown:
-            invalid[tid] = f"template {tid!r}: hook(s) {unknown} are not in the registry"
             continue
 
         valid[tid] = Template(id=tid, nodes=nodes)

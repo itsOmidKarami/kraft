@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -23,7 +23,11 @@ CREATE TABLE work_items (
   -- the brief this work item's agents are given, ahead of any attachment note
   description      TEXT,
   repo             TEXT NOT NULL,
-  chain_template   TEXT NOT NULL,
+  -- the template chosen at intake, or NULL when none was chosen explicitly
+  -- (Kraft-cd47) -- resolved to the `default` template only at the point one
+  -- is looked up, so NULL stays distinguishable from an item that named
+  -- `chain_template: "default"` outright.
+  chain_template   TEXT,
   chain_definition TEXT NOT NULL,
   current_node_id  TEXT,
   status           TEXT NOT NULL CHECK (status IN
@@ -264,7 +268,56 @@ SELECT id, bead_id, title, repo, chain_template, chain_definition, current_node_
      AND (p.created_at, p.id) <= (worker_sessions.created_at, worker_sessions.id))"""
     ],
     15: ["ALTER TABLE work_items ADD COLUMN implements_beads TEXT"],
+    # chain_template drops NOT NULL (Kraft-cd47): SQLite cannot alter a column
+    # constraint, so work_items is rebuilt the same way migration 11 was. Every
+    # existing row keeps its current value -- only new rows can write NULL.
+    # Carries implements_beads (migration 15) forward too, since this rebuild
+    # runs after it and would otherwise drop the column silently.
+    16: [
+        """CREATE TABLE work_items_new (
+  id               TEXT PRIMARY KEY,
+  bead_id          TEXT,
+  title            TEXT NOT NULL,
+  description      TEXT,
+  repo             TEXT NOT NULL,
+  chain_template   TEXT,
+  chain_definition TEXT NOT NULL,
+  current_node_id  TEXT,
+  status           TEXT NOT NULL CHECK (status IN
+                     ('active', 'needs_human', 'completed', 'paused', 'abandoned')),
+  pending_steer_context TEXT,
+  submodules       TEXT,
+  root_merge_policy TEXT,
+  attachments      TEXT,
+  base_ref         TEXT,
+  bead_cwd         TEXT,
+  branch           TEXT,
+  implements_beads TEXT,
+  created_at       TEXT NOT NULL,
+  updated_at       TEXT NOT NULL
+)""",
+        """INSERT INTO work_items_new (id, bead_id, title, description, repo, chain_template,
+  chain_definition, current_node_id, status, pending_steer_context, submodules,
+  root_merge_policy, attachments, base_ref, bead_cwd, branch, implements_beads,
+  created_at, updated_at)
+SELECT id, bead_id, title, description, repo, chain_template, chain_definition,
+       current_node_id, status, pending_steer_context, submodules, root_merge_policy,
+       attachments, base_ref, bead_cwd, branch, implements_beads, created_at, updated_at
+  FROM work_items""",
+        "DROP TABLE work_items",
+        "ALTER TABLE work_items_new RENAME TO work_items",
+    ],
 }
+
+# Two branches picking the same migration key merges as a silent last-write-wins
+# dict literal, not a git conflict -- nothing forces the numbers apart (Kraft-cd47
+# collided with the `implements_beads` migration this way; git happened to flag it
+# because both edits touched the same line, but a different line split wouldn't
+# have). Catch a gap or a duplicate at import time instead of at some future
+# upgrader's runtime KeyError.
+assert sorted(_MIGRATIONS) == list(range(min(_MIGRATIONS), SCHEMA_VERSION)), (
+    "_MIGRATIONS keys must be contiguous, one per version, up to SCHEMA_VERSION - 1"
+)
 
 
 def _connect(path: str | Path) -> sqlite3.Connection:

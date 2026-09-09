@@ -391,6 +391,20 @@ def request_gate(conn: sqlite3.Connection, work_item_id, node_id, gate) -> None:
     events.append(conn, work_item_id, "gate_requested", {"gate": gate, "node_id": node_id})
 
 
+def splice_chain(conn: sqlite3.Connection, work_item_id, chain_definition: str) -> None:
+    """Replace the item's `chain_definition` with a chain-review revision
+    (Kraft-hm0), already validated and already the complete tail. Its own
+    event, separate from `gate_approved`, so the timeline shows the row
+    changed underneath the approval rather than folding it into a payload
+    nothing reads.
+    """
+    conn.execute(
+        "UPDATE work_items SET chain_definition = ?, updated_at = ? WHERE id = ?",
+        (chain_definition, _now(), work_item_id),
+    )
+    events.append(conn, work_item_id, "chain_spliced", {})
+
+
 def approve_gate(conn: sqlite3.Connection, work_item_id, gate) -> None:
     conn.execute(
         "UPDATE work_items SET status = 'active', updated_at = ? WHERE id = ?",
