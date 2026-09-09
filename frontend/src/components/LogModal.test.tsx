@@ -220,4 +220,18 @@ describe("LogModal", () => {
     await screen.findByText("on.test.run");
     expect(screen.getByText(/no output yet/)).toBeInTheDocument();
   });
+
+  it("does not claim an empty log when a chip filtered every line away", async () => {
+    // a session writes one family of src, so every other chip empties the view
+    vi.mocked(api.getLogLines).mockResolvedValue({
+      session_id: "s1",
+      status: "done",
+      lines: [line(0, "stdout", "already merged (!77); nothing to do")],
+    });
+    render(<LogModal sessionId="s1" onClose={() => {}} />);
+    await screen.findByText("on.test.run");
+    await userEvent.click(screen.getByRole("button", { name: "agent" }));
+    expect(screen.queryByText(/has not written a line/)).not.toBeInTheDocument();
+    expect(screen.getByText(/no agent lines — this session logged 1/)).toBeInTheDocument();
+  });
 });
