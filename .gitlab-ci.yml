@@ -27,6 +27,27 @@ cache:
   paths:
     - .uv-cache
 
+# The paths that can change what `pytest` does. One list, two jobs.
+.py-changes: &py-changes
+  - src/**/*
+  - tests/**/*
+  - templates/**/*
+  # pyproject's testpaths includes plugins/kraft-lite/tests, so the suite
+  # covers the plugin; without this line a plugin-only merge produces no
+  # job and main - the only place the merge result runs - never tests it.
+  - plugins/**/*
+  - pyproject.toml
+  - uv.lock
+  - .gitlab-ci.yml
+
+# `rules: changes` has no diff to compare against on a tag pipeline, and GitLab
+# reads it as *always true* there -- which re-ran lint, slow, frontend and e2e on
+# the tag against the tree main had finished testing seconds earlier. A tag builds
+# and publishes; it does not re-test.
+.not-on-tags: &not-on-tags
+  if: $CI_COMMIT_TAG
+  when: never
+
 # `git` + `bd` aren't in the slim image; both test jobs need them.
 .py-before-script: &py-before-script
   - apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl
@@ -38,26 +59,18 @@ cache:
   - git --version && bd version
 
 # Blocking fast feedback: lint + everything except the slow/e2e tiers.
-# Ungated *on merge requests*: it is the cheapest job, and keeping one job
-# unconditional means every MR has a pipeline for `merge_when_pipeline_succeeds` to
-# wait on — a fully path-gated pipeline can produce zero jobs, and auto-merge then
-# never fires. That guarantee is only needed where something waits on the result, so
-# on the default branch it path-gates like the rest.
+#
+# This ran unconditionally on merge requests, to keep one job that always
+# produces a pipeline: a fully path-gated MR can yield zero jobs, and
+# `merge_when_pipeline_succeeds` then never fires. `release-impact` is
+# unconditional on every merge request now and holds that guarantee, so this job
+# path-gates everywhere. If release-impact is ever gated or dropped, something
+# else has to be unconditional or auto-merge breaks.
 lint-and-test:
   stage: test
   rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - changes:
-        - src/**/*
-        - tests/**/*
-        - templates/**/*
-        # pyproject's testpaths includes plugins/kraft-lite/tests, so the suite
-        # covers the plugin; without this line a plugin-only merge produces no
-        # job and main - the only place the merge result runs - never tests it.
-        - plugins/**/*
-        - pyproject.toml
-        - uv.lock
-        - .gitlab-ci.yml
+    - *not-on-tags
+    - changes: *py-changes
   variables:
     # setuptools-scm derives the version from tags; a shallow clone has none and
     # every build in it silently versions itself 0.1.dev1.
@@ -82,19 +95,9 @@ lint-and-test:
 # Subprocess servers, real uvicorn, multi-second sleeps (see pyproject `slow` marker).
 slow-tests:
   stage: test
-  needs: []
   rules:
-    - changes:
-        - src/**/*
-        - tests/**/*
-        - templates/**/*
-        # pyproject's testpaths includes plugins/kraft-lite/tests, so the suite
-        # covers the plugin; without this line a plugin-only merge produces no
-        # job and main - the only place the merge result runs - never tests it.
-        - plugins/**/*
-        - pyproject.toml
-        - uv.lock
-        - .gitlab-ci.yml
+    - *not-on-tags
+    - changes: *py-changes
   before_script: *py-before-script
   script:
     - uv sync --frozen
@@ -138,6 +141,7 @@ frontend:
   stage: test
   image: node:20-bookworm-slim
   rules:
+    - *not-on-tags
     - changes:
         - frontend/**/*
         - .gitlab-ci.yml
@@ -179,6 +183,7 @@ frontend-e2e:
   stage: test
   image: mcr.microsoft.com/playwright:v1.62.1-noble
   rules:
+    - *not-on-tags
     - changes:
         - frontend/src/**/*
         - frontend/e2e/**/*
@@ -338,7 +343,11 @@ auto-tag:
     - python3 dev/stamp_plugin_versions.py "${TAG#v}"
     - git add plugins/kraft/.claude-plugin/plugin.json plugins/kraft-lite/.claude-plugin/plugin.json
     - 'git -c user.email=ci@kraft.invalid -c user.name="Kraft CI" commit -qm "chore: plugins $TAG"'
-    - git push origin "HEAD:$CI_COMMIT_BRANCH"
+    # `-o ci.skip`: this commit only rewrites two version strings, but it touches
+    # plugins/**, so an ordinary push re-ran the whole Python suite on main against
+    # a tree it had just tested. The tag push below is a separate push and still
+    # gets its pipeline, which is the one that publishes.
+    - git push -o ci.skip origin "HEAD:$CI_COMMIT_BRANCH"
     - 'git -c user.email=ci@kraft.invalid -c user.name="Kraft CI" tag -a "$TAG" -m "$TAG"'
     - git push origin "$TAG"
     - echo "tagged $TAG"
