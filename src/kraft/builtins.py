@@ -79,7 +79,7 @@ async def ensure_worktree(
     # guarantees a crashed-and-retried run never re-pins to a moved HEAD.
     row = db.read(
         lambda c: c.execute(
-            "SELECT id, base_ref, branch FROM work_items WHERE id = ?", (work_item_id,)
+            "SELECT base_ref, branch, id FROM work_items WHERE id = ?", (work_item_id,)
         ).fetchone()
     )
     if row is not None and row["base_ref"] is None:
@@ -91,7 +91,8 @@ async def ensure_worktree(
             # for the rest of the item's life; the reason belongs in the log
             # rather than in a reviewer's guesswork.
             logger.warning("no base_ref for %s: rev-parse HEAD failed in %s", work_item_id, repo)
-    # The row is the truth. It is None only when the caller asked for a worktree
+    # One stored value, not a third derivation of it (Kraft-nhps). The row is
+    # the truth here; it is None only when the caller asked for a worktree
     # before intake committed the row — tests do, and `env_setup` is reachable
     # that way — and then the id is all there is to name a branch with.
     branch = store.branch_for(row) if row is not None else f"kraft/{work_item_id}"

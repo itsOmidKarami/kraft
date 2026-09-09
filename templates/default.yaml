@@ -28,6 +28,10 @@ nodes:
   - id: human_review
     tasks: [on.human_review.requested]
     gate_after: human_review_approval
+    # Kraft-ko7j: rejecting the last gate used to stop the item dead. It now
+    # re-enters the chain here, with the reviewer's note as the implementer's
+    # steer, and walks back up to this same gate over a changed diff.
+    reject_to: implementation
   # After the gate, not before it: the gate has to stay on the node that
   # carries the review brief (`_gate_artifact` scans the gate node's own
   # tasks), and pushing after approval means the merged head includes the

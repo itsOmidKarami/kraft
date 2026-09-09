@@ -3,6 +3,8 @@ export interface ChainNode {
   tasks: string[];
   gate_after: string | null;
   fix_loop?: string;
+  /** Where rejecting this node's gate sends the chain; null re-runs this node. */
+  reject_to?: string | null;
 }
 
 export interface ChainDefinition {

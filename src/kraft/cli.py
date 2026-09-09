@@ -386,7 +386,11 @@ def _cmd_approve(ns: argparse.Namespace) -> None:
 
 
 def _cmd_reject(ns: argparse.Namespace) -> None:
-    emit(asyncio.run(client.reject_gate(ns.note, ns.gate, ns.id)), _render_action, ns.json)
+    emit(
+        asyncio.run(client.reject_gate(ns.note, ns.gate, ns.id, ns.node)),
+        _render_action,
+        ns.json,
+    )
 
 
 def _cmd_pause(ns: argparse.Namespace) -> None:
@@ -656,6 +660,9 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     reject.add_argument("id", nargs="?")
     reject.add_argument("--note", required=True, help="what is wrong; a rejection needs a reason")
     reject.add_argument("--gate", help="default: whichever gate is pending")
+    reject.add_argument(
+        "--node", help="re-enter the chain at this node; default: the chain's own reject_to"
+    )
     reject.set_defaults(func=_cmd_reject)
 
     pause = subs.add_parser("pause", parents=[common], help="stop the running attempt")
