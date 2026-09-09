@@ -4,7 +4,7 @@ import asyncio
 import os
 
 import pytest
-from support.harness import make_repo_with_engineering
+from support.harness import make_repo, make_repo_with_engineering
 
 from kraft.db import Database
 from kraft.index import db as index_db
@@ -324,6 +324,92 @@ def test_documents_for_work_item_includes_intake_attachments(tmp_path):
             docs = ix.documents_for_work_item("w1")
             assert [d["path"] for d in docs] == [".engineering/plans/p.md"]
             assert docs[0]["attachment_kind"] == "plan"
+        finally:
+            conn.close()
+            await state.close()
+
+    asyncio.run(scenario())
+
+
+def test_documents_for_work_item_shows_unmerged_attachment_from_its_worktree(tmp_path):
+    """The attachment is committed only on the item's own branch/worktree, not
+    on the registered main checkout — `rescan_repo` never sees it, but the
+    worktree fallback should still surface it (Kraft-3sbq)."""
+    from kraft.paths import RunDirs
+
+    async def scenario():
+        state = await Database.open(tmp_path / "state.db")
+        conn = index_db.open_index(tmp_path / "index.db")
+        try:
+            repo = make_repo(tmp_path)
+            await state.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, bead_id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at, attachments) VALUES "
+                    "(?, 'b1', 't', ?, 'default', '{}', 'active', 'now', 'now', ?)",
+                    ("w1", str(repo), '[{"kind": "plan", "path": ".engineering/plans/p.md"}]'),
+                )
+            )
+            rd = RunDirs(tmp_path / "run").ensure()
+            wt = rd.worktrees / "w1" / ".engineering" / "plans"
+            wt.mkdir(parents=True)
+            (wt / "p.md").write_text("# Attached plan\nbody\n")
+
+            ix = Indexer(conn, state, repos_env=str(repo), run_dirs=rd)
+            await ix.rescan_repo(str(repo))
+            assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 0
+
+            docs = ix.documents_for_work_item("w1")
+            assert [d["path"] for d in docs] == [".engineering/plans/p.md"]
+            assert docs[0]["attachment_kind"] == "plan"
+            assert docs[0]["title"] == "Attached plan"
+            assert docs[0]["document_id"] == "attachment:w1:plan"
+
+            doc = ix.get_document("attachment:w1:plan")
+            assert doc is not None
+            assert doc["content"] == "# Attached plan\nbody\n"
+            assert doc["title"] == "Attached plan"
+        finally:
+            conn.close()
+            await state.close()
+
+    asyncio.run(scenario())
+
+
+def test_documents_for_work_item_prefers_indexed_over_worktree_attachment(tmp_path):
+    """Once the attachment lands in the `documents` table (post-merge, or a
+    path that already exists in the main checkout), that row wins — no
+    duplicate entry from the worktree fallback."""
+    from kraft.paths import RunDirs
+
+    async def scenario():
+        state = await Database.open(tmp_path / "state.db")
+        conn = index_db.open_index(tmp_path / "index.db")
+        try:
+            repo = make_repo_with_engineering(
+                tmp_path, {".engineering/plans/p.md": "# Indexed plan\nbody\n"}
+            )
+            await state.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, bead_id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at, attachments) VALUES "
+                    "(?, 'b1', 't', ?, 'default', '{}', 'active', 'now', 'now', ?)",
+                    ("w1", str(repo), '[{"kind": "plan", "path": ".engineering/plans/p.md"}]'),
+                )
+            )
+            rd = RunDirs(tmp_path / "run").ensure()
+            wt = rd.worktrees / "w1" / ".engineering" / "plans"
+            wt.mkdir(parents=True)
+            (wt / "p.md").write_text("# Stale worktree copy\nbody\n")
+
+            ix = Indexer(conn, state, repos_env=str(repo), run_dirs=rd)
+            await ix.rescan_repo(str(repo))
+            assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1
+
+            docs = ix.documents_for_work_item("w1")
+            assert len(docs) == 1
+            assert docs[0]["title"] == "Indexed plan"
+            assert not str(docs[0]["document_id"]).startswith("attachment:")
         finally:
             conn.close()
             await state.close()
