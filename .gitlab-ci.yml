@@ -216,7 +216,14 @@ frontend-e2e:
 
 # A tag is the only thing that publishes. The workflow rules at the top already
 # admit tag pipelines, so this job's rule is the whole gate.
-release:
+#
+# Split from the `release` job below on purpose. GitLab implements the `release:`
+# keyword by running glab or release-cli *inside the job's own image*, and this
+# one is a node image so it has neither -- the first attempt died on `exit 127`
+# after building and uploading a perfectly good wheel. Handing the values over as
+# a dotenv report is also the documented way to do this, rather than the
+# same-job shortcut it replaced.
+release-build:
   stage: release
   # The same node the `frontend` job builds on. bookworm's `apt-get install
   # nodejs` is still Node 18, and a release must not be the one build that runs
@@ -264,16 +271,6 @@ release:
     paths: [dist/*.whl]
     reports:
       dotenv: release.env
-  release:
-    tag_name: $CI_COMMIT_TAG
-    description: "Kraft $CI_COMMIT_TAG"
-    assets:
-      links:
-        # The name must end in .whl: update._parse picks the wheel out of a
-        # release by that suffix, and a link named otherwise makes every release
-        # look uninstallable.
-        - name: "$WHEEL_NAME"
-          url: "$WHEEL_URL"
 
 # Every merge request declares what it ships. The version comes from the git tag
 # now, so there is no bump commit left to forget -- which means the only place
@@ -345,3 +342,26 @@ auto-tag:
     - git tag -a "$TAG" -m "$TAG"
     - git push origin "$TAG"
     - echo "tagged $TAG"
+
+# Creates the Release object and nothing else. Its image is the only one in this
+# file chosen for a tool rather than a language: release-cli is what the
+# `release:` keyword shells out to. $WHEEL_URL and $WHEEL_NAME arrive from
+# release-build's dotenv report, which is why `needs:` is not optional here.
+release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs: ["release-build"]
+  rules:
+    - if: $CI_COMMIT_TAG
+  script:
+    - 'echo "creating the release for $CI_COMMIT_TAG"'
+  release:
+    tag_name: $CI_COMMIT_TAG
+    description: "Kraft $CI_COMMIT_TAG"
+    assets:
+      links:
+        # The name must end in .whl: update._parse picks the wheel out of a
+        # release by that suffix, and a link named otherwise makes every release
+        # look uninstallable.
+        - name: "$WHEEL_NAME"
+          url: "$WHEEL_URL"
