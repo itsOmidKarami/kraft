@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CirclesThree, MagnifyingGlass } from "@phosphor-icons/react";
 import * as api from "../api";
 import { repoName } from "../format";
+import { backdropProps } from "../useModal";
 import { useStore } from "../store";
 import type { Bead, SearchResult } from "../types";
 import { DocumentModal } from "./DocumentModal";
@@ -94,7 +95,7 @@ export function SearchOverlay({ onClose }: { onClose: () => void }) {
   }, [error, q, results]);
 
   return (
-    <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label="Search">
+    <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label="Search" {...backdropProps(onClose)}>
       <div className="dialog search-overlay elev-lg">
         <div className="search-bar">
           <MagnifyingGlass size={16} className="search-icon" />
