@@ -586,7 +586,10 @@ def test_migrate_v9_to_v10_widens_worker_sessions_status(tmp_path):
     assert row["log_path"] == "/l"
     assert row["result_path"] == "/r"
     assert row["status"] == "unknown"
-    assert row["attempt"] == 2
+    # migration 14 (Kraft-kq8m) recomputes attempt from the real rows rather than
+    # carrying the fixture's literal 2 forward: this is the only session in its
+    # (work_item_id, node_id, hook_point), so the backfill numbers it 1.
+    assert row["attempt"] == 1
     assert row["session_summary_ref"] == ".engineering/sessions/s1.md"
     assert row["created_at"] == "now"
     assert row["started_at"] == "started"
@@ -696,3 +699,40 @@ def test_fresh_schema_has_description(tmp_path):
     db.migrate(conn)
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(work_items)")}
     assert "description" in cols
+
+
+def test_migration_14_backfills_worker_session_attempts(tmp_path):
+    """Every row ever written carried the literal attempt = 1 (Kraft-kq8m), so
+    fixing the INSERT alone leaves the observed items wrong for the life of the
+    database. The backfill numbers each (work item, node, hook point) 1..N oldest
+    first, with (created_at, id) breaking a shared timestamp."""
+    path = tmp_path / "orchestrator.db"
+    conn = db._connect(path)
+    _build_old_db(conn, 13)
+    conn.execute(
+        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
+        "'active','now','now')"
+    )
+    for sid, hook, created in [
+        ("s1", "on.ci.poll", "2026-01-01T00:00:00"),
+        ("s2", "on.ci.poll", "2026-01-01T00:00:01"),
+        # s3 shares s2's timestamp: the id has to break the tie, or the two
+        # collide on one number and the third is never used
+        ("s3", "on.ci.poll", "2026-01-01T00:00:01"),
+        ("s4", "on.mr.open", "2026-01-01T00:00:00"),
+    ]:
+        conn.execute(
+            "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, "
+            "log_path, result_path, status, attempt, created_at) "
+            "VALUES (?, 'w1', 'mr_checks', ?, '/l', '/r', 'done', 1, ?)",
+            (sid, hook, created),
+        )
+    conn.commit()
+    conn.close()
+
+    conn2 = db._connect(path)
+    db.migrate(conn2)
+    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    got = {r["id"]: r["attempt"] for r in conn2.execute("SELECT id, attempt FROM worker_sessions")}
+    assert got == {"s1": 1, "s2": 2, "s3": 3, "s4": 1}
