@@ -210,6 +210,81 @@ def test_resume_current_node_failed_session_is_needs_human(tmp_path):
     asyncio.run(scenario())
 
 
+def test_resume_still_gives_a_node_the_repair_its_template_declared(tmp_path):
+    """Kraft-rv6i. A crash between a node failing and its `on_failure` pass is
+    exactly when the repair matters, and the session-count reconciliation would
+    read it as "did not resolve cleanly" and stop for a human with the repair
+    never tried."""
+    from kraft.templates import Registry
+
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    flag = tmp_path / "labelled"
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = Registry(
+                hooks={
+                    "on.ci.poll": {
+                        "kind": "subprocess",
+                        "command": [
+                            sys.executable,
+                            "-c",
+                            f"import pathlib,sys; sys.exit(0 if pathlib.Path({str(flag)!r})"
+                            ".exists() else 1)",
+                        ],
+                    },
+                    "on.mr.sync": {
+                        "kind": "subprocess",
+                        "command": [
+                            sys.executable,
+                            "-c",
+                            f"import pathlib; pathlib.Path({str(flag)!r}).touch()",
+                        ],
+                    },
+                }
+            )
+            wid = await executor.intake(
+                database,
+                rd,
+                title="a red pipeline the server restarted under",
+                repo=str(repo),
+                template=Template(
+                    id="recovering",
+                    nodes=[{"id": "checks", "tasks": ["on.ci.poll"], "on_failure": ["on.mr.sync"]}],
+                ),
+                bd_cwd=str(tracker),
+            )
+            await database.write(lambda c: store.load_chain(c, wid, "checks"))
+            await database.write(lambda c: store.enter_node(c, wid, "checks"))
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s-poll",
+                    work_item_id=wid,
+                    node_id="checks",
+                    hook_point="on.ci.poll",
+                    log_path="/l",
+                    result_path="/r",
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "s-poll", "failed"))
+
+            result = await executor.resume(
+                database, rd, work_item_id=wid, registry=registry, adopted={}, bd_cwd=str(tracker)
+            )
+            return result, _types(database, wid)
+        finally:
+            await database.close()
+
+    result, types = asyncio.run(scenario())
+
+    assert "node_recovery_started" in types, "resume skipped the node's declared repair"
+    assert result == "completed"
+
+
 def test_resume_awaits_adopted_task_before_reading_status(tmp_path):
     """resume must await the adopted wait-task before re-reading session status."""
     tracker = isolated_bd(tmp_path)
