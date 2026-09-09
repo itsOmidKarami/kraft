@@ -5,7 +5,7 @@ hooks:
   on.implementation.start: { kind: agent,      command: claude }
   on.test.run:             { kind: subprocess, command: [uv, run, pytest, -q] }
   # --- placeholder bindings: each replaced by its plugin effort (see 03_plugin_adapters) ---
-  on.chain.review_ready:     { kind: builtin, handler: noop }
+  on.chain.review_ready:     { kind: agent, command: claude, skill: chain-review, artifact: chain_review }
   on.review.local.run:       { kind: builtin, handler: noop }
   # backend: auto resolves per repo, from the `forge` recorded on its
   # repos.yaml entry (Settings → Repos). A CLI name here pins every repo to one
