@@ -496,6 +496,56 @@ def test_ensure_worktree_keeps_the_legacy_uuid_branch(tmp_path):
     asyncio.run(scenario())
 
 
+def test_ensure_worktree_syncs_deps_so_the_first_commit_can_run_pre_commit(tmp_path):
+    """A fresh worktree had no `.venv`, so `spec` -- the first node to commit,
+    ahead of `env_setup` in `default.yaml` -- hit `Failed to spawn: pre-commit`
+    and fell back to `--no-verify`, skipping ruff-format on the doc it had just
+    written (Kraft-i047). `uv sync` here, before any node dispatches, closes
+    that gap for any worktree that is actually a uv project."""
+    repo = make_repo(tmp_path)
+    (repo / "pyproject.toml").write_text(
+        '[project]\nname = "sample"\nversion = "0.0.0"\nrequires-python = ">=3.11"\n'
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "add pyproject")
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            wt = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id="w1"
+            )
+            assert (wt / ".venv" / "bin" / "python3").exists()
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_ensure_worktree_skips_sync_when_repo_has_no_pyproject(tmp_path):
+    """The common test fixture (`make_repo`) is not a uv project; `uv sync`
+    against it would fail loudly for every other test in this file if the
+    gate on `pyproject.toml` ever slipped."""
+    repo = make_repo(tmp_path)
+    assert not (repo / "pyproject.toml").exists()
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            wt = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id="w1"
+            )
+            assert not (wt / ".venv").exists()
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 def test_ensure_worktree_raises_when_git_fails(tmp_path):
     not_a_repo = tmp_path / "not-a-repo"
     not_a_repo.mkdir()
