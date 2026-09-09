@@ -151,6 +151,8 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
             "-- from `description` at intake",
             "-- alongside `bead_id` on completion",
         )
+    if version < 17:
+        drop_lines = (*drop_lines, "retry_at         TEXT,", "-- set while status = 'rate_limited'")
     schema = "\n".join(
         rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
     )
@@ -479,14 +481,18 @@ def test_migrate_v4_to_v5_rebuilds_work_items_for_the_paused_status(tmp_path):
     _build_old_db(
         conn,
         4,
-        drop_lines=("pending_steer_context", "-- steer text"),
+        drop_lines=(
+            "pending_steer_context",
+            "-- steer text",
+            "                     ('active', 'needs_human', 'completed', 'paused', 'abandoned',",
+            "                      'rate_limited')),",
+        ),
         replace=(
             (
                 "status           TEXT NOT NULL CHECK (status IN",
                 "  status           TEXT NOT NULL CHECK (status IN "
                 "('active', 'needs_human', 'completed')),",
             ),
-            ("('active', 'needs_human', 'completed', 'paused', 'abandoned')),", ""),
         ),
     )
     conn.execute(
@@ -829,6 +835,77 @@ def test_migration_14_backfills_worker_session_attempts(tmp_path):
     assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
     got = {r["id"]: r["attempt"] for r in conn2.execute("SELECT id, attempt FROM worker_sessions")}
     assert got == {"s1": 1, "s2": 2, "s3": 3, "s4": 1}
+
+
+def test_migrate_v16_to_v17_rebuilds_for_rate_limited(tmp_path):
+    """v16's CHECKs have no 'rate_limited' and work_items has no retry_at;
+    SQLite cannot alter a constraint, so both tables are rebuilt the same
+    12-step way migration 4 and 9 used."""
+    path = tmp_path / "orchestrator.db"
+    conn = db._connect(path)
+    _build_old_db(
+        conn,
+        16,
+        drop_lines=("                      'rate_limited')),",),
+        replace=(
+            (
+                "'paused', 'abandoned',",
+                "                     ('active', 'needs_human', 'completed', 'paused', "
+                "'abandoned')),",
+            ),
+            (
+                "'done_with_concerns', 'needs_context', 'rate_limited')),",
+                "                    'done_with_concerns', 'needs_context')),",
+            ),
+        ),
+    )
+    conn.execute(
+        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
+        "'active','now','now')"
+    )
+    conn.execute(
+        "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, log_path, "
+        "result_path, status, created_at) VALUES ('s1', 'w1', 'verify', 'on.test.run', "
+        "'/l', '/r', 'pending', 'now')"
+    )
+    conn.commit()
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("UPDATE work_items SET status = 'rate_limited' WHERE id = 'w1'")
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("UPDATE worker_sessions SET status = 'rate_limited' WHERE id = 's1'")
+    conn.close()
+
+    conn2 = db._connect(path)
+    db.migrate(conn2)
+    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    assert conn2.execute("SELECT count(*) FROM work_items").fetchone()[0] == 1
+    assert conn2.execute("SELECT count(*) FROM worker_sessions").fetchone()[0] == 1
+
+    cols = {r["name"] for r in conn2.execute("PRAGMA table_info(work_items)")}
+    assert "retry_at" in cols
+    row = conn2.execute("SELECT retry_at FROM work_items WHERE id = 'w1'").fetchone()
+    assert row["retry_at"] is None  # pre-existing row: NULL, not "not rate limited yet"
+
+    conn2.execute("UPDATE work_items SET status = 'rate_limited', retry_at = 'x' WHERE id = 'w1'")
+    conn2.execute("UPDATE worker_sessions SET status = 'rate_limited' WHERE id = 's1'")
+    assert conn2.execute("PRAGMA foreign_key_check").fetchall() == []
+    index_names = {r[0] for r in conn2.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+    assert "idx_worker_sessions_status" in index_names
+
+
+def test_fresh_schema_has_retry_at(tmp_path):
+    """SCHEMA_SQL and the migration path must agree — a fresh install and an
+    upgraded one are the same database."""
+    conn = db._connect(tmp_path / "fresh.db")
+    db.migrate(conn)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(work_items)")}
+    assert "retry_at" in cols
+    conn.execute(
+        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
+        "'rate_limited','now','now')"
+    )
 
 
 def test_migrating_v13_adds_the_branch_column(tmp_path):

@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -31,7 +31,8 @@ CREATE TABLE work_items (
   chain_definition TEXT NOT NULL,
   current_node_id  TEXT,
   status           TEXT NOT NULL CHECK (status IN
-                     ('active', 'needs_human', 'completed', 'paused', 'abandoned')),
+                     ('active', 'needs_human', 'completed', 'paused', 'abandoned',
+                      'rate_limited')),
   -- steer text a human left while paused, consumed by the next agent launch
   pending_steer_context TEXT,
   -- cross-repo (06): submodule paths chosen at intake, and what happens to the
@@ -56,6 +57,9 @@ CREATE TABLE work_items (
   -- from `description` at intake, e.g. ["Kraft-p8q1", "Kraft-ikze"]. Closed
   -- alongside `bead_id` on completion -- see `_close_beads`.
   implements_beads TEXT,
+  -- set while status = 'rate_limited': when the agent's rate limit resets and
+  -- `rate_limit_retry.poller` may relaunch the item. NULL otherwise.
+  retry_at         TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
@@ -81,7 +85,7 @@ CREATE TABLE worker_sessions (
   result_path    TEXT NOT NULL,
   status         TEXT NOT NULL CHECK (status IN
                    ('pending', 'running', 'done', 'failed', 'capped_out', 'paused', 'unknown',
-                    'done_with_concerns', 'needs_context')),
+                    'done_with_concerns', 'needs_context', 'rate_limited')),
   attempt        INTEGER NOT NULL DEFAULT 1,
   session_summary_ref TEXT,
   created_at     TEXT NOT NULL,
@@ -268,11 +272,9 @@ SELECT id, bead_id, title, repo, chain_template, chain_definition, current_node_
      AND (p.created_at, p.id) <= (worker_sessions.created_at, worker_sessions.id))"""
     ],
     15: ["ALTER TABLE work_items ADD COLUMN implements_beads TEXT"],
-    # chain_template drops NOT NULL (Kraft-cd47): SQLite cannot alter a column
-    # constraint, so work_items is rebuilt the same way migration 11 was. Every
-    # existing row keeps its current value -- only new rows can write NULL.
-    # Carries implements_beads (migration 15) forward too, since this rebuild
-    # runs after it and would otherwise drop the column silently.
+    # 'rate_limited' joins both CHECKs, and work_items gains `retry_at`; SQLite
+    # cannot alter a constraint, so both tables are rebuilt the same 12-step way
+    # migrations 4 and 9 used.
     16: [
         """CREATE TABLE work_items_new (
   id               TEXT PRIMARY KEY,
@@ -280,11 +282,12 @@ SELECT id, bead_id, title, repo, chain_template, chain_definition, current_node_
   title            TEXT NOT NULL,
   description      TEXT,
   repo             TEXT NOT NULL,
-  chain_template   TEXT,
+  chain_template   TEXT NOT NULL,
   chain_definition TEXT NOT NULL,
   current_node_id  TEXT,
   status           TEXT NOT NULL CHECK (status IN
-                     ('active', 'needs_human', 'completed', 'paused', 'abandoned')),
+                     ('active', 'needs_human', 'completed', 'paused', 'abandoned',
+                      'rate_limited')),
   pending_steer_context TEXT,
   submodules       TEXT,
   root_merge_policy TEXT,
@@ -293,6 +296,7 @@ SELECT id, bead_id, title, repo, chain_template, chain_definition, current_node_
   bead_cwd         TEXT,
   branch           TEXT,
   implements_beads TEXT,
+  retry_at         TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 )""",
@@ -303,6 +307,83 @@ SELECT id, bead_id, title, repo, chain_template, chain_definition, current_node_
 SELECT id, bead_id, title, description, repo, chain_template, chain_definition,
        current_node_id, status, pending_steer_context, submodules, root_merge_policy,
        attachments, base_ref, bead_cwd, branch, implements_beads, created_at, updated_at
+FROM work_items""",
+        "DROP TABLE work_items",
+        "ALTER TABLE work_items_new RENAME TO work_items",
+        """CREATE TABLE worker_sessions_new (
+  id             TEXT PRIMARY KEY,
+  work_item_id   TEXT NOT NULL REFERENCES work_items(id),
+  node_id        TEXT NOT NULL,
+  hook_point     TEXT NOT NULL,
+  pid            INTEGER,
+  pid_start_time REAL,
+  log_path       TEXT NOT NULL,
+  result_path    TEXT NOT NULL,
+  status         TEXT NOT NULL CHECK (status IN
+                   ('pending', 'running', 'done', 'failed', 'capped_out', 'paused', 'unknown',
+                    'done_with_concerns', 'needs_context', 'rate_limited')),
+  attempt        INTEGER NOT NULL DEFAULT 1,
+  session_summary_ref TEXT,
+  created_at     TEXT NOT NULL,
+  started_at     TEXT,
+  round          INTEGER NOT NULL DEFAULT 0,
+  model          TEXT,
+  tokens_in      INTEGER,
+  tokens_out     INTEGER,
+  cost_usd       REAL,
+  wall_ms        INTEGER,
+  exited_at      TEXT
+)""",
+        """INSERT INTO worker_sessions_new (id, work_item_id, node_id, hook_point, pid,
+  pid_start_time, log_path, result_path, status, attempt, session_summary_ref,
+  created_at, started_at, round, model, tokens_in, tokens_out, cost_usd, wall_ms,
+  exited_at)
+SELECT id, work_item_id, node_id, hook_point, pid, pid_start_time, log_path,
+       result_path, status, attempt, session_summary_ref, created_at, started_at,
+       round, model, tokens_in, tokens_out, cost_usd, wall_ms, exited_at
+FROM worker_sessions""",
+        "DROP TABLE worker_sessions",
+        "ALTER TABLE worker_sessions_new RENAME TO worker_sessions",
+        "CREATE INDEX idx_worker_sessions_status ON worker_sessions(status)",
+    ],
+    # chain_template drops NOT NULL (Kraft-cd47): SQLite cannot alter a column
+    # constraint, so work_items is rebuilt the same way migration 11 was. Every
+    # existing row keeps its current value -- only new rows can write NULL.
+    # Carries implements_beads (15) and retry_at (16) forward too, since this
+    # rebuild runs after both and would otherwise drop them silently.
+    17: [
+        """CREATE TABLE work_items_new (
+  id               TEXT PRIMARY KEY,
+  bead_id          TEXT,
+  title            TEXT NOT NULL,
+  description      TEXT,
+  repo             TEXT NOT NULL,
+  chain_template   TEXT,
+  chain_definition TEXT NOT NULL,
+  current_node_id  TEXT,
+  status           TEXT NOT NULL CHECK (status IN
+                     ('active', 'needs_human', 'completed', 'paused', 'abandoned',
+                      'rate_limited')),
+  pending_steer_context TEXT,
+  submodules       TEXT,
+  root_merge_policy TEXT,
+  attachments      TEXT,
+  base_ref         TEXT,
+  bead_cwd         TEXT,
+  branch           TEXT,
+  implements_beads TEXT,
+  retry_at         TEXT,
+  created_at       TEXT NOT NULL,
+  updated_at       TEXT NOT NULL
+)""",
+        """INSERT INTO work_items_new (id, bead_id, title, description, repo, chain_template,
+  chain_definition, current_node_id, status, pending_steer_context, submodules,
+  root_merge_policy, attachments, base_ref, bead_cwd, branch, implements_beads,
+  retry_at, created_at, updated_at)
+SELECT id, bead_id, title, description, repo, chain_template, chain_definition,
+       current_node_id, status, pending_steer_context, submodules, root_merge_policy,
+       attachments, base_ref, bead_cwd, branch, implements_beads, retry_at, created_at,
+       updated_at
   FROM work_items""",
         "DROP TABLE work_items",
         "ALTER TABLE work_items_new RENAME TO work_items",

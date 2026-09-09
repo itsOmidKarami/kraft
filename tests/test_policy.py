@@ -194,3 +194,34 @@ def test_escalate_after_must_be_a_positive_int(tmp_path, bad):
     )
     with pytest.raises(policy.PolicyError, match="escalate_after"):
         policy.load_policy(p)
+
+
+def test_policy_defaults_rate_limit_retries_to_five():
+    p = policy.Policy(loops={}, default=policy.Cap(attempts=3, wall_clock_s=100))
+    assert p.rate_limit_retries == 5
+
+
+def test_load_policy_reads_rate_limit_retries(tmp_path):
+    d = tmp_path / "policy.yaml"
+    d.write_text("default: { attempts: 2, wall_clock_s: 20 }\nrate_limit_retries: 8\n")
+    p = policy.load_policy(d)
+    assert p.rate_limit_retries == 8
+
+
+def test_load_policy_defaults_rate_limit_retries_when_absent(tmp_path):
+    d = tmp_path / "policy.yaml"
+    d.write_text("default: { attempts: 2, wall_clock_s: 20 }\n")
+    p = policy.load_policy(d)
+    assert p.rate_limit_retries == 5
+
+
+def test_load_policy_rejects_bad_rate_limit_retries(tmp_path):
+    d = tmp_path / "policy.yaml"
+    d.write_text("default: { attempts: 2, wall_clock_s: 20 }\nrate_limit_retries: 0\n")
+    with pytest.raises(policy.PolicyError):
+        policy.load_policy(d)
+
+
+def test_load_shipped_policy_has_rate_limit_retries():
+    p = policy.load_policy(_SHIPPED)
+    assert isinstance(p.rate_limit_retries, int) and p.rate_limit_retries >= 1

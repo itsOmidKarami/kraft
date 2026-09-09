@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ago, elapsed, tokens, until, usd } from "./format";
+import { ago, elapsed, statusWord, tokens, until, usd } from "./format";
 
 const now = Date.parse("2026-09-04T12:00:00Z");
 const at = (ms: number) => new Date(now - ms).toISOString();
@@ -46,5 +46,15 @@ describe("until", () => {
     expect(until(inMs(30_000), now)).toBe("in 1m");
     expect(until(inMs(-1000), now)).toBe("expired");
     expect(until(null, now)).toBe("");
+  });
+});
+
+describe("statusWord", () => {
+  it("renders rate_limited in plain words", () => {
+    expect(statusWord("rate_limited")).toBe("rate limited");
+  });
+
+  it("falls back to the raw string for anything unmapped", () => {
+    expect(statusWord("active")).toBe("active");
   });
 });

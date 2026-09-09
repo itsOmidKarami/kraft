@@ -17,3 +17,8 @@ findings:
 budget:
   work_item_usd: 10     # per work item, across every loop in its chain
   daily_usd: 50         # every work item on this instance, since local midnight
+
+# How many times Kraft may auto-relaunch a work item after a rejected API rate
+# limit before it gives up and stops for a human. Not a fix-loop cap: a rate
+# limit wait can run for hours, this only counts attempts.
+rate_limit_retries: 5

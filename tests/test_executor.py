@@ -343,6 +343,51 @@ def test_run_verify_failure_stops_at_verify(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
+def test_rate_limit_stops_the_chain_without_a_fix_loop(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "rate_limit")
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            result = await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+            assert result == "rate_limited"
+
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT status, current_node_id, retry_at FROM work_items WHERE id = ?",
+                    (wid,),
+                ).fetchone()
+            )
+            assert row["status"] == "rate_limited"
+            assert row["current_node_id"] == "implementation"
+            assert row["retry_at"] == "2026-09-09T15:40:00+00:00"
+
+            types = _events(database, wid)
+            assert "rate_limit_hit" in types
+            assert "work_item_rate_limited" in types
+            # No fix loop, no repair task, no human page for this stop.
+            assert "work_item_needs_human" not in types
+            assert "node_recovery_started" not in types
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 def test_run_gathers_multi_task_node(tmp_path):
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)

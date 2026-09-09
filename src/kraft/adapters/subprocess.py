@@ -12,7 +12,7 @@ from pathlib import Path
 
 import psutil
 
-from kraft import logs, store
+from kraft import events, logs, store
 from kraft import usage as _usage
 
 _AGENT_STATUSES = ("done", "failed", "done_with_concerns", "needs_context")
@@ -153,6 +153,43 @@ def _resolve(result_path: Path, returncode: int) -> str:
     return "done" if returncode == 0 else "failed"
 
 
+def _rate_limit_rejection(log_path: Path) -> dict | None:
+    """The rejected `rate_limit_info` from a stream-json log, or None.
+
+    The CLI emits a `rate_limit_event` line on most turns, nearly all of them
+    `status: "allowed"` -- an `overageStatus` of "rejected" on an otherwise
+    allowed turn means only that overage spend was refused, not that the turn
+    itself was blocked. Only a top-level `status: "rejected"` means the launch
+    was refused. Scanned across every line, not just the last: unlike the
+    result envelope, this event is not guaranteed to be the final line.
+    Best-effort like `agent._envelope_is_error`: a log Kraft cannot read yet is
+    "no rejection seen", not a crash.
+    """
+    try:
+        lines = [ln for ln in log_path.read_text().splitlines() if ln.strip()]
+    except OSError:
+        return None
+    for line in lines:
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict) or obj.get("type") != "rate_limit_event":
+            continue
+        info = obj.get("rate_limit_info")
+        if not isinstance(info, dict) or info.get("status") != "rejected":
+            continue
+        resets_at = info.get("resetsAt")
+        if not isinstance(resets_at, int | float):
+            continue
+        return {
+            "rate_limit_type": info.get("rateLimitType"),
+            "resets_at": resets_at,
+            "resets_at_iso": datetime.fromtimestamp(resets_at, UTC).isoformat(),
+        }
+    return None
+
+
 async def run_task(
     db,
     run_dirs,
@@ -265,7 +302,18 @@ async def run_task(
     watcher.join(timeout=2)
     returncode = proc.returncode
     status = _resolve(result_path, returncode)
-    if post_resolve is not None:
+    rate_limit = _rate_limit_rejection(log_path)
+    if rate_limit is not None:
+        # A rejected launch produced no artifact by construction, so this
+        # skips `post_resolve` (agent.py's artifact-presence check) entirely
+        # rather than let it downgrade an already-correct status to "failed".
+        status = "rate_limited"
+        await db.write(
+            lambda c, rl=rate_limit: events.append(
+                c, work_item_id, "rate_limit_hit", {**rl, "node_id": node_id}
+            )
+        )
+    elif post_resolve is not None:
         status = post_resolve(status, log_path, returncode)
     # A human pausing the item SIGTERMs this child, so a non-zero rc here may mean
     # "stopped on purpose" rather than "failed". The row is the authority.
