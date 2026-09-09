@@ -41,6 +41,7 @@ def test_doctor_on_a_live_instance_reaches_every_check(app, tmp_path):
         "mcp token",
         "agent cli",
         "shell completion",
+        "bd",
         "worktrees",
     ):
         assert name in _names(rows)
@@ -51,6 +52,17 @@ def test_a_world_readable_mcp_token_fails(app, tmp_path):
     row = _by_name(asyncio.run(doctor.run_checks()), "mcp token")
     assert not row["ok"]
     assert "0644" in row["detail"]
+
+
+def test_doctor_reports_a_missing_bd_without_failing(app, tmp_path, monkeypatch):
+    """Kraft-7gy: bd is optional. A deliberately bd-less install is not broken,
+    so the line reports and does not set doctor's exit code."""
+    _prime(tmp_path)
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    rows = asyncio.run(doctor.run_checks())
+    row = _by_name(rows, "bd")
+    assert row["ok"]
+    assert "not installed" in row["detail"]
 
 
 def test_a_dead_server_is_one_failure_and_the_rest_are_skipped(monkeypatch, tmp_path):

@@ -80,11 +80,19 @@ def test_ready_tolerates_a_bead_with_no_description(monkeypatch):
     ]
 
 
-def test_intake_raises_on_bd_failure(tmp_path):
-    bare = tmp_path / "bare"
-    bare.mkdir()
-    with pytest.raises(subprocess.CalledProcessError):
-        asyncio.run(beads.intake("x", cwd=str(bare)))
+def test_intake_error_carries_bd_stderr(tmp_path, monkeypatch):
+    """Kraft-ibwj: `CalledProcessError` names the argv and the exit status and
+    not the one line that explains them. The raised message must carry bd's own
+    words, because that message is what reaches the user."""
+    stub_dir = tmp_path / "bin"
+    stub_dir.mkdir()
+    bd = stub_dir / "bd"
+    bd.write_text('#!/bin/sh\necho "Error: no beads database found" >&2\nexit 1\n')
+    bd.chmod(0o755)
+    monkeypatch.setenv("PATH", str(stub_dir))
+    with pytest.raises(RuntimeError) as excinfo:
+        asyncio.run(beads.intake("x", cwd=str(tmp_path)))
+    assert "no beads database found" in str(excinfo.value)
 
 
 def test_search_finds_a_closed_bead(tmp_path):
