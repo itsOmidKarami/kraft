@@ -477,28 +477,103 @@ class NewWorkItem(BaseModel):
     root_merge_policy: str = "bump"
     #: spec/plan documents that already exist — they trim the gates they satisfy
     attachments: list[Attachment] = []
+    #: the caller's working directory, sent only when there are attachment paths
+    #: to resolve. A local CLI or MCP caller is often standing in a worktree of
+    #: `repo` — for a Kraft worker, always — and that is where the document it
+    #: wants to hand over actually is (Kraft-85wk). The browser sends nothing.
+    cwd: str | None = None
     #: False creates the item without running it (design §6 rule 1). An agent
     #: cannot spend tokens unattended; a human starts it from the board.
     autostart: bool = True
 
 
-def _validated_attachments(repo: str, attachments: list[Attachment]) -> list[dict]:
-    """Trust boundary: `path` comes from a browser and is used to read a file and
-    to write into a worktree. Resolve under the repo and reject any escape."""
+def _git_common_dir(path: Path) -> Path | None:
+    """The `.git` that every working tree of one repository shares, or None.
+
+    Identical for a main checkout and every worktree linked to it; different for
+    an unrelated repo, and different for a submodule of this one (whose common
+    dir is `<super>/.git/modules/<path>`). `config_mod.git_read` never raises,
+    so a directory that is not a repo, or is not readable, is None rather than a
+    500.
+    """
+    common = config_mod.git_read(
+        path, "rev-parse", "--path-format=absolute", "--git-common-dir", expected_failure=True
+    )
+    return Path(common).resolve() if common else None
+
+
+def _attachment_roots(repo: str, cwd: str | None) -> list[Path]:
+    """The roots an attachment path may be resolved against, in order.
+
+    The registered repo always, and first. The caller's own working tree second,
+    and only when it proves it is a working tree of that same repository —
+    same `.git`, or no second root (Kraft-85wk). With no `cwd` the reachable set
+    is exactly what it has always been.
+
+    This check is also what enforces Kraft-vwv's decision: an intake attachment
+    belongs to the item's root worktree only. A `cwd` inside a submodule
+    contributes no root, because a submodule's common dir is not the
+    superproject's — so a submodule-local spec cannot be attached by accident,
+    and `ensure_worktree` copies into the root worktree only. One change has one
+    spec; N copies in the MR would be N places for it to drift.
+    """
+    root = Path(repo).resolve()
+    if not cwd:
+        return [root]
+    common = _git_common_dir(Path(cwd))
+    if common is None or common != _git_common_dir(root):
+        return [root]
+    toplevel = config_mod.git_read(Path(cwd), "rev-parse", "--show-toplevel", expected_failure=True)
+    if toplevel is None:
+        return [root]
+    top = Path(toplevel).resolve()
+    return [root] if top == root else [root, top]
+
+
+def _validated_attachments(
+    repo: str, attachments: list[Attachment], cwd: str | None = None
+) -> list[dict]:
+    """Trust boundary: `path` comes from a browser or a local agent and is used
+    to read a file and to write into a worktree. Resolve under a candidate root
+    and reject any escape.
+
+    The widening `cwd` buys is small and proven: other working trees of the same
+    repository, for a caller the perimeter middleware has already established is
+    local and same-site. A path is taken at the first root it both stays inside
+    and exists under.
+    """
     kinds = [a.kind for a in attachments]
     if len(set(kinds)) != len(kinds):
         raise HTTPException(422, "at most one attachment per kind")
-    root = Path(repo).resolve()
+    roots = _attachment_roots(repo, cwd)
     out = []
     for a in attachments:
-        target = (root / a.path).resolve()
-        if not target.is_relative_to(root):
-            raise HTTPException(422, f"attachment path escapes the repo: {a.path}")
-        # Working tree, not HEAD: a document written minutes ago is legal input,
-        # and env_setup copies it into the worktree.
-        if not target.is_file():
-            raise HTTPException(422, f"attachment not found: {a.path}")
-        out.append({"kind": a.kind, "path": str(target.relative_to(root))})
+        inside = False
+        for root in roots:
+            target = (root / a.path).resolve()
+            if not target.is_relative_to(root):
+                continue
+            inside = True
+            # Working tree, not HEAD: a document written minutes ago is legal
+            # input, and ensure_worktree copies it into the worktree.
+            if not target.is_file():
+                continue
+            entry = {"kind": a.kind, "path": str(target.relative_to(root))}
+            if root != roots[0]:
+                # The copy reads `repo / path` by default and this file is not
+                # in `repo` at all, so it would silently copy nothing and leave
+                # a trimmed gate with no document. Absolute, so the copy needs
+                # to know nothing about roots.
+                entry["source"] = str(target)
+            out.append(entry)
+            break
+        else:
+            raise HTTPException(
+                422,
+                f"attachment not found: {a.path}"
+                if inside
+                else f"attachment path escapes the repo: {a.path}",
+            )
     return out
 
 
@@ -517,7 +592,7 @@ async def create_work_item(body: NewWorkItem, request: Request):
         raise HTTPException(422, f"unknown root_merge_policy {body.root_merge_policy!r}")
     if not Path(body.repo).is_dir():
         raise HTTPException(422, f"repo path does not exist: {body.repo}")
-    attachments = _validated_attachments(body.repo, body.attachments)
+    attachments = _validated_attachments(body.repo, body.attachments, body.cwd)
     try:
         wid = await executor.intake(
             st.db,

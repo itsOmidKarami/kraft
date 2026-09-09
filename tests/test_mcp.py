@@ -65,6 +65,14 @@ def test_create_work_item_offers_a_description_and_says_what_it_is_for():
     assert "brief" in create.description.lower()
 
 
+def test_create_work_item_offers_attachments_and_says_what_they_are_for():
+    """An agent that cannot see the parameter hands over a title and lets Kraft
+    re-run a spec node over a spec that is already written (Kraft-82gz)."""
+    create = next(t for t in _tools() if t.name == "create_work_item")
+    assert "attachments" in create.input_schema["properties"]
+    assert "spec" in create.description.lower()
+
+
 def test_every_tool_has_a_description_an_agent_can_act_on():
     """The docstring is what an agent reads to decide whether to call the tool.
     A one-word description is a tool that never gets used correctly."""
