@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Protocol
 
+from kraft import events
+
 CIState = Literal["pending", "success", "failed"]
 
 #: How long a `ci_poll` node waits for a pipeline to settle, and how long it
@@ -853,10 +855,22 @@ async def run_task(
                     # see, and the head has to be pushed.
                     await forge.push(repo=repo, branch=branch)
                     await forge.update_mr(repo=repo, branch=branch, body=body)
-                    log, status = f"reusing !{existing.number}: {existing.url}\n", "done"
+                    number, url = existing.number, existing.url
+                    log, status = f"reusing !{number}: {url}\n", "done"
                 else:
                     mr = await forge.open_mr(repo=repo, branch=branch, title=title, body=body)
-                    log, status = f"opened {mr.url}\n", "done"
+                    number, url = mr.number, mr.url
+                    log, status = f"opened {url}\n", "done"
+                # An event, not a work-item column (Kraft-d2sq): no migration,
+                # it reaches the UI through the stream that already exists, and
+                # it is timestamped, which a column is not. Both paths emit it,
+                # so an item whose open_mr is re-entered after a rejected
+                # review still carries a current record.
+                await db.write(
+                    lambda c, n=number, u=url: events.append(
+                        c, work_item_id, "mr_opened", {"number": n, "url": u}
+                    )
+                )
             case "ci_poll":
                 # The worker commits in the worktree and is told not to push
                 # (adapters/agent.py:45), and only open_mr and sync_mr ever

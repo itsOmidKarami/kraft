@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { KraftEvent } from "../types";
+import type { KraftEvent, WorkerSession } from "../types";
 import { EventTimeline } from "./EventTimeline";
 
 const ev = (over: Partial<KraftEvent>): KraftEvent =>
@@ -47,7 +47,7 @@ describe("EventTimeline", () => {
         ]}
       />,
     );
-    expect(screen.getByText("the migration is untested")).toBeInTheDocument();
+    expect(screen.getByText(/the migration is untested/)).toBeInTheDocument();
   });
 
   it("surfaces the failed tasks that opened a fix cycle", () => {
@@ -205,5 +205,70 @@ describe("EventTimeline", () => {
       />,
     );
     expect(screen.getByText(/2026-09-10T05:00:00Z/)).toBeInTheDocument();
+  });
+
+  it("names a worker_session_exited row by hook_point resolved from sessions", () => {
+    // Kraft-zxu4: a verify node read as eight identical grey rows. The exit
+    // payload carries no hook_point at all, so it is resolved through the
+    // sessions already in the detail payload rather than by widening the
+    // event — widening it would fix only events written after the change and
+    // leave every item already in the database unreadable.
+    render(
+      <EventTimeline
+        sessions={[
+          { id: "s-test", hook_point: "on.test.run" } as WorkerSession,
+          { id: "s-rev", hook_point: "on.review.local.run" } as WorkerSession,
+        ]}
+        events={[
+          ev({
+            seq: 1,
+            type: "worker_session_exited",
+            payload: { session_id: "s-test", status: "done", wall_ms: 272_309 },
+          }),
+          ev({
+            seq: 2,
+            type: "worker_session_exited",
+            payload: { session_id: "s-rev", status: "failed", wall_ms: 6 },
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("on.test.run exited")).toBeInTheDocument();
+    expect(screen.getByText("on.review.local.run exited")).toBeInTheDocument();
+    // a done and a failed exit stop looking identical
+    expect(screen.getByText("done · 4m")).toBeInTheDocument();
+    expect(screen.getByText("failed · 0s")).toBeInTheDocument();
+  });
+
+  it("falls back to the raw type when no session resolves the row", () => {
+    render(
+      <EventTimeline
+        events={[ev({ type: "worker_session_exited", payload: { session_id: "gone", status: "done" } })]}
+      />,
+    );
+    expect(screen.getByText("worker_session_exited")).toHaveClass("etype");
+  });
+
+  it("says how many findings were measured", () => {
+    const { rerender } = render(
+      <EventTimeline
+        events={[
+          ev({ type: "findings_measured", payload: { node_id: "verify", cycle: 0, findings: [] } }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("no findings")).toBeInTheDocument();
+
+    rerender(
+      <EventTimeline
+        events={[
+          ev({
+            type: "findings_measured",
+            payload: { node_id: "verify", cycle: 0, findings: [{ message: "a" }, { message: "b" }] },
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("2 findings")).toBeInTheDocument();
   });
 });

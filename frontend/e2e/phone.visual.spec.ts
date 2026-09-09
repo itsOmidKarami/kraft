@@ -82,6 +82,10 @@ test("the diff viewer wraps a real diff instead of scrolling sideways", async ({
   await page.getByRole("button", { name: /review changes/i }).click();
   const dialog = page.getByRole("dialog", { name: "changes" });
   await expect(dialog).toBeVisible();
+  // A quick-task's edit is already committed by the time the chain reaches a
+  // gate, so it renders under "Landed" — collapsed by default (Kraft-nceo).
+  // Open the first file the same way a reader would.
+  await dialog.locator(".diff-files summary").first().click();
   const lines = dialog.locator(".diff-body > div");
   await expect(lines.first()).toBeVisible({ timeout: 15_000 });
   await page.screenshot({ path: `${SHOTS}/phone-04-diff.png`, fullPage: true });
