@@ -59,6 +59,12 @@ export function useModal<T extends HTMLElement>(onClose: () => void) {
  */
 export const backdropProps = (onClose: () => void) => ({
   onMouseDown: (e: MouseEvent) => {
-    if (e.target === e.currentTarget) onClose();
+    if (e.target !== e.currentTarget) return;
+    // A press on the backdrop's own scrollbar (it is `overflow-y: auto`, so a
+    // dialog taller than the viewport can scroll) targets the backdrop like
+    // any other outside press. `clientWidth` excludes that scrollbar, so an
+    // offset past it is the drag that must not close anything.
+    if (e.button !== 0 || e.nativeEvent.offsetX > e.currentTarget.clientWidth) return;
+    onClose();
   },
 });

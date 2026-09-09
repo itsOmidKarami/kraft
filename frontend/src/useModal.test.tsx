@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { backdropProps, useModal } from "./useModal";
@@ -82,6 +82,25 @@ describe("backdropProps", () => {
     const onClose = vi.fn();
     render(<Backdrop onClose={onClose} />);
     await userEvent.click(screen.getByRole("button", { name: "inside" }));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("ignores a non-primary button", () => {
+    const onClose = vi.fn();
+    render(<Backdrop onClose={onClose} />);
+    fireEvent.mouseDown(screen.getByTestId("backdrop"), { button: 2 });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("ignores a press on the backdrop's scrollbar", () => {
+    const onClose = vi.fn();
+    render(<Backdrop onClose={onClose} />);
+    // jsdom lays nothing out, so clientWidth is 0: any positive offset stands
+    // in for the strip of backdrop past its own scrollbar
+    const press = new MouseEvent("mousedown", { bubbles: true, button: 0 });
+    // fireEvent cannot pass offsetX: jsdom exposes it as a getter
+    Object.defineProperty(press, "offsetX", { value: 8 });
+    fireEvent(screen.getByTestId("backdrop"), press);
     expect(onClose).not.toHaveBeenCalled();
   });
 
