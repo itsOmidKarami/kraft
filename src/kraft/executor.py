@@ -24,6 +24,7 @@ from kraft.adapters import agent as _agent
 from kraft.adapters import beads
 from kraft.adapters import forge as _forge
 from kraft.adapters import subprocess as _subprocess
+from kraft.config import git_read
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.templates import ATTACHMENT_GATES, Registry, Template, materialize
 
@@ -71,6 +72,36 @@ def _format_findings(found: list[_findings.Finding], repeats: set[str]) -> str:
 # prepended to the next agent launch. It leads because it is the reason this task is
 # running again.
 _STEER_PROMPT = "A human has steered this run: {steer}\n\n"
+
+#: What the next `verify` agent task is told after a rebase-triggered bounce
+#: (Kraft-4bgg). Deliberately not `_STEER_PROMPT`: no human wrote this, and
+#: that template's wording would say one did.
+_REBASE_PROMPT = (
+    "This branch was rebased onto a newer {branch} before opening its MR. "
+    "Commits landed upstream while this work was in progress:\n\n{body}\n\n"
+    "Check whether they affect this work; fix it if so.\n\n"
+)
+
+#: Chars, not bytes -- this is a prompt prefix, not a diff view. A commit log
+#: plus `--stat` is meant to be a pointer at what to go look at, not the
+#: change itself; a full diff would cost far more context than the note is
+#: worth.
+_REBASE_NOTE_MAX = 2000
+
+
+def _rebase_drift_note(worktree, branch: str, old_base: str, new_base: str) -> str:
+    """A short pointer at what changed upstream during a rebase bounce back
+    to `verify` (Kraft-4bgg): commit subjects and touched files, not a full
+    diff, so the next review agent knows what to go looking for instead of
+    blindly re-reviewing everything from scratch.
+    """
+    log = git_read(worktree, "log", "--oneline", f"{old_base}..{new_base}") or "(no log)"
+    stat = git_read(worktree, "diff", "--stat", f"{old_base}..{new_base}") or "(no changes)"
+    body = f"Commits:\n{log}\n\nFiles touched:\n{stat}"
+    if len(body) > _REBASE_NOTE_MAX:
+        body = body[:_REBASE_NOTE_MAX] + "\n... (truncated)"
+    return _REBASE_PROMPT.format(branch=branch, body=body)
+
 
 #: The same note, over a document this node has already written. A bare steer
 #: made a rejected plan cost a full re-plan: nothing in the dispatch said the
@@ -557,6 +588,16 @@ async def _dispatch(
             hook_point=task_hook,
             repo=work_item_row["repo"],
             worktree=str(worktree),
+            **common,
+        )
+    if kind == "builtin" and binding.get("handler") == "mr_rebase":
+        return await _builtins.mr_rebase(
+            db,
+            run_dirs,
+            hook_point=task_hook,
+            repo=work_item_row["repo"],
+            worktree=str(worktree),
+            branch=store.branch_for(work_item_row),
             **common,
         )
     if kind == "agent":
@@ -1357,6 +1398,36 @@ async def _maybe_gate(db, work_item_id: str, node: dict) -> bool:
     return True
 
 
+def _current_base_ref(db, work_item_id: str) -> str | None:
+    row = db.read(
+        lambda c: c.execute(
+            "SELECT base_ref FROM work_items WHERE id = ?", (work_item_id,)
+        ).fetchone()
+    )
+    return row["base_ref"] if row else None
+
+
+async def _bounce_to_node(db, work_item_id: str, node: dict, target: str, policy) -> str:
+    """Bump the `rebase_bounce` cap and decide whether another bounce to
+    `target` is still allowed (Kraft-4bgg). Same `Cap`/`retry_counters`
+    machinery a fix_loop's own cap check uses in `_walk_node`, just keyed on
+    the whole item's rebase bounces rather than one node's fix cycles.
+    """
+    if policy is None:
+        raise RuntimeError(f"node {node['id']!r} has rebase_bounce_to but no policy was provided")
+    key = "rebase_bounce"
+    cap = _policy.resolve_cap(policy, key)
+    count, started_at, cap = await db.write(lambda c: store.bump_counter(c, work_item_id, key, cap))
+    if _policy.check(count=count, started_at=started_at, cap=cap, now=_now()) == "breached":
+        reason = f"{key} exhausted after {count - 1} bounce(s) back to {target!r}"
+        capped = {"cycles": count - 1, "attempts": cap.attempts}
+        await db.write(
+            lambda c: store.mark_needs_human(c, work_item_id, node["id"], reason, capped)
+        )
+        return "needs_human"
+    return "ok"
+
+
 async def _run_once(
     db,
     run_dirs,
@@ -1411,7 +1482,11 @@ async def _run_once(
         await db.write(lambda c: store.mark_needs_human(c, work_item_id, failing_node, reason))
         return "needs_human"
 
-    for node in nodes[start_index:]:
+    i = start_index
+    while i < len(nodes):
+        node = nodes[i]
+        bounce_to = node.get("rebase_bounce_to")
+        pre_base = _current_base_ref(db, work_item_id) if bounce_to else None
         result = await _walk_node(
             db,
             run_dirs,
@@ -1434,8 +1509,21 @@ async def _run_once(
             return RATE_LIMITED
         if result == WAITING:
             return WAITING
+        if bounce_to:
+            new_base = _current_base_ref(db, work_item_id)
+            if new_base != pre_base:
+                bounced = await _bounce_to_node(db, work_item_id, node, bounce_to, policy)
+                if bounced == "needs_human":
+                    return "needs_human"
+                target = next(j for j, n in enumerate(nodes) if n["id"] == bounce_to)
+                carried = Steer(
+                    _rebase_drift_note(worktree, store.branch_for(row), pre_base, new_base)
+                )
+                i = target
+                continue
         if await _maybe_gate(db, work_item_id, node):
             return "awaiting_gate"
+        i += 1
 
     await db.write(lambda c: store.mark_completed(c, work_item_id))
     await _close_beads(db, row, bd_cwd)

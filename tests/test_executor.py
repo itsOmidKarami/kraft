@@ -5,11 +5,12 @@ import sys
 from pathlib import Path
 
 import pytest
-from support.harness import fake_registry, isolated_bd, make_repo
+from support.harness import _git, fake_registry, isolated_bd, make_repo
 
 from kraft import db, events, executor, store
 from kraft.adapters import beads
 from kraft.adapters import forge as _forge
+from kraft.config import git_read
 from kraft.paths import RunDirs
 from kraft.templates import Registry, Template, load_registry, load_templates
 
@@ -489,6 +490,81 @@ def test_run_gathers_multi_task_node(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_dispatch_routes_on_mr_rebase_to_the_mr_rebase_builtin(tmp_path, monkeypatch):
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    from kraft.templates import Registry, Template
+
+    registry = Registry(
+        hooks={
+            "on.env.prepare": {"kind": "builtin", "handler": "env_setup"},
+            "on.mr.rebase": {"kind": "builtin", "handler": "mr_rebase"},
+        }
+    )
+    tmpl = Template(
+        id="rebase_only",
+        nodes=[
+            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None},
+            {"id": "pre_mr_rebase", "tasks": ["on.mr.rebase"], "gate_after": None},
+        ],
+    )
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
+            )
+            result = await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+            assert result == "completed"
+            session = database.read(
+                lambda c: c.execute(
+                    "SELECT status FROM worker_sessions WHERE hook_point = 'on.mr.rebase'"
+                ).fetchone()
+            )
+            assert session["status"] == "done"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_rebase_drift_note_names_commits_and_files(tmp_path):
+    from kraft.executor import _rebase_drift_note
+
+    repo = make_repo(tmp_path)
+    old_base = git_read(repo, "rev-parse", "HEAD")
+    (repo / "moved.txt").write_text("moved on\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "moved on upstream")
+    new_base = git_read(repo, "rev-parse", "HEAD")
+
+    note = _rebase_drift_note(repo, "kraft/some-branch", old_base, new_base)
+    assert "kraft/some-branch" in note
+    assert "moved on upstream" in note
+    assert "moved.txt" in note
+
+
+def test_rebase_drift_note_truncates_a_long_diff(tmp_path):
+    from kraft.executor import _REBASE_NOTE_MAX, _rebase_drift_note
+
+    repo = make_repo(tmp_path)
+    old_base = git_read(repo, "rev-parse", "HEAD")
+    for i in range(200):
+        (repo / f"file_{i}.txt").write_text(f"content {i}\n" * 20)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "a very large upstream change")
+    new_base = git_read(repo, "rev-parse", "HEAD")
+
+    note = _rebase_drift_note(repo, "kraft/some-branch", old_base, new_base)
+    assert len(note) < _REBASE_NOTE_MAX + 500  # template text plus the capped body
+    assert "(truncated)" in note
 
 
 def test_run_unknown_hook_in_registry_is_needs_human(tmp_path):
@@ -1041,6 +1117,266 @@ def test_fix_cycle_dispatch_gets_the_same_launch_context(tmp_path, monkeypatch):
     argvs = _argv_lines(argv_log)
     assert len(argvs) == 1  # only the fix cycle ever launches the fake agent
     assert argvs[0][-2:] == ["--model", "haiku"]
+
+
+# --- rebase-and-drift-review before open_mr (Kraft-4bgg) --------------------
+
+
+def _rebase_chain_registry(tmp_path):
+    argv_log = tmp_path / "argv.jsonl"
+    base = fake_registry(sys.executable, _FAKE_AGENT)
+    registry = Registry(
+        hooks={
+            **base.hooks,
+            "on.test.run": {"kind": "subprocess", "command": [sys.executable, "-c", "exit(0)"]},
+            "on.review.local.run": {"kind": "agent", "command": f"{sys.executable} {_FAKE_AGENT}"},
+        }
+    )
+    return registry, argv_log
+
+
+def _rebase_chain_template():
+    return Template(
+        id="rebase_drift",
+        nodes=[
+            {
+                "id": "verify",
+                "tasks": ["on.test.run", "on.review.local.run"],
+                "gate_after": None,
+                "fix_loop": None,
+            },
+            {
+                "id": "pre_mr_rebase",
+                "tasks": ["on.mr.rebase"],
+                "gate_after": None,
+                "rebase_bounce_to": "verify",
+            },
+            {"id": "open_mr", "tasks": ["on.mr.open"], "gate_after": None},
+        ],
+    )
+
+
+def _gitignore_engineering(repo):
+    """`refresh_worktree_base`'s dirty check (unmodified by this plan) is a
+    plain `git status --porcelain`, unlike `_assert_clean`'s pathspec-excluded
+    one -- it has no way to know `.engineering/sessions/*.md` is Kraft's own
+    bookkeeping rather than the agent's work. A connected repo that has never
+    heard of Kraft is exactly as likely to already ignore it (many do) as not;
+    fixture repos need to say so explicitly to exercise the moved-branch path
+    rather than always hitting the "worktree has uncommitted changes" skip.
+    """
+    (repo / ".gitignore").write_text(".engineering/\n")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "gitignore .engineering"], cwd=repo, check=True)
+
+
+def test_a_moved_base_bounces_back_to_verify_with_a_drift_note(tmp_path, monkeypatch):
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    _gitignore_engineering(repo)
+    registry, argv_log = _rebase_chain_registry(tmp_path)
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_ARGV_LOG", str(argv_log))
+
+    from kraft import policy
+
+    pol_path = tmp_path / "policy.yaml"
+    pol_path.write_text(
+        "loops:\n  rebase_bounce: { attempts: 2, wall_clock_s: 3600 }\n"
+        "default: { attempts: 3, wall_clock_s: 3600 }\n"
+    )
+    pol = policy.load_policy(pol_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="bounce me",
+                repo=str(repo),
+                template=_rebase_chain_template(),
+                bd_cwd=str(tracker),
+            )
+            from kraft import builtins as kraft_builtins
+
+            await kraft_builtins.ensure_worktree(database, rd, repo=str(repo), work_item_id=wid)
+
+            (repo / "moved.txt").write_text("moved on\n")
+            subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-m", "moved on upstream"], cwd=repo, check=True)
+            new_head = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+            ).stdout.strip()
+
+            result = await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+            )
+            assert result == "completed"
+
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT base_ref FROM work_items WHERE id = ?", (wid,)
+                ).fetchone()
+            )
+            assert row["base_ref"] == new_head
+
+            starts = [
+                e["payload"]["node_id"]
+                for e in database.read(lambda c: events.read_after(c, 0, wid))
+                if e["type"] == "node_started"
+            ]
+            # This task's template (`_rebase_chain_template`) has no `env_setup`
+            # node -- `ensure_worktree` is called directly above, not through one.
+            assert starts == [
+                "verify",
+                "pre_mr_rebase",
+                "verify",
+                "pre_mr_rebase",
+                "open_mr",
+            ]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+    argvs = _argv_lines(argv_log)
+    assert len(argvs) == 2  # on.review.local.run runs once per verify entry
+    first_instruction = argvs[0][argvs[0].index("-p") + 1]
+    second_instruction = argvs[1][argvs[1].index("-p") + 1]
+    assert "moved on upstream" not in first_instruction
+    assert "moved on upstream" in second_instruction
+    assert "moved.txt" in second_instruction
+
+
+def test_no_movement_skips_the_bounce(tmp_path, monkeypatch):
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    _gitignore_engineering(repo)
+    registry, argv_log = _rebase_chain_registry(tmp_path)
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_ARGV_LOG", str(argv_log))
+
+    from kraft import policy
+
+    pol_path = tmp_path / "policy.yaml"
+    pol_path.write_text(
+        "loops:\n  rebase_bounce: { attempts: 2, wall_clock_s: 3600 }\n"
+        "default: { attempts: 3, wall_clock_s: 3600 }\n"
+    )
+    pol = policy.load_policy(pol_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="no movement",
+                repo=str(repo),
+                template=_rebase_chain_template(),
+                bd_cwd=str(tracker),
+            )
+            from kraft import builtins as kraft_builtins
+
+            await kraft_builtins.ensure_worktree(database, rd, repo=str(repo), work_item_id=wid)
+
+            result = await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+            )
+            assert result == "completed"
+
+            starts = [
+                e["payload"]["node_id"]
+                for e in database.read(lambda c: events.read_after(c, 0, wid))
+                if e["type"] == "node_started"
+            ]
+            assert starts == ["verify", "pre_mr_rebase", "open_mr"]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    assert len(_argv_lines(argv_log)) == 1  # verify ran exactly once
+
+
+def test_rebase_bounce_cap_escalates_to_needs_human(tmp_path, monkeypatch):
+    """Forces repeated bounces deterministically: verify's own on.test.run task
+    also advances `repo`, so pre_mr_rebase finds something to rebase every
+    single time it re-checks -- no timing, no async interleaving needed."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    _gitignore_engineering(repo)
+    monkeypatch.setenv("KRAFT_UPSTREAM_REPO", str(repo))
+
+    base = fake_registry(sys.executable, _FAKE_AGENT)
+    advance_upstream = (
+        "import os, subprocess; "
+        "r = os.environ['KRAFT_UPSTREAM_REPO']; "
+        "subprocess.run(['git', 'commit', '--allow-empty', '-m', 'moved again'], "
+        "cwd=r, check=True)"
+    )
+    registry = Registry(
+        hooks={
+            **base.hooks,
+            "on.test.run": {
+                "kind": "subprocess",
+                "command": [sys.executable, "-c", advance_upstream],
+            },
+        }
+    )
+
+    from kraft import policy
+
+    pol_path = tmp_path / "policy.yaml"
+    pol_path.write_text(
+        "loops:\n  rebase_bounce: { attempts: 1, wall_clock_s: 3600 }\n"
+        "default: { attempts: 3, wall_clock_s: 3600 }\n"
+    )
+    pol = policy.load_policy(pol_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="thrash",
+                repo=str(repo),
+                template=_rebase_chain_template(),
+                bd_cwd=str(tracker),
+            )
+            from kraft import builtins as kraft_builtins
+
+            await kraft_builtins.ensure_worktree(database, rd, repo=str(repo), work_item_id=wid)
+
+            # one commit before the run starts, so the first pre_mr_rebase
+            # entry already has something to rebase
+            subprocess.run(
+                ["git", "commit", "--allow-empty", "-m", "moved once"], cwd=repo, check=True
+            )
+
+            result = await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+            )
+            assert result == "needs_human"
+
+            row = database.read(
+                lambda c: c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+            assert row["status"] == "needs_human"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
 
 
 def test_run_closes_an_auto_intaken_bead_in_its_own_workspace(tmp_path, monkeypatch):
