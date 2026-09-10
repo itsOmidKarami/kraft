@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -121,6 +121,29 @@ CREATE TABLE retry_counters (
   updated_at    TEXT NOT NULL,
   PRIMARY KEY (work_item_id, key)
 );
+
+CREATE TABLE work_item_repos (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  work_item_id   TEXT NOT NULL REFERENCES work_items(id),
+  -- absolute path: the worktree root for role='root', worktree/submodule_path
+  -- for role='submodule'
+  repo_path      TEXT NOT NULL,
+  role           TEXT NOT NULL CHECK (role IN ('root', 'submodule')),
+  -- repo-relative path under the worktree, NULL for role='root'
+  submodule_path TEXT,
+  -- deepest submodule = 1, root = max (design 3a: a submodule must merge
+  -- before the parent whose pointer names it)
+  merge_rank     INTEGER NOT NULL,
+  bead_id        TEXT,
+  -- JSON {"number": int, "url": str} once this repo's merge request exists
+  mr_ref         TEXT,
+  merge_state    TEXT NOT NULL DEFAULT 'pending' CHECK (merge_state IN
+                   ('pending', 'open', 'merged', 'failed')),
+  created_at     TEXT NOT NULL,
+  updated_at     TEXT NOT NULL
+);
+
+CREATE INDEX idx_work_item_repos_item ON work_item_repos(work_item_id, merge_rank);
 """
 
 _MIGRATIONS: dict[int, list[str]] = {
@@ -387,6 +410,23 @@ SELECT id, bead_id, title, description, repo, chain_template, chain_definition,
   FROM work_items""",
         "DROP TABLE work_items",
         "ALTER TABLE work_items_new RENAME TO work_items",
+    ],
+    18: [
+        """CREATE TABLE work_item_repos (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  work_item_id   TEXT NOT NULL REFERENCES work_items(id),
+  repo_path      TEXT NOT NULL,
+  role           TEXT NOT NULL CHECK (role IN ('root', 'submodule')),
+  submodule_path TEXT,
+  merge_rank     INTEGER NOT NULL,
+  bead_id        TEXT,
+  mr_ref         TEXT,
+  merge_state    TEXT NOT NULL DEFAULT 'pending' CHECK (merge_state IN
+                   ('pending', 'open', 'merged', 'failed')),
+  created_at     TEXT NOT NULL,
+  updated_at     TEXT NOT NULL
+)""",
+        "CREATE INDEX idx_work_item_repos_item ON work_item_repos(work_item_id, merge_rank)",
     ],
 }
 

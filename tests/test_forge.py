@@ -14,8 +14,9 @@ import sqlite3
 import subprocess
 
 import pytest
-from support.harness import isolated_bd, make_repo
+from support.harness import isolated_bd, make_repo, make_repo_with_submodule
 
+from kraft import builtins as _builtins
 from kraft import db, executor, store
 from kraft.adapters import forge
 from kraft.paths import RunDirs
@@ -217,6 +218,54 @@ def test_open_mr_refuses_an_untracked_only_worktree(tmp_path, monkeypatch):
         asyncio.run(forge.GhCli().open_mr(repo=tmp_path, branch="kraft/abc", title="t", body="b"))
 
     assert _argv(tmp_path, "gh") == []
+
+
+def test_assert_clean_sees_a_submodule_with_ignore_all(tmp_path):
+    """`submodule.<path>.ignore = all` is a legitimate thing for a human to
+    set on a six-submodule workspace -- it must not blind Kraft's own guard
+    to a submodule commit that never left the worktree (the real failure on
+    work item 9d0ab38ff3c9439b90506df0f6966660)."""
+    root = tmp_path / "root"
+    root.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True)
+    (root / "README.md").write_text("root\n")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=root, check=True)
+
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=sub, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=sub, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=sub, check=True)
+    (sub / "f.txt").write_text("1\n")
+    subprocess.run(["git", "add", "-A"], cwd=sub, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=sub, check=True)
+
+    subprocess.run(
+        ["git", "-c", "protocol.file.allow=always", "submodule", "add", str(sub), "pkg"],
+        cwd=root,
+        check=True,
+    )
+    subprocess.run(["git", "config", "submodule.pkg.ignore", "all"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "add submodule"], cwd=root, check=True)
+
+    # The submodule checkout has its own gitdir under root/.git/modules and
+    # does not inherit `sub`'s identity, so a runner with no global git
+    # config (CI, unlike a dev machine) hits "unable to auto-detect email
+    # address" on the commit below without this.
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=root / "pkg", check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=root / "pkg", check=True)
+
+    # New commit inside the submodule, root pointer left untouched -- exactly
+    # what "do not bump the workspace submodule pointer" produces.
+    (root / "pkg" / "f.txt").write_text("2\n")
+    subprocess.run(["git", "add", "-A"], cwd=root / "pkg", check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "metric change"], cwd=root / "pkg", check=True)
+
+    with pytest.raises(forge.ForgeError, match="pkg"):
+        asyncio.run(forge._assert_clean(root))
 
 
 def test_gh_ci_status_fails_when_any_check_failed(tmp_path, monkeypatch):
@@ -1455,3 +1504,227 @@ def test_fake_forge_records_labels(tmp_path):
     asyncio.run(f.set_labels(repo=tmp_path, mr=mr, labels=("release::patch",)))
 
     assert f.labels == ["release::patch"]
+
+
+def test_run_task_opens_a_merge_request_per_repo_deepest_first(tmp_path, monkeypatch):
+    """Root goes through the ordinary loop too, deepest submodule first, when
+    it has changes of its own to review (Task 7 exempts only a root with
+    nothing of its own -- see test_root_with_no_changes_of_its_own... below)."""
+    fake = forge.FakeForge(ci_states=["success"])
+    monkeypatch.setattr(forge, "resolve", lambda name: fake)
+    tracker = isolated_bd(tmp_path)
+    root, _sub = make_repo_with_submodule(tmp_path)
+    # `_commits_on` (Task 7's root_has_changes) diffs against origin/main; a
+    # fixture with no origin always reads as "no changes", so root would be
+    # dropped from the loop regardless of what actually changed.
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "clone", "--bare", "-q", str(root), str(origin)], check=True)
+    subprocess.run(["git", "remote", "add", "origin", str(origin)], cwd=root, check=True)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(root),
+                template=_back_half_template(),
+                bd_cwd=str(tracker),
+                submodules=["repos/pkg"],
+                root_merge_policy="bump",
+            )
+            worktree = await _builtins.ensure_worktree(
+                database, rd, repo=str(root), work_item_id=wid
+            )
+            subprocess.run(["git", "fetch", "-q", "origin"], cwd=worktree, check=True)
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+            branch = store.branch_for(row)
+            # A root-level change of its own, or Task 7's "nothing of its own
+            # to review" exemption drops it from the loop regardless of policy.
+            (worktree / "root-change.txt").write_text("x\n")
+            subprocess.run(["git", "add", "-A"], cwd=worktree, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "root change"], cwd=worktree, check=True)
+            status = await forge.run_task(
+                database,
+                rd,
+                session_id="s1",
+                work_item_id=wid,
+                node_id="open_mr",
+                hook_point="on.mr.open",
+                handler="open_mr",
+                backend="fake",
+                repo=worktree,
+                branch=branch,
+                title="t",
+            )
+            repos = database.read(lambda c: store.repos_for(c, wid))
+            return status, repos
+        finally:
+            await database.close()
+
+    status, repos = asyncio.run(scenario())
+    assert status == "done"
+    assert len(fake.opened) == 2  # submodule, then root
+    assert [r["role"] for r in repos] == ["submodule", "root"]
+    assert repos[0]["state"] == "open"
+
+
+def test_run_task_is_unchanged_for_a_single_repo_item(tmp_path, monkeypatch):
+    """The regression this whole task is not allowed to cause."""
+    fake = forge.FakeForge(ci_states=["success"])
+    monkeypatch.setattr(forge, "resolve", lambda name: fake)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(repo),
+                template=_back_half_template(),
+                bd_cwd=str(tracker),
+            )
+            status = await forge.run_task(
+                database,
+                rd,
+                session_id="s1",
+                work_item_id=wid,
+                node_id="open_mr",
+                hook_point="on.mr.open",
+                handler="open_mr",
+                backend="fake",
+                repo=repo,
+                branch="kraft/w1",
+                title="t",
+            )
+            return status
+        finally:
+            await database.close()
+
+    status = asyncio.run(scenario())
+    assert status == "done"
+    assert len(fake.opened) == 1
+
+
+def test_root_with_no_changes_of_its_own_never_opens_a_merge_request(tmp_path, monkeypatch):
+    fake = forge.FakeForge(ci_states=["success"])
+    monkeypatch.setattr(forge, "resolve", lambda name: fake)
+    tracker = isolated_bd(tmp_path)
+    root, _sub = make_repo_with_submodule(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(root),
+                template=_back_half_template(),
+                bd_cwd=str(tracker),
+                submodules=["repos/pkg"],
+                root_merge_policy="bump_no_mr",
+            )
+            worktree = await _builtins.ensure_worktree(
+                database, rd, repo=str(root), work_item_id=wid
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+            branch = store.branch_for(row)
+            # the agent's half: a commit inside the submodule only
+            sub = worktree / "repos" / "pkg"
+            (sub / "new.txt").write_text("x\n")
+            subprocess.run(["git", "add", "-A"], cwd=sub, check=True)
+            subprocess.run(
+                ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "m"],
+                cwd=sub,
+                check=True,
+            )
+            await forge.run_task(
+                database,
+                rd,
+                session_id="s1",
+                work_item_id=wid,
+                node_id="open_mr",
+                hook_point="on.mr.open",
+                handler="open_mr",
+                backend="fake",
+                repo=worktree,
+                branch=branch,
+                title="t",
+            )
+            return database.read(lambda c: store.repos_for(c, wid))
+        finally:
+            await database.close()
+
+    repos = asyncio.run(scenario())
+    assert len(fake.opened) == 1  # the submodule only
+    root_row = next(r for r in repos if r["role"] == "root")
+    assert root_row["state"] == "pending"  # never touched by open_mr
+
+
+def test_the_shape_that_broke_on_9d0ab38ff3c9439b90506df0f6966660(tmp_path, monkeypatch):
+    """A work item whose entire deliverable is inside a submodule, root told
+    not to bump its pointer: the submodule gets its own merge request and the
+    root gets none. This is the standing regression test for the real
+    occurrence -- it exercises the same structure without depending on that
+    one workspace ever existing again (see the spec's Verification section)."""
+    fake = forge.FakeForge(ci_states=["success"])
+    monkeypatch.setattr(forge, "resolve", lambda name: fake)
+    tracker = isolated_bd(tmp_path)
+    root, _sub = make_repo_with_submodule(tmp_path, submodule_path="repos/packages")
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="six OTEL metric attributes",
+                repo=str(root),
+                template=_back_half_template(),
+                bd_cwd=str(tracker),
+                submodules=["repos/packages"],
+                root_merge_policy="skip",
+            )
+            worktree = await _builtins.ensure_worktree(
+                database, rd, repo=str(root), work_item_id=wid
+            )
+            sub = worktree / "repos" / "packages"
+            (sub / "metrics.py").write_text("ATTRS = 6\n")
+            subprocess.run(["git", "add", "-A"], cwd=sub, check=True)
+            subprocess.run(
+                ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "m"],
+                cwd=sub,
+                check=True,
+            )
+            status = await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=_forge_registry("fake"),
+                bd_cwd=str(tracker),
+            )
+            repos = database.read(lambda c: store.repos_for(c, wid))
+            return status, repos
+        finally:
+            await database.close()
+
+    status, repos = asyncio.run(scenario())
+    assert status == "completed"
+    assert fake.merged == [1]  # only the submodule's MR, never a root one
+    submodule_row = next(r for r in repos if r["role"] == "submodule")
+    assert submodule_row["state"] == "merged"
+    root_row = next(r for r in repos if r["role"] == "root")
+    assert root_row["state"] == "pending"  # skip: root untouched, as asked

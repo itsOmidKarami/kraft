@@ -14,11 +14,20 @@ import { PausedCard } from "../components/PausedCard";
 import { ChainBar, Row, RowState, RowText, StatusGlyph, Tabs } from "../components/ui";
 import { elapsed, repoName, statusWord, tokens, usd } from "../format";
 import { useStore } from "../store";
-import type { KraftEvent, WorkItem } from "../types";
+import type { KraftEvent, SessionStatus, WorkItem } from "../types";
 
 /** Whether this browser is on the machine Kraft runs on. Loopback is the one
  * origin that cannot be remote, and the worktree path only means something to
  * a machine that has it — so "Open worktree" is offered here and nowhere else. */
+/** repos-panel state -> the glyph/label vocabulary session rows already use,
+ * so a "failed" repo (Kraft-qlsf) renders as failed, not merely pending. */
+function repoGlyphStatus(state: string): SessionStatus {
+  if (state === "merged") return "done";
+  if (state === "failed") return "failed";
+  if (state === "open") return "running";
+  return "pending";
+}
+
 function onServerMachine(): boolean {
   return ["localhost", "127.0.0.1", "[::1]", "::1"].includes(window.location.hostname);
 }
@@ -436,7 +445,7 @@ export function WorkItemDetail() {
           </div>
           {item.repos.map((r) => (
             <Row key={r.path} columns="22px 1fr 100px auto" data-repo={r.path}>
-              <StatusGlyph status={r.state === "merged" ? "done" : "pending"} />
+              <StatusGlyph status={repoGlyphStatus(r.state)} />
               <RowText
                 title={r.repo}
                 sub={
@@ -446,7 +455,7 @@ export function WorkItemDetail() {
                 }
               />
               <span className="row-sub">{r.role}</span>
-              <RowState status={r.state === "merged" ? "done" : "pending"}>{r.state}</RowState>
+              <RowState status={repoGlyphStatus(r.state)}>{r.state}</RowState>
             </Row>
           ))}
         </section>

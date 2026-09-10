@@ -114,10 +114,16 @@ class FakeForge:
     merge_detail: str = ""
     #: Labels `set_labels` put on the merge request, in call order.
     labels: list[str] = field(default_factory=list)
+    #: repo each `opened` number belongs to (Kraft-qlsf). The real CLIs
+    #: disambiguate two repos sharing a branch name by their own cwd; a fake
+    #: keyed on branch alone would let a submodule's `find_mr` "discover" the
+    #: root's merge request just because both are on `kraft/<item>`.
+    _opened_repo: dict[int, str] = field(default_factory=dict)
 
     async def open_mr(self, *, repo: Path, branch: str, title: str, body: str) -> MR:
         number = len(self.opened) + 1
         self.opened[number] = branch
+        self._opened_repo[number] = str(repo)
         return MR(number=number, url=f"http://fake.forge/{number}")
 
     async def push(self, *, repo: Path, branch: str) -> None:
@@ -143,13 +149,26 @@ class FakeForge:
         # number 0 means "resolve from the checked-out branch", which is what
         # `run_task` passes and what both real CLIs do. A fake that rejected it
         # would fail on the one path production always takes.
-        number = mr.number if mr.number > 0 else max(self.opened, default=0)
+        if mr.number > 0:
+            number = mr.number
+        else:
+            candidates = [
+                n for n, b in self.opened.items() if b == branch and self._matches(n, repo)
+            ]
+            number = max(candidates, default=0)
         if number not in self.opened:
             raise ForgeError(f"no such merge request: {mr.number}")
         self.merged.append(number)
 
+    def _matches(self, number: int, repo: Path) -> bool:
+        """A number opened before `_opened_repo` existed (an older test's
+        opened={...} literal) matches any repo -- back-compatible, not
+        repo-aware."""
+        recorded = self._opened_repo.get(number)
+        return recorded is None or recorded == str(repo)
+
     async def find_mr(self, *, repo: Path, branch: str) -> MRRef | None:
-        numbers = [n for n, b in self.opened.items() if b == branch]
+        numbers = [n for n, b in self.opened.items() if b == branch and self._matches(n, repo)]
         if not numbers:
             return None
         number = next((n for n in numbers if n not in self.merged), numbers[0])
@@ -201,8 +220,18 @@ async def _assert_clean(repo: Path) -> None:
     are excluded by git itself, so `.pytest_cache/` does not trip it, and
     `_WORK_PRODUCT` drops Kraft's own session notes in a repo that has not
     ignored them.
+
+    `--ignore-submodules=none` deliberately overrides the repo's own
+    `submodule.<path>.ignore` config. A human setting `ignore = all` on a
+    workspace with several submodules to stop pointer churn in every `git
+    status` is reasonable; it is not permission for Kraft to open a merge
+    request over a submodule holding commits that request will not carry
+    (Kraft-qlsf — this is what let work item 9d0ab38ff3c9439b90506df0f6966660
+    push a submodule commit nowhere while every guard reported clean).
     """
-    raw = await _run(repo, ["git", "status", "--porcelain", "--", *_WORK_PRODUCT])
+    raw = await _run(
+        repo, ["git", "status", "--porcelain", "--ignore-submodules=none", "--", *_WORK_PRODUCT]
+    )
     dirty = [line[3:] for line in raw.splitlines() if line.strip()]
     if dirty:
         shown = ", ".join(dirty[:5])
@@ -789,6 +818,189 @@ async def _poll_merged(
         interval = min(interval * 2, cap)
 
 
+async def _run_one(
+    forge: Forge,
+    db,
+    *,
+    repo: Path,
+    branch: str,
+    title: str,
+    work_item_id: str,
+    handler: str,
+    hook_point: str,
+    poll_timeout: float,
+    poll_interval: float,
+    merge_timeout: float,
+    merge_interval: float,
+) -> tuple[str, str]:
+    """One forge handler against one repo. Extracted from `run_task` so the
+    multi-repo loop there can call it once per `work_item_repos` row; a
+    single-repo item's behaviour is unchanged -- one call, same log and status
+    strings as before this split.
+    """
+    body = mr_body(work_item_id, branch, await _commits_on(repo, branch))
+    match handler:
+        case "open_mr":
+            # Ask first: a rejected review re-entering the chain at
+            # implementation walks back through this node, and a retry of
+            # an open_mr that crashed after the create lands here too. A
+            # second `mr create` for one branch is an error on both CLIs
+            # (Kraft-xron).
+            existing = await forge.find_mr(repo=repo, branch=branch)
+            if existing is not None and existing.state == "open":
+                # The same two calls `sync_mr` makes, for the same reason:
+                # the description has to describe the head a reviewer will
+                # see, and the head has to be pushed.
+                await forge.push(repo=repo, branch=branch)
+                await forge.update_mr(repo=repo, branch=branch, body=body)
+                number, url = existing.number, existing.url
+                log, status = f"reusing !{number}: {url}\n", "done"
+            else:
+                mr = await forge.open_mr(repo=repo, branch=branch, title=title, body=body)
+                number, url = mr.number, mr.url
+                log, status = f"opened {url}\n", "done"
+            # An event, not a work-item column (Kraft-d2sq): no migration,
+            # it reaches the UI through the stream that already exists, and
+            # it is timestamped, which a column is not. Both paths emit it,
+            # so an item whose open_mr is re-entered after a rejected
+            # review still carries a current record.
+            await db.write(
+                lambda c, n=number, u=url: events.append(
+                    c, work_item_id, "mr_opened", {"number": n, "url": u}
+                )
+            )
+        case "ci_poll":
+            # The worker commits in the worktree and is told not to push
+            # (adapters/agent.py:45), and only open_mr and sync_mr ever
+            # pushed — sync_mr *after* human review. Without this, a commit
+            # made after open_mr is local, so the pipeline polled below is
+            # the previous head's: the same id on every retry, green or
+            # red, forever (Kraft-bxj8). `git push -u` is a no-op when the
+            # branch is up to date, so this costs one git call.
+            await forge.push(repo=repo, branch=branch)
+            # Both CLIs resolve the merge request from the checked-out
+            # branch, so the number is not threaded between nodes.
+            ci, timed_out = await _poll_ci(
+                forge, repo=repo, branch=branch, timeout=poll_timeout, interval=poll_interval
+            )
+            # A timeout and a red pipeline are both a failed node, but a
+            # reviewer -- and any fix loop built on this node (Kraft-cbr) --
+            # has to tell "finished red" from "never finished".
+            head = (
+                f"pipeline timed out after {poll_timeout:g}s, still pending"
+                if timed_out
+                else f"pipeline {ci.state}"
+            )
+            log = f"{head}: {ci.url}\n" + "".join(f"  {j}\n" for j in ci.jobs)
+            if ci.mergeable is False:
+                # Green *and* unmergeable is the exact shape of the bug: the
+                # pipeline passes, the gate passes, and the merge node meets
+                # the conflict (Kraft-ejj9). `is False` and not falsiness:
+                # None is undecided, and undecided is this node's normal.
+                log += f"merge request is not mergeable: {ci.merge_detail or 'unknown'}\n"
+                status = "failed"
+            else:
+                status = "done" if ci.state == "success" else "failed"
+        case "sync_mr":
+            # Push first: every commit after `open_mr` -- verify's fixes,
+            # mr_checks' findings, the review brief -- is local only until
+            # this runs, and `merge` refuses a branch ahead of its remote
+            # (Kraft-nh5m).
+            await forge.push(repo=repo, branch=branch)
+            # The description `open_mr` wrote predates every commit verify
+            # and mr_checks added, so it is rewritten from the branch head
+            # before a human is asked to read it (Kraft-c09h).
+            await forge.update_mr(repo=repo, branch=branch, body=body)
+            log, status = "pushed and synced the merge request description\n", "done"
+        case "merge":
+            # "Someone merged it first" and "the merge was refused" were
+            # indistinguishable while this only ever shelled out: both
+            # arrived as a non-zero exit and stopped the item at the last
+            # node with the work already on main (Kraft-xron). Auto-merge
+            # reaching the branch first is an ordinary event, and this
+            # node's stated end state is already true.
+            existing = await forge.find_mr(repo=repo, branch=branch)
+            if existing is not None and existing.state == "merged":
+                log = f"already merged (!{existing.number}); nothing to do\n"
+                status = "done"
+            elif existing is not None and existing.state == "open":
+                # The same push ci_poll makes, for the same reason: a
+                # commit made after the last sync is local only, and
+                # `_assert_pushed` inside forge.merge refuses a head origin
+                # has never seen — three failed nodes, and a retry of
+                # `merge` alone never re-runs mr_sync to clear it
+                # (Kraft-bxj8). Below the already-merged check: a branch
+                # already in main needs nothing pushed to it.
+                await forge.push(repo=repo, branch=branch)
+                # A genuine refusal -- conflicts, unmet approval rules --
+                # still raises inside forge.merge and still fails the node.
+                await forge.merge(repo=repo, branch=branch, mr=MR(number=0, url=""))
+                # And a refusal the CLI reported as success does not get
+                # through either. This node's stated end state is "this
+                # branch is in main", so it is read off the forge rather
+                # than inferred from an exit code (Kraft-79x3).
+                landed = await _poll_merged(
+                    forge, repo=repo, branch=branch, timeout=merge_timeout, interval=merge_interval
+                )
+                state = landed.state if landed is not None else "gone"
+                if state == "merged":
+                    log, status = f"merged !{landed.number}\n", "done"
+                elif state == "open":
+                    log = (
+                        f"!{landed.number} is still open {merge_timeout:g}s after the "
+                        "merge command returned: nothing has landed on main. The forge "
+                        "may have scheduled an auto-merge for when its checks pass — "
+                        f"look at {landed.url}\n"
+                    )
+                    status = "failed"
+                else:
+                    log = f"the merge request is {state}, not merged; nothing landed\n"
+                    status = "failed"
+            else:
+                raise ForgeError(
+                    f"no open merge request for {branch!r}"
+                    + (f": !{existing.number} is {existing.state}" if existing else "")
+                )
+        case _:
+            log, status = f"unknown forge handler {handler!r}\n", "failed"
+    return log, status
+
+
+async def _assert_submodules_covered(repo: Path, covered: set[Path]) -> None:
+    """Refuse to open the root's merge request while an initialized submodule
+    holds commits no `work_item_repos` row will carry anywhere.
+
+    The §3a scan (`builtins.scan_submodules`) runs earlier in the same node
+    and is what normally covers a submodule the agent touched but nobody
+    declared -- this only fires when that scan itself missed one (submodule
+    init failed, `git submodule status` errored), which must stop the chain
+    rather than silently drop the change, exactly as it did on work item
+    9d0ab38ff3c9439b90506df0f6966660.
+    """
+    raw = await _run(repo, ["git", "submodule", "status"])
+    for line in raw.splitlines():
+        if not line or line[0] != "+":
+            continue
+        parts = line[1:].split()
+        if len(parts) < 2:
+            continue
+        path = (repo / parts[1]).resolve()
+        if path not in covered:
+            raise ForgeError(
+                f"submodule {parts[1]} has commits not covered by any declared or "
+                "discovered repo — it will not reach a merge request"
+            )
+
+
+async def _default_branch(repo: Path) -> str:
+    """origin's default branch, or `main` when the forge doesn't say."""
+    try:
+        raw = await _run(repo, ["git", "symbolic-ref", "refs/remotes/origin/HEAD"])
+        return raw.strip().rsplit("/", 1)[-1] or "main"
+    except ForgeError:
+        return "main"
+
+
 async def run_task(
     db,
     run_dirs,
@@ -814,7 +1026,10 @@ async def run_task(
     merge_timeout: float = MERGE_VERIFY_TIMEOUT,
     merge_interval: float = MERGE_VERIFY_INTERVAL,
 ) -> str:
-    """One forge node.
+    """One forge node -- against every repo `work_item_repos` names for this
+    item, deepest submodule first, root last (design 3a), or just `repo` when
+    the table has no rows for it (every single-repo item, unchanged from
+    before this function went multi-repo).
 
     Records a session the way a builtin does rather than the way the subprocess
     adapter does: the work happens in this process, so there is no child to
@@ -825,6 +1040,7 @@ async def run_task(
     broke all three for the length of that wait (Kraft-41b, Kraft-7xt).
     """
     from kraft import builtins as _builtins
+    from kraft import store
 
     log_path, result_path = await _builtins.start_session(
         db,
@@ -835,144 +1051,112 @@ async def run_task(
         hook_point=hook_point,
         round=round,
     )
-    body = mr_body(work_item_id, branch, await _commits_on(repo, branch))
+    rows = db.read(
+        lambda c: c.execute(
+            "SELECT * FROM work_item_repos WHERE work_item_id = ? ORDER BY merge_rank",
+            (work_item_id,),
+        ).fetchall()
+    )
+    multi = bool(rows)
+    targets = [(r["id"], Path(r["repo_path"]), r["role"]) for r in rows] or [(None, repo, "root")]
+
+    root_has_changes = True
+    root_policy = "bump"
+    if multi:
+        policy_row = db.read(
+            lambda c: c.execute(
+                "SELECT root_merge_policy FROM work_items WHERE id = ?", (work_item_id,)
+            ).fetchone()
+        )
+        root_policy = (policy_row["root_merge_policy"] if policy_row else None) or "bump"
+        root_repo = next(t for _, t, role in targets if role == "root")
+        root_has_changes = bool(await _commits_on(root_repo, branch))
+        if root_policy == "skip" or not root_has_changes:
+            # Nothing of root's own to review -- it never goes through the
+            # ordinary per-repo loop below. Its pointer bump, if any (never
+            # under `skip`), is pushed directly after every submodule merges
+            # (below), not through a merge request -- see the plan's "Design
+            # correction": at `open_mr` time no submodule has merged yet, so
+            # a root MR here would review a pointer that doesn't exist.
+            targets = [t for t in targets if t[2] != "root"]
+
+    log, status = "", "done"
     try:
         # Inside the try: `backend_for` can raise, and an exception escaping
         # here would skip `finish_session` and strand the session row started
         # above (Kraft-41b, Kraft-7xt are the same wound from the other side).
-        forge = resolve(backend_for(backend, repo_forge))
-        match handler:
-            case "open_mr":
-                # Ask first: a rejected review re-entering the chain at
-                # implementation walks back through this node, and a retry of
-                # an open_mr that crashed after the create lands here too. A
-                # second `mr create` for one branch is an error on both CLIs
-                # (Kraft-xron).
-                existing = await forge.find_mr(repo=repo, branch=branch)
-                if existing is not None and existing.state == "open":
-                    # The same two calls `sync_mr` makes, for the same reason:
-                    # the description has to describe the head a reviewer will
-                    # see, and the head has to be pushed.
-                    await forge.push(repo=repo, branch=branch)
-                    await forge.update_mr(repo=repo, branch=branch, body=body)
-                    number, url = existing.number, existing.url
-                    log, status = f"reusing !{number}: {url}\n", "done"
-                else:
-                    mr = await forge.open_mr(repo=repo, branch=branch, title=title, body=body)
-                    number, url = mr.number, mr.url
-                    log, status = f"opened {url}\n", "done"
-                # An event, not a work-item column (Kraft-d2sq): no migration,
-                # it reaches the UI through the stream that already exists, and
-                # it is timestamped, which a column is not. Both paths emit it,
-                # so an item whose open_mr is re-entered after a rejected
-                # review still carries a current record.
-                await db.write(
-                    lambda c, n=number, u=url: events.append(
-                        c, work_item_id, "mr_opened", {"number": n, "url": u}
-                    )
-                )
-            case "ci_poll":
-                # The worker commits in the worktree and is told not to push
-                # (adapters/agent.py:45), and only open_mr and sync_mr ever
-                # pushed — sync_mr *after* human review. Without this, a commit
-                # made after open_mr is local, so the pipeline polled below is
-                # the previous head's: the same id on every retry, green or
-                # red, forever (Kraft-bxj8). `git push -u` is a no-op when the
-                # branch is up to date, so this costs one git call.
-                await forge.push(repo=repo, branch=branch)
-                # Both CLIs resolve the merge request from the checked-out
-                # branch, so the number is not threaded between nodes.
-                ci, timed_out = await _poll_ci(
-                    forge,
-                    repo=repo,
-                    branch=branch,
-                    timeout=poll_timeout,
-                    interval=poll_interval,
-                )
-                # A timeout and a red pipeline are both a failed node, but a
-                # reviewer -- and any fix loop built on this node (Kraft-cbr) --
-                # has to tell "finished red" from "never finished".
-                head = (
-                    f"pipeline timed out after {poll_timeout:g}s, still pending"
-                    if timed_out
-                    else f"pipeline {ci.state}"
-                )
-                log = f"{head}: {ci.url}\n" + "".join(f"  {j}\n" for j in ci.jobs)
-                if ci.mergeable is False:
-                    # Green *and* unmergeable is the exact shape of the bug: the
-                    # pipeline passes, the gate passes, and the merge node meets
-                    # the conflict (Kraft-ejj9). `is False` and not falsiness:
-                    # None is undecided, and undecided is this node's normal.
-                    log += f"merge request is not mergeable: {ci.merge_detail or 'unknown'}\n"
-                    status = "failed"
-                else:
-                    status = "done" if ci.state == "success" else "failed"
-            case "sync_mr":
-                # Push first: every commit after `open_mr` -- verify's fixes,
-                # mr_checks' findings, the review brief -- is local only until
-                # this runs, and `merge` refuses a branch ahead of its remote
-                # (Kraft-nh5m).
-                await forge.push(repo=repo, branch=branch)
-                # The description `open_mr` wrote predates every commit verify
-                # and mr_checks added, so it is rewritten from the branch head
-                # before a human is asked to read it (Kraft-c09h).
-                await forge.update_mr(repo=repo, branch=branch, body=body)
-                log, status = "pushed and synced the merge request description\n", "done"
-            case "merge":
-                # "Someone merged it first" and "the merge was refused" were
-                # indistinguishable while this only ever shelled out: both
-                # arrived as a non-zero exit and stopped the item at the last
-                # node with the work already on main (Kraft-xron). Auto-merge
-                # reaching the branch first is an ordinary event, and this
-                # node's stated end state is already true.
-                existing = await forge.find_mr(repo=repo, branch=branch)
-                if existing is not None and existing.state == "merged":
-                    log = f"already merged (!{existing.number}); nothing to do\n"
-                    status = "done"
-                elif existing is not None and existing.state == "open":
-                    # The same push ci_poll makes, for the same reason: a
-                    # commit made after the last sync is local only, and
-                    # `_assert_pushed` inside forge.merge refuses a head origin
-                    # has never seen — three failed nodes, and a retry of
-                    # `merge` alone never re-runs mr_sync to clear it
-                    # (Kraft-bxj8). Below the already-merged check: a branch
-                    # already in main needs nothing pushed to it.
-                    await forge.push(repo=repo, branch=branch)
-                    # A genuine refusal -- conflicts, unmet approval rules --
-                    # still raises inside forge.merge and still fails the node.
-                    await forge.merge(repo=repo, branch=branch, mr=MR(number=0, url=""))
-                    # And a refusal the CLI reported as success does not get
-                    # through either. This node's stated end state is "this
-                    # branch is in main", so it is read off the forge rather
-                    # than inferred from an exit code (Kraft-79x3).
-                    landed = await _poll_merged(
-                        forge,
-                        repo=repo,
-                        branch=branch,
-                        timeout=merge_timeout,
-                        interval=merge_interval,
-                    )
-                    state = landed.state if landed is not None else "gone"
-                    if state == "merged":
-                        log, status = f"merged !{landed.number}\n", "done"
-                    elif state == "open":
-                        log = (
-                            f"!{landed.number} is still open {merge_timeout:g}s after the "
-                            "merge command returned: nothing has landed on main. The forge "
-                            "may have scheduled an auto-merge for when its checks pass — "
-                            f"look at {landed.url}\n"
+        live_forge = resolve(backend_for(backend, repo_forge))
+        for row_id, target_repo, role in targets:
+            if handler == "open_mr" and role == "root" and multi:
+                await _assert_submodules_covered(target_repo, {t for _, t, _ in targets})
+            one_log, one_status = await _run_one(
+                live_forge,
+                db,
+                repo=target_repo,
+                branch=branch,
+                title=title,
+                work_item_id=work_item_id,
+                handler=handler,
+                hook_point=hook_point,
+                poll_timeout=poll_timeout,
+                poll_interval=poll_interval,
+                merge_timeout=merge_timeout,
+                merge_interval=merge_interval,
+            )
+            log += (f"[{target_repo.name}] " if multi else "") + one_log
+            if row_id is not None:
+                new_state = {
+                    "open_mr": "open",
+                    "merge": "merged" if one_status == "done" else "failed",
+                }.get(handler)
+                if new_state:
+                    await db.write(
+                        lambda c, i=row_id, s=new_state: store.update_repo_state(
+                            c, i, merge_state=s
                         )
-                        status = "failed"
-                    else:
-                        log = f"the merge request is {state}, not merged; nothing landed\n"
-                        status = "failed"
-                else:
-                    raise ForgeError(
-                        f"no open merge request for {branch!r}"
-                        + (f": !{existing.number} is {existing.state}" if existing else "")
                     )
-            case _:
-                log, status = f"unknown forge handler {handler!r}\n", "failed"
+            if one_status != "done":
+                status = one_status
+                break
+        if (
+            handler == "merge"
+            and multi
+            and root_policy != "skip"
+            and not root_has_changes
+            and status == "done"
+        ):
+            # `multi` guarantees `rows` is non-empty here, so this is always
+            # the root row's own path, not `repo` (the worktree root is the
+            # same thing, but the row is the one source of truth).
+            root_repo = Path(next(r["repo_path"] for r in rows if r["role"] == "root"))
+            bumped = []
+            for r in rows:
+                if r["role"] != "submodule":
+                    continue
+                sub_path = Path(r["repo_path"])
+                default = await _default_branch(sub_path)
+                await _run(sub_path, ["git", "fetch", "origin", default])
+                merged_sha = (
+                    await _run(sub_path, ["git", "rev-parse", f"origin/{default}"])
+                ).strip()
+                await _run(sub_path, ["git", "checkout", merged_sha])
+                rel = str(sub_path.relative_to(root_repo))
+                await _run(root_repo, ["git", "add", "--", rel])
+                bumped.append(rel)
+            if (
+                bumped
+                and (await _run(root_repo, ["git", "status", "--porcelain", "--cached"])).strip()
+            ):
+                await _run(
+                    root_repo,
+                    ["git", "commit", "-m", f"chore: bump submodule pointers for {work_item_id}"],
+                )
+                root_default = await _default_branch(root_repo)
+                await _run(root_repo, ["git", "push", "origin", f"HEAD:{root_default}"])
+                log += (
+                    f"bumped {', '.join(bumped)} directly on {root_default}, "
+                    "no root merge request\n"
+                )
     except ForgeError as exc:
         log, status = f"{hook_point} failed: {exc}\n", "failed"
 
