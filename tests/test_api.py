@@ -393,14 +393,15 @@ def test_create_work_item_accepts_auto_gate(tmp_path, monkeypatch):
         repo = make_repo(tmp_path)
         wid = client.post(
             "/api/work-items",
-            json={"title": "t", "repo": str(repo), "autostart": False, "auto_gate": True},
+            json={"title": "t", "repo": str(repo), "autostart": False, "auto_gate": False},
         ).json()["id"]
-        assert client.get(f"/api/work-items/{wid}").json()["auto_gate"] == 1
+        assert client.get(f"/api/work-items/{wid}").json()["auto_gate"] == 0
 
+        # On unless the caller opts out: the browser sends no `auto_gate` key.
         wid2 = client.post(
             "/api/work-items", json={"title": "t", "repo": str(repo), "autostart": False}
         ).json()["id"]
-        assert client.get(f"/api/work-items/{wid2}").json()["auto_gate"] == 0
+        assert client.get(f"/api/work-items/{wid2}").json()["auto_gate"] == 1
 
 
 def test_patch_updates_the_description_and_records_an_event(tmp_path, monkeypatch):

@@ -9,6 +9,7 @@ nodes:
   - id: chain_review
     tasks: [on.chain.review_ready]
     gate_after: chain_finalized
+    auto_escalate: true
   - id: env_setup
     tasks: [on.env.prepare]
     gate_after: null

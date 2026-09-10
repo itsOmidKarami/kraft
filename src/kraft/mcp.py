@@ -53,6 +53,7 @@ def build() -> MCPServer:
         chain_template: str = "default",
         description: str | None = None,
         attachments: list[dict] | None = None,
+        auto_gate: bool = True,
     ) -> dict:
         """File a new Kraft work item. It is created **paused** and does not run:
         a human starts it from the board. Use this to hand finished work off to
