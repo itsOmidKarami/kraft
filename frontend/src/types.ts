@@ -226,6 +226,13 @@ export interface DocumentDetail {
   source_created_at: string | null;
   source_updated_at: string | null;
   indexed_at: string;
+  /**
+   * 'git_scan' (`path` is real, under `repo`) or 'event_ingest' (a session
+   * summary or gate artifact — `path` is a synthetic identifier, there is no
+   * file in the connected repo checkout to open or copy a path to). Absent
+   * for a synthetic `attachment:...` document, which predates this column.
+   */
+  origin?: "git_scan" | "event_ingest";
   links: DocumentLink[];
 }
 

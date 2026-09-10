@@ -128,6 +128,11 @@ export function DocumentModal({
 
   const Icon = KIND_ICONS[doc?.kind ?? ""] ?? FileText;
   const current = EDITORS.find((e) => e.id === preferred) ?? EDITORS[EDITORS.length - 1];
+  // A session summary or gate artifact never lands in the connected repo's
+  // checkout (`forge._work_product_pathspec` keeps `.engineering/` out of
+  // git entirely) — `absPath` is fabricated for it, so opening it in an
+  // editor or copying it as a path would point at a file that does not exist.
+  const hasFile = doc?.origin !== "event_ingest";
 
   return (
     <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label="document" {...backdropProps(onClose)}>
@@ -157,40 +162,46 @@ export function DocumentModal({
             {/* Launching an editor needs a window on one machine or the other.
                 A phone has neither the server's desktop nor a vscode:// handler,
                 so the whole launch affordance goes; Copy path is the fallback
-                that works from anywhere. */}
-            <div className="desktop-only">
-              <button
-                className="btn btn-primary doc-open"
-                disabled={!doc}
-                onClick={() => openIn(current.id)}
-              >
-                <ArrowSquareOut size={13} />
-                Open in {current.name}
+                that works from anywhere. Neither exists for a document with no
+                file in the connected repo checkout (`hasFile` false) — there is
+                no path to open or copy. */}
+            {hasFile && (
+              <div className="desktop-only">
+                <button
+                  className="btn btn-primary doc-open"
+                  disabled={!doc}
+                  onClick={() => openIn(current.id)}
+                >
+                  <ArrowSquareOut size={13} />
+                  Open in {current.name}
+                </button>
+                <button
+                  className="btn btn-primary doc-open-more"
+                  aria-label="Choose editor"
+                  aria-expanded={menu}
+                  disabled={!doc}
+                  onClick={() => setMenu((v) => !v)}
+                >
+                  <CaretDown size={12} />
+                </button>
+                {menu && (
+                  <div className="doc-editor-menu card elev-lg" role="menu">
+                    {EDITORS.map((e) => (
+                      <button key={e.name} role="menuitem" onClick={() => openIn(e.id)}>
+                        {e.name}
+                        {e.id === current.id && <span className="doc-editor-default">default</span>}
+                      </button>
+                    ))}
+                    <p className="doc-editor-foot">Default editor is set in Settings → General.</p>
+                  </div>
+                )}
+              </div>
+            )}
+            {hasFile && (
+              <button className="btn btn-icon btn-ghost" title="Copy path" onClick={copyPath}>
+                <Copy size={14} />
               </button>
-              <button
-                className="btn btn-primary doc-open-more"
-                aria-label="Choose editor"
-                aria-expanded={menu}
-                disabled={!doc}
-                onClick={() => setMenu((v) => !v)}
-              >
-                <CaretDown size={12} />
-              </button>
-              {menu && (
-                <div className="doc-editor-menu card elev-lg" role="menu">
-                  {EDITORS.map((e) => (
-                    <button key={e.name} role="menuitem" onClick={() => openIn(e.id)}>
-                      {e.name}
-                      {e.id === current.id && <span className="doc-editor-default">default</span>}
-                    </button>
-                  ))}
-                  <p className="doc-editor-foot">Default editor is set in Settings → General.</p>
-                </div>
-              )}
-            </div>
-            <button className="btn btn-icon btn-ghost" title="Copy path" onClick={copyPath}>
-              <Copy size={14} />
-            </button>
+            )}
             <button className="btn btn-icon btn-ghost" title="Close · Esc" onClick={onClose}>
               <X size={14} />
             </button>
@@ -203,8 +214,9 @@ export function DocumentModal({
           {doc && <Markdown remarkPlugins={[remarkGfm]}>{doc.content}</Markdown>}
           {doc && (
             <p className="doc-modal-foot">
-              Read-only here. Edits happen in your editor; the index picks them up on the next
-              scan.
+              {hasFile
+                ? "Read-only here. Edits happen in your editor; the index picks them up on the next scan."
+                : "Read-only here. This document lives only in Kraft's index — it was never written to the connected repo."}
             </p>
           )}
         </div>
