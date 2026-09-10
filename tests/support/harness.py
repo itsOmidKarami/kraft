@@ -133,7 +133,9 @@ def fake_registry(python_exe: str, fake_agent_path: Path) -> Registry:
     return Registry(hooks=hooks)
 
 
-def fake_templates_dir(tmp_path: Path, agent_command: str, *, planning_hooks: bool = False) -> Path:
+def fake_templates_dir(
+    tmp_path: Path, agent_command: str, *, planning_hooks: bool = False, noop_verify: bool = False
+) -> Path:
     """Registry + `quick-task`/`default` chains against a throwaway templates dir.
 
     `on.spec.requested`/`on.plan.requested` default to `builtin: noop` — most
@@ -141,6 +143,11 @@ def fake_templates_dir(tmp_path: Path, agent_command: str, *, planning_hooks: bo
     Pass `planning_hooks=True` to bind them to `agent_command` instead, the way
     `fake_registry` above does: spread the shipped binding and swap only the
     command, so its `skill:`/`artifact:` keys survive.
+
+    `on.test.run` defaults to a real `python -m pytest -q` subprocess against
+    the worktree. Pass `noop_verify=True` for a caller whose assertions are
+    about an earlier node (e.g. pause/resume/rebase) and only needs the chain
+    to *reach* completed — that subprocess is pure incidental cost there.
 
     `on.chain.review_ready` is always bound to `agent_command`, unlike spec and
     plan: `POST .../gates/chain_finalized/approve` reads and parses its
@@ -177,10 +184,11 @@ def fake_templates_dir(tmp_path: Path, agent_command: str, *, planning_hooks: bo
                     "on.env.prepare": {"kind": "builtin", "handler": "env_setup"},
                     "on.implementation.start": {"kind": "agent", "command": agent_command},
                     "on.repos.scan": {"kind": "builtin", "handler": "scan_submodules"},
-                    "on.test.run": {
-                        "kind": "subprocess",
-                        "command": ["python", "-m", "pytest", "-q"],
-                    },
+                    "on.test.run": (
+                        noop()
+                        if noop_verify
+                        else {"kind": "subprocess", "command": ["python", "-m", "pytest", "-q"]}
+                    ),
                     "on.spec.requested": spec_hook,
                     "on.plan.requested": plan_hook,
                     "on.chain.review_ready": {
