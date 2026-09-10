@@ -644,8 +644,12 @@ def test_the_spa_bundle_loads_before_a_session_exists(tmp_path, monkeypatch, tem
         client.cookies.clear()
         assert client.get("/assets/app.js").status_code == 200
         assert client.get("/api/work-items").status_code == 401
-        # ...but not anything outside the bundle
-        assert client.get("/../pyproject.toml").status_code != 200
+        # Kraft-qntj: any non-/api GET is the SPA shell now, same trust level as
+        # a static asset — but traversal must still land on the shell, not on a
+        # file outside dist. 200 here is the shell, not a leak.
+        r = client.get("/../pyproject.toml")
+        assert r.status_code == 200, r.text
+        assert r.text == "<!doctype html>"
 
 
 def test_the_event_stream_needs_a_session_too(tmp_path, monkeypatch, templates_dir):

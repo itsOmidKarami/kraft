@@ -392,24 +392,12 @@ async def _authenticate(request: Request, call_next):
         not _requires_auth(app, request)
         or request.url.path in _PUBLIC_PATHS
         or _is_static_asset(app, request.url.path)
+        or (request.method == "GET" and not _is_api_path(request.url.path))
     ):
         return await call_next(request)
-    # A browser navigating to a client-side route must get the SPA shell, not a
-    # 401 — but `sec-fetch-dest` is a request header any client can send, and
-    # every mutating route lives under /api/, so excluding that prefix here
-    # costs nothing: a forged header on /api/ still has to clear the bearer or
-    # cookie check below, same as an honest request would.
-    dist = getattr(app.state, "frontend_dist", None)
-    if (
-        request.method == "GET"
-        and request.headers.get("sec-fetch-dest") == "document"
-        and dist is not None
-        and not _is_api_path(request.url.path)
-    ):
-        return FileResponse(dist / "index.html")
-    # After the SPA-shell branch on purpose: that branch answers any GET claiming
-    # `sec-fetch-dest: document`, so a bearer check ahead of it would leave that
-    # path reachable, and one inside it would hand an MCP client HTML not JSON.
+    # After the SPA-shell branch on purpose: that branch answers any non-/api
+    # GET, so a bearer check ahead of it would leave that path reachable, and
+    # one inside it would hand an MCP client HTML not JSON.
     bearer = request.headers.get("authorization", "")
     expected = getattr(app.state, "mcp_token", None)
     if expected and bearer.startswith("Bearer ") and hmac.compare_digest(bearer[7:], expected):
