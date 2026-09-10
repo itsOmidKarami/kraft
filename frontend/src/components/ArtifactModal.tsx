@@ -7,6 +7,30 @@ import type { WorkItemArtifact } from "../types";
 import { backdropProps, useModal } from "../useModal";
 
 /**
+ * Some artifact kinds (chain_review) are a JSON envelope, not prose — the
+ * orchestrator parses the body itself, so the skill can't wrap it in a code
+ * fence without breaking that parse. Rendered raw through Markdown, a JSON
+ * object has no blank lines, so it collapses into one unreadable paragraph.
+ * Reformat it into prose + a fenced block here instead, at display time only
+ * — the file on disk that the orchestrator reads is untouched.
+ */
+function asDisplayMarkdown(content: string): string {
+  const trimmed = content.trim();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return content;
+  }
+  if (parsed === null || typeof parsed !== "object") return content;
+  const obj = parsed as Record<string, unknown>;
+  const pretty = "```json\n" + JSON.stringify(parsed, null, 2) + "\n```";
+  if (typeof obj.rationale !== "string") return pretty;
+  const status = typeof obj.status === "string" ? `**Status:** \`${obj.status}\`\n\n` : "";
+  return `${status}${obj.rationale}\n\n${pretty}`;
+}
+
+/**
  * The spec or plan the pending gate is a decision about, read-only.
  *
  * Sibling to DiffModal rather than a mode of it, for the same reason DiffModal
@@ -46,7 +70,7 @@ export function ArtifactModal({
         </header>
         <div className="doc-modal-body">
           {err && <p className="form-error">{err}</p>}
-          {doc && <Markdown remarkPlugins={[remarkGfm]}>{doc.content}</Markdown>}
+          {doc && <Markdown remarkPlugins={[remarkGfm]}>{asDisplayMarkdown(doc.content)}</Markdown>}
           {doc?.truncated && (
             <p className="control-hint">
               This document is too large to show whole; the rest is in the worktree.
