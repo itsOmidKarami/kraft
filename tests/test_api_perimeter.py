@@ -202,6 +202,23 @@ def test_the_perimeter_runs_before_the_spa_shell_middleware(tmp_path, monkeypatc
         assert not r.text.startswith("<!doctype html>")
 
 
+def test_a_client_without_sec_fetch_dest_still_gets_the_spa_shell(tmp_path, monkeypatch):
+    """Kraft-qntj: some privacy browsers, in-app webviews and proxies omit or
+    strip Sec-Fetch-Dest. That header was the only thing that let an
+    unauthenticated GET / through to the shell instead of a raw 401 — so a
+    client that never sends it could never reach the login page. Any non-/api
+    GET is the same trust level as a static asset already; the bypass is
+    keyed to method + path now, not to a header the client controls."""
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<!doctype html>")
+    with _client(tmp_path, monkeypatch, peer=("10.0.0.5", 54321), dist=dist) as client:
+        _set_password(client, monkeypatch)
+        r = client.get("/")
+        assert r.status_code == 200, r.text
+        assert r.text.startswith("<!doctype html>")
+
+
 def test_the_websocket_perimeter_stands_on_its_own(tmp_path, monkeypatch):
     """HTTP middleware does not run for websockets. `/ws/events` therefore keeps
     its own origin check, and needs the bind-mismatch rule restated — otherwise
