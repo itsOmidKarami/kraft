@@ -70,6 +70,10 @@ export function CappedCard({
   const rows = cycles(events, sessions, item.current_node_id);
   const span = loopSpan(events, item.current_node_id);
   const failedHooks = [...new Set(rows.flatMap((c) => c.failed))];
+  // The server 409s an explicit steer on a node with no agent task to carry it
+  // to (Kraft-bz9b) -- offering the box there would just make retry fail.
+  // Undefined (an older cached response) fails open, same as the server does.
+  const steerable = item.steerable !== false;
   // `_guard`'s crash handler stops the item wherever it stood, which may be a
   // fix-loop node — the same shape as a `no_progress` escalation. The reason
   // string is what tells them apart (Kraft-esc); retry is still the way out.
@@ -79,7 +83,7 @@ export function CappedCard({
     setBusy(true);
     setErr(null);
     try {
-      await api.retryWorkItem(item.id, steer.trim() || undefined);
+      await api.retryWorkItem(item.id, steerable ? steer.trim() || undefined : undefined);
       setSteer("");
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -99,7 +103,7 @@ export function CappedCard({
             ) : (
               <>
                 {node?.fix_loop ?? node?.id ?? "this node"}{" "}
-                {item.cappedOut ? "hit its cap" : "needs a steer"}
+                {item.cappedOut ? "hit its cap" : steerable ? "needs a steer" : "failed"}
                 {item.cappedOut && ` — ${item.cappedOut.attempts} attempts`}
                 {span && `, ${span}`}
               </>
@@ -134,25 +138,31 @@ export function CappedCard({
         </div>
       )}
 
-      <div className="field">
-        <label htmlFor="capped-steer">
-          Steer <span className="field-hint">· goes into cycle 1 of the retry, never into the repo</span>
-        </label>
-        <textarea
-          id="capped-steer"
-          className="input"
-          value={steer}
-          onChange={(e) => setSteer(e.target.value)}
-          placeholder="What did the agent keep getting wrong?"
-        />
-      </div>
+      {steerable && (
+        <div className="field">
+          <label htmlFor="capped-steer">
+            Steer <span className="field-hint">· goes into cycle 1 of the retry, never into the repo</span>
+          </label>
+          <textarea
+            id="capped-steer"
+            className="input"
+            value={steer}
+            onChange={(e) => setSteer(e.target.value)}
+            placeholder="What did the agent keep getting wrong?"
+          />
+        </div>
+      )}
 
       <div className="gate-actions capped-actions">
         <button className="btn btn-primary" disabled={busy} onClick={retry}>
           <ChatText size={14} />
-          Steer and retry
+          {steerable ? "Steer and retry" : "Retry"}
         </button>
-        <span className="control-hint">retry resets the loop counter; steer text carries into cycle 1</span>
+        <span className="control-hint">
+          {steerable
+            ? "retry resets the loop counter; steer text carries into cycle 1"
+            : "this node has no agent to steer — retry just re-runs it"}
+        </span>
       </div>
       {err && <p className="form-error">{err}</p>}
       {logSid && <LogModal sessionId={logSid} onClose={() => setLogSid(null)} />}

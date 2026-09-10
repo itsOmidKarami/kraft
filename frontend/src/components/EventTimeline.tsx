@@ -44,6 +44,12 @@ function detailOf(e: KraftEvent): string | null {
   if (e.type === "fix_cycle_started" && Array.isArray(p.failed_tasks)) {
     return `cycle ${p.cycle}: ${(p.failed_tasks as string[]).join(", ")}`;
   }
+  // The whole point of this event (Kraft-hf12) is a trail to why work got
+  // left uncommitted -- without the error text it is just as blank a row as
+  // the server-log warning it replaced.
+  if (e.type === "sweep_failed" && typeof p.error === "string") {
+    return `${p.task_hook}: ${p.error}`;
+  }
   // A node that repairs itself runs its own tasks twice, so without this the
   // timeline shows the same measurement happening again and no reason for it
   // (Kraft-rv6i).

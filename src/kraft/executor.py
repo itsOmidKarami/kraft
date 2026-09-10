@@ -520,6 +520,19 @@ async def _dispatch(
             )
         except _forge.ForgeError as exc:
             logger.warning("could not commit stragglers after %s: %r", task_hook, exc)
+            # A log line only reaches whoever is tailing the server at the
+            # time. The failure it describes doesn't surface again until
+            # `_assert_clean` refuses `open_mr`, nodes later, with no trail
+            # back to why the work was left uncommitted (Kraft-hf12) -- so a
+            # human debugging that refusal has something to find.
+            await db.write(
+                lambda c, task_hook=task_hook, exc=exc: events.append(
+                    c,
+                    work_item_row["id"],
+                    "sweep_failed",
+                    {"node_id": node["id"], "task_hook": task_hook, "error": str(exc)},
+                )
+            )
         return status
     if kind == "subprocess":
         return await _subprocess.run_task(

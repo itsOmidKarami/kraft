@@ -1446,6 +1446,67 @@ def _set_status(wid: str, status: str) -> None:
         conn.close()
 
 
+def _force_node(wid: str, node_id: str, status: str) -> None:
+    """Force a work item onto a given node and status, without walking the
+    chain to get there for real (Kraft-bz9b's repro needs a task failure at
+    `open_mr` specifically, which the test registry's noop binding never
+    produces on its own)."""
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    try:
+        conn.execute(
+            "UPDATE work_items SET status = ?, current_node_id = ? WHERE id = ?",
+            (status, node_id, wid),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_retry_refuses_explicit_steer_on_a_node_with_no_agent_task(tmp_path, monkeypatch):
+    """Kraft-bz9b: `open_mr` is forge-kind with no fix_loop, so nothing ever
+    calls `Steer.take()` for it. `--steer` used to be accepted and echoed back
+    as if it would reach the next launch, when it was silently dropped."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _force_node(wid, "open_mr", "needs_human")
+
+        r = client.post(f"/work-items/{wid}/retry", json={"steer": "commit the leftover file"})
+
+        assert r.status_code == 409, r.text
+        assert "open_mr" in r.json()["detail"]
+
+
+def test_retry_without_explicit_steer_still_works_on_a_node_with_no_agent_task(
+    tmp_path, monkeypatch
+):
+    """The guard is for text a caller just typed and expects used, not for
+    Kraft's own last-rejection carry-forward (Kraft-ko7j) -- that must keep
+    working even on a node with nothing to steer."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _force_node(wid, "open_mr", "needs_human")
+
+        r = client.post(f"/work-items/{wid}/retry", json={})
+
+        assert r.status_code == 200, r.text
+
+
+def test_work_item_detail_reports_steerable_per_current_node(tmp_path, monkeypatch):
+    """Kraft-bz9b: the detail screen drops its steer box on `steerable: false`
+    rather than offer text `retry` would 409 on."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+
+        _force_node(wid, "open_mr", "needs_human")
+        assert client.get(f"/work-items/{wid}").json()["steerable"] is False
+
+        _force_node(wid, "implementation", "needs_human")
+        assert client.get(f"/work-items/{wid}").json()["steerable"] is True
+
+
 def test_resume_refuses_when_all_slots_are_busy(tmp_path, monkeypatch):
     """A manual start is bounded by the same limit as auto-intake (Kraft-n2d).
 

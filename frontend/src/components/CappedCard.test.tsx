@@ -128,4 +128,22 @@ describe("CappedCard", () => {
     await userEvent.click(screen.getByRole("button", { name: /steer and retry/i }));
     expect(await screen.findByText(/no fix loop/)).toHaveClass("form-error");
   });
+
+  it("drops the steer box on a node with no agent task (Kraft-bz9b)", async () => {
+    const spy = vi.spyOn(api, "retryWorkItem").mockResolvedValue({
+      id: "w1", node_id: "open_mr", loop: "", steer: null,
+    });
+    render(
+      <CappedCard
+        item={{ ...item, current_node_id: "open_mr", cappedOut: undefined, steerable: false } as WorkItem}
+        sessions={sessions}
+        events={events}
+      />,
+    );
+    expect(screen.queryByLabelText(/Steer/)).toBeNull();
+    expect(screen.getByText(/this node has no agent to steer/)).toBeInTheDocument();
+    const button = screen.getByRole("button", { name: /^retry$/i });
+    await userEvent.click(button);
+    expect(spy).toHaveBeenCalledWith("w1", undefined);
+  });
 });
