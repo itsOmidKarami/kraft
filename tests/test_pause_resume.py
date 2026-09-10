@@ -23,13 +23,23 @@ _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 def _client(tmp_path, monkeypatch):
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))))
+    # noop_verify: these tests assert on pause/resume/rebase, not on verify's
+    # real `python -m pytest -q` subprocess -- pure incidental cost here.
+    monkeypatch.setenv(
+        "KRAFT_TEMPLATES_DIR",
+        str(fake_templates_dir(tmp_path, str(_FAKE_CLAUDE), noop_verify=True)),
+    )
     monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "no-dist"))
     import kraft.api as api
 
     return TestClient(api.app, client=("127.0.0.1", 54321))
 
 
+# ponytail: the four "resumed item to complete" waits below run real git
+# worktree/rebase ops plus a real `uv run pytest -q` for the verify node --
+# CI-load-fragile (Kraft-6dqk, Kraft-x527: passes in ~7s locally, ate the full
+# prior 120s budget twice on a loaded shared runner). Bumped to 300s rather
+# than making the wait event-driven; revisit if it still times out.
 def _wait(fn, what, timeout=60):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -109,7 +119,7 @@ def test_pause_then_resume_with_a_steer_relaunches_the_task(tmp_path, monkeypatc
                 for e in client.get(f"/api/work-items/{wid}/events").json()
             ),
             "the resumed item to complete",
-            timeout=120,
+            timeout=300,
         )
 
         # a fresh session ran the same hook, and the steer led its prompt exactly once
@@ -268,7 +278,7 @@ def test_resume_rebases_the_worktree_onto_a_moved_head(tmp_path, monkeypatch):
                 client.get(f"/api/work-items/{wid}").json()
             ),
             "the resumed item to complete",
-            timeout=120,
+            timeout=300,
         )
         assert item["base_ref"] == new_head
         worktree = Path(item["worktree_path"])
@@ -311,7 +321,7 @@ def test_resume_skips_rebase_when_worktree_is_dirty(tmp_path, monkeypatch):
                 client.get(f"/api/work-items/{wid}").json()
             ),
             "the resumed item to reach a terminal state",
-            timeout=120,
+            timeout=300,
         )
         # dirty file survived untouched -- rebase was skipped, not stashed
         assert (worktree / "midedit.txt").read_text() == "uncommitted work\n"
@@ -410,7 +420,7 @@ def test_resume_skips_rebase_when_branch_already_pushed(tmp_path, monkeypatch):
                 client.get(f"/api/work-items/{wid}").json()
             ),
             "the resumed item to complete",
-            timeout=120,
+            timeout=300,
         )
         # rebase was skipped: repo's moved.txt never reached the worktree, and
         # base_ref (recorded at first dispatch) is untouched, even though the
