@@ -28,8 +28,9 @@ def _commit_paths(worktree: Path, paths: list[str], message: str) -> None:
     `pre-commit` hook has no environment to spawn from yet (Kraft-i047 is the
     same failure seen from the other side), and the content is a file Kraft
     copied unmodified — there is nothing here for the hook to catch. No `-c
-    user.email` override either: the worktree inherits the repo's git config,
-    which is where every other commit on this branch gets its author.
+    user.email` override either: `ensure_worktree` pins identity into the
+    worktree (and its submodules) via `_pin_identity` at creation, so nothing
+    downstream needs to override it.
 
     Best effort. A failure logs a warning and returns: a document that did not
     commit becomes a dirty-tree failure at `open_mr` with git's own message
@@ -109,6 +110,59 @@ def _copy_attachments(
         )
 
 
+def _pin_identity(repo: Path, worktree: Path, work_item_id: str) -> None:
+    """Resolve `user.name`/`user.email` from `repo` and write them into
+    `worktree`'s own git config, plus every submodule's separate gitdir.
+
+    `ensure_worktree` otherwise never establishes a commit identity, relying
+    on the worktree inheriting the repo's config -- true until it isn't: a
+    repo with no `[user]` block anywhere in its config chain resolves
+    nothing, and the agent told to commit before it exits invents an identity
+    to get unblocked (`kraft@local` was seen in the wild), which later nodes
+    then read back off the branch and treat as sanctioned (Kraft-mxdx).
+
+    Raised, not logged: a missing identity means every commit on this branch
+    is about to either fail or fabricate one, so failing worktree creation
+    with the missing key named beats a push rejection eight nodes later.
+
+    A submodule's gitdir lives separately (under
+    `.git/worktrees/<id>/modules/...`) and does not inherit config the way
+    the main worktree does, so it needs the same pin repeated into it.
+    """
+    name = git_read(repo, "config", "--get", "user.name", expected_failure=True)
+    email = git_read(repo, "config", "--get", "user.email", expected_failure=True)
+    if not name or not email:
+        missing = "user.name" if not name else "user.email"
+        raise RuntimeError(f"no {missing} configured in {repo}; set it before Kraft can commit")
+
+    def pin(target: Path) -> None:
+        subprocess.run(
+            ["git", "-C", str(target), "config", "user.name", name],
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(target), "config", "user.email", email],
+            capture_output=True,
+            text=True,
+        )
+
+    pin(worktree)
+    submodules = git_read(
+        worktree,
+        "submodule",
+        "foreach",
+        "--quiet",
+        "--recursive",
+        "echo $sm_path",
+        expected_failure=True,
+    )
+    for line in (submodules or "").splitlines():
+        line = line.strip()
+        if line:
+            pin(worktree / line)
+
+
 async def ensure_worktree(
     db,
     run_dirs,
@@ -186,6 +240,7 @@ async def ensure_worktree(
         # needs_human with the git stderr in the reason.
         detail = done.stderr.strip() or done.stdout.strip()
         raise RuntimeError(f"git worktree add failed for {work_item_id}: {detail}")
+    await asyncio.to_thread(_pin_identity, Path(repo), worktree, work_item_id)
     await asyncio.to_thread(
         _copy_attachments, Path(repo), worktree, attachments or [], work_item_id
     )
