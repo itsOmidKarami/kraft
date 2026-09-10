@@ -39,6 +39,22 @@ def make_repo(tmp_path: Path, name: str = "sample") -> Path:
     return dest
 
 
+def make_repo_with_submodule(
+    tmp_path: Path, *, submodule_path: str = "repos/pkg"
+) -> tuple[Path, Path]:
+    """A root repo with one real submodule already added and committed.
+
+    Every test in the submodule-merge-requests plan that needs "a superproject
+    plus a submodule" builds on this rather than repeating `git submodule add`
+    -- the shape that broke on work item 9d0ab38ff3c9439b90506df0f6966660.
+    """
+    sub = make_repo(tmp_path, name="pkg")
+    root = make_repo(tmp_path, name="ws")
+    _git(root, "-c", "protocol.file.allow=always", "submodule", "add", str(sub), submodule_path)
+    _git(root, "commit", "-m", "add submodule")
+    return root, sub
+
+
 def make_repo_with_engineering(tmp_path: Path, files: dict[str, str], name: str = "sample") -> Path:
     """make_repo(), then add repo-relative `files` (path -> text), commit, return the repo."""
     dest = make_repo(tmp_path, name)
@@ -160,6 +176,7 @@ def fake_templates_dir(tmp_path: Path, agent_command: str, *, planning_hooks: bo
                 "hooks": {
                     "on.env.prepare": {"kind": "builtin", "handler": "env_setup"},
                     "on.implementation.start": {"kind": "agent", "command": agent_command},
+                    "on.repos.scan": {"kind": "builtin", "handler": "scan_submodules"},
                     "on.test.run": {
                         "kind": "subprocess",
                         "command": ["python", "-m", "pytest", "-q"],

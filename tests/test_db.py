@@ -50,7 +50,7 @@ def test_migrate_is_idempotent(tmp_path):
     table_count = conn2.execute(
         "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
     ).fetchone()[0]
-    assert table_count == 5  # + auth_sessions (v6)
+    assert table_count == 6  # + auth_sessions (v6), work_item_repos (v18)
 
 
 def test_migrate_rejects_newer_db(tmp_path):
@@ -91,7 +91,7 @@ INVALID SQL STATEMENT;
         tables = conn.execute(
             "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
         ).fetchone()[0]
-        assert tables == 5
+        assert tables == 6
         user_version = conn.execute("PRAGMA user_version").fetchone()[0]
         assert user_version == db.SCHEMA_VERSION
     finally:
@@ -129,6 +129,8 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
     # before the schema is built, or the drop never reaches it
     if version < 6:
         skip_stmts = (*skip_stmts, "auth_sessions")
+    if version < 18:
+        skip_stmts = (*skip_stmts, "work_item_repos")
     if version < 7:
         drop_lines = (*drop_lines, "submodules", "root_merge_policy", "-- cross-repo")
     if version < 11:
@@ -529,6 +531,10 @@ def test_migration_7_adds_attachments_column(tmp_path):
     conn.execute("ALTER TABLE work_items DROP COLUMN attachments")
     conn.execute("ALTER TABLE work_items DROP COLUMN base_ref")
     conn.execute("ALTER TABLE work_items DROP COLUMN bead_cwd")
+    # Replaying from v7 re-applies every later step too, including v18's
+    # CREATE TABLE work_item_repos -- drop it as well, or that step collides
+    # with the table the earlier full migrate() already created.
+    conn.execute("DROP TABLE work_item_repos")
     db.migrate(conn)
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(work_items)")}
     assert "attachments" in cols
@@ -914,9 +920,11 @@ def test_migrating_v13_adds_the_branch_column(tmp_path):
     conn.execute("PRAGMA user_version = 13")
     conn.execute("ALTER TABLE work_items DROP COLUMN branch")
     # Replaying from v13 re-applies every later step too, including the
-    # implements_beads ALTER (Kraft-p8q1) -- drop it as well, or that step
-    # collides with the column the earlier full migrate() already added.
+    # implements_beads ALTER (Kraft-p8q1) and v18's CREATE TABLE
+    # work_item_repos -- drop both as well, or those steps collide with what
+    # the earlier full migrate() already added.
     conn.execute("ALTER TABLE work_items DROP COLUMN implements_beads")
+    conn.execute("DROP TABLE work_item_repos")
 
     db.migrate(conn)
 

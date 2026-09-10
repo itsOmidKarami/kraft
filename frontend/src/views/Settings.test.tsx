@@ -279,8 +279,10 @@ describe("Settings · templates (5b)", () => {
     renderAt("/settings/templates");
     await screen.findByRole("button", { name: /quick-task/ });
 
-    // the diagram tracks what is typed, before any validation has run
-    expect(screen.getByTestId("chain-bar")).toBeInTheDocument();
+    // the diagram tracks what is typed, before any validation has run —
+    // `findBy`, not `getBy`: the draft populates one effect tick after the
+    // template list does, and a loaded CI runner can lose that race.
+    expect(await screen.findByTestId("chain-bar")).toBeInTheDocument();
     expect(screen.getByTestId("node-verify")).toHaveAttribute("data-state", "todo");
 
     await userEvent.click(screen.getByRole("button", { name: "Validate" }));

@@ -3,6 +3,9 @@ hooks:
   on.spec.requested:       { kind: agent,      command: claude, skill: spec, artifact: spec }
   on.plan.requested:       { kind: agent,      command: claude, skill: plan, artifact: plan }
   on.implementation.start: { kind: agent,      command: claude }
+  # Design 3a: catch a submodule the agent touched but the item never
+  # declared, right after implementation, before verify's green obscures it.
+  on.repos.scan:           { kind: builtin,    handler: scan_submodules }
   on.test.run:             { kind: subprocess, command: [uv, run, pytest, -q] }
   # --- placeholder bindings: each replaced by its plugin effort (see 03_plugin_adapters) ---
   on.chain.review_ready:     { kind: agent, command: claude, skill: chain-review, artifact: chain_review }

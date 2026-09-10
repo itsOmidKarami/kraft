@@ -1038,10 +1038,15 @@ def test_work_item_usage_rollup_is_captured_from_the_agent_envelope(tmp_path, mo
         assert usage["total"]["cost_complete"] is True
 
 
-def test_cross_repo_intake_records_submodules_and_orders_the_merge(tmp_path, monkeypatch):
-    """Design 1g's cross-repo disclosure and 3a's repos panel: the submodules
-    chosen at intake come back ordered deepest-first, because a submodule has to
-    merge before the parent that points at it."""
+def test_cross_repo_intake_records_submodules_but_the_repos_panel_waits_for_the_worktree(
+    tmp_path, monkeypatch
+):
+    """Design 1g's cross-repo disclosure: `submodules`/`root_merge_policy` are
+    recorded at intake. The repos panel itself (design 3a) is empty until
+    `ensure_worktree` writes `work_item_repos` rows (Kraft-qlsf) -- a
+    deliberate trade-off over an intake-time preview, not a bug: `repos_for`
+    now reports real per-repo merge state instead of a placeholder derived
+    from `merge` node completion."""
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
@@ -1055,10 +1060,7 @@ def test_cross_repo_intake_records_submodules_and_orders_the_merge(tmp_path, mon
             },
         ).json()["id"]
         body = client.get(f"/api/work-items/{wid}").json()
-        assert [r["path"] for r in body["repos"]] == ["vendor/deep/b", "libs/a", str(repo)]
-        assert [r["role"] for r in body["repos"]] == ["submodule", "submodule", "root"]
-        assert [r["merge_rank"] for r in body["repos"]] == [1, 2, 3]
-        assert all(r["state"] == "pending" for r in body["repos"])
+        assert body["repos"] == []
         assert body["root_merge_policy"] == "skip"
 
         bad = client.post(

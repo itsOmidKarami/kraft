@@ -460,6 +460,15 @@ async def _dispatch(
         )
     if kind == "builtin" and binding.get("handler") == "noop":
         return await _builtins.noop(db, run_dirs, hook_point=task_hook, **common)
+    if kind == "builtin" and binding.get("handler") == "scan_submodules":
+        return await _builtins.scan_submodules(
+            db,
+            run_dirs,
+            hook_point=task_hook,
+            repo=work_item_row["repo"],
+            worktree=str(worktree),
+            **common,
+        )
     if kind == "agent":
         # Only agent tasks. A subprocess or builtin costs nothing, and stopping
         # `on.test.run` for a budget would strand the item mid-node for no saving.
@@ -510,10 +519,13 @@ async def _dispatch(
         #
         # Never at the cost of the run itself: an index lock a co-task holds, a
         # submodule that `add -A` finds nothing to stage in -- either of those
-        # would turn a *successful* agent task into a failed
-        # node, and on the fix-loop's direct dispatch would escape `run()`
-        # entirely. Losing the sweep only puts us back where Kraft-7fip found
-        # us: the work is still on disk and `_assert_clean` names it at open_mr.
+        # would turn a *successful* agent task into a failed node, and on the
+        # fix-loop's direct dispatch would escape `run()` entirely. (Unset
+        # `user.email` used to be on this list too; `ensure_worktree` now pins
+        # identity before any node dispatches, so it is structurally prevented
+        # rather than tolerated here -- Kraft-cppp.) Losing the sweep only puts
+        # us back where Kraft-7fip found us: the work is still on disk and
+        # `_assert_clean` names it at open_mr.
         try:
             await _forge.commit_stragglers(
                 Path(worktree), message=f"wip: uncommitted work from {node['id']}"

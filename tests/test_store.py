@@ -1172,3 +1172,63 @@ def test_set_title_records_an_event(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_merge_rank_order_puts_the_deepest_path_first():
+    assert store.merge_rank_order(["libs/a", "vendor/deep/b", "x"]) == [
+        "vendor/deep/b",
+        "libs/a",
+        "x",
+    ]
+
+
+def test_add_repo_and_repos_for_round_trip(tmp_path):
+    conn = db._connect(tmp_path / "s.db")
+    db.migrate(conn)
+    store.create_work_item(
+        conn,
+        id="w1",
+        bead_id="B",
+        title="t",
+        repo="/r",
+        chain_template="default",
+        chain_definition="{}",
+    )
+    sub_id = store.add_repo(
+        conn,
+        work_item_id="w1",
+        repo_path="/wt/repos/pkg",
+        role="submodule",
+        submodule_path="repos/pkg",
+        merge_rank=1,
+    )
+    store.add_repo(conn, work_item_id="w1", repo_path="/wt", role="root", merge_rank=2)
+
+    repos = store.repos_for(conn, "w1")
+
+    assert [r["role"] for r in repos] == ["submodule", "root"]
+    assert repos[0]["path"] == "/wt/repos/pkg"
+    assert repos[0]["state"] == "pending"
+    assert repos[0]["mr_ref"] is None
+
+    store.update_repo_state(
+        conn, sub_id, merge_state="merged", mr_ref={"number": 3, "url": "http://x/3"}
+    )
+    repos = store.repos_for(conn, "w1")
+    assert repos[0]["state"] == "merged"
+    assert repos[0]["mr_ref"] == {"number": 3, "url": "http://x/3"}
+
+
+def test_repos_for_is_empty_for_a_single_repo_item(tmp_path):
+    conn = db._connect(tmp_path / "s.db")
+    db.migrate(conn)
+    store.create_work_item(
+        conn,
+        id="w1",
+        bead_id="B",
+        title="t",
+        repo="/r",
+        chain_template="default",
+        chain_definition="{}",
+    )
+    assert store.repos_for(conn, "w1") == []

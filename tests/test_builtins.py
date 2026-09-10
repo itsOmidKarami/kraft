@@ -3,7 +3,13 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from support.harness import _git, isolated_bd, make_repo, make_repo_with_engineering
+from support.harness import (
+    _git,
+    isolated_bd,
+    make_repo,
+    make_repo_with_engineering,
+    make_repo_with_submodule,
+)
 
 from kraft import builtins as kraft_builtins
 from kraft import db, store
@@ -685,6 +691,227 @@ def test_ensure_worktree_skips_sync_when_repo_has_no_pyproject(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_ensure_worktree_pins_commit_identity_into_the_worktree(tmp_path):
+    """Kraft-cppp. A linked worktree must carry its own explicit identity, not
+    rely on inheriting the repo's -- that is what left submodule commits
+    authored `Kraft Agent <kraft@local>` on the real occurrence."""
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            wt = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id="w1"
+            )
+            assert git_read(wt, "config", "--local", "user.name") == "t"
+            assert git_read(wt, "config", "--local", "user.email") == "t@t"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_ensure_worktree_fails_when_the_repo_has_no_resolvable_identity(tmp_path, monkeypatch):
+    """No `[user]` block anywhere the repo's git config precedence looks --
+    worktree creation must refuse rather than let the first commit either die
+    mid-node or fall back to a fabricated identity."""
+    repo = tmp_path / "no-identity"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+    (repo / "f.txt").write_text("x")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "empty-gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], cwd=repo, check=True
+    )
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"],
+        cwd=repo,
+        check=True,
+    )
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            with pytest.raises(RuntimeError, match="user.name|user.email"):
+                await kraft_builtins.ensure_worktree(
+                    database, rd, repo=str(repo), work_item_id="w1"
+                )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_ensure_worktree_checks_out_a_declared_submodule_on_the_items_branch(tmp_path):
+    root, _sub = make_repo_with_submodule(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="w1",
+                    bead_id="B",
+                    title="t",
+                    repo=str(root),
+                    chain_template="default",
+                    chain_definition="{}",
+                    submodules=["repos/pkg"],
+                    root_merge_policy="bump_no_mr",
+                )
+            )
+            worktree = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(root), work_item_id="w1"
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = 'w1'").fetchone()
+            )
+            branch = store.branch_for(row)
+            sub_path = worktree / "repos" / "pkg"
+            current = subprocess.run(
+                ["git", "branch", "--show-current"],
+                cwd=sub_path,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            repos = database.read(lambda c: store.repos_for(c, "w1"))
+            return branch, current, repos
+        finally:
+            await database.close()
+
+    branch, current, repos = asyncio.run(scenario())
+
+    assert current == branch
+    assert [r["role"] for r in repos] == ["submodule", "root"]
+    assert repos[0]["path"].endswith("repos/pkg")
+
+
+def test_ensure_worktree_never_runs_a_blanket_submodule_init(tmp_path, monkeypatch):
+    """Global constraint: only declared paths, never every submodule in
+    .gitmodules (design §3 step 2)."""
+    root, _sub = make_repo_with_submodule(tmp_path)
+    calls: list[list[str]] = []
+    real_run = subprocess.run
+
+    def spy(args, **kw):
+        if "submodule" in args and "update" in args:
+            calls.append(args)
+        return real_run(args, **kw)
+
+    monkeypatch.setattr(kraft_builtins.subprocess, "run", spy)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="w1",
+                    bead_id="B",
+                    title="t",
+                    repo=str(root),
+                    chain_template="default",
+                    chain_definition="{}",
+                    submodules=["repos/pkg"],
+                    root_merge_policy="bump_no_mr",
+                )
+            )
+            await kraft_builtins.ensure_worktree(database, rd, repo=str(root), work_item_id="w1")
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    assert calls == [
+        [
+            "git",
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "update",
+            "--init",
+            "--",
+            "repos/pkg",
+        ]
+    ]
+
+
+def test_scan_submodules_finds_a_submodule_the_agent_touched_but_nobody_declared(tmp_path):
+    root, _sub = make_repo_with_submodule(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="w1",
+                    bead_id="B",
+                    title="t",
+                    repo=str(root),
+                    chain_template="default",
+                    chain_definition="{}",
+                )  # no submodules declared -- exactly the real item's shape
+            )
+            worktree = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(root), work_item_id="w1"
+            )
+            # the agent's own half, done correctly: init + branch + commit
+            # inside the submodule, root pointer never touched
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "protocol.file.allow=always",
+                    "submodule",
+                    "update",
+                    "--init",
+                    "--",
+                    "repos/pkg",
+                ],
+                cwd=worktree,
+                check=True,
+            )
+            sub = worktree / "repos" / "pkg"
+            subprocess.run(["git", "checkout", "-b", "agent-work"], cwd=sub, check=True)
+            (sub / "new.txt").write_text("metric\n")
+            subprocess.run(["git", "add", "-A"], cwd=sub, check=True)
+            subprocess.run(
+                ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "m"],
+                cwd=sub,
+                check=True,
+            )
+
+            await kraft_builtins.scan_submodules(
+                database,
+                rd,
+                session_id="s1",
+                work_item_id="w1",
+                node_id="implementation",
+                hook_point="on.repos.scan",
+                round=0,
+                repo=str(root),
+                worktree=str(worktree),
+            )
+            return database.read(lambda c: store.repos_for(c, "w1"))
+        finally:
+            await database.close()
+
+    repos = asyncio.run(scenario())
+    assert len(repos) == 1
+    assert repos[0]["role"] == "submodule"
+    assert repos[0]["path"].endswith("repos/pkg")
 
 
 def test_ensure_worktree_raises_when_git_fails(tmp_path):
