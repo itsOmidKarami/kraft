@@ -394,10 +394,12 @@ function TemplatesPage() {
           <textarea
             id="template-nodes"
             aria-label="template nodes"
-            className="input mono template-yaml"
+            className="input mono template-yaml desktop-only"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
           />
+          <pre className="template-readout phone-only">{draft}</pre>
+          <p className="phone-only open-on-desktop">Open on desktop to edit.</p>
           {!parsed && <p className="form-error">not valid JSON — nothing will be saved</p>}
           {/* The diagram tracks what is typed: `parsed` is the draft, so it
               updates as the textarea changes and vanishes into the "not valid
@@ -421,7 +423,7 @@ function TemplatesPage() {
               ))}
             </div>
           )}
-          <div className="save-row">
+          <div className="save-row desktop-only">
             <button className="btn btn-primary" disabled={busy || !parsed} onClick={save}>
               <Check size={14} />
               Save
@@ -798,12 +800,14 @@ function SteeringPage() {
               <textarea
                 id="steering-body"
                 aria-label="steering body"
-                className="input mono template-yaml"
+                className="input mono template-yaml desktop-only"
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
               />
+              <pre className="template-readout phone-only">{draft}</pre>
+              <p className="phone-only open-on-desktop">Open on desktop to edit.</p>
               {showDiff && <DraftDiff before={loaded} after={draft} />}
-              <div className="save-row">
+              <div className="save-row desktop-only">
                 <button
                   className="btn btn-primary"
                   disabled={busy || draft === loaded}

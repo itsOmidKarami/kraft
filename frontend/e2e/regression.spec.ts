@@ -55,6 +55,11 @@ test("analytics renders", async ({ page }) => {
 
 test("search overlay finds an indexed document", async ({ page }) => {
   await page.goto("/");
+  // The Ctrl-K handler attaches in a useEffect, so it doesn't exist until
+  // React has hydrated (search.spec.ts's openWithShortcut documents the same
+  // race) -- pressing the chord straight off `goto` is a race this test lost
+  // intermittently. Wait for a rendered control first.
+  await expect(page.getByRole("button", { name: "Search" })).toBeVisible();
   await page.keyboard.press("Meta+k").catch(() => {});
   const dlg = page.getByRole("dialog", { name: "Search" });
   if (!(await dlg.isVisible().catch(() => false))) {

@@ -118,6 +118,20 @@ describe("AnalyticsView", () => {
     expect(await screen.findByText(/unknown range/)).toHaveClass("form-error");
   });
 
+  it("labels every by-node and by-repo cell for the phone card reflow", async () => {
+    renderView();
+    await screen.findByText("implementation");
+    const nodeRow = screen.getByText("implementation").closest(".node-row")!;
+    for (const label of ["node", "cost share", "runs", "avg time", "tokens", "cost", "rounds"]) {
+      expect(nodeRow.querySelector(`[data-label="${label}"]`)).not.toBeNull();
+    }
+    // "repo-a" also names the sidebar facet button — scope to the table row via its title
+    const repoRow = screen.getByTitle("/repo-a").closest(".repo-row")!;
+    for (const label of ["repo", "items", "MRs", "tokens", "cost"]) {
+      expect(repoRow.querySelector(`[data-label="${label}"]`)).not.toBeNull();
+    }
+  });
+
   it("marks a cost that is only a floor, and never dresses it up as a total", async () => {
     vi.spyOn(api, "getAnalytics").mockResolvedValue({
       ...report,
