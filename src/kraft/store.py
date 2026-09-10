@@ -295,6 +295,24 @@ def mark_rate_limited(
     )
 
 
+def mark_waiting(conn: sqlite3.Connection, work_item_id: str, node_id: str, retry_at: str) -> None:
+    """The node is waiting on something outside Kraft (today: a pipeline).
+
+    Sibling of `mark_rate_limited`, and deliberately shaped identically: the
+    wait is a row the scheduler owns, not a coroutine holding a slot. A
+    `waiting` row is not an `active` one, so `active_count` stops counting it
+    and the intake slot frees (Kraft-g15w); and with no coroutine in flight
+    there is nothing for pause to fail to cancel (Kraft-tnak).
+    """
+    conn.execute(
+        "UPDATE work_items SET status = 'waiting', retry_at = ?, updated_at = ? WHERE id = ?",
+        (retry_at, _now(), work_item_id),
+    )
+    events.append(
+        conn, work_item_id, "work_item_waiting", {"node_id": node_id, "retry_at": retry_at}
+    )
+
+
 def mark_completed(conn: sqlite3.Connection, work_item_id) -> None:
     conn.execute(
         "UPDATE work_items SET status = 'completed', updated_at = ? WHERE id = ?",
@@ -858,10 +876,14 @@ def pause_work_item(conn: sqlite3.Connection, work_item_id: str, session_ids: li
 
     The log files are left alone: a paused attempt's output is still the record
     of what it managed to do before a human stopped it.
+
+    `retry_at` is cleared too (Kraft-tnak): a paused item the `ci_wait` poller
+    still considers due would be woken straight back up, and the pause would
+    look like it worked and then silently undo itself.
     """
     now = _now()
     conn.execute(
-        "UPDATE work_items SET status = 'paused', updated_at = ? WHERE id = ?",
+        "UPDATE work_items SET status = 'paused', retry_at = NULL, updated_at = ? WHERE id = ?",
         (now, work_item_id),
     )
     events.append(conn, work_item_id, "pause_requested", {"sessions": session_ids})

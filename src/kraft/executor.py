@@ -9,6 +9,7 @@ import sqlite3
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -352,6 +353,13 @@ RATE_LIMITED = "rate_limited"
 #: a missing binary.
 CONFIG_ERROR = "config_error"
 
+#: The node is waiting on something outside Kraft — today, a pipeline that has
+#: not settled. Returned by `adapters/forge`'s `ci_poll` instead of sleeping the
+#: whole `poll_timeout` in-process (Kraft-ru98). Ranked with `RATE_LIMITED`: a
+#: pipeline that has not finished is not evidence about the code either. Below
+#: `"paused"`, which is always a human's own instruction.
+WAITING = "waiting"
+
 
 def _budget_breach(db, work_item_id: str, budget: _policy.Budget) -> dict | None:
     """The breached cap, or None. Evaluated fresh: it is a query, not a counter.
@@ -415,6 +423,21 @@ async def _stop_for_rate_limit(db, work_item_id: str, node: dict) -> str:
     retry_at = info.get("resets_at_iso") or _now()
     await db.write(lambda c: store.mark_rate_limited(c, work_item_id, node["id"], retry_at))
     return RATE_LIMITED
+
+
+async def _stop_for_waiting(db, work_item_id: str, node: dict) -> str:
+    # Counter-driven backoff, growing the same way `_poll_ci`'s in-loop sleep
+    # grows today (`adapters/forge.py`'s `DEFAULT_POLL_INTERVAL`/
+    # `_MAX_POLL_INTERVAL`): doubling from the first wait, capped. The counter
+    # is `ci_wait.py`'s (`ci_wait:<node_id>`) -- read, not bumped, here; the
+    # poller bumps it on each re-entry, so a node waiting for the first time
+    # (no row yet) starts at the base interval.
+    row = db.read(lambda c: store.read_counter(c, work_item_id, f"ci_wait:{node['id']}"))
+    count = (row["count"] if row else 0) + 1
+    interval = min(_forge.DEFAULT_POLL_INTERVAL * (2 ** (count - 1)), _forge._MAX_POLL_INTERVAL)
+    retry_at = (datetime.fromisoformat(_now()) + timedelta(seconds=interval)).isoformat()
+    await db.write(lambda c: store.mark_waiting(c, work_item_id, node["id"], retry_at))
+    return WAITING
 
 
 #: The hooks whose job is to judge a change rather than make one. They are the
@@ -678,6 +701,8 @@ async def _measure_node(
         return CONFIG_ERROR, failed, []
     if any(r == RATE_LIMITED for r in results):
         return RATE_LIMITED, [], []
+    if any(r == WAITING for r in results):
+        return WAITING, [], []
     # Logged before the BUDGET rung returns: a co-task can raise in the same node
     # as a budget-refused agent, and that traceback is the only record of it.
     excs = [r for r in results if isinstance(r, BaseException)]
@@ -927,6 +952,8 @@ async def _walk_node(
             return "needs_human"
         if verdict == RATE_LIMITED:
             return await _stop_for_rate_limit(db, work_item_id, node)
+        if verdict == WAITING:
+            return await _stop_for_waiting(db, work_item_id, node)
         if verdict == BUDGET:
             return await _stop_for_budget(db, work_item_id, node, budget)
         if verdict == "failed":
@@ -1006,6 +1033,8 @@ async def _walk_node(
             return "needs_human"
         if verdict == RATE_LIMITED:
             return await _stop_for_rate_limit(db, work_item_id, node)
+        if verdict == WAITING:
+            return await _stop_for_waiting(db, work_item_id, node)
         if verdict == BUDGET:
             return await _stop_for_budget(db, work_item_id, node, budget)
 
@@ -1364,6 +1393,8 @@ async def _run_once(
             return "needs_human"
         if result == RATE_LIMITED:
             return RATE_LIMITED
+        if result == WAITING:
+            return WAITING
         if await _maybe_gate(db, work_item_id, node):
             return "awaiting_gate"
 
@@ -1607,6 +1638,8 @@ async def _resume_once(
             return "needs_human"
         if tail_result == RATE_LIMITED:
             return RATE_LIMITED
+        if tail_result == WAITING:
+            return WAITING
         if await _maybe_gate(db, work_item_id, node):
             return "awaiting_gate"
 

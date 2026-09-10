@@ -467,24 +467,29 @@ def test_reused_mr_records_an_mr_opened_event(tmp_path, monkeypatch):
     ]
 
 
-def test_ci_poll_waits_out_a_pending_pipeline(tmp_path, monkeypatch):
-    """A pipeline that is merely still running must not stop the node."""
-    fake = forge.FakeForge(ci_states=["pending", "pending", "success"])
-    returned, recorded = _forge_session(
-        tmp_path, monkeypatch, fake, "ci_poll", "s4", poll_interval=0
-    )
-    assert (returned, recorded) == ("done", "done")
-    assert fake.ci_states == ["success"], "both pendings should have been consumed"
-
-
-def test_ci_poll_times_out_while_still_pending(tmp_path, monkeypatch):
-    """A pipeline that never settles fails the node, but says why."""
+def test_ci_poll_reports_waiting_on_a_pending_pipeline(tmp_path, monkeypatch):
+    """One check, then hand the wait back to the scheduler -- no 30-minute
+    coroutine (Kraft-ru98). The old behaviour slept here instead."""
     fake = forge.FakeForge(ci_states=["pending"])
-    returned, recorded = _forge_session(
-        tmp_path, monkeypatch, fake, "ci_poll", "s5", poll_timeout=0, poll_interval=0
-    )
+    returned, recorded = _forge_session(tmp_path, monkeypatch, fake, "ci_poll", "s4")
+    assert (returned, recorded) == ("waiting", "waiting")
+    assert "pipeline pending" in _session_log(tmp_path, "s4")
+
+
+def test_ci_poll_still_resolves_a_settled_pipeline(tmp_path, monkeypatch):
+    """The path that already worked must not change: success -> done,
+    failure -> failed, unmergeable -> failed."""
+    fake = forge.FakeForge(ci_states=["success"])
+    returned, recorded = _forge_session(tmp_path / "a", monkeypatch, fake, "ci_poll", "s5")
+    assert (returned, recorded) == ("done", "done")
+
+    fake = forge.FakeForge(ci_states=["failed"])
+    returned, recorded = _forge_session(tmp_path / "b", monkeypatch, fake, "ci_poll", "s5b")
     assert (returned, recorded) == ("failed", "failed")
-    assert "timed out" in _session_log(tmp_path, "s5")
+
+    fake = forge.FakeForge(ci_states=["success"], mergeable=False)
+    returned, recorded = _forge_session(tmp_path / "c", monkeypatch, fake, "ci_poll", "s5c")
+    assert (returned, recorded) == ("failed", "failed"), "Kraft-ejj9: green and unmergeable"
 
 
 def test_ci_poll_red_pipeline_is_not_reported_as_a_timeout(tmp_path, monkeypatch):
@@ -564,55 +569,6 @@ def test_poll_never_sleeps_past_its_deadline(tmp_path, monkeypatch):
     )
     assert timed_out is True
     assert slept and all(s <= 0.05 for s in slept)
-
-
-def test_a_session_row_exists_for_the_whole_ci_poll_wait(tmp_path, monkeypatch):
-    """Kraft-41b: pause and abandon key off `worker_sessions`, and the row used
-    to appear only when the node finished -- for the whole wait there was
-    nothing to find, so a pause silently no-op'd and the chain walked on into
-    merge. The row has to be visible to `running_sessions_for_node` (the same
-    lookup `api.pause_work_item` makes) *during* the poll, not just after."""
-    seen: list[list[str]] = []
-    fake = forge.FakeForge(ci_states=["pending", "success"])
-    monkeypatch.setattr(forge, "resolve", lambda name: fake)
-
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        db_ = await db.Database.open(rd.db)
-
-        async def fake_sleep(seconds):
-            rows = db_.read(lambda c: store.running_sessions_for_node(c, "w1"))
-            seen.append([r["id"] for r in rows])
-
-        monkeypatch.setattr(forge.asyncio, "sleep", fake_sleep)
-        try:
-            await db_.write(
-                lambda c: c.execute(
-                    "INSERT INTO work_items (id, title, repo, chain_template, "
-                    "chain_definition, status, current_node_id, created_at, updated_at) "
-                    "VALUES ('w1','t','/r','default','{}','active','mr_checks','now','now')"
-                )
-            )
-            await forge.run_task(
-                db_,
-                rd,
-                session_id="s1",
-                work_item_id="w1",
-                node_id="mr_checks",
-                hook_point="on.ci.poll",
-                handler="ci_poll",
-                backend="fake",
-                repo=tmp_path,
-                branch="kraft/w1",
-                title="t",
-                poll_interval=0,
-            )
-        finally:
-            await db_.close()
-
-    asyncio.run(scenario())
-    assert seen, "the poll never slept -- nothing was observed mid-wait"
-    assert seen[0] == ["s1"], "pause/abandon would have found nothing during the poll"
 
 
 def test_a_forge_error_mid_poll_fails_the_node_rather_than_escaping(tmp_path, monkeypatch):
@@ -794,20 +750,17 @@ def test_red_pipeline_stops_before_the_merge_node(tmp_path, monkeypatch):
 
 
 def test_the_executor_forwards_the_registry_poll_keys(tmp_path, monkeypatch):
-    """Task 2's whole payoff is one splat in `executor._dispatch`. Without it
-    the binding is ignored, the node waits out the default interval and the
-    pipeline goes green -- so this fails loudly rather than silently.
-
-    `poll_timeout: 0` is a single-shot check: the first status is pending, so
-    the node times out and the chain must stop before merge.
-    """
+    """Task 2's whole payoff is one splat in `executor._dispatch`. `ci_poll`
+    itself no longer reads `poll_timeout` -- a pending pipeline is always a
+    single check that hands the wait back to the scheduler (Kraft-ru98) -- but
+    the binding still has to reach `run_task` at all, which this pins."""
     fake = forge.FakeForge(ci_states=["pending", "success"])
 
     status = _run_back_half(tmp_path, monkeypatch, fake, poll_timeout=0)
 
     assert fake.opened, "the merge request should still have been opened"
-    assert fake.merged == [], "a pipeline that never settled reached the merge node"
-    assert status == "needs_human"
+    assert fake.merged == [], "a pipeline still pending must not reach the merge node"
+    assert status == "waiting"
 
 
 def test_the_executor_passes_the_repo_forge_to_a_forge_node(tmp_path, monkeypatch):

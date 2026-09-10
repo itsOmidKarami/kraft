@@ -28,8 +28,18 @@ from starlette.websockets import WebSocketDisconnect
 from kraft import analytics as analytics_mod
 from kraft import auth as auth_mod
 from kraft import builtins as builtins_mod
+from kraft import (
+    ci_wait,
+    escalate,
+    events,
+    executor,
+    findings,
+    rate_limit_retry,
+    reattach,
+    review,
+    store,
+)
 from kraft import config as config_mod
-from kraft import escalate, events, executor, findings, rate_limit_retry, reattach, review, store
 from kraft import intake as intake_mod
 from kraft import logs as logs_mod
 from kraft import notify as notify_mod
@@ -237,6 +247,10 @@ async def lifespan(app: FastAPI):
     # Always on, unlike auto-intake: waiting out a rate limit is not optional
     # behaviour an operator enables, it is what this feature promises.
     app.state.rate_limit_task = asyncio.ensure_future(rate_limit_retry.poller(app))
+    # Always on, for the same reason the rate-limit poller is: a work item
+    # parked on a pipeline has to be woken by something, and that something
+    # cannot be the coroutine that used to sit in the wait (Kraft-ru98).
+    app.state.ci_wait_task = asyncio.ensure_future(ci_wait.poller(app))
     # PUT /intake swaps this task, and the swap has to await the cancellation of
     # the old one. Without the lock two overlapping saves both read the same old
     # task, both start a poller, and only the last assignment is reachable --
@@ -270,6 +284,8 @@ async def lifespan(app: FastAPI):
         if app.state.trigger_task is not None:
             app.state.trigger_task.cancel()
             await asyncio.gather(app.state.trigger_task, return_exceptions=True)
+        app.state.ci_wait_task.cancel()
+        await asyncio.gather(app.state.ci_wait_task, return_exceptions=True)
         tasks = list(app.state.tasks.values())
         for task in tasks:
             task.cancel()
@@ -1648,7 +1664,11 @@ async def pause_work_item(wid: str, request: Request):
     """
     st = request.app.state
     row = _work_item_row(st, wid)
-    if row["status"] not in ("active",):
+    # 'waiting' as well as 'active': a node parked on a pipeline is exactly the
+    # thing a human most wants to stop, and it used to 409 (Kraft-tnak). There
+    # is no session to signal in that state -- the wait is a row now -- so the
+    # write below is the whole operation.
+    if row["status"] not in ("active", "waiting"):
         raise HTTPException(409, f"work item is {row['status']}, not running")
     sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
     ids = [s["id"] for s in sessions]
