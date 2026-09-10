@@ -361,7 +361,11 @@ def test_resume_marks_needs_human_on_a_rebase_conflict(tmp_path, monkeypatch):
             for e in client.get(f"/api/work-items/{wid}/events").json()
             if e["type"] == "work_item_needs_human"
         ]
-        assert needs_human and "conflict" in needs_human[-1]["payload"]["reason"].lower()
+        # Not "conflict": git's own wording for a failed rebase varies by
+        # version (Kraft-3a8m saw "could not apply ..." with no "conflict"
+        # substring at all on some runners). "rebase failed for" is
+        # builtins.py's own literal, version-independent of git's message.
+        assert needs_human and "rebase failed for" in needs_human[-1]["payload"]["reason"].lower()
 
         after = client.get(f"/api/work-items/{wid}").json()
         assert len(after["worker_sessions"]) == before_sessions
