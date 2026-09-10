@@ -30,6 +30,7 @@ dev = [
     "pytest>=8",
     "ruff>=0.16.6",  # PEP 758 aware; keep .pre-commit-config.yaml rev in step
     "pre-commit>=4",
+    "pytest-testmon>=2.2.0",
 ]
 
 [project.scripts]
