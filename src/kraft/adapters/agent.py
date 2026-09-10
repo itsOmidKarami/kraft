@@ -342,6 +342,7 @@ async def run_agent_task(
     #: very item it is escalating — see spec "The self-resume trick". Every
     #: existing caller keeps today's behavior by leaving this `True`.
     identify_as_worker: bool = True,
+    head_sha: str | None = None,
 ) -> str:
     ctx = _CTX.format(
         title=title,
@@ -441,4 +442,5 @@ async def run_agent_task(
         },
         post_resolve=_resolve_status(artifact, work_item_id, cwd),
         round=round,
+        head_sha=head_sha,
     )

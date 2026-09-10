@@ -284,6 +284,7 @@ function blankSession(workItemId: string, createdAt: string): WorkerSession {
     cost_usd: null,
     wall_ms: null,
     model: null,
+    head_sha: null,
   };
 }
 

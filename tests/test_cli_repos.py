@@ -266,3 +266,30 @@ def test_disconnect_removes_an_entry_registered_under_a_worktree_path(
     cli.main(["repo", "disconnect", str(worktree)])
     assert str(worktree) in capsys.readouterr().out
     assert [entry["path"] for entry in asyncio.run(client.repos())] == [str(repo)]
+
+
+def test_repos_yaml_round_trips_a_test_command(tmp_path):
+    from kraft import config
+
+    p = tmp_path / "repos.yaml"
+    config.save_repos(p, [{"path": "/r", "test_command": "just ci"}])
+    (entry,) = config.load_repos(p, validate_steering=False)
+    assert entry["test_command"] == "just ci"
+
+
+def test_repos_yaml_defaults_test_command_to_none(tmp_path):
+    from kraft import config
+
+    p = tmp_path / "repos.yaml"
+    p.write_text("repos:\n  - path: /r\n")
+    (entry,) = config.load_repos(p, validate_steering=False)
+    assert entry["test_command"] is None
+
+
+def test_repos_yaml_rejects_a_non_string_test_command(tmp_path):
+    from kraft import config
+
+    p = tmp_path / "repos.yaml"
+    p.write_text("repos:\n  - path: /r\n    test_command: 3\n")
+    with pytest.raises(config.ConfigError):
+        config.load_repos(p, validate_steering=False)

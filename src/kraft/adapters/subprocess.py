@@ -223,6 +223,7 @@ async def run_task(
     #: more than the worker does. A test that cannot wait passes its own.
     progress_s: float = 5.0,
     round: int = 0,
+    head_sha: str | None = None,
 ) -> str:
     log_path = run_dirs.logs / f"{session_id}.log"
     result_path = run_dirs.results / f"{session_id}.json"
@@ -237,6 +238,7 @@ async def run_task(
             log_path=str(log_path),
             result_path=str(result_path),
             round=round,
+            head_sha=head_sha,
         )
     )
 
@@ -265,8 +267,12 @@ async def run_task(
             # Safe to write: in this path the child never took the fd.
             missing = "working directory" if not Path(cwd).is_dir() else f"command {cmd[0]!r}"
             log.write(f"could not start {' '.join(cmd)} in {cwd}: no such {missing} ({exc})\n")
-            await db.write(lambda c: store.session_exited(c, session_id, "failed"))
-            return "failed"
+            # Not "failed": a task that never launched is a configuration
+            # problem, and reporting it as a task failure opens a fix cycle no
+            # agent can win by editing source (Kraft-579). The caller
+            # short-circuits this straight to needs_human.
+            await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
+            return "config_error"
     finally:
         log.close()  # the child holds its own dup'd fd
     # The child owns the log fd, so it keeps writing across a Kraft restart — which

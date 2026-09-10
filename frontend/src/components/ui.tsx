@@ -77,6 +77,9 @@ const GLYPHS: Record<SessionStatus, typeof Check> = {
   // quietest ring in the vocabulary rather than inventing a glyph.
   pending: Circle,
   rate_limited: Clock,
+  // A task that never launched -- no agent can fix a missing binary or cwd by
+  // editing source, so it reads the same as capped_out: stopped, not failed.
+  config_error: Prohibit,
 };
 
 /** 20px ring, 1px border, Phosphor glyph. Only `running` animates. */

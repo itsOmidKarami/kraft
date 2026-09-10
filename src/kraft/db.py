@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 22
+SCHEMA_VERSION = 23
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -98,7 +98,7 @@ CREATE TABLE worker_sessions (
   result_path    TEXT NOT NULL,
   status         TEXT NOT NULL CHECK (status IN
                    ('pending', 'running', 'done', 'failed', 'capped_out', 'paused', 'unknown',
-                    'done_with_concerns', 'needs_context', 'rate_limited')),
+                    'done_with_concerns', 'needs_context', 'rate_limited', 'config_error')),
   attempt        INTEGER NOT NULL DEFAULT 1,
   session_summary_ref TEXT,
   created_at     TEXT NOT NULL,
@@ -110,7 +110,10 @@ CREATE TABLE worker_sessions (
   tokens_out     INTEGER,
   cost_usd       REAL,
   wall_ms        INTEGER,
-  exited_at      TEXT
+  exited_at      TEXT,
+  -- the worktree HEAD at the moment this measuring task ran (Kraft-lu2) -- NULL
+  -- for a builtin/agent task that stamps nothing, and for every historical row
+  head_sha       TEXT
 );
 
 CREATE INDEX idx_worker_sessions_status ON worker_sessions(status);
@@ -444,6 +447,49 @@ SELECT id, bead_id, title, description, repo, chain_template, chain_definition,
     19: ["ALTER TABLE work_items ADD COLUMN escalation_session_id TEXT"],
     20: ["ALTER TABLE work_items ADD COLUMN auto_gate INTEGER NOT NULL DEFAULT 0"],
     21: ["ALTER TABLE work_items ADD COLUMN agent_overrides TEXT"],
+    # 'config_error' has to join the status CHECK (a launch failure that could
+    # not even start is not a test failure -- Kraft-579), and SQLite cannot
+    # alter a constraint, so worker_sessions is rebuilt the documented way.
+    # head_sha (Kraft-lu2) rides along in the same rebuild rather than paying
+    # for a second one -- one more column, zero extra risk.
+    22: [
+        """CREATE TABLE worker_sessions_new (
+  id             TEXT PRIMARY KEY,
+  work_item_id   TEXT NOT NULL REFERENCES work_items(id),
+  node_id        TEXT NOT NULL,
+  hook_point     TEXT NOT NULL,
+  pid            INTEGER,
+  pid_start_time REAL,
+  log_path       TEXT NOT NULL,
+  result_path    TEXT NOT NULL,
+  status         TEXT NOT NULL CHECK (status IN
+                   ('pending', 'running', 'done', 'failed', 'capped_out', 'paused', 'unknown',
+                    'done_with_concerns', 'needs_context', 'rate_limited', 'config_error')),
+  attempt        INTEGER NOT NULL DEFAULT 1,
+  session_summary_ref TEXT,
+  created_at     TEXT NOT NULL,
+  started_at     TEXT,
+  round          INTEGER NOT NULL DEFAULT 0,
+  model          TEXT,
+  tokens_in      INTEGER,
+  tokens_out     INTEGER,
+  cost_usd       REAL,
+  wall_ms        INTEGER,
+  exited_at      TEXT,
+  head_sha       TEXT
+)""",
+        """INSERT INTO worker_sessions_new (id, work_item_id, node_id, hook_point, pid,
+  pid_start_time, log_path, result_path, status, attempt, session_summary_ref,
+  created_at, started_at, round, model, tokens_in, tokens_out, cost_usd, wall_ms,
+  exited_at)
+SELECT id, work_item_id, node_id, hook_point, pid, pid_start_time, log_path,
+       result_path, status, attempt, session_summary_ref, created_at, started_at,
+       round, model, tokens_in, tokens_out, cost_usd, wall_ms, exited_at
+FROM worker_sessions""",
+        "DROP TABLE worker_sessions",
+        "ALTER TABLE worker_sessions_new RENAME TO worker_sessions",
+        "CREATE INDEX idx_worker_sessions_status ON worker_sessions(status)",
+    ],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins

@@ -33,7 +33,11 @@ function detailOf(e: KraftEvent): string | null {
   }
   if (e.type === "findings_measured" && Array.isArray(p.findings)) {
     const n = (p.findings as unknown[]).length;
-    return n > 0 ? `${n} findings` : "no findings";
+    const base = n > 0 ? `${n} findings` : "no findings";
+    // A noop task is a configuration fact, not a defect in the diff it never
+    // looked at — surfaced beside the count, not styled as one of the findings.
+    const noop = Array.isArray(p.noop_hooks) ? (p.noop_hooks as string[]) : [];
+    return noop.length > 0 ? `${base} · not reviewed (noop): ${noop.join(", ")}` : base;
   }
   // A dead webhook has to be tellable from a quiet one, which is the whole
   // reason `notify` records this event rather than only logging it.
