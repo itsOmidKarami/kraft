@@ -316,6 +316,39 @@ def validate_nodes(nodes: list, registry: Registry) -> list[str]:
     return []
 
 
+def validate_agent_overrides(overrides: dict) -> list[str]:
+    """The rules a work item's own model/effort override (Kraft-4k6l) is held
+    to -- exactly what `load_registry` above already checks for an agent
+    hook's own `model`/`escalate_model`/`effort`: keys are a subset of
+    `{"model", "escalate_model", "effort"}`; `model` and `escalate_model` are
+    strings or `None`; `effort` is one of `_EFFORT_LEVELS`. One rule set, one
+    exported function -- `api.py` calls this rather than reaching for the
+    private `_EFFORT_LEVELS` itself, the same "validate in one place"
+    reasoning `validate_nodes` gives for its own two callers, so a work item's
+    override and a template's binding cannot drift into two different ideas
+    of a valid `effort` (Kraft-unk).
+
+    Returns error strings, empty if valid.
+    """
+    if not isinstance(overrides, dict):
+        return ["agent_overrides must be an object"]
+    unknown = sorted(set(overrides) - {"model", "escalate_model", "effort"})
+    if unknown:
+        return [
+            f"agent_overrides has unknown key(s) {unknown}; only model, "
+            "escalate_model, effort are allowed"
+        ]
+    for key in ("model", "escalate_model"):
+        if key in overrides and overrides[key] is not None and not isinstance(overrides[key], str):
+            return [f"agent_overrides {key!r} must be a string or null"]
+    if "effort" in overrides and overrides["effort"] not in _EFFORT_LEVELS:
+        return [
+            f"agent_overrides 'effort' must be one of {sorted(_EFFORT_LEVELS)}; "
+            f"got {overrides['effort']!r}"
+        ]
+    return []
+
+
 def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
     valid: dict[str, Template] = {}
     invalid: dict[str, str] = {}

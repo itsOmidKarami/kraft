@@ -478,6 +478,53 @@ async def mr_labels(labels: list[str], work_item_id: str | None = None) -> dict:
     return await _act(f"/work-items/{target}/mr-labels", {"labels": labels})
 
 
+async def set_chain_template(template: str, work_item_id: str | None = None) -> dict:
+    """Switch a not-yet-started Kraft work item onto a different chain
+    template (Kraft-gwn6). 404s on an unknown template name; 409s once the
+    item has a `current_node_id` -- the template is fixed for the life of a
+    started item.
+
+    `resolve_work_item`, not `_forbid_self_action`: this is not a gate
+    decision, the same reasoning `mr_labels` above gives for its own door.
+    """
+    target = await resolve_work_item(work_item_id)
+    return await _patch(f"/work-items/{target}", {"chain_template": template})
+
+
+async def set_agent_overrides(
+    model: str | None = None,
+    escalate_model: str | None = None,
+    effort: str | None = None,
+    *,
+    clear: bool = False,
+    work_item_id: str | None = None,
+) -> dict:
+    """Set or clear a Kraft work item's own model/effort override
+    (Kraft-4k6l), read fresh at every dispatch rather than baked into the
+    chain. `clear` sends `{}`, resetting every field to the template's own
+    binding; naming any of `model`/`escalate_model`/`effort` *replaces* the
+    whole stored override, it does not merge with what is already there.
+    """
+    target = await resolve_work_item(work_item_id)
+    if clear:
+        overrides: dict = {}
+    else:
+        overrides = {
+            k: v
+            for k, v in {
+                "model": model,
+                "escalate_model": escalate_model,
+                "effort": effort,
+            }.items()
+            if v is not None
+        }
+        if not overrides:
+            raise ValueError(
+                "kraft: set-overrides needs --model, --escalate-model, --effort, or --clear"
+            )
+    return await _patch(f"/work-items/{target}", {"agent_overrides": overrides})
+
+
 async def health() -> dict:
     """The server's own view of itself: invalid config, index state, reattach."""
     return await _get("/health")
@@ -498,6 +545,21 @@ async def reindex(repo: str | None = None) -> dict:
 async def search(q: str, limit: int = 20) -> dict:
     """Cross-repo search over specs, plans, and session summaries."""
     return await _get("/search", q=q, limit=limit)
+
+
+async def _patch(path: str, payload: dict) -> dict:
+    """PATCH's own status/body handling, alongside `_post`'s POST version --
+    `update_work_item` answers 404/409/422 depending on which field went
+    wrong, and every caller here turns that into the same one-sentence error
+    `_get`/`_act` already give."""
+    response = await _send("PATCH", path, json=payload)
+    try:
+        body = response.json()
+    except ValueError:
+        body = {"detail": response.text}
+    if response.status_code >= 400:
+        raise ValueError(f"kraft {response.status_code}: {body.get('detail', body)}")
+    return body
 
 
 async def _post(path: str, payload: dict | None = None) -> tuple[int, dict]:

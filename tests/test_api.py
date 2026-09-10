@@ -488,6 +488,204 @@ def test_patch_refuses_an_empty_body_and_a_blank_title(tmp_path, monkeypatch):
         assert client.get(f"/api/work-items/{wid}").json()["title"] == "t"
 
 
+def test_patch_switches_chain_template_before_the_chain_starts(tmp_path, monkeypatch):
+    """Kraft-gwn6: a not-yet-started item can switch onto a different
+    template's own materialized chain."""
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        repo = make_repo(tmp_path)
+        wid = client.post(
+            "/api/work-items",
+            json={
+                "title": "t",
+                "repo": str(repo),
+                "chain_template": "quick-task",
+                "autostart": False,
+            },
+        ).json()["id"]
+        before = client.get(f"/api/work-items/{wid}").json()
+        assert [n["id"] for n in before["chain_definition"]["nodes"]] == [
+            "env_setup",
+            "implementation",
+            "verify",
+        ]
+
+        r = client.patch(f"/api/work-items/{wid}", json={"chain_template": "default"})
+        assert r.status_code == 200, r.text
+        assert r.json() == {"id": wid, "chain_template": "default"}
+
+        after = client.get(f"/api/work-items/{wid}").json()
+        assert after["chain_template"] == "default"
+        assert [n["id"] for n in after["chain_definition"]["nodes"]] == [
+            "spec",
+            "plan",
+            "chain_review",
+            "env_setup",
+            "implementation",
+            "verify",
+            "open_mr",
+            "mr_checks",
+            "human_review",
+            "mr_sync",
+            "merge",
+        ]
+
+        evs = client.get(f"/api/work-items/{wid}/events").json()
+        changed = [e for e in evs if e["type"] == "chain_template_changed"]
+        assert [e["payload"] for e in changed] == [{"from": "quick-task", "to": "default"}]
+
+
+def test_patch_refuses_chain_template_once_started(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        repo = make_repo(tmp_path)
+        wid = client.post(
+            "/api/work-items",
+            json={
+                "title": "t",
+                "repo": str(repo),
+                "chain_template": "quick-task",
+                "autostart": False,
+            },
+        ).json()["id"]
+        db_path = Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"
+        conn = sqlite3.connect(db_path)
+        conn.execute("UPDATE work_items SET current_node_id = 'env_setup' WHERE id = ?", (wid,))
+        conn.commit()
+        conn.close()
+
+        r = client.patch(f"/api/work-items/{wid}", json={"chain_template": "default"})
+        assert r.status_code == 409, r.text
+
+        after = client.get(f"/api/work-items/{wid}").json()
+        assert after["chain_template"] == "quick-task"
+
+
+def test_patch_refuses_an_unknown_chain_template(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        repo = make_repo(tmp_path)
+        wid = client.post(
+            "/api/work-items", json={"title": "t", "repo": str(repo), "autostart": False}
+        ).json()["id"]
+
+        r = client.patch(f"/api/work-items/{wid}", json={"chain_template": "does-not-exist"})
+        assert r.status_code == 404, r.text
+
+        after = client.get(f"/api/work-items/{wid}").json()
+        assert after["chain_template"] is None
+
+
+def test_patch_switching_chain_template_preserves_attachment_gate_trim(tmp_path, monkeypatch):
+    """An item that attached a spec at intake has already trimmed
+    spec_approval out of its chain (Kraft-dgh); switching template must not
+    force it to reattach to get that trim back."""
+    templates_dir = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
+    (templates_dir / "custom.yaml").write_text(
+        "id: custom\n"
+        "nodes:\n"
+        "  - { id: spec, tasks: [on.spec.requested], gate_after: spec_approval }\n"
+        "  - { id: verify, tasks: [on.test.run], gate_after: null }\n"
+    )
+    client = _client(tmp_path, monkeypatch, templates_dir=templates_dir)
+    with client:
+        repo = make_repo(tmp_path)
+        spec = repo / ".engineering" / "specs" / "s.md"
+        spec.parent.mkdir(parents=True)
+        spec.write_text("# spec\n")
+        wid = client.post(
+            "/api/work-items",
+            json={
+                "title": "t",
+                "repo": str(repo),
+                "chain_template": "default",
+                "attachments": [{"kind": "spec", "path": ".engineering/specs/s.md"}],
+                "cwd": str(repo),
+                "autostart": False,
+            },
+        ).json()["id"]
+        before = client.get(f"/api/work-items/{wid}").json()
+        assert "spec" not in [n["id"] for n in before["chain_definition"]["nodes"]]
+
+        r = client.patch(f"/api/work-items/{wid}", json={"chain_template": "custom"})
+        assert r.status_code == 200, r.text
+
+        after = client.get(f"/api/work-items/{wid}").json()
+        assert [n["id"] for n in after["chain_definition"]["nodes"]] == ["verify"]
+
+
+def test_patch_sets_agent_overrides_and_records_an_event(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        repo = make_repo(tmp_path)
+        wid = client.post(
+            "/api/work-items", json={"title": "t", "repo": str(repo), "autostart": False}
+        ).json()["id"]
+
+        r = client.patch(
+            f"/api/work-items/{wid}",
+            json={"agent_overrides": {"model": "opus", "effort": "high"}},
+        )
+        assert r.status_code == 200, r.text
+
+        evs = client.get(f"/api/work-items/{wid}/events").json()
+        changed = [e for e in evs if e["type"] == "agent_overrides_changed"]
+        assert [e["payload"] for e in changed] == [
+            {"overrides": {"model": "opus", "effort": "high"}}
+        ]
+
+
+def test_patch_clears_agent_overrides_with_an_empty_object(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        repo = make_repo(tmp_path)
+        wid = client.post(
+            "/api/work-items", json={"title": "t", "repo": str(repo), "autostart": False}
+        ).json()["id"]
+        client.patch(f"/api/work-items/{wid}", json={"agent_overrides": {"model": "opus"}})
+
+        r = client.patch(f"/api/work-items/{wid}", json={"agent_overrides": {}})
+        assert r.status_code == 200, r.text
+
+        row = client.get(f"/api/work-items/{wid}").json()
+        assert row["agent_overrides"] is None
+
+
+def test_patch_rejects_invalid_agent_overrides_with_422(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        repo = make_repo(tmp_path)
+        wid = client.post(
+            "/api/work-items", json={"title": "t", "repo": str(repo), "autostart": False}
+        ).json()["id"]
+
+        r = client.patch(f"/api/work-items/{wid}", json={"agent_overrides": {"effort": "turbo"}})
+        assert r.status_code == 422, r.text
+
+
+def test_patch_accepts_agent_overrides_on_a_started_or_paused_item(tmp_path, monkeypatch):
+    """Unlike chain_template, a model/effort dial has no current_node_id
+    restriction -- it is the door to make a stuck item cheaper before its
+    next retry."""
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        repo = make_repo(tmp_path)
+        wid = client.post(
+            "/api/work-items", json={"title": "t", "repo": str(repo), "autostart": False}
+        ).json()["id"]
+        db_path = Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "UPDATE work_items SET current_node_id = 'env_setup', status = 'paused' WHERE id = ?",
+            (wid,),
+        )
+        conn.commit()
+        conn.close()
+
+        r = client.patch(f"/api/work-items/{wid}", json={"agent_overrides": {"model": "haiku"}})
+        assert r.status_code == 200, r.text
+
+
 def _post_default(client, repo):
     return client.post(
         "/api/work-items",
