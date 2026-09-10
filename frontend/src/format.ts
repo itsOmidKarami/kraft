@@ -80,6 +80,7 @@ const STATUS_WORDS: Record<string, string> = {
   capped_out: "capped out",
   needs_human: "needs you",
   rate_limited: "rate limited",
+  config_error: "config error",
 };
 
 export function statusWord(status: string): string {

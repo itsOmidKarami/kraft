@@ -69,6 +69,10 @@ export interface WorkItem {
   attachments?: WorkItemAttachment[];
   root_merge_policy?: string | null;
   worktree_path?: string;
+  /** The worktree's current HEAD (Kraft-lu2), so the gate can tell a
+   *  measurement taken on this commit from one taken before it. Only on the
+   *  detail endpoint. */
+  head_sha?: string | null;
   /** why the item is stopped, from the `work_item_needs_human` it sits on */
   stop_reason?: string | null;
   /** Minor findings that never entered the fix loop; only on the detail endpoint. */
@@ -106,7 +110,8 @@ export type SessionStatus =
   | "capped_out"
   | "paused"
   | "unknown"
-  | "rate_limited";
+  | "rate_limited"
+  | "config_error";
 
 export interface WorkerSession {
   id: string;
@@ -125,6 +130,9 @@ export interface WorkerSession {
   cost_usd: number | null;
   wall_ms: number | null;
   model: string | null;
+  /** The worktree HEAD this session was dispatched against (Kraft-lu2); null
+   *  for a builtin/agent task that stamps nothing, and for a historical row. */
+  head_sha: string | null;
 }
 
 export interface KraftEvent {
