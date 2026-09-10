@@ -130,7 +130,41 @@ _Add a brief overview of your project architecture_
 
 ## Conventions & Patterns
 
-_Add your project-specific conventions here_
+### Specs and plans are not committed
+
+Design docs and implementation plans do not go into git. `.engineering/` is
+gitignored (Kraft writes its own specs, plans, review briefs and session notes
+there), and `docs/superpowers/` still holds ~100 tracked files from before this
+rule — leave those, but do not add to them.
+
+When a brainstorm produces a spec and a plan for Kraft, hand them over as work
+item attachments instead:
+
+```bash
+kraft item create "title" --spec PATH --plan PATH
+```
+
+**An attachment is copied at run time, not at intake.** `builtins.ensure_worktree`
+copies the file into the worker's worktree when the item runs, reading the
+absolute `source` recorded at intake. That copy is a silent skip:
+
+```python
+if dest.exists() or not src.is_file():
+    continue
+```
+
+Gate trimming, by contrast, happens at *intake* — it is baked into
+`chain_definition`. So if the source file is gone by the time the item resumes,
+the item runs with its spec and plan gates removed **and no document**, with no
+error and no warning.
+
+Two consequences worth remembering:
+
+- Write the spec and plan somewhere durable before attaching. A file authored in
+  a throwaway `.claude/worktrees/` worktree stops existing when that worktree is
+  cleaned up, and the attachment is only a path to it.
+- Do not attach and then move or delete the file. Resume the item first, or
+  re-file it.
 
 ## Kraft Workers
 
