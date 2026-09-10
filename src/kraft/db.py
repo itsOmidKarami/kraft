@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 22
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -67,6 +67,12 @@ CREATE TABLE work_items (
   -- whether this item's `auto_escalate` gates may be reviewed by an agent
   -- before a human sees them (Kraft-zr3s). Off unless a human asked for it.
   auto_gate        INTEGER NOT NULL DEFAULT 0,
+  -- a work item's own model/effort override (Kraft-4k6l): JSON object with
+  -- up to keys model, escalate_model, effort. NULL means "use the template's
+  -- own binding". Read fresh at every dispatch, not snapshotted into
+  -- chain_definition, so a paused item can be made cheaper or stronger
+  -- before its next retry.
+  agent_overrides TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
@@ -437,6 +443,7 @@ SELECT id, bead_id, title, description, repo, chain_template, chain_definition,
     ],
     19: ["ALTER TABLE work_items ADD COLUMN escalation_session_id TEXT"],
     20: ["ALTER TABLE work_items ADD COLUMN auto_gate INTEGER NOT NULL DEFAULT 0"],
+    21: ["ALTER TABLE work_items ADD COLUMN agent_overrides TEXT"],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins
