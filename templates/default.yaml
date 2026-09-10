@@ -13,7 +13,7 @@ nodes:
     tasks: [on.env.prepare]
     gate_after: null
   - id: implementation
-    tasks: [on.implementation.start]
+    tasks: [on.implementation.start, on.repos.scan]
     gate_after: null
   - id: verify
     tasks: [on.test.run, on.review.local.run]

@@ -29,8 +29,8 @@ def _commit_paths(worktree: Path, paths: list[str], message: str) -> None:
     same failure seen from the other side), and the content is a file Kraft
     copied unmodified — there is nothing here for the hook to catch. No `-c
     user.email` override either: `ensure_worktree` pins identity into the
-    worktree (and its submodules) via `_pin_identity` at creation, so nothing
-    downstream needs to override it.
+    worktree (and its submodules) via `_pin_identity` at creation (Kraft-cppp),
+    which is where every other commit on this branch gets its author.
 
     Best effort. A failure logs a warning and returns: a document that did not
     commit becomes a dirty-tree failure at `open_mr` with git's own message
@@ -163,6 +163,82 @@ def _pin_identity(repo: Path, worktree: Path, work_item_id: str) -> None:
             pin(worktree / line)
 
 
+async def _setup_submodules(
+    db, repo: Path, worktree: Path, branch: str, work_item_id: str, paths: list[str]
+) -> None:
+    """`git submodule update --init` only the declared paths (design 3 step 2
+    -- never blanket), check the item's branch out inside each one, and write
+    one `work_item_repos` row per repo -- deepest submodule first, root last
+    (3a) -- so the forge nodes later know what to open a merge request
+    against and in what order.
+
+    A submodule is a regular working copy once initialized, not a bare repo,
+    so getting the item's branch into it is a plain `checkout`/`checkout -b`
+    -- design 06's "git worktree add inside each submodule" is shorthand for
+    "this submodule ends up on the item's branch", not a second linked
+    worktree, which a submodule path does not support the way the root does.
+    """
+    ordered = store.merge_rank_order(paths)
+    init = await asyncio.to_thread(
+        subprocess.run,
+        # `-c protocol.file.allow=always`: git 2.38+ refuses a `file://`
+        # submodule URL by default (a supply-chain hardening default, not
+        # something specific to this repo's own submodules). A real remote is
+        # https/ssh and is unaffected; the fixtures this plan's own tests
+        # build (`make_repo_with_submodule`) use plain filesystem paths.
+        [
+            "git",
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "update",
+            "--init",
+            "--",
+            *ordered,
+        ],
+        cwd=str(worktree),
+        capture_output=True,
+        text=True,
+    )
+    if init.returncode != 0:
+        detail = init.stderr.strip() or init.stdout.strip()
+        raise RuntimeError(f"git submodule update --init failed for {work_item_id}: {detail}")
+    for rank, rel in enumerate(ordered, start=1):
+        sub = worktree / rel
+        exists = git_read(
+            sub, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", expected_failure=True
+        )
+        checkout = await asyncio.to_thread(
+            subprocess.run,
+            ["git", "checkout", branch] if exists else ["git", "checkout", "-b", branch],
+            cwd=str(sub),
+            capture_output=True,
+            text=True,
+        )
+        if checkout.returncode != 0:
+            detail = checkout.stderr.strip() or checkout.stdout.strip()
+            raise RuntimeError(
+                f"checkout of {branch!r} failed in submodule {rel} for {work_item_id}: {detail}"
+            )
+        await asyncio.to_thread(_pin_identity, repo, sub, work_item_id)
+        await db.write(
+            lambda c, p=str(sub), r=rel, rk=rank: store.add_repo(
+                c,
+                work_item_id=work_item_id,
+                repo_path=p,
+                role="submodule",
+                submodule_path=r,
+                merge_rank=rk,
+            )
+        )
+    root_rank = len(ordered) + 1
+    await db.write(
+        lambda c, p=str(worktree), rk=root_rank: store.add_repo(
+            c, work_item_id=work_item_id, repo_path=p, role="root", merge_rank=rk
+        )
+    )
+
+
 async def ensure_worktree(
     db,
     run_dirs,
@@ -265,7 +341,117 @@ async def ensure_worktree(
                 work_item_id,
                 synced.stderr.strip() or synced.stdout.strip(),
             )
+    decl = db.read(
+        lambda c: c.execute(
+            "SELECT submodules FROM work_items WHERE id = ?", (work_item_id,)
+        ).fetchone()
+    )
+    submodules = json.loads(decl["submodules"]) if decl and decl["submodules"] else []
+    if submodules:
+        await _setup_submodules(db, Path(repo), worktree, branch, work_item_id, submodules)
     return worktree
+
+
+async def scan_submodules(
+    db,
+    run_dirs,
+    *,
+    session_id: str,
+    work_item_id: str,
+    node_id: str,
+    hook_point: str,
+    round: int,
+    repo: str,
+    worktree: str,
+) -> str:
+    """Design 3a: catch a submodule the agent touched but the item never
+    declared, give it a `work_item_repos` row and a pinned identity, before
+    `open_mr` would otherwise have to refuse over it.
+
+    Runs right after `on.implementation.start` in the same node (see
+    `default.yaml`), so a plain green `verify` never masks a change `open_mr`
+    would reject three nodes later -- this is what would have rescued work
+    item 9d0ab38ff3c9439b90506df0f6966660, which declared nothing.
+    """
+    log_path, result_path = await start_session(
+        db,
+        run_dirs,
+        session_id=session_id,
+        work_item_id=work_item_id,
+        node_id=node_id,
+        hook_point=hook_point,
+        round=round,
+    )
+    wt = Path(worktree)
+    known = {
+        r["submodule_path"]
+        for r in db.read(
+            lambda c: c.execute(
+                "SELECT submodule_path FROM work_item_repos "
+                "WHERE work_item_id = ? AND role = 'submodule'",
+                (work_item_id,),
+            ).fetchall()
+        )
+        if r["submodule_path"]
+    }
+    # '+' means the submodule's checked-out commit no longer matches what the
+    # superproject's index records -- new commits sitting in the worktree,
+    # exactly the shape that went unreported before this plan.
+    raw = git_read(wt, "submodule", "status", expected_failure=True) or ""
+    touched = set()
+    for line in raw.splitlines():
+        if not line or line[0] != "+":
+            continue
+        parts = line[1:].split()
+        if len(parts) >= 2:
+            touched.add(parts[1])
+
+    undeclared = sorted(touched - known)
+    if not undeclared:
+        return await finish_session(
+            db,
+            log_path,
+            result_path,
+            session_id=session_id,
+            status="done",
+            log="no undeclared submodule changes\n",
+        )
+
+    existing = db.read(
+        lambda c: c.execute(
+            "SELECT COUNT(*) AS n FROM work_item_repos WHERE work_item_id = ?", (work_item_id,)
+        ).fetchone()
+    )
+    next_rank = existing["n"] + 1
+    log = ""
+    for rel in undeclared:
+        sub = wt / rel
+        await asyncio.to_thread(_pin_identity, Path(repo), sub, work_item_id)
+        rank = next_rank
+        await db.write(
+            lambda c, p=str(sub), r=rel, rk=rank: store.add_repo(
+                c,
+                work_item_id=work_item_id,
+                repo_path=p,
+                role="submodule",
+                submodule_path=r,
+                merge_rank=rk,
+            )
+        )
+        log += f"found undeclared submodule change: {rel}\n"
+        next_rank += 1
+    # The root row (written by ensure_worktree, if this item declared any
+    # submodule at all) now has to merge after these too.
+    final_rank = next_rank
+    await db.write(
+        lambda c, rk=final_rank: c.execute(
+            "UPDATE work_item_repos SET merge_rank = ? WHERE work_item_id = ? AND role = 'root'",
+            (rk, work_item_id),
+        )
+    )
+    return await finish_session(
+        db, log_path, result_path, session_id=session_id, status="done", log=log
+    )
 
 
 async def start_session(
