@@ -894,6 +894,9 @@ HOOK_KEYWORDS = {
     "on.chain.review_ready": ("chain-review",),
     "on.env.prepare": ("worktree", "env"),
     "on.implementation.start": ("test-driven", "tdd", "implement"),
+    # No candidates: scanning repos for undeclared submodule changes is the
+    # forge adapter's own job, not something an installed skill serves.
+    "on.repos.scan": (),
     "on.test.run": (),
     "on.review.local.run": ("review",),
     "on.mr.open": ("finishing", "branch", "pull-request", "merge-request"),
