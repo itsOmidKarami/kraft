@@ -390,6 +390,21 @@ describe("WorkItemDetail", () => {
     expect(spy).toHaveBeenCalledWith("w1", "use postgres");
   });
 
+  it("offers escalate on a needs_context stop too", async () => {
+    const spy = vi
+      .spyOn(api, "escalateWorkItem")
+      .mockResolvedValue({ id: "w1", status: "escalating" });
+    setup({
+      status: "needs_human",
+      needs_context_question: "which database should this target?",
+    });
+    renderDetail();
+    await userEvent.click(screen.getByRole("button", { name: /^escalate/i }));
+    await userEvent.type(screen.getByLabelText("escalate message"), "postgres, obviously");
+    await userEvent.click(screen.getByRole("button", { name: /send to agent/i }));
+    expect(spy).toHaveBeenCalledWith("w1", "postgres, obviously");
+  });
+
   it("answers a needs_context stop before falling to CappedCard, even on a fix-loop node", () => {
     setup({
       status: "needs_human",

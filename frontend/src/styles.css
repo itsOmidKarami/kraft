@@ -338,14 +338,18 @@ aside .row, .narrow .row {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 12px; color: var(--color-accent-300);
 }
-.gate-actions { display: flex; gap: 8px; }
+.gate-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .gate-artifacts { display: flex; gap: 8px; flex-wrap: wrap; }
 .current-node > details > summary { cursor: pointer; padding: 8px 0; }
 .node-group-head { display: inline-flex; align-items: baseline; gap: 10px; }
 .current-node > details[open] > summary .row-title { color: var(--color-text); }
 .gate-actions .btn { font-size: 13px; }
-.gate-reject { display: flex; flex-direction: column; gap: 8px; width: 100%; }
-.gate-reject textarea.input { min-height: 68px; font-size: 13px; }
+/* .gate-reject fully replaces its row (Gate.tsx swaps it in via ternary), so
+   width:100% alone was enough. .gate-escalate instead sits alongside a card's
+   own retry/answer/approve button -- flex-basis pushes it onto its own line
+   rather than squeezing into the shared no-wrap-by-default row (Kraft-xhft). */
+.gate-reject, .gate-escalate { display: flex; flex-direction: column; gap: 8px; width: 100%; flex-basis: 100%; }
+.gate-reject textarea.input, .gate-escalate textarea.input { min-height: 68px; font-size: 13px; }
 .gate-deferred {
   list-style: none; margin: 10px 0 0; padding: 10px 0 0;
   border-top: 1px solid var(--color-divider);
@@ -1010,8 +1014,8 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; }
      ("spec · node 1 of 10"), and the segments still show progress. */
   .chain-bar.lg .chain-label { display: none; }
 
-  .gate-reject textarea.input { font-size: 16px; min-height: 96px; }
-  .gate-reject .btn { min-height: 44px; }
+  .gate-reject textarea.input, .gate-escalate textarea.input { font-size: 16px; min-height: 96px; }
+  .gate-reject .btn, .gate-escalate .btn { min-height: 44px; }
 
   /* same zoom-lock as the gate-reject textarea above, on /search's input */
   .search-page .search-bar input[type="search"] { font-size: 16px; }
