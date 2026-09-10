@@ -155,4 +155,12 @@ describe("CappedCard", () => {
     await userEvent.click(button);
     expect(spy).toHaveBeenCalledWith("w1", undefined);
   });
+
+  it("drops its own retry hint and disables retry while an escalation is running", () => {
+    const escalationSessions = [...sessions, session({ id: "e1", hook_point: "escalation", status: "running" })];
+    render(<CappedCard item={item} sessions={escalationSessions} events={events} />);
+    expect(screen.queryByText(/retry resets the loop counter/)).toBeNull();
+    expect(screen.getByText(/Kraft agent is on it/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /steer and retry/i })).toBeDisabled();
+  });
 });

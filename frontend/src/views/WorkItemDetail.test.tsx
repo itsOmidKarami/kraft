@@ -469,6 +469,18 @@ describe("WorkItemDetail", () => {
     expect(screen.getByText(/Review changes/)).toBeInTheDocument();
   });
 
+  it("links out to the merge request once open_mr has run", () => {
+    setup({ mr_ref: { number: 42, url: "https://forge.example/mr/42" } });
+    renderDetail();
+    const link = screen.getByRole("link", { name: /open mr !42/i });
+    expect(link).toHaveAttribute("href", "https://forge.example/mr/42");
+  });
+
+  it("offers no MR link before open_mr has run", () => {
+    renderDetail();
+    expect(screen.queryByRole("link", { name: /open mr/i })).toBeNull();
+  });
+
   it("offers the spec at a spec gate", async () => {
     setup({ pending_gate: "spec_approval", gate_artifact: ".engineering/specs/w1.md" });
     renderDetail();
