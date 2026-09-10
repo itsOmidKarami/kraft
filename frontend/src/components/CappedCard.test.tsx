@@ -129,6 +129,15 @@ describe("CappedCard", () => {
     expect(await screen.findByText(/no fix loop/)).toHaveClass("form-error");
   });
 
+  it("offers escalate alongside steer and retry", async () => {
+    const spy = vi.spyOn(api, "escalateWorkItem").mockResolvedValue({ id: "w1", status: "escalating" });
+    renderCard();
+    await userEvent.click(screen.getByRole("button", { name: /^escalate/i }));
+    await userEvent.type(screen.getByLabelText("escalate message"), "what's flaky here?");
+    await userEvent.click(screen.getByRole("button", { name: /send to agent/i }));
+    expect(spy).toHaveBeenCalledWith("w1", "what's flaky here?");
+  });
+
   it("drops the steer box on a node with no agent task (Kraft-bz9b)", async () => {
     const spy = vi.spyOn(api, "retryWorkItem").mockResolvedValue({
       id: "w1", node_id: "open_mr", loop: "", steer: null,
