@@ -2297,7 +2297,7 @@ async def remove_repo(request: Request, path: str):
     config_mod.save_repos(_repos_path(st), kept)
     # Mirror of the connect-time scan. A repo with work items stays in
     # `Indexer.repos()` and is simply re-ingested by the next rescan.
-    st.indexer.purge_repo(entry["path"])
+    await st.indexer.purge_repo(entry["path"])
 
 
 class TemplateBody(BaseModel):
