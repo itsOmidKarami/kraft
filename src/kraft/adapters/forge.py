@@ -986,9 +986,8 @@ async def _run_one(
             )
         case "sync_mr":
             # Push first: every commit after `open_mr` -- verify's fixes,
-            # mr_checks' findings, the review brief -- is local only until
-            # this runs, and `merge` refuses a branch ahead of its remote
-            # (Kraft-nh5m).
+            # mr_checks' findings -- is local only until this runs, and
+            # `merge` refuses a branch ahead of its remote (Kraft-nh5m).
             await forge.push(repo=repo, branch=branch)
             # The description `open_mr` wrote predates every commit verify
             # and mr_checks added, so it is rewritten from the branch head
@@ -1017,13 +1016,13 @@ async def _run_one(
                 await forge.push(repo=repo, branch=branch)
                 # `mr_sync`'s push, right after the human_review gate that
                 # ran after mr_checks last validated CI, can land a commit
-                # -- the review brief, anything a person committed while
-                # reviewing -- on a head mr_checks never watched. On a
-                # project that requires a green pipeline before merge, that
-                # push re-arms the requirement for a pipeline nothing here
-                # has seen finish (Kraft-266b). Wait it out the same way
-                # ci_poll does, with the same budget, before handing
-                # forge.merge() a head nothing has validated (Kraft-x10m).
+                # -- verify's fixes, mr_checks' own findings -- on a head
+                # mr_checks never watched. On a project that requires a
+                # green pipeline before merge, that push re-arms the
+                # requirement for a pipeline nothing here has seen finish
+                # (Kraft-266b). Wait it out the same way ci_poll does, with
+                # the same budget, before handing forge.merge() a head
+                # nothing has validated (Kraft-x10m).
                 ci_log, gate_status = await _wait_for_ci(
                     forge, repo=repo, branch=branch, timeout=poll_timeout, interval=poll_interval
                 )
