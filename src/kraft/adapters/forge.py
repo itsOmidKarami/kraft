@@ -848,6 +848,33 @@ async def _poll_merged(
         interval = min(interval * 2, cap)
 
 
+def _describe_ci(ci: CIStatus, *, timed_out: bool, poll_timeout: float) -> tuple[str, bool]:
+    """The log line(s) for one CI read, and whether it counts as a failure.
+
+    Shared by `ci_poll` and `merge` (Kraft-266b): human_review's own commit
+    re-arms the pipeline mr_checks already waited green, so `merge` has to
+    poll CI again before calling `glab mr merge` rather than trust mr_checks'
+    now-stale answer -- and the two nodes must describe a red, timed-out, or
+    unmergeable pipeline identically rather than drift apart.
+    """
+    # A timeout and a red pipeline are both a failure, but a reviewer -- and
+    # any fix loop built on this node (Kraft-cbr) -- has to tell "finished
+    # red" from "never finished".
+    head = (
+        f"pipeline timed out after {poll_timeout:g}s, still pending"
+        if timed_out
+        else f"pipeline {ci.state}"
+    )
+    log = f"{head}: {ci.url}\n" + "".join(f"  {j}\n" for j in ci.jobs)
+    # Green *and* unmergeable is the exact shape of the bug: the pipeline
+    # passes, the gate passes, and the merge node meets the conflict
+    # (Kraft-ejj9). `is False` and not falsiness: None is undecided, and
+    # undecided is this node's normal.
+    if ci.mergeable is False:
+        log += f"merge request is not mergeable: {ci.merge_detail or 'unknown'}\n"
+    return log, ci.state != "success" or ci.mergeable is False
+
+
 async def _run_one(
     forge: Forge,
     db,
@@ -913,24 +940,8 @@ async def _run_one(
             ci, timed_out = await _poll_ci(
                 forge, repo=repo, branch=branch, timeout=poll_timeout, interval=poll_interval
             )
-            # A timeout and a red pipeline are both a failed node, but a
-            # reviewer -- and any fix loop built on this node (Kraft-cbr) --
-            # has to tell "finished red" from "never finished".
-            head = (
-                f"pipeline timed out after {poll_timeout:g}s, still pending"
-                if timed_out
-                else f"pipeline {ci.state}"
-            )
-            log = f"{head}: {ci.url}\n" + "".join(f"  {j}\n" for j in ci.jobs)
-            if ci.mergeable is False:
-                # Green *and* unmergeable is the exact shape of the bug: the
-                # pipeline passes, the gate passes, and the merge node meets
-                # the conflict (Kraft-ejj9). `is False` and not falsiness:
-                # None is undecided, and undecided is this node's normal.
-                log += f"merge request is not mergeable: {ci.merge_detail or 'unknown'}\n"
-                status = "failed"
-            else:
-                status = "done" if ci.state == "success" else "failed"
+            log, failed = _describe_ci(ci, timed_out=timed_out, poll_timeout=poll_timeout)
+            status = "failed" if failed else "done"
         case "sync_mr":
             # Push first: every commit after `open_mr` -- verify's fixes,
             # mr_checks' findings, the review brief -- is local only until
@@ -962,6 +973,19 @@ async def _run_one(
                 # (Kraft-bxj8). Below the already-merged check: a branch
                 # already in main needs nothing pushed to it.
                 await forge.push(repo=repo, branch=branch)
+                # human_review's own commit (the review brief) lands on this
+                # branch after mr_checks already waited its pipeline green,
+                # which re-arms it. `glab mr merge --yes` against a pipeline
+                # still running for that commit exits 0 but schedules "merge
+                # when checks pass" and merges nothing (Kraft-79x3) -- so
+                # mr_checks' answer is stale the moment human_review pushes,
+                # and this has to ask again rather than trust it (Kraft-266b).
+                ci, timed_out = await _poll_ci(
+                    forge, repo=repo, branch=branch, timeout=poll_timeout, interval=poll_interval
+                )
+                log, failed = _describe_ci(ci, timed_out=timed_out, poll_timeout=poll_timeout)
+                if failed:
+                    return log, "failed"
                 # A genuine refusal -- conflicts, unmet approval rules --
                 # still raises inside forge.merge and still fails the node.
                 await forge.merge(repo=repo, branch=branch, mr=MR(number=0, url=""))
