@@ -902,7 +902,7 @@ def test_migrate_v16_to_v17_rebuilds_for_rate_limited(tmp_path):
                 "'abandoned')),",
             ),
             (
-                "'done_with_concerns', 'needs_context', 'rate_limited')),",
+                "'done_with_concerns', 'needs_context', 'rate_limited', 'config_error')),",
                 "                    'done_with_concerns', 'needs_context')),",
             ),
         ),
@@ -973,3 +973,30 @@ def test_migrating_v13_adds_the_branch_column(tmp_path):
     cols = {r[1] for r in conn.execute("PRAGMA table_info(work_items)").fetchall()}
     assert "branch" in cols
     assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+
+
+def test_config_error_is_an_allowed_session_status(tmp_path):
+    """The CHECK constraint has to know the status before the adapter can write
+    it — otherwise a missing binary turns a bad-config stop into an
+    IntegrityError three frames up (Kraft-579)."""
+    conn = db._connect(tmp_path / "orchestrator.db")
+    db.migrate(conn)
+    conn.execute(
+        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+        "status, created_at, updated_at) VALUES ('w1', 't', '/r', 'quick-task', '{}', "
+        "'active', '2026-01-01', '2026-01-01')"
+    )
+    conn.execute(
+        "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, log_path, "
+        "result_path, status, created_at) VALUES ('s1', 'w1', 'verify', 'on.test.run', "
+        "'/l', '/r.json', 'config_error', '2026-01-01')"
+    )  # must not raise IntegrityError
+
+
+def test_worker_sessions_carries_a_head_sha(tmp_path):
+    """Kraft-lu2's column rides along in this migration's table rebuild rather
+    than paying for a second one."""
+    conn = db._connect(tmp_path / "orchestrator.db")
+    db.migrate(conn)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(worker_sessions)").fetchall()}
+    assert "head_sha" in cols

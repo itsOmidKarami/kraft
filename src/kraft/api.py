@@ -1068,6 +1068,10 @@ async def get_work_item(wid: str, request: Request):
         "repos": st.db.read(lambda c: store.repos_for(c, wid)),
         # local-only: the checkout the agents are editing, for "Open worktree"
         "worktree_path": str(st.run_dirs.worktrees / wid),
+        # What the *diff on screen* is, so the gate can tell a measurement taken
+        # on this commit from one taken three commits ago (Kraft-lu2).
+        # `git_read` returns None for a worktree that does not exist yet.
+        "head_sha": config_mod.git_read(st.run_dirs.worktrees / wid, "rev-parse", "HEAD"),
         # The gate actually waiting on a person. Inferring it client-side from
         # "the node has a gate_after and its sessions are done" cannot see a
         # rejection, and offers Approve on a gate the API will 409 (Kraft).

@@ -1299,3 +1299,102 @@ def test_reject_target_rejects_a_forward_node_with_a_value_error():
     }
     with pytest.raises(ValueError):
         executor.reject_target(chain, 0, "b")
+
+
+def test_a_subprocess_hook_prefers_the_repos_test_command(tmp_path, monkeypatch):
+    """The registry's command is the fallback, not the authority: verify and CI
+    drift apart exactly when the hardcoded one wins (Kraft-579)."""
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    marker = tmp_path / "which-ran.txt"
+
+    registry_base = fake_registry(sys.executable, _FAKE_AGENT)
+    registry = Registry(
+        hooks={
+            **registry_base.hooks,
+            "on.test.run": {
+                "kind": "subprocess",
+                "command": [sys.executable, "-c", f"open({str(marker)!r}, 'w').write('registry')"],
+            },
+        }
+    )
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(
+                    repo_entry={
+                        "test_command": (
+                            f"{sys.executable} -c \"open({str(marker)!r}, 'w').write('repo')\""
+                        )
+                    },
+                    steering_dir=None,
+                ),
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    assert marker.read_text() == "repo", "the registry's hardcoded command won"
+
+
+def test_a_subprocess_hook_falls_back_to_the_registry_command(tmp_path, monkeypatch):
+    """A repo entry with no test_command keeps today's behaviour byte for byte —
+    this is what makes the change safe for every existing install."""
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    marker = tmp_path / "which-ran.txt"
+
+    registry_base = fake_registry(sys.executable, _FAKE_AGENT)
+    registry = Registry(
+        hooks={
+            **registry_base.hooks,
+            "on.test.run": {
+                "kind": "subprocess",
+                "command": [sys.executable, "-c", f"open({str(marker)!r}, 'w').write('registry')"],
+            },
+        }
+    )
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry={}, steering_dir=None),
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    assert marker.read_text() == "registry"

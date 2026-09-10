@@ -122,6 +122,13 @@ def load_repos(
         r.setdefault("default_model", None)
         if r.get("default_model") is not None and not isinstance(r["default_model"], str):
             raise ConfigError("repos.yaml: 'default_model' must be a string")
+        # The command CI runs for this repo. The registry's `on.test.run`
+        # binding is one command for every repo on the install, which is what
+        # lets verify and CI drift apart (Kraft-579). None keeps the registry's
+        # command, so an install that never sets one is unchanged.
+        r.setdefault("test_command", None)
+        if r.get("test_command") is not None and not isinstance(r["test_command"], str):
+            raise ConfigError("repos.yaml: 'test_command' must be a string")
         for key in ("deny_tools", "steering"):
             v = r.setdefault(key, [])
             if not isinstance(v, list) or not all(isinstance(x, str) for x in v):

@@ -553,8 +553,14 @@ def create_session(
     log_path,
     result_path,
     round: int = 0,
+    head_sha: str | None = None,
 ) -> None:
-    """`round` is the fix-cycle index this session was dispatched in (0 = first pass)."""
+    """`round` is the fix-cycle index this session was dispatched in (0 = first pass).
+
+    `head_sha` is the worktree HEAD this session was dispatched against
+    (Kraft-lu2) — None for a builtin/agent task that has no meaningful sha of
+    its own to report.
+    """
     # The attempt is the count of this (work item, node, hook point)'s sessions,
     # computed in the INSERT rather than passed in: no caller knows better than the
     # table does, and two callers would each re-implement the same query
@@ -562,10 +568,11 @@ def create_session(
     # serialised — so the count cannot race a concurrent insert.
     conn.execute(
         "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, pid, "
-        "pid_start_time, log_path, result_path, status, attempt, created_at, exited_at, round) "
+        "pid_start_time, log_path, result_path, status, attempt, created_at, exited_at, "
+        "round, head_sha) "
         "VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, 'pending', "
         "(SELECT COUNT(*) + 1 FROM worker_sessions "
-        "WHERE work_item_id = ? AND node_id = ? AND hook_point = ?), ?, NULL, ?)",
+        "WHERE work_item_id = ? AND node_id = ? AND hook_point = ?), ?, NULL, ?, ?)",
         (
             id,
             work_item_id,
@@ -578,6 +585,7 @@ def create_session(
             hook_point,
             _now(),
             round,
+            head_sha,
         ),
     )
     (attempt,) = conn.execute("SELECT attempt FROM worker_sessions WHERE id = ?", (id,)).fetchone()

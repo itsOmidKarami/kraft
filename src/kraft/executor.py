@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import re
+import shlex
 import sqlite3
 import uuid
 from collections.abc import Awaitable, Callable
@@ -12,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from kraft import builtins as _builtins
+from kraft import config as _config
 from kraft import events, gate_review, store
 from kraft import findings as _findings
 from kraft import policy as _policy
@@ -345,6 +347,11 @@ BUDGET = "budget"
 #: SIGTERM.
 RATE_LIMITED = "rate_limited"
 
+#: A measuring task that never launched (Kraft-579). Terminal like a pause: no
+#: fix cycle, no counter bump, no on_failure repair -- none of those can install
+#: a missing binary.
+CONFIG_ERROR = "config_error"
+
 
 def _budget_breach(db, work_item_id: str, budget: _policy.Budget) -> dict | None:
     """The breached cap, or None. Evaluated fresh: it is a query, not a counter.
@@ -460,11 +467,16 @@ async def _dispatch(
     binding = registry.hooks[task_hook]
     session_id = uuid.uuid4().hex
     kind = binding["kind"]
+    # The commit the measurement is about (Kraft-lu2). Resolved here, once, at
+    # dispatch: a sha read later would be whatever HEAD moved to while the task
+    # ran, which is the opposite of the question the gate asks. `git_read`
+    # never raises -- None for on.env.prepare, whose worktree does not exist yet.
     common = dict(
         session_id=session_id,
         work_item_id=work_item_row["id"],
         node_id=node["id"],
         round=round,
+        head_sha=_config.git_read(Path(worktree), "rev-parse", "HEAD"),
     )
     if kind == "builtin" and binding.get("handler") == "env_setup":
         return await _builtins.env_setup(
@@ -568,11 +580,18 @@ async def _dispatch(
             )
         return status
     if kind == "subprocess":
+        # The repo's own command wins over the registry's. The registry is per
+        # install and one command for every repo on it; the test command is a
+        # property of the repo, and a hardcoded one is how verify ends up
+        # running something CI does not (Kraft-579). Same source the forge
+        # branch below reads for `forge`.
+        override = (launch.repo_entry or {}).get("test_command") if launch else None
+        cmd = shlex.split(override) if override else list(binding["command"])
         return await _subprocess.run_task(
             db,
             run_dirs,
             hook_point=task_hook,
-            cmd=list(binding["command"]),
+            cmd=cmd,
             cwd=worktree,
             # The fix loop re-runs the test command after an agent edits source in
             # the same worktree. A .pyc written on an earlier cycle has the same
@@ -650,6 +669,13 @@ async def _measure_node(
     # certainly the same SIGTERM arriving on a different row.
     if any(r == "paused" for r in results):
         return "paused", [], []
+    # A human's interruption still outranks this, but a task that never
+    # launched outranks a rate limit, a budget breach and a co-task's failure:
+    # none of those are evidence about anything while a task in this node
+    # could not even start (Kraft-579).
+    if any(r == CONFIG_ERROR for r in results):
+        failed = [tasks[i] for i, r in enumerate(results) if r == CONFIG_ERROR]
+        return CONFIG_ERROR, failed, []
     if any(r == RATE_LIMITED for r in results):
         return RATE_LIMITED, [], []
     # Logged before the BUDGET rung returns: a co-task can raise in the same node
@@ -892,6 +918,13 @@ async def _walk_node(
         )
         if verdict == "paused":
             return "paused"
+        if verdict == CONFIG_ERROR:
+            named = ", ".join(failed)
+            reason = f"could not start {named} in node {node['id']} — see the session log"
+            await db.write(
+                lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node["id"], reason)
+            )
+            return "needs_human"
         if verdict == RATE_LIMITED:
             return await _stop_for_rate_limit(db, work_item_id, node)
         if verdict == BUDGET:
@@ -962,6 +995,15 @@ async def _walk_node(
         )
         if verdict == "paused":
             return "paused"
+        if verdict == CONFIG_ERROR:
+            # Checked before bump_counter: a repair pass cannot install a
+            # binary either, and the counter must stay untouched (Kraft-579).
+            named = ", ".join(failed)
+            reason = f"could not start {named} in node {node['id']} — see the session log"
+            await db.write(
+                lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node["id"], reason)
+            )
+            return "needs_human"
         if verdict == RATE_LIMITED:
             return await _stop_for_rate_limit(db, work_item_id, node)
         if verdict == BUDGET:
@@ -971,8 +1013,19 @@ async def _walk_node(
         found, reported = _collect_findings(db, work_item_id, node, round)
         eligible = [f for f in found if f.severity in policy.loop_severities]
         prints = sorted({f.fingerprint for f in eligible})
+        # A task on `builtin: noop` exits 'done' in milliseconds having done
+        # nothing, contributes no findings, and is therefore indistinguishable
+        # in this event from a review that ran and found nothing (Kraft-yenu).
+        # Naming them costs a dict lookup and is the only signal a reader gets
+        # that a tier of review is not actually running.
+        noop_hooks = [
+            t
+            for t in node["tasks"]
+            if registry.hooks.get(t, {}).get("kind") == "builtin"
+            and registry.hooks.get(t, {}).get("handler") == "noop"
+        ]
         await db.write(
-            lambda c, r=round, found=found, prints=prints: events.append(
+            lambda c, r=round, found=found, prints=prints, noop_hooks=noop_hooks: events.append(
                 c,
                 work_item_id,
                 "findings_measured",
@@ -981,6 +1034,7 @@ async def _walk_node(
                     "cycle": r,
                     "findings": [asdict(f) for f in found],
                     "fingerprints": prints,
+                    "noop_hooks": noop_hooks,
                 },
             )
         )
