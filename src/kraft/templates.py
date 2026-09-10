@@ -30,6 +30,7 @@ CONFIG_FILES = frozenset(
         "access.yaml",
         "notify.yaml",
         "intake.yaml",
+        "theme.yaml",
     }
 )
 # The complete gate set. Public because the API validates approve/reject against it
