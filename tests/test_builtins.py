@@ -1217,3 +1217,137 @@ def test_refresh_worktree_base_raises_and_aborts_on_conflict(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_mr_rebase_moves_the_base_and_records_a_done_session(tmp_path):
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            worktree = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id="w1"
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
+            )
+            branch = store.branch_for(row)
+
+            (repo / "moved.txt").write_text("moved on\n")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "moved on")
+            new_head = git_read(repo, "rev-parse", "HEAD")
+
+            status = await kraft_builtins.mr_rebase(
+                database,
+                rd,
+                session_id="s1",
+                work_item_id="w1",
+                node_id="pre_mr_rebase",
+                hook_point="on.mr.rebase",
+                round=0,
+                repo=str(repo),
+                worktree=str(worktree),
+                branch=branch,
+            )
+            assert status == "done"
+            assert _base_ref(database) == new_head
+            assert (worktree / "moved.txt").is_file()
+            session = database.read(
+                lambda c: c.execute(
+                    "SELECT hook_point, status FROM worker_sessions WHERE id='s1'"
+                ).fetchone()
+            )
+            assert session["hook_point"] == "on.mr.rebase"
+            assert session["status"] == "done"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_mr_rebase_leaves_base_ref_alone_when_nothing_to_rebase(tmp_path):
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            worktree = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id="w1"
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
+            )
+            branch = store.branch_for(row)
+            before = _base_ref(database)
+
+            status = await kraft_builtins.mr_rebase(
+                database,
+                rd,
+                session_id="s1",
+                work_item_id="w1",
+                node_id="pre_mr_rebase",
+                hook_point="on.mr.rebase",
+                round=0,
+                repo=str(repo),
+                worktree=str(worktree),
+                branch=branch,
+            )
+            assert status == "done"
+            assert _base_ref(database) == before
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_mr_rebase_raises_on_conflict(tmp_path):
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            worktree = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id="w1"
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
+            )
+            branch = store.branch_for(row)
+
+            (worktree / "calc.py").write_text(
+                "def add(a, b):\n    return a - b - 1  # bug: should be +\n"
+            )
+            _git(worktree, "add", "-A")
+            _git(worktree, "commit", "-m", "worktree edit")
+
+            (repo / "calc.py").write_text(
+                "def add(a, b):\n    return a - b - 2  # bug: should be +\n"
+            )
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "conflicting edit")
+
+            with pytest.raises(RuntimeError, match="git rebase failed"):
+                await kraft_builtins.mr_rebase(
+                    database,
+                    rd,
+                    session_id="s1",
+                    work_item_id="w1",
+                    node_id="pre_mr_rebase",
+                    hook_point="on.mr.rebase",
+                    round=0,
+                    repo=str(repo),
+                    worktree=str(worktree),
+                    branch=branch,
+                )
+            assert _base_ref(database) != git_read(repo, "rev-parse", "HEAD")
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())

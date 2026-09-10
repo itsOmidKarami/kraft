@@ -20,6 +20,17 @@ nodes:
     tasks: [on.test.run, on.review.local.run]
     fix_loop: verify_fix_loop
     gate_after: null
+  # Rebases onto repo's current HEAD right before the MR opens, so an item
+  # that ran straight through the chain -- no pause, no /retry -- doesn't
+  # open one that's silently commits behind (Kraft-4bgg). If the rebase
+  # actually moves the branch, the chain bounces back to `verify` instead of
+  # proceeding, so the same fix_loop that already guards this chain's tests
+  # and local review also catches whatever landed upstream while this item
+  # was mid-flight.
+  - id: pre_mr_rebase
+    tasks: [on.mr.rebase]
+    gate_after: null
+    rebase_bounce_to: verify
   - id: open_mr
     tasks: [on.mr.open]
     gate_after: null

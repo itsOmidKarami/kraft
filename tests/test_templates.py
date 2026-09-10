@@ -103,7 +103,7 @@ def test_policy_yaml_is_not_scanned_as_a_template():
     assert "policy" not in ts.valid
 
 
-def test_shipped_default_yaml_is_the_eleven_node_chain():
+def test_shipped_default_yaml_is_the_twelve_node_chain():
     reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
     ts = templates.load_templates(TEMPLATES_DIR, reg)
     assert "default" in ts.valid, ts.invalid
@@ -115,6 +115,7 @@ def test_shipped_default_yaml_is_the_eleven_node_chain():
         "env_setup",
         "implementation",
         "verify",
+        "pre_mr_rebase",
         "open_mr",
         "mr_checks",
         "human_review",
@@ -127,6 +128,10 @@ def test_shipped_default_yaml_is_the_eleven_node_chain():
     assert gates["chain_review"] == "chain_finalized"
     assert gates["human_review"] == "human_review_approval"
     assert gates["env_setup"] is None and gates["merge"] is None and gates["mr_sync"] is None
+
+    by_id = {n["id"]: n for n in nodes}
+    assert by_id["pre_mr_rebase"]["rebase_bounce_to"] == "verify"
+    assert by_id["pre_mr_rebase"]["tasks"] == ["on.mr.rebase"]
 
 
 def test_the_default_chain_syncs_the_mr_after_the_review_gate():
@@ -488,6 +493,7 @@ def test_materialize_quick_task_from_shipped_templates():
                 "fix_loop": None,
                 "on_failure": None,
                 "reject_to": None,
+                "rebase_bounce_to": None,
                 "auto_escalate": None,
             },
             {
@@ -497,6 +503,7 @@ def test_materialize_quick_task_from_shipped_templates():
                 "fix_loop": None,
                 "on_failure": None,
                 "reject_to": None,
+                "rebase_bounce_to": None,
                 "auto_escalate": None,
             },
             {
@@ -506,6 +513,7 @@ def test_materialize_quick_task_from_shipped_templates():
                 "fix_loop": None,
                 "on_failure": None,
                 "reject_to": None,
+                "rebase_bounce_to": None,
                 "auto_escalate": None,
             },
         ],
@@ -953,6 +961,51 @@ def test_a_node_may_name_itself_as_its_own_reject_target(tmp_path):
     reg = templates.load_registry(d / "registry.yaml")
     ts = templates.load_templates(d, reg)
     assert "self" in ts.valid, ts.invalid
+
+
+def test_rebase_bounce_to_must_name_an_earlier_node(tmp_path):
+    reg_path = tmp_path / "registry.yaml"
+    reg_path.write_text(
+        "hooks:\n"
+        "  on.a: { kind: builtin, handler: noop }\n"
+        "  on.b: { kind: builtin, handler: noop }\n"
+    )
+    reg = templates.load_registry(reg_path)
+    (tmp_path / "default.yaml").write_text(
+        "id: default\n"
+        "nodes:\n"
+        "  - { id: verify, tasks: [on.a], gate_after: null }\n"
+        "  - { id: pre_mr_rebase, tasks: [on.b], gate_after: null, "
+        "rebase_bounce_to: open_mr }\n"
+        "  - { id: open_mr, tasks: [on.a], gate_after: null }\n"
+    )
+    ts = templates.load_templates(tmp_path, reg)
+    assert "default" in ts.invalid
+    assert "rebase_bounce_to" in ts.invalid["default"]
+
+
+def test_rebase_bounce_to_an_earlier_node_is_valid_and_survives_materialize(tmp_path):
+    reg_path = tmp_path / "registry.yaml"
+    reg_path.write_text(
+        "hooks:\n"
+        "  on.a: { kind: builtin, handler: noop }\n"
+        "  on.b: { kind: builtin, handler: noop }\n"
+    )
+    reg = templates.load_registry(reg_path)
+    (tmp_path / "default.yaml").write_text(
+        "id: default\n"
+        "nodes:\n"
+        "  - { id: verify, tasks: [on.a], gate_after: null }\n"
+        "  - { id: pre_mr_rebase, tasks: [on.b], gate_after: null, "
+        "rebase_bounce_to: verify }\n"
+        "  - { id: open_mr, tasks: [on.a], gate_after: null }\n"
+    )
+    ts = templates.load_templates(tmp_path, reg)
+    assert "default" in ts.valid, ts.invalid
+    materialized = templates.materialize(ts.valid["default"])
+    by_id = {n["id"]: n for n in materialized["nodes"]}
+    assert by_id["pre_mr_rebase"]["rebase_bounce_to"] == "verify"
+    assert by_id["verify"]["rebase_bounce_to"] is None
 
 
 def test_the_default_chain_sends_a_rejected_review_back_to_implementation():

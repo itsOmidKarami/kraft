@@ -203,6 +203,7 @@ def fake_templates_dir(
                         "command": agent_command,
                     },
                     "on.review.local.run": noop(),
+                    "on.mr.rebase": {"kind": "builtin", "handler": "mr_rebase"},
                     "on.mr.open": noop(),
                     "on.ci.poll": noop(),
                     "on.review.mr.run": noop(),
