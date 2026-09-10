@@ -45,6 +45,12 @@ a wrong heuristic. It is a corrupt chain.
 
 ## Output
 
+The orchestrator parses the artifact body as JSON — the whole thing, not the
+first JSON value it finds. After the front matter block, write **only** the
+object below: no heading, no prose, no ```` ```json ```` fence, nothing before
+or after it. Anything else you want the human at the gate to see belongs
+inside `rationale`.
+
 ```
 { status: "ready_for_approval" | "error",
   revised_chain_nodes: [Node, ...],
