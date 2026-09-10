@@ -78,6 +78,11 @@ export interface WorkItem {
   /** The agent's question, set only while a `needs_human` stop is answerable
    *  as a `needs_context` one; only on the detail endpoint. */
   needs_context_question?: string | null;
+  /** Whether `current_node_id` has any agent task a retry's steer note could
+   *  reach — false on e.g. `open_mr` (forge-kind, no fix_loop). `retry` 409s
+   *  on explicit steer text otherwise, so the detail screen uses this to drop
+   *  the steer box rather than offer one. Only on the detail endpoint. */
+  steerable?: boolean;
 }
 
 export interface Finding {

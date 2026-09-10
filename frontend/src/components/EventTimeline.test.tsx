@@ -65,6 +65,25 @@ describe("EventTimeline", () => {
     expect(screen.getByText(/on\.test\.run/)).toBeInTheDocument();
   });
 
+  it("surfaces why a straggler-commit sweep failed (Kraft-hf12)", () => {
+    render(
+      <EventTimeline
+        events={[
+          ev({
+            type: "sweep_failed",
+            payload: {
+              node_id: "verify",
+              task_hook: "on.implementation.start",
+              error: "git commit failed: .git/index.lock exists",
+            },
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText(/on\.implementation\.start/)).toBeInTheDocument();
+    expect(screen.getByText(/index\.lock/)).toBeInTheDocument();
+  });
+
   it("says what a node's repair pass is repairing", () => {
     // The repair re-runs the node's own tasks, so the timeline would otherwise
     // show the same measurement twice with nothing to explain it (Kraft-rv6i).
