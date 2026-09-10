@@ -8,6 +8,7 @@ from support.harness import fake_registry, isolated_bd, make_repo
 
 from kraft import db, events, executor, store
 from kraft.adapters import beads
+from kraft.adapters import forge as _forge
 from kraft.paths import RunDirs
 from kraft.templates import Registry, Template, load_registry, load_templates
 
@@ -382,6 +383,61 @@ def test_rate_limit_stops_the_chain_without_a_fix_loop(tmp_path, monkeypatch):
             # No fix loop, no repair task, no human page for this stop.
             assert "work_item_needs_human" not in types
             assert "node_recovery_started" not in types
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_a_waiting_task_marks_the_row_and_ends_the_run(tmp_path, monkeypatch):
+    """The whole point: the executor task ends rather than blocking, and the row
+    carries the wait (Kraft-ru98)."""
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    fake = _forge.FakeForge(ci_states=["pending"])
+    monkeypatch.setattr(_forge, "resolve", lambda name: fake)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = Registry(
+                hooks={
+                    "on.env.prepare": {"kind": "builtin", "handler": "env_setup"},
+                    "on.ci.poll": {"kind": "forge", "handler": "ci_poll", "backend": "fake"},
+                }
+            )
+            tmpl = Template(
+                id="ci-wait",
+                nodes=[
+                    {
+                        "id": "env_setup",
+                        "tasks": ["on.env.prepare"],
+                        "gate_after": None,
+                        "fix_loop": None,
+                    },
+                    {
+                        "id": "mr_checks",
+                        "tasks": ["on.ci.poll"],
+                        "gate_after": None,
+                        "fix_loop": None,
+                    },
+                ],
+            )
+            wid = await executor.intake(
+                database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
+            )
+            result = await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+            assert result == "waiting"
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT status, retry_at FROM work_items WHERE id = ?", (wid,)
+                ).fetchone()
+            )
+            assert row["status"] == "waiting"
+            assert row["retry_at"]
         finally:
             await database.close()
 

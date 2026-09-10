@@ -21,6 +21,34 @@ def test_migrations_keys_are_contiguous():
     assert keys == list(range(min(keys), db.SCHEMA_VERSION))
 
 
+def test_waiting_is_an_allowed_work_item_status(tmp_path):
+    """The row state a CI wait becomes (Kraft-ru98)."""
+    conn = db._connect(tmp_path / "orchestrator.db")
+    db.migrate(conn)
+    conn.execute(
+        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+        "status, created_at, updated_at) VALUES ('w1', 't', '/r', 'quick-task', '{}', "
+        "'waiting', '2026-01-01', '2026-01-01')"
+    )  # must not raise IntegrityError
+
+
+def test_waiting_is_an_allowed_session_status(tmp_path):
+    """`forge.run_task` closes its session with the handler's own status, so the
+    sentinel has to be legal on both tables the way 'rate_limited' is."""
+    conn = db._connect(tmp_path / "orchestrator.db")
+    db.migrate(conn)
+    conn.execute(
+        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+        "status, created_at, updated_at) VALUES ('w1', 't', '/r', 'quick-task', '{}', "
+        "'active', '2026-01-01', '2026-01-01')"
+    )
+    conn.execute(
+        "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, log_path, "
+        "result_path, status, created_at) VALUES ('s1', 'w1', 'mr_checks', 'on.ci.poll', "
+        "'/l', '/r.json', 'waiting', '2026-01-01')"
+    )  # must not raise IntegrityError
+
+
 def test_migrate_creates_schema_from_empty(tmp_path):
     conn = db._connect(tmp_path / "orchestrator.db")
     db.migrate(conn)
@@ -487,7 +515,7 @@ def test_migrate_v4_to_v5_rebuilds_work_items_for_the_paused_status(tmp_path):
             "pending_steer_context",
             "-- steer text",
             "                     ('active', 'needs_human', 'completed', 'paused', 'abandoned',",
-            "                      'rate_limited')),",
+            "                      'rate_limited', 'waiting')),",
         ),
         replace=(
             (
@@ -587,6 +615,7 @@ def test_migrate_v9_to_v10_widens_worker_sessions_status(tmp_path):
             ),
             ("'unknown',", ""),
             ("done_with_concerns", ""),
+            ("                    'waiting')),", ""),
         ),
     )
     conn.execute(
@@ -894,7 +923,10 @@ def test_migrate_v16_to_v17_rebuilds_for_rate_limited(tmp_path):
     _build_old_db(
         conn,
         16,
-        drop_lines=("                      'rate_limited')),",),
+        drop_lines=(
+            "                      'rate_limited', 'waiting')),",
+            "                    'waiting')),",
+        ),
         replace=(
             (
                 "'paused', 'abandoned',",
@@ -902,7 +934,7 @@ def test_migrate_v16_to_v17_rebuilds_for_rate_limited(tmp_path):
                 "'abandoned')),",
             ),
             (
-                "'done_with_concerns', 'needs_context', 'rate_limited', 'config_error')),",
+                "'done_with_concerns', 'needs_context', 'rate_limited', 'config_error',",
                 "                    'done_with_concerns', 'needs_context')),",
             ),
         ),

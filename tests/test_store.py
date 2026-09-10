@@ -1161,6 +1161,36 @@ def test_mark_rate_limited_sets_status_and_retry_at(tmp_path):
     asyncio.run(scenario())
 
 
+def test_mark_waiting_sets_the_status_retry_at_and_event(tmp_path):
+    """The direct mirror of mark_rate_limited: the poller reads status +
+    retry_at, and the event is what the timeline shows a human."""
+
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await _mk_item(database)
+            await database.write(
+                lambda c: store.mark_waiting(c, "w1", "mr_checks", "2099-01-01T00:00:00+00:00")
+            )
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT status, retry_at FROM work_items WHERE id='w1'"
+                ).fetchone()
+            )
+            assert row["status"] == "waiting"
+            assert row["retry_at"] == "2099-01-01T00:00:00+00:00"
+            ev = database.read(lambda c: events.read_after(c, 0))[-1]
+            assert ev["type"] == "work_item_waiting"
+            assert ev["payload"] == {
+                "node_id": "mr_checks",
+                "retry_at": "2099-01-01T00:00:00+00:00",
+            }
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 def test_mark_needs_human_clears_retry_at(tmp_path):
     async def scenario():
         database = await _open(tmp_path)

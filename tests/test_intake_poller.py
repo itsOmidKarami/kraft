@@ -219,6 +219,32 @@ def test_respects_max_concurrent_counting_every_active_item(tmp_path, monkeypatc
     _run(lambda: _stub(tmp_path, max_concurrent=1), body)
 
 
+def test_a_waiting_item_does_not_hold_an_intake_slot(tmp_path, monkeypatch):
+    """Kraft-g15w: three slow pipelines used to stall auto-intake for the full
+    poll_timeout. A waiting row is not an active one, so the slot is free.
+
+    Pinned deliberately even though no production line implements it: the fix is
+    a consequence of the status, and `active_count`'s query says nothing about
+    waiting -- a later edit could re-stall intake without touching anything that
+    looks related to this bead.
+    """
+    monkeypatch.setattr(
+        intake_mod.beads, "ready", _ready([{"id": "B-1", "title": "t", "priority": 3}])
+    )
+
+    async def body(app):
+        wid = await _file(app, bead_id="HAND-1", status="active")
+        await app.state.db.write(
+            lambda c: store.mark_waiting(c, wid, "mr_checks", "2099-01-01T00:00:00+00:00")
+        )
+        assert app.state.db.read(lambda c: store.active_count(c)) == 0
+        started = await intake_mod.tick(app)
+        assert len(started) == 1
+        assert sorted(r["bead_id"] for r in _work_items(app)) == ["B-1", "HAND-1"]
+
+    _run(lambda: _stub(tmp_path, max_concurrent=1), body)
+
+
 def test_skips_a_bead_that_already_has_a_work_item(tmp_path, monkeypatch):
     monkeypatch.setattr(
         intake_mod.beads,
