@@ -36,7 +36,8 @@
     {
       "id": "implementation",
       "tasks": [
-        "on.implementation.start"
+        "on.implementation.start",
+        "on.repos.scan"
       ],
       "gate_after": null,
       "fix_loop": null

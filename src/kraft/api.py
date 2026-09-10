@@ -1005,7 +1005,7 @@ async def get_work_item(wid: str, request: Request):
         "worker_sessions": [{k: s[k] for k in s.keys()} for s in sessions],
         "usage": st.db.read(lambda c: store.usage_rollup(c, wid)),
         # empty on a single-repo item; the detail's repos panel is multi-repo only
-        "repos": store.repos_for(row, _completed_nodes(st, wid)),
+        "repos": st.db.read(lambda c: store.repos_for(c, wid)),
         # local-only: the checkout the agents are editing, for "Open worktree"
         "worktree_path": str(st.run_dirs.worktrees / wid),
         # The gate actually waiting on a person. Inferring it client-side from

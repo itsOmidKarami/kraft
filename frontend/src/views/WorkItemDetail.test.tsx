@@ -274,6 +274,20 @@ describe("WorkItemDetail", () => {
     expect(screen.getByText(/root_merge_policy/)).toHaveTextContent("bump");
   });
 
+  it("shows a failed repo as failed, not pending", () => {
+    setup({
+      root_merge_policy: "bump",
+      repos: [
+        { repo: "b", path: "repos/pkg", role: "submodule", merge_rank: 1, state: "failed" },
+        { repo: "r", path: "/r", role: "root", merge_rank: 2, state: "pending" },
+      ],
+    });
+    const { container } = renderDetail();
+    const row = container.querySelector('[data-repo="repos/pkg"]');
+    expect(row?.textContent).toContain("failed");
+    expect(row?.querySelector('[data-status="failed"]')).toBeTruthy();
+  });
+
   it("has no repos panel on a single-repo item", () => {
     setup({ repos: [] });
     const { container } = renderDetail();
