@@ -3,37 +3,13 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, type ProxyOptions } from "vite";
 
 const API = "http://127.0.0.1:8765";
-const proxy: Record<string, ProxyOptions> = Object.fromEntries(
-  [
-    "/work-items",
-    "/templates",
-    "/health",
-    "/worker-sessions",
-    "/search",
-    "/documents",
-    "/index",
-    "/analytics",
-    "/repos",
-    "/registry",
-    "/policy",
-    "/access",
-    "/sessions",
-    "/login",
-    "/logout",
-    "/beads",
-    // Four Settings screens were dev-only broken without these. `/theme` was
-    // traced while writing the spec and is not in the bead. `src/vite.proxy.test.ts`
-    // fails when the next route is added without a line here.
-    "/steering",
-    "/intake",
-    "/notify",
-    "/theme",
-  ].map((p) => [
-    p,
-    { target: API, changeOrigin: true },
-  ]),
-);
-proxy["/ws"] = { target: API, ws: true, changeOrigin: true };
+// Every backend route lives under /api/ (including /api/ws/events), so one
+// prefix covers all of them — no more per-route entries to keep in sync with
+// api.ts. src/vite.proxy.test.ts still fails if api.ts starts requesting a
+// literal outside /api/.
+const proxy: Record<string, ProxyOptions> = {
+  "/api": { target: API, changeOrigin: true, ws: true },
+};
 
 export default defineConfig({
   plugins: [react()],

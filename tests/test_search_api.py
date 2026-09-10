@@ -40,7 +40,7 @@ def test_search_documents_and_rescan(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch, index_repos=str(repo)) as client:
         # pin the mode: this case is about FTS ranking, and whether the vector
         # extra is installed differs between a dev machine and CI.
-        body = client.get("/search", params={"q": "reconnect backoff", "mode": "fts"}).json()
+        body = client.get("/api/search", params={"q": "reconnect backoff", "mode": "fts"}).json()
         assert body["mode"] == "fts"
         assert [h["path"] for h in body["results"]] == [".engineering/specs/ws.md"]
         hit = body["results"][0]
@@ -53,53 +53,53 @@ def test_search_documents_and_rescan(tmp_path, monkeypatch):
         # is fuzzy, so "no results" is not a meaningful assertion under hybrid —
         # a semantically near document is a correct hit there.
         fts = {"mode": "fts"}
-        assert client.get("/search", params={"q": "board", "kind": "plans", **fts}).json()[
+        assert client.get("/api/search", params={"q": "board", "kind": "plans", **fts}).json()[
             "results"
         ]
-        assert not client.get("/search", params={"q": "board", "kind": "specs", **fts}).json()[
+        assert not client.get("/api/search", params={"q": "board", "kind": "specs", **fts}).json()[
             "results"
         ]
-        assert not client.get("/search", params={"q": "board", "repo": "/nope", **fts}).json()[
+        assert not client.get("/api/search", params={"q": "board", "repo": "/nope", **fts}).json()[
             "results"
         ]
 
-        doc = client.get(f"/documents/{hit['id']}").json()
+        doc = client.get(f"/api/documents/{hit['id']}").json()
         assert doc["content"] == "reconnect backoff schedule caps at ten seconds\n"
         assert doc["metadata"] == {"owner": "omid"}
-        assert client.get("/documents/nope").status_code == 404
+        assert client.get("/api/documents/nope").status_code == 404
 
         (repo / ".engineering/specs/new.md").write_text("# New\nfresh material here\n")
         _commit(repo, "new spec")
-        rr = client.post("/index/rescan", params={"repo": str(repo)})
+        rr = client.post("/api/index/rescan", params={"repo": str(repo)})
         assert rr.status_code == 200
         assert rr.json()["stats"]["inserted"] == 1
-        assert client.get("/search", params={"q": "fresh material"}).json()["results"]
+        assert client.get("/api/search", params={"q": "fresh material"}).json()["results"]
 
 
 def test_search_validation(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
-        assert client.get("/search", params={"q": ""}).status_code == 422
-        assert client.get("/search").status_code == 422
-        assert client.get("/search", params={"q": "  "}).status_code == 422
+        assert client.get("/api/search", params={"q": ""}).status_code == 422
+        assert client.get("/api/search").status_code == 422
+        assert client.get("/api/search", params={"q": "  "}).status_code == 422
         # mode=vector is refused only where embeddings are unavailable; with the
         # 'vector' extra installed it is a legitimate request.
-        available = client.get("/health").json()["index"]["embeddings"]["available"]
-        vector_status = client.get("/search", params={"q": "x", "mode": "vector"}).status_code
+        available = client.get("/api/health").json()["index"]["embeddings"]["available"]
+        vector_status = client.get("/api/search", params={"q": "x", "mode": "vector"}).status_code
         assert vector_status == (200 if available else 422)
-        assert client.get("/search", params={"q": "x", "mode": "nope"}).status_code == 422
+        assert client.get("/api/search", params={"q": "x", "mode": "nope"}).status_code == 422
         # Kraft-bj9.4: an unparseable query is retried as a literal phrase, not a 422
-        r = client.get("/search", params={"q": '"unterminated'})
+        r = client.get("/api/search", params={"q": '"unterminated'})
         assert r.status_code == 200
         assert r.json()["results"] == []
-        r = client.get("/search", params={"q": "effort-4a"})
+        r = client.get("/api/search", params={"q": "effort-4a"})
         assert r.status_code == 200
 
 
 def test_rescan_unknown_repo_404(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
-        assert client.post("/index/rescan", params={"repo": "/not/known"}).status_code == 404
+        assert client.post("/api/index/rescan", params={"repo": "/not/known"}).status_code == 404
         # no repo arg -> rescan all known (none) -> zeroed stats
-        r = client.post("/index/rescan")
+        r = client.post("/api/index/rescan")
         assert r.status_code == 200
         assert r.json() == {
             "repo": None,
@@ -109,7 +109,7 @@ def test_rescan_unknown_repo_404(tmp_path, monkeypatch):
 
 def test_health_has_index_block(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
-        h = client.get("/health").json()
+        h = client.get("/api/health").json()
         assert set(h["index"]) == {
             "last_scan_at",
             "repos_scanned",
@@ -125,9 +125,9 @@ def test_health_has_index_block(tmp_path, monkeypatch):
 def test_work_item_documents_endpoint(tmp_path, monkeypatch):
     repo = make_repo_with_engineering(tmp_path, {".engineering/specs/a.md": "# A\nx\n"})
     with _client(tmp_path, monkeypatch, index_repos=str(repo)) as client:
-        assert client.get("/work-items/nope/documents").status_code == 404
-        wid = client.post("/work-items", json={"title": "t", "repo": str(repo)}).json()["id"]
-        r = client.get(f"/work-items/{wid}/documents")
+        assert client.get("/api/work-items/nope/documents").status_code == 404
+        wid = client.post("/api/work-items", json={"title": "t", "repo": str(repo)}).json()["id"]
+        r = client.get(f"/api/work-items/{wid}/documents")
         assert r.status_code == 200
         assert r.json() == {"work_item_id": wid, "documents": []}
 
@@ -139,18 +139,18 @@ def test_search_modes_without_embeddings(tmp_path, monkeypatch):
     )
     with _client(tmp_path, monkeypatch, index_repos=str(repo)) as client:
         # no mode -> hybrid requested, fts served on an instance without the extra
-        body = client.get("/search", params={"q": "reconnect"}).json()
+        body = client.get("/api/search", params={"q": "reconnect"}).json()
         assert body["mode"] in ("fts", "hybrid")
         assert [h["path"] for h in body["results"]] == [".engineering/specs/ws.md"]
 
-        r = client.get("/search", params={"q": "reconnect", "mode": "hybrid"})
+        r = client.get("/api/search", params={"q": "reconnect", "mode": "hybrid"})
         assert r.status_code == 200
 
-        r = client.get("/search", params={"q": "reconnect", "mode": "nonsense"})
+        r = client.get("/api/search", params={"q": "reconnect", "mode": "nonsense"})
         assert r.status_code == 422
 
-        available = client.get("/health").json()["index"]["embeddings"]["available"]
-        r = client.get("/search", params={"q": "reconnect", "mode": "vector"})
+        available = client.get("/api/health").json()["index"]["embeddings"]["available"]
+        r = client.get("/api/search", params={"q": "reconnect", "mode": "vector"})
         if available:
             assert r.status_code == 200
         else:
@@ -165,20 +165,22 @@ def test_connecting_a_repo_indexes_it_immediately(tmp_path, monkeypatch):
         tmp_path, {".engineering/specs/keel.md": "# Keel\nlaminated oak keel\n"}, "keel"
     )
     with _client(tmp_path, monkeypatch, index_repos="") as client:
-        assert not client.get("/search", params={"q": "laminated oak", "mode": "fts"}).json()[
+        assert not client.get("/api/search", params={"q": "laminated oak", "mode": "fts"}).json()[
             "results"
         ]
-        assert client.post("/index/rescan", params={"repo": str(repo)}).status_code == 404
+        assert client.post("/api/index/rescan", params={"repo": str(repo)}).status_code == 404
 
-        assert client.post("/repos", json={"path": str(repo)}).status_code == 201
+        assert client.post("/api/repos", json={"path": str(repo)}).status_code == 201
 
-        assert client.post("/index/rescan", params={"repo": str(repo)}).status_code == 200
-        hits = client.get("/search", params={"q": "laminated oak", "mode": "fts"}).json()["results"]
+        assert client.post("/api/index/rescan", params={"repo": str(repo)}).status_code == 200
+        hits = client.get("/api/search", params={"q": "laminated oak", "mode": "fts"}).json()[
+            "results"
+        ]
         assert [h["path"] for h in hits] == [".engineering/specs/keel.md"]
 
         # Disconnecting takes its documents back out of search.
-        assert client.delete("/repos", params={"path": str(repo)}).status_code == 204
-        assert not client.get("/search", params={"q": "laminated oak", "mode": "fts"}).json()[
+        assert client.delete("/api/repos", params={"path": str(repo)}).status_code == 204
+        assert not client.get("/api/search", params={"q": "laminated oak", "mode": "fts"}).json()[
             "results"
         ]
 
@@ -199,6 +201,8 @@ def test_the_bead_strip_searches_connected_repos_when_no_override(tmp_path, monk
     with _client(tmp_path, monkeypatch) as client:
         monkeypatch.delenv("KRAFT_BD_CWD", raising=False)
         for repo in (one, two):
-            assert client.post("/repos", json={"path": str(repo)}).status_code == 201
-        hits = client.get("/beads/search", params={"q": "caulk the", "limit": 10}).json()["beads"]
+            assert client.post("/api/repos", json={"path": str(repo)}).status_code == 201
+        hits = client.get("/api/beads/search", params={"q": "caulk the", "limit": 10}).json()[
+            "beads"
+        ]
     assert {h["title"] for h in hits} == {"caulk the alpha transom", "caulk the beta transom"}

@@ -12,7 +12,7 @@ export function connectEvents(): () => void {
     if (stopped) return;
     const seq = useStore.getState().lastSeq;
     socket = new WebSocket(
-      `${location.origin.replace(/^http/, "ws")}/ws/events?after_seq=${seq}`,
+      `${location.origin.replace(/^http/, "ws")}/api/ws/events?after_seq=${seq}`,
     );
     socket.onopen = () => {
       attempt = 0;

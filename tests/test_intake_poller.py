@@ -421,7 +421,7 @@ def _poll_for(client, wid, event_type, timeout=30):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         matching = [
-            e for e in client.get(f"/work-items/{wid}/events").json() if e["type"] == event_type
+            e for e in client.get(f"/api/work-items/{wid}/events").json() if e["type"] == event_type
         ]
         if matching:
             return matching
@@ -492,11 +492,11 @@ def test_an_auto_started_item_stops_at_its_first_gate(tmp_path, monkeypatch):
 
         gates = _poll_for(client, wid, "gate_requested")
 
-        item = client.get(f"/work-items/{wid}").json()
+        item = client.get(f"/api/work-items/{wid}").json()
         assert item["status"] == "needs_human"
         assert item["bead_id"] == bead_id, "auto-intake filed a duplicate bead instead of adopting"
 
-        evts = client.get(f"/work-items/{wid}/events").json()
+        evts = client.get(f"/api/work-items/{wid}/events").json()
         assert [e for e in evts if e["type"] == "gate_approved"] == [], (
             "an auto-started item passed a gate with no human — spec §5"
         )
@@ -527,7 +527,7 @@ def test_a_malformed_intake_yaml_still_boots_with_intake_off(tmp_path, monkeypat
     import kraft.api as api
 
     with TestClient(api.app, client=("127.0.0.1", 54321)) as client:
-        assert client.get("/work-items").status_code == 200
+        assert client.get("/api/work-items").status_code == 200
         assert client.app.state.intake["enabled"] is False
         # Not merely "the poller ticked nothing" — no poller task exists at all.
         # Without this, deleting lifespan's `if enabled` condition leaves the

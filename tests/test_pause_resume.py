@@ -39,7 +39,7 @@ def _wait(fn, what, timeout=60):
 
 def _running_agent(client, wid):
     def check():
-        rows = client.get(f"/work-items/{wid}").json()["worker_sessions"]
+        rows = client.get(f"/api/work-items/{wid}").json()["worker_sessions"]
         return next(
             (
                 s
@@ -62,55 +62,55 @@ def test_pause_then_resume_with_a_steer_relaunches_the_task(tmp_path, monkeypatc
 
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"repo": str(repo), "title": "pause me", "chain_template": "quick-task"},
         ).json()["id"]
         session = _running_agent(client, wid)
 
-        r = client.post(f"/work-items/{wid}/pause", json={})
+        r = client.post(f"/api/work-items/{wid}/pause", json={})
         assert r.status_code == 200
         assert r.json()["paused_sessions"] == [session["id"]]
 
         item = _wait(
             lambda: (lambda b: b if b["status"] == "paused" else None)(
-                client.get(f"/work-items/{wid}").json()
+                client.get(f"/api/work-items/{wid}").json()
             ),
             "the item to read paused",
         )
         paused = next(s for s in item["worker_sessions"] if s["id"] == session["id"])
         # the SIGTERM's non-zero exit must not re-resolve the row as a failure
         assert paused["status"] == "paused"
-        types = [e["type"] for e in client.get(f"/work-items/{wid}/events").json()]
+        types = [e["type"] for e in client.get(f"/api/work-items/{wid}/events").json()]
         assert "pause_requested" in types and "worker_session_paused" in types
 
         # pausing twice is a client error, not a second kill
-        assert client.post(f"/work-items/{wid}/pause", json={}).status_code == 409
+        assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 409
 
-        assert client.post(f"/work-items/{wid}/steer", json={"text": "  "}).status_code == 400
+        assert client.post(f"/api/work-items/{wid}/steer", json={"text": "  "}).status_code == 400
         assert (
             client.post(
-                f"/work-items/{wid}/steer", json={"text": "keep the old signature"}
+                f"/api/work-items/{wid}/steer", json={"text": "keep the old signature"}
             ).status_code
             == 200
         )
 
         # this time let the agent finish
         monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-        r = client.post(f"/work-items/{wid}/resume", json={})
+        r = client.post(f"/api/work-items/{wid}/resume", json={})
         assert r.status_code == 200
         assert r.json()["steer"] == "keep the old signature"
 
         _wait(
             lambda: any(
                 e["type"] == "work_item_completed"
-                for e in client.get(f"/work-items/{wid}/events").json()
+                for e in client.get(f"/api/work-items/{wid}/events").json()
             ),
             "the resumed item to complete",
             timeout=120,
         )
 
         # a fresh session ran the same hook, and the steer led its prompt exactly once
-        rows = client.get(f"/work-items/{wid}").json()["worker_sessions"]
+        rows = client.get(f"/api/work-items/{wid}").json()["worker_sessions"]
         impl = [s for s in rows if s["hook_point"] == "on.implementation.start"]
         assert len(impl) == 2
         sent = [p for p in prompts.read_text().split("\n\x00\n") if p.strip()]
@@ -119,8 +119,8 @@ def test_pause_then_resume_with_a_steer_relaunches_the_task(tmp_path, monkeypatc
         assert steered[0].startswith("A human has steered this run:")
 
         # the steer is spent, and the counters were never touched
-        assert client.get(f"/work-items/{wid}").json()["pending_steer_context"] is None
-        types = [e["type"] for e in client.get(f"/work-items/{wid}/events").json()]
+        assert client.get(f"/api/work-items/{wid}").json()["pending_steer_context"] is None
+        types = [e["type"] for e in client.get(f"/api/work-items/{wid}/events").json()]
         assert "steer_context_set" in types and "work_item_resumed" in types
 
 
@@ -130,14 +130,14 @@ def test_steer_and_resume_are_refused_while_the_item_is_running(tmp_path, monkey
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"repo": str(repo), "title": "busy", "chain_template": "quick-task"},
         ).json()["id"]
         _running_agent(client, wid)
-        assert client.post(f"/work-items/{wid}/steer", json={"text": "x"}).status_code == 409
-        assert client.post(f"/work-items/{wid}/resume", json={}).status_code == 409
-        assert client.post("/work-items/nope/pause", json={}).status_code == 404
-        client.post(f"/work-items/{wid}/pause", json={})
+        assert client.post(f"/api/work-items/{wid}/steer", json={"text": "x"}).status_code == 409
+        assert client.post(f"/api/work-items/{wid}/resume", json={}).status_code == 409
+        assert client.post("/api/work-items/nope/pause", json={}).status_code == 404
+        client.post(f"/api/work-items/{wid}/pause", json={})
 
 
 def test_a_paused_row_and_its_event_never_disagree(tmp_path):

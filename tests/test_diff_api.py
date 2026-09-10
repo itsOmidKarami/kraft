@@ -42,7 +42,7 @@ def _make_client(tmp_path, monkeypatch):
 def _wait_for_completion(client, wid, timeout=120):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        evs = client.get(f"/work-items/{wid}/events").json()
+        evs = client.get(f"/api/work-items/{wid}/events").json()
         if any(e["type"] == "work_item_completed" for e in evs):
             return
         time.sleep(0.2)
@@ -67,18 +67,18 @@ def seeded_item(client, tmp_path):
     """
     repo = make_repo(tmp_path)
     wid = client.post(
-        "/work-items",
+        "/api/work-items",
         json={"repo": str(repo), "title": "make it pass", "chain_template": "quick-task"},
     ).json()["id"]
     _wait_for_completion(client, wid)
-    worktree = Path(client.get(f"/work-items/{wid}").json()["worktree_path"])
+    worktree = Path(client.get(f"/api/work-items/{wid}").json()["worktree_path"])
     shutil.rmtree(worktree / ".pytest_cache", ignore_errors=True)
     return wid
 
 
 @pytest.fixture
 def worktree(client, seeded_item):
-    return Path(client.get(f"/work-items/{seeded_item}").json()["worktree_path"])
+    return Path(client.get(f"/api/work-items/{seeded_item}").json()["worktree_path"])
 
 
 @pytest.fixture
@@ -100,7 +100,7 @@ def test_diff_splits_landed_commits_from_in_flight_work(client, seeded_item, wor
     subprocess.run(["git", "commit", "-m", "land the doc"], cwd=worktree, check=True)
     _write(worktree / "calc.py", "in flight code\n")
 
-    body = client.get(f"/work-items/{seeded_item}/diff").json()
+    body = client.get(f"/api/work-items/{seeded_item}/diff").json()
 
     assert "in flight code" in body["diff"]
     assert "landed paperwork" not in body["diff"]
@@ -118,11 +118,11 @@ def test_diff_landed_is_empty_when_nothing_is_committed(client, seeded_item, wor
     """A worktree whose HEAD is where the chain left it: `landed` is empty and
     the page reads exactly as it did before the split."""
     # roll the worktree back to base_ref so nothing at all is committed past it
-    base = client.get(f"/work-items/{seeded_item}/diff").json()["base_ref"]
+    base = client.get(f"/api/work-items/{seeded_item}/diff").json()["base_ref"]
     subprocess.run(["git", "reset", "--hard", base], cwd=worktree, check=True)
     _write(worktree / "calc.py", "in flight code\n")
 
-    body = client.get(f"/work-items/{seeded_item}/diff").json()
+    body = client.get(f"/api/work-items/{seeded_item}/diff").json()
     assert body["landed"]["files"] == []
     assert body["landed"]["diff"] == ""
     assert body["landed"]["commits"] == []
@@ -146,7 +146,7 @@ def test_diff_landed_and_in_flight_truncate_independently(
         _write(worktree / f"flight{i}.py", "y = 2\n" * 100)
     subprocess.run(["git", "add", "-A"], cwd=worktree, check=True)
 
-    body = client.get(f"/work-items/{seeded_item}/diff").json()
+    body = client.get(f"/api/work-items/{seeded_item}/diff").json()
     assert body["truncated"] is True
     assert body["landed"]["truncated"] is True
     # Each side is cut against the cap on its own, not against a shared budget:
@@ -171,7 +171,7 @@ def test_diff_keeps_a_trailing_blank_context_line(client, seeded_item, worktree)
     """
     _write(worktree / "calc.py", "changed\n\n")
 
-    body = client.get(f"/work-items/{seeded_item}/diff").json()["diff"]
+    body = client.get(f"/api/work-items/{seeded_item}/diff").json()["diff"]
     # the blank line the agent added is the last line of the hunk: stripped, it
     # would arrive as a bare "+"
     assert body.endswith("+changed\n+\n"), repr(body[-40:])
@@ -179,7 +179,7 @@ def test_diff_keeps_a_trailing_blank_context_line(client, seeded_item, worktree)
 
 def test_diff_lists_untracked_without_adding_them(client, seeded_item, worktree):
     _write(worktree / "new_file.py", "x = 1\n")
-    body = client.get(f"/work-items/{seeded_item}/diff").json()
+    body = client.get(f"/api/work-items/{seeded_item}/diff").json()
     # not equality: the real agent's own .engineering/sessions/*.md summary is
     # also legitimately untracked at this point.
     assert "new_file.py" in body["untracked"]
@@ -197,33 +197,33 @@ def test_diff_lists_untracked_files_inside_a_new_directory(client, seeded_item, 
     (worktree / "sub").mkdir()
     _write(worktree / "sub" / "a.py", "a = 1\n")
     _write(worktree / "sub" / "b.py", "b = 1\n")
-    body = client.get(f"/work-items/{seeded_item}/diff").json()
+    body = client.get(f"/api/work-items/{seeded_item}/diff").json()
     assert "sub/a.py" in body["untracked"]
     assert "sub/b.py" in body["untracked"]
     assert "sub/" not in body["untracked"]
 
 
 def test_diff_with_null_base_ref_is_empty_not_an_error(client, item_without_base_ref):
-    r = client.get(f"/work-items/{item_without_base_ref}/diff")
+    r = client.get(f"/api/work-items/{item_without_base_ref}/diff")
     assert r.status_code == 200
     assert r.json()["base_ref"] is None
     assert r.json()["diff"] == ""
 
 
 def test_diff_404s_on_unknown_work_item(client):
-    assert client.get("/work-items/nope/diff").status_code == 404
+    assert client.get("/api/work-items/nope/diff").status_code == 404
 
 
 def test_diff_404s_when_the_worktree_is_gone(client, seeded_item, worktree):
     shutil.rmtree(worktree)
-    assert client.get(f"/work-items/{seeded_item}/diff").status_code == 404
+    assert client.get(f"/api/work-items/{seeded_item}/diff").status_code == 404
 
 
 def test_diff_500s_when_git_fails_rather_than_returning_empty(client, seeded_item, worktree):
     # A worktree whose git metadata is broken: present on disk, unusable to git.
     (worktree / ".git").unlink()
     (worktree / ".git").mkdir()
-    r = client.get(f"/work-items/{seeded_item}/diff")
+    r = client.get(f"/api/work-items/{seeded_item}/diff")
     assert r.status_code == 500
     assert r.json().get("detail")
 
@@ -236,7 +236,7 @@ def test_diff_truncates_at_a_file_boundary(client, seeded_item, worktree, monkey
         _write(worktree / f"f{i}.py", "x = 1\n" * 100)
     subprocess.run(["git", "add", "-A"], cwd=worktree, check=True)
 
-    body = client.get(f"/work-items/{seeded_item}/diff").json()
+    body = client.get(f"/api/work-items/{seeded_item}/diff").json()
     assert body["truncated"] is True
     # the file list is never truncated: all 20 new files are accounted for,
     # alongside the real chain's own calc.py and .engineering changes.
@@ -266,10 +266,10 @@ def test_diff_degrades_gracefully_when_base_ref_is_null_and_worktree_is_gone(
     # are also the likeliest to have had their worktree cleaned up: this must
     # still read as "no diff", not a 404.
     shutil.rmtree(worktree)
-    r = client.get(f"/work-items/{item_without_base_ref}/diff")
+    r = client.get(f"/api/work-items/{item_without_base_ref}/diff")
     assert r.status_code == 200
     assert r.json()["base_ref"] is None
 
 
 def test_gate_artifact_is_none_without_a_pending_gate(client, seeded_item):
-    assert client.get(f"/work-items/{seeded_item}").json()["gate_artifact"] is None
+    assert client.get(f"/api/work-items/{seeded_item}").json()["gate_artifact"] is None

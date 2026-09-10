@@ -70,7 +70,7 @@ def run_with_app(api, scenario):
 
 async def _create(repo, title="read me") -> str:
     async with client.http() as http:
-        response = await http.post("/work-items", json={"title": title, "repo": str(repo)})
+        response = await http.post("/api/work-items", json={"title": title, "repo": str(repo)})
     assert response.status_code == 201, response.text
     return response.json()["id"]
 
@@ -147,12 +147,12 @@ def test_get_work_item_names_the_next_node(wired, tmp_path):
     async def scenario():
         async with client.http() as http:
             created = await http.post(
-                "/work-items",
+                "/api/work-items",
                 json={"title": "chain me", "repo": str(repo), "autostart": False},
             )
             assert created.status_code == 201, created.text
             wid = created.json()["id"]
-            full = (await http.get(f"/work-items/{wid}")).json()
+            full = (await http.get(f"/api/work-items/{wid}")).json()
         return full, await client.get_work_item(wid)
 
     full, item = run_with_app(wired, scenario)
@@ -172,12 +172,12 @@ def test_the_last_node_has_no_next_node(wired, tmp_path):
     async def scenario():
         async with client.http() as http:
             created = await http.post(
-                "/work-items",
+                "/api/work-items",
                 json={"title": "nearly done", "repo": str(repo), "autostart": False},
             )
             assert created.status_code == 201, created.text
             wid = created.json()["id"]
-            full = (await http.get(f"/work-items/{wid}")).json()
+            full = (await http.get(f"/api/work-items/{wid}")).json()
         full["current_node_id"] = full["chain_definition"]["nodes"][-1]["id"]
         return client._next_node_id(full)
 
