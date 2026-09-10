@@ -6,8 +6,10 @@ import logging
 import re
 import sqlite3
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 from kraft import builtins as _builtins
 from kraft import events, gate_review, store
@@ -131,6 +133,13 @@ def _brief(work_item_row) -> str:
     return f"{work_item_row['title']}\n\n{description}"
 
 
+#: What one gate approval must also do, and the chain it leaves behind:
+#: `api.apply_approval`, partially applied over the app state. `None` means
+#: no door is wired up, and an agent may not approve at all -- see
+#: `_review_gates`.
+OnApprove = Callable[[Any, str], Awaitable[tuple[dict | None, str | None]]]
+
+
 @dataclass(frozen=True)
 class LaunchContext:
     """The repo config an agent dispatch resolves against.
@@ -189,7 +198,10 @@ async def intake(
     #: that wants that distinction (Kraft-cd47) has to say so explicitly.
     chain_template: str | None | object = _UNSET,
     #: Arms agent gate review for this item's `auto_escalate` gates
-    #: (Kraft-zr3s). Off by default; a human opts in per item.
+    #: (Kraft-zr3s). Off at this layer even though the create doors default it
+    #: on: `intake` is also the auto-start path, and an item nobody asked for
+    #: must pass no gate automatically. The caller that has a human behind it
+    #: passes the value.
     auto_gate: bool = False,
 ) -> str:
     work_item_id = uuid.uuid4().hex
@@ -1317,6 +1329,7 @@ async def run(
     policy: _policy.Policy | None = None,
     steer: str | None = None,
     launch: LaunchContext | None = None,
+    on_approve: OnApprove | None = None,
 ) -> str:
     status = await _run_once(
         db,
@@ -1338,6 +1351,7 @@ async def run(
         policy=policy,
         launch=launch,
         bd_cwd=bd_cwd,
+        on_approve=on_approve,
     )
 
 
@@ -1557,6 +1571,7 @@ async def resume(
     bd_cwd: str | None = None,
     policy: _policy.Policy | None = None,
     launch: LaunchContext | None = None,
+    on_approve: OnApprove | None = None,
 ) -> str:
     status = await _resume_once(
         db,
@@ -1577,6 +1592,7 @@ async def resume(
         policy=policy,
         launch=launch,
         bd_cwd=bd_cwd,
+        on_approve=on_approve,
     )
 
 
@@ -1590,6 +1606,7 @@ async def _review_gates(
     policy: _policy.Policy | None = None,
     launch: LaunchContext | None = None,
     bd_cwd: str | None = None,
+    on_approve: OnApprove | None = None,
 ) -> str:
     """Let an agent decide the gates a chain author and a human both marked
     reviewable, re-entering the walk with whatever it decides (Kraft-zr3s).
@@ -1655,10 +1672,27 @@ async def _review_gates(
         if verdict == "undecided":
             return status
         if verdict == "approve":
+            # An approval is not just a status change: `chain_finalized` splices
+            # the reviewed nodes in, and every artifact-carrying gate indexes its
+            # document, which nothing else durably keeps. `api.apply_approval` is
+            # that work, reached through `on_approve` because it needs the
+            # indexer this layer has no handle on. Without the callback the
+            # effects cannot run, so the gate is left for a person rather than
+            # cleared with half of them (Kraft-zr3s).
+            if on_approve is None:
+                return status
+            chain, reason = await on_approve(row, gate)
+            if chain is None:
+                await db.write(
+                    lambda c, reason=reason, node=row["current_node_id"]: store.mark_needs_human(
+                        c, work_item_id, node, reason
+                    )
+                )
+                return "needs_human"
             await db.write(
                 lambda c, gate=gate: store.approve_gate(c, work_item_id, gate, by="agent")
             )
-            start, steer = gate_index + 1, None
+            start, steer = gate_node_index(chain, gate) + 1, None
         else:
             # `fixed` is a rejection that repaired something on its way out: it
             # re-enters at the gate node so the repair is measured rather than
