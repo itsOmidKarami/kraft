@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 24
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -32,7 +32,7 @@ CREATE TABLE work_items (
   current_node_id  TEXT,
   status           TEXT NOT NULL CHECK (status IN
                      ('active', 'needs_human', 'completed', 'paused', 'abandoned',
-                      'rate_limited')),
+                      'rate_limited', 'waiting')),
   -- steer text a human left while paused, consumed by the next agent launch
   pending_steer_context TEXT,
   -- cross-repo (06): submodule paths chosen at intake, and what happens to the
@@ -98,7 +98,8 @@ CREATE TABLE worker_sessions (
   result_path    TEXT NOT NULL,
   status         TEXT NOT NULL CHECK (status IN
                    ('pending', 'running', 'done', 'failed', 'capped_out', 'paused', 'unknown',
-                    'done_with_concerns', 'needs_context', 'rate_limited', 'config_error')),
+                    'done_with_concerns', 'needs_context', 'rate_limited', 'config_error',
+                    'waiting')),
   attempt        INTEGER NOT NULL DEFAULT 1,
   session_summary_ref TEXT,
   created_at     TEXT NOT NULL,
@@ -485,6 +486,88 @@ SELECT id, bead_id, title, description, repo, chain_template, chain_definition,
 SELECT id, work_item_id, node_id, hook_point, pid, pid_start_time, log_path,
        result_path, status, attempt, session_summary_ref, created_at, started_at,
        round, model, tokens_in, tokens_out, cost_usd, wall_ms, exited_at
+FROM worker_sessions""",
+        "DROP TABLE worker_sessions",
+        "ALTER TABLE worker_sessions_new RENAME TO worker_sessions",
+        "CREATE INDEX idx_worker_sessions_status ON worker_sessions(status)",
+    ],
+    # 'waiting' joins both CHECKs (Kraft-ru98): a ci_poll wait becomes a row the
+    # scheduler owns rather than a coroutine blocking on `_wait_for_ci`. SQLite
+    # cannot alter a constraint, so both tables are rebuilt the same 12-step way
+    # migration 16 used, carrying every column added since forward (22's head_sha
+    # and 'config_error' included).
+    23: [
+        """CREATE TABLE work_items_new (
+  id               TEXT PRIMARY KEY,
+  bead_id          TEXT,
+  title            TEXT NOT NULL,
+  description      TEXT,
+  repo             TEXT NOT NULL,
+  chain_template   TEXT,
+  chain_definition TEXT NOT NULL,
+  current_node_id  TEXT,
+  status           TEXT NOT NULL CHECK (status IN
+                     ('active', 'needs_human', 'completed', 'paused', 'abandoned',
+                      'rate_limited', 'waiting')),
+  pending_steer_context TEXT,
+  submodules       TEXT,
+  root_merge_policy TEXT,
+  attachments      TEXT,
+  base_ref         TEXT,
+  bead_cwd         TEXT,
+  branch           TEXT,
+  implements_beads TEXT,
+  retry_at         TEXT,
+  escalation_session_id TEXT,
+  auto_gate        INTEGER NOT NULL DEFAULT 0,
+  agent_overrides  TEXT,
+  created_at       TEXT NOT NULL,
+  updated_at       TEXT NOT NULL
+)""",
+        """INSERT INTO work_items_new (id, bead_id, title, description, repo, chain_template,
+  chain_definition, current_node_id, status, pending_steer_context, submodules,
+  root_merge_policy, attachments, base_ref, bead_cwd, branch, implements_beads,
+  retry_at, escalation_session_id, auto_gate, agent_overrides, created_at, updated_at)
+SELECT id, bead_id, title, description, repo, chain_template, chain_definition,
+       current_node_id, status, pending_steer_context, submodules, root_merge_policy,
+       attachments, base_ref, bead_cwd, branch, implements_beads, retry_at,
+       escalation_session_id, auto_gate, agent_overrides, created_at, updated_at
+  FROM work_items""",
+        "DROP TABLE work_items",
+        "ALTER TABLE work_items_new RENAME TO work_items",
+        """CREATE TABLE worker_sessions_new (
+  id             TEXT PRIMARY KEY,
+  work_item_id   TEXT NOT NULL REFERENCES work_items(id),
+  node_id        TEXT NOT NULL,
+  hook_point     TEXT NOT NULL,
+  pid            INTEGER,
+  pid_start_time REAL,
+  log_path       TEXT NOT NULL,
+  result_path    TEXT NOT NULL,
+  status         TEXT NOT NULL CHECK (status IN
+                   ('pending', 'running', 'done', 'failed', 'capped_out', 'paused', 'unknown',
+                    'done_with_concerns', 'needs_context', 'rate_limited', 'config_error',
+                    'waiting')),
+  attempt        INTEGER NOT NULL DEFAULT 1,
+  session_summary_ref TEXT,
+  created_at     TEXT NOT NULL,
+  started_at     TEXT,
+  round          INTEGER NOT NULL DEFAULT 0,
+  model          TEXT,
+  tokens_in      INTEGER,
+  tokens_out     INTEGER,
+  cost_usd       REAL,
+  wall_ms        INTEGER,
+  exited_at      TEXT,
+  head_sha       TEXT
+)""",
+        """INSERT INTO worker_sessions_new (id, work_item_id, node_id, hook_point, pid,
+  pid_start_time, log_path, result_path, status, attempt, session_summary_ref,
+  created_at, started_at, round, model, tokens_in, tokens_out, cost_usd, wall_ms,
+  exited_at, head_sha)
+SELECT id, work_item_id, node_id, hook_point, pid, pid_start_time, log_path,
+       result_path, status, attempt, session_summary_ref, created_at, started_at,
+       round, model, tokens_in, tokens_out, cost_usd, wall_ms, exited_at, head_sha
 FROM worker_sessions""",
         "DROP TABLE worker_sessions",
         "ALTER TABLE worker_sessions_new RENAME TO worker_sessions",

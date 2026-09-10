@@ -427,3 +427,88 @@ def test_resume_skips_rebase_when_branch_already_pushed(tmp_path, monkeypatch):
         # chain's own commits (e.g. its wip-work commit) still moved HEAD on.
         assert not (worktree / "moved.txt").is_file()
         assert client.get(f"/api/work-items/{wid}").json()["base_ref"] == item_before["base_ref"]
+
+
+_WAIT_CHAIN = (
+    '{"template_id": "quick-task", "nodes": ['
+    '{"id": "implementation", "tasks": ["on.implementation.start"], "gate_after": null},'
+    '{"id": "mr_checks", "tasks": ["on.ci.poll"], "gate_after": null}]}'
+)
+
+
+def _seed_waiting(client, repo, wid="w1"):
+    """A node parked on a pipeline (Kraft-ru98), built straight from `store` so
+    no real agent or forge CLI ever runs -- these tests are about the status
+    guard on pause/abandon, not the wait itself.
+
+    Run through `client.portal` -- the app's writer connection was opened in
+    TestClient's own portal thread (`sqlite3` objects are thread-bound), and
+    `db.Database.write` queues onto that thread's event loop, so the write has
+    to run there too rather than in a loop this sync test function starts.
+    """
+    from kraft import store
+
+    async def go():
+        db_ = client.app.state.db
+        await db_.write(
+            lambda c: store.create_work_item(
+                c,
+                id=wid,
+                bead_id=None,
+                title="t",
+                repo=str(repo),
+                chain_template="quick-task",
+                chain_definition=_WAIT_CHAIN,
+            )
+        )
+        await db_.write(lambda c: store.enter_node(c, wid, "mr_checks"))
+        await db_.write(
+            lambda c: store.mark_waiting(c, wid, "mr_checks", "2099-01-01T00:00:00+00:00")
+        )
+
+    client.portal.call(go)
+
+
+def test_pausing_a_waiting_item_is_accepted(tmp_path, monkeypatch):
+    """It used to 409: only 'active' was pausable, and a parked item is not
+    active any more (Kraft-tnak)."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        _seed_waiting(client, repo)
+        r = client.post("/api/work-items/w1/pause", json={})
+        assert r.status_code == 200
+        assert client.get("/api/work-items/w1").json()["status"] == "paused"
+
+
+def test_pausing_a_waiting_item_clears_retry_at(tmp_path, monkeypatch):
+    """Otherwise ci_wait.tick wakes it straight back up -- the pause would look
+    like it worked and then silently undo itself."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        _seed_waiting(client, repo)
+        assert client.post("/api/work-items/w1/pause", json={}).status_code == 200
+        assert client.get("/api/work-items/w1").json()["retry_at"] is None
+
+
+def test_a_paused_item_is_not_woken_by_the_ci_wait_poller(tmp_path, monkeypatch):
+    """The behavioural assertion the other two exist to support: run tick()
+    after the pause and assert nothing was re-entered."""
+    from kraft import ci_wait
+
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        _seed_waiting(client, repo)
+        assert client.post("/api/work-items/w1/pause", json={}).status_code == 200
+        assert client.portal.call(ci_wait.tick, client.app) == []
+        assert client.get("/api/work-items/w1").json()["status"] == "paused"
+
+
+def test_abandoning_a_waiting_item_is_accepted(tmp_path, monkeypatch):
+    """abandon refuses only 'active' (api.py) -- a waiting item has no session
+    to stop, so it can go straight to abandoned and reclaim its worktree."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        _seed_waiting(client, repo)
+        r = client.post("/api/work-items/w1/abandon", json={})
+        assert r.status_code == 200
+        assert client.get("/api/work-items/w1").json()["status"] == "abandoned"

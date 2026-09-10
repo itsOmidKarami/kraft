@@ -857,32 +857,16 @@ async def _poll_ci(
         interval = min(interval * 2, cap)
 
 
-async def _wait_for_ci(
-    forge: Forge, *, repo: Path, branch: str, timeout: float, interval: float
-) -> tuple[str, str]:
-    """Wait for CI to settle, and render the log line and the mergeable/red
-    verdict `ci_poll` reports. Shared with `merge`'s own CI gate (Kraft-266b,
-    Kraft-x10m): `mr_sync`'s push after `human_review` can re-arm a project's
-    required-pipeline rule for a head `mr_checks` never watched, so `merge`
-    re-runs this exact wait, with the same timeout/interval, right before it
-    calls `forge.merge()` — not a second, differently-tuned approximation of
-    it.
+def _render_ci(ci: CIStatus) -> tuple[str, str]:
+    """Render the log line and verdict for one CI check. Shared by `ci_poll`'s
+    single check and `_wait_for_ci`'s settled result, so the two callers
+    cannot drift in how they describe the same pipeline (Kraft-ru98).
 
-    Returns the log text and "done"/"failed", the same vocabulary a node's
-    status already uses.
+    Returns the log text and "done"/"failed"/"waiting" -- "waiting" only for a
+    pipeline that is still pending and mergeable, which `_wait_for_ci` never
+    passes through here (it resolves pending itself, into a timeout).
     """
-    ci, timed_out = await _poll_ci(
-        forge, repo=repo, branch=branch, timeout=timeout, interval=interval
-    )
-    # A timeout and a red pipeline are both a failed node, but a reviewer --
-    # and any fix loop built on this node (Kraft-cbr) -- has to tell "finished
-    # red" from "never finished".
-    head = (
-        f"pipeline timed out after {timeout:g}s, still pending"
-        if timed_out
-        else f"pipeline {ci.state}"
-    )
-    log = f"{head}: {ci.url}\n" + "".join(f"  {j}\n" for j in ci.jobs)
+    log = f"pipeline {ci.state}: {ci.url}\n" + "".join(f"  {j}\n" for j in ci.jobs)
     if ci.mergeable is False:
         # Green *and* unmergeable is the exact shape of the bug: the pipeline
         # passes, the gate passes, and the merge node meets the conflict
@@ -890,7 +874,39 @@ async def _wait_for_ci(
         # undecided is this node's normal.
         log += f"merge request is not mergeable: {ci.merge_detail or 'unknown'}\n"
         return log, "failed"
+    if ci.state == "pending":
+        return log, "waiting"
     return log, "done" if ci.state == "success" else "failed"
+
+
+async def _wait_for_ci(
+    forge: Forge, *, repo: Path, branch: str, timeout: float, interval: float
+) -> tuple[str, str]:
+    """Wait for CI to settle, and render the log line and the mergeable/red
+    verdict `merge`'s own CI gate reports (Kraft-266b, Kraft-x10m):
+    `mr_sync`'s push after `human_review` can re-arm a project's
+    required-pipeline rule for a head `mr_checks` never watched, so `merge`
+    re-runs this exact wait, with the same timeout/interval, right before it
+    calls `forge.merge()` — not a second, differently-tuned approximation of
+    it. `ci_poll` no longer calls this (Kraft-ru98): it hands an unsettled
+    pipeline back to the scheduler instead of blocking here.
+
+    Returns the log text and "done"/"failed", the same vocabulary a node's
+    status already uses. A timeout here still maps to "failed" -- `merge`'s
+    caller has no scheduler to hand a wait back to.
+    """
+    ci, timed_out = await _poll_ci(
+        forge, repo=repo, branch=branch, timeout=timeout, interval=interval
+    )
+    if timed_out:
+        # A timeout and a red pipeline are both a failed node, but a reviewer
+        # -- and any fix loop built on this node (Kraft-cbr) -- has to tell
+        # "finished red" from "never finished".
+        log = f"pipeline timed out after {timeout:g}s, still pending: {ci.url}\n" + "".join(
+            f"  {j}\n" for j in ci.jobs
+        )
+        return log, "failed"
+    return _render_ci(ci)
 
 
 async def _poll_merged(
@@ -979,11 +995,13 @@ async def _run_one(
             # red, forever (Kraft-bxj8). `git push -u` is a no-op when the
             # branch is up to date, so this costs one git call.
             await forge.push(repo=repo, branch=branch)
-            # Both CLIs resolve the merge request from the checked-out
-            # branch, so the number is not threaded between nodes.
-            log, status = await _wait_for_ci(
-                forge, repo=repo, branch=branch, timeout=poll_timeout, interval=poll_interval
-            )
+            # One check, not a wait. A pipeline that has not settled hands the
+            # wait back to the scheduler as a row state (Kraft-ru98); the
+            # coroutine that used to sit here for up to poll_timeout held an
+            # intake slot and could not be cancelled. `merge`'s own gate still
+            # calls `_wait_for_ci` -- that one is Kraft-7jja.
+            ci = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
+            log, status = _render_ci(ci)
         case "sync_mr":
             # Push first: every commit after `open_mr` -- verify's fixes,
             # mr_checks' findings -- is local only until this runs, and
