@@ -2,6 +2,11 @@
 # pipelines were pushes to a working branch nobody was reviewing yet). Pipelines now
 # run where a result is actually read — an MR, the default branch, or a tag.
 workflow:
+  # A push to an MR's source branch cancels that MR's still-running pipeline
+  # instead of letting both burn runner time. Only jobs marked `interruptible`
+  # get killed; release/tag jobs below are deliberately left out of that.
+  auto_cancel:
+    on_new_commit: interruptible
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -68,6 +73,7 @@ cache:
 # else has to be unconditional or auto-merge breaks.
 lint-and-test:
   stage: test
+  interruptible: true
   rules:
     - *not-on-tags
     - changes: *py-changes
@@ -95,6 +101,7 @@ lint-and-test:
 # Subprocess servers, real uvicorn, multi-second sleeps (see pyproject `slow` marker).
 slow-tests:
   stage: test
+  interruptible: true
   rules:
     - *not-on-tags
     - changes: *py-changes
@@ -128,6 +135,7 @@ slow-tests:
 # skipped three are covered by lint-and-test, which installs it.
 lite-floor:
   stage: test
+  interruptible: true
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       changes:
@@ -140,6 +148,7 @@ lite-floor:
 frontend:
   stage: test
   image: node:20-bookworm-slim
+  interruptible: true
   rules:
     - *not-on-tags
     - changes:
@@ -182,6 +191,7 @@ frontend:
 frontend-e2e:
   stage: test
   image: mcr.microsoft.com/playwright:v1.62.1-noble
+  interruptible: true
   rules:
     - *not-on-tags
     - changes:
