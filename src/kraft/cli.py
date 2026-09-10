@@ -443,7 +443,12 @@ def _cmd_create(ns: argparse.Namespace) -> None:
     emit(
         asyncio.run(
             client.create_work_item(
-                ns.title, _repo_scope(ns), ns.chain, ns.description, attachments or None
+                ns.title,
+                _repo_scope(ns),
+                ns.chain,
+                ns.description,
+                attachments or None,
+                auto_gate=ns.auto_gate,
             )
         ),
         _render_action,
@@ -742,6 +747,11 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     # themselves in --help.
     create.add_argument("--spec", help="attach a spec that already exists; skips the spec node")
     create.add_argument("--plan", help="attach a plan that already exists; skips the plan node")
+    create.add_argument(
+        "--auto-gate",
+        action="store_true",
+        help="let an agent review this item's auto-escalate gates before a human does",
+    )
     create.set_defaults(func=_cmd_create, all=False)
 
     approve = subs.add_parser("approve", parents=[common], help="approve the pending gate")
