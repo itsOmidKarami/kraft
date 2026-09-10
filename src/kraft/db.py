@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -60,6 +60,10 @@ CREATE TABLE work_items (
   -- set while status = 'rate_limited': when the agent's rate limit resets and
   -- `rate_limit_retry.poller` may relaunch the item. NULL otherwise.
   retry_at         TEXT,
+  -- the `claude` CLI's own session id for this item's escalation thread
+  -- (distinct from any worker_sessions.id) -- see `escalate.py`. NULL until
+  -- the first escalation turn.
+  escalation_session_id TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
@@ -428,6 +432,7 @@ SELECT id, bead_id, title, description, repo, chain_template, chain_definition,
 )""",
         "CREATE INDEX idx_work_item_repos_item ON work_item_repos(work_item_id, merge_rank)",
     ],
+    19: ["ALTER TABLE work_items ADD COLUMN escalation_session_id TEXT"],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins
