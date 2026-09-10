@@ -1076,6 +1076,34 @@ def test_merge_still_fails_when_the_forge_refuses(tmp_path, monkeypatch):
     assert "1 approval required" in _session_log(tmp_path, "x4")
 
 
+def test_merge_waits_out_a_pipeline_the_review_brief_restarted(tmp_path, monkeypatch):
+    """Kraft-266b. human_review commits and pushes a review brief onto the MR
+    branch *after* mr_checks already waited its pipeline green, which starts a
+    fresh one; `glab mr merge --yes` against a still-running pipeline exits 0
+    but merges nothing (Kraft-79x3). merge must re-poll CI itself rather than
+    trust mr_checks' now-stale answer."""
+    fake = forge.FakeForge(ci_states=["pending", "success"])
+    asyncio.run(fake.open_mr(repo=tmp_path, branch="kraft/w1", title="t", body="b"))
+
+    returned, recorded = _forge_session(tmp_path, monkeypatch, fake, "merge", "m4", poll_interval=0)
+
+    assert (returned, recorded) == ("done", "done")
+    assert fake.merged == [1]
+
+
+def test_merge_fails_when_the_re_armed_pipeline_goes_red(tmp_path, monkeypatch):
+    """The other half: a review-brief pipeline that comes back red must stop
+    the node before `glab mr merge` ever runs, same as mr_checks going red."""
+    fake = forge.FakeForge(ci_states=["pending", "failed"])
+    asyncio.run(fake.open_mr(repo=tmp_path, branch="kraft/w1", title="t", body="b"))
+
+    returned, recorded = _forge_session(tmp_path, monkeypatch, fake, "merge", "m5", poll_interval=0)
+
+    assert (returned, recorded) == ("failed", "failed")
+    assert fake.merged == [], "a red pipeline reached glab mr merge"
+    assert "pipeline failed" in _session_log(tmp_path, "m5")
+
+
 def test_open_mr_reuses_an_open_mr_for_the_branch(tmp_path, monkeypatch):
     """Kraft-ko7j's re-entry walks back through this node, and a retry of an
     open_mr that crashed after the create hits the same wall: `mr create` for a
