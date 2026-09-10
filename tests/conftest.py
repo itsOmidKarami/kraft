@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import socket
 from pathlib import Path
 
 import httpx
@@ -34,6 +35,14 @@ def _isolated_kraft_home(tmp_path, monkeypatch):
     part of `app`, so a test cannot reach the home by not opting in.
     """
     monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "kraft-home"))
+    # Nor a real `kraft admin start` on the default port 8765: a test that
+    # doesn't opt into the `app` fixture's ASGI transport falls through to a
+    # real HTTP call in `client.base_url()`, and a developer machine running
+    # `kraft` for real answers it — turning an expected ConnectError into a
+    # live 401. Pin an ephemeral port nothing is listening on yet instead.
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        monkeypatch.setenv("KRAFT_PORT", str(probe.getsockname()[1]))
     # No test may reach the release feed either. `doctor`'s version check and the
     # notice at boot both call out to gitlab.com, which would make this suite
     # depend on that host being up and cost every offline run a timeout. The

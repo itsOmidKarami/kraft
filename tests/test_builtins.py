@@ -770,3 +770,37 @@ def test_the_worktree_and_the_forge_agree_on_the_branch(tmp_path, monkeypatch):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_ensure_worktree_raises_when_the_repo_has_no_commit_identity(tmp_path):
+    """Kraft-mxdx. A repo with no `user.email` anywhere in its config chain
+    used to hit `fatal: unable to auto-detect email address` on the first
+    commit a node attempted, well after `ensure_worktree` had already
+    returned success — the agent then invented an identity to get unblocked.
+    Fail here instead, at worktree creation, naming the missing key."""
+    repo = make_repo(tmp_path)
+    _git(repo, "config", "--unset", "user.email")
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="w1",
+                    bead_id="B",
+                    title="t",
+                    repo=str(repo),
+                    chain_template="quick-task",
+                    chain_definition="{}",
+                )
+            )
+            with pytest.raises(RuntimeError, match="user.email"):
+                await kraft_builtins.ensure_worktree(
+                    database, rd, repo=str(repo), work_item_id="w1"
+                )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
