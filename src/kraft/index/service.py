@@ -62,6 +62,12 @@ class Indexer:
         self._cursor: int = 0
         self._wakeup = asyncio.Event()
         self._task: asyncio.Task | None = None
+        # Every write to `self._conn` goes through this: `reconcile` now awaits
+        # mid-transaction (the embedding step runs in a thread), so two writers
+        # in flight at once — rescan_all's fan-out, a live ingest_session_summary
+        # — could otherwise interleave their BEGIN..COMMIT on the one connection.
+        # Reads (search, get_document) are unaffected; only writers serialize.
+        self._write_lock = asyncio.Lock()
 
     # ---- repo discovery ----
 
@@ -98,16 +104,19 @@ class Indexer:
 
     async def rescan_repo(self, repo: str) -> ingest.ReconcileStats:
         scanned = await asyncio.to_thread(ingest.scan_repo, Path(repo))
-        # ponytail: reconcile writes run on the event loop against the single
-        # index connection. Fine while ingestion is small and low-QPS; move
-        # behind a writer queue if a large-repo scan ever stalls the loop.
-        return ingest.reconcile(self._conn, repo, scanned, embedder=self._embedder)
+        # The embedding step inside `reconcile` runs in a thread (Kraft-fix:
+        # a big first scan used to peg the loop for minutes and take /health
+        # and everything else down with it). `_write_lock` keeps that from
+        # becoming two writers interleaving on the one index connection.
+        async with self._write_lock:
+            return await ingest.reconcile(self._conn, repo, scanned, embedder=self._embedder)
 
-    def purge_repo(self, repo: str) -> ingest.ReconcileStats:
+    async def purge_repo(self, repo: str) -> ingest.ReconcileStats:
         """Drop every indexed document for `repo` — a disconnected repo must
         stop answering searches. Reconciling against an empty scan is the same
         delete path a vanished file already takes."""
-        return ingest.reconcile(self._conn, repo, [], embedder=self._embedder)
+        async with self._write_lock:
+            return await ingest.reconcile(self._conn, repo, [], embedder=self._embedder)
 
     async def rescan_all(self) -> dict[str, ingest.ReconcileStats]:
         repos = self.repos()
@@ -201,13 +210,14 @@ class Indexer:
             source_kind="session_summary",
             links=tuple(links),
         )
-        self._conn.execute("BEGIN")
-        try:
-            ingest.upsert_document(self._conn, row["repo"], doc, _now(), self._embedder)
-            self._conn.commit()
-        except BaseException:
-            self._conn.rollback()
-            raise
+        async with self._write_lock:
+            self._conn.execute("BEGIN")
+            try:
+                await ingest.upsert_document(self._conn, row["repo"], doc, _now(), self._embedder)
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
         return True
 
     # ---- live event drain ----
