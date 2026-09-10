@@ -1031,3 +1031,147 @@ def test_ensure_worktree_raises_when_the_repo_has_no_commit_identity(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_refresh_worktree_base_returns_none_when_no_worktree(tmp_path):
+    repo = make_repo(tmp_path)
+    worktree = tmp_path / "nope"
+    result = asyncio.run(kraft_builtins.refresh_worktree_base(worktree, repo, "kraft/w1"))
+    assert result is None
+
+
+def test_refresh_worktree_base_returns_none_when_already_up_to_date(tmp_path):
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            worktree = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id="w1"
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
+            )
+            branch = store.branch_for(row)
+            # no origin remote exists here at all -- the already-pushed probe's
+            # failure must be swallowed (expected_failure), not raised
+            result = await kraft_builtins.refresh_worktree_base(worktree, repo, branch)
+            assert result is None
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_refresh_worktree_base_skips_when_branch_already_pushed(tmp_path):
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", "-q", "-b", "main", str(origin)], check=True)
+    repo = make_repo(tmp_path)
+    _git(repo, "remote", "add", "origin", str(origin))
+    _git(repo, "push", "-q", "-u", "origin", "main")
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            worktree = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id="w1"
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
+            )
+            branch = store.branch_for(row)
+            _git(worktree, "push", "-q", "-u", "origin", branch)
+            before = git_read(worktree, "rev-parse", "HEAD")
+
+            (repo / "moved.txt").write_text("moved on\n")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "moved on")
+
+            result = await kraft_builtins.refresh_worktree_base(worktree, repo, branch)
+            assert result is None
+            assert git_read(worktree, "rev-parse", "HEAD") == before
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_refresh_worktree_base_rebases_and_returns_new_head(tmp_path):
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            worktree = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id="w1"
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
+            )
+            branch = store.branch_for(row)
+
+            (worktree / "worktree_work.txt").write_text("done in the worktree\n")
+            _git(worktree, "add", "-A")
+            _git(worktree, "commit", "-m", "worktree work")
+
+            (repo / "moved.txt").write_text("moved on\n")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "moved on")
+            new_head = git_read(repo, "rev-parse", "HEAD")
+
+            result = await kraft_builtins.refresh_worktree_base(worktree, repo, branch)
+            assert result == new_head
+            assert (worktree / "worktree_work.txt").is_file()
+            assert (worktree / "moved.txt").is_file()
+            assert git_read(worktree, "merge-base", "--is-ancestor", new_head, "HEAD") == ""
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_refresh_worktree_base_raises_and_aborts_on_conflict(tmp_path):
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            worktree = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id="w1"
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
+            )
+            branch = store.branch_for(row)
+
+            (worktree / "calc.py").write_text(
+                "def add(a, b):\n    return a - b - 1  # bug: should be +\n"
+            )
+            _git(worktree, "add", "-A")
+            _git(worktree, "commit", "-m", "worktree edit")
+            worktree_head = git_read(worktree, "rev-parse", "HEAD")
+
+            (repo / "calc.py").write_text(
+                "def add(a, b):\n    return a - b - 2  # bug: should be +\n"
+            )
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "conflicting edit")
+
+            with pytest.raises(RuntimeError, match="git rebase failed"):
+                await kraft_builtins.refresh_worktree_base(worktree, repo, branch)
+
+            assert git_read(worktree, "status", "--porcelain") == ""
+            assert git_read(worktree, "rev-parse", "HEAD") == worktree_head
+
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())

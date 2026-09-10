@@ -7,11 +7,14 @@ a human's note leading its prompt.
 
 from __future__ import annotations
 
+import subprocess
 import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-from support.harness import fake_templates_dir, isolated_bd, make_repo
+from support.harness import _git, fake_templates_dir, isolated_bd, make_repo
+
+from kraft.config import git_read
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
@@ -227,4 +230,186 @@ def test_a_pause_catches_a_session_still_in_its_pending_window(tmp_path):
 
     caught, status = asyncio.run(scenario())
     assert caught == ["s1"]
-    assert status == "paused"
+
+
+def test_resume_rebases_the_worktree_onto_a_moved_head(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "30")
+    repo = make_repo(tmp_path)
+
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={"repo": str(repo), "title": "refresh me", "chain_template": "quick-task"},
+        ).json()["id"]
+        _running_agent(client, wid)
+        assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 200
+        _wait(
+            lambda: (lambda b: b if b["status"] == "paused" else None)(
+                client.get(f"/api/work-items/{wid}").json()
+            ),
+            "the item to read paused",
+        )
+
+        # repo's default branch moves on while the item sits paused
+        (repo / "moved.txt").write_text("moved on\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-m", "moved on")
+        new_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+        monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+        r = client.post(f"/api/work-items/{wid}/resume", json={})
+        assert r.status_code == 200
+
+        item = _wait(
+            lambda: (lambda b: b if b["status"] == "completed" else None)(
+                client.get(f"/api/work-items/{wid}").json()
+            ),
+            "the resumed item to complete",
+            timeout=120,
+        )
+        assert item["base_ref"] == new_head
+        worktree = Path(item["worktree_path"])
+        assert (worktree / "moved.txt").is_file()
+
+
+def test_resume_skips_rebase_when_worktree_is_dirty(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "30")
+    repo = make_repo(tmp_path)
+
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={"repo": str(repo), "title": "dirty resume", "chain_template": "quick-task"},
+        ).json()["id"]
+        _running_agent(client, wid)
+        assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 200
+        item = _wait(
+            lambda: (lambda b: b if b["status"] == "paused" else None)(
+                client.get(f"/api/work-items/{wid}").json()
+            ),
+            "the item to read paused",
+        )
+        before_base_ref = item["base_ref"]
+        worktree = Path(item["worktree_path"])
+        # models a SIGTERM catching the agent mid-edit, nothing committed yet
+        (worktree / "midedit.txt").write_text("uncommitted work\n")
+
+        (repo / "moved.txt").write_text("moved on\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-m", "moved on")
+
+        monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+        r = client.post(f"/api/work-items/{wid}/resume", json={})
+        assert r.status_code == 200
+
+        _wait(
+            lambda: (lambda b: b if b["status"] == "completed" else None)(
+                client.get(f"/api/work-items/{wid}").json()
+            ),
+            "the resumed item to reach a terminal state",
+            timeout=120,
+        )
+        # dirty file survived untouched -- rebase was skipped, not stashed
+        assert (worktree / "midedit.txt").read_text() == "uncommitted work\n"
+        assert client.get(f"/api/work-items/{wid}").json()["base_ref"] == before_base_ref
+
+
+def test_resume_marks_needs_human_on_a_rebase_conflict(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "30")
+    repo = make_repo(tmp_path)
+
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={"repo": str(repo), "title": "conflict resume", "chain_template": "quick-task"},
+        ).json()["id"]
+        _running_agent(client, wid)
+        assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 200
+        item = _wait(
+            lambda: (lambda b: b if b["status"] == "paused" else None)(
+                client.get(f"/api/work-items/{wid}").json()
+            ),
+            "the item to read paused",
+        )
+        worktree = Path(item["worktree_path"])
+
+        # the branch already has a commit touching calc.py, as an earlier node would
+        (worktree / "calc.py").write_text(
+            "def add(a, b):\n    return a - b - 1  # bug: should be +\n"
+        )
+        _git(worktree, "add", "-A")
+        _git(worktree, "commit", "-m", "worktree edit")
+
+        # repo's default branch changes the same line while the item sits paused
+        (repo / "calc.py").write_text("def add(a, b):\n    return a - b - 2  # bug: should be +\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-m", "conflicting edit")
+
+        before_sessions = len(client.get(f"/api/work-items/{wid}").json()["worker_sessions"])
+
+        r = client.post(f"/api/work-items/{wid}/resume", json={})
+        assert r.status_code == 200
+        assert r.json()["status"] == "needs_human"
+
+        needs_human = [
+            e
+            for e in client.get(f"/api/work-items/{wid}/events").json()
+            if e["type"] == "work_item_needs_human"
+        ]
+        assert needs_human and "conflict" in needs_human[-1]["payload"]["reason"].lower()
+
+        after = client.get(f"/api/work-items/{wid}").json()
+        assert len(after["worker_sessions"]) == before_sessions
+        assert git_read(worktree, "status", "--porcelain") == ""
+
+
+def test_resume_skips_rebase_when_branch_already_pushed(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "30")
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", "-q", "-b", "main", str(origin)], check=True)
+    repo = make_repo(tmp_path)
+    _git(repo, "remote", "add", "origin", str(origin))
+    _git(repo, "push", "-q", "-u", "origin", "main")
+
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={"repo": str(repo), "title": "pushed resume", "chain_template": "quick-task"},
+        ).json()["id"]
+        _running_agent(client, wid)
+        assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 200
+        item_before = _wait(
+            lambda: (lambda b: b if b["status"] == "paused" else None)(
+                client.get(f"/api/work-items/{wid}").json()
+            ),
+            "the item to read paused",
+        )
+        worktree = Path(item_before["worktree_path"])
+        _git(worktree, "push", "-q", "-u", "origin", item_before["branch"])
+
+        (repo / "moved.txt").write_text("moved on\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-m", "moved on")
+
+        monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+        r = client.post(f"/api/work-items/{wid}/resume", json={})
+        assert r.status_code == 200
+
+        _wait(
+            lambda: (lambda b: b if b["status"] == "completed" else None)(
+                client.get(f"/api/work-items/{wid}").json()
+            ),
+            "the resumed item to complete",
+            timeout=120,
+        )
+        # rebase was skipped: repo's moved.txt never reached the worktree, and
+        # base_ref (recorded at first dispatch) is untouched, even though the
+        # chain's own commits (e.g. its wip-work commit) still moved HEAD on.
+        assert not (worktree / "moved.txt").is_file()
+        assert client.get(f"/api/work-items/{wid}").json()["base_ref"] == item_before["base_ref"]
