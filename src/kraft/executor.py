@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import shlex
+import shutil
 import sqlite3
 import uuid
 from collections.abc import Awaitable, Callable
@@ -233,6 +234,12 @@ async def intake(
             bead_warning = str(exc)
         if bead_warning:
             logger.warning("bead not filed for %r in %s: %s", title, cwd, bead_warning)
+    # Before the trim below, and raising rather than degrading: `materialize`
+    # is about to remove this attachment's gate from the chain permanently, and
+    # a trim whose document is not Kraft's own is a promise something outside
+    # Kraft can later make false (Kraft-eqgn). Intake is the last moment the
+    # caller can fix the path, so it is where this fails.
+    attachments = _store_attachments(run_dirs, work_item_id, attachments, repo=repo)
     satisfied = frozenset(ATTACHMENT_GATES[a["kind"]] for a in attachments or [])
     chain_definition = json.dumps(materialize(template, satisfied_gates=satisfied))
     implements_beads = _extract_beads(description, exclude=bead_id)
@@ -264,6 +271,38 @@ async def intake(
 
     await db.write(_create)
     return work_item_id
+
+
+def _store_attachments(
+    run_dirs, work_item_id: str, attachments: list[dict] | None, *, repo: str
+) -> list[dict]:
+    """Copy each attachment into Kraft's own storage; return the rewritten records.
+
+    `path` is left alone — it is the destination inside the worktree, and
+    `ensure_worktree` still needs it. Only `source` changes, from "where the
+    caller had it" to "where Kraft keeps it", which is why `ensure_worktree`
+    needs no change at all: it already prefers `source`.
+
+    Raises rather than skipping. Every other reader of an attachment is
+    best-effort, and that is right for them; this one backs an irreversible
+    decision.
+    """
+    if not attachments:
+        return attachments or []
+    dest_dir = run_dirs.attachments / work_item_id
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    stored = []
+    for a in attachments:
+        src = Path(a["source"]) if a.get("source") else Path(repo) / a["path"]
+        dest = dest_dir / f"{a['kind']}{Path(a['path']).suffix or '.md'}"
+        # Not shutil.copyfile's own error message: it names two absolute paths
+        # under $KRAFT_HOME and says nothing about which attachment this was.
+        try:
+            shutil.copyfile(src, dest)
+        except OSError as exc:
+            raise ValueError(f"cannot read the {a['kind']} attachment at {src}: {exc}") from exc
+        stored.append({**a, "source": str(dest)})
+    return stored
 
 
 def _attachments(work_item_row) -> list[dict]:

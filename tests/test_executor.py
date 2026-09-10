@@ -4,6 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from support.harness import fake_registry, isolated_bd, make_repo
 
 from kraft import db, events, executor, store
@@ -580,6 +581,10 @@ def test_intake_with_a_plan_attachment_drops_the_plan_node(tmp_path):
         ],
     )
 
+    plan_doc = tmp_path / ".engineering" / "plans" / "p.md"
+    plan_doc.parent.mkdir(parents=True, exist_ok=True)
+    plan_doc.write_text("# p\n")
+
     async def scenario():
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
@@ -607,6 +612,144 @@ def test_intake_with_a_plan_attachment_drops_the_plan_node(tmp_path):
     asyncio.run(scenario())
 
 
+def test_intake_copies_an_attachment_into_kraft_storage(tmp_path):
+    """Kraft-eqgn: the trim is irreversible, so the document that justifies it
+    has to be Kraft's own from that moment — not a path into someone else's
+    working tree that can be deleted an hour later."""
+    template = Template(
+        id="default",
+        nodes=[
+            {"id": "plan", "tasks": ["on.plan.requested"], "gate_after": "plan_approval"},
+            {"id": "implementation", "tasks": ["on.implementation.start"], "gate_after": None},
+        ],
+    )
+    external = tmp_path / "elsewhere" / "p.md"
+    external.parent.mkdir(parents=True)
+    external.write_text("# the plan\n")
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(tmp_path),
+                template=template,
+                bd_cwd=str(isolated_bd(tmp_path)),
+                attachments=[
+                    {
+                        "kind": "plan",
+                        "path": ".engineering/plans/p.md",
+                        "source": str(external),
+                    }
+                ],
+            )
+            stored = database.read(
+                lambda c: c.execute(
+                    "SELECT attachments FROM work_items WHERE id = ?", (wid,)
+                ).fetchone()
+            )
+            entry = json.loads(stored["attachments"])[0]
+            # path is untouched: it is where the document lands in the worktree
+            assert entry["path"] == ".engineering/plans/p.md"
+            # source now points at Kraft's own copy, not the external file
+            assert entry["source"] != str(external)
+            assert Path(entry["source"]).is_file()
+            assert Path(entry["source"]).read_text() == "# the plan\n"
+            assert Path(entry["source"]).is_relative_to(rd.attachments)
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_the_copy_survives_the_original_being_deleted(tmp_path):
+    """The whole point, stated as the scenario that produced the bug: a document
+    written in a throwaway worktree that is cleaned up before the item runs."""
+    template = Template(
+        id="default",
+        nodes=[
+            {"id": "plan", "tasks": ["on.plan.requested"], "gate_after": "plan_approval"},
+            {"id": "implementation", "tasks": ["on.implementation.start"], "gate_after": None},
+        ],
+    )
+    external = tmp_path / "elsewhere" / "p.md"
+    external.parent.mkdir(parents=True)
+    external.write_text("# the plan\n")
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(tmp_path),
+                template=template,
+                bd_cwd=str(isolated_bd(tmp_path)),
+                attachments=[
+                    {"kind": "plan", "path": ".engineering/plans/p.md", "source": str(external)}
+                ],
+            )
+            external.unlink()
+            entry = json.loads(
+                database.read(
+                    lambda c: c.execute(
+                        "SELECT attachments FROM work_items WHERE id = ?", (wid,)
+                    ).fetchone()
+                )["attachments"]
+            )[0]
+            assert Path(entry["source"]).read_text() == "# the plan\n"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_intake_refuses_an_attachment_it_cannot_copy(tmp_path):
+    """The behaviour change that closes the bug: fail at the one moment the
+    caller can still fix the path, instead of creating an item that looks fine
+    and misbehaves half an hour later with two gates missing."""
+    template = Template(
+        id="default",
+        nodes=[
+            {"id": "plan", "tasks": ["on.plan.requested"], "gate_after": "plan_approval"},
+            {"id": "implementation", "tasks": ["on.implementation.start"], "gate_after": None},
+        ],
+    )
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            with pytest.raises(ValueError, match="plan attachment"):
+                await executor.intake(
+                    database,
+                    rd,
+                    title="t",
+                    repo=str(tmp_path),
+                    template=template,
+                    bd_cwd=str(isolated_bd(tmp_path)),
+                    attachments=[
+                        {
+                            "kind": "plan",
+                            "path": ".engineering/plans/p.md",
+                            "source": str(tmp_path / "no-such-file.md"),
+                        }
+                    ],
+                )
+            # and no half-built row was left behind
+            rows = database.read(lambda c: c.execute("SELECT id FROM work_items").fetchall())
+            assert rows == []
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 def test_dispatch_puts_the_attachment_note_after_the_title(tmp_path, monkeypatch):
     """Unit tests on _attachment_note/_attachments alone don't prove _dispatch
     composes them correctly (wrong order, or dropping the note entirely, would
@@ -615,6 +758,9 @@ def test_dispatch_puts_the_attachment_note_after_the_title(tmp_path, monkeypatch
     monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
+    spec_doc = repo / ".engineering" / "specs" / "a.md"
+    spec_doc.parent.mkdir(parents=True, exist_ok=True)
+    spec_doc.write_text("# a\n")
     prompts = tmp_path / "prompts.txt"
     monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompts))
     title = "make the failing test pass"

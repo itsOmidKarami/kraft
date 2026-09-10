@@ -357,6 +357,29 @@ invocation time only, never written to a repo file.
 - Everything between "plan approved" and "ready for final review" runs unattended
   (subject to pause/steer), bounded by the retry policy in §9.
 
+### 8.1 A trimmed gate must be self-backed
+
+Kraft resolves references at one time and dereferences them at another —
+steering names, skill names, artifact paths, intake attachments. When the
+referent is gone by the time it is used, the rule is:
+
+> **A missing reference may degrade what a human sees. It may never remove the
+> human.**
+
+Steering that cannot be read fails the node. A skill an agent cannot load stops
+it with `needs_context`. A missing artifact still puts its gate to a person,
+just without a document to read. All three degrade; none of them decide
+anything on a human's behalf.
+
+Where a decision made at validation time **cannot be un-made**, degrading is not
+enough: the referent is copied into Kraft's own storage at the moment the
+decision is taken. Trimming a gate is today's only such decision — an intake
+attachment removes `spec_approval` or `plan_approval` from `chain_definition`
+permanently — so intake copies the document into `run_dirs.attachments/` and
+records that copy, rather than a path into a working tree Kraft does not own
+(Kraft-eqgn). A reference that can rot must never be the thing a skipped human
+decision rests on.
+
 ---
 
 ## 9. Bounded Autonomy / Retry Policy

@@ -1325,10 +1325,19 @@ def test_intake_with_a_plan_attachment_trims_the_chain_and_reports_it(tmp_path, 
         assert r.status_code == 201, r.text
         wid = r.json()["id"]
         item = client.get(f"/api/work-items/{wid}").json()
-        assert item["attachments"] == [{"kind": "plan", "path": ".engineering/plans/p.md"}]
+        # Trimming a gate is irreversible, so intake copies the plan into
+        # Kraft's own storage and reports that copy as `source` (Kraft-eqgn).
+        stored_dir = client.app.state.run_dirs.attachments / wid
+        expected = [{"kind": "plan", "path": ".engineering/plans/p.md"}]
+        assert [
+            {k: v for k, v in a.items() if k != "source"} for a in item["attachments"]
+        ] == expected
+        assert Path(item["attachments"][0]["source"]).is_relative_to(stored_dir)
         assert "plan_approval" not in [n["gate_after"] for n in item["chain_definition"]["nodes"]]
         listed = next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
-        assert listed["attachments"] == [{"kind": "plan", "path": ".engineering/plans/p.md"}]
+        assert [
+            {k: v for k, v in a.items() if k != "source"} for a in listed["attachments"]
+        ] == expected
 
 
 def test_intake_with_a_plan_attachment_never_runs_the_plan_node(tmp_path, monkeypatch):
@@ -1481,13 +1490,16 @@ def test_intake_accepts_an_attachment_from_another_worktree_of_the_repo(tmp_path
             },
         )
         assert r.status_code == 201, r.text
-        stored = client.get(f"/api/work-items/{r.json()['id']}").json()["attachments"]
+        wid = r.json()["id"]
+        stored = client.get(f"/api/work-items/{wid}").json()["attachments"]
         # repo-relative path, unchanged in shape: it is what the prompt note,
         # the board badge and index/service._attachment_docs all read.
         assert stored[0]["kind"] == "spec"
         assert stored[0]["path"] == ".engineering/specs/s.md"
-        # and the absolute source, because `repo / path` does not exist
-        assert stored[0]["source"] == str(spec.resolve())
+        # and `source` is Kraft's own copy, not the worktree original --
+        # a trimmed gate must be self-backed (Kraft-eqgn).
+        assert Path(stored[0]["source"]).is_relative_to(client.app.state.run_dirs.attachments / wid)
+        assert Path(stored[0]["source"]).read_text() == spec.read_text()
 
 
 def test_intake_without_a_cwd_still_scopes_attachments_to_the_repo(tmp_path, monkeypatch):
@@ -1860,6 +1872,32 @@ def test_abandon_sets_terminal_status_and_removes_the_worktree(tmp_path, monkeyp
         assert r.status_code == 200, r.text
         assert r.json()["status"] == "abandoned"
         assert not worktree.exists()
+
+
+def test_abandon_reclaims_the_attachment_storage(tmp_path, monkeypatch):
+    """The worktree is already reclaimed; the documents that fed it should not
+    outlive it in $KRAFT_HOME."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        doc = repo / ".engineering" / "specs" / "s.md"
+        doc.parent.mkdir(parents=True, exist_ok=True)
+        doc.write_text("# s\n")
+        wid = client.post(
+            "/api/work-items",
+            json={
+                "title": "x",
+                "repo": str(repo),
+                "attachments": [{"kind": "spec", "path": ".engineering/specs/s.md"}],
+            },
+        ).json()["id"]
+        stored = client.app.state.run_dirs.attachments / wid
+        assert stored.is_dir()
+        _poll_events(client, wid, "gate_requested")
+        _set_status(wid, "paused")
+
+        client.post(f"/api/work-items/{wid}/abandon")
+
+        assert not stored.exists()
 
 
 def test_abandon_refuses_an_active_item(tmp_path, monkeypatch):

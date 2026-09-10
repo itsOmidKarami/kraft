@@ -310,9 +310,14 @@ def test_create_through_the_mcp_door_attaches(app, tmp_path, monkeypatch):
         )
     )
     item = asyncio.run(client.get_work_item(created["id"]))
-    # found under the repo root, so no `source` key: the stored shape is
-    # byte-for-byte what the browser already produces
-    assert item["attachments"] == [{"kind": "plan", "path": ".engineering/plans/p.md"}]
+    # Intake copies the plan into Kraft's own storage and reports that copy as
+    # `source`, even though the original was found under the repo root
+    # (Kraft-eqgn): the trim it justifies has to outlive the caller's worktree.
+    assert [{k: v for k, v in a.items() if k != "source"} for a in item["attachments"]] == [
+        {"kind": "plan", "path": ".engineering/plans/p.md"}
+    ]
+    stored_dir = tmp_path / "run" / "attachments" / created["id"]
+    assert pathlib.Path(item["attachments"][0]["source"]).is_relative_to(stored_dir)
 
 
 def test_reject_requires_a_note(app, capsys):
