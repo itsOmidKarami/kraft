@@ -216,6 +216,21 @@ aside .row, .narrow .row {
 .nav-back:hover { color: var(--color-text); }
 .kbd { opacity: 0.5; font-size: 11px; margin-left: 4px; }
 
+/* ══ bottom nav (mobile app shell) ═══════════════════════════════════════ */
+.bottom-nav {
+  display: none; /* the phone block below turns this on */
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+  justify-content: space-around;
+  background: var(--color-bg); border-top: 1px solid var(--color-divider);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.bottom-nav-tab {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  min-height: 56px; padding: 8px 4px;
+  font-size: 10px; text-decoration: none; color: var(--color-neutral-500);
+}
+.bottom-nav-tab.active { color: var(--color-accent); }
+
 /* ══ board (design 2a) ════════════════════════════════════════════════════ */
 .board { display: grid; grid-template-columns: 200px 1fr; min-height: 560px; }
 
@@ -691,6 +706,7 @@ aside .row, .narrow .row {
 
 /* ══ search overlay (design 1h) ═══════════════════════════════════════════ */
 .search-overlay { width: 700px; max-width: 100%; padding: 0; gap: 0; overflow: hidden; }
+.search-page { padding: 20px 0; display: flex; flex-direction: column; gap: 0; }
 .search-bar {
   display: flex; align-items: center; gap: 10px;
   padding: 12px 16px; border-bottom: 1px solid var(--color-divider);
@@ -823,6 +839,12 @@ aside .row, .narrow .row {
    template editor and the steering editor) hold documents, and the default
    chain template is 10 nodes pretty-printed. */
 textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; }
+.template-readout {
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.5;
+  background: var(--color-neutral-900); border-radius: 8px; padding: 12px;
+  max-height: 50vh; overflow-y: auto; margin: 0;
+}
 .validation {
   font-size: 12px; display: flex; flex-direction: column; gap: 4px;
   padding: 10px 12px; border-radius: 8px; border: 1px solid var(--color-divider);
@@ -900,6 +922,15 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; }
 
   .board, .settings, .analytics { grid-template-columns: 1fr; }
   .board-sidebar {
+    /* The base rule (styles.css:~229) is `position: sticky; top: 45px;
+       max-height: calc(100vh - 45px); overflow-y: auto` — built for the
+       desktop 2-column layout, where the sidebar sticks while the list
+       scrolls independently beside it. Stacked single-column on phone, that
+       serves nothing and stacks a second sticky context under `.app-nav`
+       (top: 0) — two sticky elements in one scroll container is a known
+       mobile-Chrome jank/overlap source during scroll, invisible to a
+       synthetic (non-momentum) scroll in headless testing. */
+    position: static; max-height: none; overflow-y: visible;
     flex-direction: row; flex-wrap: wrap; gap: 10px;
     border-right: 0; border-bottom: 1px solid var(--color-divider); padding: 12px;
   }
@@ -923,9 +954,50 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; }
       var(--color-divider) calc(100% - 24px), transparent) no-repeat bottom / 100% 1px;
   }
   .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* by-node is 7 columns, by-repo is 5 — no readable width at 390px even
+     wrapped. Stack each row into a card; `data-label` (added on the JSX
+     spans) supplies the per-field caption via ::before, so this is a CSS-only
+     reflow of markup that already carries every value it needs. */
+  .node-head, .repo-head { display: none; }
+  .node-row, .repo-row { grid-template-columns: 1fr; gap: 4px; padding: 12px 0; }
+  .node-row > span, .repo-row > span {
+    display: flex; justify-content: space-between; align-items: center; text-align: left;
+  }
+  .node-row > span::before, .repo-row > span::before {
+    content: attr(data-label);
+    font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--color-text-muted);
+  }
+  .node-row .node-name, .repo-row span[data-label="repo"] {
+    font-size: 13px; font-weight: 500; color: var(--color-text);
+  }
+  .node-row .node-name::before, .repo-row span[data-label="repo"]::before { content: none; }
+  /* the cost-share bar reads as noise once it's one of several stacked
+     key:value lines instead of a column beside them */
+  .node-row .share { display: none; }
   .template-editor, .access-grid { grid-template-columns: 1fr; }
   .dialog-backdrop { padding: 12px; align-items: flex-start; }
-  .doc-modal, .diff-modal, .log-modal { max-height: calc(100vh - 24px); }
+  /* Same trap `.intake` had (styles.css:774, fixed above): a grid item's own
+     declared `width` (820px doc-modal, 880px log-modal) sizes its track
+     before `max-width: 100%` has anything smaller to resolve against, so
+     neither ever actually clamped to the viewport. `.diff-modal` already got
+     this fix in the block below (Kraft-8mu.2); doc-modal and log-modal never
+     did. DocumentModal matters here — it's reachable from the phone Search
+     screen, not desktop-only, unlike the log viewer. */
+  .doc-modal, .diff-modal, .log-modal { max-height: calc(100vh - 24px); width: 100%; }
+  /* Same bug, missed on the first pass: the global Cmd/Ctrl+K listener
+     (App.tsx) isn't width-gated, only the trigger button is .desktop-only —
+     so the non-embedded SearchOverlay modal is reachable at any width via a
+     keyboard shortcut, e.g. a phone with a Bluetooth keyboard. */
+  .search-overlay { width: 100%; }
+  /* `.intake { width: 460px; max-width: 100% }` (styles.css:774) never
+     actually clamps: `.dialog-backdrop` is `display: grid; place-items:
+     center`, and a grid item's own declared `width` sizes its track before
+     `max-width: 100%` has anything smaller to resolve against — so the
+     460px wins outright and the dialog (New work item, Add repo) runs off
+     the right edge. `width: 100%` here has nothing to fight; it sizes
+     against the already-padded grid cell like every other phone dialog. */
+  .intake { width: 100%; }
   .doc-editor-menu { right: 0; }
 
   /* the one place a phone user types. 16px is not a taste call: mobile Safari
@@ -940,6 +1012,34 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; }
 
   .gate-reject textarea.input { font-size: 16px; min-height: 96px; }
   .gate-reject .btn { min-height: 44px; }
+
+  /* same zoom-lock as the gate-reject textarea above, on /search's input */
+  .search-page .search-bar input[type="search"] { font-size: 16px; }
+  /* 52vh was sized for the 700px desktop modal; /search is a full page that
+     already scrolls, so don't also cap results to half the viewport */
+  .search-page .search-results { max-height: none; }
+
+  .bottom-nav { display: flex; }
+  main { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
+  /* `.app-nav .nav-link` / `.app-nav .btn` are 2-class selectors
+     (specificity 0,2,0) and beat a bare `.desktop-only` (0,1,0) regardless of
+     source order — these re-qualify with `.desktop-only` so the header's
+     Analytics/Settings/Search controls actually disappear on phone. */
+  .app-nav .nav-link.desktop-only,
+  .app-nav .btn.desktop-only { display: none; }
+
+  /* 9 settings pages wrapped as chips is cramped; `.settings .board-sidebar`
+     (2-class selector) already outranks the generic 1-class `.board-sidebar`
+     phone rule above on specificity alone, so this needs no ordering care. */
+  .settings .board-sidebar { flex-direction: column; flex-wrap: nowrap; }
+  .settings .board-sidebar .facet-opt { min-height: 44px; font-size: 14px; }
+  /* The line above reorders the *outer* `<aside>` but the page links actually
+     live in a nested `.facet` div, and the generic phone rule just above
+     (`.facet { flex-direction: row; flex-wrap: wrap; }`) still wins there —
+     same 1-class-vs-2-class gap as `.board-sidebar` had, just one level
+     deeper. Missed in the original pass because nothing renders `.settings`
+     in jsdom or the e2e phone spec at this exact route/viewport combo. */
+  .settings .facet { flex-direction: column; flex-wrap: nowrap; }
 }
 
 /* the two halves of the phone rule (design 1n) */

@@ -114,4 +114,11 @@ describe("SearchOverlay", () => {
     await userEvent.click(await screen.findByRole("link", { name: "w1" }));
     expect(onClose).toHaveBeenCalled();
   });
+
+  it("renders as a plain page with no backdrop or esc control when embedded", () => {
+    render(<SearchOverlay embedded onClose={() => {}} />);
+    expect(screen.queryByRole("dialog", { name: "Search" })).toBeNull();
+    expect(screen.getByRole("searchbox")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "esc" })).toBeNull();
+  });
 });
