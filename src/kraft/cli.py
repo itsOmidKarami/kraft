@@ -765,7 +765,8 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     create.add_argument("--plan", help="attach a plan that already exists; skips the plan node")
     create.add_argument(
         "--auto-gate",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="let an agent review this item's auto-escalate gates before a human does",
     )
     create.set_defaults(func=_cmd_create, all=False)

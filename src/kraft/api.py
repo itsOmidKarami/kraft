@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import hmac
 import ipaddress
 import json
@@ -177,6 +178,7 @@ async def lifespan(app: FastAPI):
                     bd_cwd=_bd_cwd(),
                     policy=policy_obj,
                     launch=_launch(app.state, repo_row["repo"]) if repo_row else None,
+                    on_approve=_on_approve(app.state),
                 ),
             ),
         )
@@ -507,8 +509,8 @@ class NewWorkItem(BaseModel):
     #: cannot spend tokens unattended; a human starts it from the board.
     autostart: bool = True
     #: Arms agent gate review for this item's `auto_escalate` gates
-    #: (Kraft-zr3s). Off by default; a human opts in per item.
-    auto_gate: bool = False
+    #: (Kraft-zr3s). On by default; `--no-auto-gate` opts out per item.
+    auto_gate: bool = True
 
 
 def _git_common_dir(path: Path) -> Path | None:
@@ -679,6 +681,7 @@ async def create_work_item(body: NewWorkItem, request: Request):
                 bd_cwd=_bd_cwd(),
                 policy=st.policy,
                 launch=_launch(st, body.repo),
+                on_approve=_on_approve(st),
             ),
         ),
     )
@@ -1382,6 +1385,32 @@ async def _ingest_approved_gate_artifact(st, row, gate: str) -> None:
         logger.exception("gate artifact ingest failed for %s (%s)", row["id"], rel)
 
 
+async def apply_approval(st, row, gate: str) -> tuple[dict | None, str | None]:
+    """Everything an approval does before the chain is allowed to move, and the
+    chain it may move along -- or `(None, reason)` when it must not move at all.
+
+    One function, two doors: the `POST .../approve` endpoint (a human) and
+    `executor._review_gates` (an agent's `approve` verdict), which reaches it
+    through the `on_approve` callback `_launch_approval` hands the executor.
+    The same rule `apply_rejection` already enforces for the other verdict:
+    an agent's approval must have exactly the effects a person's would, or
+    `chain_review`'s revised nodes are silently discarded on the path this
+    feature makes the default (Kraft-zr3s).
+
+    Ingest before any splice: the artifact this approval is about belongs to
+    `row`'s chain as it stood when the gate opened, same as `_gate_artifact`
+    everywhere else it's called.
+    """
+    await _ingest_approved_gate_artifact(st, row, gate)
+    if gate != "chain_finalized":
+        return json.loads(row["chain_definition"]), None
+    chain, reason = _splice_chain_review(st, row)
+    if chain is None:
+        return None, reason
+    await st.db.write(lambda c: store.splice_chain(c, row["id"], json.dumps(chain)))
+    return chain, None
+
+
 @api_router.post("/work-items/{wid}/gates/{gate}/approve")
 async def approve_gate(wid: str, gate: str, request: Request):
     st = request.app.state
@@ -1391,21 +1420,10 @@ async def approve_gate(wid: str, gate: str, request: Request):
     if _pending_gate(st, wid) != gate:
         raise HTTPException(409, f"gate {gate!r} is not pending")
 
-    # Before any chain splice: the artifact this approval is about belongs to
-    # `row`'s chain as it stood when the gate opened, same as `_gate_artifact`
-    # everywhere else it's called.
-    await _ingest_approved_gate_artifact(st, row, gate)
-
-    if gate == "chain_finalized":
-        chain, reason = _splice_chain_review(st, row)
-        if chain is None:
-            await st.db.write(
-                lambda c: store.mark_needs_human(c, wid, row["current_node_id"], reason)
-            )
-            return {k: v for k, v in dict(_work_item_row(st, wid)).items()}
-        await st.db.write(lambda c: store.splice_chain(c, wid, json.dumps(chain)))
-    else:
-        chain = json.loads(row["chain_definition"])
+    chain, reason = await apply_approval(st, row, gate)
+    if chain is None:
+        await st.db.write(lambda c: store.mark_needs_human(c, wid, row["current_node_id"], reason))
+        return {k: v for k, v in dict(_work_item_row(st, wid)).items()}
 
     await st.db.write(lambda c: store.approve_gate(c, wid, gate))
     start = _gate_node_index(chain, gate) + 1
@@ -1424,6 +1442,7 @@ async def approve_gate(wid: str, gate: str, request: Request):
                 start_index=start,
                 policy=st.policy,
                 launch=_launch(st, row["repo"]),
+                on_approve=_on_approve(st),
             ),
         ),
     )
@@ -1485,6 +1504,7 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
                 policy=st.policy,
                 steer=body.note,
                 launch=_launch(st, row["repo"]),
+                on_approve=_on_approve(st),
             ),
         ),
     )
@@ -1710,6 +1730,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
                 policy=st.policy,
                 steer=steer,
                 launch=_launch(st, row["repo"]),
+                on_approve=_on_approve(st),
             ),
         ),
     )
@@ -1805,6 +1826,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                 policy=st.policy,
                 steer=steer,
                 launch=_launch(st, row["repo"]),
+                on_approve=_on_approve(st),
             ),
         ),
     )
@@ -2398,6 +2420,12 @@ def _connected(repos: list[dict], path: str) -> dict | None:
         return entry
     resolved = str(Path(path).expanduser().resolve())
     return next((r for r in repos if r["path"] == resolved), None)
+
+
+def _on_approve(st) -> executor.OnApprove:
+    """`apply_approval` bound to this app state — the door `_review_gates` calls
+    so an agent's `approve` verdict has a human approval's effects."""
+    return functools.partial(apply_approval, st)
 
 
 def _launch(st, repo: str) -> executor.LaunchContext:
