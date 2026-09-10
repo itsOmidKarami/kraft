@@ -144,3 +144,36 @@ def test_retry_on_an_item_that_is_not_stopped_is_a_readable_409(wired, tmp_path)
 
     with pytest.raises(ValueError, match="409"):
         run_with_app(wired, scenario)
+
+
+def test_escalate_refuses_an_item_that_is_not_needs_human(wired, tmp_path):
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        created = await client.create_work_item("not stuck", repo=str(repo))
+        return await client.escalate("help", work_item_id=created["id"])
+
+    with pytest.raises(ValueError, match="409"):
+        run_with_app(wired, scenario)
+
+
+def test_escalate_on_a_needs_human_item_schedules_a_turn(wired, tmp_path):
+    from kraft import store
+
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        created = await client.create_work_item("stuck", repo=str(repo))
+        wid = created["id"]
+        import kraft.api as api
+
+        await api.app.state.db.write(lambda c: store.enter_node(c, wid, "implementation"))
+        await api.app.state.db.write(
+            lambda c: store.mark_needs_human(
+                c, wid, "implementation", "task failed in node implementation"
+            )
+        )
+        return await client.escalate("please look at this", work_item_id=wid)
+
+    result = run_with_app(wired, scenario)
+    assert result["status"] == "escalating"

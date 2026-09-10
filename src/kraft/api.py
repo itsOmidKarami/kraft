@@ -27,7 +27,7 @@ from starlette.websockets import WebSocketDisconnect
 from kraft import analytics as analytics_mod
 from kraft import auth as auth_mod
 from kraft import config as config_mod
-from kraft import events, executor, findings, rate_limit_retry, reattach, review, store
+from kraft import escalate, events, executor, findings, rate_limit_retry, reattach, review, store
 from kraft import intake as intake_mod
 from kraft import logs as logs_mod
 from kraft import notify as notify_mod
@@ -866,6 +866,10 @@ class Steer(BaseModel):
 
 class Resume(BaseModel):
     steer: str | None = None
+
+
+class Escalate(BaseModel):
+    message: str
 
 
 class OpenDocument(BaseModel):
@@ -1757,6 +1761,47 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         ),
     )
     return {"id": wid, "node_id": node_id, "loop": key, "steer": steer}
+
+
+@api_router.post("/work-items/{wid}/escalate")
+async def escalate_work_item(wid: str, body: Escalate, request: Request):
+    """Send a message into this item's escalation thread, starting one if
+    none exists yet. Only door onto a `needs_human` stop meant for
+    back-and-forth with an agent rather than a one-shot retry (spec:
+    docs/superpowers/specs/2026-09-10-escalate-to-kraft-agent-design.md).
+    """
+    st = request.app.state
+    row = _work_item_row(st, wid)
+    if row["status"] != "needs_human":
+        raise HTTPException(409, "work item is not needs_human")
+    message = body.message.strip()
+    if not message:
+        raise HTTPException(400, "message is required")
+    running = st.db.read(
+        lambda c: c.execute(
+            "SELECT id FROM worker_sessions WHERE work_item_id = ? AND hook_point = 'escalation' "
+            "AND status IN ('pending', 'running') LIMIT 1",
+            (wid,),
+        ).fetchone()
+    )
+    if running is not None:
+        raise HTTPException(409, f"an escalation turn ({running['id']}) is already running")
+    _spawn(
+        request.app,
+        f"{wid}:escalate",
+        _guard(
+            st.db,
+            wid,
+            escalate.dispatch(
+                st.db,
+                st.run_dirs,
+                work_item_id=wid,
+                message=message,
+                launch=_launch(st, row["repo"]),
+            ),
+        ),
+    )
+    return {"id": wid, "status": "escalating"}
 
 
 @api_router.post("/work-items/{wid}/mr-labels")

@@ -874,6 +874,23 @@ def set_base_ref(conn: sqlite3.Connection, work_item_id: str, sha: str) -> None:
     )
 
 
+def set_escalation_session(
+    conn: sqlite3.Connection, work_item_id: str, cli_session_id: str
+) -> None:
+    """Save the `claude` CLI's own session id for this item's escalation
+    thread, so the next `escalate.dispatch` can `--resume` it.
+
+    Overwritten on every turn with whatever the run just reported, rather
+    than written once: `claude --resume` can "start a copy and say so"
+    (`claude --help`) instead of truly resuming, and picking up whatever id
+    the CLI actually used covers that without Kraft needing to detect it.
+    """
+    conn.execute(
+        "UPDATE work_items SET escalation_session_id = ?, updated_at = ? WHERE id = ?",
+        (cli_session_id, _now(), work_item_id),
+    )
+
+
 def take_steer(conn: sqlite3.Connection, work_item_id: str) -> str | None:
     """Read and clear the pending steer — it belongs to one relaunch, not to every
     later one."""

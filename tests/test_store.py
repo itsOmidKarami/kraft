@@ -630,6 +630,25 @@ def test_set_base_ref(tmp_path):
     assert conn.execute("SELECT base_ref FROM work_items WHERE id='w1'").fetchone()[0] == "abc123"
 
 
+def test_set_escalation_session(tmp_path):
+    conn = db._connect(tmp_path / "s.db")
+    db.migrate(conn)
+    store.create_work_item(
+        conn,
+        id="w1",
+        bead_id="B",
+        title="t",
+        repo="/r",
+        chain_template="quick-task",
+        chain_definition="{}",
+    )
+    row = conn.execute("SELECT escalation_session_id FROM work_items WHERE id='w1'").fetchone()
+    assert row[0] is None
+    store.set_escalation_session(conn, "w1", "cli-session-abc")
+    row = conn.execute("SELECT escalation_session_id FROM work_items WHERE id='w1'").fetchone()
+    assert row[0] == "cli-session-abc"
+
+
 def test_sessions_for_round_filters_by_node_and_round(tmp_path):
     conn = db._connect(tmp_path / "s.db")
     db.migrate(conn)
