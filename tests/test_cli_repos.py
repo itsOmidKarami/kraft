@@ -21,7 +21,7 @@ def _make_item(repo, title="locate me"):
     async def go():
         async with client.http() as http:
             response = await http.post(
-                "/work-items", json={"title": title, "repo": str(repo), "autostart": False}
+                "/api/work-items", json={"title": title, "repo": str(repo), "autostart": False}
             )
         assert response.status_code == 201, response.text
         return response.json()["id"]
@@ -181,7 +181,7 @@ def test_repos_says_disabled_in_words_not_only_in_colour(app, tmp_path, monkeypa
     async def go():
         async with client.http() as http:
             response = await http.patch(
-                "/repos", params={"path": str(off)}, json={"enabled": False}
+                "/api/repos", params={"path": str(off)}, json={"enabled": False}
             )
         assert response.status_code < 400, response.text
 

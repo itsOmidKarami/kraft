@@ -62,16 +62,16 @@ def test_probe_reads_the_repo_without_touching_it(tmp_path, client):
     repo = make_repo(tmp_path)
     before = sorted(p.name for p in repo.iterdir())
 
-    body = client.post("/repos/probe", json={"path": str(repo)}).json()
+    body = client.post("/api/repos/probe", json={"path": str(repo)}).json()
     assert body["path"] == str(repo.resolve())
     assert body["branch"]
     assert body["submodules"] == []
     assert sorted(p.name for p in repo.iterdir()) == before
 
-    assert client.post("/repos/probe", json={"path": str(tmp_path / "nope")}).status_code == 400
+    assert client.post("/api/repos/probe", json={"path": str(tmp_path / "nope")}).status_code == 400
     plain = tmp_path / "plain"
     plain.mkdir()
-    assert client.post("/repos/probe", json={"path": str(plain)}).status_code == 400
+    assert client.post("/api/repos/probe", json={"path": str(plain)}).status_code == 400
 
 
 def test_probe_finds_submodules_and_a_test_command(tmp_path, client):
@@ -81,35 +81,37 @@ def test_probe_finds_submodules_and_a_test_command(tmp_path, client):
         '[submodule "libs/a"]\n\tpath = libs/a\n\turl = ../a.git\n'
         '[submodule "libs/b"]\n\tpath = libs/b\n\turl = ../b.git\n'
     )
-    body = client.post("/repos/probe", json={"path": str(repo)}).json()
+    body = client.post("/api/repos/probe", json={"path": str(repo)}).json()
     assert body["submodules"] == ["libs/a", "libs/b"]
     assert body["test_command"] == "uv run pytest -q"
 
 
 def test_repo_crud_round_trips_through_the_yaml(tmp_path, client, templates_dir):
     repo = make_repo(tmp_path)
-    created = client.post("/repos", json={"path": str(repo), "default_chain_template": "default"})
+    created = client.post(
+        "/api/repos", json={"path": str(repo), "default_chain_template": "default"}
+    )
     assert created.status_code == 201
     path = created.json()["path"]
 
     on_disk = yaml.safe_load((templates_dir / "repos.yaml").read_text())
     assert on_disk["repos"][0]["path"] == path
-    assert client.get("/repos").json()["repos"][0]["default_chain_template"] == "default"
+    assert client.get("/api/repos").json()["repos"][0]["default_chain_template"] == "default"
 
     # connecting the same repo twice is a conflict, not a duplicate row
-    assert client.post("/repos", json={"path": str(repo)}).status_code == 409
+    assert client.post("/api/repos", json={"path": str(repo)}).status_code == 409
 
-    patched = client.patch(f"/repos?path={path}", json={"enabled": False, "name": "renamed"})
+    patched = client.patch(f"/api/repos?path={path}", json={"enabled": False, "name": "renamed"})
     assert patched.json()["enabled"] is False and patched.json()["name"] == "renamed"
-    assert client.patch("/repos?path=/nope", json={"enabled": False}).status_code == 404
+    assert client.patch("/api/repos?path=/nope", json={"enabled": False}).status_code == 404
 
     # POST stores git's resolved toplevel, so the path a client connected with is
     # not always the path stored — patch and delete must still find it.
-    assert client.patch(f"/repos?path={repo}", json={"enabled": True}).status_code == 200
+    assert client.patch(f"/api/repos?path={repo}", json={"enabled": True}).status_code == 200
 
-    assert client.delete(f"/repos?path={path}").status_code == 204
-    assert client.get("/repos").json()["repos"] == []
-    assert client.delete(f"/repos?path={path}").status_code == 404
+    assert client.delete(f"/api/repos?path={path}").status_code == 204
+    assert client.get("/api/repos").json()["repos"] == []
+    assert client.delete(f"/api/repos?path={path}").status_code == 404
 
 
 def test_add_repo_round_trips_default_model_and_steering(tmp_path, client, templates_dir):
@@ -117,7 +119,7 @@ def test_add_repo_round_trips_default_model_and_steering(tmp_path, client, templ
     (templates_dir / "steering" / "house-style.md").write_text("# House style\nBe direct.\n")
     repo = make_repo(tmp_path)
     created = client.post(
-        "/repos",
+        "/api/repos",
         json={
             "path": str(repo),
             "default_model": "anything-at-all",
@@ -132,7 +134,7 @@ def test_add_repo_round_trips_default_model_and_steering(tmp_path, client, templ
     assert on_disk["repos"][0]["deny_tools"] == ["WebFetch"]
     assert on_disk["repos"][0]["steering"] == ["house-style"]
 
-    fetched = client.get("/repos").json()["repos"][0]
+    fetched = client.get("/api/repos").json()["repos"][0]
     assert fetched["default_model"] == "anything-at-all"
     assert fetched["steering"] == ["house-style"]
 
@@ -143,30 +145,30 @@ def test_add_repo_with_a_missing_steering_name_is_refused(tmp_path, client, temp
     repos_yaml = templates_dir / "repos.yaml"
     assert not repos_yaml.exists()
     repo = make_repo(tmp_path)
-    r = client.post("/repos", json={"path": str(repo), "steering": ["does-not-exist"]})
+    r = client.post("/api/repos", json={"path": str(repo), "steering": ["does-not-exist"]})
     assert 400 <= r.status_code < 500, r.text
     # a rejected write never got persisted
     assert not repos_yaml.exists()
-    assert client.get("/repos").json()["repos"] == []
+    assert client.get("/api/repos").json()["repos"] == []
 
 
 def test_patch_repo_with_a_missing_steering_name_is_refused(tmp_path, client, templates_dir):
     repo = make_repo(tmp_path)
-    client.post("/repos", json={"path": str(repo)})
+    client.post("/api/repos", json={"path": str(repo)})
     before = (templates_dir / "repos.yaml").read_text()
 
-    r = client.patch(f"/repos?path={repo}", json={"steering": ["does-not-exist"]})
+    r = client.patch(f"/api/repos?path={repo}", json={"steering": ["does-not-exist"]})
     assert 400 <= r.status_code < 500, r.text
     assert (templates_dir / "repos.yaml").read_text() == before
 
-    (entry,) = client.get("/repos").json()["repos"]
+    (entry,) = client.get("/api/repos").json()["repos"]
     assert entry["steering"] == []
 
 
 def test_add_repo_stores_probed_forge(client, tmp_path):
     repo = make_repo(tmp_path, name="ghrepo")
     _set_origin(repo, "git@github.com:owner/repo.git")
-    r = client.post("/repos", json={"path": str(repo)})
+    r = client.post("/api/repos", json={"path": str(repo)})
     assert r.status_code == 201
     assert r.json()["forge"] == "github"
     assert r.json()["project"] == "owner/repo"
@@ -175,10 +177,12 @@ def test_add_repo_stores_probed_forge(client, tmp_path):
 
 def test_patch_repo_overrides_forge(client, tmp_path):
     repo = make_repo(tmp_path, name="patchrepo")
-    client.post("/repos", json={"path": str(repo)})
-    r = client.patch(f"/repos?path={repo}", json={"forge": "gitea", "project": "t/r"})
+    client.post("/api/repos", json={"path": str(repo)})
+    r = client.patch(f"/api/repos?path={repo}", json={"forge": "gitea", "project": "t/r"})
     assert r.status_code == 200
-    (entry,) = [x for x in client.get("/repos").json()["repos"] if x["path"] == str(repo.resolve())]
+    (entry,) = [
+        x for x in client.get("/api/repos").json()["repos"] if x["path"] == str(repo.resolve())
+    ]
     assert entry["forge"] == "gitea"
     assert entry["project"] == "t/r"
 
@@ -194,24 +198,24 @@ NODES = [
 
 def test_template_put_validates_before_it_writes(client, templates_dir):
     bad = [{"id": "x", "tasks": ["on.does.not.exist"], "gate_after": None}]
-    r = client.post("/templates/scratch/validate", json={"nodes": bad})
+    r = client.post("/api/templates/scratch/validate", json={"nodes": bad})
     assert r.json()["valid"] is False
     assert "not in the registry" in r.json()["error"]
 
-    assert client.put("/templates/scratch", json={"nodes": bad}).status_code == 422
+    assert client.put("/api/templates/scratch", json={"nodes": bad}).status_code == 422
     assert not (templates_dir / "scratch.yaml").exists()
 
-    assert client.put("/templates/scratch", json={"nodes": NODES}).status_code == 200
+    assert client.put("/api/templates/scratch", json={"nodes": NODES}).status_code == 200
     assert yaml.safe_load((templates_dir / "scratch.yaml").read_text())["id"] == "scratch"
     # the new template is live without a restart
-    assert any(t["id"] == "scratch" for t in client.get("/templates").json())
-    assert client.get("/templates/scratch").json()["nodes"] == NODES
-    assert client.get("/templates/nope").status_code == 404
+    assert any(t["id"] == "scratch" for t in client.get("/api/templates").json())
+    assert client.get("/api/templates/scratch").json()["nodes"] == NODES
+    assert client.get("/api/templates/nope").status_code == 404
 
 
 def test_an_unknown_gate_is_refused(client):
     nodes = [{"id": "a", "tasks": ["on.test.run"], "gate_after": "made_up_gate"}]
-    r = client.post("/templates/scratch/validate", json={"nodes": nodes})
+    r = client.post("/api/templates/scratch/validate", json={"nodes": nodes})
     assert r.json()["valid"] is False and "gate_after" in r.json()["error"]
 
 
@@ -225,12 +229,12 @@ def test_validate_names_the_node_and_task_that_do_not_resolve(client):
         {"id": "measure", "tasks": ["on.test.run"], "gate_after": None},
         {"id": "x", "tasks": ["on.does.not.exist"], "gate_after": None},
     ]
-    body = client.post("/templates/scratch/validate", json={"nodes": nodes}).json()
+    body = client.post("/api/templates/scratch/validate", json={"nodes": nodes}).json()
     assert body["unresolved"] == [{"node": "x", "task": "on.does.not.exist"}]
     assert "by_repo" not in body
 
     ok = client.post(
-        "/templates/scratch/validate",
+        "/api/templates/scratch/validate",
         json={"nodes": [{"id": "measure", "tasks": ["on.test.run"], "gate_after": None}]},
     ).json()
     assert ok["valid"] is True
@@ -241,26 +245,31 @@ def test_validate_names_the_node_and_task_that_do_not_resolve(client):
 
 
 def test_registry_save_reruns_the_chain_validator(client, templates_dir):
-    hooks = client.get("/registry").json()["hooks"]
+    hooks = client.get("/api/registry").json()["hooks"]
     assert "on.test.run" in hooks
 
     broken = {k: v for k, v in hooks.items() if k != "on.test.run"}
-    body = client.put("/registry", json={"hooks": broken})
+    body = client.put("/api/registry", json={"hooks": broken})
     assert body.status_code == 200
     # quick-task measures with on.test.run, so dropping the binding breaks it
     assert "quick-task" in body.json()["invalid_templates"]
-    assert client.get("/health").json()["status"] == "degraded"
+    assert client.get("/api/health").json()["status"] == "degraded"
 
-    assert client.put("/registry", json={"hooks": {"on.x": {"kind": "nope"}}}).status_code == 422
+    assert (
+        client.put("/api/registry", json={"hooks": {"on.x": {"kind": "nope"}}}).status_code == 422
+    )
     # the refused save left the file alone
     assert "on.x" not in yaml.safe_load((templates_dir / "registry.yaml").read_text())["hooks"]
 
 
 def test_registry_carries_the_interactive_flag(client):
-    hooks = client.get("/registry").json()["hooks"]
+    hooks = client.get("/api/registry").json()["hooks"]
     hooks["on.implementation.start"]["interactive"] = True
-    assert client.put("/registry", json={"hooks": hooks}).status_code == 200
-    assert client.get("/registry").json()["hooks"]["on.implementation.start"]["interactive"] is True
+    assert client.put("/api/registry", json={"hooks": hooks}).status_code == 200
+    assert (
+        client.get("/api/registry").json()["hooks"]["on.implementation.start"]["interactive"]
+        is True
+    )
 
 
 def test_put_registry_validates_steering_against_the_real_templates_dir(client, templates_dir):
@@ -269,19 +278,19 @@ def test_put_registry_validates_steering_against_the_real_templates_dir(client, 
     candidate registry into — that would 422 every save naming a real file."""
     (templates_dir / "steering").mkdir()
     (templates_dir / "steering" / "house-style.md").write_text("# House style\nBe direct.\n")
-    hooks = client.get("/registry").json()["hooks"]
+    hooks = client.get("/api/registry").json()["hooks"]
     hooks["on.implementation.start"]["steering"] = ["house-style"]
-    r = client.put("/registry", json={"hooks": hooks})
+    r = client.put("/api/registry", json={"hooks": hooks})
     assert r.status_code == 200, r.text
-    assert client.get("/registry").json()["hooks"]["on.implementation.start"]["steering"] == [
+    assert client.get("/api/registry").json()["hooks"]["on.implementation.start"]["steering"] == [
         "house-style"
     ]
 
 
 def test_get_put_registry_round_trip_is_byte_identical(client, templates_dir):
     before = (templates_dir / "registry.yaml").read_text()
-    hooks = client.get("/registry").json()["hooks"]
-    assert client.put("/registry", json={"hooks": hooks}).status_code == 200
+    hooks = client.get("/api/registry").json()["hooks"]
+    assert client.put("/api/registry", json={"hooks": hooks}).status_code == 200
     assert (templates_dir / "registry.yaml").read_text() == before
 
 
@@ -293,13 +302,13 @@ def test_policy_put_rejects_a_cap_that_would_not_load(client, templates_dir):
         "loops": {"verify_fix_loop": {"attempts": 5, "wall_clock_s": 60}},
         "default": {"attempts": 3, "wall_clock_s": 3600},
     }
-    assert client.put("/policy", json=good).status_code == 200
-    assert client.get("/policy").json()["loops"]["verify_fix_loop"]["attempts"] == 5
+    assert client.put("/api/policy", json=good).status_code == 200
+    assert client.get("/api/policy").json()["loops"]["verify_fix_loop"]["attempts"] == 5
     assert yaml.safe_load((templates_dir / "policy.yaml").read_text()) == good
 
     bad = {"loops": {}, "default": {"attempts": 0, "wall_clock_s": 1}}
-    assert client.put("/policy", json=bad).status_code == 422
-    assert client.get("/policy").json()["default"]["attempts"] == 3
+    assert client.put("/api/policy", json=bad).status_code == 422
+    assert client.get("/api/policy").json()["default"]["attempts"] == 3
 
 
 def test_saving_the_policy_preserves_the_findings_block(client, templates_dir):
@@ -309,11 +318,11 @@ def test_saving_the_policy_preserves_the_findings_block(client, templates_dir):
         "default: { attempts: 3, wall_clock_s: 3600 }\n"
         "findings:\n  loop_severities: [critical]\n"
     )
-    body = client.get("/policy").json()
+    body = client.get("/api/policy").json()
     assert body["findings"]["loop_severities"] == ["critical"]
 
     body["loops"]["verify_fix_loop"]["attempts"] = 5
-    assert client.put("/policy", json=body).status_code == 200
+    assert client.put("/api/policy", json=body).status_code == 200
 
     on_disk = yaml.safe_load((templates_dir / "policy.yaml").read_text())
     assert on_disk["findings"]["loop_severities"] == ["critical"]
@@ -326,8 +335,8 @@ def test_put_policy_persists_the_budget_block(client):
         "default": {"attempts": 3, "wall_clock_s": 3600},
         "budget": {"work_item_usd": 20.0, "daily_usd": None},
     }
-    assert client.put("/policy", json=body).status_code == 200
-    assert client.get("/policy").json()["budget"] == {"work_item_usd": 20.0, "daily_usd": None}
+    assert client.put("/api/policy", json=body).status_code == 200
+    assert client.get("/api/policy").json()["budget"] == {"work_item_usd": 20.0, "daily_usd": None}
 
 
 def test_put_policy_rejects_a_negative_budget(client):
@@ -336,13 +345,13 @@ def test_put_policy_rejects_a_negative_budget(client):
         "default": {"attempts": 3, "wall_clock_s": 3600},
         "budget": {"work_item_usd": -5},
     }
-    assert client.put("/policy", json=body).status_code == 422
+    assert client.put("/api/policy", json=body).status_code == 422
 
 
 def test_put_policy_without_a_budget_key_still_works(client):
     """Backward compatibility: an older UI build PUTs no budget."""
     body = {"loops": {}, "default": {"attempts": 3, "wall_clock_s": 3600}}
-    assert client.put("/policy", json=body).status_code == 200
+    assert client.put("/api/policy", json=body).status_code == 200
 
 
 def test_saving_the_policy_preserves_the_budget_block(client, templates_dir):
@@ -351,10 +360,10 @@ def test_saving_the_policy_preserves_the_budget_block(client, templates_dir):
         "loops: {}\ndefault: { attempts: 3, wall_clock_s: 3600 }\n"
         "budget:\n  work_item_usd: 20.0\n  daily_usd: null\n"
     )
-    body = client.get("/policy").json()
+    body = client.get("/api/policy").json()
     assert body["budget"]["work_item_usd"] == 20.0
     body["default"]["attempts"] = 5
-    assert client.put("/policy", json=body).status_code == 200
+    assert client.put("/api/policy", json=body).status_code == 200
     on_disk = yaml.safe_load((templates_dir / "policy.yaml").read_text())
     assert on_disk["budget"]["work_item_usd"] == 20.0
 
@@ -363,32 +372,32 @@ def test_saving_the_policy_preserves_the_budget_block(client, templates_dir):
 
 
 def test_get_theme_defaults_to_nocturne_dark(client):
-    assert client.get("/theme").json() == {"palette": "nocturne", "mode": "dark"}
+    assert client.get("/api/theme").json() == {"palette": "nocturne", "mode": "dark"}
 
 
 def test_put_theme_round_trips_through_the_yaml(client, templates_dir):
     body = {"palette": "forest", "mode": "light"}
-    assert client.put("/theme", json=body).status_code == 200
-    assert client.get("/theme").json() == body
+    assert client.put("/api/theme", json=body).status_code == 200
+    assert client.get("/api/theme").json() == body
     assert yaml.safe_load((templates_dir / "theme.yaml").read_text()) == body
 
 
 def test_put_theme_rejects_an_unknown_palette(client):
-    resp = client.put("/theme", json={"palette": "cerulean", "mode": "dark"})
+    resp = client.put("/api/theme", json={"palette": "cerulean", "mode": "dark"})
     assert resp.status_code == 422
-    assert client.get("/theme").json()["palette"] == "nocturne"
+    assert client.get("/api/theme").json()["palette"] == "nocturne"
 
 
 def test_put_theme_rejects_an_unknown_mode(client):
-    resp = client.put("/theme", json={"palette": "nocturne", "mode": "twilight"})
+    resp = client.put("/api/theme", json={"palette": "nocturne", "mode": "twilight"})
     assert resp.status_code == 422
 
 
 def test_changing_theme_does_not_report_health_as_degraded(client):
     # theme.yaml has no 'id' key -- load_templates would read it as a broken
     # chain template unless it's in CONFIG_FILES (Kraft-w1ps).
-    client.put("/theme", json={"palette": "forest", "mode": "light"})
-    health = client.get("/health").json()
+    client.put("/api/theme", json={"palette": "forest", "mode": "light"})
+    health = client.get("/api/health").json()
     assert health["status"] == "ok"
     assert health["invalid_templates"] == {}
 
@@ -397,62 +406,62 @@ def test_changing_theme_does_not_report_health_as_degraded(client):
 
 
 def test_localhost_needs_no_password_and_says_so(client):
-    body = client.get("/access").json()
+    body = client.get("/api/access").json()
     assert body["bind"] == "127.0.0.1"
     assert body["auth_required"] is False and body["password_set"] is False
-    assert client.get("/work-items").status_code == 200
+    assert client.get("/api/work-items").status_code == 200
 
 
 def test_binding_off_localhost_without_a_password_is_refused(client):
-    r = client.put("/access", json={"bind": "0.0.0.0"})
+    r = client.put("/api/access", json={"bind": "0.0.0.0"})
     assert r.status_code == 422
     assert "password" in r.json()["detail"]
-    assert client.get("/access").json()["bind"] == "127.0.0.1"
+    assert client.get("/api/access").json()["bind"] == "127.0.0.1"
 
 
 def test_a_lan_bind_locks_the_api_until_a_login(tmp_path, monkeypatch, templates_dir):
     with _client(tmp_path, monkeypatch, templates_dir, host="0.0.0.0") as client:
-        enabled = client.put("/access", json={"bind": "0.0.0.0", "password": "hunter2"})
+        enabled = client.put("/api/access", json={"bind": "0.0.0.0", "password": "hunter2"})
         assert enabled.status_code == 200
         assert enabled.json()["auth_required"] is True
 
         client.cookies.clear()
         # /access is itself behind the wall it just raised
-        assert client.get("/access").status_code == 401
-        assert client.get("/work-items").status_code == 401
+        assert client.get("/api/access").status_code == 401
+        assert client.get("/api/work-items").status_code == 401
         # health stays reachable so a monitor does not need a session
-        assert client.get("/health").status_code == 200
+        assert client.get("/api/health").status_code == 200
 
-        assert client.post("/login", json={"password": "wrong"}).status_code == 401
-        assert client.post("/login", json={"password": "hunter2"}).status_code == 200
-        assert client.get("/work-items").status_code == 200
+        assert client.post("/api/login", json={"password": "wrong"}).status_code == 401
+        assert client.post("/api/login", json={"password": "hunter2"}).status_code == 200
+        assert client.get("/api/work-items").status_code == 200
 
-        sessions = client.get("/sessions").json()["sessions"]
+        sessions = client.get("/api/sessions").json()["sessions"]
         assert len(sessions) == 1 and sessions[0]["current"] is True
         # the cookie's own value is never stored, only its hash
         cookie = client.cookies["kraft_session"]
         assert sessions[0]["id"] != cookie
 
-        assert client.delete("/sessions/nope").status_code == 404
+        assert client.delete("/api/sessions/nope").status_code == 404
         # revoking your own session logs you straight back out
-        assert client.delete(f"/sessions/{sessions[0]['id']}").status_code == 204
-        assert client.get("/work-items").status_code == 401
+        assert client.delete(f"/api/sessions/{sessions[0]['id']}").status_code == 204
+        assert client.get("/api/work-items").status_code == 401
 
 
 def test_changing_the_password_revokes_every_session(tmp_path, monkeypatch, templates_dir):
     with _client(tmp_path, monkeypatch, templates_dir, host="0.0.0.0") as client:
-        client.put("/access", json={"bind": "0.0.0.0", "password": "first"})
-        client.post("/login", json={"password": "first"})
-        assert client.get("/work-items").status_code == 200
+        client.put("/api/access", json={"bind": "0.0.0.0", "password": "first"})
+        client.post("/api/login", json={"password": "first"})
+        assert client.get("/api/work-items").status_code == 200
 
-        client.put("/access", json={"password": "second"})
-        assert client.get("/work-items").status_code == 401
-        assert client.post("/login", json={"password": "first"}).status_code == 401
-        assert client.post("/login", json={"password": "second"}).status_code == 200
+        client.put("/api/access", json={"password": "second"})
+        assert client.get("/api/work-items").status_code == 401
+        assert client.post("/api/login", json={"password": "first"}).status_code == 401
+        assert client.post("/api/login", json={"password": "second"}).status_code == 200
 
 
 def test_the_password_is_stored_only_as_a_scrypt_hash(client, templates_dir):
-    client.put("/access", json={"password": "hunter2"})
+    client.put("/api/access", json={"password": "hunter2"})
     raw = (templates_dir / "access.yaml").read_text()
     assert "hunter2" not in raw
     assert yaml.safe_load(raw)["password_hash"].startswith("scrypt$")
@@ -631,10 +640,10 @@ def test_the_spa_bundle_loads_before_a_session_exists(tmp_path, monkeypatch, tem
     import kraft.api as api
 
     with TestClient(api.app, client=("127.0.0.1", 54321)) as client:
-        client.put("/access", json={"bind": "0.0.0.0", "password": "hunter2"})
+        client.put("/api/access", json={"bind": "0.0.0.0", "password": "hunter2"})
         client.cookies.clear()
         assert client.get("/assets/app.js").status_code == 200
-        assert client.get("/work-items").status_code == 401
+        assert client.get("/api/work-items").status_code == 401
         # ...but not anything outside the bundle
         assert client.get("/../pyproject.toml").status_code != 200
 
@@ -645,23 +654,24 @@ def test_the_event_stream_needs_a_session_too(tmp_path, monkeypatch, templates_d
     from starlette.websockets import WebSocketDisconnect
 
     with _client(tmp_path, monkeypatch, templates_dir, host="0.0.0.0") as client:
-        client.put("/access", json={"bind": "0.0.0.0", "password": "hunter2"})
+        client.put("/api/access", json={"bind": "0.0.0.0", "password": "hunter2"})
         client.cookies.clear()
         with pytest.raises(WebSocketDisconnect):
-            with client.websocket_connect("/ws/events") as ws:
+            with client.websocket_connect("/api/ws/events") as ws:
                 ws.receive_text()
 
-        client.post("/login", json={"password": "hunter2"})
+        client.post("/api/login", json={"password": "hunter2"})
         # a fresh item's events arrive on the stream once the session is real
-        with client.websocket_connect("/ws/events") as ws:
-            client.post("/work-items", json={"title": "hello", "repo": str(tmp_path)})
+        with client.websocket_connect("/api/ws/events") as ws:
+            client.post("/api/work-items", json={"title": "hello", "repo": str(tmp_path)})
             assert ws.receive_json()["type"] == "work_item_created"
 
 
 def test_a_forged_navigation_header_cannot_write(tmp_path, monkeypatch, templates_dir):
-    """`sec-fetch-dest` is a request header any client can send. A browser
-    navigation must get the SPA shell; it must never be a way past the session
-    check into a real handler."""
+    """`sec-fetch-dest` is a request header any client can send. It must never be
+    a way past the session check into a real handler — every route it could
+    forge its way into lives under /api/, which the shell-diversion branches
+    exclude outright, so a forged header there just hits the real 401."""
     dist = tmp_path / "dist"
     dist.mkdir()
     (dist / "index.html").write_text("<!doctype html>")
@@ -673,16 +683,25 @@ def test_a_forged_navigation_header_cannot_write(tmp_path, monkeypatch, template
     import kraft.api as api
 
     with TestClient(api.app, client=("127.0.0.1", 54321)) as client:
-        client.put("/access", json={"bind": "0.0.0.0", "password": "hunter2"})
+        client.put("/api/access", json={"bind": "0.0.0.0", "password": "hunter2"})
         client.cookies.clear()
         forged = {"sec-fetch-dest": "document"}
 
         # a POST is never a navigation
-        assert client.post("/work-items/x/pause", json={}, headers=forged).status_code == 401
-        assert client.put("/access", json={"bind": "0.0.0.0"}, headers=forged).status_code == 401
-        assert client.delete("/sessions/abc", headers=forged).status_code == 401
+        assert client.post("/api/work-items/x/pause", json={}, headers=forged).status_code == 401
+        assert (
+            client.put("/api/access", json={"bind": "0.0.0.0"}, headers=forged).status_code == 401
+        )
+        assert client.delete("/api/sessions/abc", headers=forged).status_code == 401
 
-        # a GET navigation gets the shell, not JSON from a handler
+        # a GET navigation gets the real 401, not a way in and not the shell —
+        # /api/ is unambiguous JSON, forged header or not
+        r = client.get("/api/work-items", headers=forged)
+        assert r.status_code == 401
+        assert not r.text.startswith("<!doctype html>")
+
+        # the same header on a client-side route still gets the shell — that
+        # part of the mechanism is unchanged, just no longer reachable under /api/
         shell = client.get("/work-items", headers=forged)
         assert shell.status_code == 200
         assert shell.text.startswith("<!doctype html>")
@@ -695,19 +714,19 @@ def test_a_bind_change_does_not_lock_out_a_server_still_on_loopback(
     actually bound — otherwise saving the setting logs the local operator out of
     a server that is still only listening on 127.0.0.1."""
     with _client(tmp_path, monkeypatch, templates_dir) as client:
-        client.put("/access", json={"bind": "0.0.0.0", "password": "hunter2"})
+        client.put("/api/access", json={"bind": "0.0.0.0", "password": "hunter2"})
         client.cookies.clear()
-        assert client.get("/work-items").status_code == 200
-        assert client.get("/access").json()["auth_required"] is False
+        assert client.get("/api/work-items").status_code == 200
+        assert client.get("/api/access").json()["auth_required"] is False
 
 
 def test_a_failed_write_does_not_sign_everyone_out(tmp_path, monkeypatch, templates_dir):
     """Revoking first and then failing to persist the new hash would sign every
     session out while leaving the old password live."""
     with _client(tmp_path, monkeypatch, templates_dir, host="0.0.0.0") as client:
-        client.put("/access", json={"bind": "0.0.0.0", "password": "first"})
-        client.post("/login", json={"password": "first"})
-        before = [s["id"] for s in client.get("/sessions").json()["sessions"]]
+        client.put("/api/access", json={"bind": "0.0.0.0", "password": "first"})
+        client.post("/api/login", json={"password": "first"})
+        before = [s["id"] for s in client.get("/api/sessions").json()["sessions"]]
         assert len(before) == 1
 
         monkeypatch.setattr(
@@ -715,34 +734,35 @@ def test_a_failed_write_does_not_sign_everyone_out(tmp_path, monkeypatch, templa
             lambda *a, **k: (_ for _ in ()).throw(OSError("read-only")),
         )
         with pytest.raises(OSError):
-            client.put("/access", json={"password": "second"})
+            client.put("/api/access", json={"password": "second"})
         # still signed in, still on the old password (last_seen_at moves; the
         # session itself is what must survive)
-        assert [s["id"] for s in client.get("/sessions").json()["sessions"]] == before
-        assert client.get("/work-items").status_code == 200
+        assert [s["id"] for s in client.get("/api/sessions").json()["sessions"]] == before
+        assert client.get("/api/work-items").status_code == 200
 
 
 def test_a_bearer_token_authenticates_where_a_cookie_would(tmp_path, monkeypatch, templates_dir):
     """`kraft mcp` has no cookie jar. The token file is its credential (design §5)."""
     with _client(tmp_path, monkeypatch, templates_dir, host="0.0.0.0") as client:
         assert (
-            client.put("/access", json={"bind": "0.0.0.0", "password": "hunter2"}).status_code
+            client.put("/api/access", json={"bind": "0.0.0.0", "password": "hunter2"}).status_code
             == 200
         )
         client.cookies.clear()
-        assert client.get("/work-items").status_code == 401
+        assert client.get("/api/work-items").status_code == 401
 
         token = auth.read_mcp_token(tmp_path / "run")
         assert token, "serving should have created the token file"
         assert (
-            client.get("/work-items", headers={"Authorization": f"Bearer {token}"}).status_code
+            client.get("/api/work-items", headers={"Authorization": f"Bearer {token}"}).status_code
             == 200
         )
         assert (
-            client.get("/work-items", headers={"Authorization": "Bearer wrong"}).status_code == 401
+            client.get("/api/work-items", headers={"Authorization": "Bearer wrong"}).status_code
+            == 401
         )
         # a bare token without the scheme is not a credential
-        assert client.get("/work-items", headers={"Authorization": token}).status_code == 401
+        assert client.get("/api/work-items", headers={"Authorization": token}).status_code == 401
 
 
 def test_a_document_navigation_cannot_slip_past_the_bearer_check(
@@ -751,9 +771,9 @@ def test_a_document_navigation_cannot_slip_past_the_bearer_check(
     """The SPA-shell branch runs first, so it must not become an auth bypass for
     JSON: with no dist configured there is no shell, and the request still 401s."""
     with _client(tmp_path, monkeypatch, templates_dir, host="0.0.0.0") as client:
-        client.put("/access", json={"bind": "0.0.0.0", "password": "hunter2"})
+        client.put("/api/access", json={"bind": "0.0.0.0", "password": "hunter2"})
         client.cookies.clear()
-        r = client.get("/work-items", headers={"sec-fetch-dest": "document"})
+        r = client.get("/api/work-items", headers={"sec-fetch-dest": "document"})
         assert r.status_code == 401
 
 
@@ -892,7 +912,7 @@ def test_a_broken_repos_yaml_does_not_prevent_startup(tmp_path, monkeypatch):
     import kraft.api as api
 
     with TestClient(api.app, client=("127.0.0.1", 54321)) as client:  # must not raise
-        assert client.get("/health").status_code == 200
+        assert client.get("/api/health").status_code == 200
 
 
 def test_a_broken_repos_yaml_does_not_500_the_approve_path(tmp_path, monkeypatch):
@@ -906,7 +926,7 @@ def test_a_broken_repos_yaml_does_not_500_the_approve_path(tmp_path, monkeypatch
     _seed_active_work_item(run_dir, wid="w-gated", node_id="review", gate="human_review_approval")
 
     with _client(tmp_path, monkeypatch, templates_dir) as client:
-        r = client.post("/work-items/w-gated/gates/human_review_approval/approve")
+        r = client.post("/api/work-items/w-gated/gates/human_review_approval/approve")
         assert r.status_code == 200
 
 
@@ -923,7 +943,7 @@ def test_connected_repos_default_model_reaches_the_agent_launch(tmp_path, monkey
     repo = make_repo(tmp_path)
 
     with _client(tmp_path, monkeypatch, templates_dir) as client:
-        added = client.post("/repos", json={"path": str(repo), "default_model": "haiku"})
+        added = client.post("/api/repos", json={"path": str(repo), "default_model": "haiku"})
         assert added.status_code == 201
 
         # quick-task: the only agent hook this fixture binds is
@@ -931,7 +951,7 @@ def test_connected_repos_default_model_reaches_the_agent_launch(tmp_path, monkey
         # three gates the item never gets past (`on.spec.requested` is a noop
         # here), so no agent would ever launch to inspect.
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"title": "x", "repo": str(repo), "chain_template": "quick-task"},
         ).json()["id"]
 
@@ -959,7 +979,7 @@ def test_connected_repos_steering_reaches_the_agent_launch(tmp_path, monkeypatch
     repo = make_repo(tmp_path)
 
     with _client(tmp_path, monkeypatch, templates_dir) as client:
-        added = client.post("/repos", json={"path": str(repo), "steering": ["house"]})
+        added = client.post("/api/repos", json={"path": str(repo), "steering": ["house"]})
         assert added.status_code == 201, added.text
 
         # quick-task: the only agent hook this fixture binds is
@@ -967,7 +987,7 @@ def test_connected_repos_steering_reaches_the_agent_launch(tmp_path, monkeypatch
         # three gates the item never gets past (`on.spec.requested` is a noop
         # here), so no agent would ever launch to inspect.
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"title": "x", "repo": str(repo), "chain_template": "quick-task"},
         ).json()["id"]
 
@@ -991,18 +1011,18 @@ def test_get_repos_with_a_deleted_steering_file_does_not_lock_out_the_screen(tmp
     _broken_repos_yaml(templates_dir)
 
     with _client(tmp_path, monkeypatch, templates_dir) as client:
-        got = client.get("/repos")
+        got = client.get("/api/repos")
         assert got.status_code == 200
         assert got.json()["repos"][0]["steering"] == ["deleted"]
 
-        patched = client.patch("/repos?path=/r", json={"steering": []})
+        patched = client.patch("/api/repos?path=/r", json={"steering": []})
         assert patched.status_code == 200
         assert patched.json()["steering"] == []
-        assert client.get("/repos").json()["repos"][0]["steering"] == []
+        assert client.get("/api/repos").json()["repos"][0]["steering"] == []
 
 
 def test_get_intake_returns_the_defaults_when_no_file_was_written(client):
-    body = client.get("/intake").json()
+    body = client.get("/api/intake").json()
     assert body["enabled"] is False
     assert body["interval_s"] == config.INTAKE_DEFAULT["interval_s"]
 
@@ -1014,7 +1034,7 @@ def test_put_intake_persists_and_applies_without_a_restart(client, templates_dir
     assert app.state.intake_task is None
 
     saved = client.put(
-        "/intake",
+        "/api/intake",
         json={
             "enabled": True,
             "interval_s": 60,
@@ -1027,11 +1047,11 @@ def test_put_intake_persists_and_applies_without_a_restart(client, templates_dir
     assert app.state.intake["interval_s"] == 60
     assert app.state.intake_task is not None
     assert yaml.safe_load((templates_dir / "intake.yaml").read_text())["max_concurrent"] == 2
-    assert client.get("/intake").json()["repos"] == ["/repo-a"]
+    assert client.get("/api/intake").json()["repos"] == ["/repo-a"]
 
     # and turning it back off stops the poller rather than leaving a live timer
     client.put(
-        "/intake",
+        "/api/intake",
         json={
             "enabled": False,
             "interval_s": 60,
@@ -1061,7 +1081,7 @@ def test_put_intake_rejects_a_setting_the_poller_would_not_honour(client, over):
         "repos": [],
         **over,
     }
-    assert client.put("/intake", json=body).status_code == 422
+    assert client.put("/api/intake", json=body).status_code == 422
 
 
 def _steering_dir(templates_dir):
@@ -1072,14 +1092,16 @@ def _steering_dir(templates_dir):
 
 def test_steering_list_reports_sizes_against_the_injection_budget(client, templates_dir):
     (_steering_dir(templates_dir) / "house-style.md").write_text("prefer stdlib\n")
-    body = client.get("/steering").json()
+    body = client.get("/api/steering").json()
     assert body["max_bytes"] == steering_mod.MAX_BYTES
     assert body["files"] == [{"name": "house-style", "bytes": len(b"prefer stdlib\n")}]
 
 
 def test_steering_round_trips_a_body(client, templates_dir):
-    assert client.put("/steering/house-style", json={"body": "prefer stdlib\n"}).status_code == 200
-    assert client.get("/steering/house-style").json()["body"] == "prefer stdlib\n"
+    assert (
+        client.put("/api/steering/house-style", json={"body": "prefer stdlib\n"}).status_code == 200
+    )
+    assert client.get("/api/steering/house-style").json()["body"] == "prefer stdlib\n"
     assert (templates_dir / "steering" / "house-style.md").read_text() == "prefer stdlib\n"
 
 
@@ -1088,13 +1110,13 @@ def test_steering_rejects_a_name_that_is_not_a_bare_file_name(client):
     directory, so the editor cannot be the way one gets written there."""
     # a backslash and a leading dot both survive URL routing as one path
     # segment, unlike "../", which the router normalises away before we see it
-    assert client.put("/steering/..\\escape", json={"body": "x"}).status_code == 400
-    assert client.put("/steering/.hidden", json={"body": "x"}).status_code == 400
-    assert client.get("/steering/.hidden").status_code == 400
+    assert client.put("/api/steering/..\\escape", json={"body": "x"}).status_code == 400
+    assert client.put("/api/steering/.hidden", json={"body": "x"}).status_code == 400
+    assert client.get("/api/steering/.hidden").status_code == 400
 
 
 def test_steering_get_404s_on_a_file_that_is_not_there(client):
-    assert client.get("/steering/nope").status_code == 404
+    assert client.get("/api/steering/nope").status_code == 404
 
 
 def test_a_body_over_the_injection_budget_is_refused_and_rolled_back(client, templates_dir):
@@ -1104,9 +1126,9 @@ def test_a_body_over_the_injection_budget_is_refused_and_rolled_back(client, tem
     registry = yaml.safe_load((templates_dir / "registry.yaml").read_text())
     registry["hooks"]["on.implementation.start"]["steering"] = ["big"]
     (templates_dir / "registry.yaml").write_text(yaml.safe_dump(registry))
-    client.put("/registry", json={"hooks": registry["hooks"]})
+    client.put("/api/registry", json={"hooks": registry["hooks"]})
 
-    resp = client.put("/steering/big", json={"body": "x" * (steering_mod.MAX_BYTES + 1)})
+    resp = client.put("/api/steering/big", json={"body": "x" * (steering_mod.MAX_BYTES + 1)})
     assert resp.status_code == 422
     # the file on disk is the one that still loads, not the one that was refused
     assert (templates_dir / "steering" / "big.md").read_text() == "small\n"
@@ -1117,17 +1139,17 @@ def test_deleting_a_steering_file_a_hook_still_names_is_refused(client, template
     registry = yaml.safe_load((templates_dir / "registry.yaml").read_text())
     registry["hooks"]["on.implementation.start"]["steering"] = ["house-style"]
     (templates_dir / "registry.yaml").write_text(yaml.safe_dump(registry))
-    client.put("/registry", json={"hooks": registry["hooks"]})
+    client.put("/api/registry", json={"hooks": registry["hooks"]})
 
-    assert client.delete("/steering/house-style").status_code == 422
+    assert client.delete("/api/steering/house-style").status_code == 422
     assert (templates_dir / "steering" / "house-style.md").is_file()
 
 
 def test_deleting_a_steering_file_nothing_names_succeeds(client, templates_dir):
     (_steering_dir(templates_dir) / "orphan.md").write_text("unused\n")
-    assert client.delete("/steering/orphan").status_code == 200
+    assert client.delete("/api/steering/orphan").status_code == 200
     assert not (templates_dir / "steering" / "orphan.md").exists()
-    assert client.get("/steering").json()["files"] == []
+    assert client.get("/api/steering").json()["files"] == []
 
 
 def test_two_overlapping_intake_saves_leave_exactly_one_live_poller(client):
@@ -1164,10 +1186,10 @@ def test_two_overlapping_intake_saves_leave_exactly_one_live_poller(client):
             async with httpx.AsyncClient(transport=transport, base_url="http://kraft") as ac:
                 # A poller has to already be live, or neither save reaches the
                 # `await` that opens the window and the race cannot show.
-                assert (await ac.put("/intake", json=body)).status_code == 200
+                assert (await ac.put("/api/intake", json=body)).status_code == 200
                 assert app.state.intake_task is not None
                 a, b = await asyncio.gather(
-                    ac.put("/intake", json=body), ac.put("/intake", json=body)
+                    ac.put("/api/intake", json=body), ac.put("/api/intake", json=body)
                 )
             assert (a.status_code, b.status_code) == (200, 200)
             # let any cancellation delivered above actually land
@@ -1202,7 +1224,7 @@ def test_an_unexpected_validation_error_leaves_the_steering_file_untouched(
 
     monkeypatch.setattr(api_mod, "load_registry", boom)
     with pytest.raises(RuntimeError):
-        client.put("/steering/house-style", json={"body": "REPLACED\n"})
+        client.put("/api/steering/house-style", json={"body": "REPLACED\n"})
     assert (templates_dir / "steering" / "house-style.md").read_text() == "prefer stdlib\n"
 
 
@@ -1215,12 +1237,14 @@ def test_a_refused_steering_save_never_writes_the_real_file(client, templates_di
     registry = yaml.safe_load((templates_dir / "registry.yaml").read_text())
     registry["hooks"]["on.implementation.start"]["steering"] = ["big"]
     (templates_dir / "registry.yaml").write_text(yaml.safe_dump(registry))
-    client.put("/registry", json={"hooks": registry["hooks"]})
+    client.put("/api/registry", json={"hooks": registry["hooks"]})
 
     target = steering / "big.md"
     before = target.stat().st_mtime_ns
     assert (
-        client.put("/steering/big", json={"body": "x" * (steering_mod.MAX_BYTES + 1)}).status_code
+        client.put(
+            "/api/steering/big", json={"body": "x" * (steering_mod.MAX_BYTES + 1)}
+        ).status_code
         == 422
     )
     assert target.read_text() == "small\n"
@@ -1234,7 +1258,7 @@ def test_get_intake_reads_the_file_not_the_cached_state(client, templates_dir):
     (templates_dir / "intake.yaml").write_text(
         "enabled: false\ninterval_s: 900\nmax_concurrent: 4\npriority_ceiling: 1\nrepos: []\n"
     )
-    body = client.get("/intake").json()
+    body = client.get("/api/intake").json()
     assert body["interval_s"] == 900
     assert body["max_concurrent"] == 4
 
@@ -1245,7 +1269,7 @@ def test_saving_steering_reloads_nothing(client, templates_dir, monkeypatch):
     caches them."""
     called = []
     monkeypatch.setattr(api_mod, "_reload_templates", lambda st: called.append(True))
-    assert client.put("/steering/fresh", json={"body": "hi\n"}).status_code == 200
+    assert client.put("/api/steering/fresh", json={"body": "hi\n"}).status_code == 200
     assert called == []
 
 
@@ -1274,8 +1298,10 @@ def test_the_steering_validation_runs_off_the_event_loop(client, templates_dir, 
 
     monkeypatch.setattr(api_mod, "_check_steering_change", record)
 
-    assert client.put("/steering/house-style", json={"body": "prefer native\n"}).status_code == 200
-    assert client.delete("/steering/house-style").status_code == 200
+    assert (
+        client.put("/api/steering/house-style", json={"body": "prefer native\n"}).status_code == 200
+    )
+    assert client.delete("/api/steering/house-style").status_code == 200
 
     assert on_loop == []
     assert len(off_loop) == 2
@@ -1295,7 +1321,7 @@ def test_deleting_steering_reloads_nothing(client, templates_dir, monkeypatch):
     called = []
     monkeypatch.setattr(api_mod, "_reload_templates", lambda st: called.append(True))
 
-    assert client.delete("/steering/orphan").status_code == 200
+    assert client.delete("/api/steering/orphan").status_code == 200
     assert called == []
 
 
@@ -1309,7 +1335,9 @@ def test_a_stray_unreadable_entry_does_not_break_an_unrelated_save(client, templ
     (steering / "dangling.md").symlink_to(steering / "nothing-here.md")
     (steering / "adirectory.md").mkdir()
 
-    assert client.put("/steering/house-style", json={"body": "prefer stdlib\n"}).status_code == 200
+    assert (
+        client.put("/api/steering/house-style", json={"body": "prefer stdlib\n"}).status_code == 200
+    )
     assert (steering / "house-style.md").read_text() == "prefer stdlib\n"
 
 
@@ -1318,18 +1346,18 @@ def test_a_delete_referenced_only_by_repos_yaml_is_refused(tmp_path, client, tem
     other, and only the registry leg was covered."""
     (_steering_dir(templates_dir) / "house-style.md").write_text("prefer stdlib\n")
     repo = make_repo(tmp_path)
-    assert client.post("/repos", json={"path": str(repo)}).status_code == 201
+    assert client.post("/api/repos", json={"path": str(repo)}).status_code == 201
     repos = yaml.safe_load((templates_dir / "repos.yaml").read_text())
     repos["repos"][0]["steering"] = ["house-style"]
     config.write_yaml(templates_dir / "repos.yaml", repos)
 
-    assert client.delete("/steering/house-style").status_code == 422
+    assert client.delete("/api/steering/house-style").status_code == 422
     assert (templates_dir / "steering" / "house-style.md").is_file()
 
     # and once nothing names it, the same delete goes through
     repos["repos"][0].pop("steering")
     config.write_yaml(templates_dir / "repos.yaml", repos)
-    assert client.delete("/steering/house-style").status_code == 200
+    assert client.delete("/api/steering/house-style").status_code == 200
     assert not (templates_dir / "steering" / "house-style.md").exists()
 
 

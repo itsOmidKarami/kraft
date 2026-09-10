@@ -5,7 +5,7 @@ Run from the repo root:
     uv run python frontend/e2e/serve.py
 
 It builds nothing (run `cd frontend && npm run build` first), boots
-`python -m kraft` against throwaway fixtures, waits for /health, then prints:
+`python -m kraft` against throwaway fixtures, waits for /api/health, then prints:
 
     KRAFT_E2E_REPO=<path>
 
@@ -76,7 +76,7 @@ def ensure_port_free(port: int | str) -> None:
         held = f" (held by PID {', '.join(pids)})" if pids else ""
         sys.exit(
             f"port {port} is already in use{held}: {exc}\n"
-            f"  a leftover orchestrator would answer /health and impersonate this "
+            f"  a leftover orchestrator would answer /api/health and impersonate this "
             f"fixture server.\n"
             f"  inspect: lsof -nP -iTCP:{port} -sTCP:LISTEN\n"
             f"  or run on another port: KRAFT_PORT=<free port> "
@@ -152,7 +152,7 @@ def main() -> int:
         [sys.executable, "-m", "kraft"], cwd=REPO, env=env, start_new_session=True
     )
 
-    health = f"http://127.0.0.1:{PORT}/health"
+    health = f"http://127.0.0.1:{PORT}/api/health"
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         if proc.poll() is not None:
@@ -172,7 +172,7 @@ def main() -> int:
     if proc.poll() is not None:
         sys.exit(
             f"the orchestrator exited (code {proc.returncode}) but "
-            f"http://127.0.0.1:{PORT}/health still answers — another server holds "
+            f"http://127.0.0.1:{PORT}/api/health still answers — another server holds "
             f"the port; nothing below would have been the fixture instance"
         )
 

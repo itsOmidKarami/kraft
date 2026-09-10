@@ -32,12 +32,12 @@ def _completed_item(client, repo):
     import time
 
     wid = client.post(
-        "/work-items",
+        "/api/work-items",
         json={"repo": str(repo), "title": "make it pass", "chain_template": "quick-task"},
     ).json()["id"]
     deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
-        evs = client.get(f"/work-items/{wid}/events").json()
+        evs = client.get(f"/api/work-items/{wid}/events").json()
         if any(e["type"] == "work_item_completed" for e in evs):
             return wid
         time.sleep(0.2)
@@ -59,12 +59,12 @@ def test_set_mr_labels_applies_and_records_them(tmp_path, monkeypatch):
         wid = _completed_item(client, repo)
         fake = _fake_forge(monkeypatch)
 
-        r = client.post(f"/work-items/{wid}/mr-labels", json={"labels": ["release::patch"]})
+        r = client.post(f"/api/work-items/{wid}/mr-labels", json={"labels": ["release::patch"]})
         assert r.status_code == 200, r.text
         assert r.json() == {"work_item_id": wid, "labels": ["release::patch"]}
         assert fake.labels == ["release::patch"]
 
-        evs = client.get(f"/work-items/{wid}/events").json()
+        evs = client.get(f"/api/work-items/{wid}/events").json()
         assert any(
             e["type"] == "mr_labels_set" and e["payload"]["labels"] == ["release::patch"]
             for e in evs
@@ -77,14 +77,16 @@ def test_set_mr_labels_strips_blanks_and_refuses_an_empty_list(tmp_path, monkeyp
         wid = _completed_item(client, repo)
         fake = _fake_forge(monkeypatch)
 
-        r = client.post(f"/work-items/{wid}/mr-labels", json={"labels": ["  ", ""]})
+        r = client.post(f"/api/work-items/{wid}/mr-labels", json={"labels": ["  ", ""]})
         assert r.status_code == 422, r.text
         assert fake.labels == []
 
 
 def test_set_mr_labels_404s_with_no_worktree(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
-        assert client.post("/work-items/nope/mr-labels", json={"labels": ["x"]}).status_code == 404
+        assert (
+            client.post("/api/work-items/nope/mr-labels", json={"labels": ["x"]}).status_code == 404
+        )
 
 
 def test_set_mr_labels_is_not_a_self_action(tmp_path, monkeypatch):

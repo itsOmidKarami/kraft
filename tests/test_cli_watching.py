@@ -23,7 +23,7 @@ def _make_item(repo, title="watch me"):
     async def go():
         async with client.http() as http:
             response = await http.post(
-                "/work-items", json={"title": title, "repo": str(repo), "autostart": False}
+                "/api/work-items", json={"title": title, "repo": str(repo), "autostart": False}
             )
         assert response.status_code == 201, response.text
         return response.json()["id"]
@@ -74,7 +74,7 @@ def test_stream_log_follows_a_session_and_stops_when_it_stops(tmp_path, monkeypa
         monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
         monkeypatch.setenv("KRAFT_PORT", str(srv.port))
         monkeypatch.setenv("KRAFT_HOST", "127.0.0.1")
-        response = srv.client.post("/work-items", json={"title": "log me", "repo": str(repo)})
+        response = srv.client.post("/api/work-items", json={"title": "log me", "repo": str(repo)})
         assert response.status_code == 201, response.text
         wid = response.json()["id"]
 
@@ -142,7 +142,7 @@ def test_events_follow_returns_at_once_on_an_item_that_already_ended(
 
     async def abandon():
         async with client.http() as http:
-            assert (await http.post(f"/work-items/{wid}/abandon")).status_code == 200
+            assert (await http.post(f"/api/work-items/{wid}/abandon")).status_code == 200
 
     asyncio.run(abandon())
 
@@ -299,7 +299,7 @@ def test_stream_events_yields_a_frame_when_a_work_item_is_created(tmp_path, monk
             stream = client.stream_events()
             first = asyncio.create_task(anext(stream))
             await asyncio.sleep(0.5)  # let the handshake complete before the write
-            srv.client.post("/work-items", json={"title": "seen live", "repo": str(repo)})
+            srv.client.post("/api/work-items", json={"title": "seen live", "repo": str(repo)})
             event = await asyncio.wait_for(first, timeout=20)
             await stream.aclose()
             return event

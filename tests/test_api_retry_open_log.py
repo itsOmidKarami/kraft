@@ -205,12 +205,12 @@ def _completed_item(client, repo):
     import time
 
     wid = client.post(
-        "/work-items",
+        "/api/work-items",
         json={"repo": str(repo), "title": "make it pass", "chain_template": "quick-task"},
     ).json()["id"]
     deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
-        evs = client.get(f"/work-items/{wid}/events").json()
+        evs = client.get(f"/api/work-items/{wid}/events").json()
         if any(e["type"] == "work_item_completed" for e in evs):
             return wid
         time.sleep(0.2)
@@ -221,26 +221,26 @@ def test_log_jsonl_and_plain_text_are_both_served(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = _completed_item(client, repo)
-        sid = client.get(f"/work-items/{wid}").json()["worker_sessions"][0]["id"]
+        sid = client.get(f"/api/work-items/{wid}").json()["worker_sessions"][0]["id"]
 
-        body = client.get(f"/worker-sessions/{sid}/log?format=jsonl").json()
+        body = client.get(f"/api/worker-sessions/{sid}/log?format=jsonl").json()
         assert body["session_id"] == sid
         assert {line["src"] for line in body["lines"]} <= set(logs.SOURCES)
         assert all("t" in line and "text" in line for line in body["lines"])
 
-        plain = client.get(f"/worker-sessions/{sid}/log")
+        plain = client.get(f"/api/worker-sessions/{sid}/log")
         assert plain.headers["content-type"].startswith("text/plain")
 
-        assert client.get("/worker-sessions/nope/log?format=jsonl").status_code == 404
+        assert client.get("/api/worker-sessions/nope/log?format=jsonl").status_code == 404
 
 
 def test_log_follow_streams_the_lines_then_ends(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = _completed_item(client, repo)
-        sid = client.get(f"/work-items/{wid}").json()["worker_sessions"][0]["id"]
+        sid = client.get(f"/api/work-items/{wid}").json()["worker_sessions"][0]["id"]
         # the session is already finished, so the tail drains and closes
-        with client.stream("GET", f"/worker-sessions/{sid}/log?format=jsonl&follow=1") as r:
+        with client.stream("GET", f"/api/worker-sessions/{sid}/log?format=jsonl&follow=1") as r:
             assert r.headers["content-type"].startswith("text/event-stream")
             body = "".join(r.iter_text())
         assert body.rstrip().endswith("event: end\ndata: {}")
@@ -264,7 +264,7 @@ def test_log_follow_keeps_streaming_a_pending_session(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = _completed_item(client, repo)
-        sid = client.get(f"/work-items/{wid}").json()["worker_sessions"][0]["id"]
+        sid = client.get(f"/api/work-items/{wid}").json()["worker_sessions"][0]["id"]
 
         db = tmp_path / "run" / "orchestrator.db"
         conn = sqlite3.connect(db)
@@ -286,7 +286,7 @@ def test_log_follow_keeps_streaming_a_pending_session(tmp_path, monkeypatch):
         worker = threading.Thread(target=finish)
         worker.start()
         try:
-            with client.stream("GET", f"/worker-sessions/{sid}/log?format=jsonl&follow=1") as r:
+            with client.stream("GET", f"/api/worker-sessions/{sid}/log?format=jsonl&follow=1") as r:
                 body = "".join(r.iter_text())
         finally:
             worker.join()
@@ -303,26 +303,28 @@ def test_open_document_reports_501_when_no_editor_is_installed(tmp_path, monkeyp
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = _completed_item(client, repo)
-        docs = client.get(f"/work-items/{wid}/documents").json()["documents"]
+        docs = client.get(f"/api/work-items/{wid}/documents").json()["documents"]
         assert docs, "the fake agent writes a session summary"
         doc_id = docs[0]["document_id"]
 
         monkeypatch.setattr("kraft.api.shutil.which", lambda _: None)
-        r = client.post(f"/documents/{doc_id}/open", json={"editor": "zed"})
+        r = client.post(f"/api/documents/{doc_id}/open", json={"editor": "zed"})
         assert r.status_code == 501
 
-        assert client.post("/documents/nope/open", json={}).status_code == 404
-        assert client.post(f"/documents/{doc_id}/open", json={"editor": "vi"}).status_code == 400
+        assert client.post("/api/documents/nope/open", json={}).status_code == 404
+        assert (
+            client.post(f"/api/documents/{doc_id}/open", json={"editor": "vi"}).status_code == 400
+        )
 
 
 def test_open_document_launches_the_named_editor(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = _completed_item(client, repo)
-        doc = client.get(f"/work-items/{wid}/documents").json()["documents"][0]
+        doc = client.get(f"/api/work-items/{wid}/documents").json()["documents"][0]
 
         launched = _spy_on_launches(monkeypatch)
-        r = client.post(f"/documents/{doc['document_id']}/open", json={"editor": "code"})
+        r = client.post(f"/api/documents/{doc['document_id']}/open", json={"editor": "code"})
         assert r.status_code == 200
         assert r.json()["editor"] == "code"
         assert launched == [["/usr/bin/code", str(Path(doc["repo"]) / doc["path"])]]
@@ -332,10 +334,10 @@ def test_retry_is_refused_on_an_item_that_is_not_stopped(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = _completed_item(client, repo)
-        r = client.post(f"/work-items/{wid}/retry", json={"steer": "try harder"})
+        r = client.post(f"/api/work-items/{wid}/retry", json={"steer": "try harder"})
         assert r.status_code == 409
         assert "not stopped" in r.json()["detail"]
-        assert client.post("/work-items/nope/retry", json={}).status_code == 404
+        assert client.post("/api/work-items/nope/retry", json={}).status_code == 404
 
 
 def test_retry_restarts_a_stopped_node_that_has_no_fix_loop(tmp_path, monkeypatch):
@@ -351,13 +353,13 @@ def test_retry_restarts_a_stopped_node_that_has_no_fix_loop(tmp_path, monkeypatc
     with _client(tmp_path, monkeypatch) as client:
         # KRAFT_FAIL steers the fake agent into failing its node
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"repo": str(repo), "title": "KRAFT_FAIL once", "chain_template": "quick-task"},
         ).json()["id"]
 
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline:
-            item = client.get(f"/work-items/{wid}").json()
+            item = client.get(f"/api/work-items/{wid}").json()
             if item["status"] == "needs_human":
                 break
             time.sleep(0.2)
@@ -366,12 +368,12 @@ def test_retry_restarts_a_stopped_node_that_has_no_fix_loop(tmp_path, monkeypatc
         chain = item["chain_definition"]
         assert not next(n for n in chain["nodes"] if n["id"] == node_id).get("fix_loop")
 
-        r = client.post(f"/work-items/{wid}/retry", json={"steer": "the tests pass now"})
+        r = client.post(f"/api/work-items/{wid}/retry", json={"steer": "the tests pass now"})
         assert r.status_code == 200, r.text
         assert r.json()["node_id"] == node_id
         assert r.json()["loop"] is None
 
-        evts = client.get(f"/work-items/{wid}/events").json()
+        evts = client.get(f"/api/work-items/{wid}/events").json()
         retried = [e for e in evts if e["type"] == "work_item_retried"]
         assert retried and retried[-1]["payload"]["steer"] == "the tests pass now"
 
@@ -383,13 +385,13 @@ def test_log_lines_carry_the_time_the_parent_saw_them(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = _completed_item(client, repo)
-        sid = client.get(f"/work-items/{wid}").json()["worker_sessions"][0]["id"]
+        sid = client.get(f"/api/work-items/{wid}").json()["worker_sessions"][0]["id"]
 
-        body = client.get(f"/worker-sessions/{sid}/log?format=jsonl").json()
+        body = client.get(f"/api/worker-sessions/{sid}/log?format=jsonl").json()
         assert body["lines"], "the fake agent writes at least its envelope"
         assert all(line["t"] for line in body["lines"])
 
-        plain = client.get(f"/worker-sessions/{sid}/log").text
+        plain = client.get(f"/api/worker-sessions/{sid}/log").text
         # verbatim: no timestamp leaked into the copyable log
         assert plain.splitlines() == [line["text"] for line in body["lines"]]
 
@@ -405,21 +407,21 @@ def test_open_worktree_launches_the_editor_on_the_checkout(tmp_path, monkeypatch
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = _completed_item(client, repo)
-        worktree = client.get(f"/work-items/{wid}").json()["worktree_path"]
+        worktree = client.get(f"/api/work-items/{wid}").json()["worktree_path"]
         assert Path(worktree).is_dir()
 
         launched = _spy_on_launches(monkeypatch)
-        r = client.post(f"/work-items/{wid}/open-worktree", json={"editor": "zed"})
+        r = client.post(f"/api/work-items/{wid}/open-worktree", json={"editor": "zed"})
         assert r.status_code == 200 and r.json()["path"] == worktree
         assert launched == [["/usr/bin/zed", worktree]]
 
-        assert client.post("/work-items/nope/open-worktree", json={}).status_code == 404
+        assert client.post("/api/work-items/nope/open-worktree", json={}).status_code == 404
 
 
 def test_bead_search_is_live_and_quiet_on_an_empty_query(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
-        assert client.get("/beads/search?q=").json() == {"query": "", "beads": []}
-        body = client.get("/beads/search?q=zzz-no-such-bead").json()
+        assert client.get("/api/beads/search?q=").json() == {"query": "", "beads": []}
+        body = client.get("/api/beads/search?q=zzz-no-such-bead").json()
         assert body["beads"] == []
 
 
@@ -430,10 +432,10 @@ def test_open_document_is_refused_for_a_non_loopback_client(tmp_path, monkeypatc
     with _client(tmp_path, monkeypatch, peer=("10.0.0.5", 54321)) as client:
         _as_authenticated_lan_peer(client, monkeypatch)
         wid = _completed_item(client, repo)
-        doc = client.get(f"/work-items/{wid}/documents").json()["documents"][0]
+        doc = client.get(f"/api/work-items/{wid}/documents").json()["documents"][0]
 
         launched = _spy_on_launches(monkeypatch)
-        r = client.post(f"/documents/{doc['document_id']}/open", json={"editor": "code"})
+        r = client.post(f"/api/documents/{doc['document_id']}/open", json={"editor": "code"})
         assert r.status_code == 403, r.text
         assert "own machine" in r.json()["detail"]
         assert launched == [], "no process may start for a remote caller"
@@ -444,10 +446,10 @@ def test_open_worktree_is_refused_for_a_non_loopback_client(tmp_path, monkeypatc
     with _client(tmp_path, monkeypatch, peer=("10.0.0.5", 54321)) as client:
         _as_authenticated_lan_peer(client, monkeypatch)
         wid = _completed_item(client, repo)
-        assert Path(client.get(f"/work-items/{wid}").json()["worktree_path"]).is_dir()
+        assert Path(client.get(f"/api/work-items/{wid}").json()["worktree_path"]).is_dir()
 
         launched = _spy_on_launches(monkeypatch)
-        r = client.post(f"/work-items/{wid}/open-worktree", json={"editor": "zed"})
+        r = client.post(f"/api/work-items/{wid}/open-worktree", json={"editor": "zed"})
         assert r.status_code == 403, r.text
         assert launched == []
 
@@ -459,12 +461,14 @@ def test_open_document_refuses_a_document_path_outside_its_repo(tmp_path, monkey
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = _completed_item(client, repo)
-        doc_id = client.get(f"/work-items/{wid}/documents").json()["documents"][0]["document_id"]
-        escaped = {**client.get(f"/documents/{doc_id}").json(), "path": "../../../etc/passwd"}
+        doc_id = client.get(f"/api/work-items/{wid}/documents").json()["documents"][0][
+            "document_id"
+        ]
+        escaped = {**client.get(f"/api/documents/{doc_id}").json(), "path": "../../../etc/passwd"}
         monkeypatch.setattr(client.app.state.indexer, "get_document", lambda _id: escaped)
 
         launched = _spy_on_launches(monkeypatch)
-        r = client.post(f"/documents/{doc_id}/open", json={"editor": "code"})
+        r = client.post(f"/api/documents/{doc_id}/open", json={"editor": "code"})
         assert r.status_code == 400, r.text
         assert "escapes its repo" in r.json()["detail"]
         assert launched == []

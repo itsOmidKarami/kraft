@@ -71,7 +71,7 @@ def _seed_session(sid="s1", wid="w1", node="implementation"):
 
 def _ask(client, tool_name="Bash", sid="s1", **extra):
     return client.post(
-        f"/worker-sessions/{sid}/permission",
+        f"/api/worker-sessions/{sid}/permission",
         json={"tool_name": tool_name, "input": {"command": "ls"}, **extra},
     )
 
@@ -106,7 +106,7 @@ def test_permission_decision_is_recorded_as_an_event(tmp_path, monkeypatch):
         _ask(client, "Read")
         events = [
             e
-            for e in client.get("/work-items/w1/events").json()
+            for e in client.get("/api/work-items/w1/events").json()
             if e["type"] == "permission_decision"
         ]
     assert [e["payload"]["decision"] for e in events] == ["deny", "allow"]

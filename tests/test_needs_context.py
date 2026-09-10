@@ -343,7 +343,7 @@ def _wait(fn, what, timeout=30):
 def _wait_for_status(client, wid, status, timeout=30):
     return _wait(
         lambda: (lambda b: b if b["status"] == status else None)(
-            client.get(f"/work-items/{wid}").json()
+            client.get(f"/api/work-items/{wid}").json()
         ),
         f"status == {status!r}",
         timeout=timeout,
@@ -356,12 +356,12 @@ def test_steer_accepts_a_needs_context_stop(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"repo": str(repo), "title": "needs a decision", "chain_template": "quick-task"},
         ).json()["id"]
         _wait_for_status(client, wid, "needs_human")
 
-        r = client.post(f"/work-items/{wid}/steer", json={"text": "use the fork"})
+        r = client.post(f"/api/work-items/{wid}/steer", json={"text": "use the fork"})
         assert r.status_code == 200
         assert r.json()["steer"] == "use the fork"
 
@@ -372,12 +372,12 @@ def test_resume_accepts_a_needs_context_stop(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"repo": str(repo), "title": "needs a decision", "chain_template": "quick-task"},
         ).json()["id"]
         _wait_for_status(client, wid, "needs_human")
 
-        r = client.post(f"/work-items/{wid}/resume", json={"steer": "use the fork"})
+        r = client.post(f"/api/work-items/{wid}/resume", json={"steer": "use the fork"})
         assert r.status_code == 200
         assert r.json()["steer"] == "use the fork"
 
@@ -390,23 +390,23 @@ def test_steer_still_409s_on_a_running_item(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"repo": str(repo), "title": "busy", "chain_template": "quick-task"},
         ).json()["id"]
         _wait(
             lambda: next(
                 (
                     s
-                    for s in client.get(f"/work-items/{wid}").json()["worker_sessions"]
+                    for s in client.get(f"/api/work-items/{wid}").json()["worker_sessions"]
                     if s["hook_point"] == "on.implementation.start" and s["status"] == "running"
                 ),
                 None,
             ),
             "a running agent session",
         )
-        assert client.post(f"/work-items/{wid}/steer", json={"text": "x"}).status_code == 409
-        assert client.post(f"/work-items/{wid}/resume", json={}).status_code == 409
-        client.post(f"/work-items/{wid}/pause", json={})
+        assert client.post(f"/api/work-items/{wid}/steer", json={"text": "x"}).status_code == 409
+        assert client.post(f"/api/work-items/{wid}/resume", json={}).status_code == 409
+        client.post(f"/api/work-items/{wid}/pause", json={})
 
 
 def test_steer_and_resume_409_on_a_needs_human_stop_that_is_not_needs_context(
@@ -424,16 +424,16 @@ def test_steer_and_resume_409_on_a_needs_human_stop_that_is_not_needs_context(
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"repo": str(repo), "title": "needs a decision", "chain_template": "quick-task"},
         ).json()["id"]
         _wait_for_status(client, wid, "needs_human")
-        assert client.get(f"/work-items/{wid}").json()["current_node_id"] == "implementation"
+        assert client.get(f"/api/work-items/{wid}").json()["current_node_id"] == "implementation"
 
         # answered — resumes past the needs_context stop.
         monkeypatch.setenv("KRAFT_FAKE_CLAUDE_STATUS", "done")
         assert (
-            client.post(f"/work-items/{wid}/resume", json={"steer": "use the fork"}).status_code
+            client.post(f"/api/work-items/{wid}/resume", json={"steer": "use the fork"}).status_code
             == 200
         )
 
@@ -444,17 +444,17 @@ def test_steer_and_resume_409_on_a_needs_human_stop_that_is_not_needs_context(
                 lambda b: (
                     b if b["status"] == "needs_human" and b["current_node_id"] == "verify" else None
                 )
-            )(client.get(f"/work-items/{wid}").json()),
+            )(client.get(f"/api/work-items/{wid}").json()),
             "verify to fail for real",
         )
 
-        assert client.post(f"/work-items/{wid}/steer", json={"text": "x"}).status_code == 409
-        assert client.post(f"/work-items/{wid}/resume", json={}).status_code == 409
+        assert client.post(f"/api/work-items/{wid}/steer", json={"text": "x"}).status_code == 409
+        assert client.post(f"/api/work-items/{wid}/resume", json={}).status_code == 409
 
 
 def _await_gate(client, wid, gate, timeout=60):
     return _wait(
-        lambda: client.get(f"/work-items/{wid}").json()["pending_gate"] == gate,
+        lambda: client.get(f"/api/work-items/{wid}").json()["pending_gate"] == gate,
         f"pending gate {gate!r}",
         timeout=timeout,
     )
@@ -473,36 +473,38 @@ def test_a_gate_after_an_answered_needs_context_is_not_a_needs_context_stop(tmp_
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"repo": str(repo), "title": "needs a decision", "chain_template": "default"},
         ).json()["id"]
         for gate in ("spec_approval", "plan_approval", "chain_finalized"):
             _await_gate(client, wid, gate)
-            assert client.post(f"/work-items/{wid}/gates/{gate}/approve").status_code == 200
+            assert client.post(f"/api/work-items/{wid}/gates/{gate}/approve").status_code == 200
 
         # implementation asks its question and stops.
         _wait(
             lambda: (lambda b: b if b["needs_context_question"] else None)(
-                client.get(f"/work-items/{wid}").json()
+                client.get(f"/api/work-items/{wid}").json()
             ),
             "the needs_context question",
         )
-        item = client.get(f"/work-items/{wid}").json()
+        item = client.get(f"/api/work-items/{wid}").json()
         assert item["needs_context_question"] == "which database should this target?"
         assert item["current_node_id"] == "implementation"
 
         # answered — the chain runs on to the last gate.
         monkeypatch.setenv("KRAFT_FAKE_CLAUDE_STATUS", "done")
         assert (
-            client.post(f"/work-items/{wid}/resume", json={"steer": "the fork"}).status_code == 200
+            client.post(f"/api/work-items/{wid}/resume", json={"steer": "the fork"}).status_code
+            == 200
         )
         _await_gate(client, wid, "human_review_approval")
 
-        item = client.get(f"/work-items/{wid}").json()
+        item = client.get(f"/api/work-items/{wid}").json()
         assert item["pending_gate"] == "human_review_approval"
         assert item["needs_context_question"] is None
-        assert client.post(f"/work-items/{wid}/steer", json={"text": "x"}).status_code == 409
-        assert client.post(f"/work-items/{wid}/resume", json={}).status_code == 409
+        assert client.post(f"/api/work-items/{wid}/steer", json={"text": "x"}).status_code == 409
+        assert client.post(f"/api/work-items/{wid}/resume", json={}).status_code == 409
         assert (
-            client.post(f"/work-items/{wid}/gates/human_review_approval/approve").status_code == 200
+            client.post(f"/api/work-items/{wid}/gates/human_review_approval/approve").status_code
+            == 200
         )

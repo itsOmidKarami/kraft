@@ -13,7 +13,7 @@ def _poll(client, wid, want, timeout=180):
     deadline = time.monotonic() + timeout
     types = []
     while time.monotonic() < deadline:
-        evs = client.get(f"/work-items/{wid}/events").json()
+        evs = client.get(f"/api/work-items/{wid}/events").json()
         types = [e["type"] for e in evs]
         if want in types:
             return evs
@@ -33,14 +33,14 @@ def test_e2e_happy_path(tmp_path):
 
     with running_server(run_dir=run_dir, templates_dir=templates, bd_cwd=tracker) as srv:
         wid = srv.client.post(
-            "/work-items", json={"title": "make the failing test pass", "repo": str(repo)}
+            "/api/work-items", json={"title": "make the failing test pass", "repo": str(repo)}
         ).json()["id"]
         _poll(srv.client, wid, "work_item_completed")
 
-        item = srv.client.get(f"/work-items/{wid}").json()
+        item = srv.client.get(f"/api/work-items/{wid}").json()
         assert item["status"] == "completed"
 
-        docs = srv.client.get(f"/work-items/{wid}/documents").json()["documents"]
+        docs = srv.client.get(f"/api/work-items/{wid}/documents").json()["documents"]
         summaries = [d for d in docs if d["source_kind"] == "session_summary"]
         assert summaries, f"no session summary linked to {wid}; got {docs}"
         assert summaries[0]["path"].startswith(".engineering/sessions/")

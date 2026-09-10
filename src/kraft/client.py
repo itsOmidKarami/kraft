@@ -122,13 +122,20 @@ def _detail(response: httpx.Response) -> str:
         return response.text
 
 
+def _api(path: str) -> str:
+    """Every JSON route lives under /api/ (Kraft-psuq). `_send` is the one
+    request path most callers take, but the two streaming endpoints below
+    build their own request outside it and need the same prefix."""
+    return f"/api{path}"
+
+
 async def _send(method: str, path: str, **kwargs) -> httpx.Response:
-    """Every request goes through here, so a dead server reads the same at both
-    front doors — an agent calling through MCP gets this sentence too, not a
-    traceback it will try to reason about."""
+    """Everything that isn't a stream goes through here, so a dead server
+    reads the same at both front doors — an agent calling through MCP gets
+    this sentence too, not a traceback it will try to reason about."""
     try:
         async with http() as session:
-            return await session.request(method, path, **kwargs)
+            return await session.request(method, _api(path), **kwargs)
     except httpx.ConnectError as exc:
         raise ValueError(f"no Kraft server at {base_url()} — start one with `kraft`") from exc
 
@@ -329,7 +336,7 @@ async def stream_log(session_id: str, after_line: int = 0) -> AsyncIterator[dict
         try:
             async with session.stream(
                 "GET",
-                f"/worker-sessions/{session_id}/log",
+                _api(f"/worker-sessions/{session_id}/log"),
                 params={"format": "jsonl", "follow": "true"},
                 timeout=None,
             ) as response:
@@ -387,7 +394,7 @@ async def stream_events(after_seq: int = 0) -> AsyncIterator[dict]:
     from websockets.asyncio.client import connect
     from websockets.exceptions import ConnectionClosed, InvalidHandshake
 
-    url = base_url().replace("http://", "ws://", 1) + f"/ws/events?after_seq={after_seq}"
+    url = base_url().replace("http://", "ws://", 1) + _api(f"/ws/events?after_seq={after_seq}")
     run_dir = Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())
     token = auth.read_mcp_token(run_dir)
     headers = {"Authorization": f"Bearer {token}"} if token else {}

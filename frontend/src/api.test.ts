@@ -18,7 +18,7 @@ describe("api", () => {
     const f = mockFetch(200, { items: [], cursor: 7 });
     vi.stubGlobal("fetch", f);
     expect(await api.listWorkItems()).toEqual({ items: [], cursor: 7 });
-    expect(f).toHaveBeenCalledWith("/work-items", expect.anything());
+    expect(f).toHaveBeenCalledWith("/api/work-items", expect.anything());
   });
 
   it("createWorkItem posts JSON and returns the id", async () => {
@@ -27,7 +27,7 @@ describe("api", () => {
     const out = await api.createWorkItem({ repo: "/r", title: "t" });
     expect(out.id).toBe("abc");
     expect(f).toHaveBeenCalledWith(
-      "/work-items",
+      "/api/work-items",
       expect.objectContaining({ method: "POST" }),
     );
     const init = f.mock.calls[0][1] as RequestInit;
@@ -47,7 +47,7 @@ describe("api", () => {
     vi.stubGlobal("fetch", f);
     await api.rejectGate("id1", "spec_approval", "redo");
     expect(f).toHaveBeenCalledWith(
-      "/work-items/id1/gates/spec_approval/reject",
+      "/api/work-items/id1/gates/spec_approval/reject",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ note: "redo" }),
@@ -64,7 +64,7 @@ describe("api", () => {
     vi.stubGlobal("fetch", f);
     await api.search({ q: "reconnect backoff", kind: "specs", repo: "", source_kind: "" });
     const url = f.mock.calls[0][0] as string;
-    expect(url).toContain("/search?");
+    expect(url).toContain("/api/search?");
     expect(url).toContain("q=reconnect+backoff");
     expect(url).toContain("kind=specs");
     expect(url).not.toContain("repo=");
@@ -87,7 +87,7 @@ describe("api", () => {
     vi.stubGlobal("fetch", f);
     const body = await api.getWorkItemDocuments("w1");
     expect(body.work_item_id).toBe("w1");
-    expect(f).toHaveBeenCalledWith("/work-items/w1/documents", expect.anything());
+    expect(f).toHaveBeenCalledWith("/api/work-items/w1/documents", expect.anything());
   });
 
   it("names the server when the request never leaves the browser", async () => {

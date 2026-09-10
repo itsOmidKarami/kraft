@@ -18,7 +18,7 @@ def _make_item(repo, title="review me"):
     async def go():
         async with client.http() as http:
             response = await http.post(
-                "/work-items", json={"title": title, "repo": str(repo), "autostart": False}
+                "/api/work-items", json={"title": title, "repo": str(repo), "autostart": False}
             )
         assert response.status_code == 201, response.text
         return response.json()["id"]
