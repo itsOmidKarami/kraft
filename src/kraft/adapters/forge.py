@@ -31,10 +31,12 @@ _MAX_POLL_INTERVAL = 60.0
 
 #: How long the merge node waits for the forge to report the merge request
 #: actually merged, and how long it sleeps between reads. Five minutes rather
-#: than DEFAULT_POLL_TIMEOUT's thirty: the pipeline was already green at
-#: mr_checks, so a merge that has not landed by now is waiting on something a
-#: person has to see. Deliberately not registry-tunable — nothing has asked,
-#: and these are one edit away if something does.
+#: than DEFAULT_POLL_TIMEOUT's thirty: by the time this wait starts, `merge`
+#: has just re-validated CI itself (`_wait_for_ci`, same wait `ci_poll` uses),
+#: so a merge that has not landed by now is waiting on something a person has
+#: to see, not on a pipeline `mr_sync`'s push may have re-armed (Kraft-266b,
+#: Kraft-x10m). Deliberately not registry-tunable — nothing has asked, and
+#: these are one edit away if something does.
 MERGE_VERIFY_TIMEOUT = 300.0
 MERGE_VERIFY_INTERVAL = 5.0
 
@@ -479,7 +481,7 @@ class GlabCli:
         # checked-out branch, the way merge and ci already do.
         await _run(repo, ["glab", "mr", "update", "--description", body])
 
-    async def _merge_state(self, repo: Path) -> str:
+    async def _merge_state(self, repo: Path, branch: str = "") -> str:
         """The merge request's own view of whether it can merge.
 
         `glab mr view -F json` is the call `open_mr` already makes, resolved
@@ -487,17 +489,50 @@ class GlabCli:
         `merge_status` is the older, coarser field, kept as a fallback for an
         older GitLab. Anything else — including a payload that is not an object
         — is "the forge did not say", which `_mergeable` reads as undecided.
+
+        A merge request already merged out-of-band -- a person merges it in
+        the GitLab UI while this node is still polling -- reads `"state":
+        "merged"` here, checked ahead of either merge-status field: a merged
+        MR may not carry either (Kraft-v6ci). And if `glab mr view` itself
+        raises -- the reported failure shape, the branch resolving to nothing
+        when GitLab is asked for its current view -- fall back to `find_mr`,
+        the same `--all` lookup `merge`'s own "already merged" shortcut
+        already trusts (Kraft-xron), before giving up: this only reads as
+        "merged" when `find_mr` confirms it, so a genuine outage or auth
+        failure still raises rather than being read as "someone merged it".
         """
-        data = _parse_json(await _run(repo, ["glab", "mr", "view", "-F", "json"]), "glab mr view")
+        try:
+            raw = await _run(repo, ["glab", "mr", "view", "-F", "json"])
+            data = _parse_json(raw, "glab mr view")
+        except ForgeError:
+            ref = await self.find_mr(repo=repo, branch=branch) if branch else None
+            if ref is not None and ref.state == "merged":
+                return "merged"
+            raise
         if not isinstance(data, dict):
             return ""
+        if data.get("state") == "merged":
+            return "merged"
         return str(data.get("detailed_merge_status") or data.get("merge_status") or "")
 
     async def ci_status(self, *, repo: Path, mr: MR, branch: str = "") -> CIStatus:
         # The merge request's own state first: a conflict fails the check node
         # whatever colour the pipeline is, and `_poll_ci` must not wait out a
         # pipeline to learn it (Kraft-ejj9).
-        detail = await self._merge_state(repo)
+        detail = await self._merge_state(repo, branch)
+        # Merged out-of-band is a result, not a conflict and not a pipeline to
+        # read: a deleted source branch's pipeline list is not a fact this
+        # node needs once the MR has already landed (Kraft-v6ci). `_run_one`'s
+        # `case "ci_poll"` already treats state == "success" as status ==
+        # "done" -- no handler-side change needed there.
+        if detail == "merged":
+            return CIStatus(
+                state="success",
+                url="",
+                jobs=("merge request already merged",),
+                mergeable=True,
+                merge_detail="merged",
+            )
         mergeable = _mergeable(detail)
         # --ref, or this returns the newest pipeline in the whole project: a
         # green run on main would pass the gate for a red branch.
@@ -822,6 +857,42 @@ async def _poll_ci(
         interval = min(interval * 2, cap)
 
 
+async def _wait_for_ci(
+    forge: Forge, *, repo: Path, branch: str, timeout: float, interval: float
+) -> tuple[str, str]:
+    """Wait for CI to settle, and render the log line and the mergeable/red
+    verdict `ci_poll` reports. Shared with `merge`'s own CI gate (Kraft-266b,
+    Kraft-x10m): `mr_sync`'s push after `human_review` can re-arm a project's
+    required-pipeline rule for a head `mr_checks` never watched, so `merge`
+    re-runs this exact wait, with the same timeout/interval, right before it
+    calls `forge.merge()` — not a second, differently-tuned approximation of
+    it.
+
+    Returns the log text and "done"/"failed", the same vocabulary a node's
+    status already uses.
+    """
+    ci, timed_out = await _poll_ci(
+        forge, repo=repo, branch=branch, timeout=timeout, interval=interval
+    )
+    # A timeout and a red pipeline are both a failed node, but a reviewer --
+    # and any fix loop built on this node (Kraft-cbr) -- has to tell "finished
+    # red" from "never finished".
+    head = (
+        f"pipeline timed out after {timeout:g}s, still pending"
+        if timed_out
+        else f"pipeline {ci.state}"
+    )
+    log = f"{head}: {ci.url}\n" + "".join(f"  {j}\n" for j in ci.jobs)
+    if ci.mergeable is False:
+        # Green *and* unmergeable is the exact shape of the bug: the pipeline
+        # passes, the gate passes, and the merge node meets the conflict
+        # (Kraft-ejj9). `is False` and not falsiness: None is undecided, and
+        # undecided is this node's normal.
+        log += f"merge request is not mergeable: {ci.merge_detail or 'unknown'}\n"
+        return log, "failed"
+    return log, "done" if ci.state == "success" else "failed"
+
+
 async def _poll_merged(
     forge: Forge, *, repo: Path, branch: str, timeout: float, interval: float
 ) -> MRRef | None:
@@ -846,33 +917,6 @@ async def _poll_merged(
             return ref
         await asyncio.sleep(min(interval, remaining))
         interval = min(interval * 2, cap)
-
-
-def _describe_ci(ci: CIStatus, *, timed_out: bool, poll_timeout: float) -> tuple[str, bool]:
-    """The log line(s) for one CI read, and whether it counts as a failure.
-
-    Shared by `ci_poll` and `merge` (Kraft-266b): human_review's own commit
-    re-arms the pipeline mr_checks already waited green, so `merge` has to
-    poll CI again before calling `glab mr merge` rather than trust mr_checks'
-    now-stale answer -- and the two nodes must describe a red, timed-out, or
-    unmergeable pipeline identically rather than drift apart.
-    """
-    # A timeout and a red pipeline are both a failure, but a reviewer -- and
-    # any fix loop built on this node (Kraft-cbr) -- has to tell "finished
-    # red" from "never finished".
-    head = (
-        f"pipeline timed out after {poll_timeout:g}s, still pending"
-        if timed_out
-        else f"pipeline {ci.state}"
-    )
-    log = f"{head}: {ci.url}\n" + "".join(f"  {j}\n" for j in ci.jobs)
-    # Green *and* unmergeable is the exact shape of the bug: the pipeline
-    # passes, the gate passes, and the merge node meets the conflict
-    # (Kraft-ejj9). `is False` and not falsiness: None is undecided, and
-    # undecided is this node's normal.
-    if ci.mergeable is False:
-        log += f"merge request is not mergeable: {ci.merge_detail or 'unknown'}\n"
-    return log, ci.state != "success" or ci.mergeable is False
 
 
 async def _run_one(
@@ -937,11 +981,9 @@ async def _run_one(
             await forge.push(repo=repo, branch=branch)
             # Both CLIs resolve the merge request from the checked-out
             # branch, so the number is not threaded between nodes.
-            ci, timed_out = await _poll_ci(
+            log, status = await _wait_for_ci(
                 forge, repo=repo, branch=branch, timeout=poll_timeout, interval=poll_interval
             )
-            log, failed = _describe_ci(ci, timed_out=timed_out, poll_timeout=poll_timeout)
-            status = "failed" if failed else "done"
         case "sync_mr":
             # Push first: every commit after `open_mr` -- verify's fixes,
             # mr_checks' findings, the review brief -- is local only until
@@ -973,43 +1015,49 @@ async def _run_one(
                 # (Kraft-bxj8). Below the already-merged check: a branch
                 # already in main needs nothing pushed to it.
                 await forge.push(repo=repo, branch=branch)
-                # human_review's own commit (the review brief) lands on this
-                # branch after mr_checks already waited its pipeline green,
-                # which re-arms it. `glab mr merge --yes` against a pipeline
-                # still running for that commit exits 0 but schedules "merge
-                # when checks pass" and merges nothing (Kraft-79x3) -- so
-                # mr_checks' answer is stale the moment human_review pushes,
-                # and this has to ask again rather than trust it (Kraft-266b).
-                ci, timed_out = await _poll_ci(
+                # `mr_sync`'s push, right after the human_review gate that
+                # ran after mr_checks last validated CI, can land a commit
+                # -- the review brief, anything a person committed while
+                # reviewing -- on a head mr_checks never watched. On a
+                # project that requires a green pipeline before merge, that
+                # push re-arms the requirement for a pipeline nothing here
+                # has seen finish (Kraft-266b). Wait it out the same way
+                # ci_poll does, with the same budget, before handing
+                # forge.merge() a head nothing has validated (Kraft-x10m).
+                ci_log, gate_status = await _wait_for_ci(
                     forge, repo=repo, branch=branch, timeout=poll_timeout, interval=poll_interval
                 )
-                log, failed = _describe_ci(ci, timed_out=timed_out, poll_timeout=poll_timeout)
-                if failed:
-                    return log, "failed"
-                # A genuine refusal -- conflicts, unmet approval rules --
-                # still raises inside forge.merge and still fails the node.
-                await forge.merge(repo=repo, branch=branch, mr=MR(number=0, url=""))
-                # And a refusal the CLI reported as success does not get
-                # through either. This node's stated end state is "this
-                # branch is in main", so it is read off the forge rather
-                # than inferred from an exit code (Kraft-79x3).
-                landed = await _poll_merged(
-                    forge, repo=repo, branch=branch, timeout=merge_timeout, interval=merge_interval
-                )
-                state = landed.state if landed is not None else "gone"
-                if state == "merged":
-                    log, status = f"merged !{landed.number}\n", "done"
-                elif state == "open":
-                    log = (
-                        f"!{landed.number} is still open {merge_timeout:g}s after the "
-                        "merge command returned: nothing has landed on main. The forge "
-                        "may have scheduled an auto-merge for when its checks pass — "
-                        f"look at {landed.url}\n"
-                    )
-                    status = "failed"
+                if gate_status != "done":
+                    log, status = ci_log, "failed"
                 else:
-                    log = f"the merge request is {state}, not merged; nothing landed\n"
-                    status = "failed"
+                    # A genuine refusal -- conflicts, unmet approval rules --
+                    # still raises inside forge.merge and still fails the node.
+                    await forge.merge(repo=repo, branch=branch, mr=MR(number=0, url=""))
+                    # And a refusal the CLI reported as success does not get
+                    # through either. This node's stated end state is "this
+                    # branch is in main", so it is read off the forge rather
+                    # than inferred from an exit code (Kraft-79x3).
+                    landed = await _poll_merged(
+                        forge,
+                        repo=repo,
+                        branch=branch,
+                        timeout=merge_timeout,
+                        interval=merge_interval,
+                    )
+                    state = landed.state if landed is not None else "gone"
+                    if state == "merged":
+                        log, status = f"merged !{landed.number}\n", "done"
+                    elif state == "open":
+                        log = (
+                            f"!{landed.number} is still open {merge_timeout:g}s after the "
+                            "merge command returned: nothing has landed on main. The forge "
+                            "may have scheduled an auto-merge for when its checks pass — "
+                            f"look at {landed.url}\n"
+                        )
+                        status = "failed"
+                    else:
+                        log = f"the merge request is {state}, not merged; nothing landed\n"
+                        status = "failed"
             else:
                 raise ForgeError(
                     f"no open merge request for {branch!r}"
