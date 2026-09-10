@@ -434,6 +434,52 @@ async def refresh_worktree_base(worktree: Path, repo: Path, branch: str) -> str 
     return head
 
 
+async def mr_rebase(
+    db,
+    run_dirs,
+    *,
+    session_id: str,
+    work_item_id: str,
+    node_id: str,
+    hook_point: str,
+    round: int,
+    repo: str,
+    worktree: str,
+    branch: str,
+    head_sha: str | None = None,
+) -> str:
+    """Rebase onto `repo`'s current HEAD right before `open_mr`, so an item
+    that ran straight through the chain -- no pause, no `/retry` -- doesn't
+    open its MR however many commits behind (Kraft-4bgg). A thin wrapper:
+    `refresh_worktree_base` is already the whole implementation, shared with
+    `/resume` and `/retry`.
+
+    A conflict's `RuntimeError` is deliberately left to propagate rather than
+    caught here: `_measure_node` already folds a raised exception into this
+    node's ordinary failure path, the same `needs_human` outcome `/resume`
+    and `/retry` reach by catching it and calling `mark_needs_human`
+    themselves -- one behavior, this call site doesn't need its own copy of
+    that catch.
+    """
+    new_head = await refresh_worktree_base(Path(worktree), Path(repo), branch)
+    if new_head:
+        await db.write(lambda c: store.set_base_ref(c, work_item_id, new_head))
+        log = f"rebased {branch} onto {new_head}\n"
+    else:
+        log = "nothing to rebase\n"
+    return await _record_done(
+        db,
+        run_dirs,
+        session_id=session_id,
+        work_item_id=work_item_id,
+        node_id=node_id,
+        hook_point=hook_point,
+        round=round,
+        log=log,
+        head_sha=head_sha,
+    )
+
+
 async def scan_submodules(
     db,
     run_dirs,

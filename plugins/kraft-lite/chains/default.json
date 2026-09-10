@@ -52,6 +52,14 @@
       "fix_loop": "verify_fix_loop"
     },
     {
+      "id": "pre_mr_rebase",
+      "tasks": [
+        "on.mr.rebase"
+      ],
+      "gate_after": null,
+      "fix_loop": null
+    },
+    {
       "id": "open_mr",
       "tasks": [
         "on.mr.open"

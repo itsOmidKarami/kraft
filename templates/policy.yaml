@@ -6,6 +6,10 @@ loops:
   # that has not settled after this many re-entries or this long, whichever
   # comes first, stops the item for a human instead of waiting forever.
   ci_wait:           { attempts: 60, wall_clock_s: 1800 }
+  # Guards against a fast-moving default branch bouncing pre_mr_rebase <->
+  # verify forever: a clean verify pass doesn't spend a fix cycle of its own
+  # (Kraft-4bgg), so without this cap nothing else would ever stop it.
+  rebase_bounce:     { attempts: 2, wall_clock_s: 3600 }
 default:             { attempts: 3, wall_clock_s: 3600 }
 
 # Which finding severities burn a fix cycle. Minor findings are recorded and

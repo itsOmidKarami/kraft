@@ -538,6 +538,7 @@ def test_patch_switches_chain_template_before_the_chain_starts(tmp_path, monkeyp
             "env_setup",
             "implementation",
             "verify",
+            "pre_mr_rebase",
             "open_mr",
             "mr_checks",
             "human_review",

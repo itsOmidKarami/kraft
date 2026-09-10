@@ -454,6 +454,29 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
             )
             continue
 
+        # Where a rebase that moved the branch right before open_mr sends the
+        # chain back to re-verify (Kraft-4bgg). Same backward-motion
+        # constraint as reject_to, and the same `at` map -- forward would let
+        # a rebase-triggered bounce skip nodes between it and the target.
+        bad_bounce = next(
+            (
+                n["id"]
+                for i, n in enumerate(nodes)
+                if n.get("rebase_bounce_to") is not None
+                and (
+                    not isinstance(n["rebase_bounce_to"], str)
+                    or at.get(n["rebase_bounce_to"], len(nodes)) > i
+                )
+            ),
+            None,
+        )
+        if bad_bounce is not None:
+            invalid[tid] = (
+                f"template {tid!r}: node {bad_bounce!r} 'rebase_bounce_to' must name "
+                f"a node of this template at or before it"
+            )
+            continue
+
         # Which gates an agent may review before a human sees them (Kraft-zr3s).
         # Only meaningful beside a gate: on a gateless node it would review
         # nothing, and a config key that silently does nothing is worse than a
@@ -493,6 +516,7 @@ def materialize(template: Template, *, satisfied_gates: frozenset[str] = frozens
                 "fix_loop": n.get("fix_loop"),
                 "on_failure": list(n["on_failure"]) if n.get("on_failure") else None,
                 "reject_to": n.get("reject_to"),
+                "rebase_bounce_to": n.get("rebase_bounce_to"),
                 "auto_escalate": n.get("auto_escalate"),
             }
             for n in template.nodes
