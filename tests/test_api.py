@@ -24,7 +24,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 
 
-def _client(tmp_path, monkeypatch, *, templates_dir=None):
+def _client(tmp_path, monkeypatch, *, templates_dir=None, peer=("127.0.0.1", 54321)):
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
     monkeypatch.setenv(
@@ -38,7 +38,7 @@ def _client(tmp_path, monkeypatch, *, templates_dir=None):
     )
     import kraft.api as api
 
-    return TestClient(api.app, client=("127.0.0.1", 54321))
+    return TestClient(api.app, client=peer)
 
 
 def _linked_worktree(repo, tmp_path, name="wt"):
@@ -1913,3 +1913,28 @@ def test_cli_can_list_abandoned_items(tmp_path, monkeypatch):
 
 async def _as_coro(value):
     return value
+
+
+def test_post_triggers_files_a_paused_item(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        r = client.post(
+            "/api/triggers",
+            json={"repo": str(repo), "title": "from a trigger", "description": "d"},
+        )
+        assert r.status_code == 201, r.text
+        body = r.json()
+        assert body["status"] == "paused"
+        assert body["title"] == "from a trigger"
+
+
+def test_post_triggers_requires_auth(tmp_path, monkeypatch):
+    """The route takes the same `_authenticate` middleware as everything else:
+    a loopback peer is unaffected (design 5e), so this needs a remote one to
+    actually exercise the gate."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch, peer=("10.0.0.5", 54321)) as client:
+        st = client.app.state
+        monkeypatch.setattr(st, "access", {**st.access, "password_hash": "x"}, raising=False)
+        r = client.post("/api/triggers", json={"repo": str(repo), "title": "t"})
+        assert r.status_code == 401

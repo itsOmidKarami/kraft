@@ -35,6 +35,7 @@ from kraft import logs as logs_mod
 from kraft import notify as notify_mod
 from kraft import policy as policy_mod
 from kraft import steering as steering_mod
+from kraft import triggers as triggers_mod
 from kraft.adapters import agent as agent_mod
 from kraft.adapters import beads as beads_mod
 from kraft.adapters import forge as forge_mod
@@ -241,6 +242,12 @@ async def lifespan(app: FastAPI):
     # task, both start a poller, and only the last assignment is reachable --
     # the other ticks on, uncancellable, past shutdown.
     app.state.intake_lock = asyncio.Lock()
+    app.state.trigger_last_fired = {}
+    app.state.trigger_task = (
+        asyncio.ensure_future(triggers_mod.poller(app))
+        if app.state.policy and app.state.policy.triggers
+        else None
+    )
     try:
         yield
     finally:
@@ -260,6 +267,9 @@ async def lifespan(app: FastAPI):
             await asyncio.gather(live_intake_task, return_exceptions=True)
         app.state.rate_limit_task.cancel()
         await asyncio.gather(app.state.rate_limit_task, return_exceptions=True)
+        if app.state.trigger_task is not None:
+            app.state.trigger_task.cancel()
+            await asyncio.gather(app.state.trigger_task, return_exceptions=True)
         tasks = list(app.state.tasks.values())
         for task in tasks:
             task.cancel()
@@ -441,25 +451,27 @@ async def _perimeter(request: Request, call_next):
     # 2. DNS rebinding: a page on evil.com whose name flips to 127.0.0.1 is
     #    same-origin with a local Kraft and can read every response, ids
     #    included, then drive any route. A server that bound loopback may only
-    #    be addressed by a loopback name.
+    #    be addressed by a loopback name; a server bound off loopback may only
+    #    be addressed by a name the operator put in `allowed_hosts` (Kraft-cdy)
+    #    -- there is no bound address to compare against there, so without an
+    #    allowlist this fails closed rather than skipping the check.
     #
     #    Keyed on `sec-fetch-site` because only a browser can be rebound, and
     #    every other client — the CLI, MCP, httpx, curl — would otherwise need a
     #    Host allowlist for no gain. Browsers older than the Fetch Metadata
     #    rollout (pre-2020) do not send it and are not covered.
-    #
-    #    Restricted to a loopback bind because a `0.0.0.0` server is reached
-    #    under whatever address the client used, which is never `0.0.0.0`;
-    #    comparing the Host to `bound_host` there would 403 every LAN browser.
-    #    A non-loopback bind gets no rebinding protection from this rule.
-    if (
-        request.headers.get("sec-fetch-site")
-        and getattr(st, "bound_host", "127.0.0.1") in config_mod.LOOPBACK
-        and urlsplit(f"//{request.headers.get('host', '')}").hostname not in _LOCAL_HOSTS
-    ):
-        return JSONResponse(
-            {"detail": "unexpected Host for a server bound to loopback"}, status_code=403
-        )
+    if request.headers.get("sec-fetch-site"):
+        hostname = urlsplit(f"//{request.headers.get('host', '')}").hostname
+        bound_host = getattr(st, "bound_host", "127.0.0.1")
+        if bound_host in config_mod.LOOPBACK:
+            allowed = _LOCAL_HOSTS
+        else:
+            allowed = set((getattr(st, "access", None) or {}).get("allowed_hosts") or [])
+        if hostname not in allowed:
+            return JSONResponse(
+                {"detail": f"unexpected Host for a server bound to {bound_host}"},
+                status_code=403,
+            )
 
     # 3. Cross-site write. `_origin_ok` plus one clause, so that a LAN instance
     #    serving its own SPA (Origin and Host both 192.168.1.5:8765) is not
@@ -702,6 +714,55 @@ async def create_work_item(body: NewWorkItem, request: Request):
             **extra,
         },
     )
+
+
+class TriggerBody(BaseModel):
+    repo: str
+    title: str
+    description: str = ""
+    chain_template: str | None = None
+
+
+@api_router.post("/triggers", status_code=201)
+async def fire_trigger(body: TriggerBody, request: Request):
+    """The HTTP twin of a policy.yaml cron trigger (Kraft-859) -- always
+    paused, for the same reason: an agent cannot start work here any more
+    than it can from manual intake or a cron tick."""
+    st = request.app.state
+    if st.invalid_policy:
+        detail = "; ".join(st.invalid_policy)
+        raise HTTPException(503, f"policy config invalid, refusing work: {detail}")
+    template = st.templates.valid.get(
+        body.chain_template if body.chain_template is not None else "default"
+    )
+    if template is None:
+        raise HTTPException(422, "unknown or invalid template")
+    if len(body.title) > beads_mod.MAX_TITLE:
+        raise HTTPException(
+            422,
+            f"title is {len(body.title)} characters; the tracker's limit is {beads_mod.MAX_TITLE}",
+        )
+    if not Path(body.repo).is_dir():
+        raise HTTPException(422, f"repo path does not exist: {body.repo}")
+    try:
+        wid = await executor.intake(
+            st.db,
+            st.run_dirs,
+            title=body.title,
+            description=body.description,
+            repo=body.repo,
+            template=template,
+            chain_template=body.chain_template,
+            bd_cwd=_bd_cwd(),
+            status="paused",
+        )
+    except Exception as exc:  # noqa: BLE001 -- executor.intake raises several unrelated types
+        raise HTTPException(502, f"intake failed: {exc}") from exc
+    # Always paused, so this always takes create_work_item's "not autostart"
+    # branch — no _spawn, no executor.run. bead_warning is dropped: a trigger
+    # has no CLI kv block reading it, and get_work_item below already
+    # surfaces the item's real state.
+    return await get_work_item(wid, request)
 
 
 def _work_item_row(st, wid):
@@ -2837,6 +2898,7 @@ class AccessBody(BaseModel):
     port: int | None = None
     password: str | None = None
     session_expiry_days: int | None = None
+    allowed_hosts: list[str] | None = None
 
 
 @api_router.get("/access")
@@ -2847,6 +2909,7 @@ async def get_access(request: Request):
         "port": access["port"],
         "session_expiry_days": access["session_expiry_days"],
         "password_set": bool(access["password_hash"]),
+        "allowed_hosts": access["allowed_hosts"],
         "auth_required": _requires_auth(request.app, request),
     }
 
@@ -2861,6 +2924,8 @@ async def put_access(body: AccessBody, request: Request):
         access["port"] = body.port
     if body.session_expiry_days is not None:
         access["session_expiry_days"] = body.session_expiry_days
+    if body.allowed_hosts is not None:
+        access["allowed_hosts"] = body.allowed_hosts
     if body.password:
         access["password_hash"] = auth_mod.hash_password(body.password)
     # Binding off-localhost without a password is the configuration that puts an

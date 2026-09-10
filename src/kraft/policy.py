@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -24,6 +24,19 @@ class Cap:
     #: its `model` (sub-project G spec 6). `None` is "never escalate", which is
     #: the behaviour of every policy.yaml written before this existed.
     escalate_after: int | None = None
+
+
+@dataclass(frozen=True)
+class Trigger:
+    """One policy.yaml `triggers:` entry -- a cron schedule that files a
+    paused work item (Kraft-859). Never resumes it: an agent cannot start
+    work here any more than it can from manual intake."""
+
+    cron: str
+    repo: str
+    chain: str
+    title: str
+    description: str = ""
 
 
 @dataclass(frozen=True)
@@ -54,6 +67,7 @@ class Policy:
     #: `Cap`: a rate-limit wait can run for hours, and `Cap.wall_clock_s` would
     #: read that as an immediate breach.
     rate_limit_retries: int = 5
+    triggers: list[Trigger] = field(default_factory=list)
 
 
 def _cap(name: str, raw: object) -> Cap:
@@ -97,6 +111,60 @@ def _budget(name: str, raw: object) -> Budget:
     )
 
 
+def _cron_fields(name: str, expr: str) -> tuple[str, str, str, str, str]:
+    """ponytail: `*` or a comma-separated list of ints per field, no ranges
+    or steps (`1-5`, `*/15`) -- add `croniter` as a dependency if a
+    policy.yaml ever needs one."""
+    parts = expr.split()
+    if len(parts) != 5:
+        raise PolicyError(f"{name}: cron expression must have exactly 5 fields: {expr!r}")
+    for part in parts:
+        for token in part.split(","):
+            if token != "*" and not token.isdigit():
+                raise PolicyError(
+                    f"{name}: field {part!r} must be '*' or a comma-separated list of "
+                    "integers; ranges and steps are not supported"
+                )
+    minute, hour, day, month, weekday = parts
+    return minute, hour, day, month, weekday
+
+
+def cron_due(expr: str, dt: datetime) -> bool:
+    """True when `dt` (minute resolution) matches a 5-field cron expression."""
+    minute, hour, day, month, weekday = _cron_fields("cron", expr)
+
+    def matches(field: str, value: int) -> bool:
+        return field == "*" or value in {int(x) for x in field.split(",")}
+
+    return (
+        matches(minute, dt.minute)
+        and matches(hour, dt.hour)
+        and matches(day, dt.day)
+        and matches(month, dt.month)
+        and matches(weekday, dt.isoweekday() % 7)  # cron: 0 = Sunday
+    )
+
+
+def _trigger(name: str, raw: object) -> Trigger:
+    if not isinstance(raw, dict):
+        raise PolicyError(f"{name}: expected a mapping")
+    try:
+        cron = raw["cron"]
+        repo = raw["repo"]
+        chain = raw["chain"]
+        title = raw["title"]
+    except KeyError as exc:
+        raise PolicyError(f"{name}: missing 'cron', 'repo', 'chain', or 'title'") from exc
+    for field_name, value in (("cron", cron), ("repo", repo), ("chain", chain), ("title", title)):
+        if not isinstance(value, str):
+            raise PolicyError(f"{name}: '{field_name}' must be a string")
+    _cron_fields(f"{name}.cron", cron)
+    description = raw.get("description", "")
+    if not isinstance(description, str):
+        raise PolicyError(f"{name}: 'description' must be a string")
+    return Trigger(cron=cron, repo=repo, chain=chain, title=title, description=description)
+
+
 def load_policy(path: str | Path) -> Policy:
     path = Path(path)
     try:
@@ -130,12 +198,17 @@ def load_policy(path: str | Path) -> Policy:
     raw_retries = data.get("rate_limit_retries", 5)
     if not isinstance(raw_retries, int) or isinstance(raw_retries, bool) or raw_retries < 1:
         raise PolicyError(f"{path.name}: 'rate_limit_retries' must be a positive int")
+    triggers_raw = data.get("triggers") or []
+    if not isinstance(triggers_raw, list):
+        raise PolicyError(f"{path.name}: 'triggers' must be a list")
+    triggers = [_trigger(f"{path.name}: triggers[{i}]", t) for i, t in enumerate(triggers_raw)]
     return Policy(
         loops=loops,
         default=_cap("default", data["default"]),
         loop_severities=severities,
         budget=budget,
         rate_limit_retries=raw_retries,
+        triggers=triggers,
     )
 
 
