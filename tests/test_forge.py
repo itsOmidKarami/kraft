@@ -91,6 +91,13 @@ GH_PR_VIEW_CONFLICT = (
     '{"number":7,"url":"https://github.com/o/r/pull/7","mergeable":"CONFLICTING",'
     '"mergeStateStatus":"DIRTY","statusCheckRollup":[{"name":"build","conclusion":"SUCCESS"}]}'
 )
+# `glab mr view -F json` for a merge request merged out-of-band -- a person
+# merged it in the GitLab UI while mr_checks was still polling. Captured
+# against glab 1.117.0; a merged MR carries neither merge-status field.
+GLAB_MR_VIEW_MERGED = (
+    '{"iid":54,"state":"merged","source_branch":"kraft/abc",'
+    '"web_url":"https://gitlab.com/itsOmidKarami/kraft/-/merge_requests/54"}'
+)
 
 
 def _stub(tmp_path, monkeypatch, name: str, stdout: str, rc: int = 0):
@@ -135,6 +142,24 @@ def _stub_routed(tmp_path, monkeypatch, name: str, routes: dict[str, str], defau
     p.chmod(0o755)
     monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
     return p
+
+
+def _stub_glab_mr_view_fails(tmp_path, monkeypatch, mr_list_stdout: str):
+    """`glab mr view` exits non-zero -- Kraft-v6ci's reported failure mode --
+    and `glab mr list`, `_merge_state`'s fallback, answers `mr_list_stdout`.
+    """
+    argv = tmp_path / "glab.argv"
+    p = tmp_path / "glab"
+    p.write_text(
+        f'#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a" >> {argv}; done\n'
+        'case "$1 $2" in\n'
+        "  'mr view') echo 'mr view: not found' >&2; exit 1 ;;\n"
+        f"  'mr list') cat <<'STUBEOF'\n{mr_list_stdout}\nSTUBEOF\n  ;;\n"
+        "  *) exit 1 ;;\n"
+        "esac\n"
+    )
+    p.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
 
 
 def test_glab_open_mr_parses_the_number_and_url(tmp_path, monkeypatch):
@@ -1265,6 +1290,49 @@ def test_glab_ci_status_leaves_a_state_that_needs_a_person_undecided(tmp_path, m
     assert status.mergeable is None
 
 
+def test_glab_ci_status_reads_an_out_of_band_merge_without_erroring(tmp_path, monkeypatch):
+    """Kraft-v6ci. A person merges the MR in the GitLab UI while mr_checks is
+    still polling; `state: "merged"` carries neither merge-status field, and
+    must not fall through `_mergeable` as undecided or raise."""
+    _stub_routed(
+        tmp_path,
+        monkeypatch,
+        "glab",
+        {"mr view": GLAB_MR_VIEW_MERGED, "ci list": GLAB_CI_SUCCESS},
+    )
+
+    status = asyncio.run(
+        forge.GlabCli().ci_status(repo=tmp_path, mr=forge.MR(0, ""), branch="kraft/abc")
+    )
+
+    assert (status.state, status.mergeable) == ("success", True)
+    assert status.merge_detail == "merged"
+    assert status.jobs == ("merge request already merged",)
+    argv = _argv(tmp_path, "glab")
+    assert "list" not in argv, "a merged MR's pipeline list is not a fact this node needs"
+
+
+def test_merge_state_falls_back_to_find_mr_when_mr_view_fails(tmp_path, monkeypatch):
+    """Kraft-v6ci's reported failure mode: `glab mr view` errors when the
+    branch resolves to nothing because the state changed under it. The same
+    `--all` lookup merge's own "already merged" shortcut trusts (Kraft-xron)
+    still finds it."""
+    _stub_glab_mr_view_fails(tmp_path, monkeypatch, GLAB_MR_LIST_MERGED)
+
+    state = asyncio.run(forge.GlabCli()._merge_state(tmp_path, branch="kraft/abc"))
+
+    assert state == "merged"
+
+
+def test_merge_state_still_raises_when_find_mr_has_no_answer(tmp_path, monkeypatch):
+    """The fallback must not turn a genuine outage or auth failure into a
+    false "merged": it only fires when `find_mr` itself confirms the merge."""
+    _stub_glab_mr_view_fails(tmp_path, monkeypatch, "[]")
+
+    with pytest.raises(forge.ForgeError):
+        asyncio.run(forge.GlabCli()._merge_state(tmp_path, branch="kraft/abc"))
+
+
 def test_gh_ci_status_reads_mergeable_from_the_same_pr_view(tmp_path, monkeypatch):
     """No extra process on GitHub: the fields go on the `gh pr view` call the
     node already makes."""
@@ -1391,6 +1459,51 @@ def test_merge_fails_when_the_mr_was_closed_rather_than_merged(tmp_path, monkeyp
 
     assert (returned, recorded) == ("failed", "failed")
     assert "closed" in _session_log(tmp_path, "m3")
+
+
+def test_merge_waits_out_a_pipeline_recreated_after_mr_checks(tmp_path, monkeypatch):
+    """Kraft-x10m. `mr_sync`'s push after human_review can land a commit on a
+    head mr_checks never validated, re-arming a required-pipeline rule for a
+    pipeline that takes as long to finish as any other -- not the 300s window
+    `_poll_merged` gives the forge's own merge machinery. `merge` must wait
+    this pipeline out itself before calling `forge.merge()`."""
+    fake = forge.FakeForge(ci_states=["pending", "pending", "success"])
+    asyncio.run(fake.open_mr(repo=tmp_path, branch="kraft/w1", title="t", body="b"))
+
+    returned, recorded = _forge_session(tmp_path, monkeypatch, fake, "merge", "g1", poll_interval=0)
+
+    assert (returned, recorded) == ("done", "done")
+    assert fake.merged == [1]
+
+
+def test_merge_fails_fast_on_an_unmergeable_head_without_calling_merge(tmp_path, monkeypatch):
+    """Kraft-266b. A conflict (or any other code-change-needed state) is an
+    answer, not something `forge.merge()` should ever be asked to resolve."""
+    fake = forge.FakeForge(ci_states=["success"], mergeable=False, merge_detail="conflict")
+    asyncio.run(fake.open_mr(repo=tmp_path, branch="kraft/w1", title="t", body="b"))
+
+    returned, recorded = _forge_session(tmp_path, monkeypatch, fake, "merge", "g2", poll_interval=0)
+
+    assert (returned, recorded) == ("failed", "failed")
+    assert "not mergeable: conflict" in _session_log(tmp_path, "g2")
+    assert fake.merged == [], "merge must not be called against an unmergeable head"
+
+
+def test_merge_times_out_on_the_pipeline_wait_rather_than_the_merge_wait(tmp_path, monkeypatch):
+    """The new CI gate uses `poll_timeout`, not `merge_timeout`: a pipeline
+    that never settles is a different wait than the forge's own merge
+    machinery being slow, and each needs its own name in the log
+    (Kraft-x10m)."""
+    fake = forge.FakeForge(ci_states=["pending"])
+    asyncio.run(fake.open_mr(repo=tmp_path, branch="kraft/w1", title="t", body="b"))
+
+    returned, recorded = _forge_session(
+        tmp_path, monkeypatch, fake, "merge", "g3", poll_timeout=0, poll_interval=0
+    )
+
+    assert (returned, recorded) == ("failed", "failed")
+    assert "timed out" in _session_log(tmp_path, "g3")
+    assert fake.merged == []
 
 
 # `glab ci get -F json` for the pipeline in GLAB_CI_FAILED, trimmed to the
