@@ -481,6 +481,10 @@ def _cmd_retry(ns: argparse.Namespace) -> None:
     emit(asyncio.run(client.retry(ns.steer, ns.id)), _render_action, ns.json)
 
 
+def _cmd_escalate(ns: argparse.Namespace) -> None:
+    emit(asyncio.run(client.escalate(ns.message, ns.id)), _render_action, ns.json)
+
+
 def _cmd_mr_label(ns: argparse.Namespace) -> None:
     emit(asyncio.run(client.mr_labels(ns.labels, ns.id)), _render_action, ns.json)
 
@@ -769,6 +773,13 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     retry.add_argument("id", nargs="?")
     retry.add_argument("--steer", help="carried into the retry's prompt")
     retry.set_defaults(func=_cmd_retry)
+
+    escalate = subs.add_parser(
+        "escalate", parents=[common], help="ask an agent to help resolve a needs_human stop"
+    )
+    escalate.add_argument("id", nargs="?")
+    escalate.add_argument("--message", required=True, help="what to tell the agent")
+    escalate.set_defaults(func=_cmd_escalate)
 
     mr_label = subs.add_parser(
         "mr-label",

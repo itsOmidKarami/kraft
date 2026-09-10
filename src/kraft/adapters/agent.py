@@ -103,6 +103,11 @@ class Profile(NamedTuple):
     allowed_tools: tuple[str, ...]
     permission_mode_flag: tuple[str, ...]
     permission_prompt_tool: tuple[str, ...]
+    #: How this CLI spells "resume that prior session" and "keep the resumed
+    #: transcript bounded on your own" — the two flags an escalation turn adds
+    #: that no chain dispatch ever needs.
+    resume: tuple[str, ...] = ()
+    autocompact: tuple[str, ...] = ()
 
 
 PROFILES: dict[str, Profile] = {
@@ -145,6 +150,8 @@ PROFILES: dict[str, Profile] = {
         # today's behaviour rather than crashing, which is why no --mcp-config
         # is passed.
         permission_prompt_tool=("--permission-prompt-tool",),
+        resume=("--resume",),
+        autocompact=("--autocompact",),
     ),
 }
 
@@ -305,6 +312,20 @@ async def run_agent_task(
     review_package: str | None = None,
     artifact: str | None = None,
     method_text: str | None = None,
+    #: `--resume <id>` when set — an escalation turn continuing its item's
+    #: existing thread. `None` (every chain dispatch) omits the flag entirely,
+    #: same as today.
+    resume_session_id: str | None = None,
+    #: `--autocompact <value>` when set. Paired with `resume_session_id` by
+    #: `escalate.dispatch`; no chain dispatch sets it.
+    autocompact: str | None = None,
+    #: `False` only for an escalation turn: the child then gets no
+    #: `KRAFT_WORK_ITEM_ID`, so `client.resolve_context()` resolves it as a
+    #: human's own session rather than a worker's, and the existing
+    #: self-action guard (`client._forbid_self_action`) lets it act on the
+    #: very item it is escalating — see spec "The self-resume trick". Every
+    #: existing caller keeps today's behavior by leaving this `True`.
+    identify_as_worker: bool = True,
 ) -> str:
     ctx = _CTX.format(
         title=title,
@@ -371,6 +392,10 @@ async def run_agent_task(
         *prof.permission_prompt_tool,
         PERMISSION_TOOL,
     ]
+    if resume_session_id:
+        cmd += [*prof.resume, resume_session_id]
+    if autocompact:
+        cmd += [*prof.autocompact, autocompact]
     if model:
         cmd += [*prof.model, model]
     if deny_tools:
@@ -394,7 +419,7 @@ async def run_agent_task(
         # may approve its own gate. Deliberately no MCP config here — that would
         # make this adapter vendor-aware, against conceptual model §1.2.
         env={
-            "KRAFT_WORK_ITEM_ID": work_item_id,
+            **({"KRAFT_WORK_ITEM_ID": work_item_id} if identify_as_worker else {}),
             "KRAFT_SESSION_ID": session_id,
             **({"KRAFT_REVIEW_PACKAGE": review_package} if review_package else {}),
         },
