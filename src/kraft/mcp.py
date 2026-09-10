@@ -125,6 +125,15 @@ def build() -> MCPServer:
         return await client.retry(steer, work_item_id)
 
     @server.tool()
+    async def escalate_work_item(message: str, work_item_id: str | None = None) -> dict:
+        """Send a message into a Kraft work item's escalation thread — the
+        door onto a needs_human stop that wants back-and-forth with an agent
+        rather than a one-shot retry. Resumes the same thread on every later
+        call for the same item, so whatever was already tried carries
+        forward."""
+        return await client.escalate(message, work_item_id)
+
+    @server.tool()
     async def set_mr_labels(labels: list[str], work_item_id: str | None = None) -> dict:
         """Label this Kraft work item's merge request and re-create its
         pipeline. For an `on_failure` repair task that has read a red

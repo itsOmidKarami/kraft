@@ -1013,3 +1013,45 @@ def test_repo_agent_docs_do_not_forbid_a_kraft_worker_from_committing():
             f"{name}: the carve-out is inside or above a generated bd block, "
             "where a regeneration would drop it"
         )
+
+
+def test_resume_session_id_adds_resume_and_autocompact_flags(monkeypatch):
+    seen = _capture_cmd(monkeypatch)
+    _run(resume_session_id="cli-session-abc", autocompact="auto")
+    cmd = seen["cmd"]
+    assert "--resume" in cmd
+    assert cmd[cmd.index("--resume") + 1] == "cli-session-abc"
+    assert "--autocompact" in cmd
+    assert cmd[cmd.index("--autocompact") + 1] == "auto"
+
+
+def test_no_resume_session_id_omits_resume_and_autocompact_flags(monkeypatch):
+    seen = _capture_cmd(monkeypatch)
+    _run()
+    assert "--resume" not in seen["cmd"]
+    assert "--autocompact" not in seen["cmd"]
+
+
+def test_identify_as_worker_false_omits_the_work_item_env_var(monkeypatch):
+    seen = {}
+
+    async def fake_run_task(db, run_dirs, *, env, **kw):
+        seen["env"] = env
+        return "done"
+
+    monkeypatch.setattr("kraft.adapters.agent._subprocess.run_task", fake_run_task)
+    _run(identify_as_worker=False)
+    assert "KRAFT_WORK_ITEM_ID" not in seen["env"]
+    assert seen["env"]["KRAFT_SESSION_ID"] == "s1"
+
+
+def test_identify_as_worker_defaults_true(monkeypatch):
+    seen = {}
+
+    async def fake_run_task(db, run_dirs, *, env, **kw):
+        seen["env"] = env
+        return "done"
+
+    monkeypatch.setattr("kraft.adapters.agent._subprocess.run_task", fake_run_task)
+    _run()
+    assert seen["env"]["KRAFT_WORK_ITEM_ID"] == "w1"

@@ -704,3 +704,16 @@ async def retry(steer: str | None = None, work_item_id: str | None = None) -> di
     target = _forbid_self_action(work_item_id)
     payload = {"steer": steer.strip()} if steer and steer.strip() else {}
     return await _act(f"/work-items/{target}/retry", payload)
+
+
+async def escalate(message: str, work_item_id: str | None = None) -> dict:
+    """Send `message` into a work item's escalation thread, starting one if
+    none exists yet. Only a `needs_human` item has this door — retry/resume
+    cover every other stop.
+
+    Resumes the same underlying agent session on every later call for the
+    same item, so whatever it already tried carries forward, kept bounded by
+    the CLI's own `--autocompact` rather than anything Kraft does.
+    """
+    target = _forbid_self_action(work_item_id)
+    return await _act(f"/work-items/{target}/escalate", {"message": message})

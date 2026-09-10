@@ -806,6 +806,17 @@ def test_fresh_schema_has_description(tmp_path):
     assert "description" in cols
 
 
+def test_migration_19_adds_escalation_session_id_column(tmp_path):
+    conn = db._connect(tmp_path / "s.db")
+    db.migrate(conn)
+    conn.execute("PRAGMA user_version = 19")
+    conn.execute("ALTER TABLE work_items DROP COLUMN escalation_session_id")
+    db.migrate(conn)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(work_items)")}
+    assert "escalation_session_id" in cols
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+
+
 def test_migration_14_backfills_worker_session_attempts(tmp_path):
     """Every row ever written carried the literal attempt = 1 (Kraft-kq8m), so
     fixing the INSERT alone leaves the observed items wrong for the life of the
