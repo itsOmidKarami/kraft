@@ -352,6 +352,76 @@ async def ensure_worktree(
     return worktree
 
 
+async def refresh_worktree_base(worktree: Path, repo: Path, branch: str) -> str | None:
+    """Rebase `worktree`'s branch onto `repo`'s current HEAD, so a paused or
+    retried item's next commit lands on top of whatever landed on `repo`
+    while the item sat stopped, not the commit it forked from.
+
+    Returns the new HEAD sha when the rebase moved the branch (the caller
+    stores it as the item's `base_ref`), or None when there was nothing to
+    do: no worktree yet, `repo`'s HEAD unreadable, the branch already
+    contains that HEAD, the branch already has an `origin` remote-tracking
+    ref, or the worktree has uncommitted changes -- all four are best-effort
+    skips (logged), same posture as `ensure_worktree`'s other git steps.
+    The dirty-tree case comes from a pause via SIGTERM (`api.py:_terminate`)
+    catching an agent mid-edit with nothing committed yet, and `git rebase`
+    itself refuses a dirty tree; the pushed-branch case is covered below.
+
+    Raises RuntimeError, with the rebase already aborted (`git rebase
+    --abort`), on a conflict -- that is for a human to resolve, not to
+    dispatch an agent into.
+    """
+    if not worktree.is_dir():
+        return None
+    head = git_read(repo, "rev-parse", "HEAD")
+    if not head:
+        logger.warning("refresh_worktree_base: rev-parse HEAD failed in %s", repo)
+        return None
+    # Cheaper, purely local check first: a branch already pushed past a prior
+    # open_mr gate must not be rewritten -- the next mr_sync push has no
+    # --force to fall back on (adapters/forge.py:416).
+    if git_read(
+        worktree,
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        f"refs/remotes/origin/{branch}",
+        expected_failure=True,
+    ):
+        logger.info("refresh_worktree_base: %s already pushed to origin, skipping", branch)
+        return None
+    # Already up to date: exit 0 means head is already an ancestor of the tip.
+    if (
+        git_read(worktree, "merge-base", "--is-ancestor", head, "HEAD", expected_failure=True)
+        is not None
+    ):
+        return None
+    if git_read(worktree, "status", "--porcelain"):
+        logger.warning("refresh_worktree_base: %s has uncommitted changes, skipping", worktree)
+        return None
+    done = await asyncio.to_thread(
+        subprocess.run,
+        ["git", "-C", str(worktree), "rebase", head],
+        capture_output=True,
+        text=True,
+    )
+    if done.returncode != 0:
+        await asyncio.to_thread(
+            subprocess.run,
+            ["git", "-C", str(worktree), "rebase", "--abort"],
+            capture_output=True,
+            text=True,
+        )
+        # git prints the "CONFLICT (content): Merge conflict in <file>" line to
+        # stdout; stderr only ever carries the generic "could not apply"/"hint:
+        # Resolve all conflicts" text. Join both rather than preferring one, so
+        # the conflicting file's name survives into the raised message and the
+        # needs_human reason a human reads.
+        detail = "\n".join(filter(None, [done.stdout.strip(), done.stderr.strip()]))
+        raise RuntimeError(f"git rebase failed for {worktree}: {detail}")
+    return head
+
+
 async def scan_submodules(
     db,
     run_dirs,

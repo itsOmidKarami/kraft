@@ -864,9 +864,11 @@ def set_title(conn: sqlite3.Connection, work_item_id: str, title: str) -> None:
 def set_base_ref(conn: sqlite3.Connection, work_item_id: str, sha: str) -> None:
     """Pin the commit a work item's diff is measured against.
 
-    Written once, when the worktree is created. A merge-base recomputed later
-    moves when the default branch moves, and a diff that changes under an
-    unchanged work item is worse than no diff.
+    Written when the worktree is created, and again by
+    `refresh_worktree_base` when a paused or retried item resumes onto a
+    moved HEAD (Kraft-ulab). A merge-base recomputed later moves when the
+    default branch moves, and a diff that changes under an unchanged work
+    item is worse than no diff.
     """
     conn.execute(
         "UPDATE work_items SET base_ref = ?, updated_at = ? WHERE id = ?",
