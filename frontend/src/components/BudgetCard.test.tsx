@@ -66,4 +66,15 @@ describe("BudgetCard", () => {
     await userEvent.click(screen.getByRole("button", { name: /retry/i }));
     expect(spy).toHaveBeenCalledWith("w1");
   });
+
+  it("offers escalate alongside retry", async () => {
+    const spy = vi
+      .spyOn(api, "escalateWorkItem")
+      .mockResolvedValue({ id: "w1", status: "escalating" });
+    render(<BudgetCard item={item({ scope: "work_item", spent_usd: 24.5, cap_usd: 20 })} />);
+    await userEvent.click(screen.getByRole("button", { name: /^escalate/i }));
+    await userEvent.type(screen.getByLabelText("escalate message"), "is this cap too low?");
+    await userEvent.click(screen.getByRole("button", { name: /send to agent/i }));
+    expect(spy).toHaveBeenCalledWith("w1", "is this cap too low?");
+  });
 });

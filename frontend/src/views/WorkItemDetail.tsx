@@ -7,6 +7,7 @@ import { BudgetCard } from "../components/BudgetCard";
 import { CappedCard } from "../components/CappedCard";
 import { CurrentNodePanel } from "../components/CurrentNodePanel";
 import { DiffModal } from "../components/DiffModal";
+import { Escalate } from "../components/Escalate";
 import { EventTimeline } from "../components/EventTimeline";
 import { ARTIFACT_LABELS, Gate } from "../components/Gate";
 import { LinkedDocuments } from "../components/LinkedDocuments";
@@ -14,7 +15,7 @@ import { PausedCard } from "../components/PausedCard";
 import { ChainBar, Row, RowState, RowText, StatusGlyph, Tabs } from "../components/ui";
 import { elapsed, repoName, statusWord, tokens, usd } from "../format";
 import { useStore } from "../store";
-import type { KraftEvent, SessionStatus, WorkItem } from "../types";
+import type { KraftEvent, SessionStatus, WorkerSession, WorkItem } from "../types";
 
 /** Whether this browser is on the machine Kraft runs on. Loopback is the one
  * origin that cannot be remote, and the worktree path only means something to
@@ -65,7 +66,13 @@ function usageLine(item: WorkItem, taskCount: number): string {
  * `PausedCard` this state has no prior session to prefill a note from and no
  * "attempt N" to relaunch: just the question and a required answer.
  */
-function NeedsContextCard({ item }: { item: WorkItem }) {
+function NeedsContextCard({
+  item,
+  sessions,
+}: {
+  item: WorkItem;
+  sessions: WorkerSession[];
+}) {
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -112,6 +119,7 @@ function NeedsContextCard({ item }: { item: WorkItem }) {
           <ChatText size={14} />
           Answer
         </button>
+        <Escalate item={item} sessions={sessions} />
       </div>
       {err && <p className="form-error">{err}</p>}
     </div>
@@ -498,7 +506,7 @@ export function WorkItemDetail() {
           counter and discards fix-loop progress spec §3 says must survive. */}
       {item.status === "needs_human" && item.needs_context_question && !gate ? (
         <div className="desktop-only">
-          <NeedsContextCard item={item} />
+          <NeedsContextCard item={item} sessions={sessions} />
         </div>
       ) : /* Then budget: a spend cap stopped the item before it launched
              anything, and `stranded` below would otherwise claim the node
@@ -508,7 +516,7 @@ export function WorkItemDetail() {
              wins if that ever stops being true. */
       item.budget ? (
         <div className="desktop-only">
-          <BudgetCard item={item} />
+          <BudgetCard item={item} sessions={sessions} />
         </div>
       ) : item.cappedOut || stranded ? (
         <div className="desktop-only">
@@ -522,6 +530,7 @@ export function WorkItemDetail() {
         <Gate
           item={item}
           gate={gate}
+          sessions={sessions}
           sub={`${nodeSessions.map((s) => s.hook_point).join(", ")} completed clean`}
           artifact={
             /* Both, not one (Kraft-yytk): the brief is the agent's argument,

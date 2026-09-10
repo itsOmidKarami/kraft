@@ -131,6 +131,9 @@ export const retryWorkItem = (id: string, steer?: string) =>
     json("POST", { steer: steer ?? null }),
   );
 
+export const escalateWorkItem = (id: string, message: string) =>
+  req<{ id: string; status: string }>(`/work-items/${id}/escalate`, json("POST", { message }));
+
 export const openDocument = (id: string, editor?: string) =>
   req<{ document_id: string; path: string; editor: string }>(
     `/documents/${encodeURIComponent(id)}/open`,

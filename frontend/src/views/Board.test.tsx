@@ -100,6 +100,15 @@ describe("Board", () => {
     expect(within(row).getByRole("button", { name: /approve/i })).toBeInTheDocument();
   });
 
+  it("offers escalate on the inline gate row too", () => {
+    setItems(
+      wi({ id: "w3", status: "needs_human", current_node_id: "plan", pending_gate: "plan_approval" }),
+    );
+    renderBoard();
+    const row = within(group("Needs you")).getByTestId("board-card");
+    expect(within(row).getByRole("button", { name: /^escalate/i })).toBeInTheDocument();
+  });
+
   it("does not offer a blind Approve for human_review_approval, only a link to the detail view", () => {
     setItems(
       wi({

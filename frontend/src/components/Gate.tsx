@@ -2,7 +2,8 @@ import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Check, Flag } from "@phosphor-icons/react";
 import * as api from "../api";
-import type { Finding, WorkItem } from "../types";
+import { Escalate } from "./Escalate";
+import type { Finding, WorkerSession, WorkItem } from "../types";
 
 /**
  * The gate prompt, in the two places a gate is offered: the board's inline row
@@ -53,6 +54,7 @@ export function Gate({
   artifact,
   deferred,
   concerns,
+  sessions,
 }: {
   item: WorkItem;
   gate: string;
@@ -66,6 +68,10 @@ export function Gate({
   /** `done_with_concerns` text from sessions along the way — same shape of
    *  thing as `deferred`, so it shares the one panel rather than a second. */
   concerns?: string[];
+  /** Passed only from the detail view; lets `Escalate` show a running
+   *  escalation turn instead of re-offering the button. The board's inline
+   *  row has no per-item session list, so it goes without. */
+  sessions?: WorkerSession[];
 }) {
   const [rejecting, setRejecting] = useState(false);
   const [note, setNote] = useState("");
@@ -145,6 +151,7 @@ export function Gate({
           <Link className="btn btn-secondary" to={`/work-items/${item.id}`}>
             Review to approve
           </Link>
+          <Escalate item={item} sessions={sessions} />
         </div>
       );
     }
@@ -161,6 +168,7 @@ export function Gate({
             </span>
             {approve}
             {startReject}
+            <Escalate item={item} sessions={sessions} />
           </>
         ) : (
           rejectForm
@@ -206,6 +214,7 @@ export function Gate({
         <div className="gate-actions">
           {approve}
           {startReject}
+          <Escalate item={item} sessions={sessions} />
         </div>
       ) : (
         rejectForm

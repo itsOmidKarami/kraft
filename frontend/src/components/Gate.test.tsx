@@ -131,4 +131,20 @@ describe("Gate", () => {
       "/work-items/w1",
     );
   });
+
+  it("offers escalate alongside approve/reject, both variants", () => {
+    render(<Gate item={item} gate="spec_approval" />);
+    expect(screen.getByRole("button", { name: /^escalate/i })).toBeInTheDocument();
+    render(<Gate item={item} gate="spec_approval" variant="inline" />);
+    expect(screen.getAllByRole("button", { name: /^escalate/i })).toHaveLength(2);
+  });
+
+  it("escalate sends through the message box, same as the standalone control", async () => {
+    const spy = vi.spyOn(api, "escalateWorkItem").mockResolvedValue({ id: "w1", status: "escalating" });
+    render(<Gate item={item} gate="spec_approval" />);
+    await userEvent.click(screen.getByRole("button", { name: /^escalate/i }));
+    await userEvent.type(screen.getByLabelText("escalate message"), "is this right?");
+    await userEvent.click(screen.getByRole("button", { name: /send to agent/i }));
+    expect(spy).toHaveBeenCalledWith("w1", "is this right?");
+  });
 });

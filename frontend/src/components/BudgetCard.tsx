@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Coins } from "@phosphor-icons/react";
 import * as api from "../api";
-import type { WorkItem } from "../types";
+import type { WorkerSession, WorkItem } from "../types";
+import { Escalate } from "./Escalate";
 
 const usd = (n: number) => `$${n.toFixed(2)}`;
 
@@ -19,7 +20,13 @@ const usd = (n: number) => `$${n.toFixed(2)}`;
  * wants a running one, approve/reject want a gate). Retrying clears nothing, so
  * the hint says the run stops again unless the cap is raised or cleared first.
  */
-export function BudgetCard({ item }: { item: WorkItem }) {
+export function BudgetCard({
+  item,
+  sessions,
+}: {
+  item: WorkItem;
+  sessions?: WorkerSession[];
+}) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const b = item.budget;
@@ -61,6 +68,7 @@ export function BudgetCard({ item }: { item: WorkItem }) {
         <button className="btn btn-secondary" disabled={busy} onClick={retry}>
           Retry anyway
         </button>
+        <Escalate item={item} sessions={sessions} />
         <span className="control-hint">
           retry clears nothing — the spend stands, so this stops again at the next
           agent task unless the cap is raised or cleared first

@@ -3,6 +3,7 @@ import { ChatText, Prohibit } from "@phosphor-icons/react";
 import * as api from "../api";
 import { elapsed } from "../format";
 import type { KraftEvent, WorkItem, WorkerSession } from "../types";
+import { Escalate } from "./Escalate";
 import { LogModal } from "./LogModal";
 
 /**
@@ -158,6 +159,7 @@ export function CappedCard({
           <ChatText size={14} />
           {steerable ? "Steer and retry" : "Retry"}
         </button>
+        <Escalate item={item} sessions={sessions} />
         <span className="control-hint">
           {steerable
             ? "retry resets the loop counter; steer text carries into cycle 1"
