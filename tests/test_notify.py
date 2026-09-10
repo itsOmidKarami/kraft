@@ -556,7 +556,7 @@ def api_client(tmp_path, monkeypatch):
 
 
 def test_get_notify_defaults_before_the_file_exists(api_client):
-    body = api_client.get("/notify").json()
+    body = api_client.get("/api/notify").json()
     assert body == {
         "enabled": False,
         "url_set": False,
@@ -566,16 +566,16 @@ def test_get_notify_defaults_before_the_file_exists(api_client):
 
 
 def test_get_notify_never_returns_the_url(api_client):
-    api_client.put("/notify", json={"enabled": True, "url": "https://hook.invalid/t0ken"})
-    body = api_client.get("/notify").json()
+    api_client.put("/api/notify", json={"enabled": True, "url": "https://hook.invalid/t0ken"})
+    body = api_client.get("/api/notify").json()
     assert body["url_set"] is True
     assert "t0ken" not in json.dumps(body)
     assert "url" not in body
 
 
 def test_put_omitting_url_preserves_the_stored_secret(api_client):
-    api_client.put("/notify", json={"enabled": True, "url": "https://hook.invalid/t0ken"})
-    api_client.put("/notify", json={"events": ["gate_requested"]})
+    api_client.put("/api/notify", json={"enabled": True, "url": "https://hook.invalid/t0ken"})
+    api_client.put("/api/notify", json={"events": ["gate_requested"]})
     templates_dir = Path(api_client.app.state.templates_dir)
     saved = config.load_notify(templates_dir / "notify.yaml")
     assert saved["url"] == "https://hook.invalid/t0ken"
@@ -584,9 +584,9 @@ def test_put_omitting_url_preserves_the_stored_secret(api_client):
 
 
 def test_put_empty_string_clears_the_url(api_client):
-    api_client.put("/notify", json={"url": "https://hook.invalid/t0ken"})
-    api_client.put("/notify", json={"url": ""})
-    assert api_client.get("/notify").json()["url_set"] is False
+    api_client.put("/api/notify", json={"url": "https://hook.invalid/t0ken"})
+    api_client.put("/api/notify", json={"url": ""})
+    assert api_client.get("/api/notify").json()["url_set"] is False
 
 
 def test_clearing_the_url_while_enabled_disables_instead_of_422ing(api_client):
@@ -595,10 +595,10 @@ def test_clearing_the_url_while_enabled_disables_instead_of_422ing(api_client):
     operator can never actually get rid of a live token through the UI --
     clearing the URL must imply turning the feature off, not fail the
     invariant that a config cannot be enabled with nowhere to send."""
-    res = api_client.put("/notify", json={"url": "https://hook.invalid/t0ken", "enabled": True})
+    res = api_client.put("/api/notify", json={"url": "https://hook.invalid/t0ken", "enabled": True})
     assert res.status_code == 200
 
-    res = api_client.put("/notify", json={"url": ""})
+    res = api_client.put("/api/notify", json={"url": ""})
     assert res.status_code == 200
     body = res.json()
     assert body["url_set"] is False
@@ -611,19 +611,19 @@ def test_clearing_the_url_while_enabled_disables_instead_of_422ing(api_client):
 
 
 def test_put_refuses_a_non_http_url(api_client):
-    res = api_client.put("/notify", json={"url": "file:///etc/passwd"})
+    res = api_client.put("/api/notify", json={"url": "file:///etc/passwd"})
     assert res.status_code == 422
-    assert api_client.get("/notify").json()["url_set"] is False
+    assert api_client.get("/api/notify").json()["url_set"] is False
 
 
 def test_put_refuses_a_non_http_base_url(api_client):
-    res = api_client.put("/notify", json={"base_url": "file:///etc/passwd"})
+    res = api_client.put("/api/notify", json={"base_url": "file:///etc/passwd"})
     assert res.status_code == 422
-    assert api_client.get("/notify").json()["base_url"] is None
+    assert api_client.get("/api/notify").json()["base_url"] is None
 
 
 def test_put_refuses_enabling_without_a_url(api_client):
-    res = api_client.put("/notify", json={"enabled": True})
+    res = api_client.put("/api/notify", json={"enabled": True})
     assert res.status_code == 422
     # The property this test exists to prove: a rejected PUT must not leave a
     # half-applied config on disk -- `enabled` did not get written even though
@@ -635,7 +635,7 @@ def test_put_refuses_enabling_without_a_url(api_client):
 
 
 def test_put_reloads_the_running_notifier(api_client):
-    api_client.put("/notify", json={"enabled": True, "url": "https://hook.invalid/t0ken"})
+    api_client.put("/api/notify", json={"enabled": True, "url": "https://hook.invalid/t0ken"})
     assert api_client.app.state.notifier.config["enabled"] is True
     # Task 2's `config` property carries `url_set`, not `url` — its first real
     # caller is this route, so pin the shape here.
@@ -652,7 +652,7 @@ def test_the_notifier_is_on_the_commit_fan_out(api_client, tmp_path):
     notifier = api_client.app.state.notifier
     assert notifier.cursor == 0
     api_client.post(
-        "/work-items",
+        "/api/work-items",
         json={"title": "x", "repo": str(tmp_path), "autostart": False},
     )
     for _ in range(200):
@@ -703,7 +703,7 @@ def test_get_notify_with_a_malformed_yaml_file_returns_a_clean_422(api_client):
     templates_dir = Path(api_client.app.state.templates_dir)
     (templates_dir / "notify.yaml").write_text('url: "https://hook.invalid/t0ken\n')
 
-    res = api_client.get("/notify")
+    res = api_client.get("/api/notify")
 
     assert res.status_code == 422
     assert "t0ken" not in res.text
@@ -782,7 +782,7 @@ def test_get_notify_with_invalid_utf8_returns_a_clean_422_and_disables(
     with caplog.at_level("WARNING"):
         with TestClient(api.app, client=("127.0.0.1", 54321)) as c:  # must not raise
             assert c.app.state.notifier.config["enabled"] is False
-            res = c.get("/notify")
+            res = c.get("/api/notify")
 
     assert res.status_code == 422
     assert "t0ken" not in res.text
@@ -801,7 +801,7 @@ def test_get_notify_with_a_permission_denied_file_reports_that_not_bad_yaml(api_
     path.write_text("enabled: true\n")
     os.chmod(path, 0o000)
     try:
-        res = api_client.get("/notify")
+        res = api_client.get("/api/notify")
     finally:
         os.chmod(path, 0o600)
 
@@ -818,7 +818,7 @@ def test_put_notify_with_a_malformed_yaml_file_returns_a_clean_422(api_client):
     templates_dir = Path(api_client.app.state.templates_dir)
     (templates_dir / "notify.yaml").write_text('url: "https://hook.invalid/t0ken\n')
 
-    res = api_client.put("/notify", json={"enabled": True})
+    res = api_client.put("/api/notify", json={"enabled": True})
 
     assert res.status_code == 422
     assert "t0ken" not in res.text

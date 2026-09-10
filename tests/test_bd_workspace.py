@@ -135,16 +135,16 @@ def test_a_repo_with_no_beads_workspace_still_files_a_work_item(client, tmp_path
     reach the caller, and the timeline records why there is no bead."""
     repo = make_repo(tmp_path)  # a plain git repo: no .beads
     resp = client.post(
-        "/work-items", json={"title": "no tracker here", "repo": str(repo), "autostart": False}
+        "/api/work-items", json={"title": "no tracker here", "repo": str(repo), "autostart": False}
     )
     assert resp.status_code == 201, resp.text
     body = resp.json()
     assert "no beads database" in body["bead_warning"]
 
-    item = client.get(f"/work-items/{body['id']}").json()
+    item = client.get(f"/api/work-items/{body['id']}").json()
     assert item["bead_id"] is None
 
-    events = client.get(f"/work-items/{body['id']}/events").json()
+    events = client.get(f"/api/work-items/{body['id']}/events").json()
     filed = [e for e in events if e["type"] == "bead_not_filed"]
     assert len(filed) == 1
     assert "no beads database" in filed[0]["payload"]["reason"]
@@ -158,11 +158,11 @@ def test_no_bd_on_path_still_files_a_work_item(client, tmp_path, monkeypatch):
     # After the fixtures, which need the real bd to build their workspaces.
     monkeypatch.setenv("PATH", str(tmp_path / "empty"))
     resp = client.post(
-        "/work-items", json={"title": "no bd at all", "repo": str(repo), "autostart": False}
+        "/api/work-items", json={"title": "no bd at all", "repo": str(repo), "autostart": False}
     )
     assert resp.status_code == 201, resp.text
     assert "not installed" in resp.json()["bead_warning"]
-    assert client.get(f"/work-items/{resp.json()['id']}").json()["bead_id"] is None
+    assert client.get(f"/api/work-items/{resp.json()['id']}").json()["bead_id"] is None
 
 
 def test_a_bead_less_item_completes_without_calling_bd(tmp_path, monkeypatch, caplog):

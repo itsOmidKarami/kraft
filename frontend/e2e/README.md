@@ -58,7 +58,7 @@ Env it sets for the child `python -m kraft`:
 | `KRAFT_FRONTEND_DIST` | `frontend/dist` |
 | `KRAFT_FAKE_CLAUDE` | `fix` |
 
-It polls `http://127.0.0.1:8765/health` until `200`, then prints:
+It polls `http://127.0.0.1:8765/api/health` until `200`, then prints:
 
 ```
   server up on http://127.0.0.1:8765  (temp: /tmp/kraft-e2e-XXXX)

@@ -181,9 +181,9 @@ def test_broadcaster_survives_a_failing_fanout_iteration(tmp_path):
 
 def test_ws_streams_live_events_after_connect(tmp_path, monkeypatch):
     with _api_client(tmp_path, monkeypatch) as client:
-        with client.websocket_connect("/ws/events?after_seq=0") as ws:
+        with client.websocket_connect("/api/ws/events?after_seq=0") as ws:
             r = client.post(
-                "/work-items",
+                "/api/work-items",
                 json={"title": "make the failing test pass", "repo": str(tmp_path)},
             )
             assert r.status_code == 201
@@ -196,22 +196,22 @@ def test_ws_streams_live_events_after_connect(tmp_path, monkeypatch):
 def test_ws_replays_history_then_reconnect_resumes_without_gap(tmp_path, monkeypatch):
     with _api_client(tmp_path, monkeypatch) as client:
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"title": "make the failing test pass", "repo": str(tmp_path)},
         ).json()["id"]
         # let a few events accrue
         _wait_events(client, wid, "chain_loaded")
-        all_ev = client.get(f"/work-items/{wid}/events").json()
+        all_ev = client.get(f"/api/work-items/{wid}/events").json()
         cut = all_ev[len(all_ev) // 2]["seq"]
 
-        with client.websocket_connect(f"/ws/events?after_seq={cut}") as ws:
+        with client.websocket_connect(f"/api/ws/events?after_seq={cut}") as ws:
             first = ws.receive_json()
             assert first["seq"] > cut  # exclusive replay, no gap below
 
         # reconnect from the last seq we saw: no duplicate, no gap
         last_seq = all_ev[-1]["seq"]
-        with client.websocket_connect(f"/ws/events?after_seq={last_seq}") as ws:
-            client.post("/work-items", json={"title": "another one", "repo": str(tmp_path)})
+        with client.websocket_connect(f"/api/ws/events?after_seq={last_seq}") as ws:
+            client.post("/api/work-items", json={"title": "another one", "repo": str(tmp_path)})
             nxt = ws.receive_json()
             assert nxt["seq"] > last_seq
 
@@ -219,7 +219,9 @@ def test_ws_replays_history_then_reconnect_resumes_without_gap(tmp_path, monkeyp
 def test_ws_rejects_cross_site_origin(tmp_path, monkeypatch):
     with _api_client(tmp_path, monkeypatch) as client:
         with pytest.raises(WebSocketDisconnect) as exc:
-            with client.websocket_connect("/ws/events", headers={"origin": "https://evil.example"}):
+            with client.websocket_connect(
+                "/api/ws/events", headers={"origin": "https://evil.example"}
+            ):
                 pass
         assert exc.value.code == 1008
 
@@ -242,7 +244,7 @@ def test_ws_events_refuses_a_client_with_no_credential(tmp_path, monkeypatch):
     with _api_client(tmp_path, monkeypatch) as client:
         _require_auth(client, monkeypatch)
         with pytest.raises(WebSocketDisconnect) as exc:
-            with client.websocket_connect("/ws/events"):
+            with client.websocket_connect("/api/ws/events"):
                 pass
         assert exc.value.code == 1008
 
@@ -259,7 +261,7 @@ def test_ws_events_accepts_the_mcp_bearer_token(tmp_path, monkeypatch):
         token = client.app.state.mcp_token
         assert token, "the server mints an MCP token at startup"
         with client.websocket_connect(
-            "/ws/events", headers={"Authorization": f"Bearer {token}"}
+            "/api/ws/events", headers={"Authorization": f"Bearer {token}"}
         ) as ws:
             assert ws is not None  # the handshake completed; frame delivery is covered above
 
@@ -269,7 +271,7 @@ def test_ws_events_refuses_a_wrong_bearer(tmp_path, monkeypatch):
         _require_auth(client, monkeypatch)
         with pytest.raises(WebSocketDisconnect) as exc:
             with client.websocket_connect(
-                "/ws/events", headers={"Authorization": "Bearer not-the-token"}
+                "/api/ws/events", headers={"Authorization": "Bearer not-the-token"}
             ):
                 pass
         assert exc.value.code == 1008
@@ -281,7 +283,7 @@ def test_ws_no_gap_or_dup_when_events_land_in_register_window(tmp_path, monkeypa
     monkeypatched WebSocket.accept()."""
     with _api_client(tmp_path, monkeypatch) as client:
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"title": "make the failing test pass", "repo": str(tmp_path)},
         ).json()["id"]
         _wait_events(client, wid, "chain_loaded")
@@ -302,7 +304,7 @@ def test_ws_no_gap_or_dup_when_events_land_in_register_window(tmp_path, monkeypa
 
         seen_types: list[str] = []
         seqs: list[int] = []
-        with client.websocket_connect("/ws/events?after_seq=0") as ws:
+        with client.websocket_connect("/api/ws/events?after_seq=0") as ws:
             for _ in range(60):
                 ev = ws.receive_json()
                 seqs.append(ev["seq"])
@@ -321,7 +323,7 @@ def _wait_events(client, wid, want, timeout=30):
 
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        ev = client.get(f"/work-items/{wid}/events").json()
+        ev = client.get(f"/api/work-items/{wid}/events").json()
         if any(e["type"] == want for e in ev):
             return ev
         time.sleep(0.2)
@@ -331,16 +333,16 @@ def _wait_events(client, wid, want, timeout=30):
 @pytest.mark.slow
 def test_ws_events_delivered_under_real_uvicorn(tmp_path):
     """The TestClient does WS in-process; this proves a real uvicorn handshake to
-    /ws/events works (needs the `websockets` protocol lib) and streams frames."""
+    /api/ws/events works (needs the `websockets` protocol lib) and streams frames."""
     from websockets.sync.client import connect
 
     templates = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
     with running_server(run_dir=tmp_path / "run", templates_dir=templates, bd_cwd=tracker) as srv:
-        with connect(f"ws://127.0.0.1:{srv.port}/ws/events?after_seq=0") as ws:
+        with connect(f"ws://127.0.0.1:{srv.port}/api/ws/events?after_seq=0") as ws:
             r = srv.client.post(
-                "/work-items",
+                "/api/work-items",
                 json={"title": "make the failing test pass", "repo": str(repo)},
             )
             assert r.status_code == 201, r.text

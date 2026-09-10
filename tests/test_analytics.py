@@ -183,10 +183,10 @@ def test_endpoint_serves_it_and_rejects_a_bad_range(tmp_path, monkeypatch):
     import kraft.api as api
 
     with TestClient(api.app, client=("127.0.0.1", 54321)) as client:
-        body = client.get("/analytics?range=30d").json()
+        body = client.get("/api/analytics?range=30d").json()
         assert set(body) == {"totals", "weekly_merged", "by_node", "by_repo"}
         assert body["totals"]["work_items"] == 0
-        assert client.get("/analytics?range=nope").status_code == 400
+        assert client.get("/api/analytics?range=nope").status_code == 400
 
 
 def test_an_unpriced_session_makes_the_cost_a_floor_not_a_total(conn):

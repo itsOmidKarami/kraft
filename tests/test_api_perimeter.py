@@ -67,8 +67,8 @@ def test_client_is_local_reads_the_peer_address():
 def test_a_loopback_client_needs_no_password(tmp_path, monkeypatch):
     """The default instance is unchanged: the operator at the keyboard logs into nothing."""
     with _client(tmp_path, monkeypatch) as client:
-        assert client.get("/work-items").status_code == 200
-        assert client.get("/access").json()["auth_required"] is False
+        assert client.get("/api/work-items").status_code == 200
+        assert client.get("/api/access").json()["auth_required"] is False
 
 
 def test_a_non_loopback_client_must_log_in_when_a_password_is_set(tmp_path, monkeypatch):
@@ -80,11 +80,11 @@ def test_a_non_loopback_client_must_log_in_when_a_password_is_set(tmp_path, monk
     with _client(tmp_path, monkeypatch) as client:
         _set_password(client, monkeypatch)
         assert client.app.state.bound_host == "127.0.0.1"
-        assert client.get("/work-items").status_code == 200  # the local operator is unaffected
+        assert client.get("/api/work-items").status_code == 200  # the local operator is unaffected
 
     with _client(tmp_path, monkeypatch, peer=("10.0.0.5", 54321)) as lan:
         _set_password(lan, monkeypatch)
-        r = lan.get("/work-items")
+        r = lan.get("/api/work-items")
         assert r.status_code == 401, r.text
         assert r.json()["detail"] == "authentication required"
 
@@ -94,13 +94,13 @@ def test_a_non_loopback_client_is_refused_when_no_password_is_set(tmp_path, monk
     anyway, so the bind was widened by something that never told the app. With no
     password there is nothing to authenticate against — refuse rather than serve."""
     with _client(tmp_path, monkeypatch, peer=("10.0.0.5", 54321)) as client:
-        r = client.get("/work-items")
+        r = client.get("/api/work-items")
         assert r.status_code == 403, r.text
         assert "loopback bind" in r.json()["detail"]
         assert "10.0.0.5" in r.json()["detail"]
         # the public paths are not an exception: there is nothing here to log into
-        assert client.post("/login", json={"password": "x"}).status_code == 403
-        assert client.get("/health").status_code == 403
+        assert client.post("/api/login", json={"password": "x"}).status_code == 403
+        assert client.get("/api/health").status_code == 403
 
 
 def test_a_cross_site_origin_cannot_pause_a_work_item(tmp_path, monkeypatch):
@@ -110,17 +110,19 @@ def test_a_cross_site_origin_cannot_pause_a_work_item(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"repo": str(repo), "title": "hold still", "autostart": False},
         ).json()["id"]
-        assert client.get(f"/work-items/{wid}").json()["status"] == "paused"
+        assert client.get(f"/api/work-items/{wid}").json()["status"] == "paused"
 
-        r = client.post(f"/work-items/{wid}/pause", headers={"origin": "http://evil.com"})
+        r = client.post(f"/api/work-items/{wid}/pause", headers={"origin": "http://evil.com"})
         assert r.status_code == 403, r.text
-        assert client.get(f"/work-items/{wid}").json()["status"] == "paused"
+        assert client.get(f"/api/work-items/{wid}").json()["status"] == "paused"
 
         # and a GET is not a write: reads are not the thing this rule is about
-        assert client.get("/work-items", headers={"origin": "http://evil.com"}).status_code == 200
+        assert (
+            client.get("/api/work-items", headers={"origin": "http://evil.com"}).status_code == 200
+        )
 
 
 def test_the_dev_server_origin_is_accepted(tmp_path, monkeypatch):
@@ -129,7 +131,7 @@ def test_the_dev_server_origin_is_accepted(tmp_path, monkeypatch):
     hostname is what makes it legal."""
     with _client(tmp_path, monkeypatch) as client:
         r = client.post(
-            "/index/rescan",
+            "/api/index/rescan",
             headers={"origin": "http://localhost:5173", "host": "127.0.0.1:8765"},
         )
         assert r.status_code == 200, r.text
@@ -140,11 +142,11 @@ def test_a_lan_instance_accepts_its_own_origin_and_host(tmp_path, monkeypatch):
     Origin nor the Host is loopback; they match each other, and the bind is not
     loopback, so the rebinding rule has nothing to say about it either."""
     with _client(tmp_path, monkeypatch, host="0.0.0.0") as client:
-        saved = client.put("/access", json={"bind": "0.0.0.0", "password": "hunter2"})
+        saved = client.put("/api/access", json={"bind": "0.0.0.0", "password": "hunter2"})
         assert saved.status_code == 200, saved.text
-        assert client.post("/login", json={"password": "hunter2"}).status_code == 200
+        assert client.post("/api/login", json={"password": "hunter2"}).status_code == 200
         r = client.post(
-            "/index/rescan",
+            "/api/index/rescan",
             headers={
                 "origin": "http://192.168.1.5:8765",
                 "host": "192.168.1.5:8765",
@@ -160,18 +162,30 @@ def test_a_rebound_host_is_refused_for_a_browser_request(tmp_path, monkeypatch):
     route. A server that bound loopback answers to loopback names only."""
     with _client(tmp_path, monkeypatch) as client:
         browser = {"host": "evil.com:8765", "sec-fetch-site": "same-origin"}
-        assert client.get("/work-items", headers=browser).status_code == 403
-        assert client.post("/index/rescan", headers=browser).status_code == 403
+        assert client.get("/api/work-items", headers=browser).status_code == 403
+        assert client.post("/api/index/rescan", headers=browser).status_code == 403
 
         # ...and a non-browser client keeps working. Only a browser can be
         # rebound, so curl, the CLI and MCP need no Host allowlist entry.
-        assert client.get("/work-items", headers={"host": "kraft.internal"}).status_code == 200
+        assert client.get("/api/work-items", headers={"host": "kraft.internal"}).status_code == 200
+
+        # this is also the ordering guarantee for /api/ itself: _perimeter has
+        # to run before _authenticate/_spa_navigation even consider the
+        # request, or a forged nav header on a rebound host could slip past it
+        # the way test_the_perimeter_runs_before_the_spa_shell_middleware
+        # checks for a client-side route.
+        nav = {**browser, "sec-fetch-dest": "document"}
+        assert client.get("/api/work-items", headers=nav).status_code == 403
 
 
 def test_the_perimeter_runs_before_the_spa_shell_middleware(tmp_path, monkeypatch):
     """Starlette enters the last-added middleware first, so `_perimeter` has to be
     declared *below* `_authenticate` and `_spa_navigation`. Declared above, this
-    rebound navigation gets the SPA shell instead of a 403."""
+    rebound navigation gets the SPA shell instead of a 403.
+
+    A client-side route, not an /api/ one: that prefix is excluded from the
+    shell-diversion branches entirely now, so it would pass even with the
+    middleware in the wrong order and prove nothing about ordering."""
     dist = tmp_path / "dist"
     dist.mkdir()
     (dist / "index.html").write_text("<!doctype html>")
@@ -194,12 +208,12 @@ def test_the_websocket_perimeter_stands_on_its_own(tmp_path, monkeypatch):
     the live event stream is the one route the middleware did not close."""
     with _client(tmp_path, monkeypatch) as client:
         with pytest.raises(WebSocketDisconnect) as exc:
-            with client.websocket_connect("/ws/events", headers={"origin": "http://evil.com"}):
+            with client.websocket_connect("/api/ws/events", headers={"origin": "http://evil.com"}):
                 pass
         assert exc.value.code == 1008
 
     with _client(tmp_path, monkeypatch, peer=("10.0.0.5", 54321)) as lan:
         with pytest.raises(WebSocketDisconnect) as exc:
-            with lan.websocket_connect("/ws/events"):
+            with lan.websocket_connect("/api/ws/events"):
                 pass
         assert exc.value.code == 1008

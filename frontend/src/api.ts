@@ -27,10 +27,15 @@ import type {
   WorkerSession,
 } from "./types";
 
+/** Every JSON route lives under /api/ (Kraft-psuq). `req()` below is where
+ *  most callers end up, but `logStreamUrl`/`getLogText` build a request
+ *  outside it (EventSource, a plain-text fetch) and need the same prefix. */
+const apiUrl = (path: string) => `/api${path}`;
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(path, {
+    res = await fetch(apiUrl(path), {
       ...init,
       headers: { accept: "application/json", ...init?.headers },
     });
@@ -151,12 +156,13 @@ export const getLogLines = (sessionId: string) =>
   );
 
 /** SSE tail; the server closes the stream when the session stops running. */
-export const logStreamUrl = (sessionId: string) => `${logUrl(sessionId)}?format=jsonl&follow=1`;
+export const logStreamUrl = (sessionId: string) =>
+  `${apiUrl(logUrl(sessionId))}?format=jsonl&follow=1`;
 
 /** The log as plain text, whole -- `getLogLines` truncates each line for
  *  rendering, and a copied log has to be the file. */
 export const getLogText = async (sessionId: string): Promise<string> => {
-  const res = await fetch(logUrl(sessionId), { headers: { accept: "text/plain" } });
+  const res = await fetch(apiUrl(logUrl(sessionId)), { headers: { accept: "text/plain" } });
   if (!res.ok) throw new Error(`could not read the log (${res.status})`);
   return res.text();
 };

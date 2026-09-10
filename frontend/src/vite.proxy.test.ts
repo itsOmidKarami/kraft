@@ -5,24 +5,23 @@ import { describe, expect, it } from "vitest";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-/** Every `/first-segment` a string literal in `api.ts` starts with. Both plain
- *  strings ("/health") and template literals (`/work-items/${id}/diff`) begin
- *  with a quote character immediately followed by the path, so one regex finds
- *  both, and the segment stops before the first `/` or `?` that follows. */
-const prefixes = (source: string) =>
-  new Set([...source.matchAll(/["'`](\/[a-zA-Z0-9_-]+)/g)].map((m) => m[1]));
-
-// The dev proxy list has drifted at least twice: a prefix missing from
-// vite.config.ts is not a 404 under `just dev`, it is vite's SPA fallback
-// answering 200 with index.html, so `api.req()` dies inside `res.json()` with a
+// A request that misses /api/ is not a 404 under `just dev`, it is vite's SPA
+// fallback answering 200 with index.html, so `res.json()` dies with a
 // SyntaxError about `<` and the screen looks broken for an unrelated reason.
-// A subset assertion is cheaper than a route registry and fails on the next
-// route added without a proxy entry.
+// Every backend route lives under /api/ (server side: src/kraft/api.py's
+// api_router). `req()` is where most calls end up, but `logStreamUrl` and
+// `getLogText` build a request outside it (EventSource, a plain-text fetch)
+// and are the ones most likely to drift back to a bare path — this checks
+// all three, plus the one call site in ws.ts, still go through /api.
 describe("the dev vite proxy", () => {
-  it("forwards every route prefix api.ts requests", () => {
-    const requested = prefixes(readFileSync(join(here, "api.ts"), "utf-8"));
-    const proxied = prefixes(readFileSync(join(here, "..", "vite.config.ts"), "utf-8"));
+  it("every fetch/WebSocket call site in api.ts and ws.ts uses /api", () => {
+    const apiTs = readFileSync(join(here, "api.ts"), "utf-8");
+    const wsTs = readFileSync(join(here, "ws.ts"), "utf-8");
+    const viteConfig = readFileSync(join(here, "..", "vite.config.ts"), "utf-8");
 
-    expect([...requested].filter((p) => !proxied.has(p))).toEqual([]);
+    expect(apiTs).toMatch(/fetch\(apiUrl\(path\)/); // req()
+    expect([...apiTs.matchAll(/apiUrl\(logUrl\(sessionId\)\)/g)]).toHaveLength(2); // logStreamUrl, getLogText
+    expect(wsTs).toMatch(/\/api\/ws\/events/);
+    expect(viteConfig).toMatch(/["']\/api["']/);
   });
 });
