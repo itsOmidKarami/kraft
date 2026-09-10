@@ -40,6 +40,10 @@ class ScannedDoc:
     source_created_at: str | None
     source_updated_at: str | None
     source_kind: str = "artifact"
+    # 'git_scan' (the default: a `scan_repo` result) or 'event_ingest' (a
+    # session summary or gate artifact, written once by the executor/API and
+    # never reconciled against git -- see db.py's `origin` column doc).
+    origin: str = "git_scan"
     links: tuple[LinkRow, ...] = ()
 
 
@@ -253,8 +257,8 @@ async def upsert_document(conn, repo: str, doc: ScannedDoc, now: str, embedder=N
         doc_id = uuid.uuid4().hex
         conn.execute(
             "INSERT INTO documents (id, repo, source_kind, kind, title, path, content, "
-            "content_hash, metadata_json, source_created_at, source_updated_at, indexed_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "content_hash, metadata_json, source_created_at, source_updated_at, indexed_at, "
+            "origin) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 doc_id,
                 repo,
@@ -268,13 +272,15 @@ async def upsert_document(conn, repo: str, doc: ScannedDoc, now: str, embedder=N
                 doc.source_created_at,
                 doc.source_updated_at,
                 now,
+                doc.origin,
             ),
         )
     else:
         doc_id = row["id"]
         conn.execute(
             "UPDATE documents SET source_kind=?, kind=?, title=?, content=?, content_hash=?, "
-            "metadata_json=?, source_created_at=?, source_updated_at=?, indexed_at=? WHERE id=?",
+            "metadata_json=?, source_created_at=?, source_updated_at=?, indexed_at=?, origin=? "
+            "WHERE id=?",
             (
                 doc.source_kind,
                 doc.kind,
@@ -285,6 +291,7 @@ async def upsert_document(conn, repo: str, doc: ScannedDoc, now: str, embedder=N
                 doc.source_created_at,
                 doc.source_updated_at,
                 now,
+                doc.origin,
                 doc_id,
             ),
         )
@@ -293,6 +300,30 @@ async def upsert_document(conn, repo: str, doc: ScannedDoc, now: str, embedder=N
     if content_changed:
         await replace_chunks(conn, doc_id, doc.content, embedder)
     return doc_id
+
+
+async def purge_all(conn, repo: str) -> ReconcileStats:
+    """Delete every indexed document for `repo`, `origin` included.
+
+    `reconcile` against an empty scan is *not* this: it only ever deletes
+    `origin='git_scan'` rows (that scoping is the fix for the bug where a
+    scan that cannot reproduce an event-ingested row -- a session summary,
+    now a gate artifact too -- would otherwise treat it as gone and delete
+    it). A disconnected repo needs the opposite of that protection: nothing
+    should still answer a search once the repo is gone, event-ingested rows
+    included.
+    """
+    rows = conn.execute("SELECT id FROM documents WHERE repo=?", (repo,)).fetchall()
+    conn.execute("BEGIN")
+    try:
+        for r in rows:
+            _drop_chunks(conn, r["id"])
+        conn.execute("DELETE FROM documents WHERE repo=?", (repo,))
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+    return ReconcileStats(deleted=len(rows))
 
 
 async def reconcile(
@@ -307,10 +338,15 @@ async def reconcile(
     summaries = [d for d in scanned if d.source_kind == "session_summary"]
     scanned = [d for d in scanned if d.source_kind == "artifact"]
     source_kind = "artifact"
+    # origin='git_scan' only: a gate artifact ingested at approval time is
+    # also source_kind='artifact' (that's the user-facing category it belongs
+    # to), but it was never committed and this scan will never reproduce it --
+    # deleting it here would be exactly the Kraft-z8gj bug one origin over.
     existing = {
         r["path"]: (r["id"], r["content_hash"])
         for r in conn.execute(
-            "SELECT id, path, content_hash FROM documents WHERE repo=? AND source_kind=?",
+            "SELECT id, path, content_hash FROM documents "
+            "WHERE repo=? AND source_kind=? AND origin='git_scan'",
             (repo, source_kind),
         ).fetchall()
     }

@@ -8,7 +8,7 @@ import sqlite_vec
 
 logger = logging.getLogger(__name__)
 
-INDEX_SCHEMA_VERSION = 2
+INDEX_SCHEMA_VERSION = 3
 
 INDEX_SCHEMA_SQL = """
 CREATE TABLE documents (
@@ -24,6 +24,13 @@ CREATE TABLE documents (
   source_created_at TEXT,
   source_updated_at TEXT,
   indexed_at        TEXT NOT NULL,
+  -- Reconcile's provenance, not the user-facing category (that's
+  -- source_kind): 'git_scan' rows are git-truth and get deleted the moment a
+  -- rescan no longer finds them, while 'event_ingest' rows (session
+  -- summaries, and now gate artifacts -- .engineering/ stays out of git) are
+  -- written once by the executor/API and must never be treated as stale just
+  -- because a git scan doesn't reproduce them.
+  origin            TEXT NOT NULL DEFAULT 'git_scan' CHECK (origin IN ('git_scan', 'event_ingest')),
   UNIQUE (repo, path)
 );
 
@@ -95,6 +102,10 @@ _MIGRATIONS: dict[int, list[str]] = {
   chunk_id TEXT PRIMARY KEY,
   embedding float[384]
 )""",
+    ],
+    2: [
+        "ALTER TABLE documents ADD COLUMN origin TEXT NOT NULL DEFAULT 'git_scan' "
+        "CHECK (origin IN ('git_scan', 'event_ingest'))",
     ],
 }
 

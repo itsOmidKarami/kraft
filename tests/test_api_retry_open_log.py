@@ -52,6 +52,31 @@ def _spy_on_launches(monkeypatch):
     return launched
 
 
+def _as_git_scan_doc(client, monkeypatch, doc_id):
+    """Force `origin='git_scan'` on an indexed document for a test that is
+    about editor-launch mechanics, not about the index architecture.
+
+    Every document `_completed_item` produces is a session summary --
+    `origin='event_ingest'`, same as every gate artifact now
+    (`forge._work_product_pathspec` keeps `.engineering/` out of git
+    entirely) -- so `open_document` refuses it before ever reaching the
+    launch code these tests exist to cover. Reusing the escape-guard test's
+    own technique: monkeypatch `get_document` to hand back the real row with
+    just `origin` overridden, the same as forcing any other row shape a live
+    scan could produce.
+    """
+    indexer = client.app.state.indexer
+    original = indexer.get_document
+    doc = client.get(f"/api/documents/{doc_id}").json()
+    forced = {**doc, "origin": "git_scan"}
+    # Only this one id is forced -- an unrelated lookup (a 404 case, say) must
+    # still reach the real indexer instead of getting this document back too.
+    monkeypatch.setattr(
+        indexer, "get_document", lambda _id: forced if _id == doc_id else original(_id)
+    )
+    return forced
+
+
 # ── log classification ───────────────────────────────────────────────────────
 
 
@@ -306,6 +331,7 @@ def test_open_document_reports_501_when_no_editor_is_installed(tmp_path, monkeyp
         docs = client.get(f"/api/work-items/{wid}/documents").json()["documents"]
         assert docs, "the fake agent writes a session summary"
         doc_id = docs[0]["document_id"]
+        _as_git_scan_doc(client, monkeypatch, doc_id)
 
         monkeypatch.setattr("kraft.api.shutil.which", lambda _: None)
         r = client.post(f"/api/documents/{doc_id}/open", json={"editor": "zed"})
@@ -321,13 +347,37 @@ def test_open_document_launches_the_named_editor(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = _completed_item(client, repo)
-        doc = client.get(f"/api/work-items/{wid}/documents").json()["documents"][0]
+        doc_id = client.get(f"/api/work-items/{wid}/documents").json()["documents"][0][
+            "document_id"
+        ]
+        doc = _as_git_scan_doc(client, monkeypatch, doc_id)
 
         launched = _spy_on_launches(monkeypatch)
-        r = client.post(f"/api/documents/{doc['document_id']}/open", json={"editor": "code"})
+        r = client.post(f"/api/documents/{doc_id}/open", json={"editor": "code"})
         assert r.status_code == 200
         assert r.json()["editor"] == "code"
         assert launched == [["/usr/bin/code", str(Path(doc["repo"]) / doc["path"])]]
+
+
+def test_open_document_refuses_a_document_with_no_file_in_the_repo(tmp_path, monkeypatch):
+    """A session summary or gate artifact never lands in the connected repo's
+    checkout (`forge._work_product_pathspec` keeps `.engineering/` out of git
+    entirely) -- `origin='event_ingest'` says so, and this must be a 409 that
+    tells the SPA not to bother falling back to a `vscode://` URL either,
+    rather than launching an editor (or handing the SPA a path) that points
+    at a file which was never written."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _completed_item(client, repo)
+        doc = client.get(f"/api/work-items/{wid}/documents").json()["documents"][0]
+        assert client.get(f"/api/documents/{doc['document_id']}").json()["origin"] == (
+            "event_ingest"
+        )
+
+        launched = _spy_on_launches(monkeypatch)
+        r = client.post(f"/api/documents/{doc['document_id']}/open", json={"editor": "code"})
+        assert r.status_code == 409
+        assert launched == []
 
 
 def test_retry_is_refused_on_an_item_that_is_not_stopped(tmp_path, monkeypatch):
@@ -464,7 +514,14 @@ def test_open_document_refuses_a_document_path_outside_its_repo(tmp_path, monkey
         doc_id = client.get(f"/api/work-items/{wid}/documents").json()["documents"][0][
             "document_id"
         ]
-        escaped = {**client.get(f"/api/documents/{doc_id}").json(), "path": "../../../etc/passwd"}
+        escaped = {
+            **client.get(f"/api/documents/{doc_id}").json(),
+            "path": "../../../etc/passwd",
+            # This guard is unrelated to `origin`; pin it to 'git_scan' so a
+            # real row's actual 'event_ingest' doesn't trip the *other* guard
+            # first and mask what this test is checking.
+            "origin": "git_scan",
+        }
         monkeypatch.setattr(client.app.state.indexer, "get_document", lambda _id: escaped)
 
         launched = _spy_on_launches(monkeypatch)

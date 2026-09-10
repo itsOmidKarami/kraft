@@ -176,12 +176,15 @@ def test_commit_stragglers_leaves_a_clean_worktree_alone(tmp_path):
 
 
 def test_kraft_session_notes_are_not_the_agents_work_product(tmp_path):
-    """Kraft-z8gj. The agent is told to write its summary to
-    `.engineering/sessions/`, and Kraft's own repo gitignores that — a repo
-    Kraft was pointed at five minutes ago does not. Sweeping it up puts Kraft's
-    logs in that repo's first merge request; refusing to open one over it is the
-    same bug wearing the other hat. Work product under `.engineering/` still
-    goes in."""
+    """Kraft-z8gj, widened. The agent is told to write its summary to
+    `.engineering/sessions/`, and spec/plan/chain_review/review_brief to their
+    own `.engineering/` subdirectories — and Kraft's own repo gitignores the
+    whole tree (a repo Kraft was pointed at five minutes ago does not).
+    Sweeping any of it up puts Kraft's bookkeeping in that repo's first merge
+    request; refusing to open one over it is the same bug wearing the other
+    hat. None of `.engineering/` is work product anymore: it is ingested into
+    the index at gate approval (`Indexer.ingest_gate_artifact`) instead of
+    being committed."""
     repo = _repo_with_origin(tmp_path)
     before = _git(repo, "rev-parse", "HEAD")
     (repo / ".engineering" / "sessions").mkdir(parents=True)
@@ -195,9 +198,39 @@ def test_kraft_session_notes_are_not_the_agents_work_product(tmp_path):
     (repo / ".engineering" / "specs").mkdir()
     (repo / ".engineering" / "specs" / "abc.md").write_text("the design\n")
 
+    assert asyncio.run(forge.commit_stragglers(repo, message="wip: implementation")) is False
+    assert _git(repo, "rev-parse", "HEAD") == before
+    asyncio.run(forge._assert_clean(repo))
+    assert _git(repo, "ls-files", ".engineering").split() == []
+
+
+def test_a_repos_own_preexisting_engineering_doc_still_commits(tmp_path):
+    """The exclusion is per path, not per directory. A repo that already
+    tracked something under `.engineering/` before Kraft ever touched this
+    worktree -- unrelated to Kraft, possibly even colliding with one of
+    Kraft's own artifact subdirectories, like `.engineering/specs/` -- is that
+    repo's own content. An edit to it is real work product and must reach the
+    merge request like any other tracked file, not vanish because it happens
+    to share a path prefix with Kraft's bookkeeping."""
+    repo = _repo_with_origin(tmp_path)
+    doc = repo / ".engineering" / "specs" / "preexisting.md"
+    doc.parent.mkdir(parents=True)
+    doc.write_text("not Kraft's, already tracked\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "repo's own doc")
+    _git(repo, "push", "-q", "origin", BRANCH)
+
+    doc.write_text("the agent's edit to it\n")
+    (repo / ".engineering" / "sessions").mkdir(parents=True)
+    (repo / ".engineering" / "sessions" / "abc.md").write_text("what I did today\n")
+
     assert asyncio.run(forge.commit_stragglers(repo, message="wip: implementation")) is True
-    tracked = _git(repo, "ls-files", ".engineering").split()
-    assert tracked == [".engineering/specs/abc.md"]
+    assert "preexisting.md" in _git(repo, "show", "--name-only", "--format=", "HEAD")
+    # Kraft's own session note still stays out. A brand-new directory
+    # collapses to one line in `git status --porcelain` rather than one line
+    # per file inside it -- still the correct exclusion, just not per-path.
+    assert "sessions/abc.md" not in _git(repo, "show", "--name-only", "--format=", "HEAD")
+    assert _git(repo, "status", "--porcelain").strip() == "?? .engineering/sessions/"
 
 
 def test_commit_stragglers_ignores_gitignored_paths(tmp_path):
