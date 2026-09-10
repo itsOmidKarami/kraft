@@ -3,6 +3,7 @@ it is just the server the rest of the suite already covers."""
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -164,6 +165,77 @@ def test_bare_kraft_and_kraft_serve_are_the_same_path(monkeypatch, tmp_path):
     cli.main([])
     cli.main(["admin", "start"])
     assert calls[0] == calls[1]
+
+
+class _FakePopen:
+    """Stands in for `subprocess.Popen`: `on_start` runs synchronously where
+    the real child would eventually bind and write the pidfile on its own."""
+
+    def __init__(self, *args, on_start=None, exit_code=None, **kwargs):
+        self._exit_code = exit_code
+        if on_start is not None:
+            on_start()
+
+    def poll(self):
+        return self._exit_code
+
+
+def test_detach_returns_once_the_child_writes_the_pidfile(monkeypatch, tmp_path, capsys):
+    _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
+    run_dir = tmp_path / "run"
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
+    # `_read_pid` clears a pidfile naming a dead pid, so the "child" has to
+    # write one that is actually alive — this test process's own.
+    fake_child_pid = str(os.getpid())
+
+    def fake_popen(*args, **kwargs):
+        return _FakePopen(
+            on_start=lambda: paths.RunDirs(run_dir).ensure().pid.write_text(fake_child_pid)
+        )
+
+    monkeypatch.setattr(cli.subprocess, "Popen", fake_popen)
+    cli.main(["admin", "start", "--detach"])
+    out = capsys.readouterr().out
+    assert "127.0.0.1:8765" in out
+    assert fake_child_pid in out
+    assert "detached" in out
+
+
+def test_detach_refuses_while_one_is_already_running(monkeypatch, tmp_path, capsys):
+    _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
+    run_dir = tmp_path / "run"
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
+    pid_path = paths.RunDirs(run_dir).pid
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    pid_path.write_text(str(os.getpid()))
+    monkeypatch.setattr(
+        cli.subprocess, "Popen", lambda *a, **k: pytest.fail("spawned a second server")
+    )
+    with pytest.raises(SystemExit):
+        cli.main(["admin", "start", "--detach"])
+    assert "already running" in capsys.readouterr().err
+
+
+def test_detach_reports_a_child_that_exits_before_binding(monkeypatch, tmp_path, capsys):
+    _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
+    run_dir = tmp_path / "run"
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
+    monkeypatch.setattr(cli.subprocess, "Popen", lambda *a, **k: _FakePopen(exit_code=1))
+    with pytest.raises(SystemExit):
+        cli.main(["admin", "start", "--detach"])
+    assert "detached start failed" in capsys.readouterr().err
+
+
+def test_detach_host_flag_cannot_bypass_the_password_check(monkeypatch, tmp_path, capsys):
+    """Same regression as the foreground path: a flag must not be a way around
+    a check an env var respects, detached or not."""
+    _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setattr(
+        cli.subprocess, "Popen", lambda *a, **k: pytest.fail("must not spawn a child")
+    )
+    with pytest.raises(SystemExit, match="refusing to bind 0.0.0.0"):
+        cli.main(["admin", "start", "--detach", "--host", "0.0.0.0"])
 
 
 def test_version_flag_prints_a_version(capsys):

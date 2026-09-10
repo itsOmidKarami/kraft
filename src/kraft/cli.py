@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import signal
+import subprocess
 import sys
 import time
 from importlib.metadata import PackageNotFoundError
@@ -174,19 +175,75 @@ def _json_flag() -> argparse.ArgumentParser:
 
 
 def _cmd_start(ns: argparse.Namespace) -> None:
-    """The same path as bare `kraft`, with two flags on top.
+    """The same path as bare `kraft`, with three flags on top.
 
-    The flags become the env vars `_bind()` already reads, so there is one
-    precedence chain (flag > env > access.yaml) and one place that refuses a
-    LAN bind without a password. Setting the env rather than passing arguments
-    through is deliberate: a second signature would be a second place for that
-    check to be forgotten.
+    The host/port flags become the env vars `_bind()` already reads, so there
+    is one precedence chain (flag > env > access.yaml) and one place that
+    refuses a LAN bind without a password. Setting the env rather than passing
+    arguments through is deliberate: a second signature would be a second
+    place for that check to be forgotten.
     """
     if ns.host:
         os.environ["KRAFT_HOST"] = ns.host
     if ns.port:
         os.environ["KRAFT_PORT"] = str(ns.port)
+    if ns.detach:
+        _start_detached()
+        return
     _serve()
+
+
+def _start_detached() -> None:
+    """Launch `admin start` in its own session and return once it is up.
+
+    Not this process backgrounding itself: once `_serve()` calls into uvicorn
+    it owns signal handling and stdio for good, so there is no point after
+    that where control could still return to a caller. A real child, in its
+    own session (`start_new_session`) so it outlives the shell that launched
+    it, with stdio redirected to the same place worker logs go. It writes the
+    same pidfile `_serve` always has, so `admin stop`/`health`/`doctor` never
+    need to know a server was started this way.
+    """
+    templates_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    if seed_home(templates_dir):
+        print(f"kraft: seeded default config in {templates_dir}")
+    run_dirs = RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())).ensure()
+    pid_path = run_dirs.pid
+    running = _read_pid(pid_path)
+    if running is not None:
+        print(f"kraft: already running (pid {running}) - kraft admin stop", file=sys.stderr)
+        raise SystemExit(1)
+    # Resolved (and validated — refuses a password-less LAN bind) here too, so
+    # a bad access.yaml fails this shell instead of showing up only as a child
+    # that exited before ever writing a pidfile.
+    host, port = _bind(templates_dir)
+
+    log_path = run_dirs.logs / "server.log"
+    with open(log_path, "ab") as log_file:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "kraft", "admin", "start"],
+            stdin=subprocess.DEVNULL,
+            stdout=log_file,
+            stderr=log_file,
+            start_new_session=True,
+        )
+
+    # Wait for the child to actually bind, not just fork: a bad config or a
+    # port already in use both exit within the first second, and returning
+    # before that would report success for a server that's already dead.
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        pid = _read_pid(pid_path)
+        if pid is not None:
+            print(f"kraft: http://{host}:{port} (pid {pid}, detached - kraft admin stop)")
+            return
+        if proc.poll() is not None:
+            tail = log_path.read_text()[-2000:]
+            print(f"kraft: detached start failed:\n{tail}", file=sys.stderr)
+            raise SystemExit(1)
+        time.sleep(0.1)
+    print(f"kraft: detached start did not come up within 10s - check {log_path}", file=sys.stderr)
+    raise SystemExit(1)
 
 
 def _cmd_stop(ns: argparse.Namespace) -> None:
@@ -846,6 +903,12 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
     start = subs.add_parser("start", help="run the server (the same as bare `kraft`)")
     start.add_argument("--host", help="bind address (default: access.yaml, or KRAFT_HOST)")
     start.add_argument("--port", type=int, help="port (default: access.yaml, or KRAFT_PORT)")
+    start.add_argument(
+        "--detach",
+        "-d",
+        action="store_true",
+        help="fork into its own session and return once it's up, instead of blocking this shell",
+    )
     start.set_defaults(func=_cmd_start)
 
     stop = subs.add_parser("stop", help="stop the running server")

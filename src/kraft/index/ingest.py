@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
@@ -199,13 +200,19 @@ def _serialize(vector) -> bytes:
     return struct.pack(f"<{len(vector)}f", *vector)
 
 
-def replace_chunks(conn, document_id: str, text: str, embedder=None) -> int:
+async def replace_chunks(conn, document_id: str, text: str, embedder=None) -> int:
     """Rewrite a document's chunks (and their vectors) whole. Returns the count.
 
     vec0 has no foreign keys, so its rows are deleted explicitly here rather
     than by cascade. An embedder that returns None (model missing or broken)
     leaves the chunks in place without vectors — losing text search because a
     model would not load is never the right trade (4C design §5).
+
+    Async only for the encode step: `embedder.try_encode` is CPU-bound (model
+    load + inference) and is run in a thread so a big scan's embedding pass
+    doesn't starve the event loop the rest of the server answers requests on.
+    `to_thread` on the plain method, not a dedicated async method on Embedder,
+    so any duck-typed embedder (tests included) works without adding one.
     """
     old = [
         r["id"]
@@ -226,7 +233,7 @@ def replace_chunks(conn, document_id: str, text: str, embedder=None) -> int:
         [(cid, document_id, i, c) for i, (cid, c) in enumerate(zip(ids, chunks, strict=True))],
     )
     if embedder is not None:
-        vectors = embedder.try_encode(chunks)
+        vectors = await asyncio.to_thread(embedder.try_encode, chunks)
         if vectors:
             conn.executemany(
                 "INSERT INTO document_vectors (chunk_id, embedding) VALUES (?,?)",
@@ -235,7 +242,7 @@ def replace_chunks(conn, document_id: str, text: str, embedder=None) -> int:
     return len(chunks)
 
 
-def upsert_document(conn, repo: str, doc: ScannedDoc, now: str, embedder=None) -> str:
+async def upsert_document(conn, repo: str, doc: ScannedDoc, now: str, embedder=None) -> str:
     """Insert or update one document keyed on (repo, path), replacing its links.
     Shared by the git scan and the event-driven summary path."""
     row = conn.execute(
@@ -284,11 +291,11 @@ def upsert_document(conn, repo: str, doc: ScannedDoc, now: str, embedder=None) -
     replace_links(conn, doc_id, doc.links)
     # Re-embedding unchanged text is the main avoidable cost in ingestion.
     if content_changed:
-        replace_chunks(conn, doc_id, doc.content, embedder)
+        await replace_chunks(conn, doc_id, doc.content, embedder)
     return doc_id
 
 
-def reconcile(
+async def reconcile(
     conn,
     repo: str,
     scanned: list[ScannedDoc],
@@ -344,7 +351,7 @@ def reconcile(
             ren += 1
 
         for p in new_paths:
-            upsert_document(conn, repo, by_path[p], now, embedder)
+            await upsert_document(conn, repo, by_path[p], now, embedder)
             ins += 1
 
         for src in gone_paths:
@@ -373,7 +380,7 @@ def reconcile(
                     ),
                 )
                 replace_links(conn, existing[p][0], d.links)
-                replace_chunks(conn, existing[p][0], d.content, embedder)
+                await replace_chunks(conn, existing[p][0], d.content, embedder)
                 upd += 1
 
         # 04 §5 as amended by the 4B design: the summary bucket is upsert-only.
@@ -383,7 +390,7 @@ def reconcile(
             existed = conn.execute(
                 "SELECT 1 FROM documents WHERE repo=? AND path=?", (repo, d.path)
             ).fetchone()
-            upsert_document(conn, repo, d, now, embedder)
+            await upsert_document(conn, repo, d, now, embedder)
             if existed is None:
                 ins += 1
             else:
