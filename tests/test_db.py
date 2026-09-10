@@ -815,6 +815,7 @@ def test_migration_19_adds_escalation_session_id_column(tmp_path):
     # migrations from a v19 snapshot doesn't collide with a fresh schema's
     # CREATE TABLE (which already carries every column current code knows).
     conn.execute("ALTER TABLE work_items DROP COLUMN auto_gate")
+    conn.execute("ALTER TABLE work_items DROP COLUMN agent_overrides")
     db.migrate(conn)
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(work_items)")}
     assert "escalation_session_id" in cols
@@ -826,11 +827,24 @@ def test_migration_20_adds_auto_gate_column(tmp_path):
     db.migrate(conn)
     conn.execute("PRAGMA user_version = 20")
     conn.execute("ALTER TABLE work_items DROP COLUMN auto_gate")
+    # v20 replays v21 too, so its column has to come off the fresh schema as well.
+    conn.execute("ALTER TABLE work_items DROP COLUMN agent_overrides")
     db.migrate(conn)
     row = conn.execute("SELECT auto_gate FROM work_items LIMIT 0").fetchone()
     assert row is None  # empty table; the column existing is what matters
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(work_items)")}
     assert "auto_gate" in cols
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+
+
+def test_migration_21_adds_agent_overrides_column(tmp_path):
+    conn = db._connect(tmp_path / "s.db")
+    db.migrate(conn)
+    conn.execute("PRAGMA user_version = 21")
+    conn.execute("ALTER TABLE work_items DROP COLUMN agent_overrides")
+    db.migrate(conn)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(work_items)")}
+    assert "agent_overrides" in cols
     assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
 
 

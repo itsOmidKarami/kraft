@@ -456,6 +456,31 @@ def splice_chain(conn: sqlite3.Connection, work_item_id, chain_definition: str) 
     events.append(conn, work_item_id, "chain_spliced", {})
 
 
+def set_chain_template(
+    conn: sqlite3.Connection, work_item_id, template_id: str, chain_definition: str
+) -> None:
+    """Switch a not-yet-started item onto a different chain template
+    (Kraft-gwn6): the caller has already 404'd an unknown template and 409'd a
+    started item, and already recomputed `chain_definition` by calling
+    `templates.materialize` the same way `executor.intake` would have, so this
+    is just the write. Its own event type, not folded into `chain_spliced`:
+    that event means the chain-review splice path touched the row; this means
+    intake's own materialization ran again against a different template,
+    which is a different question to answer from the timeline.
+    """
+    old_template_id = conn.execute(
+        "SELECT chain_template FROM work_items WHERE id = ?", (work_item_id,)
+    ).fetchone()[0]
+    conn.execute(
+        "UPDATE work_items SET chain_template = ?, chain_definition = ?, updated_at = ? "
+        "WHERE id = ?",
+        (template_id, chain_definition, _now(), work_item_id),
+    )
+    events.append(
+        conn, work_item_id, "chain_template_changed", {"from": old_template_id, "to": template_id}
+    )
+
+
 def approve_gate(conn: sqlite3.Connection, work_item_id, gate, *, by: str = "human") -> None:
     conn.execute(
         "UPDATE work_items SET status = 'active', updated_at = ? WHERE id = ?",
@@ -878,6 +903,27 @@ def set_title(conn: sqlite3.Connection, work_item_id: str, title: str) -> None:
         (title, _now(), work_item_id),
     )
     events.append(conn, work_item_id, "work_item_title_edited", {"title": title})
+
+
+def set_agent_overrides(
+    conn: sqlite3.Connection, work_item_id: str, agent_overrides: str | None
+) -> None:
+    """Replace a work item's own model/effort override (Kraft-4k6l).
+    `agent_overrides` is already-serialized JSON text; `None` clears it back
+    to the template's own binding -- the same nullable-column convention
+    `set_description` uses. Replaces the whole stored object; there is no
+    field-level merge with what was there.
+    """
+    conn.execute(
+        "UPDATE work_items SET agent_overrides = ?, updated_at = ? WHERE id = ?",
+        (agent_overrides, _now(), work_item_id),
+    )
+    events.append(
+        conn,
+        work_item_id,
+        "agent_overrides_changed",
+        {"overrides": json.loads(agent_overrides) if agent_overrides else {}},
+    )
 
 
 def set_base_ref(conn: sqlite3.Connection, work_item_id: str, sha: str) -> None:

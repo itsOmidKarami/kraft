@@ -142,6 +142,31 @@ def build() -> MCPServer:
         return await client.mr_labels(labels, work_item_id)
 
     @server.tool()
+    async def set_chain_template(template: str, work_item_id: str | None = None) -> dict:
+        """Switch a not-yet-started Kraft work item onto a different chain
+        template. Only works before the chain has started (no current node
+        set yet) -- 404s on an unknown template name, 409s once the item is
+        running."""
+        return await client.set_chain_template(template, work_item_id)
+
+    @server.tool()
+    async def set_agent_overrides(
+        model: str | None = None,
+        escalate_model: str | None = None,
+        effort: str | None = None,
+        clear: bool = False,
+        work_item_id: str | None = None,
+    ) -> dict:
+        """Set or clear a Kraft work item's own model/effort override, applied
+        to every agent node in its chain without changing the chain itself.
+        `clear` resets every field back to the template's own binding; naming
+        a field replaces the whole stored override rather than merging with
+        it."""
+        return await client.set_agent_overrides(
+            model, escalate_model, effort, clear=clear, work_item_id=work_item_id
+        )
+
+    @server.tool()
     async def permission_request(
         tool_name: str, input: dict, tool_use_id: str | None = None
     ) -> dict:

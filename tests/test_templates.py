@@ -204,6 +204,20 @@ def test_validate_nodes_is_what_load_templates_calls_for_its_own_nodes(tmp_path)
     assert direct[0] in ts.invalid["weirdgate"]
 
 
+def test_validate_agent_overrides_rejects_unknown_effort():
+    errs = templates.validate_agent_overrides({"effort": "turbo"})
+    assert errs and "effort" in errs[0]
+
+
+def test_validate_agent_overrides_rejects_non_string_model():
+    errs = templates.validate_agent_overrides({"model": 5})
+    assert errs and "model" in errs[0]
+
+
+def test_validate_agent_overrides_accepts_a_partial_object():
+    assert templates.validate_agent_overrides({"model": "opus"}) == []
+
+
 def test_unknown_gate_after_quarantines_template(tmp_path):
     d = _dir(
         tmp_path,
