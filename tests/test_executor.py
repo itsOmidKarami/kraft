@@ -1066,7 +1066,12 @@ def test_a_failed_straggler_sweep_does_not_fail_a_good_agent_run(tmp_path, monke
     """The sweep is a courtesy, not the task. An index lock a co-task holds or
     an unset user.email would otherwise turn a successful agent run into a
     failed node — and losing the sweep only puts us back where Kraft-7fip
-    found us, with the work on disk and `_assert_clean` naming it at open_mr."""
+    found us, with the work on disk and `_assert_clean` naming it at open_mr.
+
+    It must not vanish silently either (Kraft-hf12): a `sweep_failed` event
+    is the only trail back to why that eventual `open_mr` refusal happened,
+    since the exception itself only ever reached the server's own log.
+    """
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
 
@@ -1087,17 +1092,23 @@ def test_a_failed_straggler_sweep_does_not_fail_a_good_agent_run(tmp_path, monke
                 template=_quick_task(),
                 bd_cwd=str(tracker),
             )
-            return await executor.run(
+            status = await executor.run(
                 database,
                 rd,
                 work_item_id=wid,
                 registry=fake_registry(sys.executable, _FAKE_AGENT),
                 bd_cwd=str(tracker),
             )
+            evts = database.read(lambda c: events.read_after(c, 0, wid))
+            return status, evts
         finally:
             await database.close()
 
-    assert asyncio.run(scenario()) == "completed"
+    status, evts = asyncio.run(scenario())
+    assert status == "completed"
+    swept = [e for e in evts if e["type"] == "sweep_failed"]
+    assert swept, "no sweep_failed event survived the swallowed ForgeError"
+    assert "index.lock" in swept[0]["payload"]["error"]
 
 
 def _gate_check(flag: Path) -> list[str]:

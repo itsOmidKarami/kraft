@@ -50,6 +50,7 @@ from kraft.paths import (
 from kraft.templates import (
     CONFIG_FILES,
     GATE_NAMES,
+    Registry,
     RegistryError,
     load_registry,
     load_templates,
@@ -979,9 +980,10 @@ async def get_work_item(wid: str, request: Request):
         ).fetchall()
     )
     pending = _pending_gate(st, wid)
+    chain = json.loads(row["chain_definition"])
     return {
         **{k: row[k] for k in row.keys()},
-        "chain_definition": json.loads(row["chain_definition"]),
+        "chain_definition": chain,
         "attachments": json.loads(row["attachments"]) if row["attachments"] else [],
         "worker_sessions": [{k: s[k] for k in s.keys()} for s in sessions],
         "usage": st.db.read(lambda c: store.usage_rollup(c, wid)),
@@ -1003,6 +1005,17 @@ async def get_work_item(wid: str, request: Request):
         "deferred_findings": _deferred_findings(st, wid),
         "concerns": _concerns(st, wid),
         "needs_context_question": _needs_context_question(st, wid),
+        # Whether a stranded-at-this-node retry could ever carry a steer note
+        # anywhere downstream (Kraft-bz9b): the detail screen uses this to
+        # drop the steer box entirely rather than offer text `retry` would
+        # 409 on. Fails open (True) when the node isn't in its own chain --
+        # an unmapped edge case is not a reason to hide a control that may
+        # still work.
+        "steerable": (
+            _steer_reachable(chain["nodes"], row["current_node_id"], st.registry)
+            if any(n["id"] == row["current_node_id"] for n in chain["nodes"])
+            else True
+        ),
     }
 
 
@@ -1488,6 +1501,46 @@ async def pause_work_item(wid: str, request: Request):
     return {"id": wid, "paused_sessions": ids}
 
 
+def _node_has_agent_task(node: dict, registry: Registry) -> bool:
+    """Whether this node's own dispatch could ever consume a Steer note.
+
+    `Steer.take()` (executor.py) is read only from the agent-kind branch of
+    `_dispatch`. A node whose own tasks are all subprocess/forge/builtin, and
+    which has no `fix_loop` (a fix cycle always falls back to the agent-kind
+    `on.implementation.start`), has nothing on it that will ever read one.
+    """
+    if node.get("fix_loop"):
+        return True
+    hooks = [*node.get("tasks", []), *(node.get("on_failure") or [])]
+    return any(registry.hooks.get(h, {}).get("kind") == "agent" for h in hooks)
+
+
+def _steer_reachable(nodes: list[dict], start_id: str, registry: Registry) -> bool:
+    """Whether a Steer note given at `start_id` could reach *any* agent task
+    from there to the end of the chain.
+
+    `run()` threads one `Steer` object through every node from `start_index`
+    on (`carried`, executor.py `run`) -- it is consumed by whichever agent-kind
+    dispatch runs first, not necessarily the one it was given on. `open_mr`
+    (forge-kind, no fix_loop) has nothing of its own, but `human_review` right
+    after it does; a note given while stopped at `open_mr` still reaches that
+    agent if `open_mr` and `mr_checks` succeed on retry. Checking only the
+    current node (Kraft-bz9b's first pass) refused that as dead on arrival.
+
+    Not a guarantee of delivery -- if `start_id` fails again, the walk never
+    reaches the later node and the note is dropped same as before -- only
+    that it is not *structurally* impossible, which is what the API can 409
+    on and the UI can hide a control for.
+    """
+    reached = False
+    for n in nodes:
+        if n["id"] == start_id:
+            reached = True
+        if reached and _node_has_agent_task(n, registry):
+            return True
+    return False
+
+
 @app.post("/work-items/{wid}/steer")
 async def steer_work_item(wid: str, body: Steer, request: Request):
     st = request.app.state
@@ -1520,12 +1573,19 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         raise HTTPException(
             409, f"all {limit} slots are busy; pause something or raise max_concurrent"
         )
+    chain = json.loads(row["chain_definition"])
     if body.steer and body.steer.strip():
+        found = any(n["id"] == row["current_node_id"] for n in chain["nodes"])
+        if found and not _steer_reachable(chain["nodes"], row["current_node_id"], st.registry):
+            raise HTTPException(
+                409,
+                f"node {row['current_node_id']!r} has no agent task downstream to steer; "
+                "this text would be dropped",
+            )
         await st.db.write(lambda c: store.set_steer(c, wid, body.steer.strip()))
     steer = await st.db.write(lambda c: store.take_steer(c, wid))
     await st.db.write(lambda c: store.resume_work_item(c, wid, steer))
 
-    chain = json.loads(row["chain_definition"])
     start = next((i for i, n in enumerate(chain["nodes"]) if n["id"] == row["current_node_id"]), 0)
     _spawn(
         request.app,
@@ -1590,6 +1650,13 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         raise HTTPException(409, "work item is not stopped")
 
     steer = (body.steer or "").strip() or None
+    if steer is not None and not _steer_reachable(chain["nodes"], node_id, st.registry):
+        # Explicit only: the last-rejection fallback below is Kraft's own
+        # carry-forward, not something the caller just typed and needs told.
+        raise HTTPException(
+            409,
+            f"node {node_id!r} has no agent task downstream to steer; this text would be dropped",
+        )
     if steer is None:
         # The reason the human already typed at the gate. Without this a
         # rejection that exhausted its cap makes them type it twice for it to
