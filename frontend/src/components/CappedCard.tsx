@@ -3,7 +3,7 @@ import { ChatText, Prohibit } from "@phosphor-icons/react";
 import * as api from "../api";
 import { elapsed } from "../format";
 import type { KraftEvent, WorkItem, WorkerSession } from "../types";
-import { Escalate } from "./Escalate";
+import { Escalate, escalating } from "./Escalate";
 import { LogModal } from "./LogModal";
 
 /**
@@ -79,6 +79,10 @@ export function CappedCard({
   // fix-loop node — the same shape as a `no_progress` escalation. The reason
   // string is what tells them apart (Kraft-esc); retry is still the way out.
   const crashed = item.stop_reason?.startsWith("executor crashed:") ?? false;
+  // An escalation turn is already in this worktree; a concurrent retry would
+  // race it (both touch the same checkout), and "no agent to steer" reads as
+  // a lie while `Escalate` shows one running right there.
+  const escalatingNow = escalating(sessions);
 
   const retry = async () => {
     setBusy(true);
@@ -155,17 +159,19 @@ export function CappedCard({
       )}
 
       <div className="gate-actions capped-actions">
-        <button className="btn btn-primary" disabled={busy} onClick={retry}>
+        <button className="btn btn-primary" disabled={busy || escalatingNow} onClick={retry}>
           <ChatText size={14} />
           {steerable ? "Steer and retry" : "Retry"}
         </button>
         <Escalate item={item} sessions={sessions} />
-        <span className="control-hint">
+      </div>
+      {!escalatingNow && (
+        <p className="control-hint capped-hint">
           {steerable
             ? "retry resets the loop counter; steer text carries into cycle 1"
             : "this node has no agent to steer — retry just re-runs it"}
-        </span>
-      </div>
+        </p>
+      )}
       {err && <p className="form-error">{err}</p>}
       {logSid && <LogModal sessionId={logSid} onClose={() => setLogSid(null)} />}
     </div>

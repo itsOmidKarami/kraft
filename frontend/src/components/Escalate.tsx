@@ -16,6 +16,20 @@ import { LogModal } from "./LogModal";
  * a second click while one is already in flight surfaces the server's own
  * 409 as the same inline error every other action here shows.
  */
+/** An escalation session still in flight -- the one predicate both this
+ * component's own `running` and the exported `escalating()` build on, so the
+ * two can never disagree about what "in flight" means. */
+function inFlight(s: WorkerSession): boolean {
+  return s.hook_point === "escalation" && (s.status === "pending" || s.status === "running");
+}
+
+/** Whether an escalation turn is in flight for this item -- exported so a
+ * stop card (e.g. `CappedCard`) can suppress its own retry/steer copy
+ * instead of contradicting this component's "agent is on it" state. */
+export function escalating(sessions: WorkerSession[]): boolean {
+  return sessions.some(inFlight);
+}
+
 export function Escalate({ item, sessions = [] }: { item: WorkItem; sessions?: WorkerSession[] }) {
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
@@ -28,16 +42,12 @@ export function Escalate({ item, sessions = [] }: { item: WorkItem; sessions?: W
   // whatever is being typed here with no warning. Left open, a stale send
   // surfaces the server's own 409 inline instead -- same as the board's
   // inline row, which has no sessions to check at all.
-  const running = open
-    ? undefined
-    : sessions.find(
-        (s) => s.hook_point === "escalation" && (s.status === "pending" || s.status === "running"),
-      );
+  const running = open ? undefined : sessions.find(inFlight);
 
   if (running) {
     return (
       <div className="gate-actions">
-        <span className="control-hint">agent is on it…</span>
+        <span className="control-hint">Kraft agent is on it!</span>
         <button className="btn btn-ghost" onClick={() => setShowLog(true)}>
           View log
         </button>

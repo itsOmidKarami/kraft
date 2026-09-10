@@ -6,6 +6,7 @@ import { PausedCard } from "./PausedCard";
 
 const started = { id: "w1", current_node_id: "implement" } as never;
 const neverStarted = { id: "w2", current_node_id: null } as never;
+const notSteerable = { id: "w3", current_node_id: "merge", steerable: false } as never;
 
 const session = {
   node_id: "implement",
@@ -26,6 +27,14 @@ describe("PausedCard", () => {
     expect(screen.getByRole("button", { name: /^start/i })).toBeTruthy();
     expect(screen.queryByText(/attempt/i)).toBeNull();
     expect(screen.queryByText(/relaunches/i)).toBeNull();
+  });
+
+  it("a node with no agent to steer drops the steer box, matching what resume would 409 on", () => {
+    render(<PausedCard item={notSteerable} sessions={[]} />);
+    expect(screen.queryByLabelText(/steer/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /resume with steer/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /^resume$/i })).toBeTruthy();
+    expect(screen.getByText(/has no agent to steer/i)).toBeTruthy();
   });
 
   it("starting a never-run item resumes it through the same endpoint", async () => {

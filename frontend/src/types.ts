@@ -83,6 +83,9 @@ export interface WorkItem {
    *  on explicit steer text otherwise, so the detail screen uses this to drop
    *  the steer box rather than offer one. Only on the detail endpoint. */
   steerable?: boolean;
+  /** The root repo's merge request, once `open_mr` has run; null before then.
+   *  Only on the detail endpoint. */
+  mr_ref?: { number: number; url: string } | null;
 }
 
 export interface Finding {
