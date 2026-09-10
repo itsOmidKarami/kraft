@@ -74,7 +74,20 @@ class RunDirs:
     def worktrees(self) -> Path:
         return self.base / "worktrees"
 
+    @property
+    def attachments(self) -> Path:
+        """Intake attachments, copied here at intake rather than referenced in
+        place (Kraft-eqgn).
+
+        The gate an attachment satisfies is trimmed out of `chain_definition`
+        at intake and cannot be put back, so the document that justified the
+        trim has to be one Kraft owns from that moment. Referencing a path in
+        someone else's working tree meant a file deleted in between left the
+        item running with its spec and plan gates gone and nothing said.
+        """
+        return self.base / "attachments"
+
     def ensure(self) -> RunDirs:
-        for d in (self.logs, self.results, self.worktrees):
+        for d in (self.logs, self.results, self.worktrees, self.attachments):
             d.mkdir(parents=True, exist_ok=True)
         return self

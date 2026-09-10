@@ -1652,6 +1652,10 @@ async def abandon_work_item(wid: str, request: Request):
     removed = await _remove_worktree(
         Path(row["repo"]), st.run_dirs.worktrees / wid, store.branch_for(row)
     )
+    # Best-effort, like the worktree removal beside it: the row is already
+    # abandoned, and a failure to delete a directory must not leave the item in
+    # a state the board cannot show.
+    shutil.rmtree(st.run_dirs.attachments / wid, ignore_errors=True)
     return {"id": wid, "status": "abandoned", "worktree_removed": removed}
 
 
