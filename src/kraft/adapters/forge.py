@@ -198,18 +198,46 @@ async def _run(repo: Path, args: list[str]) -> str:
     return done.stdout
 
 
-#: Kraft's own per-session bookkeeping, which lands in the worktree because the
-#: agent is told to write its summary there (`adapters/agent.py`). It is not the
-#: agent's work product, so neither the clean check nor the straggler sweep may
-#: treat it as such.
-#:
-#: A pathspec rather than a .gitignore line: this repo ignores
-#: `.engineering/sessions/` (.gitignore:54), but a repo Kraft was pointed at
-#: five minutes ago does not, and Kraft must not put its own logs into that
-#: repo's first merge request — or refuse to open one over them (Kraft-z8gj).
-#: `specs/`, `plans/` and `review_briefs/` under `.engineering/` stay in: those
-#: are work product and belong in the diff a human reviews.
-_WORK_PRODUCT = [".", ":(exclude).engineering/sessions"]
+async def _kraft_written_paths(repo: Path) -> list[str]:
+    """Untracked paths under `.engineering/` -- Kraft's own artifacts and
+    session notes, which hooks write straight to disk and never `git add`.
+
+    Deliberately not a static pathspec: a path this repo already tracked
+    under `.engineering/` before this worktree existed shows as modified
+    ('M'), not untracked ('??'), so it is never in this list. An edit to that
+    file is the repo's own content and real work product, not Kraft's
+    bookkeeping -- excluding it outright, the way a blanket
+    `:(exclude).engineering` pathspec used to, silently dropped it from every
+    merge request (caught in review: a worker's edit to a pre-existing,
+    already-committed `.engineering/specs/x.md` would otherwise vanish).
+    """
+    raw = await _run(repo, ["git", "status", "--porcelain", "--", ".engineering"])
+    return [line[3:] for line in raw.splitlines() if line.startswith("??")]
+
+
+async def _work_product_pathspec(repo: Path) -> list[str]:
+    """`.`, plus an exclusion for every path Kraft itself wrote into this
+    worktree's `.engineering/` -- session summaries, and now
+    spec/plan/chain_review/review_brief too. None of it is the agent's work
+    product, so neither the clean check nor the straggler sweep may treat it
+    as such: it is ingested straight into the index at gate approval instead
+    (`Indexer.ingest_gate_artifact`), and never lands in the connected repo's
+    git history at all.
+
+    Computed per call rather than a fixed list: which paths are Kraft's own
+    depends on what this repo already tracked before Kraft touched it
+    (`_kraft_written_paths`), which no static pathspec can know.
+
+    Individual paths rather than a `.gitignore` line or a blanket
+    `:(exclude).engineering`: this repo ignores `.engineering/` for exactly
+    this reason (.gitignore:54), but a repo Kraft was pointed at five minutes
+    ago does not, and Kraft must not put its own bookkeeping into that repo's
+    first merge request — or refuse to open one over it (Kraft-z8gj, widened:
+    the same argument that carved out session summaries applies to
+    spec/plan/chain_review/review_brief once none of them are committed
+    either) — without also assuming every path under `.engineering/` is ours.
+    """
+    return [".", *(f":(exclude){p}" for p in await _kraft_written_paths(repo))]
 
 
 async def _assert_clean(repo: Path) -> None:
@@ -218,8 +246,8 @@ async def _assert_clean(repo: Path) -> None:
     Untracked files are included on purpose: a source or test file the agent
     never `git add`ed is what went missing on work item 5163dd1b. Ignored files
     are excluded by git itself, so `.pytest_cache/` does not trip it, and
-    `_WORK_PRODUCT` drops Kraft's own session notes in a repo that has not
-    ignored them.
+    `_work_product_pathspec` drops Kraft's own session notes and artifacts in
+    a repo that has not ignored them.
 
     `--ignore-submodules=none` deliberately overrides the repo's own
     `submodule.<path>.ignore` config. A human setting `ignore = all` on a
@@ -229,8 +257,9 @@ async def _assert_clean(repo: Path) -> None:
     (Kraft-qlsf — this is what let work item 9d0ab38ff3c9439b90506df0f6966660
     push a submodule commit nowhere while every guard reported clean).
     """
+    pathspec = await _work_product_pathspec(repo)
     raw = await _run(
-        repo, ["git", "status", "--porcelain", "--ignore-submodules=none", "--", *_WORK_PRODUCT]
+        repo, ["git", "status", "--porcelain", "--ignore-submodules=none", "--", *pathspec]
     )
     dirty = [line[3:] for line in raw.splitlines() if line.strip()]
     if dirty:
@@ -253,13 +282,14 @@ async def commit_stragglers(repo: Path, *, message: str) -> bool:
     the merge request carry it.
 
     Ignored files stay out, the same exclusion `_assert_clean` relies on, so a
-    `.pytest_cache/` left behind is not mistaken for work — and `_WORK_PRODUCT`
-    keeps Kraft's own session notes out of the merge request even in a repo that
-    has never heard of them.
+    `.pytest_cache/` left behind is not mistaken for work — and
+    `_work_product_pathspec` keeps Kraft's own session notes and artifacts out
+    of the merge request even in a repo that has never heard of them.
     """
-    if not (await _run(repo, ["git", "status", "--porcelain", "--", *_WORK_PRODUCT])).strip():
+    pathspec = await _work_product_pathspec(repo)
+    if not (await _run(repo, ["git", "status", "--porcelain", "--", *pathspec])).strip():
         return False
-    await _run(repo, ["git", "add", "-A", "--", *_WORK_PRODUCT])
+    await _run(repo, ["git", "add", "-A", "--", *pathspec])
     try:
         await _run(repo, ["git", "commit", "-m", message])
     except ForgeError:
@@ -268,7 +298,7 @@ async def commit_stragglers(repo: Path, *, message: str) -> bool:
         # refuses to let a second opinion cost us the work, which is the whole
         # point of this function. A hook that fails for any other reason loses
         # nothing either -- the commit is what keeps the work reachable.
-        await _run(repo, ["git", "add", "-A", "--", *_WORK_PRODUCT])
+        await _run(repo, ["git", "add", "-A", "--", *pathspec])
         await _run(repo, ["git", "commit", "--no-verify", "-m", message])
     return True
 

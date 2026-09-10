@@ -113,10 +113,13 @@ class Indexer:
 
     async def purge_repo(self, repo: str) -> ingest.ReconcileStats:
         """Drop every indexed document for `repo` — a disconnected repo must
-        stop answering searches. Reconciling against an empty scan is the same
-        delete path a vanished file already takes."""
+        stop answering searches. Not `reconcile` against an empty scan any
+        more: `reconcile` now only ever deletes `origin='git_scan'` rows (the
+        fix that keeps a rescan from deleting a gate artifact it will never
+        find in git), so that path alone would leave every gate artifact and
+        session summary behind after disconnect. `purge_all` drops the lot."""
         async with self._write_lock:
-            return await ingest.reconcile(self._conn, repo, [], embedder=self._embedder)
+            return await ingest.purge_all(self._conn, repo)
 
     async def rescan_all(self) -> dict[str, ingest.ReconcileStats]:
         repos = self.repos()
@@ -208,6 +211,7 @@ class Indexer:
             source_created_at=None,
             source_updated_at=None,
             source_kind="session_summary",
+            origin="event_ingest",
             links=tuple(links),
         )
         async with self._write_lock:
@@ -219,6 +223,62 @@ class Indexer:
                 self._conn.rollback()
                 raise
         return True
+
+    async def ingest_gate_artifact(
+        self,
+        *,
+        repo: str,
+        work_item_id: str,
+        path: str,
+        content: str,
+        node_id: str | None = None,
+        hook_point: str | None = None,
+    ) -> None:
+        """Persist an approved gate artifact (spec/plan/chain_review/
+        review_brief) the way a session summary is already persisted: read
+        straight off the worktree by the caller, upserted here, no git scan
+        involved.
+
+        This is that artifact's only durable copy from here on: `.engineering/`
+        never lands in the connected repo's git history
+        (`forge._work_product_pathspec`), so once the worktree that holds it is
+        gone, this row is all there is.
+        The caller (`api.approve_gate`) is what makes "gate approval" the right
+        moment -- it is the first point the content is accepted rather than
+        still being drafted, and reuses the same worktree-containment-checked
+        read as the reviewer-facing endpoint.
+        """
+        fm, body = ingest.split_front_matter(content)
+        # Front-matter wins nothing here that the caller didn't already decide;
+        # it only ever contributes extra linked work items, same as a summary.
+        work_items = {work_item_id}
+        for link in ingest.links_from_front_matter(fm):
+            if link.work_item_id:
+                work_items.add(link.work_item_id)
+        links = [ingest.LinkRow(work_item_id=w) for w in sorted(work_items)]
+        if node_id or hook_point:
+            links.append(ingest.LinkRow(node_id=node_id, hook_point=hook_point))
+        doc = ingest.ScannedDoc(
+            path=path,
+            kind=ingest.derive_kind(path, fm),
+            title=ingest.derive_title(path, fm, body),
+            content=body,
+            content_hash=hashlib.sha256(body.encode()).hexdigest(),
+            metadata={k: v for k, v in fm.items() if k not in ("title", "kind")},
+            source_created_at=None,
+            source_updated_at=None,
+            source_kind="artifact",
+            origin="event_ingest",
+            links=tuple(links),
+        )
+        async with self._write_lock:
+            self._conn.execute("BEGIN")
+            try:
+                await ingest.upsert_document(self._conn, repo, doc, _now(), self._embedder)
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
 
     # ---- live event drain ----
 
@@ -632,6 +692,10 @@ class Indexer:
             "source_created_at": r["source_created_at"],
             "source_updated_at": r["source_updated_at"],
             "indexed_at": r["indexed_at"],
+            # 'git_scan' (a real path under `repo`) or 'event_ingest' (a
+            # session summary or gate artifact -- `path` is a synthetic
+            # identifier, not a file the connected repo checkout has).
+            "origin": r["origin"],
             "links": self._links_for([doc_id])[doc_id],
         }
 
