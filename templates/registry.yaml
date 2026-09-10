@@ -7,9 +7,9 @@ hooks:
   # declared, right after implementation, before verify's green obscures it.
   on.repos.scan:           { kind: builtin,    handler: scan_submodules }
   on.test.run:             { kind: subprocess, command: [uv, run, pytest, -q] }
-  # --- placeholder bindings: each replaced by its plugin effort (see 03_plugin_adapters) ---
+  # --- placeholder bindings: on.review.mr.run replaced by its plugin effort (see 03_plugin_adapters) ---
   on.chain.review_ready:     { kind: agent, command: claude, skill: chain-review, artifact: chain_review }
-  on.review.local.run:       { kind: builtin, handler: noop }
+  on.review.local.run:       { kind: agent, command: claude, skill: code-review }
   # backend: auto resolves per repo, from the `forge` recorded on its
   # repos.yaml entry (Settings → Repos). A CLI name here pins every repo to one
   # forge, which is wrong for any install with repos on both. Never probed —

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import * as api from "../api";
+import type { WorkerSession } from "../types";
 import { Gate } from "./Gate";
 
 const item = { id: "w1" } as never;
@@ -146,5 +147,47 @@ describe("Gate", () => {
     await userEvent.type(screen.getByLabelText("escalate message"), "is this right?");
     await userEvent.click(screen.getByRole("button", { name: /send to agent/i }));
     expect(spy).toHaveBeenCalledWith("w1", "is this right?");
+  });
+});
+
+const session = (over: Partial<WorkerSession> = {}) =>
+  ({
+    id: "s1",
+    work_item_id: "w1",
+    node_id: "verify",
+    hook_point: "on.test.run",
+    status: "done",
+    attempt: 1,
+    round: 0,
+    created_at: "",
+    started_at: null,
+    exited_at: null,
+    tokens_in: null,
+    tokens_out: null,
+    cost_usd: null,
+    wall_ms: null,
+    model: null,
+    head_sha: "abc1234",
+    ...over,
+  }) as WorkerSession;
+
+describe("Gate test-evidence freshness", () => {
+  it("says tests passed on the current commit", () => {
+    const freshItem = { id: "w1", head_sha: "abc1234" } as never;
+    render(<Gate item={freshItem} gate="human_review_approval" sessions={[session()]} />);
+    expect(screen.getByText(/tests passed on abc1234/i)).toBeInTheDocument();
+  });
+
+  it("calls the evidence stale when HEAD has moved since", () => {
+    const movedItem = { id: "w1", head_sha: "def5678" } as never;
+    render(<Gate item={movedItem} gate="human_review_approval" sessions={[session()]} />);
+    expect(screen.getByText(/stale/i)).toBeInTheDocument();
+    expect(screen.getByText(/abc1234/)).toBeInTheDocument();
+  });
+
+  it("says nothing when there is no test session to report on", () => {
+    const freshItem = { id: "w1", head_sha: "abc1234" } as never;
+    render(<Gate item={freshItem} gate="human_review_approval" sessions={[]} />);
+    expect(screen.queryByText(/tests (passed|last ran)/i)).not.toBeInTheDocument();
   });
 });

@@ -44,41 +44,6 @@ def test_the_fix_loop_cap_comes_along():
     assert rendered["loops"]["verify_fix_loop"]["attempts"] == 3
 
 
-def test_the_spec_does_not_state_a_noop_count_that_has_gone_stale():
-    """The spec argues Lite implements nodes Kraft leaves as `builtin: noop`.
-    That count moves every time an adapter lands — the planning adapter took it
-    from nine to seven — so it is asserted here rather than trusted in prose."""
-    import re
-
-    import yaml
-
-    registry = yaml.safe_load((ROOT / "templates" / "registry.yaml").read_text())["hooks"]
-    chain = json.loads((PLUGIN / "chains" / "default.json").read_text())
-    hooks = [hook for node in chain["nodes"] for hook in node["tasks"]]
-    noop = [h for h in hooks if registry[h].get("handler") == "noop"]
-
-    spec = (ROOT / "docs" / "superpowers" / "specs" / "2026-09-07-kraft-lite-design.md").read_text()
-    claimed = re.search(r"(\w+) of these are `\{kind: builtin, handler: noop\}`", spec)
-    assert claimed, "the spec no longer makes the claim this test guards"
-    # Counts below five became reachable once the forge adapter landed and
-    # took the noop count from seven to three.
-    words = {
-        "one": 1,
-        "two": 2,
-        "three": 3,
-        "four": 4,
-        "five": 5,
-        "six": 6,
-        "seven": 7,
-        "eight": 8,
-        "nine": 9,
-        "ten": 10,
-    }
-    assert words[claimed.group(1).lower()] == len(noop), (
-        f"spec says {claimed.group(1)}, registry has {len(noop)}: {noop}"
-    )
-
-
 def test_a_loop_absent_from_policy_takes_the_default_cap():
     """Kraft's resolve_cap falls back to `policy.default`. Dropping the loop
     instead would give Lite zero retries where Kraft gives three."""

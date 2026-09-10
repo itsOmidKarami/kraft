@@ -1126,6 +1126,7 @@ async def run_task(
     #: Keyword arguments only so tests can run them at zero; no registry key.
     merge_timeout: float = MERGE_VERIFY_TIMEOUT,
     merge_interval: float = MERGE_VERIFY_INTERVAL,
+    head_sha: str | None = None,
 ) -> str:
     """One forge node -- against every repo `work_item_repos` names for this
     item, deepest submodule first, root last (design 3a), or just `repo` when
@@ -1151,6 +1152,7 @@ async def run_task(
         node_id=node_id,
         hook_point=hook_point,
         round=round,
+        head_sha=head_sha,
     )
     rows = db.read(
         lambda c: c.execute(

@@ -46,6 +46,27 @@ const rejectTarget = (item: WorkItem, gate: string): string | null => {
   return to && nodes.slice(0, at).some((n) => n.id === to) ? to : null;
 };
 
+/**
+ * Whether the "tests passed" a human is about to trust was measured on the
+ * commit in front of them (Kraft-lu2). No session, or one with no `head_sha`
+ * stamped (a builtin, or a session older than the column), renders nothing —
+ * a gate that cannot answer the question should not manufacture doubt.
+ */
+function testEvidence(item: WorkItem, sessions?: WorkerSession[]): ReactNode {
+  const runs = (sessions ?? []).filter((s) => s.hook_point === "on.test.run");
+  const last = runs.at(-1);
+  if (!last || !last.head_sha) return null;
+  const short = last.head_sha.slice(0, 7);
+  if (last.head_sha === item.head_sha) {
+    return <p className="field-hint">tests passed on {short}</p>;
+  }
+  return (
+    <p className="field-hint gate-stale">
+      stale: tests last ran on {short}
+    </p>
+  );
+}
+
 export function Gate({
   item,
   gate,
@@ -194,6 +215,7 @@ export function Gate({
         </div>
       </div>
       {artifact}
+      {testEvidence(item, sessions)}
       {((deferred && deferred.length > 0) || (concerns && concerns.length > 0)) && (
         <ul className="gate-deferred">
           {concerns?.map((c, i) => (

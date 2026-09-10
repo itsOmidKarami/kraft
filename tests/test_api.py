@@ -1938,3 +1938,35 @@ def test_post_triggers_requires_auth(tmp_path, monkeypatch):
         monkeypatch.setattr(st, "access", {**st.access, "password_hash": "x"}, raising=False)
         r = client.post("/api/triggers", json={"repo": str(repo), "title": "t"})
         assert r.status_code == 401
+
+
+def test_get_work_item_reports_the_worktree_head(tmp_path, monkeypatch):
+    """Kraft-lu2: the gate compares a measurement's sha against this. Without it
+    the frontend has nothing to compare to."""
+    repo = make_repo(tmp_path)
+    import kraft.api as api
+
+    async def noop(*a, **kw):
+        return "completed"
+
+    monkeypatch.setattr(api.executor, "run", noop)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post("/api/work-items", json={"title": "x", "repo": str(repo)}).json()["id"]
+        body = client.get(f"/api/work-items/{wid}").json()
+        assert "head_sha" in body
+
+
+def test_get_work_item_head_sha_is_none_before_the_worktree_exists(tmp_path, monkeypatch):
+    """A paused item has no worktree yet; `git_read` returns None rather than
+    raising, and the field must carry that through instead of 500ing."""
+    repo = make_repo(tmp_path)
+    import kraft.api as api
+
+    async def noop(*a, **kw):
+        return "completed"
+
+    monkeypatch.setattr(api.executor, "run", noop)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post("/api/work-items", json={"title": "x", "repo": str(repo)}).json()["id"]
+        body = client.get(f"/api/work-items/{wid}").json()
+        assert body["head_sha"] is None

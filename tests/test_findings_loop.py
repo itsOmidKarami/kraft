@@ -70,7 +70,7 @@ def _finding(message, severity="critical", *, file="a.py", line=3):
     }
 
 
-def _run(tmp_path, monkeypatch, entries, *, attempts=3, severities=None):
+def _run(tmp_path, monkeypatch, entries, *, attempts=3, severities=None, registry=None):
     """Drive one work item through the review node. Returns a dict of what happened.
 
     Each call gets its own scratch subdirectory rather than writing straight into
@@ -107,7 +107,7 @@ def _run(tmp_path, monkeypatch, entries, *, attempts=3, severities=None):
                 database,
                 rd,
                 work_item_id=wid,
-                registry=_registry(),
+                registry=registry or _registry(),
                 bd_cwd=str(tracker),
                 policy=_policy(call_dir, attempts=attempts, severities=severities),
             )
@@ -138,6 +138,59 @@ def _needs_human_reason(out):
         if e["type"] == "work_item_needs_human":
             return e["payload"]["reason"]
     return None
+
+
+def _noop_registry():
+    """`on.review.local.run` back on the shipped noop binding, which is what any
+    repo that has not bound a reviewer is actually running."""
+    hooks = dict(_registry().hooks)
+    hooks["on.review.local.run"] = {"kind": "builtin", "handler": "noop"}
+    return Registry(hooks=hooks)
+
+
+def test_findings_measured_names_the_tasks_that_were_noops(tmp_path, monkeypatch):
+    """A noop task contributes no findings, exits 'done' in milliseconds, and is
+    otherwise indistinguishable in this event from a review that ran and found
+    nothing (Kraft-yenu part b)."""
+    out = _run(tmp_path, monkeypatch, [{"status": "done"}], registry=_noop_registry())
+    measured = _measured(out)
+    assert measured, "no findings_measured event was written"
+    assert measured[-1]["payload"]["noop_hooks"] == ["on.review.local.run"]
+
+
+def test_findings_measured_reports_no_noops_when_every_task_ran(tmp_path, monkeypatch):
+    """The empty case is explicit: readers get [] rather than a missing key, so
+    nobody has to tell 'no noops' from 'old event, field did not exist yet'."""
+    out = _run(tmp_path, monkeypatch, [{"status": "done"}])
+    assert _measured(out)[-1]["payload"]["noop_hooks"] == []
+
+
+def _broken_binary_registry():
+    """`on.review.local.run` bound to a command that does not exist — the
+    Kraft-579 incident in miniature."""
+    hooks = dict(_registry().hooks)
+    hooks["on.review.local.run"] = {
+        "kind": "subprocess",
+        "command": ["kraft-nonexistent-binary-xyz"],
+    }
+    return Registry(hooks=hooks)
+
+
+def test_a_task_that_never_launched_stops_without_burning_a_cycle(tmp_path, monkeypatch):
+    """The whole point of Kraft-579: no fix agent is dispatched and no attempt is
+    spent, because no agent can install a missing binary by editing source. The
+    incident this comes from spent six cycles and about an hour on exactly this."""
+    out = _run(tmp_path, monkeypatch, [{"status": "done"}], registry=_broken_binary_registry())
+
+    assert out["result"] == "needs_human"
+    assert _cycles(out) == 0, "a config error must not open a fix cycle"
+    reason = _needs_human_reason(out)
+    assert "kraft-nonexistent-binary-xyz" in reason or "on.review.local.run" in reason
+    assert "task failed" not in reason, "a launch failure must not read as a test failure"
+
+    # and no fix agent was dispatched at it
+    hooks = {s["hook_point"] for s in out["sessions"]}
+    assert "on.implementation.start" not in hooks
 
 
 def test_the_scripted_reviewer_drives_the_loop(tmp_path, monkeypatch):

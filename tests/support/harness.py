@@ -115,7 +115,14 @@ def fake_registry(python_exe: str, fake_agent_path: Path) -> Registry:
     # The shipped registry binds these to `claude`. A test that drives the
     # default chain must not shell out to the operator's real agent, and a
     # missing binary would land the item in needs_human rather than at a gate.
-    for hook in ("on.spec.requested", "on.plan.requested", "on.chain.review_ready"):
+    # on.review.local.run joined this list when it stopped being a noop
+    # (Kraft-yenu) -- it is now a real `claude` skill hook like the others.
+    for hook in (
+        "on.spec.requested",
+        "on.plan.requested",
+        "on.chain.review_ready",
+        "on.review.local.run",
+    ):
         hooks[hook] = {**hooks[hook], "command": fake}
     # The shipped registry's back half is real now (Kraft-33j): four forge
     # hooks on `backend: auto`, and a human_review hook bound to the operator's

@@ -433,6 +433,7 @@ async def scan_submodules(
     round: int,
     repo: str,
     worktree: str,
+    head_sha: str | None = None,
 ) -> str:
     """Design 3a: catch a submodule the agent touched but the item never
     declared, give it a `work_item_repos` row and a pinned identity, before
@@ -451,6 +452,7 @@ async def scan_submodules(
         node_id=node_id,
         hook_point=hook_point,
         round=round,
+        head_sha=head_sha,
     )
     wt = Path(worktree)
     known = {
@@ -533,6 +535,7 @@ async def start_session(
     node_id: str,
     hook_point: str,
     round: int,
+    head_sha: str | None = None,
 ) -> tuple[Path, Path]:
     """Create the session row before the in-process work starts, not after.
 
@@ -556,6 +559,7 @@ async def start_session(
             log_path=str(log_path),
             result_path=str(result_path),
             round=round,
+            head_sha=head_sha,
         )
     )
     return log_path, result_path
@@ -604,6 +608,7 @@ async def _record_done(
     round: int,
     log: str,
     status: str = "done",
+    head_sha: str | None = None,
 ) -> str:
     """A session row for a builtin that did its work in-process, before and
     after in one call. Shared so a builtin's bookkeeping cannot drift from
@@ -621,6 +626,7 @@ async def _record_done(
         node_id=node_id,
         hook_point=hook_point,
         round=round,
+        head_sha=head_sha,
     )
     return await finish_session(
         db, log_path, result_path, session_id=session_id, status=status, log=log
@@ -637,6 +643,7 @@ async def env_setup(
     repo: str,
     round: int = 0,
     attachments: list[dict] | None = None,
+    head_sha: str | None = None,
 ) -> str:
     # `ensure_worktree` copies attachments itself now (Kraft-pqu fallout: the
     # copy has to exist before `spec`/`plan`, which run ahead of this node in
@@ -657,6 +664,7 @@ async def env_setup(
         hook_point="on.env.prepare",
         round=round,
         log=f"worktree ready at {worktree}\n",
+        head_sha=head_sha,
     )
 
 
@@ -669,6 +677,7 @@ async def noop(
     node_id: str,
     hook_point: str,
     round: int = 0,
+    head_sha: str | None = None,
 ) -> str:
     """Placeholder task for a hook with no plugin yet: records a done session, does no work."""
     return await _record_done(
@@ -680,4 +689,5 @@ async def noop(
         hook_point=hook_point,
         round=round,
         log=f"noop placeholder for {hook_point}\n",
+        head_sha=head_sha,
     )

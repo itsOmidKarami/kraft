@@ -1292,3 +1292,52 @@ def test_repos_for_is_empty_for_a_single_repo_item(tmp_path):
         chain_definition="{}",
     )
     assert store.repos_for(conn, "w1") == []
+
+
+def test_create_session_stores_the_head_sha(tmp_path):
+    """Kraft-lu2: the gate compares a measurement's sha against this."""
+
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await _mk_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s-sha",
+                    work_item_id="w1",
+                    node_id="verify",
+                    hook_point="on.test.run",
+                    log_path="/l",
+                    result_path="/r",
+                    head_sha="abc123",
+                )
+            )
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT head_sha FROM worker_sessions WHERE id = 's-sha'"
+                ).fetchone()
+            )
+            assert row["head_sha"] == "abc123"
+
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s-nosha",
+                    work_item_id="w1",
+                    node_id="verify",
+                    hook_point="on.test.run",
+                    log_path="/l",
+                    result_path="/r",
+                )
+            )
+            row2 = database.read(
+                lambda c: c.execute(
+                    "SELECT head_sha FROM worker_sessions WHERE id = 's-nosha'"
+                ).fetchone()
+            )
+            assert row2["head_sha"] is None
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())

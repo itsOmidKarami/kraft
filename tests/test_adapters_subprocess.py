@@ -302,7 +302,7 @@ def test_run_task_exit_code_fallback(tmp_path):
     asyncio.run(scenario())
 
 
-def test_run_task_missing_binary_is_failed(tmp_path):
+def test_run_task_missing_binary_is_a_config_error(tmp_path):
     async def scenario():
         rd = RunDirs(tmp_path).ensure()
         database = await db.Database.open(rd.db)
@@ -318,11 +318,14 @@ def test_run_task_missing_binary_is_failed(tmp_path):
                 cmd=["kraft-nonexistent-binary-xyz"],
                 cwd=tmp_path,
             )
-            assert status == "failed"
+            # Not "failed": a task that never launched is a configuration
+            # problem, and reporting it as a task failure opened a fix cycle no
+            # agent could win by editing source (Kraft-579).
+            assert status == "config_error"
             row = database.read(
                 lambda c: c.execute("SELECT status FROM worker_sessions WHERE id='s-mb'").fetchone()
             )
-            assert row["status"] == "failed"
+            assert row["status"] == "config_error"
             # The status alone is what this branch used to leave behind: a 5ms
             # "failed" and a zero-byte log, which cost an operator the whole
             # diagnosis. The log has to name what was missing.
@@ -355,7 +358,7 @@ def test_run_task_missing_cwd_says_so_rather_than_blaming_the_command(tmp_path):
                 cmd=["echo", "hi"],  # exists; the cwd is what does not
                 cwd=tmp_path / "no-such-worktree",
             )
-            assert status == "failed"
+            assert status == "config_error"
             log = (rd.logs / "s-mc.log").read_text()
             assert "working directory" in log
             assert "no-such-worktree" in log
