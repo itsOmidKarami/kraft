@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { ChatText, FolderOpen, Pause, Prohibit } from "@phosphor-icons/react";
+import { ArrowSquareOut, ChatText, FolderOpen, Pause, Prohibit } from "@phosphor-icons/react";
 import * as api from "../api";
 import { ArtifactModal } from "../components/ArtifactModal";
 import { BudgetCard } from "../components/BudgetCard";
@@ -585,13 +585,26 @@ export function WorkItemDetail() {
       {/* "Review changes" is reachable at any status/gate: the one review path
           the Gate artifact doesn't already cover for `human_review_approval`.
           "Open worktree" sits next to it (sub-project A spec §4) and only on
-          the server's own machine — the path is a local one. */}
-      {(gate !== "human_review_approval" || local) && (
+          the server's own machine — the path is a local one. "Open MR" joins
+          both once `open_mr` has run: the forge, not the diff modal or the
+          worktree, is where CI status and review comments actually live. */}
+      {(gate !== "human_review_approval" || local || item.mr_ref) && (
         <div className="control-row">
           {gate !== "human_review_approval" && (
             <button className="btn btn-secondary" onClick={() => setShowDiff(true)}>
               Review changes
             </button>
+          )}
+          {item.mr_ref && (
+            <a
+              className="btn btn-secondary"
+              href={item.mr_ref.url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <ArrowSquareOut size={14} />
+              Open MR !{item.mr_ref.number}
+            </a>
           )}
           {local && (
             <button

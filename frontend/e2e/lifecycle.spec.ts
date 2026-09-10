@@ -45,48 +45,27 @@ test("gate: reject offers a way forward", async ({ page }) => {
   });
 });
 
-test("pause, steer and resume from the detail screen", async ({ page, request }) => {
-  // The fake agent finishes in milliseconds, so there is nothing to pause unless
-  // the implementation hook is slowed down first. Swapped through the real
-  // registry API and put back afterwards.
-  const registry = await (await request.get("/api/registry")).json();
-  const original = registry.hooks["on.implementation.start"];
-  await request.put("/api/registry", {
-    data: {
-      ...registry,
-      hooks: {
-        ...registry.hooks,
-        "on.implementation.start": {
-          kind: "subprocess",
-          command: ["python3", "-c", "import time; time.sleep(120)"],
-        },
-      },
-    },
+test("pause, steer and resume from the detail screen", async ({ page }) => {
+  // The fake agent finishes in milliseconds, so there is nothing to pause
+  // unless it is slowed down first. KRAFT_SLOW in the title does that
+  // (fixtures/fake-claude.sh) without swapping the hook's registry entry to
+  // `kind: subprocess`: that swap used to work here, but it also makes the
+  // node stop looking agent-kind for as long as it's in effect, which now
+  // flips `item.steerable` false and hides the steer box this test needs
+  // visible (PausedCard, Kraft-bz9b's last unwired caller).
+  await createItem(page, "ui pause steer KRAFT_SLOW", "quick-task");
+  const pause = page.getByRole("button", { name: /^Pause$/ });
+  await expect(pause).toBeEnabled({ timeout: 30_000 });
+  await pause.click();
+  await expect(page.getByRole("button", { name: /Resume with steer/ })).toBeVisible({
+    timeout: 30_000,
   });
-  try {
-    await createItem(page, "ui pause steer", "quick-task");
-    const pause = page.getByRole("button", { name: /^Pause$/ });
-    await expect(pause).toBeEnabled({ timeout: 30_000 });
-    await pause.click();
-    await expect(page.getByRole("button", { name: /Resume with steer/ })).toBeVisible({
-      timeout: 30_000,
-    });
-    await page.getByRole("textbox").last().fill("try a different approach");
-
-    // restore the fast hook so the resumed node actually finishes
-    await request.put("/api/registry", {
-      data: { ...registry, hooks: { ...registry.hooks, "on.implementation.start": original } },
-    });
-    await page.getByRole("button", { name: /Resume with steer/ }).click();
-    await page.getByRole("tab", { name: /Timeline/ }).click();
-    await expect(page.locator('[data-type="work_item_completed"]')).toBeVisible({
-      timeout: 90_000,
-    });
-  } finally {
-    await request.put("/api/registry", {
-      data: { ...registry, hooks: { ...registry.hooks, "on.implementation.start": original } },
-    });
-  }
+  await page.getByRole("textbox").last().fill("try a different approach");
+  await page.getByRole("button", { name: /Resume with steer/ }).click();
+  await page.getByRole("tab", { name: /Timeline/ }).click();
+  await expect(page.locator('[data-type="work_item_completed"]')).toBeVisible({
+    timeout: 90_000,
+  });
 });
 
 test("a deep link to a work item loads it, not an empty husk", async ({ page }) => {

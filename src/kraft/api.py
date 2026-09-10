@@ -941,6 +941,33 @@ def _concerns(st, wid: str) -> list[str]:
     return out
 
 
+def _mr_ref(st, wid: str) -> dict | None:
+    """The most recent `mr_opened` event's `{number, url}`, or None before
+    `open_mr` has ever run.
+
+    A single-repo item gets no `work_item_repos` row (`repos_for`'s own
+    docstring), so its merge request has nowhere to live but the event log --
+    `adapters.forge.run_task` emits `mr_opened` for exactly this reason
+    (Kraft-d2sq: "an event, not a work-item column"). Reversed scan, first hit
+    wins, same as `_stop_reason`: a retried `open_mr` that reused the existing
+    MR still logs a fresh event, so this always names the current one, not a
+    stale first-open URL for a since-force-pushed branch.
+
+    Single-repo only: a multi-repo item's `open_mr` node emits one
+    `mr_opened` per target repo (root and every declared submodule), and the
+    event carries no repo identifier to tell them apart. Returning "the
+    latest one" there would as often name a submodule's merge request as the
+    root's and label it "the" MR regardless -- silence until a per-repo
+    answer exists is better than a link to the wrong PR.
+    """
+    if st.db.read(lambda c: store.repos_for(c, wid)):
+        return None
+    for e in reversed(st.db.read(lambda c: events.read_after(c, 0, wid))):
+        if e["type"] == "mr_opened":
+            return {"number": e["payload"]["number"], "url": e["payload"]["url"]}
+    return None
+
+
 def _needs_context_question(st, wid: str) -> str | None:
     """The agent's question, straight from the `needs_context: <question>`
     reason `_needs_context_stop` already trusts — not a scan of
@@ -991,6 +1018,9 @@ async def get_work_item(wid: str, request: Request):
         "deferred_findings": _deferred_findings(st, wid),
         "concerns": _concerns(st, wid),
         "needs_context_question": _needs_context_question(st, wid),
+        # The root repo's merge request, once `open_mr` has run -- the detail
+        # screen's one link out to the forge.
+        "mr_ref": _mr_ref(st, wid),
         # Whether a stranded-at-this-node retry could ever carry a steer note
         # anywhere downstream (Kraft-bz9b): the detail screen uses this to
         # drop the steer box entirely rather than offer text `retry` would
@@ -1585,6 +1615,25 @@ def _steer_reachable(nodes: list[dict], start_id: str, registry: Registry) -> bo
     return False
 
 
+def _escalation_running(st, wid: str) -> str | None:
+    """The id of a `pending`/`running` escalation session, or None.
+
+    `retry`, `resume`, and `escalate` all dispatch a fresh agent into the same
+    worktree (`run_dirs.worktrees / wid`) an escalation turn may already be
+    live in -- each has to check this before spawning, not just `escalate`
+    itself, or a retry/resume from a second tab, the CLI, or an MCP call
+    races the escalation agent in the same checkout.
+    """
+    row = st.db.read(
+        lambda c: c.execute(
+            "SELECT id FROM worker_sessions WHERE work_item_id = ? AND hook_point = 'escalation' "
+            "AND status IN ('pending', 'running') LIMIT 1",
+            (wid,),
+        ).fetchone()
+    )
+    return row["id"] if row else None
+
+
 @api_router.post("/work-items/{wid}/steer")
 async def steer_work_item(wid: str, body: Steer, request: Request):
     st = request.app.state
@@ -1609,6 +1658,9 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         row["status"] == "needs_human" and _needs_context_stop(st, wid)
     ):
         raise HTTPException(409, "work item is not paused")
+    running = _escalation_running(st, wid)
+    if running is not None:
+        raise HTTPException(409, f"an escalation turn ({running}) is already running")
     # The one door that starts new work. Deliberately not on `approve` or
     # `retry`: those continue an item that is already underway, and refusing
     # them would strand a human mid-chain with no way to finish (Kraft-n2d).
@@ -1703,6 +1755,9 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     gate_key = f"{gate}_reject_loop" if gate else None
     if row["status"] != "needs_human":
         raise HTTPException(409, "work item is not stopped")
+    running = _escalation_running(st, wid)
+    if running is not None:
+        raise HTTPException(409, f"an escalation turn ({running}) is already running")
 
     worktree = st.run_dirs.worktrees / wid
     try:
@@ -1770,15 +1825,9 @@ async def escalate_work_item(wid: str, body: Escalate, request: Request):
     message = body.message.strip()
     if not message:
         raise HTTPException(400, "message is required")
-    running = st.db.read(
-        lambda c: c.execute(
-            "SELECT id FROM worker_sessions WHERE work_item_id = ? AND hook_point = 'escalation' "
-            "AND status IN ('pending', 'running') LIMIT 1",
-            (wid,),
-        ).fetchone()
-    )
+    running = _escalation_running(st, wid)
     if running is not None:
-        raise HTTPException(409, f"an escalation turn ({running['id']}) is already running")
+        raise HTTPException(409, f"an escalation turn ({running}) is already running")
     _spawn(
         request.app,
         f"{wid}:escalate",

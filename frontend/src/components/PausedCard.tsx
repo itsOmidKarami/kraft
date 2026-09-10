@@ -26,6 +26,10 @@ export function PausedCard({
   // An agent-created item (design §6 rule 1) is paused without ever having run:
   // no sessions, no current node. "Resume attempt 2" would be false in every word.
   const neverStarted = item.current_node_id === null;
+  // The server 409s an explicit steer on a node with no agent task to carry it
+  // to (Kraft-bz9b) -- same guard CappedCard already applies to its own box.
+  // Undefined (an older cached response) fails open, same as the server does.
+  const steerable = item.steerable !== false;
 
   const resume = async (withSteer: boolean) => {
     setBusy(true);
@@ -60,34 +64,51 @@ export function PausedCard({
 
   return (
     <div className="card elev-sm paused-card" data-testid="paused-card">
-      <div className="field">
-        <label htmlFor="paused-steer">
-          Steer{" "}
-          <span className="field-hint">
-            · goes into the next attempt's system prompt, never into the repo
-          </span>
-        </label>
-        <textarea
-          id="paused-steer"
-          className="input"
-          value={steer}
-          onChange={(e) => setSteer(e.target.value)}
-        />
-      </div>
+      {steerable && (
+        <div className="field">
+          <label htmlFor="paused-steer">
+            Steer{" "}
+            <span className="field-hint">
+              · goes into the next attempt's system prompt, never into the repo
+            </span>
+          </label>
+          <textarea
+            id="paused-steer"
+            className="input"
+            value={steer}
+            onChange={(e) => setSteer(e.target.value)}
+          />
+        </div>
+      )}
       <div className="gate-actions capped-actions">
+        {steerable && (
+          <button
+            className="btn btn-primary"
+            disabled={busy || steer.trim() === ""}
+            onClick={() => resume(true)}
+          >
+            <Play size={14} />
+            Resume with steer
+          </button>
+        )}
         <button
-          className="btn btn-primary"
-          disabled={busy || steer.trim() === ""}
-          onClick={() => resume(true)}
+          className={steerable ? "btn btn-ghost" : "btn btn-primary"}
+          disabled={busy}
+          onClick={() => resume(false)}
         >
-          <Play size={14} />
-          Resume with steer
-        </button>
-        <button className="btn btn-ghost" disabled={busy} onClick={() => resume(false)}>
-          Resume without
+          {steerable ? (
+            "Resume without"
+          ) : (
+            <>
+              <Play size={14} />
+              Resume
+            </>
+          )}
         </button>
         <span className="control-hint">
-          relaunches {paused[0]?.hook_point ?? item.current_node_id} as attempt {attempt}
+          {steerable
+            ? `relaunches ${paused[0]?.hook_point ?? item.current_node_id} as attempt ${attempt}`
+            : `${paused[0]?.hook_point ?? item.current_node_id} has no agent to steer — resume just re-runs it`}
         </span>
       </div>
       {err && <p className="form-error">{err}</p>}

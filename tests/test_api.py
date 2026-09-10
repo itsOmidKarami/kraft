@@ -17,7 +17,7 @@ from support.harness import (
     make_repo_with_engineering,
 )
 
-from kraft import events
+from kraft import events, store
 from kraft.adapters import beads
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -86,6 +86,20 @@ def _wait_for_status(client, wid, status, timeout=30):
             return body
         time.sleep(0.15)
     raise AssertionError(f"status never became {status!r}; last body={body}")
+
+
+def _seed_repo(client, wid, **kwargs):
+    """Write a `work_item_repos` row directly — same reasoning as `_seed_events`:
+    `Database` exposes only an async `write`, and a multi-repo item's row is
+    otherwise only ever created by `ensure_worktree`/the §3a submodule scan,
+    neither of which a detail-payload test needs to actually run."""
+    db_path = Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        store.add_repo(conn, work_item_id=wid, **kwargs)
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _seed_events(client, wid, payloads, event_type="findings_measured"):
@@ -1571,6 +1585,60 @@ def test_concerns_reach_the_detail_payload(tmp_path, monkeypatch):
 
         body = client.get(f"/api/work-items/{wid}").json()
         assert body["concerns"] == ["untested path"]
+
+
+def test_mr_ref_reaches_the_detail_payload(tmp_path, monkeypatch):
+    """A single-repo item gets no `work_item_repos` row (`repos_for`), so
+    `mr_opened` (Kraft-d2sq) is the only place its merge request lives --
+    the detail screen's "Open MR" link reads it from here."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+        ).json()["id"]
+        assert client.get(f"/api/work-items/{wid}").json()["mr_ref"] is None
+
+        _seed_events(
+            client,
+            wid,
+            [{"number": 12, "url": "https://forge.example/mr/12"}],
+            event_type="mr_opened",
+        )
+        body = client.get(f"/api/work-items/{wid}").json()
+        assert body["mr_ref"] == {"number": 12, "url": "https://forge.example/mr/12"}
+
+        # A retry that reuses the MR logs a fresh event -- the latest one wins,
+        # not the first-open URL for a branch since force-pushed.
+        _seed_events(
+            client,
+            wid,
+            [{"number": 12, "url": "https://forge.example/mr/12?refresh"}],
+            event_type="mr_opened",
+        )
+        body = client.get(f"/api/work-items/{wid}").json()
+        assert body["mr_ref"]["url"] == "https://forge.example/mr/12?refresh"
+
+
+def test_mr_ref_stays_silent_on_a_multi_repo_item(tmp_path, monkeypatch):
+    """A multi-repo item's `open_mr` node emits one `mr_opened` per target
+    repo with no repo identifier in the payload -- the latest one is as
+    likely to be a submodule's as the root's, so this must not guess."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+        ).json()["id"]
+        _seed_repo(client, wid, repo_path="/wt", role="root", merge_rank=1)
+        _seed_events(
+            client,
+            wid,
+            [{"number": 3, "url": "https://forge.example/mr/3"}],
+            event_type="mr_opened",
+        )
+        body = client.get(f"/api/work-items/{wid}").json()
+        assert body["mr_ref"] is None
 
 
 def test_stop_reason_reaches_the_detail_payload(tmp_path, monkeypatch):
