@@ -48,7 +48,9 @@ src/kraft/_bundled/
 .kraft-lite/chains/
 .kraft-lite/chain.jsonl
 
-# Per-worker-session summaries: one file per agent session, including sessions
-# that accomplished nothing. Operational telemetry, not the design record --
-# which is what specs/, plans/ and review_briefs/ under .engineering/ carry.
-.engineering/sessions/
+# Kraft's own artifacts -- specs, plans, chain reviews, review briefs, session
+# summaries. Since MR113 these are ingested straight into Kraft's index
+# (Indexer.ingest_gate_artifact) and never meant to land in the connected
+# repo's git history; a worker's end-of-session `git add -A` was still
+# scooping them up because only sessions/ was ignored here.
+.engineering/
