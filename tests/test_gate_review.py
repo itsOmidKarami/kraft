@@ -196,7 +196,14 @@ async def _seed_at_gate(database, rd, wid, chain, *, auto_gate):
     )
 
 
-async def _review_from_gate(database, rd, chain, *, auto_gate, wid="w1"):
+async def _passthrough_approve(row, gate):
+    """What `api.apply_approval` returns for a gate with nothing to splice."""
+    return json.loads(row["chain_definition"]), None
+
+
+async def _review_from_gate(
+    database, rd, chain, *, auto_gate, wid="w1", on_approve=_passthrough_approve
+):
     """Enter `_review_gates` exactly as `run` does when its walk stopped at a gate."""
     await _seed_at_gate(database, rd, wid, chain, auto_gate=auto_gate)
     return await executor._review_gates(
@@ -208,6 +215,7 @@ async def _review_from_gate(database, rd, chain, *, auto_gate, wid="w1"):
         policy=POLICY,
         launch=executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None),
         bd_cwd=None,
+        on_approve=on_approve,
     )
 
 
@@ -401,6 +409,96 @@ def test_budget_exhaustion_skips_the_review(tmp_path, monkeypatch):
             assert reviewed == []
             types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, "w1"))]
             assert types[-1] == "gate_auto_review_skipped"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_approve_without_an_approval_door_leaves_the_gate_for_a_human(tmp_path, monkeypatch):
+    """`store.approve_gate` is not the whole of an approval: `chain_finalized`
+    splices the reviewed nodes in and every artifact-carrying gate indexes its
+    document. Without `on_approve` those cannot run, and clearing the gate with
+    half an approval is worse than not clearing it."""
+    calls = []
+    _stub_review(monkeypatch, "approve")
+    _stub_walk(monkeypatch, calls)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await Database.open(rd.db)
+        try:
+            status = await _review_from_gate(database, rd, CHAIN2, auto_gate=True, on_approve=None)
+            assert status == "awaiting_gate"
+            assert calls == []
+            assert executor.pending_gate(database, "w1") == "human_review_approval"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_approve_parks_the_item_when_the_approval_refuses(tmp_path, monkeypatch):
+    """A `chain_review` artifact that is missing, corrupt, or reports `error`
+    makes `apply_approval` return no chain. A person gets it, and the gate is
+    not cleared on the way."""
+    calls = []
+    _stub_review(monkeypatch, "approve")
+    _stub_walk(monkeypatch, calls)
+
+    async def refuse(row, gate):
+        return None, "chain_review: no artifact found; the worker did not write one"
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await Database.open(rd.db)
+        try:
+            status = await _review_from_gate(
+                database, rd, CHAIN2, auto_gate=True, on_approve=refuse
+            )
+            assert status == "needs_human"
+            assert calls == []
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = 'w1'").fetchone()
+            )
+            assert row["status"] == "needs_human"
+            log = database.read(lambda c: events.read_after(c, 0, "w1"))
+            stops = [e for e in log if e["type"] == "work_item_needs_human"]
+            assert "no artifact found" in stops[-1]["payload"]["reason"]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_approve_walks_the_chain_the_approval_returned(tmp_path, monkeypatch):
+    """The point of routing an agent approval through the same door: a
+    `chain_finalized` approval splices a new tail in, and the walk has to
+    re-enter against that tail rather than the chain the gate opened on."""
+    calls = []
+    _stub_review(monkeypatch, "approve")
+    _stub_walk(monkeypatch, calls)
+
+    spliced = {
+        "nodes": [
+            CHAIN2["nodes"][0],
+            CHAIN2["nodes"][1],
+            {"id": "extra", "tasks": [], "gate_after": None},
+        ]
+    }
+
+    async def splice(row, gate):
+        return spliced, None
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await Database.open(rd.db)
+        try:
+            status = await _review_from_gate(
+                database, rd, CHAIN2, auto_gate=True, on_approve=splice
+            )
+            assert status == "completed"
+            assert [c[0] for c in calls] == [2]
         finally:
             await database.close()
 
