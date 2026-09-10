@@ -151,3 +151,66 @@ test("the document modal hides what a phone cannot do", async ({ page }) => {
   await expect(modal.getByRole("button", { name: /choose editor/i })).toBeHidden();
   await expect(modal.getByTitle("Copy path")).toBeVisible();
 });
+
+test("the bottom nav reaches every screen and highlights the active tab", async ({ page }) => {
+  await createItem(page, "phone shell", "default");
+  const nav = page.getByRole("navigation", { name: "primary" });
+  await expect(nav).toBeVisible();
+
+  // every tab meets the 44px touch-target floor
+  for (const label of ["Board", "Search", "Analytics", "Settings"]) {
+    const box = await nav.getByRole("link", { name: label }).boundingBox();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+  }
+
+  await nav.getByRole("link", { name: "Analytics" }).click();
+  await expect(page).toHaveURL(/\/analytics$/);
+  await expect(nav.getByRole("link", { name: "Analytics" })).toHaveClass(/active/);
+
+  await nav.getByRole("link", { name: "Settings" }).click();
+  await expect(page).toHaveURL(/\/settings/);
+
+  await nav.getByRole("link", { name: "Board" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(nav.getByRole("link", { name: "Board" })).toHaveClass(/active/);
+
+  await expect(overflowsX(page.locator("body"))).resolves.toBe(false);
+});
+
+test("Search opens as a full screen from the bottom nav, not a modal", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "primary" }).getByRole("link", { name: "Search" }).click();
+  await expect(page).toHaveURL(/\/search$/);
+  expect(await page.getByRole("dialog", { name: "Search" }).count()).toBe(0);
+  await page.getByRole("searchbox").fill("reconnect backoff");
+  await expect(page.locator(".search-result-title", { hasText: "WS transport design" })).toBeVisible();
+  await page.screenshot({ path: `${SHOTS}/phone-07-search.png`, fullPage: true });
+});
+
+test("Analytics stacks by-node and by-repo into cards with no horizontal overflow", async ({ page }) => {
+  await createItem(page, "phone analytics", "quick-task");
+  await expect(page.getByText(/completed|needs you/i).first()).toBeVisible({ timeout: 60_000 });
+  await page.goto("/analytics");
+  // `.node-row` also matches the `.node-head` header row, which this phone
+  // layout hides (asserted below) — `[data-node]` picks a real data row.
+  await expect(page.locator(".node-row[data-node]").first()).toBeVisible();
+  await page.screenshot({ path: `${SHOTS}/phone-08-analytics.png`, fullPage: true });
+  expect(await overflowsX(page.locator(".analytics-body"))).toBe(false);
+  // the head row is redundant once every cell carries its own label
+  await expect(page.locator(".node-head")).toBeHidden();
+});
+
+test("Templates and Steering show the open-on-desktop notice instead of an editable textarea", async ({ page }) => {
+  await page.goto("/settings/templates");
+  await expect(page.getByText(/open on desktop to edit/i)).toBeVisible();
+  await expect(page.getByLabel("template nodes")).toBeHidden();
+
+  await page.goto("/settings/steering");
+  const first = page.locator(".template-list .facet-opt").first();
+  if ((await first.count()) > 0) {
+    await first.click();
+    await expect(page.getByText(/open on desktop to edit/i)).toBeVisible();
+    await expect(page.getByLabel("steering body")).toBeHidden();
+  }
+  await page.screenshot({ path: `${SHOTS}/phone-09-settings.png`, fullPage: true });
+});

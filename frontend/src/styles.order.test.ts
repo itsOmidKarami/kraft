@@ -48,3 +48,10 @@ describe("styles.css specificity", () => {
     expect(rule).toMatch(/textarea\.template-yaml/);
   });
 });
+
+describe("styles.css specificity — phone header", () => {
+  it("re-qualifies .desktop-only so it outranks .app-nav .nav-link / .app-nav .btn", () => {
+    const css = readFileSync(join(here, "styles.css"), "utf-8");
+    expect(css).toMatch(/\.app-nav \.nav-link\.desktop-only,\s*\n\s*\.app-nav \.btn\.desktop-only \{ display: none; \}/);
+  });
+});
