@@ -94,8 +94,20 @@ def _copy_attachments(
         resolved = dest.resolve()
         if resolved != worktree_root and worktree_root not in resolved.parents:
             continue
-        if dest.exists() or not src.is_file():
+        if dest.exists():
             continue
+        if not src.is_file():
+            # Not a skip. `source` is Kraft's own copy since Kraft-eqgn, so a
+            # file missing here means Kraft lost it — and the gate this
+            # document justified was trimmed at intake and cannot be put back.
+            # Continuing would run the item without a document it promised, and
+            # without a gate to notice. Should be unreachable; loud if not.
+            raise FileNotFoundError(
+                f"the {attachment['kind']} attachment for {work_item_id} is missing "
+                f"from Kraft's storage at {src}; this work item's "
+                f"{attachment['kind']} gate was trimmed at intake and cannot be "
+                "restored — re-file the work item"
+            )
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, dest)
         written.append(attachment)

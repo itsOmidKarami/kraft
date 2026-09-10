@@ -205,6 +205,48 @@ def test_an_attachment_from_another_worktree_is_copied_from_its_source(tmp_path)
     asyncio.run(scenario())
 
 
+def test_a_missing_attachment_source_fails_loudly(tmp_path):
+    """After Kraft-eqgn the source is Kraft's own copy, so a missing file here
+    means Kraft lost it. The gate it justified is already trimmed and cannot be
+    put back, so continuing would run the item with a document it promised and
+    does not have — silently, which is the bug this closes."""
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="w1",
+                    bead_id="B",
+                    title="t",
+                    repo=str(repo),
+                    chain_template="quick-task",
+                    chain_definition="{}",
+                )
+            )
+            with pytest.raises(FileNotFoundError, match="missing from Kraft's storage"):
+                await kraft_builtins.ensure_worktree(
+                    database,
+                    rd,
+                    repo=str(repo),
+                    work_item_id="w1",
+                    attachments=[
+                        {
+                            "kind": "spec",
+                            "path": ".engineering/specs/s.md",
+                            "source": str(tmp_path / "run" / "attachments" / "w1" / "spec.md"),
+                        }
+                    ],
+                )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 def _porcelain(cwd):
     return subprocess.run(
         ["git", "status", "--porcelain"], cwd=cwd, capture_output=True, text=True, check=True
