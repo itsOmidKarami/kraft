@@ -74,6 +74,21 @@ def read_question(path: Path) -> str | None:
     return _read_str_field(path, "question")
 
 
+def read_verdict(path: Path) -> str | None:
+    """`verdict` from a gate-review result file, or None (Kraft-zr3s).
+
+    Deliberately absent from `read_result_fields`. That function exists because
+    a field which must reach the DB has two independent readers -- the
+    in-process exit and `reattach._exit_from_file` -- and one of them forgetting
+    it is Kraft-k3d. A verdict never reaches the DB: `gate_review` reads it once,
+    in-process, and acts on it immediately. The asymmetry is the crash story
+    rather than a gap in it -- on the reattach path there is no gate_review frame
+    to act on a verdict, so none is read, so the gate stays pending and a human
+    decides.
+    """
+    return _read_str_field(path, "verdict")
+
+
 def read_result_fields(path: Path) -> dict[str, str | None]:
     """`session_summary_ref`/`concerns`/`question` together.
 

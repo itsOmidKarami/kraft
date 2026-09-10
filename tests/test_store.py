@@ -102,6 +102,46 @@ def test_create_work_item_without_a_description_stores_null(tmp_path):
     asyncio.run(scenario())
 
 
+def test_auto_gate_defaults_off_and_round_trips(tmp_path):
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="w1",
+                    bead_id=None,
+                    title="t",
+                    repo="/r",
+                    chain_template="default",
+                    chain_definition="{}",
+                )
+            )
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="w2",
+                    bead_id=None,
+                    title="t",
+                    repo="/r",
+                    chain_template="default",
+                    chain_definition="{}",
+                    auto_gate=True,
+                )
+            )
+            rows = {
+                r["id"]: r["auto_gate"]
+                for r in database.read(
+                    lambda c: c.execute("SELECT id, auto_gate FROM work_items").fetchall()
+                )
+            }
+            assert rows == {"w1": 0, "w2": 1}
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 def test_node_lifecycle_events_and_current_node(tmp_path):
     async def scenario():
         database = await _open(tmp_path)
@@ -1029,6 +1069,7 @@ def test_last_rejection_reads_the_note_and_the_target_back(tmp_path):
                 "gate": "plan_approval",
                 "note": "task 4 has no test",
                 "node": "plan",
+                "by": "human",
             }
         finally:
             await database.close()

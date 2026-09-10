@@ -503,6 +503,9 @@ class NewWorkItem(BaseModel):
     #: False creates the item without running it (design §6 rule 1). An agent
     #: cannot spend tokens unattended; a human starts it from the board.
     autostart: bool = True
+    #: Arms agent gate review for this item's `auto_escalate` gates
+    #: (Kraft-zr3s). Off by default; a human opts in per item.
+    auto_gate: bool = False
 
 
 def _git_common_dir(path: Path) -> Path | None:
@@ -642,6 +645,7 @@ async def create_work_item(body: NewWorkItem, request: Request):
             root_merge_policy=body.root_merge_policy,
             attachments=attachments,
             status="active" if body.autostart else "paused",
+            auto_gate=body.auto_gate,
         )
     except Exception as exc:  # noqa: BLE001 -- executor.intake raises several unrelated types
         # No longer reachable for a bd failure — `executor.intake` degrades
@@ -704,11 +708,7 @@ def _work_item_row(st, wid):
 
 
 def _pending_gate(st, wid: str) -> str | None:
-    evts = st.db.read(lambda c: events.read_after(c, 0, wid))
-    for e in reversed(evts):
-        if e["type"] in ("gate_requested", "gate_approved", "gate_rejected"):
-            return e["payload"]["gate"] if e["type"] == "gate_requested" else None
-    return None
+    return executor.pending_gate(st.db, wid)
 
 
 #: The event types that bound a `work_item_needs_human` stop, newest wins —
@@ -746,38 +746,11 @@ def _needs_context_stop(st, wid: str) -> bool:
 
 
 def _gate_node_index(chain: dict, gate: str) -> int:
-    return next(i for i, n in enumerate(chain["nodes"]) if n.get("gate_after") == gate)
+    return executor.gate_node_index(chain, gate)
 
 
 def _gate_artifact(st, row, gate: str | None) -> str | None:
-    """The document the pending gate is a decision *about*, or None.
-
-    Derived from the binding, not stored: the gate's node names its hooks, a
-    hook with `artifact:` names a kind, and the kind plus the work item id is
-    the path (`agent.artifact_path`). Nothing here to migrate and nothing to go
-    stale when a rerun revises the same file.
-
-    None when there is no pending gate, when none of the node's hooks produce
-    an artifact, or when the file is not on disk — the last case is an agent
-    that reported done without honouring the contract, and the gate is still
-    answerable, just without a document to read.
-    """
-    if not gate:
-        return None
-    chain = json.loads(row["chain_definition"])
-    try:
-        node = chain["nodes"][_gate_node_index(chain, gate)]
-    except StopIteration:
-        return None
-    worktree = st.run_dirs.worktrees / row["id"]
-    for task in node["tasks"]:
-        kind = st.registry.hooks.get(task, {}).get("artifact")
-        if not kind:
-            continue
-        rel = agent_mod.artifact_path(kind, row["id"])
-        if (worktree / rel).is_file():
-            return rel
-    return None
+    return executor.gate_artifact(st.registry, st.run_dirs, row, gate)
 
 
 def _strip_front_matter(text: str) -> str:
@@ -1378,30 +1351,6 @@ async def approve_gate(wid: str, gate: str, request: Request):
     return {k: v for k, v in dict(_work_item_row(st, wid)).items()}
 
 
-def _reject_target(chain: dict, gate_index: int, requested: str | None) -> int:
-    """The index a rejection re-enters the chain at (Kraft-ko7j).
-
-    `requested`, else the gate node's `reject_to`, else the gate node itself.
-    A `reject_to` that `materialize` dropped — an intake attachment satisfied
-    that node's gate — falls back to the gate node rather than 500-ing; a bad
-    `node` in the request body is the caller's error and is a 400.
-    """
-    nodes = chain["nodes"]
-    name = requested or nodes[gate_index].get("reject_to")
-    if not name:
-        return gate_index
-    index = next((i for i, n in enumerate(nodes) if n["id"] == name), None)
-    if index is None or index > gate_index:
-        if requested:
-            raise HTTPException(
-                400,
-                f"cannot reject to {name!r}: not a node of this chain at or before "
-                f"{nodes[gate_index]['id']!r}",
-            )
-        return gate_index
-    return index
-
-
 @api_router.post("/work-items/{wid}/gates/{gate}/reject")
 async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
     """Reject a gate and put the chain back to work (02 §7.2, backward motion).
@@ -1420,42 +1369,25 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
         raise HTTPException(409, f"gate {gate!r} is not pending")
 
     chain = json.loads(row["chain_definition"])
-    gate_index = _gate_node_index(chain, gate)
-    node_id = chain["nodes"][gate_index]["id"]
-    # Resolved before anything is written: a bad target must leave the gate
-    # pending and the events table untouched.
-    target = _reject_target(chain, gate_index, body.node)
-    key = f"{gate}_reject_loop"
 
     if st.invalid_policy:
         # Same posture as intake (§9): a re-run we cannot bound is not started.
         raise HTTPException(
             503, f"policy config invalid, refusing work: {'; '.join(st.invalid_policy)}"
         )
-    # Same counter machinery as a fix loop: rejections are bounded, and the
-    # cap is snapshotted on first fire rather than re-resolved per attempt.
-    cap = policy_mod.resolve_cap(st.policy, key)
-    count, started_at, cap = await st.db.write(
-        lambda c, cap=cap: store.bump_counter(c, wid, key, cap)
-    )
-    replan = (
-        policy_mod.check(count=count, started_at=started_at, cap=cap, now=executor._now()) == "ok"
-    )
-
-    target_id = chain["nodes"][target]["id"]
-    await st.db.write(
-        lambda c: store.reject_gate(c, wid, gate, body.note, reopen=replan, node=target_id)
-    )
-    if not replan:
-        await st.db.write(
-            lambda c: store.mark_needs_human(
-                c,
-                wid,
-                node_id,
-                f"{key} exhausted after {count - 1} rejection(s)",
-                {"cycles": count - 1, "attempts": cap.attempts},
-            )
+    try:
+        target = await executor.apply_rejection(
+            st.db,
+            st.policy,
+            work_item_id=wid,
+            chain=chain,
+            gate=gate,
+            note=body.note,
+            node=body.node,
         )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if target is None:
         return {k: v for k, v in dict(_work_item_row(st, wid)).items()}
 
     _spawn(

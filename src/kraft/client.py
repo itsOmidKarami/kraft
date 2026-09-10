@@ -517,6 +517,7 @@ async def create_work_item(
     chain_template: str = "default",
     description: str | None = None,
     attachments: list[dict] | None = None,
+    auto_gate: bool = False,
 ) -> dict:
     """Create a work item. It lands paused: an agent files work, a human starts it.
 
@@ -550,6 +551,7 @@ async def create_work_item(
             "repo": repo,
             "chain_template": chain_template,
             "autostart": False,
+            "auto_gate": auto_gate,
             **({"description": description} if description else {}),
             **({"attachments": attachments, "cwd": str(Path.cwd())} if attachments else {}),
         },

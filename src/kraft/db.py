@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -64,6 +64,9 @@ CREATE TABLE work_items (
   -- (distinct from any worker_sessions.id) -- see `escalate.py`. NULL until
   -- the first escalation turn.
   escalation_session_id TEXT,
+  -- whether this item's `auto_escalate` gates may be reviewed by an agent
+  -- before a human sees them (Kraft-zr3s). Off unless a human asked for it.
+  auto_gate        INTEGER NOT NULL DEFAULT 0,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
@@ -433,6 +436,7 @@ SELECT id, bead_id, title, description, repo, chain_template, chain_definition,
         "CREATE INDEX idx_work_item_repos_item ON work_item_repos(work_item_id, merge_rank)",
     ],
     19: ["ALTER TABLE work_items ADD COLUMN escalation_session_id TEXT"],
+    20: ["ALTER TABLE work_items ADD COLUMN auto_gate INTEGER NOT NULL DEFAULT 0"],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins
