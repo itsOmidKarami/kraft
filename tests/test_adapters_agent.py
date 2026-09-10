@@ -787,6 +787,44 @@ def test_escalate_falls_back_to_the_repo_default_when_the_hook_names_neither():
     )
 
 
+def test_item_override_model_beats_binding_model():
+    binding = {"command": "c", "model": "sonnet"}
+    inv = agent.resolve_invocation(binding, {}, None, item_override={"model": "opus"})
+    assert inv.model == "opus"
+
+
+def test_item_override_escalate_model_beats_binding_escalate_model_while_escalating():
+    binding = {"command": "c", "escalate_model": "opus"}
+    inv = agent.resolve_invocation(
+        binding, {}, None, escalate=True, item_override={"escalate_model": "opus-max"}
+    )
+    assert inv.model == "opus-max"
+
+
+def test_binding_escalate_model_beats_item_plain_model_override_while_escalating():
+    """The bead's own worked case: a cheap item override must not suppress the
+    escalation valve. A plain `model` override is not `escalate_model`, so it
+    does not compete with the binding's `escalate_model` while escalating."""
+    binding = {"command": "c", "model": "sonnet", "escalate_model": "opus"}
+    inv = agent.resolve_invocation(
+        binding, {}, None, escalate=True, item_override={"model": "haiku"}
+    )
+    assert inv.model == "opus"
+
+
+def test_item_override_effort_beats_binding_effort():
+    binding = {"command": "c", "effort": "low"}
+    inv = agent.resolve_invocation(binding, {}, None, item_override={"effort": "max"})
+    assert inv.effort == "max"
+
+
+def test_no_item_override_falls_through_to_binding_and_repo_default():
+    binding = {"command": "c", "model": "sonnet", "effort": "low"}
+    inv = agent.resolve_invocation(binding, {}, None, item_override=None)
+    assert inv.model == "sonnet"
+    assert inv.effort == "low"
+
+
 def test_an_artifact_binding_names_the_exact_path_in_the_system_prompt(monkeypatch):
     seen = _capture_cmd(monkeypatch)
     _run(artifact="spec")

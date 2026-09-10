@@ -179,13 +179,19 @@ def resolve_invocation(
     *,
     skills_dir: Path | None = None,
     escalate: bool = False,
+    #: A work item's own model/effort override (Kraft-4k6l), already
+    #: validated by `validate_agent_overrides`. `None` or `{}` both mean "no
+    #: override", so a caller does not have to special-case an unset column.
+    item_override: dict | None = None,
 ) -> Invocation:
-    """Fold a hook binding and a repo entry into one launch.
+    """Fold a hook binding, a repo entry, and an item's own override into one
+    launch.
 
     Precedence lives here and only here. Spelling it out at each call site is how
     three features that touch the same twenty lines end up disagreeing.
     """
     repo = repo_entry or {}
+    io = item_override or {}
     deny: list[str] = []
     for name in (*repo.get("deny_tools", ()), *binding.get("deny_tools", ())):
         if name not in deny:
@@ -219,14 +225,23 @@ def resolve_invocation(
     # steering is what a repo demands of every hook. A repo-level default would
     # make one hook's method depend on which repo it ran in.
     method_text = _skill.read(skills_dir, binding["skill"]) if binding.get("skill") else None
+    # The item's own override wins over the binding's, for both the plain and
+    # the escalate model -- but the two never compete with each other: while
+    # escalating, only an escalate model (the item's if it set one, else the
+    # binding's) can win, so a cheap item override can never suppress the
+    # escalation valve (the bead's own worked case).
+    eff_model = io.get("model") if io.get("model") is not None else binding.get("model")
+    eff_escalate_model = (
+        io.get("escalate_model")
+        if io.get("escalate_model") is not None
+        else binding.get("escalate_model")
+    )
     return Invocation(
         command=binding["command"],
         profile=binding.get("profile", "claude"),
         # `escalate` is the fix loop asking for a capability bump, not naming a
         # model: an unset `escalate_model` falls through to the ordinary chain.
-        model=(binding.get("escalate_model") if escalate else None)
-        or binding.get("model")
-        or repo.get("default_model"),
+        model=(eff_escalate_model if escalate else None) or eff_model or repo.get("default_model"),
         deny_tools=tuple(deny),
         steering_texts=steering_texts,
         method_text=method_text,
@@ -235,8 +250,9 @@ def resolve_invocation(
         # mechanical — not of the repo it runs in. A repo-wide default would
         # make the same node think harder in one checkout than another.
         # Deliberately no `escalate_effort`: `escalate_model` is already the fix
-        # loop's capability bump, and two bump knobs is one too many.
-        effort=binding.get("effort"),
+        # loop's capability bump, and two bump knobs is one too many. The
+        # item's own override, when set, wins over the binding's either way.
+        effort=io.get("effort") if io.get("effort") is not None else binding.get("effort"),
         # Hook-level only, like `effort` and unlike `deny_tools`. Unioning a
         # repo allowlist with a hook's would *widen* the narrower one, which is
         # the opposite of what an allowlist is for; a deny list only ever

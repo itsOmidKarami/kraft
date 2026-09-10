@@ -35,6 +35,8 @@ def test_the_tools_are_registered():
         "retry_work_item",
         "escalate_work_item",
         "set_mr_labels",
+        "set_chain_template",
+        "set_agent_overrides",
         "permission_request",
     }
 

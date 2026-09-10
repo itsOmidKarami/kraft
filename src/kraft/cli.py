@@ -494,6 +494,22 @@ def _cmd_mr_label(ns: argparse.Namespace) -> None:
     emit(asyncio.run(client.mr_labels(ns.labels, ns.id)), _render_action, ns.json)
 
 
+def _cmd_set_chain(ns: argparse.Namespace) -> None:
+    emit(asyncio.run(client.set_chain_template(ns.template, ns.id)), _render_action, ns.json)
+
+
+def _cmd_set_overrides(ns: argparse.Namespace) -> None:
+    emit(
+        asyncio.run(
+            client.set_agent_overrides(
+                ns.model, ns.escalate_model, ns.effort, clear=ns.clear, work_item_id=ns.id
+            )
+        ),
+        _render_action,
+        ns.json,
+    )
+
+
 def _print_log(entry: dict, as_json: bool) -> None:
     """NDJSON under --json: one object per line, because a stream has no end to
     close an array on. `flush` because a follow that buffers is not a follow."""
@@ -790,6 +806,34 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     escalate.add_argument("id", nargs="?")
     escalate.add_argument("--message", required=True, help="what to tell the agent")
     escalate.set_defaults(func=_cmd_escalate)
+
+    set_chain = subs.add_parser(
+        "set-chain", parents=[common], help="switch a not-yet-started item's chain template"
+    )
+    # A plain optional positional, like pause/resume/retry -- there is only
+    # one positional-shaped argument here (`--template` is a flag either way),
+    # unlike `mr-label`, which needs `--id` because a bare positional ahead of
+    # its own `nargs="+"` labels would be ambiguous the moment two labels are
+    # given with no id.
+    set_chain.add_argument("id", nargs="?")
+    set_chain.add_argument("--template", required=True, help="a chain template name")
+    set_chain.set_defaults(func=_cmd_set_chain)
+
+    set_overrides = subs.add_parser(
+        "set-overrides",
+        parents=[common],
+        help="per-item model/effort override, without changing the chain",
+    )
+    set_overrides.add_argument("id", nargs="?")
+    set_overrides.add_argument("--model", help="plain model override")
+    set_overrides.add_argument(
+        "--escalate-model", help="override for the fix loop's escalation model"
+    )
+    set_overrides.add_argument("--effort", help="low, medium, high, xhigh, or max")
+    set_overrides.add_argument(
+        "--clear", action="store_true", help="reset every field to the template's own binding"
+    )
+    set_overrides.set_defaults(func=_cmd_set_overrides)
 
     mr_label = subs.add_parser(
         "mr-label",

@@ -49,12 +49,15 @@ from kraft.paths import (
     default_templates_dir,
 )
 from kraft.templates import (
+    ATTACHMENT_GATES,
     CONFIG_FILES,
     GATE_NAMES,
     Registry,
     RegistryError,
     load_registry,
     load_templates,
+    materialize,
+    validate_agent_overrides,
     validate_nodes,
 )
 from kraft.ws import Broadcaster
@@ -1003,30 +1006,76 @@ async def get_work_item(wid: str, request: Request):
 
 
 class WorkItemPatch(BaseModel):
-    #: Absent means untouched, in both fields. This route is still not a general
-    #: table editor -- a body carrying anything else is ignored, not applied --
-    #: but a screen that edits one field must not blank the other, so neither
-    #: field has a default that means "clear it". `description: ""` clears the
-    #: brief; `description` omitted leaves it alone.
+    #: Absent means untouched, in every field. This route is still not a
+    #: general table editor -- a body carrying anything else is ignored, not
+    #: applied -- but a screen that edits one field must not blank another,
+    #: so no field has a default that means "clear it" except where the field
+    #: itself says otherwise. `description: ""` clears the brief;
+    #: `description` omitted leaves it alone.
     title: str | None = None
     description: str | None = None
+    #: A template name switches a not-yet-started item onto that template's
+    #: own materialized chain (Kraft-gwn6). 404s on an unknown name; 409s once
+    #: `current_node_id` is set -- the chain is fixed for the life of a
+    #: started item.
+    chain_template: str | None = None
+    #: `None` (default) leaves the override alone. `{}` clears every field
+    #: back to the template's own binding; a non-empty object *replaces* the
+    #: whole stored override -- it does not merge with what is already there
+    #: (Kraft-4k6l). No `current_node_id` restriction, unlike `chain_template`:
+    #: a model/effort dial can change mid-chain, including on a paused item --
+    #: that is the point, making a stuck item cheaper before its next retry.
+    agent_overrides: dict | None = None
 
 
 @api_router.patch("/work-items/{wid}")
 async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
     st = request.app.state
-    _work_item_row(st, wid)  # 404s on an unknown work item, before any 422
-    if body.title is None and body.description is None:
-        raise HTTPException(422, "nothing to patch: send a title, a description, or both")
+    row = _work_item_row(st, wid)  # 404s on an unknown work item, before any 422
+    if (
+        body.title is None
+        and body.description is None
+        and body.chain_template is None
+        and body.agent_overrides is None
+    ):
+        raise HTTPException(
+            422, "nothing to patch: send a title, description, chain_template, or agent_overrides"
+        )
     if body.title is not None and not body.title.strip():
         raise HTTPException(422, "title cannot be empty")
 
+    new_chain_definition = None
+    if body.chain_template is not None:
+        template = st.templates.valid.get(body.chain_template)
+        if template is None:
+            raise HTTPException(404, f"unknown chain template {body.chain_template!r}")
+        if row["current_node_id"] is not None:
+            raise HTTPException(
+                409, "work item has already started; template is fixed for its life"
+            )
+        # The exact expression `executor.intake` uses today, against the
+        # item's existing attachments -- switching template must not force a
+        # re-attach to get back a trim the item already earned.
+        satisfied = frozenset(ATTACHMENT_GATES[a["kind"]] for a in executor._attachments(row))
+        new_chain_definition = json.dumps(materialize(template, satisfied_gates=satisfied))
+
+    if body.agent_overrides is not None:
+        errs = validate_agent_overrides(body.agent_overrides)
+        if errs:
+            raise HTTPException(422, errs[0])
+
     def apply(c):
-        # One write, so a two-field patch is one transaction and cannot land half.
+        # One write, so a multi-field patch is one transaction and cannot land half.
         if body.title is not None:
             store.set_title(c, wid, body.title)
         if body.description is not None:
             store.set_description(c, wid, body.description)
+        if body.chain_template is not None:
+            store.set_chain_template(c, wid, body.chain_template, new_chain_definition)
+        if body.agent_overrides is not None:
+            store.set_agent_overrides(
+                c, wid, json.dumps(body.agent_overrides) if body.agent_overrides else None
+            )
 
     await st.db.write(apply)
     return {"id": wid, **body.model_dump(exclude_none=True)}

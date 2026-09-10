@@ -489,6 +489,11 @@ async def _dispatch(
             launch.steering_dir if launch else None,
             skills_dir=launch.skills_dir if launch else None,
             escalate=escalate,
+            item_override=(
+                json.loads(work_item_row["agent_overrides"])
+                if work_item_row["agent_overrides"]
+                else None
+            ),
         )
         status = await _agent.run_agent_task(
             db,
