@@ -54,3 +54,4 @@ src/kraft/_bundled/
 # repo's git history; a worker's end-of-session `git add -A` was still
 # scooping them up because only sessions/ was ignored here.
 .engineering/
+docs/superpowers/
