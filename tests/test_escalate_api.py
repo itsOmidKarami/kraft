@@ -63,22 +63,62 @@ def test_escalate_requires_a_nonempty_message(tmp_path, monkeypatch):
         assert r.status_code == 400
 
 
+def _seed_running_escalation(tmp_path, wid, node_id, session_id="running-turn"):
+    """A `pending` escalation session, inserted directly -- the dispatch
+    machinery itself is exercised elsewhere; these tests only need the guard
+    every door onto the same worktree has to check."""
+    conn = sqlite3.connect(tmp_path / "run" / "orchestrator.db")
+    conn.execute(
+        "INSERT INTO worker_sessions "
+        "(id, work_item_id, node_id, hook_point, log_path, result_path, status, created_at) "
+        "VALUES (?, ?, ?, 'escalation', 'l', 'r', 'pending', 'now')",
+        (session_id, wid, node_id),
+    )
+    conn.commit()
+    conn.close()
+
+
 def test_escalate_refuses_a_second_call_while_one_is_running(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = _needs_human_item(client, repo)
         node_id = client.get(f"/api/work-items/{wid}").json()["current_node_id"]
+        _seed_running_escalation(tmp_path, wid, node_id)
 
+        r = client.post(f"/api/work-items/{wid}/escalate", json={"message": "help"})
+        assert r.status_code == 409
+        assert "running-turn" in r.json()["detail"]
+
+
+def test_retry_refuses_while_an_escalation_turn_is_running(tmp_path, monkeypatch):
+    """`retry` dispatches into the same worktree an escalation agent may
+    already be committing in -- it has to check the same guard `escalate`
+    itself does, not just rely on the UI disabling its own button."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _needs_human_item(client, repo)
+        node_id = client.get(f"/api/work-items/{wid}").json()["current_node_id"]
+        _seed_running_escalation(tmp_path, wid, node_id)
+
+        r = client.post(f"/api/work-items/{wid}/retry", json={})
+        assert r.status_code == 409
+        assert "running-turn" in r.json()["detail"]
+
+
+def test_resume_refuses_while_an_escalation_turn_is_running(tmp_path, monkeypatch):
+    """Same race as `retry`, reached through `resume` instead: a `paused`
+    item can carry a leftover running escalation row (Kraft-esc: an item can
+    leave `needs_human` some other way while an escalation session exists)."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _needs_human_item(client, repo)
+        node_id = client.get(f"/api/work-items/{wid}").json()["current_node_id"]
+        _seed_running_escalation(tmp_path, wid, node_id)
         conn = sqlite3.connect(tmp_path / "run" / "orchestrator.db")
-        conn.execute(
-            "INSERT INTO worker_sessions "
-            "(id, work_item_id, node_id, hook_point, log_path, result_path, status, created_at) "
-            "VALUES ('running-turn', ?, ?, 'escalation', 'l', 'r', 'pending', 'now')",
-            (wid, node_id),
-        )
+        conn.execute("UPDATE work_items SET status = 'paused' WHERE id = ?", (wid,))
         conn.commit()
         conn.close()
 
-        r = client.post(f"/api/work-items/{wid}/escalate", json={"message": "help"})
+        r = client.post(f"/api/work-items/{wid}/resume", json={})
         assert r.status_code == 409
         assert "running-turn" in r.json()["detail"]
