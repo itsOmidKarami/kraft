@@ -373,6 +373,22 @@ def test_create_without_a_description_returns_null(tmp_path, monkeypatch):
         assert [i["description"] for i in listed if i["id"] == wid] == [None]
 
 
+def test_create_work_item_accepts_auto_gate(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        repo = make_repo(tmp_path)
+        wid = client.post(
+            "/api/work-items",
+            json={"title": "t", "repo": str(repo), "autostart": False, "auto_gate": True},
+        ).json()["id"]
+        assert client.get(f"/api/work-items/{wid}").json()["auto_gate"] == 1
+
+        wid2 = client.post(
+            "/api/work-items", json={"title": "t", "repo": str(repo), "autostart": False}
+        ).json()["id"]
+        assert client.get(f"/api/work-items/{wid2}").json()["auto_gate"] == 0
+
+
 def test_patch_updates_the_description_and_records_an_event(tmp_path, monkeypatch):
     """The description feeds every agent prompt, so an edit has to be answerable
     from the timeline: `events` is the authoritative log."""
@@ -698,6 +714,7 @@ def test_gate_reject_requires_note_and_re_runs_the_producer(tmp_path, monkeypatc
             "gate": "spec_approval",
             "note": "too vague",
             "node": "spec",
+            "by": "human",
         }
 
         # the spec node runs again and asks for its gate a second time

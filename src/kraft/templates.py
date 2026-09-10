@@ -421,6 +421,26 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
             )
             continue
 
+        # Which gates an agent may review before a human sees them (Kraft-zr3s).
+        # Only meaningful beside a gate: on a gateless node it would review
+        # nothing, and a config key that silently does nothing is worse than a
+        # rejected one.
+        bad_auto = next(
+            (
+                n["id"]
+                for n in nodes
+                if n.get("auto_escalate") is not None
+                and (not isinstance(n["auto_escalate"], bool) or not n.get("gate_after"))
+            ),
+            None,
+        )
+        if bad_auto is not None:
+            invalid[tid] = (
+                f"template {tid!r}: node {bad_auto!r} 'auto_escalate' must be a bool "
+                f"on a node that declares a 'gate_after'"
+            )
+            continue
+
         valid[tid] = Template(id=tid, nodes=nodes)
 
     return TemplateSet(valid=valid, invalid=invalid)
@@ -440,6 +460,7 @@ def materialize(template: Template, *, satisfied_gates: frozenset[str] = frozens
                 "fix_loop": n.get("fix_loop"),
                 "on_failure": list(n["on_failure"]) if n.get("on_failure") else None,
                 "reject_to": n.get("reject_to"),
+                "auto_escalate": n.get("auto_escalate"),
             }
             for n in template.nodes
             if n.get("gate_after") not in satisfied_gates

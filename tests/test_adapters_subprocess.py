@@ -94,6 +94,20 @@ def test_read_concerns_and_read_question(tmp_path):
     assert sp.read_concerns(question_path) is None
 
 
+def test_read_verdict(tmp_path):
+    p = tmp_path / "r.json"
+    p.write_text(json.dumps({"status": "done", "verdict": "approve"}))
+    assert sp.read_verdict(p) == "approve"
+
+    p.write_text(json.dumps({"status": "done"}))
+    assert sp.read_verdict(p) is None
+
+    p.write_text("not json at all")
+    assert sp.read_verdict(p) is None
+
+    assert sp.read_verdict(tmp_path / "missing.json") is None
+
+
 def test_read_result_fields_is_the_one_place_the_field_list_lives(tmp_path):
     """`run_task` and `reattach._exit_from_file` are two independent readers of
     the same result file; a field spelled out in only one of them would reach
