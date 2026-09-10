@@ -680,7 +680,7 @@ def test_purge_repo_drops_its_documents(tmp_path):
             await ix.startup_scan()
             assert ix.search("harpoon rigging")
 
-            ix.purge_repo(str(repo))
+            await ix.purge_repo(str(repo))
             assert ix.search("harpoon rigging") == []
         finally:
             conn.close()

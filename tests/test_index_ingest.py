@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import subprocess
 
 import pytest
@@ -11,6 +12,13 @@ from kraft.index import ingest
 
 def _git(cwd, *args):
     subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, check=True)
+
+
+def _reconcile(*args, **kwargs):
+    """`ingest.reconcile` is async (the embedding step runs in a thread — see
+    Indexer._write_lock); these tests stay sync callers via a fresh loop each
+    call, same as the rest of this file's style."""
+    return asyncio.run(ingest.reconcile(*args, **kwargs))
 
 
 # ---- split_front_matter ----
@@ -92,7 +100,7 @@ def test_reconcile_tolerates_non_json_front_matter(conn, tmp_path):
         tmp_path,
         {".engineering/specs/a.md": "---\ntitle: A\ndate: 2026-09-04\ntags: [x, y]\n---\nbody\n"},
     )
-    s = ingest.reconcile(conn, str(repo), ingest.scan_repo(repo))
+    s = _reconcile(conn, str(repo), ingest.scan_repo(repo))
     assert s.inserted == 1
     meta = _rows(conn, str(repo))[".engineering/specs/a.md"]["metadata_json"]
     assert "2026-09-04" in meta
@@ -117,22 +125,22 @@ def _rows(conn, repo):
 
 def test_reconcile_insert_then_noop(conn, tmp_path):
     repo = make_repo_with_engineering(tmp_path, {".engineering/specs/a.md": "# A\nalpha\n"})
-    s1 = ingest.reconcile(conn, str(repo), ingest.scan_repo(repo))
+    s1 = _reconcile(conn, str(repo), ingest.scan_repo(repo))
     assert (s1.inserted, s1.updated, s1.renamed, s1.deleted) == (1, 0, 0, 0)
     assert conn.execute("SELECT COUNT(*) FROM documents_fts").fetchone()[0] == 1
 
-    s2 = ingest.reconcile(conn, str(repo), ingest.scan_repo(repo))
+    s2 = _reconcile(conn, str(repo), ingest.scan_repo(repo))
     assert (s2.inserted, s2.updated, s2.renamed, s2.deleted) == (0, 0, 0, 0)
 
 
 def test_reconcile_edit_changes_hash_and_reextracts(conn, tmp_path):
     repo = make_repo_with_engineering(tmp_path, {".engineering/specs/a.md": "# A\nalpha\n"})
-    ingest.reconcile(conn, str(repo), ingest.scan_repo(repo))
+    _reconcile(conn, str(repo), ingest.scan_repo(repo))
     doc_id = _rows(conn, str(repo))[".engineering/specs/a.md"]["id"]
 
     (repo / ".engineering/specs/a.md").write_text("# A\nalpha bravo charlie\n")
     _git(repo, "commit", "-am", "edit")
-    s = ingest.reconcile(conn, str(repo), ingest.scan_repo(repo))
+    s = _reconcile(conn, str(repo), ingest.scan_repo(repo))
     assert (s.inserted, s.updated, s.renamed, s.deleted) == (0, 1, 0, 0)
     row = _rows(conn, str(repo))[".engineering/specs/a.md"]
     assert row["id"] == doc_id
@@ -143,12 +151,12 @@ def test_reconcile_rename_keeps_id(conn, tmp_path):
     repo = make_repo_with_engineering(
         tmp_path, {".engineering/specs/a.md": "# A\nunique body xyzzy\n"}
     )
-    ingest.reconcile(conn, str(repo), ingest.scan_repo(repo))
+    _reconcile(conn, str(repo), ingest.scan_repo(repo))
     doc_id = _rows(conn, str(repo))[".engineering/specs/a.md"]["id"]
 
     _git(repo, "mv", ".engineering/specs/a.md", ".engineering/specs/renamed.md")
     _git(repo, "commit", "-m", "rename")
-    s = ingest.reconcile(conn, str(repo), ingest.scan_repo(repo))
+    s = _reconcile(conn, str(repo), ingest.scan_repo(repo))
     assert (s.inserted, s.updated, s.renamed, s.deleted) == (0, 0, 1, 0)
     rows = _rows(conn, str(repo))
     assert ".engineering/specs/a.md" not in rows
@@ -164,10 +172,10 @@ def test_reconcile_delete_removes_row_and_fts(conn, tmp_path):
             ".engineering/specs/b.md": "# B\ndelete me\n",
         },
     )
-    ingest.reconcile(conn, str(repo), ingest.scan_repo(repo))
+    _reconcile(conn, str(repo), ingest.scan_repo(repo))
     _git(repo, "rm", ".engineering/specs/b.md")
     _git(repo, "commit", "-m", "rm b")
-    s = ingest.reconcile(conn, str(repo), ingest.scan_repo(repo))
+    s = _reconcile(conn, str(repo), ingest.scan_repo(repo))
     assert (s.inserted, s.updated, s.renamed, s.deleted) == (0, 0, 0, 1)
     assert set(_rows(conn, str(repo))) == {".engineering/specs/a.md"}
     assert conn.execute("SELECT COUNT(*) FROM documents_fts").fetchone()[0] == 1
@@ -289,7 +297,7 @@ def test_reconcile_writes_the_links_it_is_given(conn):
             ),
         ),
     ]
-    stats = ingest.reconcile(conn, "/r", scanned)
+    stats = _reconcile(conn, "/r", scanned)
     assert stats.inserted == 2
     docs = _all_docs(conn)
     assert docs[".engineering/sessions/s1.md"]["source_kind"] == "session_summary"
@@ -310,20 +318,20 @@ def test_reconcile_writes_the_links_it_is_given(conn):
 
 
 def test_reconcile_never_deletes_summaries_but_still_deletes_artifacts(conn):
-    ingest.reconcile(
+    _reconcile(
         conn,
         "/r",
         [_artifact(".engineering/specs/a.md", "h1"), _summary(".engineering/sessions/s1.md", "h2")],
     )
-    stats = ingest.reconcile(conn, "/r", [])
+    stats = _reconcile(conn, "/r", [])
     assert stats.deleted == 1  # the artifact only
     assert set(_all_docs(conn)) == {".engineering/sessions/s1.md"}
 
 
 def test_reconcile_summary_update_replaces_links(conn):
     p = ".engineering/sessions/s1.md"
-    ingest.reconcile(conn, "/r", [_summary(p, "h1", links=(ingest.LinkRow(work_item_id="w1"),))])
-    ingest.reconcile(conn, "/r", [_summary(p, "h2", links=(ingest.LinkRow(work_item_id="w2"),))])
+    _reconcile(conn, "/r", [_summary(p, "h1", links=(ingest.LinkRow(work_item_id="w1"),))])
+    _reconcile(conn, "/r", [_summary(p, "h2", links=(ingest.LinkRow(work_item_id="w2"),))])
     doc_id = _all_docs(conn)[p]["id"]
     rows = conn.execute(
         "SELECT work_item_id FROM document_links WHERE document_id=?", (doc_id,)
@@ -341,7 +349,7 @@ def _chunk_rows(conn, doc_id):
 
 
 def test_reconcile_writes_chunks(conn):
-    ingest.reconcile(conn, "/r", [_artifact(".engineering/specs/a.md", "h1")])
+    _reconcile(conn, "/r", [_artifact(".engineering/specs/a.md", "h1")])
     doc_id = _all_docs(conn)[".engineering/specs/a.md"]["id"]
     rows = _chunk_rows(conn, doc_id)
     assert len(rows) == 1
@@ -350,7 +358,7 @@ def test_reconcile_writes_chunks(conn):
 
 def test_changed_content_replaces_chunks(conn):
     p = ".engineering/specs/a.md"
-    ingest.reconcile(conn, "/r", [_artifact(p, "h1")])
+    _reconcile(conn, "/r", [_artifact(p, "h1")])
     doc_id = _all_docs(conn)[p]["id"]
     changed = ingest.ScannedDoc(
         path=p,
@@ -362,7 +370,7 @@ def test_changed_content_replaces_chunks(conn):
         source_created_at=None,
         source_updated_at=None,
     )
-    ingest.reconcile(conn, "/r", [changed])
+    _reconcile(conn, "/r", [changed])
     rows = _chunk_rows(conn, doc_id)
     assert len(rows) == 2
     assert [r["chunk_index"] for r in rows] == [0, 1]
@@ -370,18 +378,18 @@ def test_changed_content_replaces_chunks(conn):
 
 
 def test_deleting_a_document_leaves_no_chunks_or_vectors(conn):
-    ingest.reconcile(conn, "/r", [_artifact(".engineering/specs/a.md", "h1")])
+    _reconcile(conn, "/r", [_artifact(".engineering/specs/a.md", "h1")])
     doc_id = _all_docs(conn)[".engineering/specs/a.md"]["id"]
     chunk_id = _chunk_rows(conn, doc_id)[0]["chunk_index"] is not None
     assert chunk_id
-    ingest.reconcile(conn, "/r", [])
+    _reconcile(conn, "/r", [])
     assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM document_vectors").fetchone()[0] == 0
 
 
 def test_chunks_written_without_an_embedder_and_no_vectors(conn):
-    ingest.reconcile(conn, "/r", [_artifact(".engineering/specs/a.md", "h1")], embedder=None)
+    _reconcile(conn, "/r", [_artifact(".engineering/specs/a.md", "h1")], embedder=None)
     assert conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM document_vectors").fetchone()[0] == 0
 
@@ -391,9 +399,7 @@ def test_vectors_written_when_an_embedder_is_supplied(conn):
         def try_encode(self, texts):
             return [[0.1] * 384 for _ in texts]
 
-    ingest.reconcile(
-        conn, "/r", [_artifact(".engineering/specs/a.md", "h1")], embedder=FakeEmbedder()
-    )
+    _reconcile(conn, "/r", [_artifact(".engineering/specs/a.md", "h1")], embedder=FakeEmbedder())
     doc_id = _all_docs(conn)[".engineering/specs/a.md"]["id"]
     n = conn.execute(
         "SELECT COUNT(*) FROM document_vectors WHERE chunk_id IN "
@@ -408,9 +414,7 @@ def test_embedder_failure_still_keeps_the_document_and_chunks(conn):
         def try_encode(self, texts):
             return None  # model unavailable
 
-    ingest.reconcile(
-        conn, "/r", [_artifact(".engineering/specs/a.md", "h1")], embedder=BrokenEmbedder()
-    )
+    _reconcile(conn, "/r", [_artifact(".engineering/specs/a.md", "h1")], embedder=BrokenEmbedder())
     assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM document_vectors").fetchone()[0] == 0
