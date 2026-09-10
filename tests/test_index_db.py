@@ -89,9 +89,10 @@ def test_v1_index_migrates_forward_keeping_documents(tmp_path):
     schema = "\n".join(
         ln
         for ln in index_db.INDEX_SCHEMA_SQL.splitlines()
-        if "document_chunks" not in ln and "document_vectors" not in ln
+        # crude but sufficient: strip the 4C tables and the v3 `origin` column,
+        # keep everything else -- what a genuine pre-4C, pre-origin file had.
+        if "document_chunks" not in ln and "document_vectors" not in ln and "origin" not in ln
     )
-    # crude but sufficient: drop the two 4C statements, keep everything else
     stmts = [s.strip() for s in schema.split(";") if s.strip()]
     conn.executescript(";\n".join(s for s in stmts if "chunk" not in s and "vec0" not in s) + ";")
     conn.execute("PRAGMA user_version = 1")
@@ -109,3 +110,31 @@ def test_v1_index_migrates_forward_keeping_documents(tmp_path):
     names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert "document_chunks" in names
     conn.close()
+
+
+def test_v2_index_migrates_forward_defaulting_origin_to_git_scan(tmp_path):
+    """Kraft-<id>: `origin` distinguishes reconcile's git-truth rows from the
+    ones ingested at gate approval, which must survive a rescan that finds no
+    trace of them in git. An existing file predates the concept entirely --
+    every row on it really did come from a git scan, so that is the default a
+    plain `ADD COLUMN` gives them, not a guess."""
+    path = tmp_path / "index.db"
+    conn = index_db.connect(path)
+    schema = "\n".join(ln for ln in index_db.INDEX_SCHEMA_SQL.splitlines() if "origin" not in ln)
+    conn.executescript(schema)
+    conn.execute("PRAGMA user_version = 2")
+    conn.execute(
+        "INSERT INTO documents (id, repo, source_kind, kind, title, path, content, "
+        "content_hash, metadata_json, indexed_at) VALUES "
+        "('d1','/r','artifact','specs','A','.engineering/specs/a.md','body','h','{}','t')"
+    )
+    conn.commit()
+    conn.close()
+
+    conn = index_db.open_index(path)
+    try:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == index_db.INDEX_SCHEMA_VERSION
+        row = conn.execute("SELECT origin FROM documents WHERE id='d1'").fetchone()
+        assert row["origin"] == "git_scan"
+    finally:
+        conn.close()

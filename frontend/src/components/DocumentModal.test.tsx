@@ -159,4 +159,19 @@ describe("DocumentModal", () => {
     expect(screen.getByTitle("Copy path").closest(".desktop-only")).toBeNull();
     expect(screen.getByTitle("Close · Esc").closest(".desktop-only")).toBeNull();
   });
+
+  it("hides Open and Copy path for a document that never reached the repo", async () => {
+    // A session summary or gate artifact -- `path` is a synthetic identifier
+    // Kraft made up for the index, never a real file under `repo`. Offering
+    // "Open in ..." or "Copy path" would send the reader after a file that
+    // does not exist (Kraft-inte).
+    vi.spyOn(api, "getDocument").mockResolvedValue({ ...doc, origin: "event_ingest" });
+    wrap(<DocumentModal id="d1" onClose={() => {}} />);
+    await screen.findByText(/reconnect backoff/);
+    expect(screen.queryByRole("button", { name: /open in/i })).toBeNull();
+    expect(screen.queryByTitle("Copy path")).toBeNull();
+    expect(
+      screen.getByText(/lives only in Kraft's index — it was never written to the connected repo/)
+    ).toBeInTheDocument();
+  });
 });

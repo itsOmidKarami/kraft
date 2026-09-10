@@ -235,6 +235,64 @@ def test_artifact_over_the_cap_truncates_without_500ing_on_a_split_codepoint(
     assert len(body["content"]) <= DIFF_MAX_BYTES
 
 
+def test_approving_a_gate_ingests_its_artifact_into_the_index(client, item_at_spec_gate, worktree):
+    """Nothing Kraft wrote under `.engineering/` is committed anymore
+    (`forge._work_product_pathspec` excludes it), so gate approval is what
+    makes the spec durable:
+    it must land in the index synchronously, before the approve response comes
+    back — not on the indexer's own scan schedule."""
+    _write_artifact(worktree, item_at_spec_gate, "---\ntitle: A spec\n---\n\nthe body\n")
+
+    resp = client.post(f"/api/work-items/{item_at_spec_gate}/gates/spec_approval/approve")
+    assert resp.status_code == 200
+
+    docs = client.get(f"/api/work-items/{item_at_spec_gate}/documents").json()["documents"]
+    artifacts = [d for d in docs if d["source_kind"] == "artifact"]
+    assert len(artifacts) == 1
+    assert artifacts[0]["kind"] == "specs"
+    assert artifacts[0]["path"] == f".engineering/specs/{item_at_spec_gate}.md"
+
+    doc = client.get(f"/api/documents/{artifacts[0]['document_id']}").json()
+    assert doc["title"] == "A spec"
+    assert doc["content"] == "\nthe body\n"
+
+
+def test_approving_a_gate_survives_a_broken_index(client, item_at_spec_gate, worktree, monkeypatch):
+    """A locked index or an unwritable index.db must not block a gate the
+    agent already satisfied. Same contract `ingest_session_summary` gives the
+    event-drain loop (the index never blocks the executor) -- enforced here
+    instead, since approval is a synchronous request a reviewer is waiting on.
+    The approve response must still succeed and the gate must still clear even
+    though nothing got indexed."""
+    _write_artifact(worktree, item_at_spec_gate, "---\ntitle: A spec\n---\n\nthe body\n")
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("index is locked")
+
+    monkeypatch.setattr(api.app.state.indexer, "ingest_gate_artifact", _boom)
+
+    resp = client.post(f"/api/work-items/{item_at_spec_gate}/gates/spec_approval/approve")
+    assert resp.status_code == 200
+
+    docs = client.get(f"/api/work-items/{item_at_spec_gate}/documents").json()["documents"]
+    assert [d for d in docs if d["source_kind"] == "artifact"] == []
+
+
+def test_approving_a_gate_with_no_artifact_ingests_nothing(client, item_at_spec_gate, worktree):
+    """An agent that reported done without honouring the artifact contract
+    (Task 8) must not make gate approval 500, and must leave nothing behind
+    for this gate's artifact -- there is nothing to remember. (The fake
+    agent's own session summary still ingests separately; this only pins the
+    artifact side.)"""
+    (worktree / ".engineering" / "specs" / f"{item_at_spec_gate}.md").unlink()
+
+    resp = client.post(f"/api/work-items/{item_at_spec_gate}/gates/spec_approval/approve")
+    assert resp.status_code == 200
+
+    docs = client.get(f"/api/work-items/{item_at_spec_gate}/documents").json()["documents"]
+    assert [d for d in docs if d["source_kind"] == "artifact"] == []
+
+
 def test_the_review_gate_still_resolves_its_brief(tmp_path):
     """§5. Splitting `on.mr.sync` onto its own node must not move the gate off
     the node that carries the review brief: `_gate_artifact` scans the gate

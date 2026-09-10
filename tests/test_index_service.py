@@ -687,3 +687,36 @@ def test_purge_repo_drops_its_documents(tmp_path):
             await state.close()
 
     asyncio.run(scenario())
+
+
+def test_purge_repo_drops_event_ingested_rows_too(tmp_path):
+    """A disconnected repo must stop answering searches for everything, not
+    just what a git scan would have found. `reconcile` deliberately never
+    deletes an `origin='event_ingest'` row (a gate artifact or session
+    summary) on its own -- that is what stops a rescan from treating one as
+    stale the instant it is written, since nothing under `.engineering/` is
+    committed for a scan to reproduce. `purge_repo` must not inherit that
+    same protection: disconnect is the one place that row really is gone."""
+
+    async def scenario():
+        state = await Database.open(tmp_path / "state.db")
+        conn = index_db.open_index(tmp_path / "index.db")
+        try:
+            repo = make_repo(tmp_path)
+            ix = Indexer(conn, state, repos_env=str(repo))
+            await ix.startup_scan()
+            await ix.ingest_gate_artifact(
+                repo=str(repo),
+                work_item_id="w1",
+                path=".engineering/specs/w1.md",
+                content="# spec\nnarwhal tusk provenance\n",
+            )
+            assert ix.search("narwhal tusk provenance")
+
+            await ix.purge_repo(str(repo))
+            assert ix.search("narwhal tusk provenance") == []
+        finally:
+            conn.close()
+            await state.close()
+
+    asyncio.run(scenario())

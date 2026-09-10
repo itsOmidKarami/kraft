@@ -1217,6 +1217,61 @@ async def _refuse_artifact(st, wid: str, rel: str, reason: str) -> None:
     await st.db.write(lambda c: events.append(c, wid, "artifact_refused", payload))
 
 
+async def _read_worktree_artifact(st, wid: str, rel: str) -> tuple[str, bool] | None:
+    """Safely read `rel` out of `wid`'s worktree: resolve, check containment,
+    open with no symlink followed anywhere along the path, and cap the read at
+    `DIFF_MAX_BYTES`. Records why via `_refuse_artifact` and returns None on
+    any failure -- shared by the reviewer-facing read and gate-approval
+    ingestion (`approve_gate`) so both trust the exact same containment walk.
+    """
+    worktree = st.run_dirs.worktrees / wid
+    try:
+        root = worktree.resolve(strict=True)
+        target = (worktree / rel).resolve(strict=True)
+    except OSError:
+        await _refuse_artifact(st, wid, rel, "absent")
+        return None
+    if not target.is_relative_to(root):
+        # A symlink out of the worktree is the one way a derived, unstored path
+        # can still point somewhere it should not. Same answer as a missing
+        # file: a reviewer's browser learns nothing about the server's disk.
+        logger.warning("artifact for %s resolves outside its worktree: %s", wid, target)
+        await _refuse_artifact(st, wid, rel, "escaped_containment")
+        return None
+    try:
+        # The resolve+is_relative_to check above is what produces the warning
+        # and names the work item; it is a fact about the instant it ran, not
+        # a guarantee. This walk is the actual containment: the agent that
+        # owns this worktree can swap any component -- not just the leaf --
+        # for a symlink between that check and this open.
+        fd = _open_no_symlinks(root, rel)
+    except OSError:
+        await _refuse_artifact(st, wid, rel, "unreadable")
+        return None
+    try:
+        fh = os.fdopen(fd, "rb")
+    except OSError:
+        # fdopen failed before taking ownership of fd (e.g. the walk landed on
+        # a directory) -- close it ourselves, or it leaks.
+        os.close(fd)
+        await _refuse_artifact(st, wid, rel, "unreadable")
+        return None
+    try:
+        with fh:
+            # Capped at the read, not just at the response: an agent that writes
+            # a multi-gigabyte file by mistake must not be able to make the
+            # server read it into memory to decide it is too big (spec §4). One
+            # byte over the cap is how `truncated` is known without a stat race.
+            data = fh.read(DIFF_MAX_BYTES + 1)
+    except OSError:
+        await _refuse_artifact(st, wid, rel, "unreadable")
+        return None
+    truncated = len(data) > DIFF_MAX_BYTES
+    # Slicing bytes can land mid-codepoint; `errors="replace"` is what makes
+    # that a single replacement character instead of a 500.
+    return data[:DIFF_MAX_BYTES].decode(errors="replace"), truncated
+
+
 @api_router.get("/work-items/{wid}/artifact")
 async def get_work_item_artifact(wid: str, request: Request):
     """The pending gate's document, for a reviewer with no filesystem access.
@@ -1230,52 +1285,10 @@ async def get_work_item_artifact(wid: str, request: Request):
     rel = _gate_artifact(st, row, _pending_gate(st, wid))
     if rel is None:
         raise HTTPException(404, "this work item's gate has no artifact")
-    worktree = st.run_dirs.worktrees / wid
-    try:
-        root = worktree.resolve(strict=True)
-        target = (worktree / rel).resolve(strict=True)
-    except OSError:
-        await _refuse_artifact(st, wid, rel, "absent")
-        raise HTTPException(404, "this work item's gate has no artifact") from None
-    if not target.is_relative_to(root):
-        # A symlink out of the worktree is the one way a derived, unstored path
-        # can still point somewhere it should not. Same answer as a missing
-        # file: a reviewer's browser learns nothing about the server's disk.
-        logger.warning("artifact for %s resolves outside its worktree: %s", wid, target)
-        await _refuse_artifact(st, wid, rel, "escaped_containment")
+    result = await _read_worktree_artifact(st, wid, rel)
+    if result is None:
         raise HTTPException(404, "this work item's gate has no artifact")
-    try:
-        # The resolve+is_relative_to check above is what produces the warning
-        # and names the work item; it is a fact about the instant it ran, not
-        # a guarantee. This walk is the actual containment: the agent that
-        # owns this worktree can swap any component -- not just the leaf --
-        # for a symlink between that check and this open.
-        fd = _open_no_symlinks(root, rel)
-    except OSError:
-        await _refuse_artifact(st, wid, rel, "unreadable")
-        raise HTTPException(404, "this work item's gate has no artifact") from None
-    try:
-        fh = os.fdopen(fd, "rb")
-    except OSError:
-        # fdopen failed before taking ownership of fd (e.g. the walk landed on
-        # a directory) -- close it ourselves, or it leaks.
-        os.close(fd)
-        await _refuse_artifact(st, wid, rel, "unreadable")
-        raise HTTPException(404, "this work item's gate has no artifact") from None
-    try:
-        with fh:
-            # Capped at the read, not just at the response: an agent that writes
-            # a multi-gigabyte file by mistake must not be able to make the
-            # server read it into memory to decide it is too big (spec §4). One
-            # byte over the cap is how `truncated` is known without a stat race.
-            data = fh.read(DIFF_MAX_BYTES + 1)
-    except OSError:
-        await _refuse_artifact(st, wid, rel, "unreadable")
-        raise HTTPException(404, "this work item's gate has no artifact") from None
-    truncated = len(data) > DIFF_MAX_BYTES
-    # Slicing bytes can land mid-codepoint; `errors="replace"` is what makes
-    # that a single replacement character instead of a 500.
-    text = data[:DIFF_MAX_BYTES].decode(errors="replace")
+    text, truncated = result
     fm, body = ingest_mod.split_front_matter(text)
     return {
         "work_item_id": wid,
@@ -1289,6 +1302,41 @@ async def get_work_item_artifact(wid: str, request: Request):
     }
 
 
+async def _ingest_approved_gate_artifact(st, row, gate: str) -> None:
+    """Persist the gate's artifact into the index now that it is approved.
+
+    Approval, not the worktree's eventual removal, is the hook: it is the
+    first moment the content is accepted rather than still being drafted, and
+    it is a point every artifact-carrying gate already passes through --
+    unlike worktree teardown, which today only happens on `abandon`. Nothing
+    Kraft wrote under `.engineering/` is committed
+    (`forge._work_product_pathspec`), so this is the artifact's only durable
+    copy once its worktree is eventually gone.
+
+    Best-effort end to end: a missing or unreadable artifact is
+    `_read_worktree_artifact` recording why on the item's own timeline, and an
+    indexer failure (a locked index, a read-only file) is caught and logged
+    here rather than raised -- same contract `ingest_session_summary` gives
+    the event-drain loop, just enforced at this call site instead, since
+    approval is a synchronous request a reviewer is waiting on, not a
+    background drain. A gate the agent already satisfied must not be blocked
+    from clearing by the index's own health.
+    """
+    rel = _gate_artifact(st, row, gate)
+    if rel is None:
+        return
+    result = await _read_worktree_artifact(st, row["id"], rel)
+    if result is None:
+        return
+    text, _truncated = result
+    try:
+        await st.indexer.ingest_gate_artifact(
+            repo=row["repo"], work_item_id=row["id"], path=rel, content=text
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("gate artifact ingest failed for %s (%s)", row["id"], rel)
+
+
 @api_router.post("/work-items/{wid}/gates/{gate}/approve")
 async def approve_gate(wid: str, gate: str, request: Request):
     st = request.app.state
@@ -1297,6 +1345,11 @@ async def approve_gate(wid: str, gate: str, request: Request):
         raise HTTPException(404, f"unknown gate {gate!r}")
     if _pending_gate(st, wid) != gate:
         raise HTTPException(409, f"gate {gate!r} is not pending")
+
+    # Before any chain splice: the artifact this approval is about belongs to
+    # `row`'s chain as it stood when the gate opened, same as `_gate_artifact`
+    # everywhere else it's called.
+    await _ingest_approved_gate_artifact(st, row, gate)
 
     if gate == "chain_finalized":
         chain, reason = _splice_chain_review(st, row)
@@ -1983,10 +2036,26 @@ async def open_document(doc_id: str, body: OpenDocument, request: Request):
     to a `vscode://file/...` URL, which the *viewer's* machine can honour even
     though the server cannot.
     """
+    # Ahead of everything else, `_launch_editor` would otherwise check this
+    # first internally: a remote caller learns nothing about a document --
+    # not even whether it has a file to open -- before being told it may not
+    # ask this server to start a process at all.
+    if not _client_is_local(request):
+        raise HTTPException(403, "this server only opens editors for a client on its own machine")
     st = request.app.state
     doc = st.indexer.get_document(doc_id)
     if doc is None:
         raise HTTPException(404, "unknown document")
+    if doc.get("origin") == "event_ingest":
+        # A session summary or gate artifact: `path` is a synthetic identifier
+        # Kraft made up for the index, never a file the connected repo
+        # checkout has (`forge._work_product_pathspec` keeps it out of git
+        # entirely now). `doc["repo"] / doc["path"]` would resolve to nothing
+        # -- launching an editor on it, or handing the SPA's `vscode://`
+        # fallback that same path, just points at a file that does not exist.
+        raise HTTPException(
+            409, "this document exists only in Kraft's index; it was never written to the repo"
+        )
     # The row comes from the indexer, not the caller — but it is still the only
     # thing between a stored `../..` and an editor opened outside the repo.
     # Validate the resolved path, launch the unresolved one: a repo under a
