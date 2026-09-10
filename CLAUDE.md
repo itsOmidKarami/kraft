@@ -132,10 +132,9 @@ _Add a brief overview of your project architecture_
 
 ### Specs and plans are not committed
 
-Design docs and implementation plans do not go into git. `.engineering/` is
-gitignored (Kraft writes its own specs, plans, review briefs and session notes
-there), and `docs/superpowers/` still holds ~100 tracked files from before this
-rule — leave those, but do not add to them.
+Design docs and implementation plans do not go into git. `.engineering/` and
+`docs/superpowers/` are both gitignored (Kraft writes its own specs, plans,
+review briefs and session notes there).
 
 When a brainstorm produces a spec and a plan for Kraft, hand them over as work
 item attachments instead:
