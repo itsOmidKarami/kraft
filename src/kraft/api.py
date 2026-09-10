@@ -26,6 +26,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from kraft import analytics as analytics_mod
 from kraft import auth as auth_mod
+from kraft import builtins as builtins_mod
 from kraft import config as config_mod
 from kraft import escalate, events, executor, findings, rate_limit_retry, reattach, review, store
 from kraft import intake as intake_mod
@@ -1658,6 +1659,17 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             )
         await st.db.write(lambda c: store.set_steer(c, wid, body.steer.strip()))
     steer = await st.db.write(lambda c: store.take_steer(c, wid))
+    worktree = st.run_dirs.worktrees / wid
+    try:
+        new_base = await builtins_mod.refresh_worktree_base(
+            worktree, Path(row["repo"]), store.branch_for(row)
+        )
+    except RuntimeError as exc:
+        reason = str(exc)
+        await st.db.write(lambda c: store.mark_needs_human(c, wid, row["current_node_id"], reason))
+        return {k: v for k, v in dict(_work_item_row(st, wid)).items()}
+    if new_base:
+        await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
     await st.db.write(lambda c: store.resume_work_item(c, wid, steer))
 
     start = next((i for i, n in enumerate(chain["nodes"]) if n["id"] == row["current_node_id"]), 0)
@@ -1722,6 +1734,18 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     gate_key = f"{gate}_reject_loop" if gate else None
     if row["status"] != "needs_human":
         raise HTTPException(409, "work item is not stopped")
+
+    worktree = st.run_dirs.worktrees / wid
+    try:
+        new_base = await builtins_mod.refresh_worktree_base(
+            worktree, Path(row["repo"]), store.branch_for(row)
+        )
+    except RuntimeError as exc:
+        reason = str(exc)
+        await st.db.write(lambda c: store.mark_needs_human(c, wid, node_id, reason))
+        return {k: v for k, v in dict(_work_item_row(st, wid)).items()}
+    if new_base:
+        await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
 
     steer = (body.steer or "").strip() or None
     if steer is not None and not _steer_reachable(chain["nodes"], node_id, st.registry):

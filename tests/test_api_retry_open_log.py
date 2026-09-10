@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import subprocess
 import threading
 import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-from support.harness import fake_templates_dir, isolated_bd, make_repo
+from support.harness import _git, fake_templates_dir, isolated_bd, make_repo
 
 from kraft import logs
 
@@ -529,3 +530,39 @@ def test_open_document_refuses_a_document_path_outside_its_repo(tmp_path, monkey
         assert r.status_code == 400, r.text
         assert "escapes its repo" in r.json()["detail"]
         assert launched == []
+
+
+def test_retry_rebases_the_worktree_onto_a_moved_head(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        # KRAFT_FAIL steers the fake agent into failing its node, same trick
+        # test_retry_restarts_a_stopped_node_that_has_no_fix_loop uses above
+        wid = client.post(
+            "/api/work-items",
+            json={"repo": str(repo), "title": "KRAFT_FAIL once", "chain_template": "quick-task"},
+        ).json()["id"]
+
+        deadline = time.monotonic() + 120
+        item = None
+        while time.monotonic() < deadline:
+            item = client.get(f"/api/work-items/{wid}").json()
+            if item["status"] == "needs_human":
+                break
+            time.sleep(0.2)
+        assert item is not None and item["status"] == "needs_human"
+
+        # repo's default branch moves on while the item sits stopped
+        (repo / "moved.txt").write_text("moved on\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-m", "moved on")
+        new_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+        r = client.post(f"/api/work-items/{wid}/retry", json={"steer": "the tests pass now"})
+        assert r.status_code == 200, r.text
+
+        after = client.get(f"/api/work-items/{wid}").json()
+        assert after["base_ref"] == new_head
+        worktree = Path(after["worktree_path"])
+        assert (worktree / "moved.txt").is_file()
