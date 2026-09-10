@@ -221,7 +221,9 @@ def test_summary_of_an_empty_directory_is_unstarted_not_done(chain):
     assert out["totals"]["nodes"] == 0
     # Same keys either way: a caller rendering the totals should not have to ask
     # whether a chain exists first.
-    assert set(out["totals"]) == set(kl.summary(walked(chain, [stamp(0)] * 12), chain)["totals"])
+    assert set(out["totals"]) == set(
+        kl.summary(walked(chain, [stamp(0)] * (len(chain["nodes"]) + 1)), chain)["totals"]
+    )
 
 
 def test_summary_counts_gates_answered_not_gates_declared(chain):

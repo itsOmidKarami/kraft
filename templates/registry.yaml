@@ -14,6 +14,11 @@ hooks:
   # repos.yaml entry (Settings → Repos). A CLI name here pins every repo to one
   # forge, which is wrong for any install with repos on both. Never probed —
   # see adapters/forge.resolve.
+  # Rebases onto repo's current HEAD right before open_mr, so an item that
+  # ran straight through the chain doesn't open its MR commits behind
+  # (Kraft-4bgg). Real from day one -- unlike the two placeholder bindings
+  # below it, this is a plain git operation with nothing to fake out.
+  on.mr.rebase:              { kind: builtin, handler: mr_rebase }
   on.mr.open:                { kind: forge, handler: open_mr, backend: auto }
   on.ci.poll:                { kind: forge, handler: ci_poll, backend: auto }
   on.review.mr.run:          { kind: builtin, handler: noop }
