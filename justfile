@@ -93,9 +93,15 @@ install: bundle
     @echo "installed. run: kraft"
     @grep -q "register-python-argcomplete kraft" ~/.zshrc 2>/dev/null || echo 'tip: add eval "$(register-python-argcomplete kraft)" to ~/.zshrc for tab completion'
 
-# Backend tests (add args, e.g. `just test -k search`)
+# Backend tests, only those affected by your changes (pytest-testmon; data in
+# .testmondata). `just test --no-testmon` runs everything; pass other args as
+# usual, e.g. `just test -k search`. On the recipe, not in pyproject addopts:
+# CI, the verify node and lite-floor call pytest directly and must stay full.
+# COVERAGE_CORE=ctrace: coverage's default sysmon core on 3.14 can't record
+# testmon's per-test contexts and silently under-selects. Drop it once
+# coverage supports dynamic contexts under sysmon.
 test *ARGS:
-    uv run pytest {{ARGS}}
+    COVERAGE_CORE=ctrace uv run pytest --testmon {{ARGS}}
 
 # Regenerate the Lite plugin's chain artifact from the YAML templates.
 lite-build:

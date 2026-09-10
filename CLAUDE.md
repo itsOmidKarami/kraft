@@ -64,7 +64,7 @@ Everything goes through `just` — run `just` for the list.
 
 ```bash
 just setup      # uv sync + npm install
-just test       # backend tests (pass args: just test -k search)
+just test       # backend tests affected by your changes (testmon); --no-testmon for all
 just test-ui    # frontend unit tests
 just lint       # ruff check + format check
 ```
