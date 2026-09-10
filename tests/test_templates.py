@@ -224,6 +224,49 @@ def test_unknown_gate_after_quarantines_template(tmp_path):
     assert "bogus_gate" in ts.invalid["weirdgate"]
 
 
+_AUTO_TEMPLATE = (
+    "id: autos\n"
+    "nodes:\n"
+    "  - { id: n1, tasks: [on.test.run], gate_after: spec_approval, auto_escalate: true }\n"
+    "  - { id: n2, tasks: [on.test.run], gate_after: null }\n"
+)
+
+
+def test_materialize_carries_auto_escalate(tmp_path):
+    d = _dir(tmp_path, **{"registry.yaml": REGISTRY_YAML, "autos.yaml": _AUTO_TEMPLATE})
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    nodes = materialize(ts.valid["autos"])["nodes"]
+    assert nodes[0]["auto_escalate"] is True
+    # A node that never opted in reads as None -- not a KeyError, and not
+    # False-by-accident, so `node.get(...)` in the executor stays honest.
+    assert nodes[1]["auto_escalate"] is None
+
+
+def test_auto_escalate_must_be_a_bool_beside_a_gate(tmp_path):
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "badtype.yaml": (
+                "id: badtype\n"
+                "nodes:\n"
+                "  - { id: n1, tasks: [on.test.run], gate_after: spec_approval, "
+                "auto_escalate: yes please }\n"
+            ),
+            "nogate.yaml": (
+                "id: nogate\n"
+                "nodes:\n"
+                "  - { id: n1, tasks: [on.test.run], gate_after: null, auto_escalate: true }\n"
+            ),
+        },
+    )
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert "auto_escalate" in ts.invalid["badtype"]
+    # auto_escalate on a gateless node reviews nothing. A config key that
+    # silently does nothing is how a human concludes the feature is broken.
+    assert "auto_escalate" in ts.invalid["nogate"]
+
+
 def _dir(tmp_path, **files):
     for name, body in files.items():
         (tmp_path / name).write_text(body)
@@ -431,6 +474,7 @@ def test_materialize_quick_task_from_shipped_templates():
                 "fix_loop": None,
                 "on_failure": None,
                 "reject_to": None,
+                "auto_escalate": None,
             },
             {
                 "id": "implementation",
@@ -439,6 +483,7 @@ def test_materialize_quick_task_from_shipped_templates():
                 "fix_loop": None,
                 "on_failure": None,
                 "reject_to": None,
+                "auto_escalate": None,
             },
             {
                 "id": "verify",
@@ -447,6 +492,7 @@ def test_materialize_quick_task_from_shipped_templates():
                 "fix_loop": None,
                 "on_failure": None,
                 "reject_to": None,
+                "auto_escalate": None,
             },
         ],
     }

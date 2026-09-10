@@ -75,6 +75,10 @@ def create_work_item(
     status: str = "active",
     bead_cwd: str | None = None,
     implements_beads: list[str] | None = None,
+    #: Whether this item's `auto_escalate` gates may be reviewed by an agent
+    #: before a human sees them (Kraft-zr3s). Off unless a human asked for it:
+    #: the template says which gates *could* be, this says whether they *may*.
+    auto_gate: bool = False,
 ) -> None:
     """`submodules` are the cross-repo paths chosen at intake (06, design 1g).
 
@@ -92,8 +96,9 @@ def create_work_item(
     conn.execute(
         "INSERT INTO work_items (id, bead_id, title, description, repo, chain_template, "
         "chain_definition, current_node_id, status, created_at, updated_at, "
-        "submodules, root_merge_policy, attachments, bead_cwd, branch, implements_beads) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "submodules, root_merge_policy, attachments, bead_cwd, branch, implements_beads, "
+        "auto_gate) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             id,
             bead_id,
@@ -111,6 +116,7 @@ def create_work_item(
             bead_cwd,
             branch_name(title, id),
             json.dumps(implements_beads) if implements_beads else None,
+            1 if auto_gate else 0,
         ),
     )
     events.append(
@@ -450,16 +456,23 @@ def splice_chain(conn: sqlite3.Connection, work_item_id, chain_definition: str) 
     events.append(conn, work_item_id, "chain_spliced", {})
 
 
-def approve_gate(conn: sqlite3.Connection, work_item_id, gate) -> None:
+def approve_gate(conn: sqlite3.Connection, work_item_id, gate, *, by: str = "human") -> None:
     conn.execute(
         "UPDATE work_items SET status = 'active', updated_at = ? WHERE id = ?",
         (_now(), work_item_id),
     )
-    events.append(conn, work_item_id, "gate_approved", {"gate": gate})
+    events.append(conn, work_item_id, "gate_approved", {"gate": gate, "by": by})
 
 
 def reject_gate(
-    conn: sqlite3.Connection, work_item_id, gate, note, *, reopen: bool, node: str | None = None
+    conn: sqlite3.Connection,
+    work_item_id,
+    gate,
+    note,
+    *,
+    reopen: bool,
+    node: str | None = None,
+    by: str = "human",
 ) -> None:
     """Record the rejection. `reopen` flips the item back to active for the
     backward-motion re-run (02 §7.2); a rejection that breached the gate's
@@ -468,13 +481,19 @@ def reject_gate(
     `node` is the chain node the re-run enters at (Kraft-ko7j). It rides the
     event rather than a column: the events table is already append-only and
     already holds the note, and `store.last_rejection` reads both back.
+
+    `by` records who decided (Kraft-zr3s) -- a gate cleared by an agent and a
+    gate cleared by a person have to be tellable apart in the timeline forever
+    after.
     """
     status = "'active'" if reopen else "status"
     conn.execute(
         f"UPDATE work_items SET status = {status}, updated_at = ? WHERE id = ?",
         (_now(), work_item_id),
     )
-    events.append(conn, work_item_id, "gate_rejected", {"gate": gate, "note": note, "node": node})
+    events.append(
+        conn, work_item_id, "gate_rejected", {"gate": gate, "note": note, "node": node, "by": by}
+    )
 
 
 #: Events that mean the newest rejection has already been acted on, so its note

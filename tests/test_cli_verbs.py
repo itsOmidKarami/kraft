@@ -188,6 +188,18 @@ def test_create_carries_the_description(app, tmp_path, monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["description"] == "the brief"
 
 
+def test_item_create_passes_auto_gate(monkeypatch):
+    seen = {}
+
+    async def fake_create(title, repo, chain, description, attachments, auto_gate=False):
+        seen["auto_gate"] = auto_gate
+        return {"id": "w1"}
+
+    monkeypatch.setattr("kraft.cli.client.create_work_item", fake_create)
+    cli.main(["item", "create", "t", "--repo", "/r", "--auto-gate"])
+    assert seen["auto_gate"] is True
+
+
 def test_create_outside_a_connected_repo_says_how_to_fix_it(app, tmp_path, monkeypatch, capsys):
     stranger = make_repo(tmp_path, name="stranger")
     monkeypatch.chdir(stranger)
