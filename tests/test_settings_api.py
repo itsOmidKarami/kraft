@@ -384,6 +384,15 @@ def test_put_theme_rejects_an_unknown_mode(client):
     assert resp.status_code == 422
 
 
+def test_changing_theme_does_not_report_health_as_degraded(client):
+    # theme.yaml has no 'id' key -- load_templates would read it as a broken
+    # chain template unless it's in CONFIG_FILES (Kraft-w1ps).
+    client.put("/theme", json={"palette": "forest", "mode": "light"})
+    health = client.get("/health").json()
+    assert health["status"] == "ok"
+    assert health["invalid_templates"] == {}
+
+
 # ── access + auth (5e, 1m) ───────────────────────────────────────────────────
 
 
