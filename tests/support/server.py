@@ -59,7 +59,7 @@ def _try_start(run_dir: Path, templates_dir: Path, bd_cwd: Path, env: dict | Non
             client.close()
             return proc.returncode
         with contextlib.suppress(httpx.TransportError):
-            if client.get("/health").status_code == 200:
+            if client.get("/api/health").status_code == 200:
                 return Server(proc, base, port, client)
         time.sleep(0.2)
     client.close()

@@ -49,9 +49,9 @@ test("pause, steer and resume from the detail screen", async ({ page, request })
   // The fake agent finishes in milliseconds, so there is nothing to pause unless
   // the implementation hook is slowed down first. Swapped through the real
   // registry API and put back afterwards.
-  const registry = await (await request.get("/registry")).json();
+  const registry = await (await request.get("/api/registry")).json();
   const original = registry.hooks["on.implementation.start"];
-  await request.put("/registry", {
+  await request.put("/api/registry", {
     data: {
       ...registry,
       hooks: {
@@ -74,7 +74,7 @@ test("pause, steer and resume from the detail screen", async ({ page, request })
     await page.getByRole("textbox").last().fill("try a different approach");
 
     // restore the fast hook so the resumed node actually finishes
-    await request.put("/registry", {
+    await request.put("/api/registry", {
       data: { ...registry, hooks: { ...registry.hooks, "on.implementation.start": original } },
     });
     await page.getByRole("button", { name: /Resume with steer/ }).click();
@@ -83,7 +83,7 @@ test("pause, steer and resume from the detail screen", async ({ page, request })
       timeout: 90_000,
     });
   } finally {
-    await request.put("/registry", {
+    await request.put("/api/registry", {
       data: { ...registry, hooks: { ...registry.hooks, "on.implementation.start": original } },
     });
   }

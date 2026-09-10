@@ -109,7 +109,9 @@ def main() -> int:
     # it, and intake shells out to `bd` there on the first work item.
     if "--repo-only" in sys.argv:
         return 0
-    client = httpx.Client(base_url=BASE, timeout=30.0)
+    # Every JSON route lives under /api/ (Kraft-psuq); baked into base_url so
+    # every call below stays a bare "/work-items"-style path.
+    client = httpx.Client(base_url=f"{BASE}/api", timeout=30.0)
     try:
         client.get("/health").raise_for_status()
     except httpx.HTTPError as exc:

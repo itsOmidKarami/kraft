@@ -55,7 +55,7 @@ def client(tmp_path, monkeypatch, prompt_log):
 def _await_gate(client, wid, gate, timeout=60):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if client.get(f"/work-items/{wid}").json().get("pending_gate") == gate:
+        if client.get(f"/api/work-items/{wid}").json().get("pending_gate") == gate:
             return
         time.sleep(0.2)
     raise AssertionError(f"{wid} never reached {gate}")
@@ -65,27 +65,28 @@ def _await_gate(client, wid, gate, timeout=60):
 def test_spec_gate_offers_the_document_then_reject_and_approve(client, tmp_path, prompt_log):
     repo = make_repo(tmp_path)
     wid = client.post(
-        "/work-items",
+        "/api/work-items",
         json={"title": "add a flag", "repo": str(repo), "chain_template": "default"},
     ).json()["id"]
 
     _await_gate(client, wid, "spec_approval")
-    body = client.get(f"/work-items/{wid}").json()
+    body = client.get(f"/api/work-items/{wid}").json()
     assert body["gate_artifact"] == f".engineering/specs/{wid}.md"
-    assert client.get(f"/work-items/{wid}/artifact").json()["title"] == "fake spec"
+    assert client.get(f"/api/work-items/{wid}/artifact").json()["title"] == "fake spec"
 
-    client.post(f"/work-items/{wid}/gates/spec_approval/reject", json={"note": "too vague"})
+    client.post(f"/api/work-items/{wid}/gates/spec_approval/reject", json={"note": "too vague"})
     _await_gate(client, wid, "spec_approval")
     # The rejection note reaches the relaunched agent as its instruction, which
     # is the whole of how "revise the same document" works (spec §5).
     assert "too vague" in prompt_log.read_text()
 
-    client.post(f"/work-items/{wid}/gates/spec_approval/approve")
+    client.post(f"/api/work-items/{wid}/gates/spec_approval/approve")
     _await_gate(client, wid, "plan_approval")
     assert (
-        client.get(f"/work-items/{wid}").json()["gate_artifact"] == f".engineering/plans/{wid}.md"
+        client.get(f"/api/work-items/{wid}").json()["gate_artifact"]
+        == f".engineering/plans/{wid}.md"
     )
-    assert client.get(f"/work-items/{wid}/artifact").json()["title"] == "fake plan"
+    assert client.get(f"/api/work-items/{wid}/artifact").json()["title"] == "fake plan"
 
 
 @pytest.mark.slow
@@ -94,16 +95,16 @@ def test_a_rejected_plan_rerun_is_framed_as_a_revision(client, tmp_path, prompt_
     already wrote, not to start again from the brief."""
     repo = make_repo(tmp_path)
     wid = client.post(
-        "/work-items",
+        "/api/work-items",
         json={"title": "add a flag", "repo": str(repo), "chain_template": "default"},
     ).json()["id"]
 
     _await_gate(client, wid, "spec_approval")
-    client.post(f"/work-items/{wid}/gates/spec_approval/approve")
+    client.post(f"/api/work-items/{wid}/gates/spec_approval/approve")
     _await_gate(client, wid, "plan_approval")
 
     client.post(
-        f"/work-items/{wid}/gates/plan_approval/reject", json={"note": "task 4 has no test"}
+        f"/api/work-items/{wid}/gates/plan_approval/reject", json={"note": "task 4 has no test"}
     )
     _await_gate(client, wid, "plan_approval")
 

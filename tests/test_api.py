@@ -58,7 +58,7 @@ def _poll_events(client, wid, want, timeout=30, count=1):
     deadline = time.monotonic() + timeout
     seen = []
     while time.monotonic() < deadline:
-        seen = client.get(f"/work-items/{wid}/events").json()
+        seen = client.get(f"/api/work-items/{wid}/events").json()
         if sum(e["type"] == want for e in seen) >= count:
             return seen
         time.sleep(0.2)
@@ -70,7 +70,7 @@ def _await_gate(client, wid, gate, timeout=30):
     deadline = time.monotonic() + timeout
     item = {}
     while time.monotonic() < deadline:
-        item = client.get(f"/work-items/{wid}").json()
+        item = client.get(f"/api/work-items/{wid}").json()
         if item.get("pending_gate") == gate:
             return item
         time.sleep(0.2)
@@ -81,7 +81,7 @@ def _wait_for_status(client, wid, status, timeout=30):
     deadline = time.monotonic() + timeout
     body = {}
     while time.monotonic() < deadline:
-        body = client.get(f"/work-items/{wid}").json()
+        body = client.get(f"/api/work-items/{wid}").json()
         if body["status"] == status:
             return body
         time.sleep(0.15)
@@ -109,7 +109,7 @@ def test_health_ok_and_degraded(tmp_path, monkeypatch):
         "id: broken\nnodes:\n  - {id: x, tasks: [on.nope], gate_after: null}\n"
     )
     with _client(tmp_path, monkeypatch, templates_dir=bad) as client:
-        body = client.get("/health").json()
+        body = client.get("/api/health").json()
         assert body["status"] == "degraded"
         assert "broken" in body["invalid_templates"]
         assert "reattach_summary" in body
@@ -119,14 +119,14 @@ def test_health_reports_invalid_policy(tmp_path, monkeypatch):
     bad = fake_templates_dir(tmp_path, "claude")
     (bad / "policy.yaml").write_text("default: { attempts: 0, wall_clock_s: 1 }\n")
     with _client(tmp_path, monkeypatch, templates_dir=bad) as client:
-        h = client.get("/health").json()
+        h = client.get("/api/health").json()
         assert h["status"] == "degraded"
         assert h["invalid_policy"]
 
 
 def test_health_ok_with_valid_policy(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
-        h = client.get("/health").json()
+        h = client.get("/api/health").json()
         assert h["invalid_policy"] == []
 
 
@@ -136,7 +136,7 @@ def test_post_refused_when_policy_invalid(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch, templates_dir=bad) as client:
         r = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"title": "x", "repo": str(repo), "chain_template": "default"},
         )
         assert r.status_code != 201
@@ -154,7 +154,7 @@ def test_default_chain_fix_loop_breach_over_http(tmp_path, monkeypatch):
     )
     with _client(tmp_path, monkeypatch, templates_dir=tdir) as client:
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={
                 "title": "make the failing test pass",
                 "repo": str(repo),
@@ -166,7 +166,7 @@ def test_default_chain_fix_loop_breach_over_http(tmp_path, monkeypatch):
         for gate in ("spec_approval", "plan_approval", "chain_finalized"):
             deadline = time.monotonic() + 60
             while time.monotonic() < deadline:
-                r = client.post(f"/work-items/{wid}/gates/{gate}/approve")
+                r = client.post(f"/api/work-items/{wid}/gates/{gate}/approve")
                 if r.status_code == 200:
                     break
                 time.sleep(0.2)
@@ -175,7 +175,7 @@ def test_default_chain_fix_loop_breach_over_http(tmp_path, monkeypatch):
 
         assert len([e for e in events if e["type"] == "fix_cycle_started"]) == 2
 
-        item = client.get(f"/work-items/{wid}").json()
+        item = client.get(f"/api/work-items/{wid}").json()
         assert item["status"] == "needs_human"
         assert item["current_node_id"] == "verify"
         assert any(
@@ -188,7 +188,7 @@ def test_post_materializes_chain(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         r = client.post(
-            "/work-items",
+            "/api/work-items",
             json={
                 "title": "make the failing test pass",
                 "repo": str(repo),
@@ -209,14 +209,14 @@ def test_post_materializes_chain(tmp_path, monkeypatch):
 def test_post_invalid_template_422(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
         r = client.post(
-            "/work-items", json={"title": "x", "repo": "/tmp", "chain_template": "nope"}
+            "/api/work-items", json={"title": "x", "repo": "/tmp", "chain_template": "nope"}
         )
         assert r.status_code == 422
 
 
 def test_post_missing_repo_422(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
-        r = client.post("/work-items", json={"title": "x"})
+        r = client.post("/api/work-items", json={"title": "x"})
         assert r.status_code == 422
 
 
@@ -225,7 +225,7 @@ def test_happy_path_via_api(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={
                 "title": "make the failing test pass",
                 "repo": str(repo),
@@ -234,7 +234,7 @@ def test_happy_path_via_api(tmp_path, monkeypatch):
         ).json()["id"]
         _poll_events(client, wid, "work_item_completed")
 
-        item = client.get(f"/work-items/{wid}").json()
+        item = client.get(f"/api/work-items/{wid}").json()
         assert item["status"] == "completed"
         assert len(item["worker_sessions"]) == 3
 
@@ -247,7 +247,7 @@ def test_happy_path_via_api(tmp_path, monkeypatch):
             f".engineering/sessions/{impl_session['id']}.md"
         )
         for _ in range(100):
-            docs = client.get(f"/work-items/{wid}/documents").json()["documents"]
+            docs = client.get(f"/api/work-items/{wid}/documents").json()["documents"]
             if docs:
                 break
             time.sleep(0.05)
@@ -257,7 +257,7 @@ def test_happy_path_via_api(tmp_path, monkeypatch):
         assert any(d["worker_session_id"] == impl_session["id"] for d in docs)
 
         # and the summary is searchable, carrying its links inline
-        hits = client.get("/search", params={"q": "fake-claude session"}).json()["results"]
+        hits = client.get("/api/search", params={"q": "fake-claude session"}).json()["results"]
         assert hits, "session summary not searchable"
         assert any(
             ln["work_item_id"] == wid for h in hits for ln in h["links"] if ln["work_item_id"]
@@ -265,7 +265,7 @@ def test_happy_path_via_api(tmp_path, monkeypatch):
 
         # log endpoint returns the agent's stdout
         impl = next(s for s in item["worker_sessions"] if s["node_id"] == "implementation")
-        log = client.get(f"/worker-sessions/{impl['id']}/log")
+        log = client.get(f"/api/worker-sessions/{impl['id']}/log")
         assert log.status_code == 200
         assert "is_error" in log.text
 
@@ -280,10 +280,10 @@ def test_executor_crash_marks_needs_human(tmp_path, monkeypatch):
 
     monkeypatch.setattr(api.executor, "run", boom)
     with _client(tmp_path, monkeypatch) as client:
-        wid = client.post("/work-items", json={"title": "x", "repo": str(repo)}).json()["id"]
+        wid = client.post("/api/work-items", json={"title": "x", "repo": str(repo)}).json()["id"]
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
-            status = client.get(f"/work-items/{wid}").json()["status"]
+            status = client.get(f"/api/work-items/{wid}").json()["status"]
             if status == "needs_human":
                 break
             time.sleep(0.2)
@@ -292,7 +292,7 @@ def test_executor_crash_marks_needs_human(tmp_path, monkeypatch):
 
 def test_post_nonexistent_repo_422(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
-        r = client.post("/work-items", json={"title": "x", "repo": "/no/such/dir"})
+        r = client.post("/api/work-items", json={"title": "x", "repo": "/no/such/dir"})
         assert r.status_code == 422
 
 
@@ -312,7 +312,7 @@ def test_a_title_over_the_tracker_limit_is_refused_before_bd(tmp_path, monkeypat
         repo = make_repo(tmp_path)
         long_title = "x" * 711
         r = client.post(
-            "/work-items", json={"title": long_title, "repo": str(repo), "autostart": False}
+            "/api/work-items", json={"title": long_title, "repo": str(repo), "autostart": False}
         )
         assert r.status_code == 422
         detail = r.json()["detail"]
@@ -320,11 +320,11 @@ def test_a_title_over_the_tracker_limit_is_refused_before_bd(tmp_path, monkeypat
         assert str(beads.MAX_TITLE) in detail
         assert long_title not in detail
 
-        assert client.get("/work-items").json()["items"] == []
+        assert client.get("/api/work-items").json()["items"] == []
 
         # the boundary itself is accepted
         ok = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"title": "x" * beads.MAX_TITLE, "repo": str(repo), "autostart": False},
         )
         assert ok.status_code == 201, ok.text
@@ -332,8 +332,8 @@ def test_a_title_over_the_tracker_limit_is_refused_before_bd(tmp_path, monkeypat
 
 def test_get_unknown_work_item_404(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
-        assert client.get("/work-items/does-not-exist").status_code == 404
-        assert client.get("/worker-sessions/nope/log").status_code == 404
+        assert client.get("/api/work-items/does-not-exist").status_code == 404
+        assert client.get("/api/worker-sessions/nope/log").status_code == 404
 
 
 def test_create_accepts_a_description_and_both_payloads_return_it(tmp_path, monkeypatch):
@@ -341,7 +341,7 @@ def test_create_accepts_a_description_and_both_payloads_return_it(tmp_path, monk
     with client:
         repo = make_repo(tmp_path)
         r = client.post(
-            "/work-items",
+            "/api/work-items",
             json={
                 "title": "short label",
                 "description": "the brief the spec is written from",
@@ -352,10 +352,10 @@ def test_create_accepts_a_description_and_both_payloads_return_it(tmp_path, monk
         assert r.status_code == 201
         wid = r.json()["id"]
 
-        detail = client.get(f"/work-items/{wid}").json()
+        detail = client.get(f"/api/work-items/{wid}").json()
         assert detail["description"] == "the brief the spec is written from"
 
-        listed = client.get("/work-items").json()["items"]
+        listed = client.get("/api/work-items").json()["items"]
         assert [i["description"] for i in listed if i["id"] == wid] == [
             "the brief the spec is written from"
         ]
@@ -366,10 +366,10 @@ def test_create_without_a_description_returns_null(tmp_path, monkeypatch):
     with client:
         repo = make_repo(tmp_path)
         wid = client.post(
-            "/work-items", json={"title": "t", "repo": str(repo), "autostart": False}
+            "/api/work-items", json={"title": "t", "repo": str(repo), "autostart": False}
         ).json()["id"]
-        assert client.get(f"/work-items/{wid}").json()["description"] is None
-        listed = client.get("/work-items").json()["items"]
+        assert client.get(f"/api/work-items/{wid}").json()["description"] is None
+        listed = client.get("/api/work-items").json()["items"]
         assert [i["description"] for i in listed if i["id"] == wid] == [None]
 
 
@@ -380,20 +380,20 @@ def test_patch_updates_the_description_and_records_an_event(tmp_path, monkeypatc
     with client:
         repo = make_repo(tmp_path)
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"title": "t", "description": "first", "repo": str(repo), "autostart": False},
         ).json()["id"]
-        before = client.get(f"/work-items/{wid}").json()["updated_at"]
+        before = client.get(f"/api/work-items/{wid}").json()["updated_at"]
 
-        r = client.patch(f"/work-items/{wid}", json={"description": "second"})
+        r = client.patch(f"/api/work-items/{wid}", json={"description": "second"})
         assert r.status_code == 200
         assert r.json()["description"] == "second"
 
-        after = client.get(f"/work-items/{wid}").json()
+        after = client.get(f"/api/work-items/{wid}").json()
         assert after["description"] == "second"
         assert after["updated_at"] >= before
 
-        evs = client.get(f"/work-items/{wid}/events").json()
+        evs = client.get(f"/api/work-items/{wid}/events").json()
         edits = [e for e in evs if e["type"] == "work_item_description_edited"]
         assert [e["payload"]["description"] for e in edits] == ["second"]
 
@@ -401,7 +401,7 @@ def test_patch_updates_the_description_and_records_an_event(tmp_path, monkeypatc
 def test_patch_404s_on_an_unknown_work_item(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     with client:
-        assert client.patch("/work-items/nope", json={"description": "x"}).status_code == 404
+        assert client.patch("/api/work-items/nope", json={"description": "x"}).status_code == 404
 
 
 def test_patch_can_clear_the_description(tmp_path, monkeypatch):
@@ -409,11 +409,11 @@ def test_patch_can_clear_the_description(tmp_path, monkeypatch):
     with client:
         repo = make_repo(tmp_path)
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"title": "t", "description": "first", "repo": str(repo), "autostart": False},
         ).json()["id"]
-        assert client.patch(f"/work-items/{wid}", json={"description": ""}).status_code == 200
-        assert client.get(f"/work-items/{wid}").json()["description"] is None
+        assert client.patch(f"/api/work-items/{wid}", json={"description": ""}).status_code == 200
+        assert client.get(f"/api/work-items/{wid}").json()["description"] is None
 
 
 def test_patch_sets_the_title_without_clobbering_the_description(tmp_path, monkeypatch):
@@ -423,7 +423,7 @@ def test_patch_sets_the_title_without_clobbering_the_description(tmp_path, monke
     with client:
         repo = make_repo(tmp_path)
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={
                 "title": "typed in a hurry",
                 "description": "the brief",
@@ -432,20 +432,20 @@ def test_patch_sets_the_title_without_clobbering_the_description(tmp_path, monke
             },
         ).json()["id"]
 
-        r = client.patch(f"/work-items/{wid}", json={"title": "a better label"})
+        r = client.patch(f"/api/work-items/{wid}", json={"title": "a better label"})
         assert r.status_code == 200, r.text
         assert r.json() == {"id": wid, "title": "a better label"}
-        after = client.get(f"/work-items/{wid}").json()
+        after = client.get(f"/api/work-items/{wid}").json()
         assert after["title"] == "a better label"
         assert after["description"] == "the brief"
 
-        r = client.patch(f"/work-items/{wid}", json={"description": "a better brief"})
+        r = client.patch(f"/api/work-items/{wid}", json={"description": "a better brief"})
         assert r.status_code == 200, r.text
-        after = client.get(f"/work-items/{wid}").json()
+        after = client.get(f"/api/work-items/{wid}").json()
         assert after["title"] == "a better label"
         assert after["description"] == "a better brief"
 
-        evs = client.get(f"/work-items/{wid}/events").json()
+        evs = client.get(f"/api/work-items/{wid}/events").json()
         assert [e["payload"]["title"] for e in evs if e["type"] == "work_item_title_edited"] == [
             "a better label"
         ]
@@ -458,23 +458,23 @@ def test_patch_refuses_an_empty_body_and_a_blank_title(tmp_path, monkeypatch):
     with client:
         repo = make_repo(tmp_path)
         wid = client.post(
-            "/work-items", json={"title": "t", "repo": str(repo), "autostart": False}
+            "/api/work-items", json={"title": "t", "repo": str(repo), "autostart": False}
         ).json()["id"]
 
-        empty = client.patch(f"/work-items/{wid}", json={})
+        empty = client.patch(f"/api/work-items/{wid}", json={})
         assert empty.status_code == 422
         assert "nothing to patch" in empty.json()["detail"]
 
-        blank = client.patch(f"/work-items/{wid}", json={"title": "   "})
+        blank = client.patch(f"/api/work-items/{wid}", json={"title": "   "})
         assert blank.status_code == 422
         assert "title cannot be empty" in blank.json()["detail"]
 
-        assert client.get(f"/work-items/{wid}").json()["title"] == "t"
+        assert client.get(f"/api/work-items/{wid}").json()["title"] == "t"
 
 
 def _post_default(client, repo):
     return client.post(
-        "/work-items",
+        "/api/work-items",
         json={
             "title": "make the failing test pass",
             "repo": str(repo),
@@ -492,12 +492,14 @@ def test_no_explicit_chain_template_still_runs_default_and_is_distinguishable(
     outright also stores. The two must not collide."""
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
-        unset_wid = client.post("/work-items", json={"title": "t", "repo": str(repo)}).json()["id"]
+        unset_wid = client.post("/api/work-items", json={"title": "t", "repo": str(repo)}).json()[
+            "id"
+        ]
         named_wid = client.post(
-            "/work-items", json={"title": "t", "repo": str(repo), "chain_template": "default"}
+            "/api/work-items", json={"title": "t", "repo": str(repo), "chain_template": "default"}
         ).json()["id"]
-        unset = client.get(f"/work-items/{unset_wid}").json()
-        named = client.get(f"/work-items/{named_wid}").json()
+        unset = client.get(f"/api/work-items/{unset_wid}").json()
+        named = client.get(f"/api/work-items/{named_wid}").json()
         assert unset["chain_template"] is None
         assert named["chain_template"] == "default"
         assert unset["chain_definition"]["nodes"] == named["chain_definition"]["nodes"]
@@ -509,15 +511,15 @@ def test_gate_approve_advances_chain(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
         wid = _post_default(client, repo)
         _poll_events(client, wid, "gate_requested")
-        item = client.get(f"/work-items/{wid}").json()
+        item = client.get(f"/api/work-items/{wid}").json()
         assert item["status"] == "needs_human"
 
-        r = client.post(f"/work-items/{wid}/gates/spec_approval/approve")
+        r = client.post(f"/api/work-items/{wid}/gates/spec_approval/approve")
         assert r.status_code == 200, r.text
         _poll_events(client, wid, "gate_approved")
         assert any(
             e["type"] == "node_started" and e["payload"]["node_id"] == "plan"
-            for e in client.get(f"/work-items/{wid}/events").json()
+            for e in client.get(f"/api/work-items/{wid}/events").json()
         )
 
 
@@ -543,10 +545,10 @@ def test_chain_review_splice_runs_the_revised_tail(tmp_path, monkeypatch):
         wid = _post_default(client, repo)
         for gate in ("spec_approval", "plan_approval"):
             _await_gate(client, wid, gate)
-            assert client.post(f"/work-items/{wid}/gates/{gate}/approve").status_code == 200
+            assert client.post(f"/api/work-items/{wid}/gates/{gate}/approve").status_code == 200
         _await_gate(client, wid, "chain_finalized")
 
-        tail = client.get(f"/work-items/{wid}").json()["chain_definition"]["nodes"]
+        tail = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
         original = [n for n in tail if n["id"] not in ("spec", "plan", "chain_review")]
         revised = [
             {"id": "extra_check", "tasks": ["on.review.local.run"], "gate_after": None},
@@ -558,18 +560,18 @@ def test_chain_review_splice_runs_the_revised_tail(tmp_path, monkeypatch):
             {"status": "ready_for_approval", "revised_chain_nodes": revised, "rationale": "t"},
         )
 
-        r = client.post(f"/work-items/{wid}/gates/chain_finalized/approve")
+        r = client.post(f"/api/work-items/{wid}/gates/chain_finalized/approve")
         assert r.status_code == 200, r.text
         _await_gate(client, wid, "human_review_approval")
         started = [
             e["payload"]["node_id"]
-            for e in client.get(f"/work-items/{wid}/events").json()
+            for e in client.get(f"/api/work-items/{wid}/events").json()
             if e["type"] == "node_started"
         ]
         assert "extra_check" in started
-        assert client.get(f"/work-items/{wid}").json()["chain_definition"]["nodes"][3]["id"] == (
-            "extra_check"
-        )
+        assert client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"][3][
+            "id"
+        ] == ("extra_check")
 
 
 def test_chain_review_unchanged_tail_round_trips(tmp_path, monkeypatch):
@@ -581,15 +583,15 @@ def test_chain_review_unchanged_tail_round_trips(tmp_path, monkeypatch):
         wid = _post_default(client, repo)
         for gate in ("spec_approval", "plan_approval"):
             _await_gate(client, wid, gate)
-            assert client.post(f"/work-items/{wid}/gates/{gate}/approve").status_code == 200
+            assert client.post(f"/api/work-items/{wid}/gates/{gate}/approve").status_code == 200
         _await_gate(client, wid, "chain_finalized")
-        before = client.get(f"/work-items/{wid}").json()["chain_definition"]["nodes"]
+        before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
 
         # fake-claude.sh's default answer for on.chain.review_ready is the
         # unchanged tail — no override needed here.
-        r = client.post(f"/work-items/{wid}/gates/chain_finalized/approve")
+        r = client.post(f"/api/work-items/{wid}/gates/chain_finalized/approve")
         assert r.status_code == 200, r.text
-        after = client.get(f"/work-items/{wid}").json()["chain_definition"]["nodes"]
+        after = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
         assert after == before
 
 
@@ -618,19 +620,19 @@ def test_chain_review_error_or_invalid_tail_stops_at_needs_human(
         wid = _post_default(client, repo)
         for gate in ("spec_approval", "plan_approval"):
             _await_gate(client, wid, gate)
-            assert client.post(f"/work-items/{wid}/gates/{gate}/approve").status_code == 200
+            assert client.post(f"/api/work-items/{wid}/gates/{gate}/approve").status_code == 200
         _await_gate(client, wid, "chain_finalized")
-        before = client.get(f"/work-items/{wid}").json()["chain_definition"]["nodes"]
+        before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
 
         _write_chain_review(client, wid, envelope)
-        r = client.post(f"/work-items/{wid}/gates/chain_finalized/approve")
+        r = client.post(f"/api/work-items/{wid}/gates/chain_finalized/approve")
         assert r.status_code == 200, r.text
-        item = client.get(f"/work-items/{wid}").json()
+        item = client.get(f"/api/work-items/{wid}").json()
         assert item["status"] == "needs_human"
         assert item["chain_definition"]["nodes"] == before
         stops = [
             e
-            for e in client.get(f"/work-items/{wid}/events").json()
+            for e in client.get(f"/api/work-items/{wid}/events").json()
             if e["type"] == "work_item_needs_human"
         ]
         assert stops and reason_has in stops[-1]["payload"]["reason"]
@@ -643,13 +645,13 @@ def test_chain_review_missing_artifact_stops_at_needs_human(tmp_path, monkeypatc
         wid = _post_default(client, repo)
         for gate in ("spec_approval", "plan_approval"):
             _await_gate(client, wid, gate)
-            assert client.post(f"/work-items/{wid}/gates/{gate}/approve").status_code == 200
+            assert client.post(f"/api/work-items/{wid}/gates/{gate}/approve").status_code == 200
         _await_gate(client, wid, "chain_finalized")
         _chain_review_path(client, wid).unlink()
 
-        r = client.post(f"/work-items/{wid}/gates/chain_finalized/approve")
+        r = client.post(f"/api/work-items/{wid}/gates/chain_finalized/approve")
         assert r.status_code == 200, r.text
-        assert client.get(f"/work-items/{wid}").json()["status"] == "needs_human"
+        assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
 
 
 def test_gate_approve_wrong_gate_409(tmp_path, monkeypatch):
@@ -657,7 +659,7 @@ def test_gate_approve_wrong_gate_409(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
         wid = _post_default(client, repo)
         _poll_events(client, wid, "gate_requested")
-        r = client.post(f"/work-items/{wid}/gates/plan_approval/approve")
+        r = client.post(f"/api/work-items/{wid}/gates/plan_approval/approve")
         assert r.status_code == 409
 
 
@@ -666,7 +668,7 @@ def test_gate_unknown_name_404(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
         wid = _post_default(client, repo)
         _poll_events(client, wid, "gate_requested")
-        assert client.post(f"/work-items/{wid}/gates/not_a_gate/approve").status_code == 404
+        assert client.post(f"/api/work-items/{wid}/gates/not_a_gate/approve").status_code == 404
 
 
 def test_gate_reject_requires_note_and_re_runs_the_producer(tmp_path, monkeypatch):
@@ -682,12 +684,15 @@ def test_gate_reject_requires_note_and_re_runs_the_producer(tmp_path, monkeypatc
         _poll_events(client, wid, "gate_requested")
 
         assert (
-            client.post(f"/work-items/{wid}/gates/spec_approval/reject", json={}).status_code == 422
+            client.post(f"/api/work-items/{wid}/gates/spec_approval/reject", json={}).status_code
+            == 422
         )
 
-        r = client.post(f"/work-items/{wid}/gates/spec_approval/reject", json={"note": "too vague"})
+        r = client.post(
+            f"/api/work-items/{wid}/gates/spec_approval/reject", json={"note": "too vague"}
+        )
         assert r.status_code == 200, r.text
-        evts = client.get(f"/work-items/{wid}/events").json()
+        evts = client.get(f"/api/work-items/{wid}/events").json()
         rej = [e for e in evts if e["type"] == "gate_rejected"]
         assert rej and rej[0]["payload"] == {
             "gate": "spec_approval",
@@ -697,9 +702,9 @@ def test_gate_reject_requires_note_and_re_runs_the_producer(tmp_path, monkeypatc
 
         # the spec node runs again and asks for its gate a second time
         _poll_events(client, wid, "gate_requested", count=2)
-        item = client.get(f"/work-items/{wid}").json()
+        item = client.get(f"/api/work-items/{wid}").json()
         assert item["pending_gate"] == "spec_approval"
-        assert client.post(f"/work-items/{wid}/gates/spec_approval/approve").status_code == 200
+        assert client.post(f"/api/work-items/{wid}/gates/spec_approval/approve").status_code == 200
 
 
 def test_gate_reject_is_bounded_by_its_reject_loop(tmp_path, monkeypatch):
@@ -714,23 +719,23 @@ def test_gate_reject_is_bounded_by_its_reject_loop(tmp_path, monkeypatch):
         _poll_events(client, wid, "gate_requested")
         assert (
             client.post(
-                f"/work-items/{wid}/gates/spec_approval/reject", json={"note": "again"}
+                f"/api/work-items/{wid}/gates/spec_approval/reject", json={"note": "again"}
             ).status_code
             == 200
         )
         _poll_events(client, wid, "gate_requested", count=2)
         assert (
             client.post(
-                f"/work-items/{wid}/gates/spec_approval/reject", json={"note": "still no"}
+                f"/api/work-items/{wid}/gates/spec_approval/reject", json={"note": "still no"}
             ).status_code
             == 200
         )
-        item = client.get(f"/work-items/{wid}").json()
+        item = client.get(f"/api/work-items/{wid}").json()
         assert item["status"] == "needs_human"
         assert item["pending_gate"] is None
         stops = [
             e
-            for e in client.get(f"/work-items/{wid}/events").json()
+            for e in client.get(f"/api/work-items/{wid}/events").json()
             if e["type"] == "work_item_needs_human"
         ]
         assert stops and "spec_approval_reject_loop" in stops[-1]["payload"]["reason"]
@@ -749,11 +754,11 @@ def test_rejecting_the_final_gate_re_enters_at_implementation(tmp_path, monkeypa
         wid = _post_default(client, repo)
         for gate in ("spec_approval", "plan_approval", "chain_finalized"):
             _await_gate(client, wid, gate)
-            assert client.post(f"/work-items/{wid}/gates/{gate}/approve").status_code == 200
+            assert client.post(f"/api/work-items/{wid}/gates/{gate}/approve").status_code == 200
         _await_gate(client, wid, "human_review_approval")
 
         r = client.post(
-            f"/work-items/{wid}/gates/human_review_approval/reject",
+            f"/api/work-items/{wid}/gates/human_review_approval/reject",
             json={"note": "the retry path is untested"},
         )
         assert r.status_code == 200, r.text
@@ -769,11 +774,13 @@ def test_rejecting_the_final_gate_re_enters_at_implementation(tmp_path, monkeypa
         _poll_events(client, wid, "gate_requested", count=5)
         starts = [
             e["payload"]["node_id"]
-            for e in client.get(f"/work-items/{wid}/events").json()
+            for e in client.get(f"/api/work-items/{wid}/events").json()
             if e["type"] == "node_started"
         ]
         assert starts.count("implementation") == 2
-        assert client.get(f"/work-items/{wid}").json()["pending_gate"] == ("human_review_approval")
+        assert client.get(f"/api/work-items/{wid}").json()["pending_gate"] == (
+            "human_review_approval"
+        )
 
         # and the note led the re-run's instruction rather than dying in an event
         assert "the retry path is untested" in prompts.read_text()
@@ -787,22 +794,22 @@ def test_reject_refuses_a_node_after_its_gate(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
         wid = _post_default(client, repo)
         _await_gate(client, wid, "spec_approval")
-        assert client.post(f"/work-items/{wid}/gates/spec_approval/approve").status_code == 200
+        assert client.post(f"/api/work-items/{wid}/gates/spec_approval/approve").status_code == 200
         _await_gate(client, wid, "plan_approval")
 
         r = client.post(
-            f"/work-items/{wid}/gates/plan_approval/reject",
+            f"/api/work-items/{wid}/gates/plan_approval/reject",
             json={"note": "wrong", "node": "merge"},
         )
         assert r.status_code == 400, r.text
         assert "merge" in r.json()["detail"]
         # nothing was spawned and nothing was recorded
-        item = client.get(f"/work-items/{wid}").json()
+        item = client.get(f"/api/work-items/{wid}").json()
         assert item["status"] == "needs_human"
         assert item["pending_gate"] == "plan_approval"
         assert not [
             e
-            for e in client.get(f"/work-items/{wid}/events").json()
+            for e in client.get(f"/api/work-items/{wid}/events").json()
             if e["type"] == "gate_rejected"
         ]
 
@@ -814,7 +821,7 @@ def test_reject_refuses_a_node_that_is_not_in_this_chain(tmp_path, monkeypatch):
         wid = _post_default(client, repo)
         _await_gate(client, wid, "spec_approval")
         r = client.post(
-            f"/work-items/{wid}/gates/spec_approval/reject",
+            f"/api/work-items/{wid}/gates/spec_approval/reject",
             json={"note": "wrong", "node": "no_such_node"},
         )
         assert r.status_code == 400, r.text
@@ -832,17 +839,17 @@ def test_a_rejection_note_is_the_default_steer_for_the_next_retry(tmp_path, monk
     with _client(tmp_path, monkeypatch, templates_dir=templates) as client:
         wid = _post_default(client, repo)
         _await_gate(client, wid, "spec_approval")
-        client.post(f"/work-items/{wid}/gates/spec_approval/reject", json={"note": "again"})
+        client.post(f"/api/work-items/{wid}/gates/spec_approval/reject", json={"note": "again"})
         _await_gate(client, wid, "spec_approval")
-        client.post(f"/work-items/{wid}/gates/spec_approval/reject", json={"note": "still no"})
+        client.post(f"/api/work-items/{wid}/gates/spec_approval/reject", json={"note": "still no"})
         _wait_for_status(client, wid, "needs_human")
 
-        r = client.post(f"/work-items/{wid}/retry", json={})
+        r = client.post(f"/api/work-items/{wid}/retry", json={})
         assert r.status_code == 200, r.text
         assert r.json()["steer"] == "still no"
         retried = [
             e
-            for e in client.get(f"/work-items/{wid}/events").json()
+            for e in client.get(f"/api/work-items/{wid}/events").json()
             if e["type"] == "work_item_retried"
         ]
         assert retried[-1]["payload"]["steer"] == "still no"
@@ -862,15 +869,15 @@ def test_retry_clears_the_gate_reject_counter(tmp_path, monkeypatch):
         wid = _post_default(client, repo)
         _await_gate(client, wid, "spec_approval")
         for note in ("again", "still no"):
-            client.post(f"/work-items/{wid}/gates/spec_approval/reject", json={"note": note})
+            client.post(f"/api/work-items/{wid}/gates/spec_approval/reject", json={"note": note})
             if note == "again":
                 _await_gate(client, wid, "spec_approval")
         _wait_for_status(client, wid, "needs_human")
 
-        assert client.post(f"/work-items/{wid}/retry", json={}).status_code == 200
+        assert client.post(f"/api/work-items/{wid}/retry", json={}).status_code == 200
         _await_gate(client, wid, "spec_approval")
         r = client.post(
-            f"/work-items/{wid}/gates/spec_approval/reject", json={"note": "third time"}
+            f"/api/work-items/{wid}/gates/spec_approval/reject", json={"note": "third time"}
         )
         assert r.status_code == 200, r.text
         assert r.json()["status"] == "active", (
@@ -880,15 +887,15 @@ def test_retry_clears_the_gate_reject_counter(tmp_path, monkeypatch):
 
 def test_gate_approve_unknown_work_item_404(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
-        assert client.post("/work-items/nope/gates/spec_approval/approve").status_code == 404
+        assert client.post("/api/work-items/nope/gates/spec_approval/approve").status_code == 404
 
 
 def test_list_work_items_shape_and_cursor(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
         client.post(
-            "/work-items", json={"title": "make the failing test pass", "repo": str(tmp_path)}
+            "/api/work-items", json={"title": "make the failing test pass", "repo": str(tmp_path)}
         )
-        body = client.get("/work-items").json()
+        body = client.get("/api/work-items").json()
         assert set(body) == {"items", "cursor"}
         assert isinstance(body["cursor"], int) and body["cursor"] > 0
         item = body["items"][0]
@@ -910,7 +917,7 @@ def test_list_work_items_shape_and_cursor(tmp_path, monkeypatch):
 
 def test_list_work_items_empty(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
-        body = client.get("/work-items").json()
+        body = client.get("/api/work-items").json()
         assert body == {"items": [], "cursor": 0}
 
 
@@ -920,7 +927,7 @@ def test_templates_lists_only_resolvable_sorted(tmp_path, monkeypatch):
         "id: broken\nnodes:\n  - {id: x, tasks: [on.nope], gate_after: null}\n"
     )
     with _client(tmp_path, monkeypatch, templates_dir=bad) as client:
-        got = client.get("/templates").json()
+        got = client.get("/api/templates").json()
         ids = [t["id"] for t in got]
         assert "broken" not in ids
         assert ids == sorted(ids)
@@ -935,36 +942,44 @@ def test_spa_catchall_serves_index_when_dist_present(tmp_path, monkeypatch):
     monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(dist))
     with _client(tmp_path, monkeypatch) as client:
         assert "<title>kraft</title>" in client.get("/").text
-        # browser navigation deep link -> index.html
+        # browser deep-link on a client-side route -> index.html, regardless of
+        # headers, because /work-items/<id> is not a real route: the catch-all
+        # is all that's left to answer it.
         html = {"accept": "text/html,application/xhtml+xml"}
         assert "<title>kraft</title>" in client.get("/work-items/abc123", headers=html).text
-        # XHR (Accept: application/json) still gets a real JSON 404
-        r = client.get("/work-items/abc123", headers={"accept": "application/json"})
+        assert (
+            "<title>kraft</title>"
+            in client.get("/work-items/abc123", headers={"accept": "application/json"}).text
+        )
+        # a genuine 404 under /api/ is always JSON, even from a browser
+        # navigation — that prefix is unambiguous, no header can turn it HTML
+        r = client.get("/api/work-items/abc123", headers=html)
         assert r.status_code == 404
         assert "detail" in r.json()
-        r = client.get(
-            "/worker-sessions/does-not-exist/log", headers={"accept": "application/json"}
-        )
+        r = client.get("/api/worker-sessions/does-not-exist/log", headers=html)
+        assert r.status_code == 404
+        assert "detail" in r.json()
+        # a bad /api/ path with no matching route at all is also a plain JSON
+        # 404, not the shell
+        r = client.get("/api/nope", headers=html)
         assert r.status_code == 404
         assert "detail" in r.json()
         # real asset -> that file
         assert client.get("/assets/app.js").text == "console.log(1)"
-        # API route still wins
-        assert client.get("/health").json()["status"] in ("ok", "degraded")
-        assert client.get("/work-items").json() == {"items": [], "cursor": 0}
-        # browser navigation to a path that shadows a real API route (never 404s,
-        # so the exception handler can't catch it) -> SPA shell, not raw JSON
+        # real API routes work
+        assert client.get("/api/health").json()["status"] in ("ok", "degraded")
+        assert client.get("/api/work-items").json() == {"items": [], "cursor": 0}
+        # a forged browser-navigation header on /api/ does nothing: that prefix
+        # is unambiguous, so it still answers with real JSON, not the shell
         nav = {"sec-fetch-dest": "document"}
-        shell = client.get("/work-items", headers=nav)
+        assert client.get("/api/work-items", headers=nav).json() == {"items": [], "cursor": 0}
+        assert client.get("/api/health", headers=nav).json()["status"] in ("ok", "degraded")
+        # the same header on a client-side route still fast-paths to the shell,
+        # with cache headers so a refresh can't be answered from a stale cache
+        shell = client.get("/work-items/abc123", headers=nav)
         assert "<title>kraft</title>" in shell.text
-        assert "<title>kraft</title>" in client.get("/health", headers=nav).text
-        # The shell is served under URLs that are also API routes, and a browser
-        # caches by URL. Cached, it would answer the SPA's own fetch for the same
-        # path — the detail screen rendered an empty husk on every deep link.
         assert shell.headers["cache-control"] == "no-store"
         assert shell.headers["vary"] == "sec-fetch-dest"
-        # a script/style/XHR fetch (dest != document) still hits the API
-        assert client.get("/health", headers={"sec-fetch-dest": "empty"}).json()["status"]
 
 
 @pytest.mark.parametrize(
@@ -988,7 +1003,7 @@ def test_spa_catchall_404s_when_dist_absent(tmp_path, monkeypatch):
     monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "nope"))
     with _client(tmp_path, monkeypatch) as client:
         assert client.get("/some/spa/route").status_code == 404
-        assert client.get("/health").status_code == 200
+        assert client.get("/api/health").status_code == 200
 
 
 def test_work_item_usage_rollup_is_captured_from_the_agent_envelope(tmp_path, monkeypatch):
@@ -998,12 +1013,12 @@ def test_work_item_usage_rollup_is_captured_from_the_agent_envelope(tmp_path, mo
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"repo": str(repo), "title": "make it pass", "chain_template": "quick-task"},
         ).json()["id"]
         _poll_events(client, wid, "work_item_completed", timeout=120)
 
-        usage = client.get(f"/work-items/{wid}").json()["usage"]
+        usage = client.get(f"/api/work-items/{wid}").json()["usage"]
         impl = next(n for n in usage["by_node"] if n["node"] == "implementation")
         # 1000 input + 500 cache-read, 200 output
         assert (impl["tokens_in"], impl["tokens_out"]) == (1500, 200)
@@ -1030,7 +1045,7 @@ def test_cross_repo_intake_records_submodules_and_orders_the_merge(tmp_path, mon
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={
                 "repo": str(repo),
                 "title": "bump the pointers",
@@ -1039,7 +1054,7 @@ def test_cross_repo_intake_records_submodules_and_orders_the_merge(tmp_path, mon
                 "root_merge_policy": "skip",
             },
         ).json()["id"]
-        body = client.get(f"/work-items/{wid}").json()
+        body = client.get(f"/api/work-items/{wid}").json()
         assert [r["path"] for r in body["repos"]] == ["vendor/deep/b", "libs/a", str(repo)]
         assert [r["role"] for r in body["repos"]] == ["submodule", "submodule", "root"]
         assert [r["merge_rank"] for r in body["repos"]] == [1, 2, 3]
@@ -1047,7 +1062,7 @@ def test_cross_repo_intake_records_submodules_and_orders_the_merge(tmp_path, mon
         assert body["root_merge_policy"] == "skip"
 
         bad = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"repo": str(repo), "title": "x", "root_merge_policy": "nonsense"},
         )
         assert bad.status_code == 422
@@ -1057,17 +1072,17 @@ def test_a_single_repo_item_has_no_repos_panel(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"repo": str(repo), "title": "solo", "chain_template": "quick-task"},
         ).json()["id"]
-        assert client.get(f"/work-items/{wid}").json()["repos"] == []
+        assert client.get(f"/api/work-items/{wid}").json()["repos"] == []
 
 
 def test_intake_with_a_plan_attachment_trims_the_chain_and_reports_it(tmp_path, monkeypatch):
     repo = make_repo_with_engineering(tmp_path, {".engineering/plans/p.md": "# plan\n"})
     with _client(tmp_path, monkeypatch) as client:
         r = client.post(
-            "/work-items",
+            "/api/work-items",
             json={
                 "title": "t",
                 "repo": str(repo),
@@ -1077,10 +1092,10 @@ def test_intake_with_a_plan_attachment_trims_the_chain_and_reports_it(tmp_path, 
         )
         assert r.status_code == 201, r.text
         wid = r.json()["id"]
-        item = client.get(f"/work-items/{wid}").json()
+        item = client.get(f"/api/work-items/{wid}").json()
         assert item["attachments"] == [{"kind": "plan", "path": ".engineering/plans/p.md"}]
         assert "plan_approval" not in [n["gate_after"] for n in item["chain_definition"]["nodes"]]
-        listed = next(i for i in client.get("/work-items").json()["items"] if i["id"] == wid)
+        listed = next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
         assert listed["attachments"] == [{"kind": "plan", "path": ".engineering/plans/p.md"}]
 
 
@@ -1091,7 +1106,7 @@ def test_intake_with_a_plan_attachment_never_runs_the_plan_node(tmp_path, monkey
     repo = make_repo_with_engineering(tmp_path, {".engineering/plans/p.md": "# plan\n"})
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={
                 "title": "t",
                 "repo": str(repo),
@@ -1100,7 +1115,7 @@ def test_intake_with_a_plan_attachment_never_runs_the_plan_node(tmp_path, monkey
             },
         ).json()["id"]
         _await_gate(client, wid, "spec_approval")
-        client.post(f"/work-items/{wid}/gates/spec_approval/approve")
+        client.post(f"/api/work-items/{wid}/gates/spec_approval/approve")
         events = _poll_events(client, wid, "node_started", count=2)
         started = [e["payload"]["node_id"] for e in events if e["type"] == "node_started"]
         assert "plan" not in started
@@ -1111,7 +1126,7 @@ def test_intake_rejects_a_traversing_attachment_path(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         r = client.post(
-            "/work-items",
+            "/api/work-items",
             json={
                 "title": "t",
                 "repo": str(repo),
@@ -1131,7 +1146,7 @@ def test_intake_rejects_an_absolute_attachment_path(tmp_path, monkeypatch):
     outside.write_text("# outside\n")
     with _client(tmp_path, monkeypatch) as client:
         r = client.post(
-            "/work-items",
+            "/api/work-items",
             json={
                 "title": "t",
                 "repo": str(repo),
@@ -1154,7 +1169,7 @@ def test_intake_rejects_a_symlink_that_escapes_the_repo(tmp_path, monkeypatch):
     escape.symlink_to(outside)
     with _client(tmp_path, monkeypatch) as client:
         r = client.post(
-            "/work-items",
+            "/api/work-items",
             json={
                 "title": "t",
                 "repo": str(repo),
@@ -1169,7 +1184,7 @@ def test_intake_rejects_a_missing_attachment_and_a_duplicate_kind(tmp_path, monk
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         missing = client.post(
-            "/work-items",
+            "/api/work-items",
             json={
                 "title": "t",
                 "repo": str(repo),
@@ -1180,7 +1195,7 @@ def test_intake_rejects_a_missing_attachment_and_a_duplicate_kind(tmp_path, monk
         (repo / ".engineering" / "plans").mkdir(parents=True)
         (repo / ".engineering" / "plans" / "p.md").write_text("# p\n")
         dupe = client.post(
-            "/work-items",
+            "/api/work-items",
             json={
                 "title": "t",
                 "repo": str(repo),
@@ -1200,7 +1215,7 @@ def test_intake_accepts_an_uncommitted_attachment(tmp_path, monkeypatch):
     plan.write_text("# uncommitted\n")
     with _client(tmp_path, monkeypatch) as client:
         r = client.post(
-            "/work-items",
+            "/api/work-items",
             json={
                 "title": "t",
                 "repo": str(repo),
@@ -1224,7 +1239,7 @@ def test_intake_accepts_an_attachment_from_another_worktree_of_the_repo(tmp_path
     assert not (repo / ".engineering" / "specs" / "s.md").exists()
     with _client(tmp_path, monkeypatch) as client:
         r = client.post(
-            "/work-items",
+            "/api/work-items",
             json={
                 "title": "t",
                 "repo": str(repo),
@@ -1234,7 +1249,7 @@ def test_intake_accepts_an_attachment_from_another_worktree_of_the_repo(tmp_path
             },
         )
         assert r.status_code == 201, r.text
-        stored = client.get(f"/work-items/{r.json()['id']}").json()["attachments"]
+        stored = client.get(f"/api/work-items/{r.json()['id']}").json()["attachments"]
         # repo-relative path, unchanged in shape: it is what the prompt note,
         # the board badge and index/service._attachment_docs all read.
         assert stored[0]["kind"] == "spec"
@@ -1253,7 +1268,7 @@ def test_intake_without_a_cwd_still_scopes_attachments_to_the_repo(tmp_path, mon
     spec.write_text("# written in the worktree\n")
     with _client(tmp_path, monkeypatch) as client:
         r = client.post(
-            "/work-items",
+            "/api/work-items",
             json={
                 "title": "t",
                 "repo": str(repo),
@@ -1277,7 +1292,7 @@ def test_intake_ignores_a_cwd_in_a_different_repo(tmp_path, monkeypatch):
     spec.write_text("# not this repo's spec\n")
     with _client(tmp_path, monkeypatch) as client:
         r = client.post(
-            "/work-items",
+            "/api/work-items",
             json={
                 "title": "t",
                 "repo": str(repo),
@@ -1294,7 +1309,7 @@ def test_deferred_minor_findings_reach_the_detail_payload(tmp_path, monkeypatch)
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
         ).json()["id"]
         nit = {
@@ -1315,7 +1330,7 @@ def test_deferred_minor_findings_reach_the_detail_payload(tmp_path, monkeypatch)
         # twice: the roll-up must deduplicate by fingerprint
         _seed_events(client, wid, [payload, payload])
 
-        body = client.get(f"/work-items/{wid}").json()
+        body = client.get(f"/api/work-items/{wid}").json()
         assert [f["message"] for f in body["deferred_findings"]] == ["naming nit"]
 
 
@@ -1327,7 +1342,7 @@ def test_concerns_reach_the_detail_payload(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
         ).json()["id"]
         _seed_events(
@@ -1337,7 +1352,7 @@ def test_concerns_reach_the_detail_payload(tmp_path, monkeypatch):
             event_type="worker_session_exited",
         )
 
-        body = client.get(f"/work-items/{wid}").json()
+        body = client.get(f"/api/work-items/{wid}").json()
         assert body["concerns"] == ["untested path"]
 
 
@@ -1348,10 +1363,10 @@ def test_stop_reason_reaches_the_detail_payload(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
         ).json()["id"]
-        assert client.get(f"/work-items/{wid}").json()["stop_reason"] is None
+        assert client.get(f"/api/work-items/{wid}").json()["stop_reason"] is None
 
         _seed_events(
             client,
@@ -1359,7 +1374,7 @@ def test_stop_reason_reaches_the_detail_payload(tmp_path, monkeypatch):
             [{"node_id": "verify", "reason": "executor crashed: RuntimeError('boom')"}],
             event_type="work_item_needs_human",
         )
-        body = client.get(f"/work-items/{wid}").json()
+        body = client.get(f"/api/work-items/{wid}").json()
         assert body["stop_reason"] == "executor crashed: RuntimeError('boom')"
 
 
@@ -1370,7 +1385,7 @@ def test_concerns_stop_at_the_gate_that_answered_them(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
         ).json()["id"]
         _seed_events(
@@ -1380,7 +1395,7 @@ def test_concerns_stop_at_the_gate_that_answered_them(tmp_path, monkeypatch):
             event_type="worker_session_exited",
         )
         _seed_events(client, wid, [{"gate": "spec_approval"}], event_type="gate_approved")
-        assert client.get(f"/work-items/{wid}").json()["concerns"] == []
+        assert client.get(f"/api/work-items/{wid}").json()["concerns"] == []
 
         _seed_events(
             client,
@@ -1388,7 +1403,7 @@ def test_concerns_stop_at_the_gate_that_answered_them(tmp_path, monkeypatch):
             [{"session_id": "s2", "status": "done_with_concerns", "concerns": "new worry"}],
             event_type="worker_session_exited",
         )
-        assert client.get(f"/work-items/{wid}").json()["concerns"] == ["new worry"]
+        assert client.get(f"/api/work-items/{wid}").json()["concerns"] == ["new worry"]
 
 
 def test_needs_context_question_reaches_the_detail_payload(tmp_path, monkeypatch):
@@ -1401,7 +1416,7 @@ def test_needs_context_question_reaches_the_detail_payload(tmp_path, monkeypatch
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"repo": str(repo), "title": "needs a decision", "chain_template": "quick-task"},
         ).json()["id"]
         body = _wait_for_status(client, wid, "needs_human")
@@ -1417,7 +1432,7 @@ def test_needs_context_question_does_not_resurface_a_stale_answer(tmp_path, monk
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
-            "/work-items",
+            "/api/work-items",
             json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
         ).json()["id"]
         _seed_events(
@@ -1430,7 +1445,7 @@ def test_needs_context_question_does_not_resurface_a_stale_answer(tmp_path, monk
             event_type="work_item_needs_human",
         )
 
-        body = client.get(f"/work-items/{wid}").json()
+        body = client.get(f"/api/work-items/{wid}").json()
         assert body["needs_context_question"] == "(no question given)"
 
 
@@ -1471,7 +1486,7 @@ def test_retry_refuses_explicit_steer_on_a_node_with_no_agent_task(tmp_path, mon
         wid = _post_default(client, repo)
         _force_node(wid, "open_mr", "needs_human")
 
-        r = client.post(f"/work-items/{wid}/retry", json={"steer": "commit the leftover file"})
+        r = client.post(f"/api/work-items/{wid}/retry", json={"steer": "commit the leftover file"})
 
         assert r.status_code == 409, r.text
         assert "open_mr" in r.json()["detail"]
@@ -1488,7 +1503,7 @@ def test_retry_without_explicit_steer_still_works_on_a_node_with_no_agent_task(
         wid = _post_default(client, repo)
         _force_node(wid, "open_mr", "needs_human")
 
-        r = client.post(f"/work-items/{wid}/retry", json={})
+        r = client.post(f"/api/work-items/{wid}/retry", json={})
 
         assert r.status_code == 200, r.text
 
@@ -1501,10 +1516,10 @@ def test_work_item_detail_reports_steerable_per_current_node(tmp_path, monkeypat
         wid = _post_default(client, repo)
 
         _force_node(wid, "open_mr", "needs_human")
-        assert client.get(f"/work-items/{wid}").json()["steerable"] is False
+        assert client.get(f"/api/work-items/{wid}").json()["steerable"] is False
 
         _force_node(wid, "implementation", "needs_human")
-        assert client.get(f"/work-items/{wid}").json()["steerable"] is True
+        assert client.get(f"/api/work-items/{wid}").json()["steerable"] is True
 
 
 def test_resume_refuses_when_all_slots_are_busy(tmp_path, monkeypatch):
@@ -1523,11 +1538,11 @@ def test_resume_refuses_when_all_slots_are_busy(tmp_path, monkeypatch):
         _set_status(idle, "paused")
         client.app.state.intake["max_concurrent"] = 1
 
-        r = client.post(f"/work-items/{idle}/resume", json={})
+        r = client.post(f"/api/work-items/{idle}/resume", json={})
 
         assert r.status_code == 409, r.text
         assert "1" in r.json()["detail"]
-        assert client.get(f"/work-items/{busy}").json()["status"] == "active"
+        assert client.get(f"/api/work-items/{busy}").json()["status"] == "active"
 
 
 def test_resume_works_when_a_slot_is_free(tmp_path, monkeypatch):
@@ -1539,7 +1554,7 @@ def test_resume_works_when_a_slot_is_free(tmp_path, monkeypatch):
         _set_status(wid, "paused")
         client.app.state.intake["max_concurrent"] = 1
 
-        r = client.post(f"/work-items/{wid}/resume", json={})
+        r = client.post(f"/api/work-items/{wid}/resume", json={})
 
         assert r.status_code == 200, r.text
 
@@ -1554,7 +1569,7 @@ def test_abandon_sets_terminal_status_and_removes_the_worktree(tmp_path, monkeyp
         assert worktree.is_dir(), "fixture never made a worktree; the test would prove nothing"
         _set_status(wid, "paused")
 
-        r = client.post(f"/work-items/{wid}/abandon")
+        r = client.post(f"/api/work-items/{wid}/abandon")
 
         assert r.status_code == 200, r.text
         assert r.json()["status"] == "abandoned"
@@ -1569,7 +1584,7 @@ def test_abandon_refuses_an_active_item(tmp_path, monkeypatch):
         _poll_events(client, wid, "gate_requested")
         _set_status(wid, "active")
 
-        r = client.post(f"/work-items/{wid}/abandon")
+        r = client.post(f"/api/work-items/{wid}/abandon")
 
         assert r.status_code == 409, r.text
         assert "active" in r.json()["detail"]
@@ -1581,10 +1596,10 @@ def test_list_hides_abandoned_items(tmp_path, monkeypatch):
         wid = _post_default(client, repo)
         _poll_events(client, wid, "gate_requested")
         _set_status(wid, "paused")
-        client.post(f"/work-items/{wid}/abandon")
+        client.post(f"/api/work-items/{wid}/abandon")
 
-        visible = client.get("/work-items").json()["items"]
-        everything = client.get("/work-items?include_abandoned=true").json()["items"]
+        visible = client.get("/api/work-items").json()["items"]
+        everything = client.get("/api/work-items?include_abandoned=true").json()["items"]
 
         assert wid not in [i["id"] for i in visible]
         assert wid in [i["id"] for i in everything]
@@ -1598,11 +1613,11 @@ def test_cli_can_list_abandoned_items(tmp_path, monkeypatch):
         wid = _post_default(client, repo)
         _poll_events(client, wid, "gate_requested")
         _set_status(wid, "paused")
-        client.post(f"/work-items/{wid}/abandon")
+        client.post(f"/api/work-items/{wid}/abandon")
 
         import kraft.client as kc
 
-        monkeypatch.setattr(kc, "_get", lambda path: _as_coro(client.get(path).json()))
+        monkeypatch.setattr(kc, "_get", lambda path: _as_coro(client.get(f"/api{path}").json()))
         visible = asyncio.run(kc.list_work_items())
         everything = asyncio.run(kc.list_work_items(include_abandoned=True))
 

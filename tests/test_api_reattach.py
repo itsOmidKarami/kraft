@@ -19,7 +19,7 @@ def _poll(client, wid, want, timeout=30, pred=None):
     deadline = time.monotonic() + timeout
     types = []
     while time.monotonic() < deadline:
-        evs = client.get(f"/work-items/{wid}/events").json()
+        evs = client.get(f"/api/work-items/{wid}/events").json()
         types = [e["type"] for e in evs]
         if any(e["type"] == want and (pred is None or pred(e)) for e in evs):
             return evs
@@ -43,7 +43,7 @@ def test_reattach_adopts_running_agent(tmp_path):
         run_dir=run_dir, templates_dir=templates, bd_cwd=tracker, env=slow_env
     ) as srv:
         wid = srv.client.post(
-            "/work-items",
+            "/api/work-items",
             # quick-task, not the default chain: this test needs the
             # implementation agent actually running to kill and re-adopt, and
             # `default` stops at spec_approval before it ever starts.
@@ -73,7 +73,7 @@ def test_reattach_adopts_running_agent(tmp_path):
     with running_server(
         run_dir=run_dir, templates_dir=templates, bd_cwd=tracker, env=slow_env
     ) as srv:
-        health = srv.client.get("/health").json()
+        health = srv.client.get("/api/health").json()
         assert wid in health["reattach_summary"]["resumed_work_items"]
         assert sess_id in health["reattach_summary"]["adopted"], (
             f"expected {sess_id} adopted, got summary {health['reattach_summary']}"
@@ -140,6 +140,6 @@ def test_reattach_pending_session_is_unknown(tmp_path):
     asyncio.run(seed())
 
     with running_server(run_dir=run_dir, templates_dir=templates, bd_cwd=tracker) as srv:
-        health = srv.client.get("/health").json()
+        health = srv.client.get("/api/health").json()
         assert "s-seed" in health["reattach_summary"]["unknown"]
-        assert srv.client.get("/work-items/w-seed").json()["status"] == "needs_human"
+        assert srv.client.get("/api/work-items/w-seed").json()["status"] == "needs_human"

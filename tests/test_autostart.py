@@ -20,7 +20,7 @@ def _poll_for(client, wid, event_type, timeout=30):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         matching = [
-            e for e in client.get(f"/work-items/{wid}/events").json() if e["type"] == event_type
+            e for e in client.get(f"/api/work-items/{wid}/events").json() if e["type"] == event_type
         ]
         if matching:
             return matching
@@ -45,10 +45,10 @@ def client(tmp_path, monkeypatch):
 def test_autostart_false_lands_paused_and_never_ran(client, tmp_path):
     repo = make_repo(tmp_path)
     wid = client.post(
-        "/work-items", json={"title": "wait for me", "repo": str(repo), "autostart": False}
+        "/api/work-items", json={"title": "wait for me", "repo": str(repo), "autostart": False}
     ).json()["id"]
 
-    item = client.get(f"/work-items/{wid}").json()
+    item = client.get(f"/api/work-items/{wid}").json()
     assert item["status"] == "paused"
     assert item["current_node_id"] is None
     # never started means no session was ever launched, not "a session was killed"
@@ -57,8 +57,8 @@ def test_autostart_false_lands_paused_and_never_ran(client, tmp_path):
 
 def test_autostart_defaults_true_so_the_ui_is_unaffected(client, tmp_path):
     repo = make_repo(tmp_path)
-    wid = client.post("/work-items", json={"title": "go now", "repo": str(repo)}).json()["id"]
-    assert client.get(f"/work-items/{wid}").json()["status"] == "active"
+    wid = client.post("/api/work-items", json={"title": "go now", "repo": str(repo)}).json()["id"]
+    assert client.get(f"/api/work-items/{wid}").json()["status"] == "active"
 
 
 def test_resuming_a_never_started_item_begins_at_node_zero(client, tmp_path):
@@ -67,11 +67,11 @@ def test_resuming_a_never_started_item_begins_at_node_zero(client, tmp_path):
     expression is ever refactored, this test is the thing that notices."""
     repo = make_repo(tmp_path)
     wid = client.post(
-        "/work-items", json={"title": "start me", "repo": str(repo), "autostart": False}
+        "/api/work-items", json={"title": "start me", "repo": str(repo), "autostart": False}
     ).json()["id"]
-    first_node = client.get(f"/work-items/{wid}").json()["chain_definition"]["nodes"][0]["id"]
+    first_node = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"][0]["id"]
 
-    assert client.post(f"/work-items/{wid}/resume", json={}).status_code == 200
+    assert client.post(f"/api/work-items/{wid}/resume", json={}).status_code == 200
 
     started = _poll_for(client, wid, "node_started")
     assert started[0]["payload"]["node_id"] == first_node, (
@@ -83,6 +83,6 @@ def test_pausing_a_never_started_item_is_refused(client, tmp_path):
     """It is already paused; /pause requires an active item."""
     repo = make_repo(tmp_path)
     wid = client.post(
-        "/work-items", json={"title": "already waiting", "repo": str(repo), "autostart": False}
+        "/api/work-items", json={"title": "already waiting", "repo": str(repo), "autostart": False}
     ).json()["id"]
-    assert client.post(f"/work-items/{wid}/pause").status_code == 409
+    assert client.post(f"/api/work-items/{wid}/pause").status_code == 409

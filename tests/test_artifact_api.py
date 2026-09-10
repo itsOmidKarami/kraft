@@ -72,7 +72,7 @@ def client(tmp_path, monkeypatch):
 def _await_gate(client, wid, gate, timeout=60):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if client.get(f"/work-items/{wid}").json().get("pending_gate") == gate:
+        if client.get(f"/api/work-items/{wid}").json().get("pending_gate") == gate:
             return
         time.sleep(0.2)
     raise AssertionError(f"{wid} never reached {gate}")
@@ -82,7 +82,7 @@ def _await_gate(client, wid, gate, timeout=60):
 def item_at_spec_gate(client, tmp_path):
     repo = make_repo(tmp_path)
     wid = client.post(
-        "/work-items",
+        "/api/work-items",
         json={"repo": str(repo), "title": "add a flag", "chain_template": "spec-only"},
     ).json()["id"]
     _await_gate(client, wid, "spec_approval")
@@ -91,7 +91,7 @@ def item_at_spec_gate(client, tmp_path):
 
 @pytest.fixture
 def worktree(client, item_at_spec_gate) -> Path:
-    return Path(client.get(f"/work-items/{item_at_spec_gate}").json()["worktree_path"])
+    return Path(client.get(f"/api/work-items/{item_at_spec_gate}").json()["worktree_path"])
 
 
 def _write_artifact(worktree: Path, wid: str, text: str) -> Path:
@@ -111,10 +111,10 @@ def _write_artifact(worktree: Path, wid: str, text: str) -> Path:
 def test_gate_artifact_names_the_file_the_hook_wrote(client, item_at_spec_gate, worktree):
     _write_artifact(worktree, item_at_spec_gate, "---\ntitle: A spec\n---\n\nthe body\n")
 
-    body = client.get(f"/work-items/{item_at_spec_gate}").json()
+    body = client.get(f"/api/work-items/{item_at_spec_gate}").json()
     assert body["gate_artifact"] == f".engineering/specs/{item_at_spec_gate}.md"
 
-    art = client.get(f"/work-items/{item_at_spec_gate}/artifact").json()
+    art = client.get(f"/api/work-items/{item_at_spec_gate}/artifact").json()
     assert art["title"] == "A spec"
     assert art["content"].strip() == "the body"
     assert art["truncated"] is False
@@ -129,14 +129,14 @@ def test_a_gate_whose_agent_wrote_nothing_reports_no_artifact(client, item_at_sp
     fake invocation that skips it.
     """
     (worktree / ".engineering" / "specs" / f"{item_at_spec_gate}.md").unlink()
-    assert client.get(f"/work-items/{item_at_spec_gate}").json()["gate_artifact"] is None
+    assert client.get(f"/api/work-items/{item_at_spec_gate}").json()["gate_artifact"] is None
     # A UI polls the detail endpoint while it waits for the agent's session to
     # finish; this case must not write an event on every poll, only the ones
     # below where the file was there and something then went wrong reading it.
-    client.get(f"/work-items/{item_at_spec_gate}/artifact")
-    client.get(f"/work-items/{item_at_spec_gate}/artifact")
-    assert client.get(f"/work-items/{item_at_spec_gate}/artifact").status_code == 404
-    events = client.get(f"/work-items/{item_at_spec_gate}/events").json()
+    client.get(f"/api/work-items/{item_at_spec_gate}/artifact")
+    client.get(f"/api/work-items/{item_at_spec_gate}/artifact")
+    assert client.get(f"/api/work-items/{item_at_spec_gate}/artifact").status_code == 404
+    events = client.get(f"/api/work-items/{item_at_spec_gate}/events").json()
     assert not [e for e in events if e["type"] == "artifact_refused"]
 
 
@@ -150,7 +150,7 @@ def test_a_symlink_out_of_the_worktree_is_a_404(
     path.symlink_to(outside)
 
     with caplog.at_level("WARNING", logger="kraft.api"):
-        resp = client.get(f"/work-items/{item_at_spec_gate}/artifact")
+        resp = client.get(f"/api/work-items/{item_at_spec_gate}/artifact")
     assert resp.status_code == 404
     # Pins the escape branch specifically, not merely "some 404 happened": a
     # regression that made the containment check a no-op would still 404 (the
@@ -159,7 +159,7 @@ def test_a_symlink_out_of_the_worktree_is_a_404(
 
     # Spec §4: the reason has to reach a reviewer with no access to this log,
     # so it belongs on the item's own timeline too, not only in caplog.
-    events = client.get(f"/work-items/{item_at_spec_gate}/events").json()
+    events = client.get(f"/api/work-items/{item_at_spec_gate}/events").json()
     refusals = [e for e in events if e["type"] == "artifact_refused"]
     assert len(refusals) == 1
     assert refusals[0]["payload"]["reason"] == "escaped_containment"
@@ -179,7 +179,7 @@ def test_a_symlinked_directory_out_of_the_worktree_is_a_404(
     engineering.symlink_to(outside_dir, target_is_directory=True)
 
     with caplog.at_level("WARNING", logger="kraft.api"):
-        resp = client.get(f"/work-items/{item_at_spec_gate}/artifact")
+        resp = client.get(f"/api/work-items/{item_at_spec_gate}/artifact")
     assert resp.status_code == 404
     assert item_at_spec_gate in caplog.text
 
@@ -228,7 +228,7 @@ def test_artifact_over_the_cap_truncates_without_500ing_on_a_split_codepoint(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
 
-    resp = client.get(f"/work-items/{item_at_spec_gate}/artifact")
+    resp = client.get(f"/api/work-items/{item_at_spec_gate}/artifact")
     assert resp.status_code == 200  # not a 500 from a decode error
     body = resp.json()
     assert body["truncated"] is True

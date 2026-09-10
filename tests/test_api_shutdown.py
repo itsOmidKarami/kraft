@@ -26,7 +26,7 @@ def test_sigterm_shuts_down_cleanly_mid_task(tmp_path):
         run_dir=run_dir, templates_dir=templates, bd_cwd=tracker, env=slow_env
     ) as srv:
         wid = srv.client.post(
-            "/work-items",
+            "/api/work-items",
             # quick-task, not the default chain: this test needs an agent
             # session running within 20s, and `default` stops at spec_approval.
             json={
@@ -37,7 +37,7 @@ def test_sigterm_shuts_down_cleanly_mid_task(tmp_path):
         ).json()["id"]
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
-            types = [e["type"] for e in srv.client.get(f"/work-items/{wid}/events").json()]
+            types = [e["type"] for e in srv.client.get(f"/api/work-items/{wid}/events").json()]
             if "worker_session_started" in types:
                 break
             time.sleep(0.2)
@@ -73,7 +73,7 @@ def test_sigterm_exits_with_a_websocket_client_connected(tmp_path):
     templates = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
     tracker = isolated_bd(tmp_path)
     with running_server(run_dir=tmp_path / "run", templates_dir=templates, bd_cwd=tracker) as srv:
-        with connect(f"ws://127.0.0.1:{srv.port}/ws/events?after_seq=0"):
+        with connect(f"ws://127.0.0.1:{srv.port}/api/ws/events?after_seq=0"):
             srv.proc.terminate()
             srv.proc.wait(timeout=10)
         assert srv.proc.returncode in (0, -signal.SIGTERM)

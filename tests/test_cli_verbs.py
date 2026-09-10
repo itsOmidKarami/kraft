@@ -62,7 +62,7 @@ def _make_item(app, repo, title="a thing"):
     async def go():
         async with client.http() as http:
             response = await http.post(
-                "/work-items",
+                "/api/work-items",
                 json={"title": title, "repo": str(repo), "autostart": False},
             )
         assert response.status_code == 201, response.text
@@ -272,7 +272,7 @@ def test_create_attaches_a_spec_from_the_flag(app, tmp_path, monkeypatch, capsys
 
     async def _fetch_full():
         async with client.http() as http:
-            return (await http.get(f"/work-items/{created['id']}")).json()
+            return (await http.get(f"/api/work-items/{created['id']}")).json()
 
     full = asyncio.run(_fetch_full())
     assert "spec_approval" not in [n["gate_after"] for n in full["chain_definition"]["nodes"]]

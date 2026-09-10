@@ -19,7 +19,7 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 import yaml
-from fastapi import FastAPI, HTTPException, Request, Response, WebSocket
+from fastapi import APIRouter, FastAPI, HTTPException, Request, Response, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.websockets import WebSocketDisconnect
@@ -270,26 +270,42 @@ def _spawn(app: FastAPI, wid: str, coro) -> asyncio.Task:
 
 app = FastAPI(lifespan=lifespan)
 
+#: Every JSON endpoint lives under here, so it can never share a path with an
+#: SPA client-side route (e.g. GET /work-items/<id> the page vs. the same path
+#: as a JSON handler) — that collision used to make a browser render raw JSON
+#: on some deep links instead of the app shell.
+api_router = APIRouter(prefix="/api")
+
+
+def _is_api_path(path: str) -> bool:
+    """True for `/api` itself or anything under it — one predicate for the
+    boundary every middleware and 404 path below has to agree on. `path ==
+    "/api"` matters even though nothing is mounted at the router root today:
+    `.startswith("/api/")` alone lets the bare prefix slip through as if it
+    were an ordinary SPA path."""
+    return path == "/api" or path.startswith("/api/")
+
 
 @app.middleware("http")
 async def _spa_navigation(request: Request, call_next):
     # A browser deep-link / refresh on a client-side route (e.g. /work-items/<id>)
-    # would otherwise hit the matching API route and render raw JSON. Any top-level
-    # navigation carries Sec-Fetch-Dest: document; hand those the SPA shell and let
-    # the client router resolve the path. Static assets are dest=script/style, XHR
-    # is dest=empty, so only real navigations are caught.
+    # would otherwise reach the same catch-all any GET falls through to anyway
+    # — this is a fast path, not the only path. Any top-level navigation
+    # carries Sec-Fetch-Dest: document; hand those the SPA shell directly and
+    # skip routing. Static assets are dest=script/style, XHR is dest=empty, so
+    # only real navigations are caught. Excluded for /api/: that prefix is
+    # unambiguously JSON, so a forged header there must not stand in for a
+    # real 401/404/200.
     dist = getattr(request.app.state, "frontend_dist", None)
     if (
         dist is not None
         and request.method == "GET"
         and request.headers.get("sec-fetch-dest") == "document"
+        and not _is_api_path(request.url.path)
     ):
-        # The shell is served under every client-side route, including paths that
-        # are also API routes (/work-items/<id>). The browser caches by URL, so
-        # without no-store it answers the SPA's own fetch for that same path with
-        # the cached HTML: `res.json()` throws and the detail screen renders an
-        # empty husk on every deep link and every refresh. `vary` says the same
-        # thing to caches that honour it.
+        # The browser caches by URL, so without no-store a refresh could answer
+        # from a stale cached shell. `vary` says the same thing to caches that
+        # honour it.
         return FileResponse(
             dist / "index.html",
             headers={"cache-control": "no-store", "vary": "sec-fetch-dest"},
@@ -298,9 +314,9 @@ async def _spa_navigation(request: Request, call_next):
 
 
 #: Paths that must work before a session exists.
-#: `/health` is deliberately open — a monitor should not need a session, and the
-#: login screen reads the bind address from it.
-_PUBLIC_PATHS = {"/login", "/health"}
+#: `/api/health` is deliberately open — a monitor should not need a session,
+#: and the login screen reads the bind address from it.
+_PUBLIC_PATHS = {"/api/login", "/api/health"}
 
 
 def _is_static_asset(app: FastAPI, path: str) -> bool:
@@ -377,16 +393,17 @@ async def _authenticate(request: Request, call_next):
         or _is_static_asset(app, request.url.path)
     ):
         return await call_next(request)
-    # A browser navigating to a client-side route must get the SPA shell, not
-    # JSON — but `sec-fetch-dest` is a request header any client can send, so this
-    # returns the shell itself rather than letting the request reach a handler.
-    # Without that, `curl -X POST -H 'sec-fetch-dest: document' .../pause` would
-    # be an unauthenticated write.
+    # A browser navigating to a client-side route must get the SPA shell, not a
+    # 401 — but `sec-fetch-dest` is a request header any client can send, and
+    # every mutating route lives under /api/, so excluding that prefix here
+    # costs nothing: a forged header on /api/ still has to clear the bearer or
+    # cookie check below, same as an honest request would.
     dist = getattr(app.state, "frontend_dist", None)
     if (
         request.method == "GET"
         and request.headers.get("sec-fetch-dest") == "document"
         and dist is not None
+        and not _is_api_path(request.url.path)
     ):
         return FileResponse(dist / "index.html")
     # After the SPA-shell branch on purpose: that branch answers any GET claiming
@@ -589,7 +606,7 @@ def _validated_attachments(
     return out
 
 
-@app.post("/work-items", status_code=201)
+@api_router.post("/work-items", status_code=201)
 async def create_work_item(body: NewWorkItem, request: Request):
     st = request.app.state
     if st.invalid_policy:
@@ -855,7 +872,7 @@ class OpenDocument(BaseModel):
     editor: str | None = None
 
 
-@app.get("/work-items")
+@api_router.get("/work-items")
 async def list_work_items(request: Request):
     st = request.app.state
     # Read outside `_read`: that closure runs on the database thread and has no
@@ -970,7 +987,7 @@ def _needs_context_question(st, wid: str) -> str | None:
     return reason.removeprefix("needs_context: ")
 
 
-@app.get("/work-items/{wid}")
+@api_router.get("/work-items/{wid}")
 async def get_work_item(wid: str, request: Request):
     st = request.app.state
     row = _work_item_row(st, wid)
@@ -1029,7 +1046,7 @@ class WorkItemPatch(BaseModel):
     description: str | None = None
 
 
-@app.patch("/work-items/{wid}")
+@api_router.patch("/work-items/{wid}")
 async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
     st = request.app.state
     _work_item_row(st, wid)  # 404s on an unknown work item, before any 422
@@ -1049,14 +1066,14 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
     return {"id": wid, **body.model_dump(exclude_none=True)}
 
 
-@app.get("/work-items/{wid}/events")
+@api_router.get("/work-items/{wid}/events")
 async def get_events(wid: str, request: Request, after_seq: int = 0):
     st = request.app.state
     _work_item_row(st, wid)
     return st.db.read(lambda c: events.read_after(c, after_seq, wid))
 
 
-@app.get("/work-items/{wid}/documents")
+@api_router.get("/work-items/{wid}/documents")
 async def get_work_item_documents(wid: str, request: Request):
     st = request.app.state
     _work_item_row(st, wid)  # 404s on an unknown work item
@@ -1091,7 +1108,7 @@ def _truncate_at_file_boundary(diff: str, limit: int) -> tuple[str, bool]:
     return result, True
 
 
-@app.get("/work-items/{wid}/diff")
+@api_router.get("/work-items/{wid}/diff")
 async def get_work_item_diff(wid: str, request: Request):
     """The changes an agent made, for a reviewer with no filesystem access.
 
@@ -1200,7 +1217,7 @@ async def _refuse_artifact(st, wid: str, rel: str, reason: str) -> None:
     await st.db.write(lambda c: events.append(c, wid, "artifact_refused", payload))
 
 
-@app.get("/work-items/{wid}/artifact")
+@api_router.get("/work-items/{wid}/artifact")
 async def get_work_item_artifact(wid: str, request: Request):
     """The pending gate's document, for a reviewer with no filesystem access.
 
@@ -1272,7 +1289,7 @@ async def get_work_item_artifact(wid: str, request: Request):
     }
 
 
-@app.post("/work-items/{wid}/gates/{gate}/approve")
+@api_router.post("/work-items/{wid}/gates/{gate}/approve")
 async def approve_gate(wid: str, gate: str, request: Request):
     st = request.app.state
     row = _work_item_row(st, wid)
@@ -1339,7 +1356,7 @@ def _reject_target(chain: dict, gate_index: int, requested: str | None) -> int:
     return index
 
 
-@app.post("/work-items/{wid}/gates/{gate}/reject")
+@api_router.post("/work-items/{wid}/gates/{gate}/reject")
 async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
     """Reject a gate and put the chain back to work (02 §7.2, backward motion).
 
@@ -1459,7 +1476,7 @@ async def _remove_worktree(repo: Path, worktree: Path, branch: str) -> bool:
     return ok
 
 
-@app.post("/work-items/{wid}/abandon")
+@api_router.post("/work-items/{wid}/abandon")
 async def abandon_work_item(wid: str, request: Request):
     """Terminal state plus worktree and branch reclaim (Kraft-x85).
 
@@ -1480,7 +1497,7 @@ async def abandon_work_item(wid: str, request: Request):
     return {"id": wid, "status": "abandoned", "worktree_removed": removed}
 
 
-@app.post("/work-items/{wid}/pause")
+@api_router.post("/work-items/{wid}/pause")
 async def pause_work_item(wid: str, request: Request):
     """Stop the current node's running sessions (02 §10.2).
 
@@ -1541,7 +1558,7 @@ def _steer_reachable(nodes: list[dict], start_id: str, registry: Registry) -> bo
     return False
 
 
-@app.post("/work-items/{wid}/steer")
+@api_router.post("/work-items/{wid}/steer")
 async def steer_work_item(wid: str, body: Steer, request: Request):
     st = request.app.state
     row = _work_item_row(st, wid)
@@ -1556,7 +1573,7 @@ async def steer_work_item(wid: str, body: Steer, request: Request):
     return {"id": wid, "steer": text}
 
 
-@app.post("/work-items/{wid}/resume")
+@api_router.post("/work-items/{wid}/resume")
 async def resume_work_item(wid: str, body: Resume, request: Request):
     """Relaunch the paused node, carrying the steer into the next agent launch."""
     st = request.app.state
@@ -1609,7 +1626,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
     return {"id": wid, "node_id": row["current_node_id"], "steer": steer}
 
 
-@app.post("/work-items/{wid}/open-worktree")
+@api_router.post("/work-items/{wid}/open-worktree")
 async def open_worktree(wid: str, body: OpenDocument, request: Request):
     """Open the item's worktree in an editor (design 4b, handoff spec §8).
 
@@ -1624,7 +1641,7 @@ async def open_worktree(wid: str, body: OpenDocument, request: Request):
     return _launch_editor(request, body.editor, path)
 
 
-@app.post("/work-items/{wid}/retry")
+@api_router.post("/work-items/{wid}/retry")
 async def retry_work_item(wid: str, body: Retry, request: Request):
     """Re-run the stopped node, steer text in hand (4b), clearing a breached
     loop cap if there was one.
@@ -1689,7 +1706,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     return {"id": wid, "node_id": node_id, "loop": key, "steer": steer}
 
 
-@app.post("/work-items/{wid}/mr-labels")
+@api_router.post("/work-items/{wid}/mr-labels")
 async def set_mr_labels(wid: str, body: MrLabels, request: Request):
     """Label this item's merge request and re-create its pipeline (Kraft-xh0q
     layer 3).
@@ -1756,7 +1773,7 @@ async def _tail(st, sid: str, path: Path, *, poll_s: float = 0.4):
     yield "event: end\ndata: {}\n\n"
 
 
-@app.get("/worker-sessions/{sid}/log")
+@api_router.get("/worker-sessions/{sid}/log")
 async def get_log(sid: str, request: Request, format: str | None = None, follow: bool = False):
     """Plain text by default (the modal's copy button); `format=jsonl` for the
     filterable, followable view (design 6c)."""
@@ -1786,7 +1803,7 @@ class PermissionAsk(BaseModel):
     tool_use_id: str | None = None
 
 
-@app.post("/worker-sessions/{sid}/permission")
+@api_router.post("/worker-sessions/{sid}/permission")
 async def permission_request(sid: str, body: PermissionAsk, request: Request):
     """Answer a worker's permission prompt from its node's grant (Kraft-oor).
 
@@ -1837,7 +1854,7 @@ async def permission_request(sid: str, body: PermissionAsk, request: Request):
     return {"behavior": "deny", "message": reason}
 
 
-@app.get("/search")
+@api_router.get("/search")
 async def search(
     request: Request,
     q: str = "",
@@ -1865,7 +1882,7 @@ async def search(
     return {"query": q, "mode": served, "results": results}
 
 
-@app.get("/beads/search")
+@api_router.get("/beads/search")
 async def beads_search(request: Request, q: str = "", limit: int = 5):
     """The live strip under the search results (design 1h)."""
     if not q.strip():
@@ -1902,7 +1919,7 @@ async def _beads_search(st, q: str, limit: int) -> list[dict]:
     return list(merged.values())[:limit]
 
 
-@app.get("/documents/{doc_id}")
+@api_router.get("/documents/{doc_id}")
 async def get_document(doc_id: str, request: Request):
     doc = request.app.state.indexer.get_document(doc_id)
     if doc is None:
@@ -1958,7 +1975,7 @@ def _launch_editor(request: Request, editor: str | None, path: Path) -> dict:
     return {"path": str(path), "editor": name or "system"}
 
 
-@app.post("/documents/{doc_id}/open")
+@api_router.post("/documents/{doc_id}/open")
 async def open_document(doc_id: str, body: OpenDocument, request: Request):
     """Launch an editor on the document's absolute path.
 
@@ -1983,7 +2000,7 @@ async def open_document(doc_id: str, body: OpenDocument, request: Request):
     return {"document_id": doc_id, **_launch_editor(request, body.editor, path)}
 
 
-@app.get("/analytics")
+@api_router.get("/analytics")
 async def get_analytics(
     request: Request,
     range: str = "7d",
@@ -1999,7 +2016,7 @@ async def get_analytics(
     )
 
 
-@app.post("/index/rescan")
+@api_router.post("/index/rescan")
 async def index_rescan(request: Request, repo: str | None = None):
     ix = request.app.state.indexer
     if repo is not None:
@@ -2023,7 +2040,7 @@ def _origin_ok(origin: str | None) -> bool:
     return urlsplit(origin).hostname in _LOCAL_HOSTS
 
 
-@app.websocket("/ws/events")
+@api_router.websocket("/ws/events")
 async def ws_events(websocket: WebSocket, after_seq: int = 0):
     if not _origin_ok(websocket.headers.get("origin")):
         await websocket.close(code=1008)
@@ -2146,7 +2163,7 @@ def _validate_repos(st, repos: list[dict]) -> None:
             raise HTTPException(422, str(exc)) from exc
 
 
-@app.get("/repos")
+@api_router.get("/repos")
 async def list_repos(request: Request):
     st = request.app.state
     # No steering validation on the read path (config.load_repos): a steering
@@ -2155,7 +2172,7 @@ async def list_repos(request: Request):
     return {"repos": config_mod.load_repos(_repos_path(st), validate_steering=False)}
 
 
-@app.post("/repos/probe")
+@api_router.post("/repos/probe")
 async def probe_repo(body: ProbeBody, request: Request):
     """Read-only inspection of a candidate repo — Kraft never edits repo files."""
     try:
@@ -2164,7 +2181,7 @@ async def probe_repo(body: ProbeBody, request: Request):
         raise HTTPException(400, str(exc)) from exc
 
 
-@app.post("/repos", status_code=201)
+@api_router.post("/repos", status_code=201)
 async def add_repo(body: RepoBody, request: Request):
     st = request.app.state
     try:
@@ -2256,7 +2273,7 @@ def _launch(st, repo: str) -> executor.LaunchContext:
     )
 
 
-@app.patch("/repos")
+@api_router.patch("/repos")
 async def update_repo(body: RepoPatch, request: Request, path: str):
     st = request.app.state
     repos = config_mod.load_repos(_repos_path(st), validate_steering=False)
@@ -2269,7 +2286,7 @@ async def update_repo(body: RepoPatch, request: Request, path: str):
     return entry
 
 
-@app.delete("/repos", status_code=204)
+@api_router.delete("/repos", status_code=204)
 async def remove_repo(request: Request, path: str):
     st = request.app.state
     repos = config_mod.load_repos(_repos_path(st), validate_steering=False)
@@ -2293,7 +2310,7 @@ def _template_path(st, tid: str) -> Path:
     return st.templates_dir / f"{tid}.yaml"
 
 
-@app.get("/templates")
+@api_router.get("/templates")
 async def list_templates(request: Request):
     st = request.app.state
     return [
@@ -2302,7 +2319,7 @@ async def list_templates(request: Request):
     ]
 
 
-@app.get("/templates/{tid}")
+@api_router.get("/templates/{tid}")
 async def get_template(tid: str, request: Request):
     st = request.app.state
     template = st.templates.valid.get(tid)
@@ -2342,12 +2359,12 @@ def _validate_template(st, tid: str, nodes: list[dict]) -> dict:
     }
 
 
-@app.post("/templates/{tid}/validate")
+@api_router.post("/templates/{tid}/validate")
 async def validate_template(tid: str, body: TemplateBody, request: Request):
     return _validate_template(request.app.state, tid, body.nodes)
 
 
-@app.put("/templates/{tid}")
+@api_router.put("/templates/{tid}")
 async def put_template(tid: str, body: TemplateBody, request: Request):
     st = request.app.state
     path = _template_path(st, tid)
@@ -2363,12 +2380,12 @@ class RegistryBody(BaseModel):
     hooks: dict
 
 
-@app.get("/registry")
+@api_router.get("/registry")
 async def get_registry(request: Request):
     return {"hooks": request.app.state.registry.hooks}
 
 
-@app.put("/registry")
+@api_router.put("/registry")
 async def put_registry(body: RegistryBody, request: Request):
     """Save bindings, then re-run the chain validator over every template.
 
@@ -2402,13 +2419,13 @@ class PolicyBody(BaseModel):
     budget: dict | None = None
 
 
-@app.get("/policy")
+@api_router.get("/policy")
 async def get_policy(request: Request):
     st = request.app.state
     return config_mod.read_yaml(st.templates_dir / "policy.yaml", {"loops": {}, "default": {}})
 
 
-@app.put("/policy")
+@api_router.put("/policy")
 async def put_policy(body: PolicyBody, request: Request):
     """Caps apply to loops that start after the save — a counter already running
     keeps the cap it snapshotted at first fire (`02` §2.C)."""
@@ -2440,13 +2457,13 @@ class ThemeBody(BaseModel):
     mode: Literal["light", "dark", "system"]
 
 
-@app.get("/theme")
+@api_router.get("/theme")
 async def get_theme(request: Request):
     st = request.app.state
     return config_mod.read_yaml(st.templates_dir / "theme.yaml", THEME_DEFAULT)
 
 
-@app.put("/theme")
+@api_router.put("/theme")
 async def put_theme(body: ThemeBody, request: Request):
     if body.palette not in PALETTE_IDS:
         raise HTTPException(422, f"unknown palette: {body.palette!r}")
@@ -2516,7 +2533,7 @@ def _check_steering_change(st, name: str, body: str | None) -> None:
             raise HTTPException(422, str(exc)) from exc
 
 
-@app.get("/steering")
+@api_router.get("/steering")
 async def list_steering(request: Request):
     """Names and sizes, not bodies: the list is a picker, and the assembled
     budget is the number an operator is actually rationing."""
@@ -2534,7 +2551,7 @@ async def list_steering(request: Request):
     return {"files": files, "max_bytes": steering_mod.MAX_BYTES}
 
 
-@app.get("/steering/{name}")
+@api_router.get("/steering/{name}")
 async def get_steering(name: str, request: Request):
     st = request.app.state
     try:
@@ -2549,7 +2566,7 @@ async def get_steering(name: str, request: Request):
         raise HTTPException(500, f"{name}: cannot read: {exc}") from exc
 
 
-@app.put("/steering/{name}")
+@api_router.put("/steering/{name}")
 async def put_steering(name: str, body: SteeringBody, request: Request):
     st = request.app.state
     steering_dir = _steering_dir(st)
@@ -2565,7 +2582,7 @@ async def put_steering(name: str, body: SteeringBody, request: Request):
     return {"name": name, "body": body.body}
 
 
-@app.delete("/steering/{name}")
+@api_router.delete("/steering/{name}")
 async def delete_steering(name: str, request: Request):
     st = request.app.state
     try:
@@ -2594,7 +2611,7 @@ class IntakeBody(BaseModel):
     repos: list[str] = []
 
 
-@app.get("/intake")
+@api_router.get("/intake")
 async def get_intake(request: Request):
     """From disk, like `GET /policy`. `intake.yaml` was hand-edited until this
     screen existed, so returning the cached state would hide an edit made since
@@ -2608,7 +2625,7 @@ async def get_intake(request: Request):
         return st.intake
 
 
-@app.put("/intake")
+@api_router.put("/intake")
 async def put_intake(body: IntakeBody, request: Request):
     """Applies without a restart: the poller task is replaced, not just the
     config it reads. `interval_s` is read once at task start, so a live poller
@@ -2638,7 +2655,7 @@ class AccessBody(BaseModel):
     session_expiry_days: int | None = None
 
 
-@app.get("/access")
+@api_router.get("/access")
 async def get_access(request: Request):
     access = request.app.state.access
     return {
@@ -2650,7 +2667,7 @@ async def get_access(request: Request):
     }
 
 
-@app.put("/access")
+@api_router.put("/access")
 async def put_access(body: AccessBody, request: Request):
     st = request.app.state
     access = dict(st.access)
@@ -2704,7 +2721,7 @@ def _checked_url(value: str, field: str) -> str:
     return value
 
 
-@app.get("/notify")
+@api_router.get("/notify")
 async def get_notify(request: Request):
     # Reads straight off disk. `st.notifier` holds its own copy of this file in
     # memory and only refreshes it on `reload()` (called by `put_notify` below,
@@ -2717,7 +2734,7 @@ async def get_notify(request: Request):
     return _notify_view(config_mod.load_notify(st.templates_dir / "notify.yaml"))
 
 
-@app.put("/notify")
+@api_router.put("/notify")
 async def put_notify(body: NotifyBody, request: Request):
     st = request.app.state
     path = st.templates_dir / "notify.yaml"
@@ -2751,7 +2768,7 @@ class Login(BaseModel):
     password: str
 
 
-@app.post("/login")
+@api_router.post("/login")
 async def login(body: Login, request: Request):
     st = request.app.state
     if not auth_mod.verify_password(body.password, st.access["password_hash"]):
@@ -2778,7 +2795,7 @@ async def login(body: Login, request: Request):
     return response
 
 
-@app.post("/logout", status_code=204)
+@api_router.post("/logout", status_code=204)
 async def logout(request: Request):
     token = request.cookies.get(auth_mod.COOKIE)
     if token:
@@ -2790,20 +2807,20 @@ async def logout(request: Request):
     return response
 
 
-@app.get("/sessions")
+@api_router.get("/sessions")
 async def list_sessions(request: Request):
     token = request.cookies.get(auth_mod.COOKIE)
     return {"sessions": request.app.state.db.read(lambda c: auth_mod.list_sessions(c, token))}
 
 
-@app.delete("/sessions/{session_id}", status_code=204)
+@api_router.delete("/sessions/{session_id}", status_code=204)
 async def revoke_session(session_id: str, request: Request):
     revoked = await request.app.state.db.write(lambda c: auth_mod.revoke_session(c, session_id))
     if not revoked:
         raise HTTPException(404, "unknown session")
 
 
-@app.get("/health")
+@api_router.get("/health")
 async def health(request: Request):
     st = request.app.state
     invalid = st.templates.invalid
@@ -2819,8 +2836,15 @@ async def health(request: Request):
     }
 
 
+app.include_router(api_router)
+
+
 @app.get("/{path:path}")
 async def spa(path: str, request: Request):
+    if _is_api_path(f"/{path}"):
+        # A real API prefix with no matching route is a bad request, not a
+        # missing page — this must not fall through to the SPA shell.
+        raise HTTPException(404, "not found")
     dist = request.app.state.frontend_dist
     if dist is None:
         raise HTTPException(404, "not found")
@@ -2847,13 +2871,9 @@ async def _bad_config_file(request: Request, exc: config_mod.ConfigError) -> JSO
 
 @app.exception_handler(404)
 async def _spa_deep_link(request: Request, exc: HTTPException):
-    # A client-side route that shadows a real API path (e.g. GET /work-items/<id>)
-    # 404s before the catch-all sees it; hand those GETs the SPA shell too.
-    dist = getattr(request.app.state, "frontend_dist", None)
-    if (
-        dist is not None
-        and request.method == "GET"
-        and "text/html" in request.headers.get("accept", "")
-    ):
-        return FileResponse(dist / "index.html")
+    # Every non-/api GET is answered directly by the spa() catch-all above —
+    # it returns a file or index.html unconditionally and never raises — so
+    # the only 404s that reach here are genuinely /api/ ones (a bad path, or a
+    # handler's own `raise HTTPException(404, ...)`). Always JSON: nothing
+    # under /api/ is ever the shell, whatever Accept header asks for it.
     return JSONResponse({"detail": exc.detail}, status_code=404)
