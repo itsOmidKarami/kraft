@@ -508,9 +508,9 @@ async def _dispatch(
         # `git commit` in someone else's worktree (Kraft-7fip). Kraft owns the
         # worktree, so it takes the work rather than reporting it missing.
         #
-        # Never at the cost of the run itself: an index lock a co-task holds, an
-        # unset user.email, a submodule that `add -A` finds nothing to stage in
-        # -- any of those would turn a *successful* agent task into a failed
+        # Never at the cost of the run itself: an index lock a co-task holds, a
+        # submodule that `add -A` finds nothing to stage in -- either of those
+        # would turn a *successful* agent task into a failed
         # node, and on the fix-loop's direct dispatch would escape `run()`
         # entirely. Losing the sweep only puts us back where Kraft-7fip found
         # us: the work is still on disk and `_assert_clean` names it at open_mr.
