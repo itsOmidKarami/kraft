@@ -610,7 +610,7 @@ def test_a_rewind_reopens_every_node_after_the_named_one(tmp_path, monkeypatch, 
     kl.main(["reject", "--note", "again", "--from-node", "implementation"])
     capsys.readouterr()
 
-    for expected in ("implementation", "verify", "open_mr", "mr_checks"):
+    for expected in ("implementation", "verify", "pre_mr_rebase", "open_mr", "mr_checks"):
         kl.main(["state"])
         assert json.loads(capsys.readouterr().out)["node"] == expected
         kl.main(["close"])
