@@ -35,4 +35,24 @@ describe("ArtifactModal", () => {
     await screen.findByText("branch column");
     expect(container.querySelector(".doc-modal-body table th")?.textContent).toBe("File");
   });
+
+  it("renders a chain_review JSON envelope as prose plus a formatted block, not a wall of text", async () => {
+    vi.spyOn(api, "getWorkItemArtifact").mockResolvedValue({
+      work_item_id: "w1",
+      path: ".engineering/chain_reviews/w1.md",
+      title: "Chain unchanged",
+      content: JSON.stringify({
+        status: "ready_for_approval",
+        revised_chain_nodes: [{ id: "verify", tasks: ["on.test.run"], gate_after: null, fix_loop: null }],
+        rationale: "Docs-only change, tail fits.",
+      }),
+      truncated: false,
+    });
+    const { container } = render(<ArtifactModal workItemId="w1" onClose={() => {}} />);
+    expect(await screen.findByText("Docs-only change, tail fits.")).toBeTruthy();
+    expect(await screen.findByText("ready_for_approval")).toBeTruthy();
+    expect(container.querySelector(".doc-modal-body pre code")?.textContent).toContain(
+      "revised_chain_nodes",
+    );
+  });
 });
