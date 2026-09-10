@@ -142,7 +142,10 @@ def test_a_lan_instance_accepts_its_own_origin_and_host(tmp_path, monkeypatch):
     Origin nor the Host is loopback; they match each other, and the bind is not
     loopback, so the rebinding rule has nothing to say about it either."""
     with _client(tmp_path, monkeypatch, host="0.0.0.0") as client:
-        saved = client.put("/api/access", json={"bind": "0.0.0.0", "password": "hunter2"})
+        saved = client.put(
+            "/api/access",
+            json={"bind": "0.0.0.0", "password": "hunter2", "allowed_hosts": ["192.168.1.5"]},
+        )
         assert saved.status_code == 200, saved.text
         assert client.post("/api/login", json={"password": "hunter2"}).status_code == 200
         r = client.post(
@@ -154,6 +157,54 @@ def test_a_lan_instance_accepts_its_own_origin_and_host(tmp_path, monkeypatch):
             },
         )
         assert r.status_code == 200, r.text
+
+
+def test_a_non_loopback_bind_refuses_an_unlisted_host(tmp_path, monkeypatch):
+    """cdy: a `0.0.0.0` bind gets no rebinding protection today -- this is the
+    missing half of test_a_rebound_host_is_refused_for_a_browser_request."""
+    with _client(tmp_path, monkeypatch, host="0.0.0.0") as client:
+        saved = client.put(
+            "/api/access",
+            json={"bind": "0.0.0.0", "password": "hunter2", "allowed_hosts": ["kraft.example.com"]},
+        )
+        assert saved.status_code == 200, saved.text
+        assert client.post("/api/login", json={"password": "hunter2"}).status_code == 200
+        browser = {"host": "evil.example.com:8765", "sec-fetch-site": "same-origin"}
+        assert client.get("/api/work-items", headers=browser).status_code == 403
+
+
+def test_a_non_loopback_bind_accepts_a_listed_host(tmp_path, monkeypatch):
+    with _client(tmp_path, monkeypatch, host="0.0.0.0") as client:
+        saved = client.put(
+            "/api/access",
+            json={"bind": "0.0.0.0", "password": "hunter2", "allowed_hosts": ["kraft.example.com"]},
+        )
+        assert saved.status_code == 200, saved.text
+        assert client.post("/api/login", json={"password": "hunter2"}).status_code == 200
+        browser = {"host": "kraft.example.com:8765", "sec-fetch-site": "same-origin"}
+        assert client.get("/api/work-items", headers=browser).status_code == 200
+
+
+def test_a_non_loopback_bind_with_no_allowlist_refuses_every_browser_host(tmp_path, monkeypatch):
+    """Fails closed: no `allowed_hosts` configured is not an open gate."""
+    with _client(tmp_path, monkeypatch, host="0.0.0.0") as client:
+        saved = client.put("/api/access", json={"bind": "0.0.0.0", "password": "hunter2"})
+        assert saved.status_code == 200, saved.text
+        assert client.post("/api/login", json={"password": "hunter2"}).status_code == 200
+        browser = {"host": "192.168.1.5:8765", "sec-fetch-site": "same-origin"}
+        assert client.get("/api/work-items", headers=browser).status_code == 403
+
+
+def test_get_access_reports_allowed_hosts(tmp_path, monkeypatch):
+    with _client(tmp_path, monkeypatch, host="0.0.0.0") as client:
+        client.put(
+            "/api/access",
+            json={"bind": "0.0.0.0", "password": "hunter2", "allowed_hosts": ["a.example.com"]},
+        )
+        client.post("/api/login", json={"password": "hunter2"})
+        r = client.get("/api/access")
+        assert r.status_code == 200, r.text
+        assert r.json()["allowed_hosts"] == ["a.example.com"]
 
 
 def test_a_rebound_host_is_refused_for_a_browser_request(tmp_path, monkeypatch):

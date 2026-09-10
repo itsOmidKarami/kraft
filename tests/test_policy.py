@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -225,3 +226,69 @@ def test_load_policy_rejects_bad_rate_limit_retries(tmp_path):
 def test_load_shipped_policy_has_rate_limit_retries():
     p = policy.load_policy(_SHIPPED)
     assert isinstance(p.rate_limit_retries, int) and p.rate_limit_retries >= 1
+
+
+def test_load_policy_parses_triggers(tmp_path):
+    d = tmp_path / "policy.yaml"
+    d.write_text(
+        "default: { attempts: 2, wall_clock_s: 20 }\n"
+        "triggers:\n"
+        '  - cron: "0 * * * *"\n'
+        "    repo: /repo\n"
+        "    chain: default\n"
+        "    title: Nightly sweep\n"
+        "    description: sweep it\n"
+    )
+    p = policy.load_policy(d)
+    assert len(p.triggers) == 1
+    t = p.triggers[0]
+    assert t == policy.Trigger(
+        cron="0 * * * *",
+        repo="/repo",
+        chain="default",
+        title="Nightly sweep",
+        description="sweep it",
+    )
+
+
+def test_load_policy_defaults_triggers_to_empty(tmp_path):
+    d = tmp_path / "policy.yaml"
+    d.write_text("default: { attempts: 2, wall_clock_s: 20 }\n")
+    assert policy.load_policy(d).triggers == []
+
+
+@pytest.mark.parametrize(
+    "doc",
+    [
+        # missing required field
+        "default: { attempts: 2, wall_clock_s: 20 }\n"
+        'triggers:\n  - cron: "* * * * *"\n    repo: /r\n    chain: c\n',
+        # cron has wrong field count
+        "default: { attempts: 2, wall_clock_s: 20 }\n"
+        'triggers:\n  - cron: "* * *"\n    repo: /r\n    chain: c\n    title: t\n',
+        # cron uses an unsupported range
+        "default: { attempts: 2, wall_clock_s: 20 }\n"
+        'triggers:\n  - cron: "1-5 * * * *"\n    repo: /r\n    chain: c\n    title: t\n',
+        # triggers not a list
+        "default: { attempts: 2, wall_clock_s: 20 }\ntriggers: nope\n",
+    ],
+)
+def test_load_policy_rejects_malformed_triggers(tmp_path, doc):
+    d = tmp_path / "policy.yaml"
+    d.write_text(doc)
+    with pytest.raises(policy.PolicyError):
+        policy.load_policy(d)
+
+
+def test_cron_due_matches_exact_fields():
+    dt = datetime(2026, 9, 10, 14, 30, tzinfo=UTC)  # a Thursday
+    assert policy.cron_due("30 14 10 9 *", dt)
+    assert not policy.cron_due("31 14 10 9 *", dt)
+    assert not policy.cron_due("30 15 10 9 *", dt)
+
+
+def test_cron_due_matches_star_and_lists():
+    dt = datetime(2026, 9, 10, 14, 30, tzinfo=UTC)
+    assert policy.cron_due("* * * * *", dt)
+    assert policy.cron_due("30,45 14 * * *", dt)
+    assert not policy.cron_due("15,45 14 * * *", dt)

@@ -273,6 +273,7 @@ ACCESS_DEFAULT: dict = {
     "port": 8765,
     "password_hash": None,
     "session_expiry_days": 7,
+    "allowed_hosts": [],
 }
 
 LOOPBACK = {"127.0.0.1", "::1", "localhost"}
