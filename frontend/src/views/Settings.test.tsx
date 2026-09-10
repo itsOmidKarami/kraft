@@ -792,3 +792,20 @@ describe("Settings · sidebar nav", () => {
     expect(link).toHaveAttribute("href", "/settings/intake");
   });
 });
+
+describe("Settings · phone (mobile app shell)", () => {
+  it("Templates hides the editable textarea behind desktop-only and shows a read-only notice", async () => {
+    renderAt("/settings/templates");
+    await screen.findByText(/nodes · validated/i);
+    expect(screen.getByLabelText("template nodes")).toHaveClass("desktop-only");
+    expect(screen.getByText(/open on desktop to edit/i)).toBeInTheDocument();
+    expect(screen.getByText(/open on desktop to edit/i)).toHaveClass("phone-only");
+  });
+
+  it("Steering hides the editable textarea the same way once a file is selected", async () => {
+    renderAt("/settings/steering");
+    await userEvent.click(await screen.findByText("house-style"));
+    expect(await screen.findByLabelText("steering body")).toHaveClass("desktop-only");
+    expect(screen.getByText(/open on desktop to edit/i)).toBeInTheDocument();
+  });
+});

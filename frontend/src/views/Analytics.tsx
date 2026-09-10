@@ -233,15 +233,27 @@ export function AnalyticsView() {
                 </div>
                 {report.by_node.map((n) => (
                   <div key={n.node} className="node-row" data-node={n.node}>
-                    <span className="node-name">{n.node}</span>
-                    <span className="share">
+                    <span className="node-name" data-label="node">
+                      {n.node}
+                    </span>
+                    <span className="share" data-label="cost share">
                       <span style={{ width: `${(n.cost_usd / topCost) * 100}%` }} />
                     </span>
-                    <span className="num">{n.runs}</span>
-                    <span className="num">{elapsed(n.avg_ms)}</span>
-                    <span className="num">{tokens(n.tokens)}</span>
-                    <span className="num strong">{usd(n.cost_usd, n.cost_complete)}</span>
-                    <span className="num">{n.rounds}</span>
+                    <span className="num" data-label="runs">
+                      {n.runs}
+                    </span>
+                    <span className="num" data-label="avg time">
+                      {elapsed(n.avg_ms)}
+                    </span>
+                    <span className="num" data-label="tokens">
+                      {tokens(n.tokens)}
+                    </span>
+                    <span className="num strong" data-label="cost">
+                      {usd(n.cost_usd, n.cost_complete)}
+                    </span>
+                    <span className="num" data-label="rounds">
+                      {n.rounds}
+                    </span>
                   </div>
                 ))}
               </section>
@@ -257,11 +269,21 @@ export function AnalyticsView() {
                 </div>
                 {report.by_repo.map((r) => (
                   <div key={r.repo} className="repo-row" data-repo={r.repo}>
-                    <span title={r.repo}>{repoName(r.repo)}</span>
-                    <span className="num">{r.items}</span>
-                    <span className="num">{r.mrs}</span>
-                    <span className="num">{tokens(r.tokens)}</span>
-                    <span className="num strong">{usd(r.cost_usd, r.cost_complete)}</span>
+                    <span title={r.repo} data-label="repo">
+                      {repoName(r.repo)}
+                    </span>
+                    <span className="num" data-label="items">
+                      {r.items}
+                    </span>
+                    <span className="num" data-label="MRs">
+                      {r.mrs}
+                    </span>
+                    <span className="num" data-label="tokens">
+                      {tokens(r.tokens)}
+                    </span>
+                    <span className="num strong" data-label="cost">
+                      {usd(r.cost_usd, r.cost_complete)}
+                    </span>
                   </div>
                 ))}
                 <p className="table-foot">

@@ -5,10 +5,12 @@ import * as api from "./api";
 import { ConnBadge } from "./components/ConnBadge";
 import { HealthBadge } from "./components/HealthBadge";
 import { IntakeModal } from "./components/IntakeModal";
+import { BottomNav } from "./components/BottomNav";
 import { SearchOverlay } from "./components/SearchOverlay";
 import { AnalyticsView } from "./views/Analytics";
 import { Board } from "./views/Board";
 import { Login } from "./views/Login";
+import { SearchView } from "./views/Search";
 import { Settings } from "./views/Settings";
 import { WorkItemDetail } from "./views/WorkItemDetail";
 
@@ -30,13 +32,13 @@ function Nav({ onSearch, onNew }: { onSearch: () => void; onNew: () => void }) {
       <span className="nav-brand">Kraft</span>
       <ConnBadge />
       <HealthBadge />
-      <NavLink to="/analytics" className="nav-link">
+      <NavLink to="/analytics" className="nav-link desktop-only">
         Analytics
       </NavLink>
-      <NavLink to="/settings" className="nav-link">
+      <NavLink to="/settings" className="nav-link desktop-only">
         Settings
       </NavLink>
-      <button className="btn btn-secondary" onClick={onSearch}>
+      <button className="btn btn-secondary desktop-only" onClick={onSearch}>
         <MagnifyingGlass size={14} />
         Search
         <span className="kbd">⌘K</span>
@@ -102,8 +104,10 @@ export function App() {
           <Route path="/work-items/:id" element={<WorkItemDetail />} />
           <Route path="/analytics" element={<AnalyticsView />} />
           <Route path="/settings/*" element={<Settings />} />
+          <Route path="/search" element={<SearchView />} />
         </Routes>
       </main>
+      <BottomNav />
       {search && <SearchOverlay onClose={() => setSearch(false)} />}
       {intake && <IntakeModal onClose={() => setIntake(false)} />}
     </BrowserRouter>

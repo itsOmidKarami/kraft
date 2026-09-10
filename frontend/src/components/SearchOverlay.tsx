@@ -17,7 +17,13 @@ import { Snippet } from "./Snippet";
 const uniq = (xs: string[]) => [...new Set(xs)].sort();
 const MODES = ["hybrid", "fts", "vector"];
 
-export function SearchOverlay({ onClose }: { onClose: () => void }) {
+export function SearchOverlay({
+  onClose,
+  embedded = false,
+}: {
+  onClose: () => void;
+  embedded?: boolean;
+}) {
   const repos = useStore((s) => uniq(Object.values(s.workItems).map((w) => w.repo)));
   const [q, setQ] = useState("");
   const [mode, setMode] = useState("hybrid");
@@ -94,111 +100,127 @@ export function SearchOverlay({ onClose }: { onClose: () => void }) {
     );
   }, [error, q, results]);
 
-  return (
-    <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label="Search" {...backdropProps(onClose)}>
-      <div className="dialog search-overlay elev-lg">
-        <div className="search-bar">
-          <MagnifyingGlass size={16} className="search-icon" />
-          <input
-            ref={inputRef}
-            type="search"
-            aria-label="search"
-            placeholder="Search…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
-          <span className="seg search-mode">
-            {MODES.map((m) => (
-              <label key={m} className="seg-opt">
-                <input
-                  type="radio"
-                  name="search-mode"
-                  checked={mode === m}
-                  onChange={() => setMode(m)}
-                />
-                {m}
-              </label>
-            ))}
-          </span>
+  const content = (
+    <div className={embedded ? "search-page" : "dialog search-overlay elev-lg"}>
+      <div className="search-bar">
+        <MagnifyingGlass size={16} className="search-icon" />
+        <input
+          ref={inputRef}
+          type="search"
+          aria-label="search"
+          placeholder="Search…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        <span className="seg search-mode">
+          {MODES.map((m) => (
+            <label key={m} className="seg-opt">
+              <input
+                type="radio"
+                name="search-mode"
+                checked={mode === m}
+                onChange={() => setMode(m)}
+              />
+              {m}
+            </label>
+          ))}
+        </span>
+        {!embedded && (
           <button type="button" className="btn btn-ghost search-esc" onClick={onClose}>
             esc
           </button>
-        </div>
-
-        <div className="search-facets">
-          <span className="tag tag-neutral">source: {sourceKind || "any"}</span>
-          <span className="tag tag-neutral">kind: {kind || "any"}</span>
-          <span className="tag tag-neutral">repo: {repo || "any"}</span>
-          <button
-            type="button"
-            className="btn btn-ghost search-advanced"
-            aria-expanded={advanced}
-            onClick={() => setAdvanced((v) => !v)}
-          >
-            advanced
-          </button>
-          <span className="search-count">
-            {results.length} {results.length === 1 ? "result" : "results"} · lagging index, not
-            live state
-          </span>
-        </div>
-
-        {advanced && (
-          <div className="search-filters">
-            <label>
-              source_kind
-              <select
-                aria-label="source_kind"
-                value={sourceKind}
-                onChange={(e) => setSourceKind(e.target.value)}
-              >
-                <option value="">any</option>
-                <option value="artifact">artifact</option>
-                <option value="session_summary">session_summary</option>
-              </select>
-            </label>
-            <label>
-              kind
-              <input
-                className="input"
-                aria-label="kind"
-                value={kind}
-                onChange={(e) => setKind(e.target.value)}
-              />
-            </label>
-            <label>
-              repo
-              <select aria-label="repo" value={repo} onChange={(e) => setRepo(e.target.value)}>
-                <option value="">any repo</option>
-                {repos.map((r) => (
-                  <option key={r}>{r}</option>
-                ))}
-              </select>
-            </label>
-          </div>
         )}
-
-        {body}
-
-        <div className="bead-strip">
-          <CirclesThree size={15} className="bead-icon" />
-          <span className="bead-label">Beads · live via hub</span>
-          {beads.length === 0 ? (
-            <span className="bead-hit">no bead matches</span>
-          ) : (
-            beads.slice(0, 2).map((b) => (
-              <span key={b.id} className="bead-hit">
-                <code>{b.id}</code> {b.title}
-                {/* closed beads are searchable (Kraft-evm), so say which are */}
-                {b.status === "closed" && <span className="tag tag-neutral">closed</span>}
-              </span>
-            ))
-          )}
-        </div>
       </div>
-      {openDoc && (
-        <DocumentModal id={openDoc} onClose={() => setOpenDoc(null)} onNavigate={onClose} />
+
+      <div className="search-facets">
+        <span className="tag tag-neutral">source: {sourceKind || "any"}</span>
+        <span className="tag tag-neutral">kind: {kind || "any"}</span>
+        <span className="tag tag-neutral">repo: {repo || "any"}</span>
+        <button
+          type="button"
+          className="btn btn-ghost search-advanced"
+          aria-expanded={advanced}
+          onClick={() => setAdvanced((v) => !v)}
+        >
+          advanced
+        </button>
+        <span className="search-count">
+          {results.length} {results.length === 1 ? "result" : "results"} · lagging index, not
+          live state
+        </span>
+      </div>
+
+      {advanced && (
+        <div className="search-filters">
+          <label>
+            source_kind
+            <select
+              aria-label="source_kind"
+              value={sourceKind}
+              onChange={(e) => setSourceKind(e.target.value)}
+            >
+              <option value="">any</option>
+              <option value="artifact">artifact</option>
+              <option value="session_summary">session_summary</option>
+            </select>
+          </label>
+          <label>
+            kind
+            <input
+              className="input"
+              aria-label="kind"
+              value={kind}
+              onChange={(e) => setKind(e.target.value)}
+            />
+          </label>
+          <label>
+            repo
+            <select aria-label="repo" value={repo} onChange={(e) => setRepo(e.target.value)}>
+              <option value="">any repo</option>
+              {repos.map((r) => (
+                <option key={r}>{r}</option>
+              ))}
+            </select>
+          </label>
+        </div>
       )}
+
+      {body}
+
+      <div className="bead-strip">
+        <CirclesThree size={15} className="bead-icon" />
+        <span className="bead-label">Beads · live via hub</span>
+        {beads.length === 0 ? (
+          <span className="bead-hit">no bead matches</span>
+        ) : (
+          beads.slice(0, 2).map((b) => (
+            <span key={b.id} className="bead-hit">
+              <code>{b.id}</code> {b.title}
+              {/* closed beads are searchable (Kraft-evm), so say which are */}
+              {b.status === "closed" && <span className="tag tag-neutral">closed</span>}
+            </span>
+          ))
+        )}
+      </div>
     </div>
+  );
+
+  return (
+    <>
+      {embedded ? (
+        content
+      ) : (
+        <div
+          className="dialog-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Search"
+          {...backdropProps(onClose)}
+        >
+          {content}
+        </div>
+      )}
+      {openDoc && <DocumentModal id={openDoc} onClose={() => setOpenDoc(null)} onNavigate={onClose} />}
+    </>
   );
 }
