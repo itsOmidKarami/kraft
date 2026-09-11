@@ -82,7 +82,12 @@ async def lifespan(app: FastAPI):
     )
 
     summary, adopted = await reattach.reattach(database, run_dirs, registry)
-    app.state.tasks.update(adopted)
+    # Not `.update(adopted)` alone: unlike `deps.spawn`'s tasks, nothing else
+    # ever pops a session_id-keyed entry, so an adopted task would sit in
+    # app.state.tasks forever, live or dead (Kraft-mjwz).
+    for sid, task in adopted.items():
+        app.state.tasks[sid] = task
+        task.add_done_callback(lambda _t, sid=sid: app.state.tasks.pop(sid, None))
     for wid in summary.resumed_work_items:
         repo_row = database.read(
             lambda c, wid=wid: c.execute(

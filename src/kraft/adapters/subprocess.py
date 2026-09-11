@@ -164,6 +164,23 @@ def _read_new(path: Path, offset: int) -> tuple[str, int]:
     return data[: cut + 1].decode("utf-8", "replace"), offset + cut + 1
 
 
+def _progress_usage(
+    log_path: Path, offset: int, seen: dict[str, _usage.Usage]
+) -> tuple[int, _usage.Usage | None]:
+    """One tick: new lines since `offset` folded into `seen`, the new offset, and
+    the running total (or None if nothing has been seen at all).
+
+    Shared by `run_task`'s own poll loop and `reattach._adopt`'s: an adopted
+    session's child survives a Kraft restart (`start_new_session=True`) and
+    keeps writing its log, so without this loop running there too, tokens_in/out
+    freeze at whatever `run_task` last wrote before the restart and never move
+    again until the process finally exits -- Kraft-jgs6, the sequel to
+    Kraft-41f7 (same frozen-tokens symptom, a different loop missing it).
+    """
+    chunk, offset = _read_new(log_path, offset)
+    return offset, _usage.from_stream(logs.split_lines(chunk), seen)
+
+
 def _resolve(result_path: Path, returncode: int) -> str:
     file_status = _resolve_result_file(result_path)
     if file_status is not None:
@@ -328,8 +345,7 @@ async def run_task(
         # loop silently freezes tokens_in/out for the rest of the session with
         # nothing to show it happened (Kraft-41f7).
         try:
-            chunk, log_offset = _read_new(log_path, log_offset)
-            live = _usage.from_stream(logs.split_lines(chunk), seen_usage)
+            log_offset, live = _progress_usage(log_path, log_offset, seen_usage)
             if live is not None:
                 await db.write(lambda c, u=live: store.session_progress(c, session_id, u))
         except Exception:
