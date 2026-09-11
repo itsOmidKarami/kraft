@@ -183,6 +183,17 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         )
     if version < 17:
         drop_lines = (*drop_lines, "retry_at         TEXT,", "-- set while status = 'rate_limited'")
+    if version < 26:
+        drop_lines = (
+            *drop_lines,
+            "archived_at      TEXT,",
+            "archived_by      TEXT,",
+            "-- who and when a completed/abandoned item was archived",
+            '-- NULL means "not archived". Never set on any other status',
+            "-- does not change `status`",
+            "-- abandoned. 'you' | 'auto', enforced in kraft.store, not by a CHECK:",
+            "-- the two writers are archive_work_item's only two callers.",
+        )
     schema = "\n".join(
         rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
     )
@@ -458,6 +469,18 @@ def test_raising_rollback_still_informs_caller_and_next_db_works(tmp_path, monke
             await fresh.close()
 
     asyncio.run(scenario())
+
+
+def test_migrate_v25_to_v26_adds_archive_columns(tmp_path):
+    """A v25 database migrates forward and gains archived_at/archived_by."""
+    conn = db._connect(tmp_path / "orchestrator.db")
+    _build_old_db(conn, 25)
+
+    db.migrate(conn)
+
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(work_items)").fetchall()}
+    assert {"archived_at", "archived_by"} <= cols
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
 
 
 def test_migrate_v2_to_v3_adds_session_summary_ref(tmp_path):

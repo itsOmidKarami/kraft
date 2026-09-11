@@ -98,6 +98,16 @@ def test_saving_the_policy_preserves_rate_limit_retries_and_triggers(client, tem
     assert on_disk["triggers"][0]["title"] == "weekly sweep"
 
 
+def test_put_policy_persists_the_archive_block(client):
+    body = {
+        "loops": {},
+        "default": {"attempts": 3, "wall_clock_s": 600},
+        "archive": {"after_days": 14},
+    }
+    assert client.put("/api/policy", json=body).status_code == 200
+    assert client.get("/api/policy").json()["archive"] == {"after_days": 14}
+
+
 def test_put_policy_rejects_a_negative_budget(client):
     body = {
         "loops": {},

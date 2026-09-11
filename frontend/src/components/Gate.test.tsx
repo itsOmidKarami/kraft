@@ -133,6 +133,16 @@ describe("Gate", () => {
     );
   });
 
+  it("with navigateReject, the inline Reject… links to the item instead of opening a note field", () => {
+    render(
+      <MemoryRouter>
+        <Gate item={item} gate="plan_approval" variant="inline" navigateReject />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("link", { name: /^reject/i })).toHaveAttribute("href", "/work-items/w1");
+    expect(screen.queryByLabelText("reject note")).toBeNull();
+  });
+
   it("offers escalate alongside approve/reject, both variants", () => {
     render(<Gate item={item} gate="spec_approval" />);
     expect(screen.getByRole("button", { name: /^escalate/i })).toBeInTheDocument();

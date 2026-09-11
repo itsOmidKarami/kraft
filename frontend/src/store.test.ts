@@ -170,7 +170,7 @@ describe("applyEvent", () => {
       },
     }));
     useStore.getState().applyEvent(ev({ type: "task_progress", payload: { node_id: "env_setup", task: 2, total: 3, title: "b" } }));
-    expect(useStore.getState().workItems.w1.progress?.tasks.map((t) => t.state)).toEqual([
+    expect(useStore.getState().workItems.w1.progress?.tasks?.map((t) => t.state)).toEqual([
       "done",
       "current",
       "pending",
@@ -228,6 +228,38 @@ describe("applyEvent", () => {
       expect(useStore.getState().workItems.w1.needs_context_question).toBeNull();
     },
   );
+
+  it("work_item_rate_limited patches status and retry_at", () => {
+    useStore.getState().applyEvent(
+      ev({ type: "work_item_rate_limited", payload: { retry_at: "2026-01-01T00:00:00Z", node_id: "n" } }),
+    );
+    expect(useStore.getState().workItems.w1.status).toBe("rate_limited");
+    expect(useStore.getState().workItems.w1.retry_at).toBe("2026-01-01T00:00:00Z");
+  });
+
+  it("work_item_waiting patches status and retry_at", () => {
+    useStore.getState().applyEvent(
+      ev({ type: "work_item_waiting", payload: { retry_at: "2026-01-01T00:00:00Z", node_id: "n" } }),
+    );
+    expect(useStore.getState().workItems.w1.status).toBe("waiting");
+    expect(useStore.getState().workItems.w1.retry_at).toBe("2026-01-01T00:00:00Z");
+  });
+
+  it("work_item_archived sets archived_at/archived_by", () => {
+    useStore.setState({ workItems: { w1: baseItem({ status: "completed" }) } });
+    useStore.getState().applyEvent(ev({ type: "work_item_archived", payload: { by: "you" } }));
+    expect(useStore.getState().workItems.w1.archived_by).toBe("you");
+    expect(useStore.getState().workItems.w1.archived_at).toBeTruthy();
+  });
+
+  it("work_item_restored clears archived_at/archived_by", () => {
+    useStore.setState({
+      workItems: { w1: baseItem({ status: "completed", archived_at: "t", archived_by: "you" }) },
+    });
+    useStore.getState().applyEvent(ev({ type: "work_item_restored", payload: {} }));
+    expect(useStore.getState().workItems.w1.archived_at).toBeNull();
+    expect(useStore.getState().workItems.w1.archived_by).toBeNull();
+  });
 
   it("unknown type is stored in the timeline, no throw", () => {
     expect(() =>

@@ -77,6 +77,7 @@ export function Gate({
   deferred,
   concerns,
   sessions,
+  navigateReject = false,
 }: {
   item: WorkItem;
   gate: string;
@@ -94,6 +95,12 @@ export function Gate({
    *  escalation turn instead of re-offering the button. The board's inline
    *  row has no per-item session list, so it goes without. */
   sessions?: WorkerSession[];
+  /** Inline-only: "Reject…" routes to the item with the reject composer
+   *  requested via router `state` instead of opening a note field on the
+   *  spot — the board row and its peek pane have no room for one (UI v2 ·
+   *  02). UI v2 · 06's action bar reads `location.state.comp === "reject"`;
+   *  wiring that read is that group's job, not this prop's. */
+  navigateReject?: boolean;
 }) {
   const [rejecting, setRejecting] = useState(false);
   const [note, setNote] = useState("");
@@ -189,7 +196,17 @@ export function Gate({
               {(PROMPTS[gate] ?? "approve to continue").replace(/ to continue$/, "")}
             </span>
             {approve}
-            {startReject}
+            {navigateReject ? (
+              <Link
+                className="btn btn-secondary"
+                to={`/work-items/${item.id}`}
+                state={{ comp: "reject", gate }}
+              >
+                Reject…
+              </Link>
+            ) : (
+              startReject
+            )}
             <Escalate item={item} sessions={sessions} />
           </>
         ) : (

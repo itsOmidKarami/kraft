@@ -78,8 +78,12 @@ const json = (method: string, body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
+// include_abandoned=true: abandoned items sit under Done until archived, so
+// the board's normal (non-archived) view must still see them.
 export const listWorkItems = () =>
-  req<{ items: WorkItem[]; cursor: number }>("/work-items");
+  req<{ items: WorkItem[]; cursor: number }>(
+    "/work-items?include_abandoned=true",
+  );
 
 export const getWorkItem = (id: string) =>
   req<WorkItem & { worker_sessions: WorkerSession[] }>(`/work-items/${id}`);
@@ -157,6 +161,23 @@ export const abandonWorkItem = (id: string) =>
   req<{ id: string; status: string; worktree_removed: boolean }>(
     `/work-items/${id}/abandon`,
     json("POST", {}),
+  );
+
+export const archiveWorkItem = (id: string) =>
+  req<{ id: string; archived_by: string; worktree_removed: boolean }>(
+    `/work-items/${id}/archive`,
+    json("POST", {}),
+  );
+
+export const restoreWorkItem = (id: string) =>
+  req<{ id: string; status: string }>(`/work-items/${id}/restore`, json("POST", {}));
+
+export const listArchivedWorkItems = () =>
+  // include_abandoned=true: the archived view is the only way to restore an
+  // abandoned item (the auto-archive poller and the Done group's Archive
+  // action both archive abandoned items), so it must not drop them.
+  req<{ items: WorkItem[]; cursor: number }>(
+    "/work-items?archived=true&include_abandoned=true",
   );
 
 export const retryWorkItem = (id: string, steer?: string) =>
