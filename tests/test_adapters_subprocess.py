@@ -446,6 +446,109 @@ def test_post_resolve_can_downgrade(tmp_path):
     asyncio.run(scenario())
 
 
+def test_require_result_file_downgrades_a_silent_success(tmp_path):
+    """Kraft-avpe: an agent that exits 0 with no result file at all is not
+    'done' -- it never reached the end of the contract every agent hook is told
+    to follow. cmd writes nothing to $KRAFT_RESULT_PATH and exits 0."""
+
+    async def scenario():
+        rd = RunDirs(tmp_path).ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database)
+            status = await sp.run_task(
+                database,
+                rd,
+                session_id="s-rrf",
+                work_item_id="w1",
+                node_id="implementation",
+                hook_point="on.implementation.start",
+                cmd=["true"],
+                cwd=tmp_path,
+                require_result_file=True,
+            )
+            assert status == "failed"
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT status FROM worker_sessions WHERE id='s-rrf'"
+                ).fetchone()
+            )
+            assert row["status"] == "failed"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_require_result_file_does_not_affect_a_normal_subprocess_hook(tmp_path):
+    """The default is False and only run_agent_task sets it -- on.test.run and
+    every other subprocess-kind binding has no result-file contract and must
+    resolve to 'done' on exit 0 exactly as it does today."""
+
+    async def scenario():
+        rd = RunDirs(tmp_path).ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database)
+            status = await sp.run_task(
+                database,
+                rd,
+                session_id="s-norrf",
+                work_item_id="w1",
+                node_id="verify",
+                hook_point="on.test.run",
+                cmd=["true"],
+                cwd=tmp_path,
+            )
+            assert status == "done"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_require_result_file_does_not_override_a_rate_limited_launch(tmp_path):
+    """A rejected launch produces no result file by construction (existing
+    comment in run_task) -- it must still resolve to rate_limited, not be
+    caught by the new check as a contract violation.
+
+    Nothing in this file already drives run_task end-to-end through a
+    rejected-rate-limit log (the existing rate_limit_* tests below call
+    sp._rate_limit_rejection directly on a hand-written log file) -- this
+    builds that path itself, writing the same event shape those tests parse
+    (test_rate_limit_rejection_reads_a_rejected_event, this file)."""
+
+    async def scenario():
+        rd = RunDirs(tmp_path).ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database)
+            # The child writes a rejected rate_limit_event to stdout (which
+            # run_task redirects to the session's log file) and exits 0 with
+            # no result file -- the exact shape a real rejected launch leaves
+            # behind.
+            event = (
+                '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected",'
+                '"resetsAt":1788968400,"rateLimitType":"five_hour"}}'
+            )
+            status = await sp.run_task(
+                database,
+                rd,
+                session_id="s-rl",
+                work_item_id="w1",
+                node_id="implementation",
+                hook_point="on.implementation.start",
+                cmd=["sh", "-c", f"echo '{event}'"],
+                cwd=tmp_path,
+                require_result_file=True,
+            )
+            assert status == "rate_limited"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 def test_run_task_persists_session_summary_ref(tmp_path):
     """03 §3: session_summary_ref from the result file lands on the session row."""
 
