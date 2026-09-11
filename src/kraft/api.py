@@ -2372,6 +2372,16 @@ async def open_document(doc_id: str, body: OpenDocument, request: Request):
     doc = st.indexer.get_document(doc_id)
     if doc is None:
         raise HTTPException(404, "unknown document")
+    if doc_id.startswith("attachment:"):
+        # A synthetic attachment doc's file lives in the item's own worktree,
+        # not necessarily the connected repo's checkout (Kraft-2jy6) — the
+        # same worktree-first lookup `get_document` already reads its content
+        # from. `resolve_attachment_path` does its own containment check
+        # (`Indexer._summary_path`), so there is no separate escape check here.
+        path = st.indexer.resolve_attachment_path(doc_id)
+        if path is None:
+            raise HTTPException(404, "attachment file not found")
+        return {"document_id": doc_id, **_launch_editor(request, body.editor, path)}
     if doc.get("origin") == "event_ingest":
         # A session summary or gate artifact: `path` is a synthetic identifier
         # Kraft made up for the index, never a file the connected repo

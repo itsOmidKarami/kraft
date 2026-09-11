@@ -376,6 +376,42 @@ def test_documents_for_work_item_shows_unmerged_attachment_from_its_worktree(tmp
     asyncio.run(scenario())
 
 
+def test_resolve_attachment_path_reads_from_the_worktree_not_the_main_repo(tmp_path):
+    """Kraft-2jy6: `open_document` needs the same worktree-first path
+    `_synthesize_attachment_doc` already resolves content from — the file is
+    on the item's branch, not the registered repo's checkout."""
+    from kraft.paths import RunDirs
+
+    async def scenario():
+        state = await Database.open(tmp_path / "state.db")
+        conn = index_db.open_index(tmp_path / "index.db")
+        try:
+            repo = make_repo(tmp_path)
+            await state.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, bead_id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at, attachments) VALUES "
+                    "(?, 'b1', 't', ?, 'default', '{}', 'active', 'now', 'now', ?)",
+                    ("w1", str(repo), '[{"kind": "plan", "path": ".engineering/plans/p.md"}]'),
+                )
+            )
+            rd = RunDirs(tmp_path / "run").ensure()
+            wt = rd.worktrees / "w1" / ".engineering" / "plans"
+            wt.mkdir(parents=True)
+            (wt / "p.md").write_text("# Attached plan\nbody\n")
+
+            ix = Indexer(conn, state, repos_env=str(repo), run_dirs=rd)
+            resolved = ix.resolve_attachment_path("attachment:w1:plan")
+            assert resolved == (wt / "p.md").resolve()
+            assert ix.resolve_attachment_path("attachment:w1:spec") is None
+            assert ix.resolve_attachment_path("attachment:nope:plan") is None
+        finally:
+            conn.close()
+            await state.close()
+
+    asyncio.run(scenario())
+
+
 def test_documents_for_work_item_prefers_indexed_over_worktree_attachment(tmp_path):
     """Once the attachment lands in the `documents` table (post-merge, or a
     path that already exists in the main checkout), that row wins — no

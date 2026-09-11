@@ -53,15 +53,16 @@ async def resolve_repo(cwd: Path | None = None) -> str | None:
     server anyway.
 
     Parents are walked so a submodule checkout resolves to the connected
-    superproject.
+    superproject. `config.normalized_repo_root`, not a bare `--show-toplevel`,
+    so a linked worktree ($KRAFT_HOME worktree or any other) resolves to its
+    main checkout instead of having no connected ancestor at all (Kraft-tc33).
     """
     here = cwd or Path.cwd()
-    toplevel = config.git_read(here, "rev-parse", "--show-toplevel", expected_failure=True)
-    if toplevel is None:
+    root = config.normalized_repo_root(here)
+    if root is None:
         return None
     payload = await _get("/repos")
     connected = {entry["path"] for entry in payload["repos"]}
-    root = Path(toplevel)
     for candidate in (root, *root.parents):
         if str(candidate) in connected:
             return str(candidate)
