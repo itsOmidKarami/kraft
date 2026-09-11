@@ -1514,8 +1514,15 @@ async def approve_gate(wid: str, gate: str, request: Request):
 
     chain, reason = await apply_approval(st, row, gate)
     if chain is None:
+        # Kraft-iv4y: a human hitting `approve` again after this exact failure
+        # used to get a 200 back with nothing changed -- the same reason
+        # logged a second time, no error, no hint that approving was never
+        # going to work. The node that produced the bad artifact needs to be
+        # redone, not re-approved, so this is a clear stop, not a silent one.
         await st.db.write(lambda c: store.mark_needs_human(c, wid, row["current_node_id"], reason))
-        return {k: v for k, v in dict(_work_item_row(st, wid)).items()}
+        raise HTTPException(
+            422, f"{reason} -- gate {gate!r} cannot be approved; run `kraft item retry` instead"
+        )
 
     await st.db.write(lambda c: store.approve_gate(c, wid, gate))
     start = _gate_node_index(chain, gate) + 1
