@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ChatText, Prohibit } from "@phosphor-icons/react";
 import * as api from "../api";
 import { elapsed } from "../format";
+import { useStore } from "../store";
 import type { KraftEvent, WorkItem, WorkerSession } from "../types";
 import { Escalate, escalating } from "./Escalate";
 import { LogModal } from "./LogModal";
@@ -75,6 +76,7 @@ export function CappedCard({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [logSid, setLogSid] = useState<string | null>(null);
+  const hydrateItem = useStore((s) => s.hydrateItem);
 
   const node = item.chain_definition.nodes.find((n) => n.id === item.current_node_id);
   const rows = cycles(events, sessions, item.current_node_id);
@@ -99,6 +101,12 @@ export function CappedCard({
     try {
       await api.retryWorkItem(item.id, steerable ? steer.trim() || undefined : undefined);
       setSteer("");
+      // The ws push carries this too, but a retry that outraces its own
+      // event (or lands while the socket is mid-reconnect) left this card on
+      // screen with a request that had already succeeded. Caught separately:
+      // the retry itself is done by this point, so a hydrate hiccup must not
+      // read back as a failed retry.
+      hydrateItem(item.id).catch(() => {});
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {

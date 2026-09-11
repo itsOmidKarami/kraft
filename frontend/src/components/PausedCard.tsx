@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Play } from "@phosphor-icons/react";
 import * as api from "../api";
+import { useStore } from "../store";
 import { SkipControl } from "./SkipControl";
 import type { WorkItem, WorkerSession } from "../types";
 
@@ -19,6 +20,7 @@ export function PausedCard({
   const [steer, setSteer] = useState(item.pending_steer_context ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const hydrateItem = useStore((s) => s.hydrateItem);
 
   const paused = sessions.filter(
     (s) => s.node_id === item.current_node_id && s.status === "paused",
@@ -37,6 +39,12 @@ export function PausedCard({
     setErr(null);
     try {
       await api.resumeWorkItem(item.id, withSteer ? steer.trim() || undefined : undefined);
+      // The ws push carries this too, but a resume that outraces its own
+      // event (or lands while the socket is mid-reconnect) left this card on
+      // screen with a request that had already succeeded. Caught separately:
+      // the resume itself is done by this point, so a hydrate hiccup must not
+      // read back as a failed resume.
+      hydrateItem(item.id).catch(() => {});
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
