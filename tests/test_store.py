@@ -1371,3 +1371,92 @@ def test_create_session_stores_the_head_sha(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_skip_node_marks_active_and_appends_event(tmp_path):
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await _mk_item(database)
+            await database.write(lambda c: store.mark_needs_human(c, "w1", "verify", "boom"))
+            await database.write(
+                lambda c: store.skip_node(c, "w1", "verify", None, "flaky, known issue")
+            )
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT status, retry_at FROM work_items WHERE id='w1'"
+                ).fetchone()
+            )
+            evs = database.read(lambda c: events.read_after(c, 0, "w1"))
+            return row, [e for e in evs if e["type"] == "node_skipped"]
+        finally:
+            await database.close()
+
+    row, skipped = asyncio.run(scenario())
+    assert row["status"] == "active"
+    assert row["retry_at"] is None
+    assert skipped == [
+        {
+            "seq": skipped[0]["seq"],
+            "work_item_id": "w1",
+            "type": "node_skipped",
+            "payload": {"node_id": "verify", "gate": None, "note": "flaky, known issue"},
+            "created_at": skipped[0]["created_at"],
+        }
+    ]
+
+
+def test_skip_node_records_the_gate_it_bypassed(tmp_path):
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await _mk_item(database)
+            await database.write(
+                lambda c: store.skip_node(c, "w1", "env_setup", "spec_approval", None)
+            )
+            evs = database.read(lambda c: events.read_after(c, 0, "w1"))
+            return next(e for e in evs if e["type"] == "node_skipped")
+        finally:
+            await database.close()
+
+    ev = asyncio.run(scenario())
+    assert ev["payload"] == {"node_id": "env_setup", "gate": "spec_approval", "note": None}
+
+
+def test_skip_node_marks_a_running_session_paused_before_it_can_be_read_as_failed(tmp_path):
+    """Same race `pause_work_item` guards against (test_pause_resume.py's
+    `test_a_paused_row_and_its_event_never_disagree`): the session's own exit
+    handler must see 'paused' already there, or a `_terminate`d session reads
+    back as 'failed' forever."""
+
+    async def scenario():
+        database = await _open(tmp_path)
+        try:
+            await _mk_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="verify",
+                    hook_point="on.test.run",
+                    log_path="l",
+                    result_path="r",
+                )
+            )
+            await database.write(
+                lambda c: store.skip_node(c, "w1", "verify", None, None, session_ids=["s1"])
+            )
+            await database.write(lambda c: store.session_exited(c, "s1", "failed"))
+            row = database.read(
+                lambda c: c.execute("SELECT status FROM worker_sessions WHERE id='s1'").fetchone()
+            )
+            types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, "w1"))]
+            return row["status"], types
+        finally:
+            await database.close()
+
+    status, types = asyncio.run(scenario())
+    assert status == "paused"
+    assert "worker_session_exited" not in types
+    assert "worker_session_paused" in types

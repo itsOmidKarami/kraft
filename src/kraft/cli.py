@@ -486,6 +486,10 @@ def _cmd_retry(ns: argparse.Namespace) -> None:
     emit(asyncio.run(client.retry(ns.steer, ns.id)), _render_action, ns.json)
 
 
+def _cmd_skip(ns: argparse.Namespace) -> None:
+    emit(asyncio.run(client.skip(ns.note, ns.id)), _render_action, ns.json)
+
+
 def _cmd_escalate(ns: argparse.Namespace) -> None:
     emit(asyncio.run(client.escalate(ns.message, ns.id)), _render_action, ns.json)
 
@@ -800,6 +804,13 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     retry.add_argument("id", nargs="?")
     retry.add_argument("--steer", help="carried into the retry's prompt")
     retry.set_defaults(func=_cmd_retry)
+
+    skip = subs.add_parser(
+        "skip", parents=[common], help="advance past the current node or gate without running it"
+    )
+    skip.add_argument("id", nargs="?")
+    skip.add_argument("--note", help="optional reason, recorded on the node_skipped event")
+    skip.set_defaults(func=_cmd_skip)
 
     escalate = subs.add_parser(
         "escalate", parents=[common], help="ask an agent to help resolve a needs_human stop"

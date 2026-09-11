@@ -140,6 +140,16 @@ describe("Gate", () => {
     expect(screen.getAllByRole("button", { name: /^escalate/i })).toHaveLength(2);
   });
 
+  it("offers Skip on a pending gate, card variant", () => {
+    render(<Gate item={item} gate="spec_approval" />);
+    expect(screen.getByRole("button", { name: /skip/i })).toBeInTheDocument();
+  });
+
+  it("does not offer Skip on the inline variant", () => {
+    render(<Gate item={item} gate="spec_approval" variant="inline" />);
+    expect(screen.queryByRole("button", { name: /skip/i })).not.toBeInTheDocument();
+  });
+
   it("escalate sends through the message box, same as the standalone control", async () => {
     const spy = vi.spyOn(api, "escalateWorkItem").mockResolvedValue({ id: "w1", status: "escalating" });
     render(<Gate item={item} gate="spec_approval" />);

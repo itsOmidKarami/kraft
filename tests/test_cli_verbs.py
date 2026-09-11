@@ -367,6 +367,19 @@ def test_retry_passes_the_id_and_steer_through(app, monkeypatch, capsys):
     assert "w1" in capsys.readouterr().out
 
 
+def test_skip_passes_the_id_and_note_through(app, monkeypatch, capsys):
+    seen = {}
+
+    async def fake_skip(note=None, work_item_id=None):
+        seen.update(note=note, work_item_id=work_item_id)
+        return {"id": work_item_id, "status": "active"}
+
+    monkeypatch.setattr(client, "skip", fake_skip)
+    cli.main(["item", "skip", "w1", "--note", "known flake"])
+    assert seen == {"note": "known flake", "work_item_id": "w1"}
+    assert "w1" in capsys.readouterr().out
+
+
 def test_escalate_passes_the_id_and_message_through(app, monkeypatch, capsys):
     seen = {}
 
