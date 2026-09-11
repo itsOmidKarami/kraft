@@ -121,6 +121,41 @@ Signed one-shot approve/reject links and a Slack action endpoint were
 considered and dropped: this gives phone access to the real board, with the
 same auth, for no new code to secure.
 
+## Inbound triggers
+
+Kraft-859: start a chain from an event instead of typing into `kraft item
+create` every time. Two doors, same effect — both always file the item
+`paused`, exactly like manual intake: an agent cannot start work from a
+trigger any more than from a human's own `kraft item create`.
+
+**A cron schedule**, via a `triggers:` entry in `policy.yaml`:
+
+```yaml
+triggers:
+  - cron: "0 9 * * 1,2,3,4,5"  # 5-field cron, minute resolution; 9am weekdays
+    repo: /path/to/repo
+    chain: default              # a chain_template id from templates/
+    title: "Nightly dependency check"
+    description: "Filed by the 9am weekday trigger"  # optional, defaults to ""
+```
+
+Checked once a minute against the current time; a missed minute (server
+down, clock skew) is not backfilled — the spec (Kraft-7izl) treats that as
+acceptable rather than an incident.
+
+**An HTTP call**, via `POST /triggers` — the HTTP twin of the same cron entry,
+for anything that can fire a webhook (CI, an external scheduler, a script
+watching a queue) but can't wait for the next minute-tick:
+
+```
+POST /api/triggers
+{"title": "...", "repo": "/path/to/repo", "chain_template": "default", "description": "..."}
+```
+
+It needs the same auth as every other mutating route — the session cookie a
+browser holds after logging in, or an MCP bearer token — nothing
+trigger-specific. See "Remote access" above for reaching this from off-machine.
+
 ## Without the orchestrator
 
 `plugins/kraft-lite/` runs the same chain inside a single agent session — same
