@@ -1,0 +1,3 @@
+@media (max-width: 767px) {
+  .settings-section [data-pickup] { grid-template-columns: 1fr; gap: 4px; }
+}

@@ -15,6 +15,7 @@ describe("Settings → Notifications", () => {
       url_set: true,
       base_url: null,
       events: ["gate_requested", "work_item_needs_human"],
+      last_test: null,
     });
     renderAt("/settings/notify");
     expect(await screen.findByText(/a webhook URL is set/i)).toBeInTheDocument();
@@ -29,12 +30,14 @@ describe("Settings → Notifications", () => {
       url_set: false,
       base_url: null,
       events: ["gate_requested", "work_item_needs_human"],
+      last_test: null,
     });
     const put = vi.spyOn(api, "putNotify").mockResolvedValue({
       enabled: false,
       url_set: true,
       base_url: null,
       events: ["gate_requested", "work_item_needs_human"],
+      last_test: null,
     });
     renderAt("/settings/notify");
 
@@ -61,12 +64,14 @@ describe("Settings → Notifications", () => {
       url_set: true,
       base_url: null,
       events: ["gate_requested", "work_item_needs_human"],
+      last_test: null,
     });
     const put = vi.spyOn(api, "putNotify").mockResolvedValue({
       enabled: false,
       url_set: false,
       base_url: null,
       events: ["gate_requested", "work_item_needs_human"],
+      last_test: null,
     });
     renderAt("/settings/notify");
     await userEvent.click(await screen.findByRole("button", { name: /clear/i }));
@@ -86,6 +91,7 @@ describe("Settings → Notifications", () => {
       url_set: false,
       base_url: null as string | null,
       events: [] as string[],
+      last_test: null as { at: string; status: number | null; ms: number | null; error: string | null } | null,
     };
     vi.spyOn(api, "getNotify").mockImplementation(
       () => new Promise((resolve) => setTimeout(() => resolve({ ...backend }), 40)),
@@ -124,6 +130,7 @@ describe("Settings → Notifications", () => {
       url_set: false,
       base_url: null,
       events: ["gate_requested", "work_item_needs_human"],
+      last_test: null,
     });
     vi.spyOn(api, "putNotify").mockRejectedValue(
       new Error("set a webhook URL before enabling notifications"),
@@ -159,6 +166,7 @@ describe("Settings → Notifications", () => {
       url_set: true,
       base_url: null,
       events: ["gate_requested", "work_item_needs_human"],
+      last_test: null,
     });
     vi.spyOn(api, "putNotify").mockRejectedValue(new Error("could not save events"));
     renderAt("/settings/notify");
@@ -183,12 +191,14 @@ describe("Settings → Notifications", () => {
       url_set: true,
       base_url: null,
       events: ["gate_requested", "work_item_needs_human"],
+      last_test: null,
     });
     vi.spyOn(api, "putNotify").mockResolvedValue({
       enabled: false,
       url_set: true,
       base_url: "http://192.168.1.20:8765",
       events: ["gate_requested", "work_item_needs_human"],
+      last_test: null,
     });
     renderAt("/settings/notify");
 
@@ -214,5 +224,37 @@ describe("Settings → Notifications", () => {
       .getByRole("button", { name: /^save$/i })
       .closest(".save-row") as HTMLElement;
     expect(within(urlRow).queryByText(/^saved$/i)).toBeNull();
+  });
+
+  it("sends a test and reports the result next to the button", async () => {
+    vi.spyOn(api, "getNotify").mockResolvedValue({
+      enabled: true,
+      url_set: true,
+      base_url: null,
+      events: ["gate_requested", "work_item_needs_human"],
+      last_test: null,
+    });
+    const test = vi.spyOn(api, "testNotify").mockResolvedValue({
+      at: new Date().toISOString(),
+      status: 200,
+      ms: 118,
+      error: null,
+    });
+    renderAt("/settings/notify");
+    await userEvent.click(await screen.findByRole("button", { name: /send a test/i }));
+    expect(test).toHaveBeenCalled();
+    expect(await screen.findByText(/200 OK · 118 ms/i)).toBeInTheDocument();
+  });
+
+  it("disables Send a test until a webhook URL is set", async () => {
+    vi.spyOn(api, "getNotify").mockResolvedValue({
+      enabled: false,
+      url_set: false,
+      base_url: null,
+      events: [],
+      last_test: null,
+    });
+    renderAt("/settings/notify");
+    expect(await screen.findByRole("button", { name: /send a test/i })).toBeDisabled();
   });
 });

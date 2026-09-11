@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import * as api from "../../api";
 import { ago, until } from "../../format";
-import { OverflowMenu, Row, RowText } from "../../components/ui";
+import { Chip, OverflowMenu, Row, RowText } from "../../components/ui";
+import { parseUserAgent } from "../../ua";
 import type { Access, AuthSession } from "../../types";
 import { PageHead, SaveRow, useResource } from "./shared";
+import "./access.css";
 
 /* ── 5e access ────────────────────────────────────────────────────────────── */
 
@@ -13,7 +15,24 @@ export function AccessPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [sessions, setSessions] = useState<AuthSession[]>([]);
+  const [hostDraft, setHostDraft] = useState("");
   const access: Access | null = value;
+
+  const [notifyBaseUrl, setNotifyBaseUrl] = useState<string | null>(null);
+  useEffect(() => {
+    api
+      .getNotify()
+      .then((n) => setNotifyBaseUrl(n.base_url))
+      .catch(() => {});
+  }, []);
+  const notifyHost = (() => {
+    if (!notifyBaseUrl) return null;
+    try {
+      return new URL(notifyBaseUrl).hostname;
+    } catch {
+      return null;
+    }
+  })();
 
   const loadSessions = useCallback(() => {
     return api
@@ -82,6 +101,68 @@ export function AccessPage() {
               Takes effect on restart. Kraft never binds publicly; use a tunnel if you need
               remote access.
             </p>
+            <p className="settings-foot phone-only">
+              Changing the bind from a phone locks this phone out until you are on the new
+              address.
+            </p>
+          </section>
+
+          <section className="settings-section">
+            <h6>Allowed hosts</h6>
+            <p className="settings-foot">the names a browser may reach this instance by</p>
+            <div className="host-tags">
+              {access.allowed_hosts.map((h) => (
+                <Chip
+                  key={h}
+                  label={h}
+                  trailing="×"
+                  onClick={() => {
+                    // Removing the host this browser is on would 403 every
+                    // request the perimeter sees from it, including the one
+                    // that just sent this PUT — locking the operator out.
+                    if (h === window.location.hostname) {
+                      setMessage("can't remove the host you're connected as");
+                      return;
+                    }
+                    put({ allowed_hosts: access.allowed_hosts.filter((x) => x !== h) });
+                  }}
+                />
+              ))}
+              <input
+                className="input host-add"
+                placeholder="add a host or IP"
+                value={hostDraft}
+                onChange={(e) => setHostDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === ",") {
+                    e.preventDefault();
+                    const host = hostDraft.trim().replace(/,$/, "");
+                    if (host && !access.allowed_hosts.includes(host)) {
+                      put({ allowed_hosts: [...access.allowed_hosts, host] });
+                    }
+                    setHostDraft("");
+                  }
+                }}
+              />
+            </div>
+            <p className="settings-foot">
+              Off loopback, a browser request is refused (403) unless its Host is on this list —
+              the DNS-rebinding guard. On 127.0.0.1 the list is ignored and only loopback names
+              are accepted.
+            </p>
+            {access.bind !== "127.0.0.1" && access.allowed_hosts.length === 0 && (
+              <p className="settings-foot" data-tone="warn">
+                An empty list on a LAN bind refuses every browser.
+              </p>
+            )}
+            {notifyHost && (
+              <p className="settings-foot">
+                The notification link-back ({notifyHost}) is{" "}
+                {access.allowed_hosts.includes(notifyHost)
+                  ? "on the list."
+                  : "not on the list — that link will be refused."}
+              </p>
+            )}
           </section>
 
           <section className="settings-section">
@@ -134,7 +215,7 @@ export function AccessPage() {
                 <RowText
                   title={
                     <>
-                      {s.label ?? "unknown"}
+                      {parseUserAgent(s.label)}
                       {s.current && <span className="session-current"> current</span>}
                     </>
                   }

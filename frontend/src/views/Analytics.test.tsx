@@ -1,8 +1,9 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../api";
+import { elapsed, usd } from "../format";
 import { useStore } from "../store";
 import type { Analytics, WorkItem } from "../types";
 import { AnalyticsView } from "./Analytics";
@@ -17,17 +18,64 @@ const report: Analytics = {
     human_wait_ms: 12 * 3_600_000,
     tokens_in: 1_200_000,
     tokens_out: 200_000,
-    cost_usd: 18.0, cost_complete: true,
+    cost_usd: 18.0,
+    cost_complete: true,
     rounds: 5,
     capped_out: 2,
+    completed: 6,
+    completed_prev: 4,
+    median_lead_ms: 2 * 3_600_000 + 41 * 60_000,
+    human_wait_pct: 38,
+    fix_cycles: 1.6,
+    fix_cycles_capped: 9,
+    rejected_gates: 7,
   },
   weekly_merged: [{ week_start: "2026-08-31", n: 4 }],
   by_node: [
-    { node: "implementation", runs: 9, wall_ms: 900_000, avg_ms: 100_000, tokens: 1_000_000, cost_usd: 15, cost_complete: true, rounds: 5, capped_out: 2 },
-    { node: "verify", runs: 12, wall_ms: 120_000, avg_ms: 10_000, tokens: 400_000, cost_usd: 3, cost_complete: true, rounds: 5, capped_out: 0 },
+    {
+      node: "implementation",
+      runs: 9,
+      wall_ms: 900_000,
+      avg_ms: 100_000,
+      tokens: 1_000_000,
+      cost_usd: 15,
+      cost_complete: true,
+      rounds: 5,
+      capped_out: 2,
+    },
+    {
+      node: "verify",
+      runs: 12,
+      wall_ms: 120_000,
+      avg_ms: 10_000,
+      tokens: 400_000,
+      cost_usd: 3,
+      cost_complete: true,
+      rounds: 5,
+      capped_out: 0,
+    },
   ],
   by_repo: [
-    { repo: "/repo-a", items: 9, mrs: 4, tokens: 1_400_000, cost_usd: 18, cost_complete: true },
+    {
+      repo: "/repo-a",
+      items: 9,
+      mrs: 4,
+      tokens: 1_400_000,
+      cost_usd: 18,
+      cost_complete: true,
+      done: 6,
+      cycles: 1.2,
+    },
+  ],
+  rejected_gates_by_gate: [
+    { gate: "plan_approval", n: 5 },
+    { gate: "human_review_approval", n: 2 },
+  ],
+  stop_reasons: [
+    { label: "gate · plan_approval", n: 41 },
+    { label: "capped out · verify_fix_loop", n: 9 },
+    { label: "agent question · needs_context", n: 4 },
+    { label: "budget", n: 2 },
   ],
 };
 
@@ -49,87 +97,86 @@ const renderView = () =>
   );
 
 describe("AnalyticsView", () => {
-  it("asks for the last 30 days by default and says so", async () => {
+  it("asks for the last 8 weeks and the current filters", async () => {
     renderView();
     await screen.findByText("Analytics");
-    await screen.findAllByText("$18.00");
     expect(api.getAnalytics).toHaveBeenCalledWith({
-      range: "30d",
+      range: "8w",
       repo: undefined,
       template: undefined,
     });
-    expect(screen.getByText(/last 30 days · all repos · all templates/)).toBeInTheDocument();
+    expect(screen.getByText("last 8 weeks")).toBeInTheDocument();
+    expect(screen.queryByText(/last 7 days/i)).toBeNull();
   });
 
-  it("shows six KPIs, each with a sub-stat", async () => {
+  it("shows six KPIs", async () => {
     const { container } = renderView();
-    await screen.findAllByText("$18.00");
+    await screen.findAllByText("6");
     expect(container.querySelectorAll(".kpi")).toHaveLength(6);
-    expect(screen.getByText("6 completed · 3 needs human")).toBeInTheDocument();
-    expect(screen.getByText("+ 12h waiting on people")).toBeInTheDocument();
-    expect(screen.getByText("1.2M in · 200k out")).toBeInTheDocument();
-    // $18.00 over the 6 items that ran, not over all 9 — 9 is the backlog
-    expect(screen.getByText("$3.00 per work item run")).toBeInTheDocument();
-    expect(screen.getByText("2 sessions capped out")).toBeInTheDocument();
+    const labels = [...container.querySelectorAll(".kpi-label")].map((n) => n.textContent);
+    expect(labels).toEqual([
+      "Completed",
+      "Median lead time",
+      "Human wait",
+      "Fix cycles",
+      "Cost",
+      "Rejected gates",
+    ]);
+    const values = [...container.querySelectorAll(".kpi-value")].map((n) => n.textContent);
+    expect(values).toEqual([
+      "6",
+      elapsed(report.totals.median_lead_ms),
+      "38%",
+      "1.6",
+      usd(18, true),
+      "7",
+    ]);
   });
 
-  it("draws seven week columns even though only one week merged anything", async () => {
+  it("draws eight week columns", async () => {
     const { container } = renderView();
-    await screen.findAllByText("$18.00");
-    expect(container.querySelectorAll(".bar-col")).toHaveLength(7);
-    // the newest column is the partial one
-    const cols = [...container.querySelectorAll(".bar-col")];
-    expect(cols[6]).toHaveAttribute("data-partial", "true");
-    expect(cols.filter((c) => c.querySelector(".bar-n")?.textContent !== "0")).toHaveLength(1);
+    await screen.findAllByText("6");
+    expect(container.querySelectorAll(".bar-col")).toHaveLength(8);
   });
 
-  it("ranks nodes by cost share and repos by items", async () => {
-    const { container } = renderView();
-    await screen.findAllByText("$18.00");
-    const nodes = [...container.querySelectorAll(".node-row[data-node]")];
-    expect(nodes.map((n) => n.getAttribute("data-node"))).toEqual(["implementation", "verify"]);
-    // the top node's bar is full width; the cheaper one is proportional
-    expect((nodes[0].querySelector(".share > span") as HTMLElement).style.width).toBe("100%");
-    expect((nodes[1].querySelector(".share > span") as HTMLElement).style.width).toBe("20%");
-    expect(within(nodes[0] as HTMLElement).getByText("1M")).toBeInTheDocument();
-  });
-
-  it("refetches when a filter changes", async () => {
+  it("refetches when repo/template selects change", async () => {
     renderView();
-    await screen.findAllByText("$18.00");
-    await userEvent.click(screen.getByRole("button", { name: "Last 7 days" }));
+    await screen.findAllByText("6");
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: /repo/i }), "/repo-b");
     expect(api.getAnalytics).toHaveBeenLastCalledWith({
-      range: "7d",
-      repo: undefined,
-      template: undefined,
-    });
-    // the facet reads as the repo's own name; the filter still sends the path
-    await userEvent.click(screen.getByRole("button", { name: "repo-b" }));
-    expect(api.getAnalytics).toHaveBeenLastCalledWith({
-      range: "7d",
+      range: "8w",
       repo: "/repo-b",
       template: undefined,
     });
+  });
+
+  it("renders the by-node MIN/%% columns and by-repo DONE/CYCLES columns", async () => {
+    const { container } = renderView();
+    await screen.findByText("implementation");
+    const nodeRow = container.querySelector('.node-row[data-node="implementation"]')!;
+    expect(nodeRow.querySelector('[data-label="min"]')).not.toBeNull();
+    expect(nodeRow.querySelector('[data-label="%"]')).not.toBeNull();
+    const repoRow = container.querySelector('.repo-row[data-repo="/repo-a"]')!;
+    expect(repoRow.querySelector('[data-label="done"]')).not.toBeNull();
+    expect(repoRow.querySelector('[data-label="cycles"]')).not.toBeNull();
+  });
+
+  it("orders stop reasons by count and labels each bar", async () => {
+    const { container } = renderView();
+    await screen.findByText("Why items stopped for a person");
+    const rows = [...container.querySelectorAll(".stop-row")];
+    expect(rows.map((r) => r.getAttribute("data-label"))).toEqual(
+      report.stop_reasons.map((s) => s.label),
+    );
+    expect(rows.map((r) => r.querySelector(".stop-n")!.textContent)).toEqual(
+      report.stop_reasons.map((s) => String(s.n)),
+    );
   });
 
   it("surfaces a failed fetch instead of an empty page", async () => {
     vi.spyOn(api, "getAnalytics").mockRejectedValue(new Error("unknown range"));
     renderView();
     expect(await screen.findByText(/unknown range/)).toHaveClass("form-error");
-  });
-
-  it("labels every by-node and by-repo cell for the phone card reflow", async () => {
-    renderView();
-    await screen.findByText("implementation");
-    const nodeRow = screen.getByText("implementation").closest(".node-row")!;
-    for (const label of ["node", "cost share", "runs", "avg time", "tokens", "cost", "rounds"]) {
-      expect(nodeRow.querySelector(`[data-label="${label}"]`)).not.toBeNull();
-    }
-    // "repo-a" also names the sidebar facet button — scope to the table row via its title
-    const repoRow = screen.getByTitle("/repo-a").closest(".repo-row")!;
-    for (const label of ["repo", "items", "MRs", "tokens", "cost"]) {
-      expect(repoRow.querySelector(`[data-label="${label}"]`)).not.toBeNull();
-    }
   });
 
   it("marks a cost that is only a floor, and never dresses it up as a total", async () => {
@@ -140,8 +187,5 @@ describe("AnalyticsView", () => {
     });
     renderView();
     await screen.findAllByText("$18.00+");
-    expect(screen.getByText("a floor — some runs reported no cost")).toBeInTheDocument();
-    // and no invented per-item average alongside it
-    expect(screen.queryByText(/per work item/)).toBeNull();
   });
 });

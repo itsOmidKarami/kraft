@@ -105,6 +105,16 @@ export interface Intake {
   max_concurrent?: number;
   priority_ceiling: number;
   repos: string[];
+  repo_pickups: Record<string, { items: number | null; last_picked_up: string | null }>;
+  recent_pickups: {
+    work_item_id: string;
+    bead_id: string | null;
+    title: string | null;
+    repo: string | null;
+    priority: number | null;
+    status: string;
+    at: string;
+  }[];
 }
 
 export interface Cap {
@@ -126,9 +136,14 @@ export type ThemeMode = "light" | "dark" | "system";
 
 /** `GET/PUT /theme`. Instance-wide, like every other Settings-backed value —
  *  see the theme-palettes design doc for why this isn't per-user. */
+export type BoardGroupBy = "status" | "repo" | "template";
+export type BoardOpenIn = "peek" | "full";
+
 export interface Theme {
   palette: PaletteId;
   mode: ThemeMode;
+  density: "compact" | "comfortable";
+  board: { group_by: BoardGroupBy; show_done: number; open_in: BoardOpenIn };
 }
 
 export interface Access {
@@ -137,6 +152,7 @@ export interface Access {
   session_expiry_days: number;
   password_set: boolean;
   auth_required: boolean;
+  allowed_hosts: string[];
 }
 
 /** `GET /notify`. The webhook URL is deliberately absent — the server never
@@ -146,6 +162,7 @@ export interface Notify {
   url_set: boolean;
   base_url: string | null;
   events: string[];
+  last_test: { at: string; status: number | null; ms: number | null; error: string | null } | null;
 }
 
 export interface AuthSession {

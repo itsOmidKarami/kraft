@@ -193,6 +193,23 @@ def test_starts_one_bead_when_enabled(tmp_path, monkeypatch):
     _run(lambda: _stub(tmp_path), body)
 
 
+def test_a_started_pickup_is_recorded_with_source_and_priority(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        intake_mod.beads, "ready", _ready([{"id": "B-1", "title": "pick me up", "priority": 3}])
+    )
+
+    async def body(app):
+        started = await intake_mod.tick(app)
+        assert len(started) == 1
+        pickups = app.state.db.read(store.recent_auto_pickups)
+        assert len(pickups) == 1
+        assert pickups[0]["priority"] == 3
+        last = app.state.db.read(store.last_auto_pickup_at)
+        assert last  # at least one repo recorded
+
+    _run(lambda: _stub(tmp_path), body)
+
+
 def test_auto_intake_carries_the_beads_description(tmp_path, monkeypatch):
     """The bead already carries the brief its author wrote. Auto-intake is the one
     path with no human present to notice it being dropped."""

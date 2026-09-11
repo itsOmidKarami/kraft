@@ -1,0 +1,2 @@
+.host-tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.host-add { flex: 1; min-width: 140px; }

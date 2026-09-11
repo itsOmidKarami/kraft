@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import * as api from "../../api";
-import { Switch } from "../../components/ui";
+import { Row, RowText, Switch } from "../../components/ui";
+import { ago, repoName, statusWord } from "../../format";
 import type { Intake, Repo } from "../../types";
 import { PageHead, SaveRow, useResource } from "./shared";
+import "./intake.css";
 
 /* ── 5d-bis auto-intake ───────────────────────────────────────────────────── */
 
@@ -22,6 +24,14 @@ export function IntakePage() {
       .catch(() => setRepos([]));
   }, []);
 
+  const [dailyBudget, setDailyBudget] = useState<number | null>(null);
+  useEffect(() => {
+    api
+      .getPolicy()
+      .then((p) => setDailyBudget(p.budget?.daily_usd ?? null))
+      .catch(() => {});
+  }, []);
+
   const set = <K extends keyof Intake>(field: K, v: Intake[K]) => {
     if (!intake) return;
     setDraft({ ...intake, [field]: v });
@@ -32,7 +42,11 @@ export function IntakePage() {
     setBusy(true);
     setMessage(null);
     try {
-      await api.putIntake(draft);
+      // `repo_pickups`/`recent_pickups` are read-only, derived server-side --
+      // strip them off the draft (a straight spread of `intake`) rather than
+      // send them back as if they were poller config.
+      const { repo_pickups: _rp, recent_pickups: _rc, ...body } = draft;
+      await api.putIntake(body as Intake);
       setDraft(null);
       await reload();
       setMessage("saved");
@@ -107,6 +121,18 @@ export function IntakePage() {
                 should be looking at
               </span>
             </div>
+            <div className="save-row">
+              <Switch checked disabled onChange={() => {}} label="only chains with a gate" />
+              <span className="save-hint">
+                an unattended start must still stop for a person somewhere
+              </span>
+            </div>
+            <div className="save-row">
+              <Switch checked disabled onChange={() => {}} label="never past the daily budget" />
+              <span className="save-hint">
+                {dailyBudget != null ? `$${dailyBudget} · Policy → Spend caps` : "Policy → Spend caps"}
+              </span>
+            </div>
           </section>
 
           <section className="settings-section">
@@ -128,7 +154,16 @@ export function IntakePage() {
                 />
                 <span className="dot" />
                 <span>
-                  {r.name} <span className="row-sub">· {r.path}</span>
+                  {r.name}
+                  <span className="row-sub">
+                    {" "}
+                    · {intake.repo_pickups[r.path]?.items != null
+                      ? `${intake.repo_pickups[r.path].items} items`
+                      : "item count unavailable"}
+                    {intake.repo_pickups[r.path]?.last_picked_up
+                      ? ` · last picked up ${ago(intake.repo_pickups[r.path].last_picked_up!)}`
+                      : ""}
+                  </span>
                 </span>
               </label>
             ))}
@@ -136,6 +171,22 @@ export function IntakePage() {
               An empty list means every enabled repo. An epic is never auto-started: it is a
               container for work, not work.
             </p>
+          </section>
+
+          <section className="settings-section">
+            <h6>Recent pickups</h6>
+            {intake.recent_pickups.length === 0 && <p className="empty">nothing picked up yet</p>}
+            {intake.recent_pickups.map((p) => (
+              <Row key={p.work_item_id} columns="1fr 120px 90px 100px" data-pickup={p.work_item_id}>
+                <RowText
+                  title={`${p.priority != null ? `P${p.priority} · ` : ""}${p.title ?? p.work_item_id}`}
+                  sub={p.repo ? repoName(p.repo) : undefined}
+                />
+                <span className="row-sub">{ago(p.at)}</span>
+                <span className="row-sub">started</span>
+                <span className="row-sub">{statusWord(p.status)}</span>
+              </Row>
+            ))}
           </section>
 
           <SaveRow

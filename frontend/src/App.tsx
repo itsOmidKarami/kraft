@@ -21,6 +21,7 @@ export function App() {
   // all of them so the login screen is decided in one place (design 1m).
   const [locked, setLocked] = useState(false);
   const [bind, setBind] = useState<string | undefined>();
+  const [sessionExpiryDays, setSessionExpiryDays] = useState<number | undefined>();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -45,7 +46,10 @@ export function App() {
     // /health needs no session, and it is where the bind address comes from
     api
       .getHealth()
-      .then((h) => setBind(h.bind))
+      .then((h) => {
+        setBind(h.bind);
+        setSessionExpiryDays(h.session_expiry_days);
+      })
       .catch(() => {});
   }, [locked]);
 
@@ -54,7 +58,8 @@ export function App() {
     window.location.reload(); // simplest correct refill of every view's data
   }, []);
 
-  if (locked) return <Login bind={bind} onSignedIn={signedIn} />;
+  if (locked)
+    return <Login bind={bind} sessionExpiryDays={sessionExpiryDays} onSignedIn={signedIn} />;
 
   return (
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
