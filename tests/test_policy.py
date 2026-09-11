@@ -292,3 +292,29 @@ def test_cron_due_matches_star_and_lists():
     assert policy.cron_due("* * * * *", dt)
     assert policy.cron_due("30,45 14 * * *", dt)
     assert not policy.cron_due("15,45 14 * * *", dt)
+
+
+def test_load_policy_reads_max_concurrent(tmp_path):
+    d = tmp_path / "policy.yaml"
+    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\nmax_concurrent: 7\n")
+    assert policy.load_policy(d).max_concurrent == 7
+
+
+def test_load_policy_defaults_max_concurrent_to_three(tmp_path):
+    d = tmp_path / "policy.yaml"
+    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\n")
+    assert policy.load_policy(d).max_concurrent == 3
+
+
+def test_load_policy_falls_back_to_legacy_intake_max_concurrent(tmp_path):
+    (tmp_path / "intake.yaml").write_text("max_concurrent: 9\n")
+    d = tmp_path / "policy.yaml"
+    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\n")
+    assert policy.load_policy(d).max_concurrent == 9
+
+
+def test_load_policy_rejects_bad_max_concurrent(tmp_path):
+    d = tmp_path / "policy.yaml"
+    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\nmax_concurrent: 0\n")
+    with pytest.raises(policy.PolicyError):
+        policy.load_policy(d)

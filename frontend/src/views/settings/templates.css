@@ -1,0 +1,106 @@
+/* Chains editor — graph, node form, YAML pane (design 27 / m13). New rules
+ * only; `.template-editor`, `.template-list`, `.facet-opt`, `.validation`,
+ * `.template-yaml` already live in styles.css and are reused here. */
+
+.chain-editor {
+  grid-template-columns: 200px 1fr 340px;
+}
+
+.chain-middle {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.chain-graph {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+}
+
+.chain-graph-item {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.chain-pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--color-divider);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chain-pill[data-selected] {
+  border-color: var(--color-accent-700);
+  background: var(--color-accent-900);
+  color: var(--color-accent-300);
+}
+
+.chain-pill-count {
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+.chain-insert {
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 4px;
+}
+
+.chain-insert:hover {
+  color: var(--color-text);
+}
+
+.chain-move {
+  display: flex;
+  gap: 2px;
+}
+
+.chain-move button {
+  border: 1px solid var(--color-divider);
+  background: transparent;
+  color: var(--color-text-muted);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 1px 4px;
+}
+
+.chain-node-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chain-task-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.chain-yaml-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+@media (max-width: 1200px) {
+  .chain-editor {
+    grid-template-columns: 1fr;
+  }
+}

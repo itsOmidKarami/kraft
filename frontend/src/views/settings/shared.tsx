@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { Check } from "@phosphor-icons/react";
+import { ArrowLeft, Check } from "@phosphor-icons/react";
+import { Link } from "react-router-dom";
 
 /**
  * Settings (design 5a–5e). Every page edits versioned YAML through the API
@@ -66,6 +67,54 @@ export function PageHead({ title, note, action }: { title: string; note: string;
     <div className="settings-head">
       <h2>{title}</h2>
       <span className="settings-note">{note}</span>
+      {action}
+    </div>
+  );
+}
+
+const PHONE_QUERY = "(max-width: 767px)"; // README breakpoint (UI v2 · 00 common)
+
+/** True at phone width, live across a resize — not a one-time read, so
+ *  rotating a device or resizing a dev-tools panel doesn't strand the page
+ *  between the list and detail layout. */
+export function usePhone(): boolean {
+  const [phone, setPhone] = useState(() => window.matchMedia(PHONE_QUERY).matches);
+  useEffect(() => {
+    const mql = window.matchMedia(PHONE_QUERY);
+    const onChange = () => setPhone(mql.matches);
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
+  return phone;
+}
+
+/** m10–m14's phone top bar: `← <parent>` · title · subtitle · one primary
+ *  action (Save, or +). `back` is the parent's own label ("Settings" from a
+ *  top-level page like Repos; "Repos" from a repo's own detail page) — the
+ *  caller names it because only the caller knows which level it's leaving. */
+export function PhoneHeader({
+  back,
+  backTo,
+  title,
+  subtitle,
+  action,
+}: {
+  back: string;
+  backTo: string;
+  title: string;
+  subtitle?: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="phone-header">
+      <Link to={backTo} className="phone-header-back">
+        <ArrowLeft size={16} />
+        {back}
+      </Link>
+      <div className="phone-header-title">
+        <span className="phone-header-h1">{title}</span>
+        {subtitle && <span className="phone-header-sub">{subtitle}</span>}
+      </div>
       {action}
     </div>
   );

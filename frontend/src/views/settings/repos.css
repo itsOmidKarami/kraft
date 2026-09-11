@@ -1,0 +1,44 @@
+/* Repos list + detail (design 24/25/26). New rules only — shared primitives
+ * (.field, .seg, .tag, .submodules, .readout, .save-row) live in styles.css
+ * already and are reused here, not redeclared. */
+
+.repo-detail {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.submodule-table {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-divider);
+  border-radius: 6px;
+  overflow: hidden;
+  margin: 8px 0;
+}
+
+.submodule-row {
+  display: grid;
+  grid-template-columns: 44px 1fr 1fr 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.submodule-row:last-child {
+  border-bottom: none;
+}
+
+.submodule-head {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-neutral-500);
+}
+
+.btn-danger {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}

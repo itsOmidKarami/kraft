@@ -1,5 +1,12 @@
 /* ── settings (design 5a–5e) ─────────────────────────────────────────────── */
 
+export interface RepoSubmodule {
+  path: string;
+  enabled: boolean;
+  test_command: string | null;
+  chain_override: string | null;
+}
+
 export interface Repo {
   path: string;
   name: string;
@@ -8,6 +15,12 @@ export interface Repo {
   forge: string | null;
   project: string | null;
   enabled: boolean;
+  default_model: string | null;
+  deny_tools: string[];
+  steering: string[];
+  allow_cross_repo: boolean;
+  default_root_merge_policy: "bump" | "skip" | "bump_no_mr";
+  submodules: RepoSubmodule[];
 }
 
 export interface RepoProbe {
@@ -29,6 +42,14 @@ export interface TemplateNode {
   tasks: string[];
   gate_after: string | null;
   fix_loop?: string | null;
+  on_failure?: string[];
+  reject_to?: string | null;
+  auto_escalate?: boolean;
+  /** Any node key the form doesn't render (e.g. `rebase_bounce_to` on
+   *  `pre_mr_rebase` in `default.yaml`) still round-trips: the serializer
+   *  writes every own-key of a node object, known or not, so editing one
+   *  node never silently drops a key this form doesn't know about. */
+  [key: string]: unknown;
 }
 
 export interface TemplateSummary {
@@ -46,11 +67,24 @@ export interface TemplateValidation {
 }
 
 export interface HookBinding {
-  kind: "builtin" | "agent" | "subprocess";
+  kind: "builtin" | "agent" | "subprocess" | "forge";
   handler?: string;
   command?: string | string[];
   interactive?: boolean;
-  repos?: Record<string, boolean>;
+  timeout?: number;
+  repos?: Record<string, { enabled: boolean; command?: string | string[] | null }>;
+  /** Agent kind only. Steering files' "who uses it" (Steering page) reads
+   *  this to name a hook the same way it names a repo. */
+  steering?: string[];
+}
+
+export interface HookRun {
+  work_item_id: string;
+  node_id: string;
+  round: number;
+  status: string;
+  wall_ms: number | null;
+  created_at: string;
 }
 
 export interface SteeringFile {
@@ -66,7 +100,9 @@ export interface SteeringList {
 export interface Intake {
   enabled: boolean;
   interval_s: number;
-  max_concurrent: number;
+  // Moved to Policy.max_concurrent; kept optional here so an old client
+  // reading/writing this file still round-trips.
+  max_concurrent?: number;
   priority_ceiling: number;
   repos: string[];
 }
@@ -81,6 +117,8 @@ export interface Policy {
   default: Cap;
   findings?: { loop_severities?: string[] };
   budget?: { work_item_usd: number | null; daily_usd: number | null };
+  max_concurrent: number;
+  rate_limit_retries?: number;
 }
 
 export type PaletteId = "nocturne" | "rose" | "forest" | "amber" | "slate";

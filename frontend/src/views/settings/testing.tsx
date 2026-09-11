@@ -13,16 +13,26 @@ export const repo = {
   forge: "github",
   project: "acme/repo-a",
   enabled: true,
+  default_model: null,
+  deny_tools: [],
+  steering: [],
+  allow_cross_repo: false,
+  default_root_merge_policy: "bump" as const,
+  submodules: [],
 };
 
 export const hooks = {
   "on.env.prepare": { kind: "builtin" as const, handler: "env_setup" },
   "on.implementation.start": { kind: "agent" as const, command: "claude" },
+  "on.test.run": { kind: "subprocess" as const, command: ["pytest"] },
+  "on.mr.open": { kind: "forge" as const, handler: "open_mr" },
 };
 
 export const policy = {
   loops: { verify_fix_loop: { attempts: 3, wall_clock_s: 3600 } },
   default: { attempts: 3, wall_clock_s: 3600 },
+  max_concurrent: 3,
+  rate_limit_retries: 5,
 };
 
 export const theme: Theme = { palette: "nocturne", mode: "dark" };

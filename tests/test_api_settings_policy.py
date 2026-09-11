@@ -30,7 +30,10 @@ def test_policy_put_rejects_a_cap_that_would_not_load(client, templates_dir):
     }
     assert client.put("/api/policy", json=good).status_code == 200
     assert client.get("/api/policy").json()["loops"]["verify_fix_loop"]["attempts"] == 5
-    assert yaml.safe_load((templates_dir / "policy.yaml").read_text()) == good
+    assert yaml.safe_load((templates_dir / "policy.yaml").read_text()) == {
+        **good,
+        "max_concurrent": 3,
+    }
 
     bad = {"loops": {}, "default": {"attempts": 0, "wall_clock_s": 1}}
     assert client.put("/api/policy", json=bad).status_code == 422
@@ -65,6 +68,36 @@ def test_put_policy_persists_the_budget_block(client):
     assert client.get("/api/policy").json()["budget"] == {"work_item_usd": 20.0, "daily_usd": None}
 
 
+def test_put_policy_persists_rate_limit_retries(client):
+    body = {
+        "loops": {},
+        "default": {"attempts": 3, "wall_clock_s": 3600},
+        "rate_limit_retries": 8,
+    }
+    assert client.put("/api/policy", json=body).status_code == 200
+    assert client.get("/api/policy").json()["rate_limit_retries"] == 8
+
+
+def test_saving_the_policy_preserves_rate_limit_retries_and_triggers(client, templates_dir):
+    """A save from the policy screen must not silently erase what it does not edit."""
+    (templates_dir / "policy.yaml").write_text(
+        "loops: {}\ndefault: { attempts: 3, wall_clock_s: 3600 }\n"
+        "rate_limit_retries: 8\n"
+        "triggers:\n"
+        "  - cron: '0 9 * * 1'\n"
+        "    repo: /r\n"
+        "    chain: default\n"
+        "    title: weekly sweep\n"
+    )
+    body = client.get("/api/policy").json()
+    assert body["rate_limit_retries"] == 8
+    body["default"]["attempts"] = 5
+    assert client.put("/api/policy", json=body).status_code == 200
+    on_disk = yaml.safe_load((templates_dir / "policy.yaml").read_text())
+    assert on_disk["rate_limit_retries"] == 8
+    assert on_disk["triggers"][0]["title"] == "weekly sweep"
+
+
 def test_put_policy_rejects_a_negative_budget(client):
     body = {
         "loops": {},
@@ -92,3 +125,23 @@ def test_saving_the_policy_preserves_the_budget_block(client, templates_dir):
     assert client.put("/api/policy", json=body).status_code == 200
     on_disk = yaml.safe_load((templates_dir / "policy.yaml").read_text())
     assert on_disk["budget"]["work_item_usd"] == 20.0
+
+
+def test_get_policy_reports_max_concurrent_default(client):
+    assert client.get("/api/policy").json()["max_concurrent"] == 3
+
+
+def test_put_policy_persists_max_concurrent(client, templates_dir):
+    body = client.get("/api/policy").json()
+    body["max_concurrent"] = 5
+    saved = client.put("/api/policy", json=body)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["max_concurrent"] == 5
+    assert yaml.safe_load((templates_dir / "policy.yaml").read_text())["max_concurrent"] == 5
+    assert client.get("/api/policy").json()["max_concurrent"] == 5
+
+
+def test_put_policy_rejects_bad_max_concurrent(client):
+    body = client.get("/api/policy").json()
+    body["max_concurrent"] = 0
+    assert client.put("/api/policy", json=body).status_code == 422

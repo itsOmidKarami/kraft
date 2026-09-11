@@ -16,6 +16,7 @@ from kraft import config as config_mod
 from kraft import intake as intake_mod
 from kraft import policy as policy_mod
 from kraft import steering as steering_mod
+from kraft import store
 from kraft.api import api_router, deps, perimeter
 from kraft.templates import (
     CONFIG_FILES,
@@ -107,6 +108,30 @@ async def put_template(tid: str, body: TemplateBody, request: Request):
     return {"id": tid, "nodes": body.nodes}
 
 
+class ParseBody(BaseModel):
+    text: str
+
+
+@api_router.post("/templates/parse")
+async def parse_template_yaml(body: ParseBody):
+    """The YAML pane's other direction (UI v2 · 09): typed text back into the
+    node list the graph/form render from. Parsing only — `/templates/{tid}/validate`
+    is the separate, existing check against the registry. No YAML library ships
+    in the frontend; this is the server doing the one direction that's genuinely
+    hard to hand-roll (arbitrary operator-typed YAML), reusing pyyaml already
+    imported here.
+    """
+    try:
+        data = yaml.safe_load(body.text)
+    except yaml.YAMLError as exc:
+        return {"nodes": None, "error": str(exc)}
+    if not isinstance(data, dict) or not isinstance(data.get("nodes"), list):
+        return {"nodes": None, "error": "expected a mapping with a 'nodes' list"}
+    if not all(isinstance(n, dict) for n in data["nodes"]):
+        return {"nodes": None, "error": "every node must be a mapping"}
+    return {"nodes": data["nodes"], "error": None}
+
+
 class RegistryBody(BaseModel):
     hooks: dict
 
@@ -143,6 +168,12 @@ async def put_registry(body: RegistryBody, request: Request):
     return {"hooks": body.hooks, "invalid_templates": checked.invalid}
 
 
+@api_router.get("/registry/{hook}/runs")
+async def hook_runs(hook: str, request: Request):
+    st = request.app.state
+    return {"runs": st.db.read(lambda c: store.recent_sessions_for_hook(c, hook))}
+
+
 @api_router.post("/templates/reload")
 async def reload_templates_endpoint(request: Request):
     st = request.app.state
@@ -158,12 +189,17 @@ class PolicyBody(BaseModel):
     default: dict
     findings: dict | None = None
     budget: dict | None = None
+    max_concurrent: int = Field(default=3, ge=1)
+    rate_limit_retries: int | None = None
+    triggers: list[dict] | None = None
 
 
 @api_router.get("/policy")
 async def get_policy(request: Request):
     st = request.app.state
-    return config_mod.read_yaml(st.templates_dir / "policy.yaml", {"loops": {}, "default": {}})
+    data = config_mod.read_yaml(st.templates_dir / "policy.yaml", {"loops": {}, "default": {}})
+    data.setdefault("max_concurrent", st.policy.max_concurrent if st.policy else 3)
+    return data
 
 
 @api_router.put("/policy")
@@ -171,11 +207,15 @@ async def put_policy(body: PolicyBody, request: Request):
     """Caps apply to loops that start after the save — a counter already running
     keeps the cap it snapshotted at first fire (`02` §2.C)."""
     st = request.app.state
-    data = {"loops": body.loops, "default": body.default}
+    data = {"loops": body.loops, "default": body.default, "max_concurrent": body.max_concurrent}
     if body.findings is not None:
         data["findings"] = body.findings
     if body.budget is not None:
         data["budget"] = body.budget
+    if body.rate_limit_retries is not None:
+        data["rate_limit_retries"] = body.rate_limit_retries
+    if body.triggers is not None:
+        data["triggers"] = body.triggers
     with tempfile.TemporaryDirectory() as tmp:
         candidate = Path(tmp) / "policy.yaml"
         candidate.write_text(yaml.safe_dump(data))
@@ -346,7 +386,10 @@ class IntakeBody(BaseModel):
     # The poller floors this at 30s anyway; rejecting it is better than
     # accepting a number the running instance will not honour.
     interval_s: int = Field(ge=30)
-    max_concurrent: int = Field(ge=1)
+    # Moved to `policy.yaml` (`Policy.max_concurrent`); kept optional here for
+    # one release so an old client or a hand-edited file round-trips without
+    # a 422. No longer read back as authoritative anywhere.
+    max_concurrent: int | None = Field(default=None, ge=1)
     # P0 is the *highest* priority, so the ceiling is "P<n> and below".
     priority_ceiling: int = Field(ge=0, le=4)
     repos: list[str] = []
