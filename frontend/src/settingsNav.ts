@@ -13,9 +13,10 @@ import {
 /**
  * The nine Settings sub-pages, in the order and grouping the sidebar draws
  * them (handoff screen 01). One source of truth: `AppNav` renders this list,
- * `Header` looks up a route's breadcrumb label in it, and `views/Settings.tsx`
- * builds its `<Routes>` from it — before this module, only `Settings.tsx`'s
- * `PAGES` had this list, and nothing else needed to agree with it.
+ * `Header` looks up a route's breadcrumb label in it, and
+ * `views/settings/index.tsx` builds its `<Routes>` from it — before this
+ * module, only `Settings.tsx`'s `PAGES` had this list, and nothing else
+ * needed to agree with it.
  *
  * The collapsed rail (screens 03, 11) only ever shows the "how" group's
  * icons, regardless of route — "instance" pages are reachable only via the
