@@ -458,7 +458,7 @@ def test_connected_repos_default_model_reaches_the_agent_launch(tmp_path, monkey
         assert argv_log.exists(), f"agent never launched for {wid}"
 
     argv = json.loads(argv_log.read_text().splitlines()[0])
-    assert argv[-2:] == ["--model", "haiku"]
+    assert argv[argv.index("--model") + 1] == "haiku"
 
 
 def test_connected_repos_steering_reaches_the_agent_launch(tmp_path, monkeypatch):
