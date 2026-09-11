@@ -15,8 +15,10 @@ import logging
 import os
 import subprocess
 import tempfile
+from collections.abc import Iterator
 from configparser import ConfigParser
 from configparser import Error as ConfigParserError
+from contextlib import contextmanager
 from pathlib import Path
 
 import yaml
@@ -177,6 +179,40 @@ def git_read(
         log("git_read %s in %s failed: %s", cmd, cwd, out.stderr.strip())
         return None
     return out.stdout.strip() if strip else out.stdout
+
+
+@contextmanager
+def main_ignore_args(repo: Path) -> Iterator[list[str]]:
+    """`-c core.excludesFile=<scratch>`, naming a temp file holding `origin/
+    main`'s current `.gitignore` -- or `[]` if there is no `origin/main`, no
+    `.gitignore` there, or git refuses to say.
+
+    Layered on top of whatever `.gitignore` is actually checked out in
+    `repo`, not a replacement for it -- `core.excludesFile` is git's own
+    mechanism for an extra, untracked set of ignore rules, so this only ever
+    widens what a `git status`/`git add` in `repo` treats as ignored, never
+    narrows it.
+
+    A worktree's checked-out `.gitignore` is whatever `main` looked like when
+    `ensure_worktree` cut the worktree, and nothing refreshes it afterward
+    short of a full rebase, which most nodes never trigger. A rule `main`
+    gains later (Kraft-vu26: `.engineering/` widened past `sessions/`, then
+    `docs/superpowers/` added) is invisible to that worktree's `git status`/
+    `git add` until then, so whatever a node writes to the now-ignored path
+    stages and commits exactly as if the rule had never landed, and rides
+    into the merge request -- caught live on work item 46ef3286, whose
+    worktree predated the `docs/superpowers/` rule by under an hour. Reading
+    `main`'s own copy from its remote-tracking ref sidesteps the lag outright:
+    it does not matter how old the branch's checkout is.
+    """
+    content = git_read(repo, "show", "origin/main:.gitignore", expected_failure=True, strip=False)
+    if not content:
+        yield []
+        return
+    with tempfile.NamedTemporaryFile("w", prefix="kraft-main-gitignore-", suffix=".txt") as f:
+        f.write(content)
+        f.flush()
+        yield ["-c", f"core.excludesFile={f.name}"]
 
 
 #: Test commands to look for, in the order a repo is most likely to want them.

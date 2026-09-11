@@ -233,6 +233,44 @@ def test_a_repos_own_preexisting_engineering_doc_still_commits(tmp_path):
     assert _git(repo, "status", "--porcelain").strip() == "?? .engineering/sessions/"
 
 
+def test_commit_stragglers_ignores_a_root_main_gitignored_after_the_branch_forked(tmp_path):
+    """Kraft-vu26. `ensure_worktree` checks out whatever `.gitignore` `main`
+    had at intake, and nothing refreshes it short of a rebase most nodes never
+    trigger. If `main` starts ignoring a root afterward -- `docs/superpowers/`
+    the day this bug was filed -- this worktree's own checked-out `.gitignore`
+    still does not know it, so a plain `git add -A` would stage a new file
+    under it same as any other work. `main_ignore_args` reads `main`'s current
+    `.gitignore` off the remote-tracking ref instead, so this stays out
+    exactly like a root the branch always ignored -- caught by
+    `test_kraft_session_notes_are_not_the_agents_work_product` above."""
+    repo = _repo_with_origin(tmp_path)
+    main_clone = tmp_path / "main-clone"
+    _git(tmp_path, "clone", "-q", str(tmp_path / "origin.git"), str(main_clone))
+    # A plain clone inherits no identity -- CI's container has no global
+    # `user.name`/`user.email` at all, unlike `make_repo`, which sets both on
+    # the repo it creates directly.
+    _git(main_clone, "config", "user.email", "t@t")
+    _git(main_clone, "config", "user.name", "t")
+    (main_clone / ".gitignore").write_text("docs/superpowers/\n")
+    _git(main_clone, "add", "-A")
+    _git(main_clone, "commit", "-q", "-m", "widen gitignore")
+    _git(main_clone, "push", "-q", "origin", "main")
+    _git(repo, "fetch", "-q", "origin", "main")
+    assert not (repo / ".gitignore").exists(), "repo's own checkout must stay unaware of the rule"
+    doc = repo / "docs" / "superpowers" / "specs" / "s.md"
+    doc.parent.mkdir(parents=True)
+    doc.write_text("# the attached spec\n")
+
+    committed = asyncio.run(forge.commit_stragglers(repo, message="wip: implementation"))
+
+    assert committed is False
+    asyncio.run(forge._assert_clean(repo))
+    # Collapses to the first new directory level, `docs/` -- `docs` itself
+    # did not exist on the branch before, same collapse `git status` does for
+    # any new untracked directory.
+    assert _git(repo, "status", "--porcelain").strip() == "?? docs/"
+
+
 def test_commit_stragglers_ignores_gitignored_paths(tmp_path):
     """Same exclusion `_assert_clean` relies on: a `.pytest_cache/` left behind
     is not work, and committing it would put junk in the merge request."""

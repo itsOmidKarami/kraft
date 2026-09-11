@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from kraft import logs, store
-from kraft.config import git_read
+from kraft.config import git_read, main_ignore_args
 
 logger = logging.getLogger(__name__)
 
@@ -35,30 +35,43 @@ def _commit_paths(worktree: Path, paths: list[str], message: str) -> None:
     Best effort. A failure logs a warning and returns: a document that did not
     commit becomes a dirty-tree failure at `open_mr` with git's own message
     already in the log, which is strictly better than failing worktree creation.
+
+    `main_ignore_args`, the same override `forge._work_product_pathspec`
+    relies on, rides along on the `add`: a spec/plan attachment copied to its
+    original relative path can land under `docs/superpowers/` or
+    `.engineering/`, and if `main` ignores that root but this worktree's own
+    checked-out `.gitignore` predates the rule (Kraft-vu26), a plain `git add`
+    stages it anyway. Staging nothing here is correct, not a failure -- the
+    diff-cached check below already treats "nothing staged" as a no-op, and
+    the attachment stays on disk for the agent to read either way.
     """
     if not paths:
         return
 
-    def git(*args: str) -> subprocess.CompletedProcess:
-        return subprocess.run(["git", *args], cwd=str(worktree), capture_output=True, text=True)
+    with main_ignore_args(worktree) as ignore_args:
 
-    added = git("add", "--", *paths)
-    if added.returncode != 0:
-        logger.warning("could not stage %s in %s: %s", paths, worktree, added.stderr.strip())
-        return
-    # Exit 0 means no staged difference for these paths — an ignored or an
-    # unchanged path stages nothing, and `git commit` on an empty commit exits
-    # non-zero. Skip it rather than log a failure that is really a no-op.
-    if git("diff", "--cached", "--quiet", "--", *paths).returncode == 0:
-        return
-    done = git("commit", "--no-verify", "-m", message, "--", *paths)
-    if done.returncode != 0:
-        logger.warning(
-            "could not commit %s in %s: %s",
-            paths,
-            worktree,
-            done.stderr.strip() or done.stdout.strip(),
-        )
+        def git(*args: str) -> subprocess.CompletedProcess:
+            return subprocess.run(
+                ["git", *ignore_args, *args], cwd=str(worktree), capture_output=True, text=True
+            )
+
+        added = git("add", "--", *paths)
+        if added.returncode != 0:
+            logger.warning("could not stage %s in %s: %s", paths, worktree, added.stderr.strip())
+            return
+        # Exit 0 means no staged difference for these paths — an ignored or an
+        # unchanged path stages nothing, and `git commit` on an empty commit exits
+        # non-zero. Skip it rather than log a failure that is really a no-op.
+        if git("diff", "--cached", "--quiet", "--", *paths).returncode == 0:
+            return
+        done = git("commit", "--no-verify", "-m", message, "--", *paths)
+        if done.returncode != 0:
+            logger.warning(
+                "could not commit %s in %s: %s",
+                paths,
+                worktree,
+                done.stderr.strip() or done.stdout.strip(),
+            )
 
 
 def _copy_attachments(
