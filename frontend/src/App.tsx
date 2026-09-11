@@ -6,6 +6,7 @@ import { Header } from "./components/Header";
 import { IntakeModal } from "./components/IntakeModal";
 import { BottomNav } from "./components/BottomNav";
 import { SearchOverlay } from "./components/SearchOverlay";
+import { ToastHost } from "./components/Toast";
 import { AnalyticsView } from "./views/Analytics";
 import { Board } from "./views/Board";
 import { ArchivedView } from "./views/board/Archived";
@@ -82,6 +83,7 @@ export function App() {
       <BottomNav />
       {search && <SearchOverlay onClose={() => setSearch(false)} />}
       {intake && <IntakeModal onClose={() => setIntake(false)} />}
+      <ToastHost />
     </BrowserRouter>
   );
 }

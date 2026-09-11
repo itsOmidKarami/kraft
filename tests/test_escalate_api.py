@@ -122,3 +122,34 @@ def test_resume_refuses_while_an_escalation_turn_is_running(tmp_path, monkeypatc
         r = client.post(f"/api/work-items/{wid}/resume", json={})
         assert r.status_code == 409
         assert "running-turn" in r.json()["detail"]
+
+
+def test_stop_escalation_kills_the_turn_without_changing_item_status(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _needs_human_item(client, repo)
+        node_id = client.get(f"/api/work-items/{wid}").json()["current_node_id"]
+        _seed_running_escalation(tmp_path, wid, node_id, session_id="turn-1")
+
+        r = client.post(f"/api/work-items/{wid}/escalate/stop")
+        assert r.status_code == 200
+        assert r.json()["session_id"] == "turn-1"
+
+        conn = sqlite3.connect(tmp_path / "run" / "orchestrator.db")
+        status = conn.execute("SELECT status FROM worker_sessions WHERE id = 'turn-1'").fetchone()[
+            0
+        ]
+        assert status == "paused"
+        item_status = conn.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()[
+            0
+        ]
+        assert item_status == "needs_human"
+        conn.close()
+
+
+def test_stop_escalation_refuses_when_none_is_running(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _needs_human_item(client, repo)
+        r = client.post(f"/api/work-items/{wid}/escalate/stop")
+        assert r.status_code == 409

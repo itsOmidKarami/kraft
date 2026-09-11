@@ -143,6 +143,12 @@ export interface WorkItem {
   /** This item's effective spend cap and its source. Only on the detail
    *  endpoint. */
   budget_cap?: BudgetCap;
+  /** UI v2 · 06 rate-limited sub-row: relaunches used vs `policy.rate_limit_retries`.
+   *  null off a non-rate_limited item. Only on the detail endpoint. */
+  rate_limit?: { count: number; cap: number } | null;
+  /** Whether an agent may review this item's `auto_escalate` gates before a
+   *  human sees them (Kraft-zr3s). Set at intake; the column is on every row. */
+  auto_gate?: boolean;
 }
 
 export interface Finding {
@@ -189,6 +195,10 @@ export interface WorkerSession {
   /** The worktree HEAD this session was dispatched against (Kraft-lu2); null
    *  for a builtin/agent task that stamps nothing, and for a historical row. */
   head_sha: string | null;
+  /** Path (relative to repo) the worker's result reported as its
+   *  `.engineering/sessions/*.md` writeup (03 §3); optional so the many
+   *  fixture/test literals that predate this field keep typechecking. */
+  session_summary_ref?: string | null;
 }
 
 export interface KraftEvent {

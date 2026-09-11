@@ -1,18 +1,20 @@
 // Throwaway visual check for "intake from existing artifacts" (Kraft-dgh).
 // Screenshots the surfaces a unit test cannot see: the picker, the chain
 // preview's strikethrough, the badge, and the Documents tab tag.
-import { expect, test } from "./fixtures";
+import { connectRepo, expect, test } from "./fixtures";
 
 const REPO = process.env.KRAFT_E2E_REPO!;
+const REPO_NAME = REPO.split("/").pop()!;
 
 test("intake from an existing plan, end to end", async ({ page }) => {
+  await connectRepo(page, REPO);
   await page.goto("/");
   await page.getByRole("button", { name: /new work item/i }).click();
 
   const modal = page.getByRole("dialog", { name: "New work item" });
-  await modal.getByLabel("repo").fill(REPO);
+  await modal.getByRole("button", { name: new RegExp(REPO_NAME, "i") }).click();
   await modal.getByLabel("title").fill("add auth from an existing plan");
-  await modal.getByText("default", { exact: true }).click();
+  await modal.locator("label.seg-opt", { hasText: /^default\b/ }).click();
   await page.screenshot({ path: "e2e-shots/0-modal.png", fullPage: true });
 
   // type-to-search picker
@@ -27,7 +29,7 @@ test("intake from an existing plan, end to end", async ({ page }) => {
   await page.waitForTimeout(500);
   await page.screenshot({ path: "e2e-shots/2-preview.png", fullPage: true });
 
-  await modal.getByRole("button", { name: /create/i }).click();
+  await modal.getByRole("button", { name: /create and start/i }).click();
   await expect(page.locator(".detail h2")).toHaveText("add auth from an existing plan");
   await page.waitForTimeout(1500);
   await page.screenshot({ path: "e2e-shots/3-detail-badge.png", fullPage: true });

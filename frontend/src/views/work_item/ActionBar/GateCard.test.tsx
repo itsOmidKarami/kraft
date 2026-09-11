@@ -1,0 +1,124 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+import * as api from "../../../api";
+import { GateCard } from "./GateCard";
+import { item } from "./testFixtures";
+
+describe("GateCard", () => {
+  it("approve calls the API", async () => {
+    const spy = vi.spyOn(api, "approveGate").mockResolvedValue(undefined);
+    render(
+      <GateCard
+        item={item()}
+        gate="plan_approval"
+        open={false}
+        onOpen={() => {}}
+        onCancel={() => {}}
+        onReadDoc={() => {}}
+        onReviewChanges={() => {}}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+    expect(spy).toHaveBeenCalledWith("w1", "plan_approval");
+  });
+
+  it("reject submit is disabled until a note is entered", async () => {
+    render(
+      <GateCard
+        item={item()}
+        gate="plan_approval"
+        open
+        onOpen={() => {}}
+        onCancel={() => {}}
+        onReadDoc={() => {}}
+        onReviewChanges={() => {}}
+      />,
+    );
+    const submit = screen.getByRole("button", { name: /reject and/i });
+    expect(submit).toBeDisabled();
+    await userEvent.type(screen.getByLabelText(/composer message/i), "fix the error path");
+    expect(submit).toBeEnabled();
+  });
+
+  it("names the node a rejection sends the chain back to", () => {
+    const withTarget = item({
+      chain_definition: {
+        template_id: "d",
+        nodes: [
+          { id: "spec", tasks: [], gate_after: null },
+          { id: "plan", tasks: [], gate_after: "plan_approval", reject_to: "spec" },
+        ],
+      },
+    });
+    render(
+      <GateCard
+        item={withTarget}
+        gate="plan_approval"
+        open
+        onOpen={() => {}}
+        onCancel={() => {}}
+        onReadDoc={() => {}}
+        onReviewChanges={() => {}}
+      />,
+    );
+    expect(screen.getByText(/re-enters at/)).toHaveTextContent("spec");
+    expect(screen.getByRole("button", { name: /reject and send back/i })).toBeInTheDocument();
+  });
+
+  const card = (over: Parameters<typeof item>[0] = {}) =>
+    render(
+      <GateCard
+        item={item(over)}
+        gate="human_review_approval"
+        open={false}
+        onOpen={() => {}}
+        onCancel={() => {}}
+        onReadDoc={() => {}}
+        onReviewChanges={() => {}}
+      />,
+    );
+  const deferred = [
+    { severity: "minor", message: "naming nit", file: "a.py", line: 3, source_plugin: "fake" },
+  ];
+
+  it("lists deferred minor findings at the gate", () => {
+    card({ deferred_findings: [...deferred] });
+    expect(screen.getByText(/naming nit/)).toBeInTheDocument();
+    expect(screen.getByText(/a\.py:3/)).toBeInTheDocument();
+  });
+
+  it("shows concerns in the same panel as deferred findings", () => {
+    card({ deferred_findings: [...deferred], concerns: ["the retry path is untested"] });
+    expect(screen.getByText(/the retry path is untested/)).toBeInTheDocument();
+    expect(screen.getByText(/naming nit/)).toBeInTheDocument();
+    expect(document.querySelectorAll(".gate-deferred")).toHaveLength(1);
+  });
+
+  it("renders no list when there are no findings and no concerns", () => {
+    const { container } = card({ deferred_findings: [], concerns: [] });
+    expect(container.querySelector(".gate-deferred")).toBeNull();
+  });
+
+  it("shows a failed Approve", async () => {
+    vi.spyOn(api, "approveGate").mockRejectedValue(new Error("409 gate already resolved"));
+    card();
+    await userEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+    expect(await screen.findByText(/409 gate already resolved/)).toBeInTheDocument();
+  });
+
+  it("offers Read document only when the gate has an artifact", () => {
+    render(
+      <GateCard
+        item={item({ gate_artifact: "docs/plan.md" })}
+        gate="plan_approval"
+        open={false}
+        onOpen={() => {}}
+        onCancel={() => {}}
+        onReadDoc={() => {}}
+        onReviewChanges={() => {}}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /review plan/i })).toBeInTheDocument();
+  });
+});

@@ -3,195 +3,382 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import * as api from "../api";
-import { useStore } from "../store";
 import { IntakeModal } from "./IntakeModal";
 
-describe("IntakeModal", () => {
-  it("offers the connected repos, and says where to get one when there are none", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "default", nodes: [], gates: 0 }]);
-    const repos = vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] } as never);
-    useStore.setState({ workItems: {} } as never);
-    render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <IntakeModal onClose={() => {}} />
-      </MemoryRouter>,
-    );
-    // a fresh install has no work items either, so the field would otherwise be
-    // an empty box with no hint that a repo has to be connected first
-    expect(await screen.findByText(/connect one in Settings/i)).toBeInTheDocument();
+const REPO_A = {
+  path: "/a",
+  name: "repo-a",
+  enabled: true,
+  default_chain_template: "default",
+  test_command: null,
+  forge: null,
+  project: null,
+  default_model: null,
+  deny_tools: [],
+  steering: [],
+  allow_cross_repo: false,
+  default_root_merge_policy: "bump" as const,
+  submodules: [],
+};
 
-    repos.mockResolvedValue({
-      repos: [{ path: "/connected", enabled: true }],
-    } as never);
-    render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <IntakeModal onClose={() => {}} />
-      </MemoryRouter>,
+function renderModal(onClose: () => void = () => {}) {
+  return render(
+    <MemoryRouter
+      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+    >
+      <Routes>
+        <Route path="/" element={<IntakeModal onClose={onClose} />} />
+        <Route path="/work-items/:id" element={<p>detail for w9</p>} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+async function fillBasics(repoName = "repo-a", title = "t") {
+  await userEvent.click(
+    await screen.findByRole("button", { name: new RegExp(repoName, "i") }),
+  );
+  await userEvent.type(screen.getByLabelText("title"), title);
+}
+
+describe("IntakeModal", () => {
+  it("says where to get one when there are no repos connected", async () => {
+    vi.spyOn(api, "getTemplates").mockResolvedValue([
+      { id: "default", nodes: [], gates: 0 },
+    ]);
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] });
+    renderModal();
+    expect(
+      await screen.findByText(/connect one in Settings/i),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a disabled repo as a disabled chip, not omitted", async () => {
+    vi.spyOn(api, "getTemplates").mockResolvedValue([
+      { id: "default", nodes: [], gates: 0 },
+    ]);
+    vi.spyOn(api, "getRepos").mockResolvedValue({
+      repos: [
+        REPO_A,
+        { ...REPO_A, path: "/c", name: "repo-c", enabled: false },
+      ],
+    });
+    renderModal();
+    expect(
+      await screen.findByRole("button", { name: /repo-c.*disabled/i }),
+    ).toBeDisabled();
+  });
+
+  it("preselects the chosen repo's default chain template", async () => {
+    vi.spyOn(api, "getTemplates").mockResolvedValue([
+      {
+        id: "default",
+        nodes: [{ id: "spec", tasks: [], gate_after: null }],
+        gates: 0,
+      },
+      {
+        id: "quick-task",
+        nodes: [{ id: "implementation", tasks: [], gate_after: null }],
+        gates: 0,
+      },
+    ]);
+    vi.spyOn(api, "getRepos").mockResolvedValue({
+      repos: [{ ...REPO_A, default_chain_template: "quick-task" }],
+    });
+    renderModal();
+    await userEvent.click(
+      await screen.findByRole("button", { name: /repo-a/i }),
     );
-    await waitFor(() =>
-      expect(document.querySelector('#intake-repos option[value="/connected"]')).not.toBeNull(),
-    );
+    expect(screen.getByRole("radio", { name: /quick-task/i })).toBeChecked();
   });
 
   it("submits and shows an inline error on failure", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "default", nodes: [], gates: 0 }]);
-    vi.spyOn(api, "createWorkItem").mockRejectedValue(new Error("repo path does not exist"));
-    render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <IntakeModal onClose={() => {}} />
-      </MemoryRouter>,
+    vi.spyOn(api, "getTemplates").mockResolvedValue([
+      { id: "default", nodes: [], gates: 0 },
+    ]);
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
+    vi.spyOn(api, "createWorkItem").mockRejectedValue(
+      new Error("repo path does not exist"),
     );
-    await userEvent.type(screen.getByLabelText("repo"), "/nope");
-    await userEvent.type(screen.getByLabelText("title"), "do a thing");
-    await userEvent.click(screen.getByRole("button", { name: /create/i }));
-    expect(await screen.findByText(/repo path does not exist/)).toBeInTheDocument();
+    renderModal();
+    await fillBasics();
+    await userEvent.click(
+      screen.getByRole("button", { name: /create and start/i }),
+    );
+    expect(
+      await screen.findByText(/repo path does not exist/),
+    ).toBeInTheDocument();
   });
 
   it("closes and navigates on success, omitting chain_template for the default chain", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "default", nodes: [], gates: 0 }, { id: "quick-task", nodes: [], gates: 0 }]);
-    const create = vi.spyOn(api, "createWorkItem").mockResolvedValue({ id: "w9" });
+    vi.spyOn(api, "getTemplates").mockResolvedValue([
+      { id: "default", nodes: [], gates: 0 },
+      { id: "quick-task", nodes: [], gates: 0 },
+    ]);
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
+    const create = vi
+      .spyOn(api, "createWorkItem")
+      .mockResolvedValue({ id: "w9" });
     const onClose = vi.fn();
-    render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <Routes>
-          <Route path="/" element={<IntakeModal onClose={onClose} />} />
-          <Route path="/work-items/:id" element={<p>detail for w9</p>} />
-        </Routes>
-      </MemoryRouter>,
+    renderModal(onClose);
+    await fillBasics("repo-a", "do a thing");
+    await userEvent.click(
+      screen.getByRole("button", { name: /create and start/i }),
     );
-    await userEvent.type(screen.getByLabelText("repo"), "/r");
-    await userEvent.type(screen.getByLabelText("title"), "do a thing");
-    await userEvent.click(screen.getByRole("button", { name: /create/i }));
 
-    await waitFor(() => expect(create).toHaveBeenCalledWith({ repo: "/r", title: "do a thing" }));
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          repo: "/a",
+          title: "do a thing",
+          skip_nodes: [],
+          auto_gate: true,
+          autostart: true,
+        }),
+      ),
+    );
     expect(onClose).toHaveBeenCalled();
     expect(await screen.findByText("detail for w9")).toBeInTheDocument();
   });
 
-  it("submits the description with the new work item", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "default", nodes: [], gates: 0 }]);
-    const create = vi.spyOn(api, "createWorkItem").mockResolvedValue({ id: "w9" });
-    render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <Routes>
-          <Route path="/" element={<IntakeModal onClose={() => {}} />} />
-          <Route path="/work-items/:id" element={<p>detail for w9</p>} />
-        </Routes>
-      </MemoryRouter>,
+  it("rejects a non-numeric budget instead of silently sending no cap", async () => {
+    vi.spyOn(api, "getTemplates").mockResolvedValue([
+      { id: "default", nodes: [], gates: 0 },
+    ]);
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
+    const create = vi
+      .spyOn(api, "createWorkItem")
+      .mockResolvedValue({ id: "w9" });
+    renderModal();
+    await fillBasics();
+    await userEvent.type(screen.getByLabelText("budget"), "$20");
+    await userEvent.click(
+      screen.getByRole("button", { name: /create and start/i }),
     );
-    await userEvent.type(screen.getByLabelText("repo"), "/r");
-    await userEvent.type(screen.getByLabelText("title"), "short label");
+    expect(
+      await screen.findByText(/budget must be a plain number/),
+    ).toBeInTheDocument();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("submits the description with the new work item", async () => {
+    vi.spyOn(api, "getTemplates").mockResolvedValue([
+      { id: "default", nodes: [], gates: 0 },
+    ]);
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
+    const create = vi
+      .spyOn(api, "createWorkItem")
+      .mockResolvedValue({ id: "w9" });
+    renderModal();
+    await fillBasics("repo-a", "short label");
     await userEvent.type(screen.getByLabelText("description"), "the brief");
-    await userEvent.click(screen.getByRole("button", { name: /create/i }));
+    await userEvent.click(
+      screen.getByRole("button", { name: /create and start/i }),
+    );
 
     await waitFor(() =>
-      expect(create).toHaveBeenCalledWith({
-        repo: "/r",
-        title: "short label",
-        description: "the brief",
-      }),
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          repo: "/a",
+          title: "short label",
+          description: "the brief",
+        }),
+      ),
     );
   });
 
   it("sends chain_template when a non-default template is picked", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "default", nodes: [], gates: 0 }, { id: "quick-task", nodes: [], gates: 0 }]);
-    const create = vi.spyOn(api, "createWorkItem").mockResolvedValue({ id: "w9" });
-    render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <IntakeModal onClose={() => {}} />
-      </MemoryRouter>,
+    vi.spyOn(api, "getTemplates").mockResolvedValue([
+      { id: "default", nodes: [], gates: 0 },
+      { id: "quick-task", nodes: [], gates: 0 },
+    ]);
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
+    const create = vi
+      .spyOn(api, "createWorkItem")
+      .mockResolvedValue({ id: "w9" });
+    renderModal();
+    await fillBasics();
+    await userEvent.click(
+      await screen.findByRole("radio", { name: /quick-task/i }),
     );
-    await userEvent.type(screen.getByLabelText("repo"), "/r");
-    await userEvent.type(screen.getByLabelText("title"), "t");
-    await userEvent.click(await screen.findByRole("radio", { name: "quick-task" }));
-    await userEvent.click(screen.getByRole("button", { name: /create/i }));
+    await userEvent.click(
+      screen.getByRole("button", { name: /create and start/i }),
+    );
     await waitFor(() =>
-      expect(create).toHaveBeenCalledWith({ repo: "/r", title: "t", chain_template: "quick-task" }),
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          repo: "/a",
+          title: "t",
+          chain_template: "quick-task",
+        }),
+      ),
     );
   });
 
-  it("does not submit a template the server never offered", async () => {
-    // The control defaults to "default" before /templates answers. If the
-    // server does not offer it, nothing is checked while state still says
-    // default — and we would submit a chain the server never listed.
-    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "release", nodes: [], gates: 0 }, { id: "legacy", nodes: [], gates: 0 }]);
-    const create = vi.spyOn(api, "createWorkItem").mockResolvedValue({ id: "w9" });
-    render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <IntakeModal onClose={() => {}} />
-      </MemoryRouter>,
+  it("clicking a chain-preview node toggles skip and sends it as skip_nodes", async () => {
+    vi.spyOn(api, "getTemplates").mockResolvedValue([
+      {
+        id: "default",
+        gates: 0,
+        nodes: [
+          { id: "spec", tasks: [], gate_after: null },
+          { id: "plan", tasks: [], gate_after: null },
+          { id: "verify", tasks: [], gate_after: null },
+        ],
+      },
+    ]);
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
+    const create = vi
+      .spyOn(api, "createWorkItem")
+      .mockResolvedValue({ id: "w9" });
+    renderModal();
+    await fillBasics();
+    await userEvent.click(await screen.findByRole("button", { name: /^plan/ }));
+    await userEvent.click(
+      screen.getByRole("button", { name: /create and start/i }),
     );
-    const picked = () =>
-      (screen.getAllByRole("radio") as HTMLInputElement[]).find((r) => r.checked)?.value;
-    await waitFor(() => expect(picked()).toBe("release"));
-    await userEvent.type(screen.getByLabelText("repo"), "/r");
-    await userEvent.type(screen.getByLabelText("title"), "t");
-    await userEvent.click(screen.getByRole("button", { name: /create/i }));
     await waitFor(() =>
-      expect(create).toHaveBeenCalledWith({ repo: "/r", title: "t", chain_template: "release" }),
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({ skip_nodes: ["plan"], autostart: true }),
+      ),
+    );
+  });
+
+  it("sends auto_gate and node_overrides from the Overrides switches", async () => {
+    vi.spyOn(api, "getTemplates").mockResolvedValue([
+      {
+        id: "default",
+        gates: 1,
+        nodes: [{ id: "plan", tasks: [], gate_after: "plan_approval" }],
+      },
+    ]);
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
+    const create = vi
+      .spyOn(api, "createWorkItem")
+      .mockResolvedValue({ id: "w9" });
+    renderModal();
+    await fillBasics();
+    await userEvent.click(screen.getByLabelText(/auto-escalate every gate/i));
+    await userEvent.click(
+      screen.getByRole("button", { name: /create paused/i }),
+    );
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          auto_gate: true,
+          autostart: false,
+          node_overrides: { plan: { auto_escalate: true } },
+        }),
+      ),
+    );
+  });
+
+  it("Create paused sends autostart: false; Create and start sends true", async () => {
+    vi.spyOn(api, "getTemplates").mockResolvedValue([
+      { id: "default", nodes: [], gates: 0 },
+    ]);
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
+    const create = vi
+      .spyOn(api, "createWorkItem")
+      .mockResolvedValue({ id: "w9" });
+    renderModal();
+    await fillBasics();
+    await userEvent.click(
+      screen.getByRole("button", { name: /create paused/i }),
+    );
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({ autostart: false }),
+      ),
     );
   });
 
   it("offers the cross-repo disclosure only when the repo actually has submodules", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "default", nodes: [], gates: 0 }]);
+    vi.spyOn(api, "getTemplates").mockResolvedValue([
+      { id: "default", nodes: [], gates: 0 },
+    ]);
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
     const probe = vi.spyOn(api, "probeRepo").mockResolvedValue({
-      path: "/r", name: "r", branch: "main", submodules: [], has_beads: true,
-      beads_export_auto: true, beads_export_git_add: true, has_engineering: true,
-      test_command: null, forge: null, project: null,
+      path: "/a",
+      name: "repo-a",
+      branch: "main",
+      submodules: [],
+      has_beads: true,
+      beads_export_auto: true,
+      beads_export_git_add: true,
+      has_engineering: true,
+      test_command: null,
+      forge: null,
+      project: null,
     });
-    render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <IntakeModal onClose={() => {}} />
-      </MemoryRouter>,
+    renderModal();
+    await userEvent.click(
+      await screen.findByRole("button", { name: /repo-a/i }),
     );
-    await userEvent.type(screen.getByLabelText("repo"), "/r");
     await waitFor(() => expect(probe).toHaveBeenCalled());
     expect(screen.queryByRole("button", { name: /cross-repo/ })).toBeNull();
   });
 
   it("sends the picked submodules and the root merge policy", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "default", nodes: [], gates: 0 }]);
+    vi.spyOn(api, "getTemplates").mockResolvedValue([
+      { id: "default", nodes: [], gates: 0 },
+    ]);
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
     vi.spyOn(api, "probeRepo").mockResolvedValue({
-      path: "/r", name: "r", branch: "main", submodules: ["libs/a", "libs/b"],
-      has_beads: true, beads_export_auto: true, beads_export_git_add: true,
-      has_engineering: true, test_command: null, forge: null, project: null,
+      path: "/a",
+      name: "repo-a",
+      branch: "main",
+      submodules: ["libs/a", "libs/b"],
+      has_beads: true,
+      beads_export_auto: true,
+      beads_export_git_add: true,
+      has_engineering: true,
+      test_command: null,
+      forge: null,
+      project: null,
     });
-    const create = vi.spyOn(api, "createWorkItem").mockResolvedValue({ id: "w9" });
-    render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <IntakeModal onClose={() => {}} />
-      </MemoryRouter>,
-    );
-    await userEvent.type(screen.getByLabelText("repo"), "/r");
-    await userEvent.type(screen.getByLabelText("title"), "bump pointers");
+    const create = vi
+      .spyOn(api, "createWorkItem")
+      .mockResolvedValue({ id: "w9" });
+    renderModal();
+    await fillBasics("repo-a", "bump pointers");
 
     // collapsed by default
-    const disclosure = await screen.findByRole("button", { name: /cross-repo/ });
+    const disclosure = await screen.findByRole("button", {
+      name: /cross-repo/,
+    });
     expect(screen.queryByRole("button", { name: "libs/a" })).toBeNull();
     await userEvent.click(disclosure);
 
     await userEvent.click(screen.getByRole("button", { name: "libs/a" }));
     await userEvent.click(screen.getByRole("radio", { name: "Skip" }));
-    await userEvent.click(screen.getByRole("button", { name: /create/i }));
+    await userEvent.click(
+      screen.getByRole("button", { name: /create and start/i }),
+    );
     await waitFor(() =>
-      expect(create).toHaveBeenCalledWith({
-        repo: "/r",
-        title: "bump pointers",
-        submodules: ["libs/a"],
-        root_merge_policy: "skip",
-      }),
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          repo: "/a",
+          title: "bump pointers",
+          submodules: ["libs/a"],
+          root_merge_policy: "skip",
+        }),
+      ),
     );
   });
 
   it("searches the chosen repo's artifacts and submits the picked plan", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "default", nodes: [], gates: 0 }]);
+    vi.spyOn(api, "getTemplates").mockResolvedValue([
+      { id: "default", nodes: [], gates: 0 },
+    ]);
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
     vi.spyOn(api, "search").mockResolvedValue({
       query: "auth",
       mode: "hybrid",
       results: [
         {
           id: "d1",
-          repo: "/repo",
+          repo: "/a",
           kind: "plans",
           source_kind: "artifact",
           title: "Auth plan",
@@ -201,23 +388,26 @@ describe("IntakeModal", () => {
           links: [],
         },
       ],
-    } as never);
-    const create = vi.spyOn(api, "createWorkItem").mockResolvedValue({ id: "w1" });
-    render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <IntakeModal onClose={() => {}} />
-      </MemoryRouter>,
-    );
+    });
+    const create = vi
+      .spyOn(api, "createWorkItem")
+      .mockResolvedValue({ id: "w1" });
+    renderModal();
 
-    await userEvent.type(screen.getByLabelText("repo"), "/repo");
-    await userEvent.type(screen.getByLabelText("title"), "t");
+    await fillBasics();
     await userEvent.type(screen.getByLabelText("existing plan"), "auth");
     await userEvent.click(await screen.findByText("Auth plan"));
-    await userEvent.click(screen.getByRole("button", { name: /create/i }));
+    await userEvent.click(
+      screen.getByRole("button", { name: /create and start/i }),
+    );
 
     await waitFor(() =>
       expect(api.search).toHaveBeenCalledWith(
-        expect.objectContaining({ repo: "/repo", kind: "plans", source_kind: "artifact" }),
+        expect.objectContaining({
+          repo: "/a",
+          kind: "plans",
+          source_kind: "artifact",
+        }),
       ),
     );
     await waitFor(() =>
@@ -235,21 +425,32 @@ describe("IntakeModal", () => {
         id: "default",
         gates: 2,
         nodes: [
-          { id: "spec", tasks: ["on.spec.requested"], gate_after: "spec_approval" },
-          { id: "plan", tasks: ["on.plan.requested"], gate_after: "plan_approval" },
-          { id: "implementation", tasks: ["on.implementation.start"], gate_after: null },
+          {
+            id: "spec",
+            tasks: ["on.spec.requested"],
+            gate_after: "spec_approval",
+          },
+          {
+            id: "plan",
+            tasks: ["on.plan.requested"],
+            gate_after: "plan_approval",
+          },
+          {
+            id: "implementation",
+            tasks: ["on.implementation.start"],
+            gate_after: null,
+          },
         ],
       },
     ]);
-    render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <IntakeModal onClose={() => {}} />
-      </MemoryRouter>,
-    );
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
+    renderModal();
 
-    await userEvent.type(screen.getByLabelText("repo"), "/repo");
-    await userEvent.type(screen.getByLabelText("title"), "t");
-    await userEvent.type(screen.getByLabelText("spec path"), ".engineering/specs/x.md");
+    await fillBasics();
+    await userEvent.type(
+      screen.getByLabelText("spec path"),
+      ".engineering/specs/x.md",
+    );
 
     const struckSpec = await screen.findByText("spec", { selector: "s" });
     expect(struckSpec).toBeInTheDocument();
@@ -258,18 +459,23 @@ describe("IntakeModal", () => {
   });
 
   it("accepts a path typed by hand for a document that is not indexed", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "default", nodes: [], gates: 0 }]);
-    const create = vi.spyOn(api, "createWorkItem").mockResolvedValue({ id: "w1" });
-    render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <IntakeModal onClose={() => {}} />
-      </MemoryRouter>,
-    );
+    vi.spyOn(api, "getTemplates").mockResolvedValue([
+      { id: "default", nodes: [], gates: 0 },
+    ]);
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
+    const create = vi
+      .spyOn(api, "createWorkItem")
+      .mockResolvedValue({ id: "w1" });
+    renderModal();
 
-    await userEvent.type(screen.getByLabelText("repo"), "/repo");
-    await userEvent.type(screen.getByLabelText("title"), "t");
-    await userEvent.type(screen.getByLabelText("spec path"), ".engineering/specs/x.md");
-    await userEvent.click(screen.getByRole("button", { name: /create/i }));
+    await fillBasics();
+    await userEvent.type(
+      screen.getByLabelText("spec path"),
+      ".engineering/specs/x.md",
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: /create and start/i }),
+    );
 
     await waitFor(() =>
       expect(create).toHaveBeenCalledWith(

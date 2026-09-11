@@ -631,6 +631,23 @@ async def escalate_work_item(wid: str, body: Escalate, request: Request):
     return {"id": wid, "status": "escalating"}
 
 
+@api_router.post("/work-items/{wid}/escalate/stop")
+async def stop_escalation(wid: str, request: Request):
+    """Kill the running escalation turn (06 'Stop agent'). The item stays
+    needs_human at whatever it was stopped for -- only the turn ends."""
+    st = request.app.state
+    deps._work_item_row(st, wid)
+    running = _escalation_running(st, wid)
+    if running is None:
+        raise HTTPException(409, "no escalation turn is running")
+    row = st.db.read(
+        lambda c: c.execute("SELECT pid FROM worker_sessions WHERE id = ?", (running,)).fetchone()
+    )
+    await st.db.write(lambda c: store.stop_escalation_session(c, wid, running))
+    _terminate(row["pid"] if row else None)
+    return {"id": wid, "session_id": running, "status": "paused"}
+
+
 @api_router.post("/work-items/{wid}/mr-labels")
 async def set_mr_labels(wid: str, body: MrLabels, request: Request):
     """Label this item's merge request and re-create its pipeline (Kraft-xh0q

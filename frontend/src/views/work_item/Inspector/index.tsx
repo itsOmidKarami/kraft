@@ -65,6 +65,7 @@ export function Inspector({
           <Tasks
             item={item}
             sessions={sessions}
+            events={events}
             nodeId={nodeId}
             selected={selection.kind === "session" ? selection.id : null}
             onSelect={(id) => onSelect({ kind: "session", id })}
@@ -83,6 +84,7 @@ export function Inspector({
             eventCount={events.length}
             selected={selection.kind === "document" ? selection.id : null}
             onSelect={(id) => onSelect({ kind: "document", id })}
+            preselectPath={item.gate_artifact}
           />
         )}
         {tab === "timeline" && (

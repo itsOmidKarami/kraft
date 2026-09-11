@@ -9,6 +9,7 @@
  */
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import {
+  Archive,
   Check,
   ChatText,
   Circle,
@@ -20,6 +21,7 @@ import {
   Pause,
   Prohibit,
   Question,
+  Robot,
   WarningCircle,
   X,
   XCircle,
@@ -96,6 +98,11 @@ const GLYPHS: Record<SessionStatus | ItemDisplayState, typeof Check> = {
   budget: Coins,
   not_started: Circle,
   abandoned: X,
+  // A running/finished escalation turn -- same glyph as the escalate
+  // controls it corresponds to (Escalate.tsx).
+  escalating: Robot,
+  escalated: Robot,
+  archived: Archive,
 };
 
 /** 20px ring, 1px border, Phosphor glyph. Only `running` animates. */

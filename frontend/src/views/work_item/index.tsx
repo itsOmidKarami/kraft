@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { Row, RowState, RowText, StatusGlyph } from "../../components/ui";
 import { until } from "../../format";
 import { useStore } from "../../store";
-import type { SessionStatus, WorkItem } from "../../types";
+import type { SessionStatus } from "../../types";
 import { ActionBar } from "./ActionBar";
 import { GraphSplit } from "./GraphSplit";
 import { Header } from "./Header";
@@ -45,30 +45,6 @@ function useNodeSelection(defaultNodeId: string | null): [string | null, (id: st
   const fromHash = match ? decodeURIComponent(match[1]) : null;
   const select = (id: string) => navigate({ hash: `node=${encodeURIComponent(id)}` });
   return [fromHash ?? defaultNodeId, select, fromHash != null];
-}
-
-/** Desktop 21's body: an item nobody has started yet. */
-function NotStarted({ item }: { item: WorkItem }) {
-  const nodes = item.chain_definition.nodes;
-  const firstGate = nodes.find((n) => n.gate_after)?.gate_after ?? "none";
-  return (
-    <div className="card not-started-card" data-testid="not-started-card">
-      <p className="attention-title">
-        Filed by {item.stop_reason?.includes("by you") ? "you" : "an agent session"} — waiting for
-        you to start it
-      </p>
-      <dl className="config-fields">
-        <dt>will start at</dt>
-        <dd>{nodes[0]?.id ?? "—"}</dd>
-        <dt>first gate</dt>
-        <dd>{firstGate}</dd>
-        <dt>budget</dt>
-        <dd>
-          {item.budget_cap?.cap_usd != null ? `$${item.budget_cap.cap_usd.toFixed(2)}` : "no cap"}
-        </dd>
-      </dl>
-    </div>
-  );
 }
 
 export function WorkItemDetail() {
@@ -121,6 +97,27 @@ export function WorkItemDetail() {
       setSelectionByTab(EMPTY_SELECTION);
     }
   };
+  // The gate card's "Read <doc>" — same tab-switch shape as goToChanges,
+  // for the document the gate is a decision about. Clears the Documents
+  // selection every time, not just on phone: a stale selection from an
+  // earlier gate's artifact would otherwise survive the tab switch and
+  // Documents.tsx's own "select the first once nothing is selected" only
+  // fires when `selected` is null (Kraft-esc's own idiom for a fresh stop).
+  const goToDocuments = () => {
+    setTab("documents");
+    setSelectionByTab((prev) => ({ ...prev, documents: EMPTY_SELECTION.documents }));
+    if (phone && item?.current_node_id) {
+      selectNode(item.current_node_id);
+    }
+  };
+  // The not_started bar's "Edit chain" (06): opens the Config tab.
+  const goToConfig = () => {
+    setTab("config");
+    if (phone && item?.current_node_id) {
+      selectNode(item.current_node_id);
+      setSelectionByTab(EMPTY_SELECTION);
+    }
+  };
 
   if (loadErr && !item) {
     return (
@@ -151,7 +148,6 @@ export function WorkItemDetail() {
     );
   }
 
-  const notStarted = item.current_node_id == null && item.status !== "completed";
   const currentLogSessionId = selectionByTab.tasks.kind === "session" ? selectionByTab.tasks.id : null;
 
   return (
@@ -186,11 +182,16 @@ export function WorkItemDetail() {
         </section>
       )}
 
-      <ActionBar item={item} sessions={sessions} events={events} onReviewChanges={goToChanges} />
+      <ActionBar
+        item={item}
+        sessions={sessions}
+        events={events}
+        onReviewChanges={goToChanges}
+        onReadDoc={goToDocuments}
+        onEditChain={goToConfig}
+      />
 
-      {notStarted ? (
-        <NotStarted item={item} />
-      ) : phone ? (
+      {phone ? (
         <>
           <PhoneStageList
             item={item}

@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures";
+import { connectRepo, expect, test } from "./fixtures";
 
 /**
  * Sub-project B, spec §4 and §6: everything a notification links to has to work
@@ -13,6 +13,7 @@ import { expect, test } from "./fixtures";
  */
 
 const REPO = process.env.KRAFT_E2E_REPO!;
+const REPO_NAME = REPO.split("/").pop()!;
 const SHOTS = "e2e-shots";
 
 // iPhone 14 CSS pixels. Comfortably inside the 767px phone breakpoint, and the
@@ -24,16 +25,17 @@ const overflowsX = (locator: any) =>
   locator.evaluate((el: HTMLElement) => el.scrollWidth > el.clientWidth + 1);
 
 async function createItem(page: any, title: string, template: string) {
+  await connectRepo(page, REPO);
   await page.goto("/");
   await page.getByRole("button", { name: /new work item/i }).click();
   const modal = page.getByRole("dialog", { name: "New work item" });
-  await modal.getByLabel("repo").fill(REPO);
+  await modal.getByRole("button", { name: new RegExp(REPO_NAME, "i") }).click();
   await modal.getByLabel("title").fill(title);
   await modal
     .getByRole("radiogroup", { name: "template" })
-    .getByText(template, { exact: true })
+    .locator("label.seg-opt", { hasText: new RegExp(`^${template}\\b`) })
     .click();
-  await modal.getByRole("button", { name: /create/i }).click();
+  await modal.getByRole("button", { name: /create and start/i }).click();
   await expect(page.locator(".detail h2")).toHaveText(title);
 }
 
@@ -51,8 +53,8 @@ test("the gate, its reject textarea and the diff viewer all fit a phone", async 
   await page.screenshot({ path: `${SHOTS}/phone-02-gate.png`, fullPage: true });
 
   // §4: the reject textarea is the one place a phone user types.
-  await page.getByRole("button", { name: /Reject/ }).first().click();
-  const note = page.getByLabel("reject note");
+  await page.getByRole("button", { name: /^Reject$/ }).first().click();
+  const note = page.getByLabel("composer message");
   await note.fill("the spec misses the error path");
   await page.screenshot({ path: `${SHOTS}/phone-03-reject.png`, fullPage: true });
 
@@ -70,6 +72,31 @@ test("the gate, its reject textarea and the diff viewer all fit a phone", async 
   expect(box!.height).toBeGreaterThanOrEqual(44);
 
   await page.getByRole("button", { name: /Cancel/ }).click();
+});
+
+test("a paused item's needs-you state (m07) and its full-screen steer composer (m08)", async ({
+  page,
+}) => {
+  // KRAFT_SLOW gives the pause something to catch — same recipe as
+  // lifecycle.spec.ts's desktop pause/steer/resume test.
+  await createItem(page, "phone pause KRAFT_SLOW", "quick-task");
+  const pause = page.getByRole("button", { name: /^Pause$/ });
+  await expect(pause).toBeEnabled({ timeout: 30_000 });
+  await pause.click();
+  await expect(page.getByRole("button", { name: /^Resume$/ })).toBeVisible({ timeout: 30_000 });
+  await page.screenshot({ path: `${SHOTS}/phone-10-needs-you-paused.png`, fullPage: true });
+  expect(await overflowsX(page.locator("body"))).toBe(false);
+
+  // m08: the composer is a full-screen page here, not an inline expand.
+  await page.getByRole("button", { name: /^Steer$/ }).click();
+  const composer = page.getByTestId("phone-composer");
+  await expect(composer).toBeVisible();
+  await page.screenshot({ path: `${SHOTS}/phone-11-composer.png`, fullPage: true });
+  expect(await overflowsX(composer)).toBe(false);
+  // Two Cancels: PhoneComposer's own head, and the shared Composer's footer
+  // one underneath -- the head one is the full-screen page's own affordance.
+  await composer.locator(".phone-composer-head").getByRole("button", { name: /cancel/i }).click();
+  await expect(composer).toBeHidden();
 });
 
 test("the diff viewer wraps a real diff instead of scrolling sideways", async ({ page }) => {

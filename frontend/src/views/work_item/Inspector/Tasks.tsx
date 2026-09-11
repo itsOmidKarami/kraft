@@ -1,7 +1,8 @@
 import { useState } from "react";
+import { Robot } from "@phosphor-icons/react";
 import { Row, RowState, RowText, StatusGlyph } from "../../../components/ui";
-import { elapsed, tokens, usd } from "../../../format";
-import type { WorkerSession, WorkItem } from "../../../types";
+import { clock, elapsed, tokens, usd } from "../../../format";
+import type { KraftEvent, WorkerSession, WorkItem } from "../../../types";
 
 /**
  * Inspector · Tasks (UI v2 · 05, 12): one row per session, newest first.
@@ -24,20 +25,27 @@ function metricsOf(s: WorkerSession): string {
 export function Tasks({
   item,
   sessions,
+  events,
   nodeId,
   selected,
   onSelect,
 }: {
   item: WorkItem;
   sessions: WorkerSession[];
+  events: KraftEvent[];
   /** The stage graph's selected node — the default scope. */
   nodeId: string | null;
   selected: string | null;
   onSelect: (sessionId: string) => void;
 }) {
   const [scope, setScope] = useState<"node" | "all">("node");
-  const ordered = [...sessions].sort((a, b) => b.created_at.localeCompare(a.created_at));
-  const shown = scope === "node" && nodeId ? ordered.filter((s) => s.node_id === nodeId) : ordered;
+  const ordered = [...sessions].sort((a, b) =>
+    b.created_at.localeCompare(a.created_at),
+  );
+  const shown =
+    scope === "node" && nodeId
+      ? ordered.filter((s) => s.node_id === nodeId)
+      : ordered;
 
   return (
     <div className="inspector-list" data-testid="inspector-tasks">
@@ -62,12 +70,49 @@ export function Tasks({
         >
           this node
         </button>
-        <button className="chip" aria-pressed={scope === "all"} onClick={() => setScope("all")}>
+        <button
+          className="chip"
+          aria-pressed={scope === "all"}
+          onClick={() => setScope("all")}
+        >
           all
         </button>
       </div>
-      {shown.length === 0 && <p className="empty">no tasks {scope === "node" ? "on this node" : "yet"}</p>}
+      {shown.length === 0 && (
+        <p className="empty">
+          no tasks {scope === "node" ? "on this node" : "yet"}
+        </p>
+      )}
       {shown.map((s) => {
+        // An escalation turn (18, 18b): its own session row, robot glyph --
+        // "turn N · ses_… · 2m 08s" while running, "sent 11:41 · "<message>""
+        // once it has one.
+        if (s.hook_point === "escalation") {
+          const sent = events.find(
+            (e) =>
+              e.type === "escalation_message" && e.payload.session_id === s.id,
+          );
+          const m = metricsOf(s);
+          const sub =
+            s.status === "running" || s.status === "pending"
+              ? `turn ${s.attempt} · ${s.id} · ${m || "starting…"}`
+              : sent
+                ? `sent ${clock(sent.created_at)} · "${sent.payload.message}"`
+                : `turn ${s.attempt}`;
+          return (
+            <Row
+              key={s.id}
+              data-testid={`task-row-${s.id}`}
+              data-selected={s.id === selected}
+              onClick={() => onSelect(s.id)}
+              columns="22px 1fr auto"
+            >
+              <Robot size={16} className="attention-glyph" />
+              <RowText title={`escalation · turn ${s.attempt}`} sub={sub} />
+              <RowState status={s.status} />
+            </Row>
+          );
+        }
         const attempt =
           s.hook_point === "on.implementation.start" && item.fixCycle != null
             ? `cycle ${item.fixCycle}`
