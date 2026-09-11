@@ -138,6 +138,11 @@ describe("CappedCard", () => {
     expect(spy).toHaveBeenCalledWith("w1", "what's flaky here?");
   });
 
+  it("offers Skip alongside Retry", () => {
+    renderCard();
+    expect(screen.getByRole("button", { name: /skip/i })).toBeInTheDocument();
+  });
+
   it("drops the steer box on a node with no agent task (Kraft-bz9b)", async () => {
     const spy = vi.spyOn(api, "retryWorkItem").mockResolvedValue({
       id: "w1", node_id: "open_mr", loop: "", steer: null,

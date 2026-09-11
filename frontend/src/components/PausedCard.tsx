@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Play } from "@phosphor-icons/react";
 import * as api from "../api";
+import { SkipControl } from "./SkipControl";
 import type { WorkItem, WorkerSession } from "../types";
 
 /**
@@ -105,6 +106,7 @@ export function PausedCard({
             </>
           )}
         </button>
+        <SkipControl itemId={item.id} />
         <span className="control-hint">
           {steerable
             ? `relaunches ${paused[0]?.hook_point ?? item.current_node_id} as attempt ${attempt}`

@@ -895,6 +895,46 @@ def pause_work_item(conn: sqlite3.Connection, work_item_id: str, session_ids: li
         events.append(conn, work_item_id, "worker_session_paused", {"session_id": sid})
 
 
+def skip_node(
+    conn: sqlite3.Connection,
+    work_item_id: str,
+    node_id: str,
+    gate: str | None,
+    note: str | None,
+    *,
+    session_ids: list[str] | None = None,
+) -> None:
+    """Advance past `node_id` (its own gate `gate`, if it has one and that is
+    what is being bypassed) without running or approving it.
+
+    Sets the item back to `active` the same way `approve_gate` and
+    `retry_after_cap` do — the caller spawns `executor.run` right after this
+    write, same as every other door onto the chain. `retry_at` is cleared for
+    the same reason `pause_work_item` clears it: a `ci_wait`-due item skipped
+    out from under the poller must not wake back up under the old wait.
+
+    `session_ids` carries the node's own running sessions when the skip
+    interrupts a live attempt — marked `paused` here, *before* the caller's
+    `_terminate` signals them, so the adapter's death handler reads a session
+    it expected to stop rather than one that just failed (`pause_work_item`'s
+    ordering, same race).
+    """
+    now = _now()
+    conn.execute(
+        "UPDATE work_items SET status = 'active', retry_at = NULL, updated_at = ? WHERE id = ?",
+        (now, work_item_id),
+    )
+    events.append(
+        conn, work_item_id, "node_skipped", {"node_id": node_id, "gate": gate, "note": note}
+    )
+    for sid in session_ids or []:
+        conn.execute(
+            "UPDATE worker_sessions SET status = 'paused', exited_at = ? WHERE id = ?",
+            (now, sid),
+        )
+        events.append(conn, work_item_id, "worker_session_paused", {"session_id": sid})
+
+
 def set_steer(conn: sqlite3.Connection, work_item_id: str, text: str) -> None:
     conn.execute(
         "UPDATE work_items SET pending_steer_context = ?, updated_at = ? WHERE id = ?",

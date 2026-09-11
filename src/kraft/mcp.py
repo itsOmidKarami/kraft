@@ -126,6 +126,14 @@ def build() -> MCPServer:
         return await client.retry(steer, work_item_id)
 
     @server.tool()
+    async def skip_work_item(note: str | None = None, work_item_id: str | None = None) -> dict:
+        """Advance a Kraft work item past its current node or pending gate,
+        without running or approving it. Works while active (kills the
+        running session first), paused, or stopped for a human. Only a human
+        should decide this — ask first."""
+        return await client.skip(note, work_item_id)
+
+    @server.tool()
     async def escalate_work_item(message: str, work_item_id: str | None = None) -> dict:
         """Send a message into a Kraft work item's escalation thread — the
         door onto a needs_human stop that wants back-and-forth with an agent
