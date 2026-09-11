@@ -47,6 +47,16 @@ async def intake(
     #: must pass no gate automatically. The caller that has a human behind it
     #: passes the value.
     auto_gate: bool = False,
+    #: Node ids to remove from the materialized chain at intake (UI v2 · 04
+    #: point 6, `templates.materialize`'s `skip_nodes`). Already validated
+    #: against the template by the caller.
+    skip_nodes: frozenset[str] = frozenset(),
+    #: Intake-time spend cap and per-node overrides, forwarded verbatim to
+    #: `store.create_work_item` (point 6). `budget_set=False` (default)
+    #: means "no explicit cap at intake, policy default applies".
+    budget_set: bool = False,
+    budget_usd: float | None = None,
+    node_overrides: dict[str, dict] | None = None,
 ) -> str:
     work_item_id = uuid.uuid4().hex
     # A daemon's cwd is an accident of how it was launched — launchd, a login
@@ -81,7 +91,9 @@ async def intake(
     # caller can fix the path, so it is where this fails.
     attachments = _store_attachments(run_dirs, work_item_id, attachments, repo=repo)
     satisfied = frozenset(ATTACHMENT_GATES[a["kind"]] for a in attachments or [])
-    chain_definition = json.dumps(materialize(template, satisfied_gates=satisfied))
+    chain_definition = json.dumps(
+        materialize(template, satisfied_gates=satisfied, skip_nodes=skip_nodes)
+    )
     implements_beads = _extract_beads(description, exclude=bead_id)
 
     def _create(c):
@@ -103,6 +115,9 @@ async def intake(
             status=status,
             implements_beads=implements_beads,
             auto_gate=auto_gate,
+            budget_set=budget_set,
+            budget_usd=budget_usd,
+            node_overrides=node_overrides,
         )
         if bead_warning:
             # Same transaction as the row: an item with no bead and no record of

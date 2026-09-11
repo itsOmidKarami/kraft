@@ -220,9 +220,31 @@ async def get_work_item(wid: str, request: Request):
     )
     pending = _pending_gate(st, wid)
     chain = json.loads(row["chain_definition"])
+    node_overrides = store.node_overrides_of(row)
+    budget = st.policy.budget if st.policy else policy_mod.NO_BUDGET
+    cap_usd, cap_source = store.effective_work_item_cap(row, budget)
+    spent_usd, _daily = st.db.read(lambda c: store.budget_spend(c, wid))
     return {
         **{k: row[k] for k in row.keys()},
         "chain_definition": chain,
+        # The Config tab's "effective chain" (UI v2 · 04 point 3): node
+        # overrides folded over the template-shaped chain, plus the raw
+        # override layer itself and its count, so the tab can both render the
+        # merged YAML and mark which lines are `# override`.
+        "effective_chain": store.effective_chain(chain, node_overrides),
+        "node_overrides": node_overrides,
+        "node_overrides_count": len(node_overrides),
+        # The Config tab's "$5.00 · $2.41 used" and "policy default" / "item"
+        # source line (point 4). Deliberately not `budget` -- that key is
+        # `item.budget` client-side, `{scope, spent_usd, cap_usd} | null`,
+        # derived purely from a `work_item_needs_human` event's payload
+        # (`store.applyEvent`) and used by `deriveState`/`BudgetCard` to mean
+        # "a spend cap is what stopped this item right now". This is a
+        # different, always-present question -- the item's effective cap and
+        # where it comes from -- and reusing the name would make every GET
+        # response's truthy `budget` object read as "the item is stopped for
+        # budget" even when it is running fine under its cap.
+        "budget_cap": {"cap_usd": cap_usd, "source": cap_source, "spent_usd": spent_usd},
         "attachments": json.loads(row["attachments"]) if row["attachments"] else [],
         "worker_sessions": [{k: s[k] for k in s.keys()} for s in sessions],
         "usage": st.db.read(lambda c: store.usage_rollup(c, wid)),

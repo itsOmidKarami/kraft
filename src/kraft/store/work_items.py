@@ -59,6 +59,14 @@ def create_work_item(
     #: before a human sees them (Kraft-zr3s). Off unless a human asked for it:
     #: the template says which gates *could* be, this says whether they *may*.
     auto_gate: bool = False,
+    #: Intake-time spend cap and per-node overrides (UI v2 · 04 point 6).
+    #: `budget_set` follows the same "explicit vs policy default" rule as
+    #: `store.budget.set_budget` -- False leaves both columns at their
+    #: defaults (policy default applies), True means the intake caller sent
+    #: a `budget_usd` (a number, or `None` for an explicit "no cap").
+    budget_set: bool = False,
+    budget_usd: float | None = None,
+    node_overrides: dict[str, dict] | None = None,
 ) -> None:
     """`submodules` are the cross-repo paths chosen at intake (06, design 1g).
 
@@ -77,8 +85,8 @@ def create_work_item(
         "INSERT INTO work_items (id, bead_id, title, description, repo, chain_template, "
         "chain_definition, current_node_id, status, created_at, updated_at, "
         "submodules, root_merge_policy, attachments, bead_cwd, branch, implements_beads, "
-        "auto_gate) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "auto_gate, budget_set, budget_usd, node_overrides) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             id,
             bead_id,
@@ -97,6 +105,9 @@ def create_work_item(
             branch_name(title, id),
             json.dumps(implements_beads) if implements_beads else None,
             1 if auto_gate else 0,
+            1 if budget_set else 0,
+            budget_usd,
+            json.dumps(node_overrides) if node_overrides else None,
         ),
     )
     events.append(

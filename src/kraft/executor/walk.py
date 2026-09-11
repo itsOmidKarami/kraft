@@ -134,8 +134,18 @@ async def walk_node(
 ) -> str:
     key = node.get("fix_loop")
     # Derived here rather than passed in: every caller already hands us the
-    # policy, so no call site can forget the cap and silently lose it.
-    budget = policy.budget if policy else _policy.NO_BUDGET
+    # policy, so no call site can forget the cap and silently lose it. Folded
+    # through the item's own cap (UI v2 · 04 point 4) -- re-read fresh from
+    # the DB rather than trusting the caller's `row`, which run_once/resume
+    # read once at run start: a per-item cap set or lowered via PATCH mid-run
+    # must be picked up here, the same way gates.review_gates re-reads before
+    # its own budget check.
+    fresh_row = db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+    )
+    budget = store.effective_budget(
+        fresh_row if fresh_row is not None else row, policy.budget if policy else _policy.NO_BUDGET
+    )
 
     if not key:
         verdict, failed, excs = await dispatch.measure_node(

@@ -225,6 +225,23 @@ def test_deferred_minor_findings_reach_the_detail_payload(tmp_path, monkeypatch)
         assert [f["message"] for f in body["deferred_findings"]] == ["naming nit"]
 
 
+def test_get_work_item_survives_an_invalid_policy(tmp_path, monkeypatch):
+    """startup.py sets app.state.policy to None on a PolicyError; the detail
+    route must fall back to NO_BUDGET like every other st.policy reader
+    instead of raising AttributeError on st.policy.budget."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+        ).json()["id"]
+        client.app.state.policy = None
+
+        resp = client.get(f"/api/work-items/{wid}")
+        assert resp.status_code == 200
+        assert resp.json()["id"] == wid
+
+
 def test_concerns_reach_the_detail_payload(tmp_path, monkeypatch):
     """`done_with_concerns` text rides `worker_session_exited` (written by
     adapters.subprocess.run_task at session exit) — read from the event log,
