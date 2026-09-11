@@ -157,18 +157,33 @@ def from_stream(lines: Iterable[str], seen: dict[str, Usage]) -> Usage | None:
 
 
 def read_envelope(log_path: Path) -> dict | None:
-    """The last JSON object on the log's final non-empty line, if there is one."""
+    """The agent's final result envelope: the last JSON object that carries a
+    `usage` block, searching from the end of the log.
+
+    Claude Code's `stream-json` output appends a trailing `system/task_summary`
+    line *after* the `result` line that carries `usage` and `total_cost_usd`.
+    Taking the literal last line picked up that summary instead and silently
+    dropped a reported cost (Kraft-xob8). Scanning backward for `usage` finds
+    the `result` line regardless of what follows it; a log that never has one
+    still gets its last parseable JSON object, unchanged from before.
+    """
     try:
         lines = [ln for ln in log_path.read_text().splitlines() if ln.strip()]
     except OSError:
         return None
-    if not lines:
-        return None
-    try:
-        envelope = json.loads(lines[-1])
-    except json.JSONDecodeError:
-        return None
-    return envelope if isinstance(envelope, dict) else None
+    fallback = None
+    for line in reversed(lines):
+        try:
+            envelope = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(envelope, dict):
+            continue
+        if fallback is None:
+            fallback = envelope
+        if isinstance(envelope.get("usage"), dict):
+            return envelope
+    return fallback
 
 
 def read(log_path: Path, result_path: Path) -> Usage | None:
