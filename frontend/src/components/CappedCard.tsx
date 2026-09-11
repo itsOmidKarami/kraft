@@ -36,8 +36,16 @@ function cycles(events: KraftEvent[], sessions: WorkerSession[], nodeId: string 
     .map((e) => {
       const n = e.payload.cycle as number;
       const failed = (e.payload.failed_tasks as string[]) ?? [];
+      // A cycle can open on eligible findings alone, with no task actually
+      // failing (a review that exits clean but flags something) — `failed` is
+      // then empty and never matches a hook_point. Fall back to any session
+      // from that round; it beats a dead-end log link, even if the node ran
+      // more than one measuring task.
       const measured = sessions.find(
-        (s) => s.node_id === nodeId && s.round === n - 1 && failed.includes(s.hook_point),
+        (s) =>
+          s.node_id === nodeId &&
+          s.round === n - 1 &&
+          (failed.length === 0 || failed.includes(s.hook_point)),
       );
       return { n, failed, sessionId: measured?.id ?? null };
     });
@@ -130,7 +138,7 @@ export function CappedCard({
             <div key={c.n} className="cycle-row" data-cycle={c.n}>
               <span className="cycle-n">cycle {c.n}</span>
               <span className="cycle-failed">
-                {c.failed.length} failing · {c.failed.join(", ")}
+                {c.failed.length > 0 ? `${c.failed.length} failing · ${c.failed.join(", ")}` : "findings only"}
               </span>
               {c.sessionId ? (
                 <button className="btn btn-ghost cycle-log" onClick={() => setLogSid(c.sessionId)}>

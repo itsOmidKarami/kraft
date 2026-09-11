@@ -101,6 +101,35 @@ describe("CappedCard", () => {
     expect(lines).toHaveBeenCalledWith("c0");
   });
 
+  it("still links the log when a cycle opened on findings alone (Kraft-jyh4)", async () => {
+    // A review task that exits clean but reports an eligible finding opens a
+    // cycle with no failed hook point at all -- `failed_tasks` is empty.
+    const findingsEvents = [
+      ev({
+        seq: 1,
+        type: "fix_cycle_started",
+        payload: { node_id: "verify", cycle: 1, failed_tasks: [] },
+        created_at: "2026-09-04T10:00:00Z",
+      }),
+      ev({
+        seq: 3,
+        type: "work_item_needs_human",
+        payload: { node_id: "verify", reason: "cap" },
+        created_at: "2026-09-04T11:12:00Z",
+      }),
+    ];
+    render(<CappedCard item={item} sessions={sessions} events={findingsEvents} />);
+    expect(screen.getByText("findings only")).toBeInTheDocument();
+    const lines = vi.spyOn(api, "getLogLines").mockResolvedValue({
+      session_id: "c0",
+      status: "capped_out",
+      lines: [],
+    });
+    await userEvent.click(screen.getByRole("button", { name: "log" }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(lines).toHaveBeenCalledWith("c0");
+  });
+
   it("sends the steer with the retry and clears the box", async () => {
     const spy = vi.spyOn(api, "retryWorkItem").mockResolvedValue({
       id: "w1", node_id: "verify", loop: "verify_fix_loop", steer: "the sign is flipped",

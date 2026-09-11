@@ -59,12 +59,14 @@ cycle re-running implementation for nothing, and a deflated real defect ships.
   failure mode, but is bounded: an unhandled edge case, a missed caller of a
   changed contract, an error swallowed where it should surface.
 - **`minor`** — genuinely worth someone's attention but not worth re-running
-  implementation for. It is recorded, it reaches the human at the review gate,
-  and it does not burn a cycle.
+  implementation for. It is recorded and stays on the item; it does not burn
+  a cycle.
 
-If you are between two levels, take the lower one. The human review gate sees
-every finding including the `minor` ones, so nothing you report is discarded —
-the only thing severity buys is whether a robot tries to fix it first.
+If you are between two levels, take the lower one. Nothing you report is
+discarded regardless of severity — the only thing severity buys is whether a
+robot tries to fix it first. Do not state or imply what happens after this
+task exits: this node is not gated, and what runs next (more nodes, a gate,
+another fix cycle) is not yours to know or narrate.
 
 ## Finding nothing is a real answer
 

@@ -252,6 +252,43 @@ def test_important_finding_enters_the_loop(tmp_path, monkeypatch):
     assert _cycles(out) == 1
 
 
+def test_important_finding_enters_the_loop_even_when_the_task_exits_done(tmp_path, monkeypatch):
+    """A review skill can exit clean (status: done) and still report findings —
+    that is the normal case, not the failed one every other test in this file
+    drives. `verdict == "ok"` must not short-circuit past eligible findings."""
+    out = _run(
+        tmp_path,
+        monkeypatch,
+        [
+            {"status": "done", "findings": [_finding("swallowed error", "important")]},
+            {"status": "done", "findings": []},
+        ],
+    )
+    assert out["result"] == "completed"
+    assert _cycles(out) == 1
+
+
+def test_findings_only_cycle_does_not_tell_the_fix_agent_a_check_failed(tmp_path, monkeypatch):
+    """`_FIX_PROMPT`'s "checks ... failed. Failing hook points: {failed}" is
+    only true when a task actually failed. A findings-only cycle (task exits
+    done) has no failed hook point to name — the fix agent must get findings
+    framing instead, not a "failed" claim with a blank list after the colon."""
+    log = tmp_path / "prompts.log"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(log))
+    _run(
+        tmp_path,
+        monkeypatch,
+        [
+            {"status": "done", "findings": [_finding("swallowed error", "important")]},
+            {"status": "done", "findings": []},
+        ],
+    )
+    prompts = [p for p in log.read_text().split("\n\x00\n") if p.strip()]
+    assert "failed" not in prompts[0].lower()
+    assert "Failing hook points:" not in prompts[0]
+    assert "swallowed error" in prompts[0]
+
+
 def test_failure_with_no_findings_still_enters_the_loop(tmp_path, monkeypatch):
     """A measuring task can fail without saying why; that is still non-clean."""
     out = _run(
