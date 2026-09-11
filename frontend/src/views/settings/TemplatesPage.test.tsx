@@ -1,136 +1,204 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
-import type { TemplateSummary } from "../../types";
+import type { TemplateNode } from "../../types";
+import { reparseSerializedNodes, serializeNodes } from "./TemplatesPage";
 import { renderAt, setupSettingsMocks } from "./testing";
+
+function setPhoneWidth(matches: boolean) {
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn().mockImplementation((query: string) => ({
+      matches,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  );
+}
 
 beforeEach(() => {
   setupSettingsMocks();
+  vi.spyOn(api, "getTemplates").mockResolvedValue([
+    {
+      id: "default",
+      gates: 4,
+      nodes: [
+        { id: "spec", tasks: ["on.spec.requested"], gate_after: "spec_approval" },
+        { id: "plan", tasks: ["on.plan.requested"], gate_after: "plan_approval" },
+        {
+          id: "verify",
+          tasks: ["on.test.run"],
+          gate_after: null,
+          fix_loop: "verify_fix_loop",
+        },
+        {
+          id: "human_review",
+          tasks: ["on.human_review.requested"],
+          gate_after: "human_review_approval",
+          reject_to: "verify",
+        },
+      ],
+    },
+  ]);
 });
 
-describe("Settings · templates (5b)", () => {
-  it("validates a draft without saving it", async () => {
-    const validate = vi.spyOn(api, "validateTemplate").mockResolvedValue({
-      id: "quick-task",
-      valid: false,
-      error: "hook(s) ['on.nope'] are not in the registry",
-      unresolved: [{ node: "verify", task: "on.nope" }],
-    });
-    const put = vi.spyOn(api, "putTemplate");
-    renderAt("/settings/templates");
-    await screen.findByRole("button", { name: /quick-task/ });
+describe("serializeNodes (task 8b)", () => {
+  it("serializes a node list to match write_yaml's own formatting for quick-task.yaml", () => {
+    const nodes: TemplateNode[] = [
+      { id: "env_setup", tasks: ["on.env.prepare"], gate_after: null },
+      { id: "implementation", tasks: ["on.implementation.start"], gate_after: null },
+      { id: "verify", tasks: ["on.test.run"], gate_after: null },
+    ];
+    expect(serializeNodes("quick-task", nodes)).toBe(
+      "id: quick-task\n" +
+        "nodes:\n" +
+        "  - id: env_setup\n" +
+        "    tasks: [on.env.prepare]\n" +
+        "    gate_after: null\n" +
+        "  - id: implementation\n" +
+        "    tasks: [on.implementation.start]\n" +
+        "    gate_after: null\n" +
+        "  - id: verify\n" +
+        "    tasks: [on.test.run]\n" +
+        "    gate_after: null\n",
+    );
+  });
+});
 
-    await userEvent.click(screen.getByRole("button", { name: "Validate" }));
-    expect(validate).toHaveBeenCalled();
-    expect(await screen.findByText(/not in the registry/)).toBeInTheDocument();
-    expect(screen.getByText("verify: on.nope does not resolve")).toBeInTheDocument();
-    expect(put).not.toHaveBeenCalled();
+describe("serializeNodes round trip (task 8c)", () => {
+  it("round-trips every node key of a node list through the serializer, including keys the form doesn't render", () => {
+    const nodes: TemplateNode[] = [
+      { id: "spec", tasks: ["on.spec.requested"], gate_after: "spec_approval" },
+      {
+        id: "pre_mr_rebase",
+        tasks: ["on.mr.rebase"],
+        gate_after: null,
+        rebase_bounce_to: "verify",
+      },
+      {
+        id: "mr_checks",
+        tasks: ["on.ci.poll", "on.review.mr.run"],
+        gate_after: null,
+        on_failure: ["on.mr_checks.repair"],
+      },
+      {
+        id: "human_review",
+        tasks: ["on.human_review.requested"],
+        gate_after: "human_review_approval",
+        reject_to: "implementation",
+      },
+    ];
+    const text = serializeNodes("default", nodes);
+    const reparsed = reparseSerializedNodes(text);
+    expect(reparsed).toEqual(nodes);
+  });
+});
+
+describe("Settings · chains editor (task 8)", () => {
+  it("renders a pill per node with its task count and a gate flag after a gated node", async () => {
+    renderAt("/settings/chains");
+    expect(await screen.findByText("spec")).toBeInTheDocument();
+    expect(screen.getByTestId("chain-flag-spec")).toBeInTheDocument();
   });
 
-  it("refuses to save a draft that is not even JSON", async () => {
-    renderAt("/settings/templates");
-    const box = await screen.findByLabelText("template nodes");
-    await userEvent.clear(box);
-    await userEvent.type(box, "{{ broken");
-    expect(screen.getByText(/not valid JSON/)).toBeInTheDocument();
+  it("selecting a pill opens its node form and highlights its YAML block", async () => {
+    renderAt("/settings/chains");
+    await userEvent.click(await screen.findByText("verify"));
+    expect(await screen.findByText(/node \d+ of 4/)).toBeInTheDocument();
+    expect(screen.getByLabelText("fix_loop")).toHaveValue("verify_fix_loop");
+  });
+
+  it("editing a form field updates the YAML pane", async () => {
+    renderAt("/settings/chains");
+    await userEvent.click(await screen.findByText("verify"));
+    await userEvent.selectOptions(screen.getByLabelText("gate_after"), "human_review_approval");
+    const yaml = screen.getByLabelText("chain yaml") as HTMLTextAreaElement;
+    expect(yaml.value).toContain("gate_after: human_review_approval");
+  });
+
+  it("a YAML parse error shows inline and leaves the form untouched", async () => {
+    vi.spyOn(api, "parseTemplateYaml").mockResolvedValue({ nodes: null, error: "bad indent" });
+    renderAt("/settings/chains");
+    await userEvent.click(await screen.findByText("verify"));
+    await userEvent.type(screen.getByLabelText("chain yaml"), "  broken");
+    expect(await screen.findByText(/bad indent/)).toBeInTheDocument();
+    expect(screen.getByLabelText("fix_loop")).toHaveValue("verify_fix_loop"); // unchanged
+  });
+
+  it("insert, remove, and reorder nodes mark the template dirty", async () => {
+    renderAt("/settings/chains");
+    await userEvent.click((await screen.findAllByRole("button", { name: /insert node/i }))[0]);
+    expect(await screen.findByRole("button", { name: "Save" })).toBeEnabled();
+  });
+
+  it("Save is disabled while the debounced validator reports invalid", async () => {
+    vi.spyOn(api, "validateTemplate").mockResolvedValue({
+      id: "default",
+      valid: false,
+      error: "nope",
+      unresolved: [],
+    });
+    renderAt("/settings/chains");
+    await userEvent.click(await screen.findByText("verify"));
+    await userEvent.click((await screen.findAllByRole("button", { name: /insert node/i }))[0]);
+    await new Promise((r) => setTimeout(r, 450)); // past the 400ms validation debounce
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
-  it("does not clobber a fresh edit with the re-fetch of the previous save", async () => {
-    // A fake backend with a network-like gap: `putTemplate` commits quickly,
-    // `getTemplates` (re-fetched by `reload`) reads it back more slowly. If
-    // `busy` clears as soon as the PUT resolves, Save re-enables while the
-    // page still holds pre-save state — the user types the next edit, and
-    // then the late re-fetch lands and `setDraft(original)` wipes it.
-    const backend: TemplateSummary[] = [
-      {
-        id: "quick-task",
-        gates: 0,
-        nodes: [{ id: "verify", tasks: ["on.test.run"], gate_after: null }],
-      },
-    ];
-    vi.spyOn(api, "getTemplates").mockImplementation(
-      () =>
-        new Promise((resolve) =>
-          setTimeout(() => resolve(backend.map((t) => ({ ...t }))), 40),
-        ),
-    );
-    const put = vi.spyOn(api, "putTemplate").mockImplementation(
-      (_id, nodes) =>
-        new Promise((resolve) =>
-          setTimeout(() => {
-            backend[0] = { ...backend[0], nodes };
-            resolve(undefined as never);
-          }, 5),
-        ),
-    );
-    renderAt("/settings/templates");
-
-    await screen.findByRole("button", { name: /quick-task/ });
-    const box = screen.getByLabelText("template nodes") as HTMLTextAreaElement;
-    // fireEvent, not userEvent.type: `[` and `{` are key-descriptor syntax
-    // for userEvent's keyboard parser, and this draft is JSON.
-    fireEvent.change(box, { target: { value: '[{"id":"one"}]' } });
-    const save = screen.getByRole("button", { name: "Save" });
-    await userEvent.click(save);
-    await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
-
-    // As soon as Save is live again, make the next edit — in the broken
-    // version this lands after the PUT but before the re-fetch.
-    await waitFor(() => expect(save).not.toBeDisabled());
-    fireEvent.change(box, { target: { value: '[{"id":"two"}]' } });
-
-    // give the slow re-fetch every chance to land on top of the new edit
-    await new Promise((r) => setTimeout(r, 80));
-    expect(box.value).toBe('[{"id":"two"}]');
+  it("+ New creates a template from a copy of the selected one", async () => {
+    const put = vi.spyOn(api, "putTemplate").mockResolvedValue({ id: "default-2", nodes: [] });
+    vi.spyOn(window, "prompt").mockReturnValue("default-2");
+    renderAt("/settings/chains");
+    await userEvent.click(await screen.findByRole("button", { name: "New" }));
+    expect(put).toHaveBeenCalledWith("default-2", expect.any(Array));
   });
 
-  it("shows the unsaved template change", async () => {
-    renderAt("/settings/templates");
-    const box = (await screen.findByLabelText("template nodes")) as HTMLTextAreaElement;
-    fireEvent.change(box, { target: { value: `${box.value}\n` } });
+  it("+ New refuses a name that already exists, without calling the API", async () => {
+    const put = vi.spyOn(api, "putTemplate");
+    vi.spyOn(window, "prompt").mockReturnValue("default");
+    renderAt("/settings/chains");
+    await userEvent.click(await screen.findByRole("button", { name: "New" }));
+    expect(put).not.toHaveBeenCalled();
+    expect(await screen.findByText(/already exists/)).toBeInTheDocument();
+  });
+});
 
-    await userEvent.click(screen.getByRole("button", { name: "Changes" }));
-    expect(await screen.findByTestId("draft-diff")).toBeInTheDocument();
+describe("Settings · chains phone (task 9, m13)", () => {
+  beforeEach(() => setPhoneWidth(true));
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("phone: shows the template list with no template selected", async () => {
+    renderAt("/settings/chains");
+    expect(await screen.findByText("default")).toBeInTheDocument();
+    expect(screen.queryByText(/node \d+ of/)).toBeNull();
   });
 
-  it("draws the parsed draft as a chain bar and marks the node that does not resolve", async () => {
-    vi.spyOn(api, "validateTemplate").mockResolvedValue({
-      id: "quick-task",
-      valid: false,
-      error: "hook(s) ['on.nope'] are not in the registry",
-      unresolved: [{ node: "verify", task: "on.nope" }],
-    });
-    renderAt("/settings/templates");
-    await screen.findByRole("button", { name: /quick-task/ });
+  it("phone: opening a template shows its node list, not the node form", async () => {
+    renderAt("/settings/chains");
+    await userEvent.click(await screen.findByText("default"));
+    expect(await screen.findByText(/verify/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("gate_after")).toBeNull();
+  });
 
-    // the diagram tracks what is typed, before any validation has run —
-    // `findBy`, not `getBy`: the draft populates one effect tick after the
-    // template list does, and a loaded CI runner can lose that race.
-    expect(await screen.findByTestId("chain-bar")).toBeInTheDocument();
-    expect(screen.getByTestId("node-verify")).toHaveAttribute("data-state", "todo");
+  it("phone: opening a node shows the form and a read-only YAML sheet", async () => {
+    renderAt("/settings/chains?tpl=default&node=verify");
+    expect(await screen.findByLabelText("fix_loop")).toBeInTheDocument();
+    expect(screen.getByLabelText("chain yaml")).toHaveAttribute("readonly");
+  });
 
-    await userEvent.click(screen.getByRole("button", { name: "Validate" }));
-    await waitFor(() =>
-      expect(screen.getByTestId("node-verify")).toHaveAttribute("data-state", "invalid"),
-    );
+  it("phone: the back link on the node page returns to the node list, not Settings", async () => {
+    renderAt("/settings/chains?tpl=default&node=verify");
+    await userEvent.click(await screen.findByText("default")); // the PhoneHeader back link
+    expect(await screen.findByText(/verify/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("fix_loop")).toBeNull();
   });
 });
 
 describe("Settings · route rename (UI v2 · 01)", () => {
   it("redirects the old /settings/templates path to /settings/chains", async () => {
     renderAt("/settings/templates");
-    expect(await screen.findByRole("heading", { name: /template/i })).toBeInTheDocument();
-  });
-});
-
-describe("Settings · phone (mobile app shell)", () => {
-  it("Templates hides the editable textarea behind desktop-only and shows a read-only notice", async () => {
-    renderAt("/settings/templates");
-    await screen.findByText(/nodes · validated/i);
-    expect(screen.getByLabelText("template nodes")).toHaveClass("desktop-only");
-    expect(screen.getByText(/open on desktop to edit/i)).toBeInTheDocument();
-    expect(screen.getByText(/open on desktop to edit/i)).toHaveClass("phone-only");
+    expect(await screen.findByText("Templates")).toBeInTheDocument();
   });
 });

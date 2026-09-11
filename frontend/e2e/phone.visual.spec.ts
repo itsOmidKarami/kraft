@@ -200,17 +200,32 @@ test("Analytics stacks by-node and by-repo into cards with no horizontal overflo
   await expect(page.locator(".node-head")).toBeHidden();
 });
 
-test("Templates and Steering show the open-on-desktop notice instead of an editable textarea", async ({ page }) => {
-  await page.goto("/settings/templates");
-  await expect(page.getByText(/open on desktop to edit/i)).toBeVisible();
-  await expect(page.getByLabel("template nodes")).toBeHidden();
+test("Chains and Steering are editable on a phone, not an open-on-desktop notice", async ({ page }) => {
+  await page.goto("/settings/chains");
+  await page.getByText("default").click();
+  await page.getByText("verify").click();
+  await expect(page.getByLabel("fix_loop")).toBeVisible();
+  await expect(page.getByText(/open on desktop/i)).toBeHidden();
 
   await page.goto("/settings/steering");
-  const first = page.locator(".template-list .facet-opt").first();
+  const first = page.locator(".settings-index-row, .facet-opt").first();
   if ((await first.count()) > 0) {
     await first.click();
-    await expect(page.getByText(/open on desktop to edit/i)).toBeVisible();
-    await expect(page.getByLabel("steering body")).toBeHidden();
+    await expect(page.getByLabel("steering body")).toBeEditable();
+    await expect(page.getByText(/open on desktop/i)).toBeHidden();
   }
   await page.screenshot({ path: `${SHOTS}/phone-09-settings.png`, fullPage: true });
+});
+
+test("Settings landing shows the m10 drill-down list, not a page body", async ({ page }) => {
+  await page.goto("/settings");
+  // the desktop sidebar is display:none on a phone but still in the DOM, with
+  // the same group labels, so look inside the page body only
+  const main = page.getByRole("main");
+  await expect(main.getByText("How work runs", { exact: true })).toBeVisible();
+  await expect(main.getByText("This instance", { exact: true })).toBeVisible();
+  await main.getByText("Repos", { exact: true }).click();
+  await expect(page).toHaveURL(/\/settings\/repos$/);
+  await expect(main.getByText(/back|settings/i).first()).toBeVisible();
+  expect(await overflowsX(page.locator(".settings-body"))).toBe(false);
 });

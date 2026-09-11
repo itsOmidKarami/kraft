@@ -1,14 +1,26 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
-import { renderAt, setupSettingsMocks } from "./testing";
+import { renderAt, repo, setupSettingsMocks } from "./testing";
+
+function setPhoneWidth(matches: boolean) {
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn().mockImplementation((query: string) => ({
+      matches,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  );
+}
 
 beforeEach(() => {
   setupSettingsMocks();
 });
 
-describe("Settings · steering", () => {
+describe("Settings · steering (5c-bis, design 30)", () => {
   it("loads a file's body only when it is picked, and saves it back", async () => {
     const get = vi.spyOn(api, "getSteeringFile");
     const put = vi
@@ -20,7 +32,7 @@ describe("Settings · steering", () => {
     // the list is a picker: every body at once would be the whole injection
     // budget over the wire on every page load
     expect(get).not.toHaveBeenCalled();
-    expect(screen.getByText("14 B")).toBeInTheDocument();
+    expect(screen.getByText(/14 B/)).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: /house-style/ }));
     const box = (await screen.findByLabelText("steering body")) as HTMLTextAreaElement;
@@ -34,30 +46,32 @@ describe("Settings · steering", () => {
     expect(await screen.findByText("saved")).toBeInTheDocument();
   });
 
-  it("meters the open file, not the whole directory", async () => {
-    // MAX_BYTES is the assembled budget of one repo or hook's steering list.
-    // Summing every file in the directory against it reads as over budget when
-    // nothing is, and under it when something is.
-    vi.spyOn(api, "getSteering").mockResolvedValue({
-      files: [
-        { name: "house-style", bytes: 14 },
-        { name: "other", bytes: 9000 },
-      ],
-      max_bytes: 8192,
+  it("shows who uses each steering file", async () => {
+    vi.spyOn(api, "getRepos").mockResolvedValue({
+      repos: [{ ...repo, steering: ["house-style"] }],
     });
     renderAt("/settings/steering");
-    await userEvent.click(await screen.findByRole("button", { name: /house-style/ }));
+    expect(await screen.findByText(/repo-a/)).toBeInTheDocument();
+  });
+
+  it("toggles between edit and diff vs saved via Tabs", async () => {
+    renderAt("/settings/steering?file=house-style");
     const box = (await screen.findByLabelText("steering body")) as HTMLTextAreaElement;
     await waitFor(() => expect(box.value).toBe("prefer stdlib\n"));
+    fireEvent.change(box, { target: { value: "prefer stdlib\nthen native\n" } });
+    await userEvent.click(await screen.findByRole("tab", { name: /diff vs saved/i }));
+    expect(screen.getByTestId("draft-diff")).toBeInTheDocument();
+  });
 
-    // 14 B open, 9014 B on disk in total — the meter must say 14. Scoped to the
-    // hint because the list row legitimately shows this file's size too.
-    const hint = screen.getByText(/counts toward/);
-    expect(hint).toHaveTextContent("14 B");
-    expect(hint).not.toHaveTextContent("9014");
-
-    fireEvent.change(box, { target: { value: "12345" } });
-    await waitFor(() => expect(screen.getByText(/counts toward/)).toHaveTextContent("5 B"));
+  it("Delete lives behind the overflow menu and confirms first", async () => {
+    const del = vi.spyOn(api, "deleteSteeringFile").mockResolvedValue({ deleted: "house-style" });
+    renderAt("/settings/steering?file=house-style");
+    await screen.findByLabelText("steering body");
+    await userEvent.click(await screen.findByRole("button", { name: "More" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
+    expect(del).not.toHaveBeenCalled();
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
+    expect(del).toHaveBeenCalled();
   });
 
   it("surfaces a refused delete instead of dropping the file from the list", async () => {
@@ -66,37 +80,49 @@ describe("Settings · steering", () => {
     vi.spyOn(api, "deleteSteeringFile").mockRejectedValue(
       new Error("registry.yaml: steering 'house-style' does not resolve"),
     );
-    renderAt("/settings/steering");
-    await userEvent.click(await screen.findByRole("button", { name: /house-style/ }));
+    renderAt("/settings/steering?file=house-style");
     await screen.findByLabelText("steering body");
-    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await userEvent.click(screen.getByRole("button", { name: "More" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
     expect(await screen.findByText(/does not resolve/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /house-style/ })).toBeInTheDocument();
   });
 
   it("shows the unsaved steering change and discards it back to the saved body", async () => {
-    renderAt("/settings/steering");
-    await userEvent.click(await screen.findByRole("button", { name: /house-style/ }));
+    renderAt("/settings/steering?file=house-style");
     const box = (await screen.findByLabelText("steering body")) as HTMLTextAreaElement;
     await waitFor(() => expect(box.value).toBe("prefer stdlib\n"));
 
     fireEvent.change(box, { target: { value: "prefer stdlib\nthen native\n" } });
-    await userEvent.click(screen.getByRole("button", { name: "Changes" }));
+    await userEvent.click(screen.getByRole("tab", { name: /diff vs saved/i }));
     const diff = await screen.findByTestId("draft-diff");
     expect(within(diff).getByText("+then native")).toBeInTheDocument();
 
+    await userEvent.click(screen.getByRole("tab", { name: "edit" }));
     await userEvent.click(screen.getByRole("button", { name: "Discard" }));
-    expect(box.value).toBe("prefer stdlib\n");
+    expect((screen.getByLabelText("steering body") as HTMLTextAreaElement).value).toBe(
+      "prefer stdlib\n",
+    );
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
-    expect(await screen.findByText("no unsaved changes")).toBeInTheDocument();
   });
 });
 
-describe("Settings · phone (mobile app shell)", () => {
-  it("Steering hides the editable textarea the same way once a file is selected", async () => {
-    renderAt("/settings/steering");
-    await userEvent.click(await screen.findByText("house-style"));
-    expect(await screen.findByLabelText("steering body")).toHaveClass("desktop-only");
-    expect(screen.getByText(/open on desktop to edit/i)).toBeInTheDocument();
+describe("phone", () => {
+  beforeEach(() => setPhoneWidth(true));
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("the body is editable on phone, not the open-on-desktop notice", async () => {
+    renderAt("/settings/steering?file=house-style");
+    expect(await screen.findByLabelText("steering body")).toBeEnabled();
+    expect(screen.queryByText(/open on desktop/i)).toBeNull();
+  });
+
+  it("saving on phone calls putSteeringFile", async () => {
+    const put = vi.spyOn(api, "putSteeringFile").mockResolvedValue({ name: "house-style", body: "x" });
+    renderAt("/settings/steering?file=house-style");
+    await userEvent.type(await screen.findByLabelText("steering body"), "x");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(put).toHaveBeenCalled();
   });
 });

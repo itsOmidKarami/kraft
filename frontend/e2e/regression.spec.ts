@@ -16,18 +16,24 @@ test("settings: connect a repo", async ({ page }) => {
   await expect(dlg.getByRole("button", { name: /add|connect/i })).toBeEnabled({ timeout: 15_000 });
   await dlg.getByRole("button", { name: /add|connect/i }).click();
   await expect(page.getByText(REPO.split("/").pop()!, { exact: false }).first()).toBeVisible();
+  // the row navigates into the detail pane, not just the list
+  await page.getByText(REPO.split("/").pop()!).first().click();
+  await expect(page.getByRole("heading", { name: REPO.split("/").pop()! })).toBeVisible();
 });
 
 test("settings: chain templates page loads and validates", async ({ page }) => {
   await page.goto("/settings/chains");
-  await expect(page.getByLabel("template nodes")).toBeVisible({ timeout: 15_000 });
-  await page.getByRole("button", { name: /check|validate/i }).click();
-  await expect(page.locator(".save-hint, .settings-note").first()).toBeVisible();
+  await expect(page.getByText("default").first()).toBeVisible({ timeout: 15_000 });
+  // the graph node, not the live YAML pane, which also says "verify"
+  await page.getByRole("button", { name: /^verify\b/ }).click();
+  await expect(page.getByLabel("fix_loop")).toBeVisible();
 });
 
 test("settings: plugins page lists hooks", async ({ page }) => {
   await page.goto("/settings/plugins");
   await expect(page.getByRole("switch").first()).toBeVisible({ timeout: 15_000 });
+  await page.getByText("on.test.run").click();
+  await expect(page.getByText(/used by/)).toBeVisible();
 });
 
 test("settings: policy edit saves", async ({ page }) => {
@@ -35,9 +41,29 @@ test("settings: policy edit saves", async ({ page }) => {
   const attempts = page.getByLabel(/attempts/).first();
   await expect(attempts).toBeVisible({ timeout: 15_000 });
   await attempts.fill("4");
+  const maxConcurrent = page.getByLabel(/max concurrent/i);
+  await maxConcurrent.fill("4");
   await page.getByRole("button", { name: "Save" }).click();
   await page.reload();
   await expect(page.getByLabel(/attempts/).first()).toHaveValue("4");
+  await expect(page.getByLabel(/max concurrent/i)).toHaveValue("4");
+});
+
+test("settings: steering is editable and diffable", async ({ page }) => {
+  await page.goto("/settings/steering");
+  // the fixture instance ships no steering files, so make one
+  page.once("dialog", (d) => d.accept("e2e-steering"));
+  await page.getByRole("button", { name: "New", exact: true }).click({ timeout: 15_000 });
+  const body = page.getByLabel("steering body");
+  await expect(body).toBeVisible();
+  await body.fill("edited by e2e\n");
+  await page.getByRole("tab", { name: /diff vs saved/i }).click();
+  await expect(page.getByTestId("draft-diff")).toBeVisible();
+  await page.getByRole("tab", { name: "edit" }).click();
+  await page.getByRole("button", { name: "Save" }).click();
+  await page.reload();
+  await page.locator(".facet-opt", { hasText: "e2e-steering" }).click();
+  await expect(page.getByLabel("steering body")).toHaveValue("edited by e2e\n");
 });
 
 test("settings: access page shows bind", async ({ page }) => {
