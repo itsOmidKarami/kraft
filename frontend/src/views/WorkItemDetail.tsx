@@ -78,12 +78,19 @@ function NeedsContextCard({
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const hydrateItem = useStore((s) => s.hydrateItem);
 
   const submit = async () => {
     setBusy(true);
     setErr(null);
     try {
       await api.resumeWorkItem(item.id, answer.trim());
+      // The ws push carries this too, but a resume that outraces its own
+      // event (or lands while the socket is mid-reconnect) left this card on
+      // screen with a request that had already succeeded. Caught separately:
+      // the resume itself is done by this point, so a hydrate hiccup must not
+      // read back as a failed answer.
+      hydrateItem(item.id).catch(() => {});
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
