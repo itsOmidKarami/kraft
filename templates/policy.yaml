@@ -35,3 +35,14 @@ rate_limit_retries: 5
 # The board's Done group header states this number, so keep them in sync.
 archive:
   after_days: 30
+
+# Fire a work item from a schedule instead of typing into `kraft item create`
+# (Kraft-859) -- always files the item paused, same as manual intake. Off by
+# default (no triggers below means no timer, no tick); uncomment and edit to
+# add one.
+# triggers:
+#   - cron: "0 9 * * 1,2,3,4,5"  # 5-field cron, minute resolution; 9am weekdays
+#     repo: /path/to/repo
+#     chain: default              # a chain_template id from templates/
+#     title: "Nightly dependency check"
+#     description: "Filed by the 9am weekday trigger"

@@ -807,3 +807,78 @@ def test_intake_ignores_a_cwd_in_a_different_repo(tmp_path, monkeypatch):
         )
         assert r.status_code == 422
         assert "not found" in r.text
+
+
+def test_trigger_creates_a_paused_work_item_and_resolves_default_template(tmp_path, monkeypatch):
+    """POST /triggers is the HTTP twin of a policy.yaml cron trigger
+    (Kraft-859): it always files the item paused, regardless of policy or
+    template -- fire_trigger never reads body.autostart because TriggerBody
+    has no such field. `chain_template: null` resolves to the `default`
+    template the same way create_work_item's Kraft-cd47 fix does: the row
+    stores None (distinguishable from an item that named "default" outright)
+    but the materialized chain is the default template's."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        unset = client.post("/api/triggers", json={"title": "t", "repo": str(repo)})
+        assert unset.status_code == 201, unset.text
+        unset_body = unset.json()
+        assert unset_body["status"] == "paused"
+        assert unset_body["chain_template"] is None
+
+        named = client.post(
+            "/api/triggers",
+            json={"title": "t", "repo": str(repo), "chain_template": "default"},
+        )
+        assert named.status_code == 201, named.text
+        named_body = named.json()
+        assert named_body["status"] == "paused"
+        assert named_body["chain_template"] == "default"
+
+        assert unset_body["chain_definition"]["nodes"] == named_body["chain_definition"]["nodes"]
+
+
+def test_trigger_rejects_an_unknown_chain_template_422(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        r = client.post(
+            "/api/triggers",
+            json={"title": "t", "repo": str(repo), "chain_template": "nope"},
+        )
+        assert r.status_code == 422
+        assert "unknown or invalid template" in r.json()["detail"]
+
+
+def test_trigger_rejects_a_nonexistent_repo_422(tmp_path, monkeypatch):
+    with _client(tmp_path, monkeypatch) as client:
+        r = client.post("/api/triggers", json={"title": "t", "repo": "/no/such/dir"})
+        assert r.status_code == 422
+        assert "repo path does not exist" in r.json()["detail"]
+
+
+def test_trigger_rejects_a_title_over_the_tracker_limit_422(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        long_title = "x" * (beads.MAX_TITLE + 1)
+        r = client.post("/api/triggers", json={"title": long_title, "repo": str(repo)})
+        assert r.status_code == 422
+        detail = r.json()["detail"]
+        assert str(beads.MAX_TITLE) in detail
+        assert long_title not in detail
+
+        # the boundary itself is accepted
+        ok = client.post("/api/triggers", json={"title": "x" * beads.MAX_TITLE, "repo": str(repo)})
+        assert ok.status_code == 201, ok.text
+
+
+def test_trigger_refuses_with_503_when_policy_is_invalid(tmp_path, monkeypatch):
+    """Same posture as create_work_item (spec §9): a re-run we cannot bound is
+    not started. Set app.state.invalid_policy directly rather than writing a
+    malformed policy.yaml to disk -- test_get_work_item_survives_an_invalid_policy
+    (tests/test_api_board.py) mutates app.state the same way, for the same
+    reason: it isolates the one code path under test from startup.py's parsing."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        client.app.state.invalid_policy = ["boom: not a number"]
+        r = client.post("/api/triggers", json={"title": "t", "repo": str(repo)})
+        assert r.status_code == 503
+        assert "policy config invalid" in r.json()["detail"]
