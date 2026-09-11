@@ -633,6 +633,25 @@ class Indexer:
             for r in rows
         ]
 
+    def resolve_attachment_path(self, doc_id: str) -> Path | None:
+        """The absolute on-disk path an `attachment:{work_item_id}:{kind}` id
+        names — worktree-first, same lookup `_synthesize_attachment_doc` uses
+        for content, so `open_document` (Kraft-2jy6) points an editor at the
+        file that actually exists pre-merge instead of `doc['repo'] /
+        doc['path']`, which is only ever right after the branch lands."""
+        _, work_item_id, kind = doc_id.split(":", 2)
+        row = self._state.read(
+            lambda c: c.execute(
+                "SELECT repo, attachments FROM work_items WHERE id = ?", (work_item_id,)
+            ).fetchone()
+        )
+        if row is None or not row["attachments"]:
+            return None
+        attachment = next((a for a in json.loads(row["attachments"]) if a["kind"] == kind), None)
+        if attachment is None:
+            return None
+        return self._summary_path(attachment["path"], work_item_id, row["repo"])
+
     def _get_synthetic_attachment_document(self, doc_id: str) -> dict | None:
         """Content fetch for the synthetic `attachment:{work_item_id}:{kind}` ids
         `_synthesize_attachment_doc` hands out — there's no `documents` row to
