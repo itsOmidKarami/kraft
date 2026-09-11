@@ -123,6 +123,41 @@ def test_verdict_resolution(tmp_path, monkeypatch, result, expected):
     asyncio.run(scenario())
 
 
+def test_item_override_reaches_the_gate_review_dispatch(tmp_path, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        "kraft.gate_review._agent.run_agent_task",
+        _fake_agent({"status": "done", "verdict": "approve"}, seen),
+    )
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await Database.open(rd.db)
+        try:
+            await _seed(database, rd, "w1")
+            await database.write(
+                lambda c: store.set_agent_overrides(
+                    c, "w1", json.dumps({"model": "sonnet", "effort": "low"})
+                )
+            )
+            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+            await gate_review.review(
+                database,
+                rd,
+                work_item_id="w1",
+                gate="spec_approval",
+                node=CHAIN["nodes"][0],
+                registry=_registry(),
+                launch=launch,
+            )
+            assert seen["kwargs"]["model"] == "sonnet"
+            assert seen["kwargs"]["effort"] == "low"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 def test_dispatch_is_a_worker_with_no_resume(tmp_path, monkeypatch):
     seen = {}
     monkeypatch.setattr(

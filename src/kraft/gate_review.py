@@ -12,6 +12,7 @@ so that a human's escalation agent *can* act.
 
 from __future__ import annotations
 
+import json
 import uuid
 
 from kraft import events, executor
@@ -103,6 +104,10 @@ async def review(
         launch.repo_entry,
         launch.steering_dir,
         skills_dir=launch.skills_dir,
+        # Uniform with every other dispatch (executor._dispatch) -- an item
+        # marked cheap stays cheap for its gate reviews too (Kraft-ui79: no
+        # per-gate floor).
+        item_override=json.loads(row["agent_overrides"]) if row["agent_overrides"] else None,
     )
     status = await _agent.run_agent_task(
         db,
@@ -114,6 +119,7 @@ async def review(
         command=inv.command,
         profile=inv.profile,
         model=inv.model,
+        effort=inv.effort,
         deny_tools=inv.deny_tools,
         steering_texts=inv.steering_texts,
         task_instruction=task_instruction,
