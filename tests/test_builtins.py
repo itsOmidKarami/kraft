@@ -1178,6 +1178,142 @@ def test_refresh_worktree_base_rebases_and_returns_new_head(tmp_path):
     asyncio.run(scenario())
 
 
+def _repo_with_origin(tmp_path):
+    """`make_repo` pushed to a bare `origin`, plus a second clone standing in for
+    everyone else -- what lands through it reaches origin but not `repo`."""
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", "-q", "-b", "main", str(origin)], check=True)
+    repo = make_repo(tmp_path)
+    _git(repo, "remote", "add", "origin", str(origin))
+    _git(repo, "push", "-q", "-u", "origin", "main")
+    other = tmp_path / "other"
+    subprocess.run(["git", "clone", "-q", str(origin), str(other)], check=True)
+    _git(other, "config", "user.email", "o@o")
+    _git(other, "config", "user.name", "o")
+    return repo, other
+
+
+def _land_upstream(other, name):
+    (other / name).write_text("landed upstream\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", f"upstream {name}")
+    _git(other, "push", "-q", "origin", "main")
+    return git_read(other, "rev-parse", "HEAD")
+
+
+def test_ensure_worktree_forks_from_origin_when_the_local_checkout_is_behind(tmp_path):
+    # Kraft-k647: the connected repo's checkout is only as fresh as its owner's
+    # last pull, and Kraft merges on the forge -- forking from it started every
+    # item behind the branch its MR targets.
+    repo, other = _repo_with_origin(tmp_path)
+    upstream = _land_upstream(other, "upstream.txt")
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            worktree = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id="w1"
+            )
+            assert (worktree / "upstream.txt").is_file()
+            assert _base_ref(database) == upstream
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_refresh_worktree_base_rebases_onto_origin_when_the_local_checkout_is_behind(tmp_path):
+    # Kraft-k647: against the stale local HEAD this answered "nothing to
+    # rebase" -- the branch already contained it -- on every pre_mr_rebase.
+    repo, other = _repo_with_origin(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            worktree = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id="w1"
+            )
+            branch = store.branch_for(
+                database.read(
+                    lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
+                )
+            )
+            (worktree / "worktree_work.txt").write_text("done in the worktree\n")
+            _git(worktree, "add", "-A")
+            _git(worktree, "commit", "-m", "worktree work")
+            upstream = _land_upstream(other, "upstream.txt")
+
+            result = await kraft_builtins.refresh_worktree_base(worktree, repo, branch)
+            assert result == upstream
+            assert (worktree / "upstream.txt").is_file()
+            assert (worktree / "worktree_work.txt").is_file()
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_refresh_worktree_base_falls_back_to_local_head_when_origin_is_unreachable(tmp_path):
+    # Offline, or credentials the server process cannot reach: the rebase still
+    # happens against what the checkout has, rather than failing the resume.
+    repo = make_repo(tmp_path)
+    _git(repo, "remote", "add", "origin", str(tmp_path / "gone.git"))
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            worktree = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id="w1"
+            )
+            branch = store.branch_for(
+                database.read(
+                    lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
+                )
+            )
+            (repo / "moved.txt").write_text("moved on\n")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "moved on")
+            local = git_read(repo, "rev-parse", "HEAD")
+
+            result = await kraft_builtins.refresh_worktree_base(worktree, repo, branch)
+            assert result == local
+            assert (worktree / "moved.txt").is_file()
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_upstream_head_falls_back_to_the_last_fetched_origin_ref_before_local_head(tmp_path):
+    # A failed fetch still leaves the last good view of origin, and that -- not
+    # whatever the checkout has on it, unpushed commits or another branch -- is
+    # what the MR targets.
+    repo, _ = _repo_with_origin(tmp_path)
+    fetched = git_read(repo, "rev-parse", "origin/main")
+    (repo / "local_only.txt").write_text("never pushed\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "local only")
+    _git(repo, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+
+    assert asyncio.run(kraft_builtins.upstream_head(repo)) == fetched
+
+
+def test_upstream_head_sees_origin_even_when_the_fetch_refspec_skips_the_default(tmp_path):
+    # A --single-branch clone of some other branch: a bare `fetch origin main`
+    # would not update refs/remotes/origin/main, and the tip read back is stale.
+    repo, other = _repo_with_origin(tmp_path)
+    _git(repo, "config", "remote.origin.fetch", "+refs/heads/other:refs/remotes/origin/other")
+    upstream = _land_upstream(other, "upstream.txt")
+
+    assert asyncio.run(kraft_builtins.upstream_head(repo)) == upstream
+
+
 def test_refresh_worktree_base_raises_and_aborts_on_conflict(tmp_path):
     repo = make_repo(tmp_path)
 

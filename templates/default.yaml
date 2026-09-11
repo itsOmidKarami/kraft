@@ -20,7 +20,8 @@ nodes:
     tasks: [on.test.run, on.review.local.run]
     fix_loop: verify_fix_loop
     gate_after: null
-  # Rebases onto repo's current HEAD right before the MR opens, so an item
+  # Rebases onto origin's default branch (freshly fetched; the local checkout's
+  # HEAD when there is no origin) right before the MR opens, so an item
   # that ran straight through the chain -- no pause, no /retry -- doesn't
   # open one that's silently commits behind (Kraft-4bgg). If the rebase
   # actually moves the branch, the chain bounces back to `verify` instead of
