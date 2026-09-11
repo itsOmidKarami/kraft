@@ -242,6 +242,32 @@ def _detect_forge(remote: str) -> tuple[str | None, str | None]:
     return None, None
 
 
+def normalized_repo_root(p: Path) -> Path | None:
+    """`p`'s repo root, with a linked worktree normalized to its main checkout.
+
+    `--show-toplevel` from a linked worktree is the worktree itself, so
+    walking straight up from it would never reach the main checkout a
+    connected repo is registered under — and agents run in worktrees
+    (Kraft-97e, Kraft-tc33). `--git-common-dir` points at the main checkout's
+    `.git`, whose parent is that checkout. In an ordinary checkout it is
+    `<repo>/.git`, so this is not a worktree special case and the answer is
+    unchanged.
+
+    The `.git` name guard is load-bearing: a submodule's common dir is
+    `<super>/.git/modules/<path>`, whose parent is not a repo at all. Anything
+    that is not a plain `.git` directory stays on `--show-toplevel`.
+
+    None when `p` is not inside a git repository at all.
+    """
+    toplevel = git_read(p, "rev-parse", "--show-toplevel", expected_failure=True)
+    if toplevel is None:
+        return None
+    common = git_read(
+        p, "rev-parse", "--path-format=absolute", "--git-common-dir", expected_failure=True
+    )
+    return Path(common).parent if common and Path(common).name == ".git" else Path(toplevel)
+
+
 def probe_repo(path: str | Path) -> dict:
     """What Kraft can tell about a candidate repo without changing anything.
 
@@ -252,22 +278,9 @@ def probe_repo(path: str | Path) -> dict:
     p = Path(path).expanduser()
     if not p.is_dir():
         raise ConfigError(f"{p} is not a directory")
-    toplevel = git_read(p, "rev-parse", "--show-toplevel", expected_failure=True)
-    if toplevel is None:
+    root = normalized_repo_root(p)
+    if root is None:
         raise ConfigError(f"{p} is not a git repository")
-    # A linked worktree's `--show-toplevel` is the worktree, so probing from one
-    # would register it as a repo of its own — and agents run in worktrees
-    # (Kraft-97e). The common git dir points at the main checkout's `.git`, whose
-    # parent is that checkout. In an ordinary checkout it is `<repo>/.git`, so
-    # this is not a worktree special case and the answer is unchanged.
-    #
-    # The `.git` name guard is load-bearing: a submodule's common dir is
-    # `<super>/.git/modules/<path>`, whose parent is not a repo at all. Anything
-    # that is not a plain `.git` directory stays on `--show-toplevel`.
-    common = git_read(
-        p, "rev-parse", "--path-format=absolute", "--git-common-dir", expected_failure=True
-    )
-    root = Path(common).parent if common and Path(common).name == ".git" else Path(toplevel)
 
     submodules: list[str] = []
     gitmodules = root / ".gitmodules"

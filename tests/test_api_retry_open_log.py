@@ -10,7 +10,13 @@ import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-from support.harness import _git, fake_templates_dir, isolated_bd, make_repo
+from support.harness import (
+    _git,
+    fake_templates_dir,
+    isolated_bd,
+    make_repo,
+    make_repo_with_engineering,
+)
 
 from kraft import logs
 
@@ -358,6 +364,42 @@ def test_open_document_launches_the_named_editor(tmp_path, monkeypatch):
         assert r.status_code == 200
         assert r.json()["editor"] == "code"
         assert launched == [["/usr/bin/code", str(Path(doc["repo"]) / doc["path"])]]
+
+
+def test_open_document_on_an_attachment_resolves_the_worktree_not_the_repo(tmp_path, monkeypatch):
+    """Kraft-2jy6: a synthetic `attachment:{id}:{kind}` doc's file lives on
+    the item's own branch, not the connected repo's checkout — `open_document`
+    must resolve it the same worktree-first way `GET /documents/{id}` already
+    does, not `doc['repo'] / doc['path']`."""
+    repo = make_repo_with_engineering(tmp_path, {".engineering/plans/p.md": "# Repo copy\nold\n"})
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={
+                "repo": str(repo),
+                "title": "carry the plan over",
+                "chain_template": "quick-task",
+                "autostart": False,
+                "attachments": [{"kind": "plan", "path": ".engineering/plans/p.md"}],
+            },
+        ).json()["id"]
+
+        # The worktree copy is what a running item would have on its own
+        # branch -- newer than what's on the registered repo's checkout, so a
+        # resolution that fell back to `doc['repo'] / doc['path']` would open
+        # the stale file instead.
+        st = client.app.state
+        wt = st.run_dirs.worktrees / wid / ".engineering" / "plans"
+        wt.mkdir(parents=True)
+        (wt / "p.md").write_text("# Worktree copy\nnew\n")
+
+        doc_id = f"attachment:{wid}:plan"
+        assert client.get(f"/api/documents/{doc_id}").json()["content"] == "# Worktree copy\nnew\n"
+
+        launched = _spy_on_launches(monkeypatch)
+        r = client.post(f"/api/documents/{doc_id}/open", json={"editor": "code"})
+        assert r.status_code == 200
+        assert launched == [["/usr/bin/code", str((wt / "p.md").resolve())]]
 
 
 def test_open_document_refuses_a_document_with_no_file_in_the_repo(tmp_path, monkeypatch):
