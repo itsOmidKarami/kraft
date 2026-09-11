@@ -12,6 +12,7 @@ import { EventTimeline } from "../components/EventTimeline";
 import { ARTIFACT_LABELS, Gate } from "../components/Gate";
 import { LinkedDocuments } from "../components/LinkedDocuments";
 import { PausedCard } from "../components/PausedCard";
+import { SkipControl } from "../components/SkipControl";
 import { ChainBar, Row, RowState, RowText, StatusGlyph, Tabs } from "../components/ui";
 import { elapsed, repoName, statusWord, tokens, usd } from "../format";
 import { useStore } from "../store";
@@ -578,6 +579,7 @@ export function WorkItemDetail() {
             <ChatText size={14} />
             Steer
           </button>
+          <SkipControl itemId={item.id} disabled={item.status !== "active"} />
           <span className="control-hint">
             {pauseErr ?? "steer unlocks once paused"}
           </span>

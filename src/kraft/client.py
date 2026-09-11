@@ -770,6 +770,17 @@ async def retry(steer: str | None = None, work_item_id: str | None = None) -> di
     return await _act(f"/work-items/{target}/retry", payload)
 
 
+async def skip(note: str | None = None, work_item_id: str | None = None) -> dict:
+    """Advance past the current node or pending gate without running or
+    approving it. The one door that bypasses a step outright, rather than
+    retrying, resuming, or approving/rejecting it — works whether the item
+    is running, paused, or stopped for a human.
+    """
+    target = _forbid_self_action(work_item_id)
+    payload = {"note": note.strip()} if note and note.strip() else {}
+    return await _act(f"/work-items/{target}/skip", payload)
+
+
 async def escalate(message: str, work_item_id: str | None = None) -> dict:
     """Send `message` into a work item's escalation thread, starting one if
     none exists yet. Only a `needs_human` item has this door — retry/resume

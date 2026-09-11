@@ -37,6 +37,11 @@ describe("PausedCard", () => {
     expect(screen.getByText(/has no agent to steer/i)).toBeTruthy();
   });
 
+  it("offers Skip alongside Resume", () => {
+    render(<PausedCard item={started} sessions={[session]} />);
+    expect(screen.getByRole("button", { name: /skip/i })).toBeInTheDocument();
+  });
+
   it("starting a never-run item resumes it through the same endpoint", async () => {
     const spy = vi
       .spyOn(api, "resumeWorkItem")
