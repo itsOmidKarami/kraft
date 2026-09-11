@@ -45,6 +45,16 @@ _FIX_PROMPT = (
     "pass. Make no unrelated changes. Failing hook points: {failed}"
 )
 
+#: A cycle can also open with no task failure at all -- a review task that
+#: exits clean but reports an eligible-severity finding (`enters_loop` is
+#: `eligible` OR `blind_failures`). `_FIX_PROMPT`'s "checks ... failed" with a
+#: blank "Failing hook points:" would lie about that; this is what fires
+#: instead when `failed` is empty.
+_FIX_PROMPT_FINDINGS_ONLY = (
+    "A review of node {node_id} reported findings that need fixing. Fix the "
+    "code so they no longer apply. Make no unrelated changes."
+)
+
 #: Appended when the failures came with structured findings. Repeats lead: an
 #: agent told it already tried and the reviewer disagreed behaves differently
 #: from one seeing the finding fresh.
@@ -1260,7 +1270,7 @@ async def _walk_node(
         blind_failures = [t for t in failed if t not in reported]
         enters_loop = bool(eligible) or bool(blind_failures)
 
-        if verdict == "ok" or not enters_loop:
+        if not enters_loop:
             await db.write(lambda c: store.complete_node(c, work_item_id, node["id"]))
             return "ok"
 
@@ -1325,7 +1335,11 @@ async def _walk_node(
         await db.write(
             lambda c, payload=payload: events.append(c, work_item_id, "fix_cycle_started", payload)
         )
-        instruction = _FIX_PROMPT.format(node_id=node["id"], failed=", ".join(failed))
+        instruction = (
+            _FIX_PROMPT.format(node_id=node["id"], failed=", ".join(failed))
+            if failed
+            else _FIX_PROMPT_FINDINGS_ONLY.format(node_id=node["id"])
+        )
         if eligible:
             repeats = set(previous_prints or [])
             instruction += _FIX_FINDINGS.format(findings=_format_findings(eligible, repeats))
