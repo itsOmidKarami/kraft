@@ -76,6 +76,50 @@ def _commit_paths(worktree: Path, paths: list[str], message: str) -> None:
             )
 
 
+def restore_branch(worktree: Path, branch: str) -> None:
+    """Force the worktree back onto `branch` if an agent task left it
+    somewhere else, aborting any in-progress merge first (Kraft-v5qd).
+
+    An agent has a real shell and can check out whatever it likes to
+    investigate something -- a diagnostic test-merge against `main` to look
+    at a conflict, say. Nothing enforces that it checks back out afterward,
+    and a merge left mid-conflict when the agent's turn just ends (budget,
+    a crash, the one-pass skills that only run once) strands the worktree:
+    every task after it resolves the merge request from *this* branch, and a
+    diagnostic branch has none. `commit_stragglers` runs right after this in
+    the agent-kind dispatch, precisely so any straggler ends up on the
+    branch the item actually owns rather than committed onto whatever the
+    agent happened to leave checked out.
+
+    Best effort throughout, like `commit_stragglers`: a `restore_branch`
+    that could not recover is a worktree already too broken for a log line
+    to fix, and the failure it hides here surfaces the same way it always
+    did -- the next node's own git command refuses on the same tree.
+    """
+    with main_ignore_args(worktree) as ignore_args:
+
+        def git(*args: str) -> subprocess.CompletedProcess:
+            return subprocess.run(
+                ["git", *ignore_args, *args], cwd=str(worktree), capture_output=True, text=True
+            )
+
+        current = git("rev-parse", "--abbrev-ref", "HEAD")
+        if current.returncode != 0 or current.stdout.strip() == branch:
+            return
+        logger.warning(
+            "worktree %s left on %r instead of %r after an agent task; restoring",
+            worktree,
+            current.stdout.strip(),
+            branch,
+        )
+        git("merge", "--abort")  # no-op, exit nonzero, if no merge is in progress
+        checked_out = git("checkout", "-f", branch)
+        if checked_out.returncode != 0:
+            logger.warning(
+                "could not restore %s to %r: %s", worktree, branch, checked_out.stderr.strip()
+            )
+
+
 def _copy_attachments(
     repo: Path, worktree: Path, attachments: list[dict], work_item_id: str
 ) -> None:

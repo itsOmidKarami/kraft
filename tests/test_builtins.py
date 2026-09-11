@@ -280,6 +280,70 @@ def test_commit_paths_stages_and_commits_only_the_named_paths(tmp_path):
     assert again == head, "a second call made an empty commit"
 
 
+def test_restore_branch_recovers_from_a_stranded_mid_merge_diagnostic_branch(tmp_path):
+    """Kraft-v5qd: an agent diagnosing a conflict checked out a scratch
+    branch, ran a test merge that hit real conflicts, and never checked back
+    out -- the worktree sat on the scratch branch, mid-merge, with the
+    item's own branch untouched underneath. `restore_branch` is the net for
+    exactly that, whatever left the worktree there."""
+    repo = make_repo(tmp_path)
+    readme = repo / "README.md"
+
+    _git(repo, "checkout", "-b", "kraft/w1")
+    readme.write_text("item's own change\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "item work")
+    item_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout
+
+    _git(repo, "checkout", "main")
+    readme.write_text("diverging main change\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "main diverges")
+
+    # An agent's ad-hoc diagnosis: branch off the item's own branch, try a
+    # merge, hit a conflict, and stop mid-merge without cleaning up.
+    _git(repo, "checkout", "kraft/w1")
+    _git(repo, "checkout", "-b", "_conflict_test")
+    subprocess.run(["git", "merge", "main"], cwd=repo, capture_output=True, text=True)
+    assert any("README.md" in line for line in _porcelain(repo)), (
+        "the scenario did not actually conflict"
+    )
+
+    kraft_builtins.restore_branch(repo, "kraft/w1")
+
+    current = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert current == "kraft/w1"
+    assert _porcelain(repo) == [], "the aborted merge left the tree dirty"
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout
+    assert head == item_head, "the item's own commit must be untouched"
+
+
+def test_restore_branch_is_a_no_op_when_already_on_the_right_branch(tmp_path):
+    repo = make_repo(tmp_path)
+    _git(repo, "checkout", "-b", "kraft/w1")
+
+    kraft_builtins.restore_branch(repo, "kraft/w1")
+
+    current = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert current == "kraft/w1"
+
+
 def test_an_attached_document_is_committed_in_the_worktree(tmp_path):
     """Kraft-8iw6. An uncommitted attachment lands in the worktree as an
     untracked file that no agent changed and so no agent commits, and
