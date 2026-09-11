@@ -201,6 +201,78 @@ test("Analytics stacks by-node and by-repo into cards with no horizontal overflo
   expect(await overflowsX(page.locator(".analytics-body"))).toBe(false);
   // the head row is redundant once every cell carries its own label
   await expect(page.locator(".node-head")).toBeHidden();
+  // stop-reasons cards (m15): stacked, not the desktop 3-column row
+  const stopRows = page.locator(".stop-row");
+  if ((await stopRows.count()) > 0) {
+    expect(await overflowsX(stopRows.first())).toBe(false);
+  }
+});
+
+test("m11: Access and Notifications fit a phone in one column, allowed-hosts tags don't overflow", async ({
+  page,
+}) => {
+  await page.goto("/settings/access");
+  await expect(page.locator(".settings-section").first()).toBeVisible({ timeout: 30_000 });
+  await page.getByPlaceholder(/add a host or ip/i).fill("m11.kraft.local");
+  await page.getByPlaceholder(/add a host or ip/i).press("Enter");
+  await expect(page.locator(".chip", { hasText: "m11.kraft.local" })).toBeVisible({
+    timeout: 15_000,
+  });
+  expect(await overflowsX(page.locator(".host-tags"))).toBe(false);
+  await page.screenshot({ path: `${SHOTS}/phone-10-access.png`, fullPage: true });
+
+  await page.goto("/settings/notify");
+  await expect(page.locator(".settings-section").first()).toBeVisible({ timeout: 15_000 });
+  expect(await overflowsX(page.locator(".settings-body"))).toBe(false);
+  await page.screenshot({ path: `${SHOTS}/phone-11-notify.png`, fullPage: true });
+});
+
+test("m15: Analytics, Auto-intake and Appearance stack with the KPIs 2-up", async ({ page }) => {
+  await createItem(page, "phone m15", "quick-task");
+  await page.goto("/analytics");
+  await expect(page.locator(".kpi").first()).toBeVisible({ timeout: 60_000 });
+  const kpiBox = await page.locator(".kpis").boundingBox();
+  const firstKpi = await page.locator(".kpi").first().boundingBox();
+  const secondKpi = await page.locator(".kpi").nth(1).boundingBox();
+  // 2-up: the second KPI is roughly beside the first, not stacked below it —
+  // its top sits within the first KPI's own height, not a full row down.
+  if (kpiBox && firstKpi && secondKpi) {
+    expect(Math.abs(secondKpi.y - firstKpi.y)).toBeLessThan(firstKpi.height);
+  }
+
+  await page.goto("/settings/intake");
+  await expect(page.locator(".settings-section").first()).toBeVisible({ timeout: 15_000 });
+  expect(await overflowsX(page.locator(".settings-body"))).toBe(false);
+
+  await page.goto("/settings/appearance");
+  await expect(page.getByText("Palette", { exact: true })).toBeVisible({ timeout: 15_000 });
+  expect(await overflowsX(page.locator(".settings-body"))).toBe(false);
+  await page.screenshot({ path: `${SHOTS}/phone-12-appearance.png`, fullPage: true });
+});
+
+test("m16: Login renders on a phone and the error state fits without horizontal scroll", async ({
+  page,
+}) => {
+  // Auth is off for a loopback client (perimeter.py), so no password brings
+  // the login screen up here. Answer the API with 401 instead: the app routes
+  // to Login on any 401, and /api/login's detail is the error it shows.
+  await page.route("**/api/**", (route) =>
+    route.fulfill({
+      status: 401,
+      contentType: "application/json",
+      body: JSON.stringify({
+        detail: route.request().url().endsWith("/api/login") ? "Wrong password." : "authentication required",
+      }),
+    }),
+  );
+  await page.goto("/");
+  await expect(page.locator(".login-form")).toBeVisible({ timeout: 15_000 });
+  expect(await overflowsX(page.locator(".login-form"))).toBe(false);
+  await page.getByLabel("Password").fill("wrong");
+  await page.getByRole("button", { name: /sign in/i }).click();
+  await expect(page.getByText("Wrong password.")).toBeVisible({ timeout: 15_000 });
+  expect(await overflowsX(page.locator(".login-form"))).toBe(false);
+  await page.screenshot({ path: `${SHOTS}/phone-13-login.png`, fullPage: true });
 });
 
 test("Chains and Steering are editable on a phone, not an open-on-desktop notice", async ({ page }) => {

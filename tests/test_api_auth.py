@@ -5,6 +5,8 @@ from __future__ import annotations
 from support.api import _client
 from support.harness import fake_templates_dir, make_repo
 
+from kraft import auth as auth_mod
+
 
 def test_health_ok_and_degraded(tmp_path, monkeypatch):
     # a templates dir with one bad-hook template
@@ -39,6 +41,43 @@ def test_health_reports_port_and_version(tmp_path, monkeypatch):
         h = client.get("/api/health").json()
         assert isinstance(h["port"], int)
         assert isinstance(h["version"], str) and h["version"]
+
+
+def test_login_rejects_with_the_new_copy(tmp_path, monkeypatch):
+    with _client(tmp_path, monkeypatch, peer=("10.0.0.5", 54321)) as client:
+        st = client.app.state
+        monkeypatch.setattr(
+            st, "access", {**st.access, "password_hash": auth_mod.hash_password("hunter2")}
+        )
+        resp = client.post("/api/login", json={"password": "wrong"})
+        assert resp.status_code == 401
+        assert resp.json()["detail"] == "Wrong password."
+
+
+def test_stay_signed_in_false_sets_a_session_cookie(tmp_path, monkeypatch):
+    with _client(tmp_path, monkeypatch, peer=("10.0.0.5", 54321)) as client:
+        st = client.app.state
+        monkeypatch.setattr(
+            st, "access", {**st.access, "password_hash": auth_mod.hash_password("hunter2")}
+        )
+        resp = client.post("/api/login", json={"password": "hunter2", "stay_signed_in": False})
+        set_cookie = resp.headers["set-cookie"]
+        assert "Max-Age" not in set_cookie
+
+
+def test_stay_signed_in_true_sets_a_persistent_cookie(tmp_path, monkeypatch):
+    with _client(tmp_path, monkeypatch, peer=("10.0.0.5", 54321)) as client:
+        st = client.app.state
+        monkeypatch.setattr(
+            st, "access", {**st.access, "password_hash": auth_mod.hash_password("hunter2")}
+        )
+        resp = client.post("/api/login", json={"password": "hunter2", "stay_signed_in": True})
+        assert "Max-Age" in resp.headers["set-cookie"]
+
+
+def test_health_carries_session_expiry_days(tmp_path, monkeypatch):
+    with _client(tmp_path, monkeypatch) as client:
+        assert "session_expiry_days" in client.get("/api/health").json()
 
 
 def test_post_triggers_requires_auth(tmp_path, monkeypatch):

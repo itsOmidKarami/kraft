@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -69,10 +70,19 @@ class Notifier:
         #: Swapped for an `httpx.MockTransport` under test. `None` is already
         #: what `AsyncClient` means by "use the default transport".
         self._transport: httpx.AsyncBaseTransport | None = None
+        self._last_test: dict | None = None
 
     @property
     def cursor(self) -> int:
         return self._cursor
+
+    @property
+    def last_test(self) -> dict | None:
+        """`{at, status, ms, error}` from the most recent `send_test()` call, or
+        None before the first one. In-memory only, like `_last_sent` — a restart
+        loses it, same as the drain's own coalescing state, and for the same
+        reason: nothing here is a record a human needs kept."""
+        return self._last_test
 
     @property
     def config(self) -> dict:
@@ -282,3 +292,39 @@ class Notifier:
             raise
         except Exception:
             logger.exception("could not record notification_failed for %s", ev["work_item_id"])
+
+    async def send_test(self) -> dict:
+        """`POST /notify/test`: a synchronous one-shot send, unlike `_dispatch`/`_send`
+        which run off the event drain fire-and-forget. Raises `ValueError` if no
+        URL is configured -- the route turns that into a 422."""
+        url = self._config.get("url")
+        if not url:
+            raise ValueError("no webhook URL is set")
+        body = {
+            "work_item_id": None,
+            "title": "Send a test",
+            "type": "test",
+            "gate": None,
+            "url": f"{self._base_url()}",
+        }
+        start = time.monotonic()
+        status: int | None = None
+        error: str | None = None
+        try:
+            async with httpx.AsyncClient(
+                timeout=self._timeout, transport=self._transport
+            ) as client:
+                res = await client.post(url, json=body)
+                status = res.status_code
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 -- same class of failure `_send` already reports
+            error = type(exc).__name__
+        ms = int((time.monotonic() - start) * 1000)
+        self._last_test = {
+            "at": datetime.now(UTC).isoformat(),
+            "status": status,
+            "ms": ms,
+            "error": error,
+        }
+        return self._last_test

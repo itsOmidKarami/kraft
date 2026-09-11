@@ -582,3 +582,60 @@ def test_archive_appends_work_item_archived_event(tmp_path):
 
     evs = [e for e in events.read_after(conn, 0, "w1") if e["type"] == "work_item_archived"]
     assert evs and evs[0]["payload"] == {"by": "you"}
+
+
+def test_recent_auto_pickups_excludes_manually_created_items(tmp_path):
+    conn = db._connect(tmp_path / "s.db")
+    db.migrate(conn)
+    store.create_work_item(
+        conn,
+        id="w1",
+        bead_id=None,
+        title="manual",
+        repo="/a",
+        chain_template="default",
+        chain_definition="{}",
+    )
+    store.create_work_item(
+        conn,
+        id="w2",
+        bead_id="B-1",
+        title="auto",
+        repo="/a",
+        chain_template="default",
+        chain_definition="{}",
+        source="auto_intake",
+        bead_priority=2,
+    )
+    conn.commit()
+    pickups = store.recent_auto_pickups(conn)
+    assert [p["work_item_id"] for p in pickups] == ["w2"]
+    assert pickups[0]["priority"] == 2
+
+
+def test_last_auto_pickup_at_only_tracks_auto_intake_repos(tmp_path):
+    conn = db._connect(tmp_path / "s.db")
+    db.migrate(conn)
+    store.create_work_item(
+        conn,
+        id="w1",
+        bead_id="B-1",
+        title="auto",
+        repo="/a",
+        chain_template="default",
+        chain_definition="{}",
+        source="auto_intake",
+    )
+    store.create_work_item(
+        conn,
+        id="w2",
+        bead_id=None,
+        title="manual",
+        repo="/b",
+        chain_template="default",
+        chain_definition="{}",
+    )
+    conn.commit()
+    last = store.last_auto_pickup_at(conn)
+    assert "/a" in last
+    assert "/b" not in last

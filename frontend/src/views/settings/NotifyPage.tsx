@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import * as api from "../../api";
 import { Switch } from "../../components/ui";
+import { ago } from "../../format";
 import type { Notify } from "../../types";
 import { PageHead, SaveRow, useResource } from "./shared";
+import "./notify.css";
 
 /* ── 5f notifications ─────────────────────────────────────────────────────── */
 
@@ -24,6 +26,24 @@ export function NotifyPage() {
   const [message, setMessage] = useState<{ where: string; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const notify: Notify | null = value;
+
+  const [lastTest, setLastTest] = useState(notify?.last_test ?? null);
+  const [testBusy, setTestBusy] = useState(false);
+
+  useEffect(() => {
+    if (notify) setLastTest(notify.last_test);
+  }, [notify]);
+
+  const sendTest = async () => {
+    setTestBusy(true);
+    try {
+      setLastTest(await api.testNotify());
+    } catch (e) {
+      setMessage({ where: "test", text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setTestBusy(false);
+    }
+  };
 
   const put = async (body: Parameters<typeof api.putNotify>[0], where: string) => {
     setBusy(true);
@@ -93,6 +113,24 @@ export function NotifyPage() {
               message={message?.where === "url" ? message.text : null}
               hint="writes notify.yaml, 0600"
             />
+            <div className="save-row">
+              <button
+                className="btn btn-ghost"
+                disabled={testBusy || !notify.url_set}
+                onClick={sendTest}
+              >
+                Send a test
+              </button>
+              <span className="save-hint">
+                {message?.where === "test"
+                  ? message.text
+                  : lastTest
+                    ? lastTest.error
+                      ? `last attempt ${ago(lastTest.at)} · failed · ${lastTest.error}`
+                      : `last delivered ${ago(lastTest.at)} · ${lastTest.status} ${lastTest.status && lastTest.status < 400 ? "OK" : ""} · ${lastTest.ms} ms`
+                    : "never sent"}
+              </span>
+            </div>
             {notify.url_set && (
               <div className="save-row">
                 {/* No `data-danger`: the only rule for it is
@@ -176,6 +214,23 @@ export function NotifyPage() {
               Progress events are deliberately not offered. A notifier that fires on progress
               gets muted, and a muted channel is the same as no channel at all.
             </p>
+          </section>
+
+          <section className="settings-section">
+            <h6>Preview</h6>
+            <div className="notify-preview">
+              <span className="notify-preview-icon">K</span>
+              <div>
+                <div className="notify-preview-title">Kraft · needs you</div>
+                <div className="notify-preview-body">
+                  Add retry budget to the intake poller — plan_approval is waiting (repo-a, 12
+                  min)
+                </div>
+                <div className="notify-preview-link">
+                  {base || "192.168.1.20:8765"}/work-items/wi_01HX3M2
+                </div>
+              </div>
+            </div>
           </section>
         </>
       )}

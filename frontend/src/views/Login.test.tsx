@@ -18,16 +18,30 @@ describe("Login", () => {
     render(<Login onSignedIn={onSignedIn} />);
     await userEvent.type(screen.getByLabelText("Password"), "hunter2");
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
-    expect(spy).toHaveBeenCalledWith("hunter2");
+    expect(spy).toHaveBeenCalledWith("hunter2", true);
     expect(onSignedIn).toHaveBeenCalled();
   });
 
-  it("says the password was wrong and lets the user try again", async () => {
-    vi.spyOn(api, "login").mockRejectedValue(new Error("wrong password"));
+  it("says the password was wrong with the new copy", async () => {
+    vi.spyOn(api, "login").mockRejectedValue(new Error("Wrong password."));
     render(<Login onSignedIn={() => {}} />);
     await userEvent.type(screen.getByLabelText("Password"), "nope");
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
-    expect(await screen.findByText("wrong password")).toHaveClass("form-error");
+    expect(await screen.findByText("Wrong password.")).toHaveClass("form-error");
     expect(screen.getByRole("button", { name: /sign in/i })).toBeEnabled();
+  });
+
+  it("shows the configured session length next to stay signed in", () => {
+    render(<Login sessionExpiryDays={7} onSignedIn={() => {}} />);
+    expect(screen.getByText(/stay signed in · 7 days/)).toBeInTheDocument();
+  });
+
+  it("sends stay_signed_in as false when the switch is off", async () => {
+    const spy = vi.spyOn(api, "login").mockResolvedValue({ ok: true });
+    render(<Login onSignedIn={() => {}} />);
+    await userEvent.click(screen.getByRole("switch", { name: /stay signed in/i }));
+    await userEvent.type(screen.getByLabelText("Password"), "hunter2");
+    await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
+    expect(spy).toHaveBeenCalledWith("hunter2", false);
   });
 });

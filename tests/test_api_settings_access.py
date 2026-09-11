@@ -26,11 +26,20 @@ def client(tmp_path, monkeypatch, templates_dir):
 
 
 def test_get_theme_defaults_to_nocturne_dark(client):
-    assert client.get("/api/theme").json() == {"palette": "nocturne", "mode": "dark"}
+    body = client.get("/api/theme").json()
+    assert body["palette"] == "nocturne"
+    assert body["mode"] == "dark"
+    assert body["density"] == "compact"
+    assert body["board"] == {"group_by": "status", "show_done": 5, "open_in": "peek"}
 
 
 def test_put_theme_round_trips_through_the_yaml(client, templates_dir):
-    body = {"palette": "forest", "mode": "light"}
+    body = {
+        "palette": "forest",
+        "mode": "light",
+        "density": "comfortable",
+        "board": {"group_by": "repo", "show_done": 10, "open_in": "full"},
+    }
     assert client.put("/api/theme", json=body).status_code == 200
     assert client.get("/api/theme").json() == body
     assert yaml.safe_load((templates_dir / "theme.yaml").read_text()) == body
@@ -44,6 +53,36 @@ def test_put_theme_rejects_an_unknown_palette(client):
 
 def test_put_theme_rejects_an_unknown_mode(client):
     resp = client.put("/api/theme", json={"palette": "nocturne", "mode": "twilight"})
+    assert resp.status_code == 422
+
+
+def test_put_theme_defaults_density_and_board_when_omitted(client):
+    resp = client.put("/api/theme", json={"palette": "nocturne", "mode": "dark"})
+    assert resp.json()["density"] == "compact"
+    assert resp.json()["board"] == {"group_by": "status", "show_done": 5, "open_in": "peek"}
+
+
+def test_get_theme_fills_defaults_for_a_pre_existing_file(client, templates_dir):
+    # An operator's theme.yaml from before this change — no density/board keys.
+    (templates_dir / "theme.yaml").write_text("palette: rose\nmode: light\n")
+    body = client.get("/api/theme").json()
+    assert body == {
+        "palette": "rose",
+        "mode": "light",
+        "density": "compact",
+        "board": {"group_by": "status", "show_done": 5, "open_in": "peek"},
+    }
+
+
+def test_put_theme_rejects_an_unknown_group_by(client):
+    resp = client.put(
+        "/api/theme",
+        json={
+            "palette": "nocturne",
+            "mode": "dark",
+            "board": {"group_by": "priority", "show_done": 5, "open_in": "peek"},
+        },
+    )
     assert resp.status_code == 422
 
 

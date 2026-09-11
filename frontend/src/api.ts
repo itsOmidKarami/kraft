@@ -320,6 +320,7 @@ export const putAccess = (body: {
   port?: number;
   password?: string;
   session_expiry_days?: number;
+  allowed_hosts?: string[];
 }) => req<Access>("/access", json("PUT", body));
 
 export const getNotify = () => req<Notify>("/notify");
@@ -329,12 +330,18 @@ export const putNotify = (body: {
   base_url?: string;
   events?: string[];
 }) => req<Notify>("/notify", json("PUT", body));
+export const testNotify = () =>
+  req<{ at: string; status: number | null; ms: number | null; error: string | null }>(
+    "/notify/test",
+    { method: "POST" },
+  );
 
 export const getAuthSessions = () => req<{ sessions: AuthSession[] }>("/sessions");
 export const revokeSession = (id: string) =>
   req<void>(`/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
 
-export const login = (password: string) => req<{ ok: true }>("/login", json("POST", { password }));
+export const login = (password: string, stay_signed_in = true) =>
+  req<{ ok: true }>("/login", json("POST", { password, stay_signed_in }));
 export const logout = () => req<void>("/logout", { method: "POST" });
 
 export const searchBeads = (q: string) =>

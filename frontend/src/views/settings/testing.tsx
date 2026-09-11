@@ -35,7 +35,12 @@ export const policy = {
   rate_limit_retries: 5,
 };
 
-export const theme: Theme = { palette: "nocturne", mode: "dark" };
+export const theme: Theme = {
+  palette: "nocturne",
+  mode: "dark",
+  density: "compact",
+  board: { group_by: "status", show_done: 5, open_in: "peek" },
+};
 
 export const access = {
   bind: "127.0.0.1",
@@ -43,6 +48,7 @@ export const access = {
   session_expiry_days: 7,
   password_set: false,
   auth_required: false,
+  allowed_hosts: [],
 };
 
 /** Every mock a Settings page might need, at a state that renders cleanly.
@@ -75,6 +81,8 @@ export function setupSettingsMocks() {
     max_concurrent: 1,
     priority_ceiling: 2,
     repos: [],
+    repo_pickups: {},
+    recent_pickups: [],
   });
   vi.spyOn(api, "getAccess").mockResolvedValue(access);
   vi.spyOn(api, "getAuthSessions").mockResolvedValue({ sessions: [] });
@@ -83,6 +91,7 @@ export function setupSettingsMocks() {
     url_set: false,
     base_url: null,
     events: ["gate_requested", "work_item_needs_human"],
+    last_test: null,
   });
 }
 

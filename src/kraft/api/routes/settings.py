@@ -17,6 +17,7 @@ from kraft import intake as intake_mod
 from kraft import policy as policy_mod
 from kraft import steering as steering_mod
 from kraft import store
+from kraft.adapters import beads
 from kraft.api import api_router, deps, perimeter
 from kraft.templates import (
     CONFIG_FILES,
@@ -233,18 +234,31 @@ async def put_policy(body: PolicyBody, request: Request):
 
 
 PALETTE_IDS = frozenset({"nocturne", "rose", "forest", "amber", "slate"})
-THEME_DEFAULT: dict = {"palette": "nocturne", "mode": "dark"}
+THEME_DEFAULT: dict = {
+    "palette": "nocturne",
+    "mode": "dark",
+    "density": "compact",
+    "board": {"group_by": "status", "show_done": 5, "open_in": "peek"},
+}
+
+
+class BoardPrefs(BaseModel):
+    group_by: Literal["status", "repo", "template"] = "status"
+    show_done: int = Field(default=5, ge=1)
+    open_in: Literal["peek", "full"] = "peek"
 
 
 class ThemeBody(BaseModel):
     palette: str
     mode: Literal["light", "dark", "system"]
+    density: Literal["compact", "comfortable"] = "compact"
+    board: BoardPrefs = Field(default_factory=BoardPrefs)
 
 
 @api_router.get("/theme")
 async def get_theme(request: Request):
     st = request.app.state
-    return config_mod.read_yaml(st.templates_dir / "theme.yaml", THEME_DEFAULT)
+    return {**THEME_DEFAULT, **config_mod.read_yaml(st.templates_dir / "theme.yaml", THEME_DEFAULT)}
 
 
 @api_router.put("/theme")
@@ -252,7 +266,7 @@ async def put_theme(body: ThemeBody, request: Request):
     if body.palette not in PALETTE_IDS:
         raise HTTPException(422, f"unknown palette: {body.palette!r}")
     st = request.app.state
-    data = {"palette": body.palette, "mode": body.mode}
+    data = body.model_dump()
     config_mod.write_yaml(st.templates_dir / "theme.yaml", data)
     return data
 
@@ -405,11 +419,27 @@ async def get_intake(request: Request):
     boot and let the next save overwrite it silently."""
     st = request.app.state
     try:
-        return config_mod.load_intake(st.templates_dir / "intake.yaml")
+        data = config_mod.load_intake(st.templates_dir / "intake.yaml")
     except config_mod.ConfigError:
         # Unreadable: show what the instance is actually running on, which
         # lifespan already degraded to the defaults. Saving replaces the file.
-        return st.intake
+        data = dict(st.intake)
+    try:
+        repos = config_mod.load_repos(deps.repos_path(st), validate_steering=False)
+    except config_mod.ConfigError:
+        repos = []
+    last_picked_up = st.db.read(store.last_auto_pickup_at)
+    repo_pickups: dict[str, dict] = {}
+    for r in repos:
+        try:
+            ready = await beads.ready(cwd=r["path"])
+            count = len(ready)
+        except Exception:  # noqa: BLE001 -- a settings-page read must not 500 on a bad repo
+            count = None
+        repo_pickups[r["path"]] = {"items": count, "last_picked_up": last_picked_up.get(r["path"])}
+    data["repo_pickups"] = repo_pickups
+    data["recent_pickups"] = st.db.read(store.recent_auto_pickups)
+    return data
 
 
 @api_router.put("/intake")
@@ -493,7 +523,7 @@ class NotifyBody(BaseModel):
     events: list[str] | None = None
 
 
-def _notify_view(notify_cfg: dict) -> dict:
+def _notify_view(notify_cfg: dict, last_test: dict | None = None) -> dict:
     """What `/notify` is allowed to say. The URL is not in it: a settings screen
     that renders the value back into the DOM puts the token in the browser, in
     screenshots, and in any future session recording."""
@@ -502,6 +532,7 @@ def _notify_view(notify_cfg: dict) -> dict:
         "url_set": bool(notify_cfg["url"]),
         "base_url": notify_cfg["base_url"],
         "events": notify_cfg["events"],
+        "last_test": last_test,
     }
 
 
@@ -522,7 +553,9 @@ async def get_notify(request: Request):
     # docstring claim that a hand edit and a UI edit are the same operation;
     # closing it means a file watcher, which this task does not build.
     st = request.app.state
-    return _notify_view(config_mod.load_notify(st.templates_dir / "notify.yaml"))
+    return _notify_view(
+        config_mod.load_notify(st.templates_dir / "notify.yaml"), st.notifier.last_test
+    )
 
 
 @api_router.put("/notify")
@@ -552,4 +585,13 @@ async def put_notify(body: NotifyBody, request: Request):
         raise HTTPException(422, "set a webhook URL before enabling notifications")
     config_mod.save_notify(path, cfg)
     st.notifier.reload()
-    return _notify_view(cfg)
+    return _notify_view(cfg, st.notifier.last_test)
+
+
+@api_router.post("/notify/test")
+async def notify_test(request: Request):
+    st = request.app.state
+    try:
+        return await st.notifier.send_test()
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
