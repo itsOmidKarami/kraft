@@ -1992,6 +1992,33 @@ def test_abandon_refuses_an_active_item(tmp_path, monkeypatch):
         assert "active" in r.json()["detail"]
 
 
+def test_abandon_kills_a_process_left_running_from_the_worktree(tmp_path, monkeypatch):
+    """Kraft-ugm6: a server (or anything else) an agent started by hand from
+    inside the worktree is invisible to `pause`'s session teardown and used to
+    outlive the directory it was launched from."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+        worktree = Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees" / wid
+        orphan = subprocess.Popen(["sleep", "60"], cwd=worktree, start_new_session=True)
+        try:
+            _set_status(wid, "paused")
+
+            r = client.post(f"/api/work-items/{wid}/abandon")
+
+            assert r.status_code == 200, r.text
+            for _ in range(50):
+                if orphan.poll() is not None:
+                    break
+                time.sleep(0.1)
+            assert orphan.poll() is not None, "orphan process outlived the abandon"
+        finally:
+            if orphan.poll() is None:
+                orphan.kill()
+            orphan.wait()
+
+
 def test_list_hides_abandoned_items(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
