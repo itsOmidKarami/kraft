@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Literal, Protocol
 
 from kraft import events
-from kraft.config import main_ignore_args
+from kraft.config import git_read, main_ignore_args
 
 CIState = Literal["pending", "success", "failed"]
 
@@ -331,6 +331,47 @@ async def commit_stragglers(repo: Path, *, message: str) -> bool:
     return True
 
 
+async def _push(repo: Path, branch: str) -> None:
+    """`git push -u origin <branch>`, safe to call after a rebase.
+
+    A plain push can only fast-forward. Any rebase -- a human resolving a
+    real conflict against a moved `main`, or `mr_rebase`'s own auto-refresh
+    -- moves the branch off of what origin last saw, and an ordinary push
+    then dies `! [rejected] ... (non-fast-forward)` with no recourse but a
+    human running a force push by hand: Kraft tells an escalation session
+    not to push (Kraft owns the push), but Kraft's own push then structurally
+    cannot publish the very rebase it asked for (Kraft-z6i8).
+
+    `--force-with-lease=<branch>:<remote-sha>` against the remote-tracking
+    ref this worktree last observed publishes the rewritten branch while
+    still refusing if someone else moved the remote branch in between -- a
+    genuine concurrent-writer race stays an error instead of being silently
+    clobbered. The lease value is read locally, not re-fetched:
+    `refs/remotes/origin/<branch>` reflects whatever this worktree's own last
+    push or fetch saw, which is exactly the "last observed" state the lease
+    is meant to protect -- fetching right before the push would instead adopt
+    someone else's concurrent write as the expected value and defeat the
+    check entirely.
+
+    No local remote-tracking ref at all -- the branch has never been pushed
+    from here -- needs no lease: origin has nothing yet for a lease to
+    protect, and a plain push already does the right thing.
+    """
+    remote_sha = git_read(
+        repo,
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        f"refs/remotes/origin/{branch}",
+        expected_failure=True,
+    )
+    args = ["git", "push"]
+    if remote_sha:
+        args.append(f"--force-with-lease={branch}:{remote_sha}")
+    args += ["-u", "origin", branch]
+    await _run(repo, args)
+
+
 async def _assert_pushed(repo: Path, branch: str) -> None:
     """Refuse to merge a head the remote has never seen.
 
@@ -500,7 +541,7 @@ class GlabCli:
         return MR(number=int(data["iid"]), url=str(data["web_url"]))
 
     async def push(self, *, repo: Path, branch: str) -> None:
-        await _run(repo, ["git", "push", "-u", "origin", branch])
+        await _push(repo, branch)
 
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None:
         # No iid: `glab mr update` resolves the merge request from the
@@ -698,7 +739,7 @@ class GhCli:
         return MR(number=int(data["number"]), url=str(data["url"]))
 
     async def push(self, *, repo: Path, branch: str) -> None:
-        await _run(repo, ["git", "push", "-u", "origin", branch])
+        await _push(repo, branch)
 
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None:
         await _run(repo, ["gh", "pr", "edit", "--body", body])

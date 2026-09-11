@@ -129,3 +129,39 @@ committed copy any more.
 
 The directory layout does not change, which is why it is this one. Tracked as
 Kraft-t3qn.
+
+## Branch hygiene
+
+Two ways a branch you're reusing by hand — not one Kraft itself cut for a
+work item — can quietly cost you work or CI signal:
+
+**Don't reuse a worktree branch after its MR merges (Kraft-je6).** This repo
+merges by squash, so the branch's own commits never become ancestors of
+`main` — only their squashed equivalent does. Push more commits onto that
+same branch afterward and `git diff` against its old merge-base re-presents
+everything the squash already landed: the exact failure that made
+`lite-version` fail an MR demanding a version bump already on `main`, and
+made an unrelated CI job run because the stale diff still touched the
+directory it gates on. Every `changes:`-gated job in `.gitlab-ci.yml` has the
+same exposure. Cut a fresh branch from `origin/main` for the next piece of
+work instead.
+
+**Rebuilding a branch by `git reset` + cherry-pick can silently orphan a
+commit (Kraft-zy7l).** Resetting a branch to an earlier point and re-picking
+commits back onto it drops anything you forgot to include — no warning, and
+the commit survives only as a dangling object until the next `git gc`
+destroys it. Before you reset, capture the branch's current tip:
+
+```
+old=$(git rev-parse mybranch)
+git reset --hard <earlier-point>
+git cherry-pick <sha1> <sha2> ...
+```
+
+After the rebuild, check nothing got left behind — non-empty output means
+stop and figure out what's missing before doing anything else that could
+prune it:
+
+```
+git log --oneline "$old" --not mybranch
+```
