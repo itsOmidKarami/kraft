@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import * as api from "../api";
+import { useStore } from "../store";
 import { PausedCard } from "./PausedCard";
 
 const started = { id: "w1", current_node_id: "implement" } as never;
@@ -49,5 +50,16 @@ describe("PausedCard", () => {
     render(<PausedCard item={neverStarted} sessions={[]} />);
     await userEvent.click(screen.getByRole("button", { name: /^start/i }));
     expect(spy).toHaveBeenCalledWith("w2", undefined);
+  });
+
+  // A successful resume that outraces its own ws event, or lands mid-reconnect,
+  // must not leave the card stuck on screen forever — the click has to pull
+  // the fresh item itself, not only wait on the socket.
+  it("hydrates the item after a successful resume, not just via the ws push", async () => {
+    vi.spyOn(api, "resumeWorkItem").mockResolvedValue({ id: "w2", node_id: null, steer: null });
+    const hydrateItem = vi.spyOn(useStore.getState(), "hydrateItem").mockResolvedValue();
+    render(<PausedCard item={neverStarted} sessions={[]} />);
+    await userEvent.click(screen.getByRole("button", { name: /^start/i }));
+    expect(hydrateItem).toHaveBeenCalledWith("w2");
   });
 });
