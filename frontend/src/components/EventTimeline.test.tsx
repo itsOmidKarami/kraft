@@ -65,6 +65,22 @@ describe("EventTimeline", () => {
     expect(screen.getByText(/on\.test\.run/)).toBeInTheDocument();
   });
 
+  it("says 'findings only' for a cycle with no failed task (Kraft-mjpm)", () => {
+    // A review task that exits clean but reports an eligible finding opens a
+    // cycle with `failed_tasks: []` -- joining that left a bare "cycle N: ".
+    render(
+      <EventTimeline
+        events={[
+          ev({
+            type: "fix_cycle_started",
+            payload: { node_id: "verify", cycle: 1, failed_tasks: [] },
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText(/cycle 1: findings only/)).toBeInTheDocument();
+  });
+
   it("surfaces why a straggler-commit sweep failed (Kraft-hf12)", () => {
     render(
       <EventTimeline
