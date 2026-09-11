@@ -46,7 +46,8 @@ export interface WorkItem {
   bead_id: string | null;
   /** Steer text left while paused; consumed by the next agent launch. */
   pending_steer_context?: string | null;
-  /** Set while `status === "rate_limited"`: when the poller may relaunch it. */
+  /** Set while `status` is `"rate_limited"` or `"waiting"`: when the poller
+   *  next acts on this item. */
   retry_at?: string | null;
   created_at: string;
   updated_at: string;

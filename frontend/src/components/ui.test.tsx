@@ -72,6 +72,19 @@ describe("StatusGlyph / RowState", () => {
     render(<StatusGlyph status="waiting" />);
     expect(screen.getByRole("img", { name: "waiting" })).toBeInTheDocument();
   });
+
+  it("renders waiting with the same icon as rate_limited", () => {
+    // The label alone (above) can't tell a real glyph from the Question
+    // fallback -- aria-label is set from the status string unconditionally,
+    // whichever icon actually renders. Both statuses are the same shape (a
+    // poller-driven wait, Kraft-ru98) and are meant to share a glyph; this
+    // catches the glyph itself regressing to the fallback.
+    const { container: waiting } = render(<StatusGlyph status="waiting" />);
+    const { container: rateLimited } = render(<StatusGlyph status="rate_limited" />);
+    expect(waiting.querySelector("svg")?.outerHTML).toBe(
+      rateLimited.querySelector("svg")?.outerHTML,
+    );
+  });
 });
 
 describe("OverflowMenu", () => {
