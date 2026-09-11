@@ -226,6 +226,20 @@ describe("EventTimeline", () => {
     expect(screen.getByText(/2026-09-10T05:00:00Z/)).toBeInTheDocument();
   });
 
+  it("surfaces the next check time on a ci-wait stop", () => {
+    render(
+      <EventTimeline
+        events={[
+          ev({
+            type: "work_item_waiting",
+            payload: { node_id: "mr_checks", retry_at: "2026-09-10T05:00:00Z" },
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText(/2026-09-10T05:00:00Z/)).toBeInTheDocument();
+  });
+
   it("names a worker_session_exited row by hook_point resolved from sessions", () => {
     // Kraft-zxu4: a verify node read as eight identical grey rows. The exit
     // payload carries no hook_point at all, so it is resolved through the

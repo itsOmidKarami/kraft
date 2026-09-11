@@ -278,6 +278,9 @@ const STATUS_TAG: Record<WorkItem["status"], string> = {
   // Same treatment as active: the poller is driving it, not waiting on a
   // person -- the same story Board.tsx's "Running" group tells for it.
   rate_limited: "tag tag-outline",
+  // Same again: parked on a pipeline, woken by the ci_wait poller, not waiting
+  // on a person (Kraft-ru98).
+  waiting: "tag tag-outline",
 };
 
 export function WorkItemDetail() {

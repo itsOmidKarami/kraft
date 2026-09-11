@@ -81,6 +81,9 @@ const STATUS_WORDS: Record<string, string> = {
   needs_human: "needs you",
   rate_limited: "rate limited",
   config_error: "config error",
+  // A node parked on a pipeline (Kraft-ru98). Says what it is waiting on, so a
+  // healthy wait does not read as a stall.
+  waiting: "waiting on CI",
 };
 
 export function statusWord(status: string): string {
