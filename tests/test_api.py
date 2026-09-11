@@ -892,7 +892,11 @@ def test_chain_review_error_or_invalid_tail_stops_at_needs_human(
 ):
     """Kraft-hm0/unk: `status: "error"` and an invalid `revised_chain_nodes`
     both stop the item at needs_human rather than advancing, and never touch
-    `chain_definition`."""
+    `chain_definition`.
+
+    Kraft-iv4y: the approve call itself now errors instead of returning 200
+    with nothing changed -- a human retrying the same broken approval needs
+    to hear "no" clearly, not read it off the row's unchanged status."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
@@ -905,7 +909,9 @@ def test_chain_review_error_or_invalid_tail_stops_at_needs_human(
 
         _write_chain_review(client, wid, envelope)
         r = client.post(f"/api/work-items/{wid}/gates/chain_finalized/approve")
-        assert r.status_code == 200, r.text
+        assert r.status_code == 422, r.text
+        assert reason_has in r.json()["detail"]
+        assert "kraft item retry" in r.json()["detail"]
         item = client.get(f"/api/work-items/{wid}").json()
         assert item["status"] == "needs_human"
         assert item["chain_definition"]["nodes"] == before
@@ -929,8 +935,30 @@ def test_chain_review_missing_artifact_stops_at_needs_human(tmp_path, monkeypatc
         _chain_review_path(client, wid).unlink()
 
         r = client.post(f"/api/work-items/{wid}/gates/chain_finalized/approve")
-        assert r.status_code == 200, r.text
+        assert r.status_code == 422, r.text
         assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
+
+
+def test_chain_review_repeated_approve_keeps_erroring(tmp_path, monkeypatch):
+    """Kraft-iv4y: the exact reported shape -- a human retries `approve` on a
+    gate that already failed once. `pending_gate` never clears (it's read off
+    `gate_requested`/`gate_approved`/`gate_rejected`, none of which fire here),
+    so the second call must error the same way as the first, not silently
+    return 200 with the row unchanged."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        for gate in ("spec_approval", "plan_approval"):
+            _await_gate(client, wid, gate)
+            assert client.post(f"/api/work-items/{wid}/gates/{gate}/approve").status_code == 200
+        _await_gate(client, wid, "chain_finalized")
+        _chain_review_path(client, wid).unlink()
+
+        first = client.post(f"/api/work-items/{wid}/gates/chain_finalized/approve")
+        second = client.post(f"/api/work-items/{wid}/gates/chain_finalized/approve")
+        assert first.status_code == second.status_code == 422
+        assert client.get(f"/api/work-items/{wid}").json()["pending_gate"] == "chain_finalized"
 
 
 def test_gate_approve_wrong_gate_409(tmp_path, monkeypatch):
