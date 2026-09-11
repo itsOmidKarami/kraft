@@ -275,6 +275,21 @@ def _cmd_reindex(ns: argparse.Namespace) -> None:
     common.emit(asyncio.run(client.reindex(ns.repo)), _render_reindex, ns.json)
 
 
+def _render_reload(result: dict) -> str:
+    lines = [f"reloaded {len(result.get('valid', []))} template(s)"]
+    for name, reason in (result.get("invalid_templates") or {}).items():
+        lines.append(f"  invalid: {name}: {reason}")
+    return "\n".join(lines)
+
+
+def _cmd_reload(ns: argparse.Namespace) -> None:
+    payload = asyncio.run(client.reload_templates())
+    common.emit(payload, _render_reload, ns.json)
+    if payload.get("invalid_templates"):
+        # exit 1 so `kraft admin reload && ...` works; the reasons are already on stdout
+        raise SystemExit(1)
+
+
 def _cmd_mcp(ns: argparse.Namespace) -> None:
     from kraft.mcp import serve_stdio
 
@@ -351,6 +366,11 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
     reindex = subs.add_parser("reindex", parents=[common], help="rescan documents into the index")
     reindex.add_argument("--repo", help="one repo path (default: all)")
     reindex.set_defaults(func=_cmd_reindex)
+
+    reload_p = subs.add_parser(
+        "reload", parents=[common], help="reread templates and registry from disk, no restart"
+    )
+    reload_p.set_defaults(func=_cmd_reload)
 
     init = subs.add_parser(
         "init", parents=[common], help="register Kraft's MCP server and skills with an agent"
