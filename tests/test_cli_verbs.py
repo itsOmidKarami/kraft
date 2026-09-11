@@ -522,3 +522,61 @@ def test_no_source_string_tells_a_user_to_run_a_removed_verb():
             if pattern.search(line):
                 offenders.append(f"{path.relative_to(src)}:{n}: {line.strip()}")
     assert not offenders, "\n".join(offenders)
+
+
+def test_progress_passes_the_task_and_id_through(app, monkeypatch, capsys):
+    seen = {}
+
+    async def fake_report(task, work_item_id=None):
+        seen.update(task=task, work_item_id=work_item_id)
+        return {"id": work_item_id, "progress": {"current": task, "total": 3, "title": "serve"}}
+
+    monkeypatch.setattr(client, "report_progress", fake_report)
+    cli.main(["item", "progress", "2", "w1"])
+    assert seen == {"task": 2, "work_item_id": "w1"}
+    assert "w1" in capsys.readouterr().out
+
+
+def test_show_renders_progress_as_a_task_list(app, monkeypatch, capsys):
+    async def fake_get(work_item_id=None):
+        return {
+            "id": "w1",
+            "current_node_id": "implementation",
+            "progress": {
+                "current": 2,
+                "total": 3,
+                "title": "serve",
+                "tasks": [
+                    {"n": 1, "title": "parse", "state": "done"},
+                    {"n": 2, "title": "serve", "state": "current"},
+                    {"n": 3, "title": "render", "state": "pending"},
+                ],
+            },
+        }
+
+    monkeypatch.setattr(client, "get_work_item", fake_get)
+    cli.main(["view", "show", "w1"])
+    out = capsys.readouterr().out
+    assert "Task 2/3 — serve" in out
+    assert "✓ 1. parse" in out
+    assert "▸ 2. serve" in out
+    assert "· 3. render" in out
+
+
+def test_list_puts_progress_after_the_node(app, monkeypatch, capsys):
+    async def fake_list(status=None, include_abandoned=False):
+        return [
+            {
+                "id": "w1",
+                "title": "t",
+                "repo": "/r",
+                "status": "active",
+                "current_node_id": "implementation",
+                "pending_gate": None,
+                "progress": {"current": 2, "total": 3, "title": "serve"},
+            }
+        ]
+
+    monkeypatch.setattr(client, "list_work_items", fake_list)
+    cli.main(["view", "list", "--all"])
+    assert "implementation 2/3" in capsys.readouterr().out

@@ -203,7 +203,9 @@ def trim_work_items(items: list[dict], status: str | None = None) -> list[dict]:
     """
     keep = ("id", "title", "repo", "status", "current_node_id", "pending_gate")
     return [
-        {k: item[k] for k in keep} for item in items if status is None or item["status"] == status
+        {**{k: item[k] for k in keep}, "progress": item.get("progress")}
+        for item in items
+        if status is None or item["status"] == status
     ]
 
 
@@ -250,6 +252,8 @@ async def get_work_item(work_item_id: str | None = None) -> dict:
         # what an attached spec/plan trimmed, and the trim itself — an agent
         # confirming a handoff landed needs to see both (Kraft-82gz).
         "attachments",
+        # where the implementer is in its plan, "Task 3 of 6" (None off that node)
+        "progress",
     )
     return {**{k: item[k] for k in keep if k in item}, "next_node_id": _next_node_id(item)}
 
@@ -780,6 +784,16 @@ async def skip(note: str | None = None, work_item_id: str | None = None) -> dict
     target = _forbid_self_action(work_item_id)
     payload = {"note": note.strip()} if note and note.strip() else {}
     return await _act(f"/work-items/{target}/skip", payload)
+
+
+async def report_progress(task: int, work_item_id: str | None = None) -> dict:
+    """Say which plan task the implementation has started.
+
+    `resolve_work_item`, not `_forbid_self_action`: this verb exists *for* a
+    worker's own item. Reporting where you are decides nothing.
+    """
+    target = await resolve_work_item(work_item_id)
+    return await _act(f"/work-items/{target}/progress", {"task": task})
 
 
 async def escalate(message: str, work_item_id: str | None = None) -> dict:
