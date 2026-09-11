@@ -1418,6 +1418,44 @@ def test_merge_fails_when_the_mr_was_closed_rather_than_merged(tmp_path, monkeyp
     assert "closed" in _session_log(tmp_path, "m3")
 
 
+def test_poll_ci_tolerates_a_short_burst_of_transient_forge_errors(tmp_path):
+    """Kraft-x92: a flaky/rate-limited `ci_status` call used to fail the whole
+    wait, indistinguishable from a red pipeline. A run of errors under the
+    cap must not end the poll."""
+
+    class FlakyThenGreen(forge.FakeForge):
+        calls = 0
+
+        async def ci_status(self, *, repo, mr, branch=""):
+            self.calls += 1
+            if self.calls <= forge._MAX_CONSECUTIVE_POLL_ERRORS:
+                raise forge.ForgeError("transient")
+            return await super().ci_status(repo=repo, mr=mr, branch=branch)
+
+    fake = FlakyThenGreen(ci_states=["success"])
+
+    ci, timed_out = asyncio.run(
+        forge._poll_ci(fake, repo=tmp_path, branch="kraft/w1", timeout=5, interval=0)
+    )
+
+    assert timed_out is False
+    assert ci.state == "success"
+
+
+def test_poll_ci_gives_up_after_too_many_consecutive_forge_errors(tmp_path):
+    """One more error than the tolerance still ends the wait -- this is not
+    an unlimited retry, only a burst allowance."""
+
+    class AlwaysFlaky(forge.FakeForge):
+        async def ci_status(self, *, repo, mr, branch=""):
+            raise forge.ForgeError("transient")
+
+    fake = AlwaysFlaky()
+
+    with pytest.raises(forge.ForgeError):
+        asyncio.run(forge._poll_ci(fake, repo=tmp_path, branch="kraft/w1", timeout=5, interval=0))
+
+
 def test_merge_waits_out_a_pipeline_recreated_after_mr_checks(tmp_path, monkeypatch):
     """Kraft-x10m. `mr_sync`'s push after human_review can land a commit on a
     head mr_checks never validated, re-arming a required-pipeline rule for a

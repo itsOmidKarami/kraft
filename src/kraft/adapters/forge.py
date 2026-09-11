@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,6 +21,8 @@ from typing import Literal, Protocol
 
 from kraft import events
 from kraft.config import git_read, main_ignore_args
+
+logger = logging.getLogger(__name__)
 
 CIState = Literal["pending", "success", "failed"]
 
@@ -895,6 +898,14 @@ def backend_for(backend: str, repo_forge: str | None) -> str:
     return cli
 
 
+#: Kraft-x92: one flaky/rate-limited `ci_status` call used to fail the whole
+#: wait -- an error at minute 12 of a 30-minute poll read the same as a red
+#: pipeline. Tolerate a short run of consecutive errors before giving up;
+#: reset the count the moment a call succeeds, so this bounds a burst, not
+#: the wait's total error budget.
+_MAX_CONSECUTIVE_POLL_ERRORS = 3
+
+
 async def _poll_ci(
     forge: Forge, *, repo: Path, branch: str, timeout: float, interval: float
 ) -> tuple[CIStatus, bool]:
@@ -911,8 +922,26 @@ async def _poll_ci(
     # for: a registry that sets a 300s interval for a rate-limited forge must
     # not silently get 60s and five times the CLI calls.
     cap = max(_MAX_POLL_INTERVAL, interval)
+    consecutive_errors = 0
     while True:
-        ci = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
+        try:
+            ci = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
+        except ForgeError:
+            consecutive_errors += 1
+            if consecutive_errors > _MAX_CONSECUTIVE_POLL_ERRORS:
+                raise
+            logger.warning(
+                "ci_status failed mid-poll (%d/%d consecutive), retrying",
+                consecutive_errors,
+                _MAX_CONSECUTIVE_POLL_ERRORS,
+            )
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise
+            await asyncio.sleep(min(interval, remaining))
+            interval = min(interval * 2, cap)
+            continue
+        consecutive_errors = 0
         # A branch that cannot merge is an answer, not a wait: a conflict will
         # not resolve itself in thirty minutes (Kraft-ejj9).
         if ci.state != "pending" or ci.mergeable is False:
