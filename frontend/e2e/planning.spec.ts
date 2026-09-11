@@ -1,21 +1,50 @@
-import { expect, test } from "./fixtures";
+import { connectRepo, expect, test } from "./fixtures";
 
 // The planning hooks: on.spec.requested and on.plan.requested write and commit
 // a document (fixtures/fake-claude.sh honours the `artifact:` contract), and
 // the SPA offers it at the gate. Covers create -> spec_approval -> "Review
-// spec" -> modal -> reject -> re-plan -> approve -> plan_approval -> "Review
-// plan" -> modal.
+// spec" -> Documents tab -> reject -> re-plan -> approve -> plan_approval ->
+// "Review plan" -> Documents tab. UI v2 · 06/07 replaced the old
+// ArtifactModal with a switch to the Documents tab (GateCard's onReadDoc);
+// Documents.tsx auto-selects the gate's own artifact by path once it lands
+// in the index.
+//
+// That "once it lands" is doing real work: the index only sees a work
+// item's own in-progress worktree once something merges it back to the
+// connected repo (Kraft-mkoh) — unlike the old ArtifactModal, which read the
+// worktree directly. So this only asserts what the UI wiring actually
+// controls (the tab switch, a document rendering in the right pane), not
+// the specific artifact's body, which depends on indexing this test's
+// environment cannot force.
 const REPO = process.env.KRAFT_E2E_REPO!;
+const REPO_NAME = REPO.split("/").pop()!;
 
 async function createItem(page: any, title: string, template: string) {
+  await connectRepo(page, REPO);
   await page.goto("/");
   await page.getByRole("button", { name: /new work item/i }).click();
   const modal = page.getByRole("dialog", { name: "New work item" });
-  await modal.getByLabel("repo").fill(REPO);
+  await modal.getByRole("button", { name: new RegExp(REPO_NAME, "i") }).click();
   await modal.getByLabel("title").fill(title);
-  await modal.getByRole("radiogroup", { name: "template" }).getByText(template, { exact: true }).click();
-  await modal.getByRole("button", { name: /create/i }).click();
+  await modal
+    .getByRole("radiogroup", { name: "template" })
+    .locator("label.seg-opt", { hasText: new RegExp(`^${template}\\b`) })
+    .click();
+  await modal.getByRole("button", { name: /create and start/i }).click();
   await expect(page.locator(".detail h2")).toHaveText(title);
+}
+
+// The gate's own artifact is only indexed once it merges back to the connected
+// repo, and Documents.tsx deliberately shows nothing rather than some unrelated
+// document while that is still pending. Either state proves the wiring: the tab
+// switched and the pane is driven by the gate's path.
+async function expectGateDocOrPending(page: any) {
+  await expect(
+    page
+      .getByTestId("right-pane-doc")
+      .or(page.getByText(/the gate's document isn't available yet/i))
+      .first(),
+  ).toBeVisible();
 }
 
 test("spec gate: review, reject and re-plan, then approve into the plan gate", async ({
@@ -27,16 +56,13 @@ test("spec gate: review, reject and re-plan, then approve into the plan gate", a
   const reviewSpec = page.getByRole("button", { name: "Review spec" });
   await expect(reviewSpec).toBeVisible();
   await reviewSpec.click();
-  const specDialog = page.getByRole("dialog", { name: "document" });
-  await expect(specDialog).toBeVisible();
-  await expect(specDialog).toContainText(/fake spec body/i);
-  await specDialog.getByRole("button", { name: "close" }).click();
-  await expect(specDialog).toBeHidden();
+  await expect(page.getByRole("tab", { name: /Documents/, selected: true })).toBeVisible();
+  await expectGateDocOrPending(page);
 
   // Reject with a note: the spec node re-runs and the item returns to the
   // same gate, offering the button again — not stranded, not silently gone.
-  await page.getByRole("button", { name: /Reject/ }).first().click();
-  await page.getByLabel("reject note").fill("the spec misses the error path");
+  await page.getByRole("button", { name: /^Reject$/ }).first().click();
+  await page.getByLabel("composer message").fill("the spec misses the error path");
   await page.getByRole("button", { name: /Reject and re-plan/ }).click();
   await expect(page.locator(".attention-title")).toContainText(/approve the spec/i, {
     timeout: 100_000,
@@ -52,7 +78,6 @@ test("spec gate: review, reject and re-plan, then approve into the plan gate", a
   const reviewPlan = page.getByRole("button", { name: "Review plan" });
   await expect(reviewPlan).toBeVisible();
   await reviewPlan.click();
-  const planDialog = page.getByRole("dialog", { name: "document" });
-  await expect(planDialog).toBeVisible();
-  await expect(planDialog).toContainText(/fake plan body/i);
+  await expect(page.getByRole("tab", { name: /Documents/, selected: true })).toBeVisible();
+  await expectGateDocOrPending(page);
 });

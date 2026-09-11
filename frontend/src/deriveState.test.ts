@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { deriveState } from "./deriveState";
-import type { WorkItem } from "./types";
+import type { KraftEvent, WorkItem, WorkerSession } from "./types";
 
 const BASE: WorkItem = {
   id: "wi_1",
@@ -97,9 +97,9 @@ describe("deriveState", () => {
     ).toEqual({ state: "question", needsYou: true });
   });
 
-  it("falls back to gate for a needs_human stop with no reason field set", () => {
+  it("falls back to capped (Retry, not a broken gate) for a needs_human stop with no reason field set", () => {
     expect(deriveState({ ...BASE, status: "needs_human" })).toEqual({
-      state: "gate",
+      state: "capped",
       needsYou: true,
     });
   });
@@ -113,5 +113,87 @@ describe("deriveState", () => {
         cappedOut: { cycles: 3, attempts: 3 },
       }),
     ).toEqual({ state: "gate", needsYou: true });
+  });
+});
+
+const escSession = (over: Partial<WorkerSession> = {}): WorkerSession =>
+  ({
+    id: "e1",
+    work_item_id: "wi_1",
+    node_id: "verify",
+    hook_point: "escalation",
+    status: "running",
+    attempt: 1,
+    round: 0,
+    created_at: "2026-01-01T00:05:00Z",
+    started_at: "2026-01-01T00:05:00Z",
+    exited_at: null,
+    tokens_in: null,
+    tokens_out: null,
+    cost_usd: null,
+    wall_ms: null,
+    model: null,
+    head_sha: null,
+    ...over,
+  }) as WorkerSession;
+
+const NEEDS_HUMAN_EVENT: KraftEvent = {
+  seq: 1,
+  work_item_id: "wi_1",
+  type: "work_item_needs_human",
+  payload: { reason: "loop capped" },
+  created_at: "2026-01-01T00:00:00Z",
+};
+
+describe("deriveState — escalation and archived", () => {
+  it("maps a running escalation turn to escalating, not needs-you", () => {
+    const item = { ...BASE, status: "needs_human" as const, cappedOut: { cycles: 3, attempts: 3 } };
+    expect(deriveState(item, [escSession()], [NEEDS_HUMAN_EVENT])).toEqual({
+      state: "escalating",
+      needsYou: false,
+    });
+  });
+
+  it("maps a finished escalation turn to escalated, needs-you", () => {
+    const item = { ...BASE, status: "needs_human" as const, cappedOut: { cycles: 3, attempts: 3 } };
+    const done = escSession({ status: "done_with_concerns", exited_at: "2026-01-01T00:06:00Z" });
+    expect(deriveState(item, [done], [NEEDS_HUMAN_EVENT])).toEqual({
+      state: "escalated",
+      needsYou: true,
+    });
+  });
+
+  it("ignores an escalation turn from a prior, already-resolved stop", () => {
+    const item = { ...BASE, status: "needs_human" as const, cappedOut: { cycles: 3, attempts: 3 } };
+    const stale = escSession({ status: "done", created_at: "2025-12-31T00:00:00Z" });
+    expect(deriveState(item, [stale], [NEEDS_HUMAN_EVENT])).toEqual({
+      state: "capped",
+      needsYou: true,
+    });
+  });
+
+  it("ignores an escalation turn superseded by a later gate stop (no new work_item_needs_human event)", () => {
+    // escalate -> apply as steer & retry -> node reaches a gate: gate stops
+    // emit `gate_requested`, not another `work_item_needs_human`, so the
+    // episode boundary has to bound on both, same as `board._stop_reason`.
+    const item = { ...BASE, status: "needs_human" as const, pending_gate: "human_review" };
+    const stale = escSession({ status: "done", created_at: "2026-01-01T00:03:00Z" });
+    const gateRequested: KraftEvent = {
+      seq: 2,
+      work_item_id: "wi_1",
+      type: "gate_requested",
+      payload: { gate: "human_review" },
+      created_at: "2026-01-01T00:04:00Z",
+    };
+    expect(deriveState(item, [stale], [NEEDS_HUMAN_EVENT, gateRequested])).toEqual({
+      state: "gate",
+      needsYou: true,
+    });
+  });
+
+  it("maps an archived item to archived, not needs-you, regardless of status", () => {
+    expect(
+      deriveState({ ...BASE, status: "completed", archived_at: "2026-01-02T00:00:00Z" }),
+    ).toEqual({ state: "archived", needsYou: false });
   });
 });
