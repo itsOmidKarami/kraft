@@ -144,6 +144,13 @@ def test_health_ok_with_valid_policy(tmp_path, monkeypatch):
         assert h["invalid_policy"] == []
 
 
+def test_health_reports_port_and_version(tmp_path, monkeypatch):
+    with _client(tmp_path, monkeypatch) as client:
+        h = client.get("/api/health").json()
+        assert isinstance(h["port"], int)
+        assert isinstance(h["version"], str) and h["version"]
+
+
 def test_post_refused_when_policy_invalid(tmp_path, monkeypatch):
     bad = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
     (bad / "policy.yaml").write_text("default: { attempts: 0, wall_clock_s: 1 }\n")
