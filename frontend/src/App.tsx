@@ -11,7 +11,7 @@ import { Board } from "./views/Board";
 import { Login } from "./views/Login";
 import { SearchView } from "./views/Search";
 import { Settings } from "./views/settings";
-import { WorkItemDetail } from "./views/WorkItemDetail";
+import { WorkItemDetail } from "./views/work_item";
 
 export function App() {
   const [search, setSearch] = useState(false);

@@ -16,6 +16,7 @@ import type {
   Repo,
   Theme,
   RepoProbe,
+  NodeOverrides,
   SearchResponse,
   TemplateNode,
   TemplateSummary,
@@ -93,15 +94,47 @@ export const createWorkItem = (body: {
   submodules?: string[];
   root_merge_policy?: string;
   attachments?: { kind: "spec" | "plan"; path: string }[];
+  /** Node ids to drop from the materialized chain at intake (UI v2 · 04
+   *  point 6; design 10/m09's click-to-skip). */
+  skip_nodes?: string[];
+  /** `undefined`: policy default. `null`: explicit "no cap". A number: that cap. */
+  budget_usd?: number | null;
+  node_overrides?: NodeOverrides;
 }) => req<{ id: string }>("/work-items", json("POST", body));
 
 /** Absent fields are untouched, not cleared: the title editor and the
  *  description editor each send one field and must not blank the other. The
- *  response echoes only the fields that were set. */
-export const updateWorkItem = (id: string, patch: { title?: string; description?: string }) =>
-  req<{ id: string; title?: string; description?: string }>(
-    `/work-items/${id}`,
-    json("PATCH", patch),
+ *  response echoes only the fields that were set.
+ *
+ *  `node_overrides`: `undefined` leaves overrides alone, `{}` resets every
+ *  node to the template (409 once the item has started), a non-empty object
+ *  is per node id and merges into what's stored (UI v2 · 04 point 1/2).
+ *  `budget_usd`: `undefined` leaves the cap alone, `null` sets an explicit
+ *  "no cap", a number sets that cap (point 4). */
+export const updateWorkItem = (
+  id: string,
+  patch: {
+    title?: string;
+    description?: string;
+    chain_template?: string;
+    agent_overrides?: Record<string, unknown>;
+    node_overrides?: NodeOverrides;
+    budget_usd?: number | null;
+  },
+) =>
+  req<{ id: string } & typeof patch>(`/work-items/${id}`, json("PATCH", patch));
+
+/** Drop every node override back to the template -- refused (409) once the
+ *  item has started (UI v2 · 04 point 2). */
+export const resetChainOverrides = (id: string) => updateWorkItem(id, { node_overrides: {} });
+
+/** Raise a work item's spend cap and continue it from wherever the budget
+ *  stopped it (UI v2 · 04 point 5; Prototype `raiseBudget`). `null` sets "no
+ *  cap". 409s unless the item is `needs_human`. */
+export const raiseBudget = (id: string, budgetUsd: number | null) =>
+  req<{ id: string; node_id: string; loop: string; steer: string | null }>(
+    `/work-items/${id}/budget/raise`,
+    json("POST", { budget_usd: budgetUsd }),
   );
 
 export const approveGate = (id: string, gate: string) =>

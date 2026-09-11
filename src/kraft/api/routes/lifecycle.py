@@ -451,6 +451,30 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     return {"id": wid, "node_id": node_id, "loop": key, "steer": steer}
 
 
+class RaiseBudget(BaseModel):
+    #: The new cap; `None` means "no cap" (UI v2 · 04 point 5, Prototype
+    #: `raiseBudget`). Omitting the field entirely is a 422 -- there is no
+    #: sensible "raise by nothing".
+    budget_usd: float | None
+
+
+@api_router.post("/work-items/{wid}/budget/raise")
+async def raise_budget(wid: str, body: RaiseBudget, request: Request):
+    """Raise a work item's spend cap and continue it from wherever its budget
+    stopped it -- the composed action the "Raise budget" button in a `budget`
+    `needs_human` card takes (point 5). Sets the item's own cap
+    (`store.raise_budget`, its own `budget_raised` event so the timeline
+    reads "raised the cap", not a generic PATCH) and retries the stopped node
+    the same way `POST .../retry` does.
+    """
+    st = request.app.state
+    row = deps._work_item_row(st, wid)
+    if row["status"] != "needs_human":
+        raise HTTPException(409, "work item is not stopped")
+    await st.db.write(lambda c: store.raise_budget(c, wid, body.budget_usd))
+    return await retry_work_item(wid, Retry(steer=None), request)
+
+
 @api_router.post("/work-items/{wid}/skip")
 async def skip_work_item(wid: str, body: Skip, request: Request):
     """Advance past the current node or pending gate without running or

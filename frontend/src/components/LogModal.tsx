@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLineDown, Copy, X } from "@phosphor-icons/react";
 import * as api from "../api";
 import { clock, elapsed, tokens, usd } from "../format";
-import { findSession } from "../store";
+import { findSession, useStore } from "../store";
 import type { LogLine } from "../types";
 import { backdropProps, useModal } from "../useModal";
 import { StatusGlyph } from "./ui";
@@ -42,6 +42,7 @@ export function LogModal({ sessionId, onClose }: { sessionId: string; onClose: (
   const [note, setNote] = useState<string | null>(null);
   const ref = useModal<HTMLDivElement>(onClose);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const connection = useStore((s) => s.connection);
 
   const session = findSession(sessionId);
   // a session still in 'pending' is about to write: follow it, do not wait
@@ -70,7 +71,11 @@ export function LogModal({ sessionId, onClose }: { sessionId: string; onClose: (
     return () => {
       alive = false;
     };
-  }, [sessionId, follow]);
+    // `connection` is in the dependency list deliberately (Kraft-3oau): a
+    // snapshot fetch that failed while the socket was down retries, and
+    // clears its own stale error, the moment `connection` reports `"open"`
+    // again — not just on the next unrelated re-render.
+  }, [sessionId, follow, connection]);
 
   useEffect(() => {
     if (!follow || typeof EventSource === "undefined") return;

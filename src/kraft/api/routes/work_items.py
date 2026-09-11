@@ -51,6 +51,19 @@ class NewWorkItem(BaseModel):
     #: Arms agent gate review for this item's `auto_escalate` gates
     #: (Kraft-zr3s). On by default; `--no-auto-gate` opts out per item.
     auto_gate: bool = True
+    #: Node ids to drop from the materialized chain at intake (UI v2 · 04
+    #: point 6; design 10/m09's click-to-skip). Rejected (422) if any name
+    #: is not a node of the resolved template. A gated node may be named --
+    #: see `templates.materialize`'s docstring for why that is not a bypass.
+    skip_nodes: list[str] = []
+    #: Per-item spend cap at intake (point 6), same presence-vs-null rule as
+    #: the PATCH route: omitted means "use the policy default", `null` means
+    #: an explicit "no cap", a number means that cap. Distinguished via
+    #: `model_fields_set`, same as `WorkItemPatch.budget_usd`.
+    budget_usd: float | None = None
+    #: Per-node overrides at intake, same shape and field set as the PATCH
+    #: route's `node_overrides` (point 6): `{node_id: {auto_escalate: bool}}`.
+    node_overrides: dict[str, dict] = {}
 
 
 def _git_common_dir(path: Path) -> Path | None:
@@ -171,6 +184,41 @@ async def create_work_item(body: NewWorkItem, request: Request):
     if not Path(body.repo).is_dir():
         raise HTTPException(422, f"repo path does not exist: {body.repo}")
     attachments = _validated_attachments(body.repo, body.attachments, body.cwd)
+    node_ids = {n["id"] for n in template.nodes}
+    unknown_skip = set(body.skip_nodes) - node_ids
+    if unknown_skip:
+        raise HTTPException(422, f"unknown node id(s) to skip: {sorted(unknown_skip)}")
+    # A kept node's rebase_bounce_to naming a skipped node is a dangling bounce
+    # target: walk.py's `next(j for j, n in ... if n["id"] == bounce_to)` has no
+    # fallback like `reject_target`'s and raises StopIteration mid-run, crashing
+    # the executor into needs_human. Reject the skip at intake instead.
+    dangling_bounce = {
+        n["id"]: n["rebase_bounce_to"]
+        for n in template.nodes
+        if n["id"] not in body.skip_nodes and n.get("rebase_bounce_to") in body.skip_nodes
+    }
+    if dangling_bounce:
+        raise HTTPException(
+            422,
+            f"cannot skip node(s) {sorted(set(dangling_bounce.values()))}: named as "
+            f"rebase_bounce_to by kept node(s) {sorted(dangling_bounce)}",
+        )
+    # skip_nodes alone, or together with an attachment's gate trim, must not
+    # empty the chain: materialize would hand `intake` nothing to run, and
+    # `create_work_item`/`executor.run_once` both index `nodes[0]` unguarded
+    # (code-review). The bead is already filed and the run spawned by the
+    # time either of those would crash, so this has to be checked first.
+    satisfied = frozenset(ATTACHMENT_GATES[a["kind"]] for a in attachments)
+    if not materialize(template, satisfied_gates=satisfied, skip_nodes=body.skip_nodes)["nodes"]:
+        raise HTTPException(422, "skip_nodes would leave no nodes in the chain")
+    for node_id, fields in body.node_overrides.items():
+        if node_id not in node_ids:
+            raise HTTPException(422, f"unknown node id {node_id!r}")
+        extra = set(fields) - store.OVERRIDABLE_NODE_FIELDS
+        if extra:
+            raise HTTPException(422, f"node {node_id!r}: cannot override {sorted(extra)}")
+        if "auto_escalate" in fields and not isinstance(fields["auto_escalate"], bool):
+            raise HTTPException(422, f"node {node_id!r}: auto_escalate must be a boolean")
     try:
         wid = await executor.intake(
             st.db,
@@ -191,6 +239,10 @@ async def create_work_item(body: NewWorkItem, request: Request):
             attachments=attachments,
             status="active" if body.autostart else "paused",
             auto_gate=body.auto_gate,
+            skip_nodes=frozenset(body.skip_nodes),
+            budget_set="budget_usd" in body.model_fields_set,
+            budget_usd=body.budget_usd,
+            node_overrides=body.node_overrides or None,
         )
     except Exception as exc:  # noqa: BLE001 -- executor.intake raises several unrelated types
         # No longer reachable for a bd failure — `executor.intake` degrades
@@ -314,23 +366,73 @@ class WorkItemPatch(BaseModel):
     #: a model/effort dial can change mid-chain, including on a paused item --
     #: that is the point, making a stuck item cheaper before its next retry.
     agent_overrides: dict | None = None
+    #: Per-node field overrides (UI v2 · 04 point 1). `None` (default) leaves
+    #: overrides alone. `{}` resets every node to the template -- refused
+    #: (409) once the item has started. A non-empty object is per node id:
+    #: `{node_id: {}}` drops that node's overrides, `{node_id: {field:
+    #: value}}` sets fields on it -- merged into what's already stored, not a
+    #: whole-object replace (unlike `agent_overrides`), so toggling one
+    #: node's switch never wipes another's. Refused (409) for any node id
+    #: that has already started.
+    node_overrides: dict[str, dict] | None = None
+    #: Per-item spend cap (point 4). Presence, not value, is what matters:
+    #: omitted leaves the cap alone; sent as `null` sets an explicit "no
+    #: cap"; sent as a number sets that cap. Distinguished via
+    #: `model_fields_set` below, because `None` is both "untouched" and a
+    #: legal explicit value here.
+    budget_usd: float | None = None
+
+
+def _validate_node_overrides(st, row, patch: dict[str, dict]) -> None:
+    """422 on an unknown node id or field, 409 on a node that has started
+    (UI v2 · 04 point 1). `patch == {}` (reset to template) 409s if the item
+    has started at all -- point 2, "only allowed on unstarted nodes".
+    """
+    chain = json.loads(row["chain_definition"])
+    node_ids = {n["id"] for n in chain["nodes"]}
+    if not patch:
+        if row["current_node_id"] is not None:
+            raise HTTPException(409, "work item has already started; overrides cannot be reset")
+        return
+
+    def check(c):
+        for node_id, fields in patch.items():
+            if node_id not in node_ids:
+                raise HTTPException(422, f"unknown node id {node_id!r}")
+            extra = set(fields) - store.OVERRIDABLE_NODE_FIELDS
+            if extra:
+                raise HTTPException(422, f"node {node_id!r}: cannot override {sorted(extra)}")
+            if "auto_escalate" in fields and not isinstance(fields["auto_escalate"], bool):
+                raise HTTPException(422, f"node {node_id!r}: auto_escalate must be a boolean")
+            if store.node_started(c, row["id"], node_id):
+                raise HTTPException(409, f"node {node_id!r} has started; its config is locked")
+
+    st.db.read(lambda c: check(c))
 
 
 @api_router.patch("/work-items/{wid}")
 async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
     st = request.app.state
     row = deps._work_item_row(st, wid)  # 404s on an unknown work item, before any 422
+    fields_set = body.model_fields_set
     if (
         body.title is None
         and body.description is None
         and body.chain_template is None
         and body.agent_overrides is None
+        and body.node_overrides is None
+        and "budget_usd" not in fields_set
     ):
         raise HTTPException(
-            422, "nothing to patch: send a title, description, chain_template, or agent_overrides"
+            422,
+            "nothing to patch: send a title, description, chain_template, agent_overrides, "
+            "node_overrides, or budget_usd",
         )
     if body.title is not None and not body.title.strip():
         raise HTTPException(422, "title cannot be empty")
+
+    if body.node_overrides is not None:
+        _validate_node_overrides(st, row, body.node_overrides)
 
     new_chain_definition = None
     if body.chain_template is not None:
@@ -364,6 +466,13 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
             store.set_agent_overrides(
                 c, wid, json.dumps(body.agent_overrides) if body.agent_overrides else None
             )
+        if body.node_overrides is not None:
+            store.set_node_overrides(c, wid, body.node_overrides)
+        if "budget_usd" in fields_set:
+            store.set_budget(c, wid, body.budget_usd)
 
     await st.db.write(apply)
-    return {"id": wid, **body.model_dump(exclude_none=True)}
+    # `model_dump(exclude_none=True)` would drop an explicit `budget_usd:
+    # null` along with every untouched field, so build the echo from
+    # `fields_set` (what the caller actually sent) instead.
+    return {"id": wid, **{f: getattr(body, f) for f in fields_set}}

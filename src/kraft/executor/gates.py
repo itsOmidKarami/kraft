@@ -177,7 +177,6 @@ async def review_gates(
     """
     from kraft.executor import walk
 
-    budget = policy.budget if policy else _policy.NO_BUDGET
     while status == "awaiting_gate":
         gate = pending_gate(db, work_item_id)
         row = db.read(
@@ -185,11 +184,17 @@ async def review_gates(
         )
         if gate is None or not row["auto_gate"]:
             return status
-        chain = json.loads(row["chain_definition"])
+        # The item's own chain, node overrides folded in (UI v2 · 04 point 1):
+        # an `auto_escalate` override must arm/disarm review here the same way
+        # it does the Config tab's read, not just the template's own binding.
+        chain = store.effective_chain(
+            json.loads(row["chain_definition"]), store.node_overrides_of(row)
+        )
         gate_index = gate_node_index(chain, gate)
         node = chain["nodes"][gate_index]
         if not node.get("auto_escalate"):
             return status
+        budget = store.effective_budget(row, policy.budget if policy else _policy.NO_BUDGET)
 
         # Checked before the dispatch, not after: same posture as every other
         # agent launch (`kraft.executor.walk.walk_node`'s BUDGET rung). Logged
