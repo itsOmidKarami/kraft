@@ -403,8 +403,12 @@ async def refresh_worktree_base(worktree: Path, repo: Path, branch: str) -> str 
         logger.warning("refresh_worktree_base: rev-parse HEAD failed in %s", repo)
         return None
     # Cheaper, purely local check first: a branch already pushed past a prior
-    # open_mr gate must not be rewritten -- the next mr_sync push has no
-    # --force to fall back on (adapters/forge.py:416).
+    # open_mr gate must not be silently rewritten here -- a reviewer or a
+    # pipeline may already be looking at those commits, and this is a quiet
+    # auto-refresh on resume/retry, not a deliberate rebase someone asked
+    # for. `forge._push` can publish a rewritten branch now (Kraft-z6i8), so
+    # this skip is a policy choice about *when* to rewrite, not a workaround
+    # for push being unable to.
     if git_read(
         worktree,
         "rev-parse",

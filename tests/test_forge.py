@@ -419,12 +419,16 @@ def test_sync_mr_pushes_before_it_rewrites_the_description(tmp_path, monkeypatch
 
 def test_push_sets_the_upstream_on_the_work_item_branch(tmp_path, monkeypatch):
     """The line `open_mr` already ran, now reachable on its own so the nodes
-    after it can push too."""
+    after it can push too.
+
+    No `origin/kraft/abc` remote-tracking ref exists yet in this stubbed repo
+    (the `rev-parse --verify` probe returns nothing), so `_push` has no lease
+    to attach and falls back to the plain fast-forward push (Kraft-z6i8)."""
     _stub(tmp_path, monkeypatch, "git", "")
 
     asyncio.run(forge.GlabCli().push(repo=tmp_path, branch="kraft/abc"))
 
-    assert _argv(tmp_path, "git") == ["push", "-u", "origin", "kraft/abc"]
+    assert _argv(tmp_path, "git")[-4:] == ["push", "-u", "origin", "kraft/abc"]
 
 
 def _session_log(tmp_path, session_id: str) -> str:
