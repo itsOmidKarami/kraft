@@ -228,6 +228,27 @@ def test_load_shipped_policy_has_rate_limit_retries():
     assert isinstance(p.rate_limit_retries, int) and p.rate_limit_retries >= 1
 
 
+def test_load_policy_reads_archive_after_days(tmp_path):
+    d = tmp_path / "policy.yaml"
+    d.write_text("default: { attempts: 3, wall_clock_s: 600 }\narchive: { after_days: 30 }\n")
+    p = policy.load_policy(d)
+    assert p.archive_after_days == 30
+
+
+def test_load_policy_defaults_archive_after_days_to_none(tmp_path):
+    d = tmp_path / "policy.yaml"
+    d.write_text("default: { attempts: 3, wall_clock_s: 600 }\n")
+    p = policy.load_policy(d)
+    assert p.archive_after_days is None
+
+
+def test_load_policy_rejects_a_negative_after_days(tmp_path):
+    d = tmp_path / "policy.yaml"
+    d.write_text("default: { attempts: 3, wall_clock_s: 600 }\narchive: { after_days: -1 }\n")
+    with pytest.raises(policy.PolicyError):
+        policy.load_policy(d)
+
+
 def test_load_policy_parses_triggers(tmp_path):
     d = tmp_path / "policy.yaml"
     d.write_text(

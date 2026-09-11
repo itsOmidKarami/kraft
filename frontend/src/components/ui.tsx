@@ -7,7 +7,7 @@
  * box. Colour, size and radius come from Nocturne tokens in `styles.css`; this
  * file carries no literal values.
  */
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import {
   Check,
   ChatText,
@@ -379,16 +379,30 @@ export function Chip({
   count,
   selected = false,
   onClick,
+  trailing,
+  dashed = false,
 }: {
   label: ReactNode;
   count?: number;
   selected?: boolean;
-  onClick?: () => void;
+  onClick?: (e: ReactMouseEvent<HTMLButtonElement>) => void;
+  /** The "×" on a removable facet value (`template: default ×`) or the "▾"
+   *  on the repo dropdown chip (design 04). */
+  trailing?: ReactNode;
+  /** The dashed "+ Filter" affordance chip (design 04). */
+  dashed?: boolean;
 }) {
   return (
-    <button type="button" className="chip" aria-pressed={selected} onClick={onClick}>
+    <button
+      type="button"
+      className="chip"
+      data-dashed={dashed || undefined}
+      aria-pressed={selected}
+      onClick={onClick}
+    >
       {label}
       {count != null && <span className="chip-count">{count}</span>}
+      {trailing}
     </button>
   );
 }

@@ -244,6 +244,35 @@ def abandon_work_item(conn: sqlite3.Connection, work_item_id: str) -> None:
     events.append(conn, work_item_id, "work_item_abandoned", {})
 
 
+def archive_work_item(conn: sqlite3.Connection, work_item_id: str, by: str) -> None:
+    """Marks a completed/abandoned item archived without touching `status`
+    (UI v2 · 03): "Ended as" keeps reading completed/abandoned, and every
+    board count that filters on status still excludes an archived item only
+    because the list query adds its own `archived_at IS NULL` (board.py).
+
+    `by` is `"you"` (the archive route) or `"auto"` (the poller) — shown in
+    the Archived view's ARCHIVED column ("today · by you" / "2 days ago ·
+    auto").
+    """
+    now = _now()
+    conn.execute(
+        "UPDATE work_items SET archived_at = ?, archived_by = ?, updated_at = ? WHERE id = ?",
+        (now, by, now, work_item_id),
+    )
+    events.append(conn, work_item_id, "work_item_archived", {"by": by})
+
+
+def restore_work_item(conn: sqlite3.Connection, work_item_id: str) -> None:
+    """Puts an archived item back under Done (UI v2 · 03) -- clears the two
+    columns `archive_work_item` set; `status` never moved, so there is
+    nothing else to restore."""
+    conn.execute(
+        "UPDATE work_items SET archived_at = NULL, archived_by = NULL, updated_at = ? WHERE id = ?",
+        (_now(), work_item_id),
+    )
+    events.append(conn, work_item_id, "work_item_restored", {})
+
+
 def pause_work_item(conn: sqlite3.Connection, work_item_id: str, session_ids: list[str]) -> None:
     """Mark the item and its killed sessions paused (02 §10.2).
 

@@ -63,11 +63,16 @@ async def list_work_items(request: Request):
     # Read outside `_read`: that closure runs on the database thread and has no
     # request to ask.
     include_abandoned = request.query_params.get("include_abandoned") == "true"
+    # Board counts and the default list exclude archived items entirely
+    # (UI v2 · 03); ?archived=true flips to *only* archived, for the
+    # Archived view. There is no third state ("both") -- nothing needs it.
+    archived = request.query_params.get("archived") == "true"
 
     def _read(c):
         rows = c.execute(
-            "SELECT * FROM work_items WHERE (? OR status != 'abandoned') ORDER BY created_at",
-            (include_abandoned,),
+            "SELECT * FROM work_items WHERE (? OR status != 'abandoned') "
+            "AND (archived_at IS NOT NULL) = ? ORDER BY created_at",
+            (include_abandoned, archived),
         ).fetchall()
         cursor = c.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()[0]
         # The latest gate_* event per item, in one pass — the board renders a gate
@@ -102,6 +107,8 @@ async def list_work_items(request: Request):
             "pending_gate": pending.get(r["id"]),
             "attachments": json.loads(r["attachments"]) if r["attachments"] else [],
             "retry_at": r["retry_at"],
+            "archived_at": r["archived_at"],
+            "archived_by": r["archived_by"],
             "progress": _board_progress(st, r),
         }
         for r in rows

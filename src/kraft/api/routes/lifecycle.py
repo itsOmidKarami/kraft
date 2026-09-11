@@ -163,6 +163,52 @@ async def abandon_work_item(wid: str, request: Request):
     return {"id": wid, "status": "abandoned", "worktree_removed": removed}
 
 
+async def _archive_one(app, row, by: str) -> bool:
+    """Shared by the archive route and `archive.poller`: reclaim the
+    worktree the same way `abandon_work_item` does (UI v2 · 03: "Archive
+    reclaims the worktree the same way abandon tears it down today"), then
+    flip the row. Returns whether the worktree was actually removed (a
+    completed item usually still has one; an already-abandoned item does
+    not, and `_remove_worktree`'s git calls fail best-effort in that case,
+    same as a second `abandon` call today).
+    """
+    st = app.state
+    wid = row["id"]
+    await st.db.write(lambda c: store.archive_work_item(c, wid, by))
+    worktree = st.run_dirs.worktrees / wid
+    killed = await asyncio.to_thread(_kill_orphans_under, worktree)
+    if killed:
+        logger.warning("archive %s: killed orphaned process(es) %s under worktree", wid, killed)
+    removed = await _remove_worktree(Path(row["repo"]), worktree, store.branch_for(row))
+    shutil.rmtree(st.run_dirs.attachments / wid, ignore_errors=True)
+    return removed
+
+
+@api_router.post("/work-items/{wid}/archive")
+async def archive_work_item(wid: str, request: Request):
+    """Archive a completed/abandoned item (UI v2 · 03): "Ended as" keeps
+    reading completed/abandoned -- only `archived_at`/`archived_by` change."""
+    st = request.app.state
+    row = deps._work_item_row(st, wid)
+    if row["status"] not in ("completed", "abandoned"):
+        raise HTTPException(409, "only a completed or abandoned item can be archived")
+    if row["archived_at"]:
+        return {"id": wid, "archived_by": row["archived_by"], "worktree_removed": False}
+    removed = await _archive_one(request.app, row, "you")
+    return {"id": wid, "archived_by": "you", "worktree_removed": removed}
+
+
+@api_router.post("/work-items/{wid}/restore")
+async def restore_work_item(wid: str, request: Request):
+    """Put an archived item back under Done (UI v2 · 03)."""
+    st = request.app.state
+    row = deps._work_item_row(st, wid)
+    if not row["archived_at"]:
+        raise HTTPException(409, "work item is not archived")
+    await st.db.write(lambda c: store.restore_work_item(c, wid))
+    return {"id": wid, "status": row["status"]}
+
+
 @api_router.post("/work-items/{wid}/pause")
 async def pause_work_item(wid: str, request: Request):
     """Stop the current node's running sessions (02 §10.2).

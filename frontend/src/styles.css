@@ -216,6 +216,13 @@ main { min-height: calc(100vh - 48px); }
   font-size: 10px; text-decoration: none; color: var(--color-neutral-500);
 }
 .bottom-nav-tab.active { color: var(--color-accent); }
+.bottom-nav-tab { position: relative; }
+.bottom-nav-badge {
+  position: absolute; top: 4px; right: calc(50% - 20px);
+  min-width: 15px; height: 15px; padding: 0 3px; border-radius: 999px;
+  background: var(--color-accent); color: var(--color-accent-contrast, #fff);
+  font-size: 10px; line-height: 15px; text-align: center;
+}
 
 /* ══ app shell: sidebar + rail (designs 01/02/03) ══════════════════════ */
 .app-shell { display: flex; min-height: 100vh; }
@@ -334,41 +341,85 @@ main { min-height: calc(100vh - 48px); }
 .app-header-crumb-sub { font-size: 11px; color: var(--color-neutral-600); margin-left: 6px; }
 .app-header-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 .app-header .btn { font-size: 13px; padding: 5px 10px; }
-@media (max-width: 640px) {
-  .app-header .kbd { display: none; }
-  .app-header .btn-secondary { display: none; }
+
+/* ══ board (design 04) ════════════════════════════════════════════════════ */
+.board { display: grid; grid-template-columns: 1fr; min-height: 560px; }
+.board.has-peek { grid-template-columns: 1fr 440px; align-items: start; }
+
+.repo-pill {
+  display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+  padding: 4px 10px 4px 4px; margin-bottom: 8px; border-radius: 999px;
+  border: 1px solid var(--color-divider); background: var(--color-surface);
+  color: var(--color-text); font: inherit; font-size: 12px;
+}
+.repo-pill-avatar {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--color-accent-900); color: var(--color-accent-300); font-size: 11px;
 }
 
-/* ══ board (design 2a) ════════════════════════════════════════════════════ */
-.board { display: grid; grid-template-columns: 200px 1fr; min-height: 560px; }
+/* ══ repo sheet (design m02) ══════════════════════════════════════════════
+   Bottom sheet, phone-only -- mounted via `.phone-only` on its trigger, not
+   media-queried itself, so `just dev` at desktop width can still render it
+   in a component test. */
+.repo-sheet-backdrop { align-items: flex-end; }
+.repo-sheet {
+  width: 100%; max-height: 70vh; overflow-y: auto;
+  background: var(--color-surface); border-radius: 16px 16px 0 0;
+  padding: 8px 0 max(8px, env(safe-area-inset-bottom));
+}
+.repo-sheet-head { padding: 10px 16px; font-size: 12px; color: var(--color-text-muted); }
+.repo-sheet-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 14px 16px; border: 0; background: transparent; color: inherit;
+  font: inherit; text-align: left; min-height: 44px;
+}
+.repo-sheet-row:active { background: color-mix(in srgb, var(--color-text) 6%, transparent); }
+.repo-sheet-count { margin-left: auto; font-size: 12px; color: var(--color-neutral-500); }
 
-.board-sidebar {
-  padding: 20px 16px;
-  border-right: 1px solid var(--color-divider);
-  display: flex; flex-direction: column; gap: 18px;
-  font-size: 13px;
-  /* pinned under the sticky header; scrolls internally rather than off-screen
-     once the board list runs past the viewport */
-  position: sticky; top: 48px; align-self: start;
-  max-height: calc(100vh - 48px); overflow-y: auto;
+/* ══ archived view (design 07) ═══════════════════════════════════════════ */
+.archived { padding: 16px 20px 24px; display: flex; flex-direction: column; gap: 16px; }
+.archived-banner {
+  margin: 0; padding: 12px 14px; border-radius: 8px;
+  background: var(--hairline-24); font-size: 12px; color: var(--color-neutral-400);
 }
-.facet { display: flex; flex-direction: column; gap: 2px; }
-.facet .section-label { margin: 0 0 6px; color: var(--color-text-muted); }
-.facet-opt {
-  display: flex; justify-content: space-between; align-items: center; gap: 8px;
-  padding: 5px 8px; border: 0; border-radius: 6px;
-  font: inherit; text-align: left; cursor: pointer;
-  background: transparent; color: var(--color-neutral-400);
+.archived-table { display: flex; flex-direction: column; }
+.archived-head {
+  display: grid; grid-template-columns: 1fr 140px 180px 100px;
+  padding: 6px 10px; font-size: 11px; color: var(--color-text-muted); letter-spacing: 0.04em;
 }
-.facet-opt:hover { background: color-mix(in srgb, var(--color-text) 6%, transparent); color: var(--color-text); }
-.facet-opt[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
-  color: var(--color-accent-300);
+.archived-row {
+  display: grid; grid-template-columns: 1fr 140px 180px 100px; align-items: center;
+  gap: 10px; padding: 10px; border-radius: 8px; text-decoration: none; color: inherit;
+  background: linear-gradient(to right,
+    transparent, var(--color-divider) 48px,
+    var(--color-divider) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
 }
-.facet-count { font-size: 11px; color: var(--color-text-muted); }
+.archived-row:hover { background-color: color-mix(in srgb, var(--color-text) 4%, transparent); }
+.archived-row-item { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.archived-row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.archived-row-title { font-size: 14px; font-weight: 500; color: var(--color-text); }
+.archived-row-meta { display: flex; gap: 8px; font-size: 11px; color: var(--color-neutral-500); }
+.archived-row-meta code { font-family: ui-monospace, Menlo, monospace; }
+.archived-row-actions { display: flex; justify-content: flex-end; }
+
+/* ══ fresh install (design 08) ═══════════════════════════════════════════ */
+.board-empty { max-width: 620px; padding: 40px 20px; display: flex; flex-direction: column; gap: 16px; }
+.board-empty h1 { font-size: 22px; margin: 0; }
+.board-empty > p { color: var(--color-neutral-400); margin: 0; }
+.board-empty > p code { font-family: ui-monospace, Menlo, monospace; }
+.board-empty-steps { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; }
+.board-empty-steps li {
+  display: flex; justify-content: space-between; align-items: center; gap: 16px;
+  padding: 14px 0;
+  border-top: 1px solid var(--color-divider);
+}
+.board-empty-step-text { display: flex; flex-direction: column; gap: 2px; }
+.board-empty-step-text span { font-size: 12px; color: var(--color-neutral-500); }
+.board-empty-footer { font-size: 12px; color: var(--color-text-muted); margin: 0; }
 
 .board-foot {
-  margin-top: auto;
+  margin-top: 8px;
   font-size: 11px; color: var(--color-text-muted);
   display: flex; flex-direction: column; gap: 4px;
 }
@@ -381,9 +432,16 @@ main { min-height: calc(100vh - 48px); }
   background: var(--color-accent); animation: kpulse 1.8s infinite;
 }
 
-.board-groups { padding: 16px 20px 24px; display: flex; flex-direction: column; gap: 22px; }
+.board-groups { padding: 16px 20px 24px; display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+.board-filter-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.board-facet { display: flex; align-items: center; gap: 6px; }
+.board-filter-divider {
+  width: 1px; align-self: stretch; background: var(--color-divider);
+}
 .board-sort {
-  display: flex; align-items: center; gap: 8px; align-self: flex-end;
+  display: flex; align-items: center; gap: 8px; margin-left: auto;
   font-size: 12px; color: var(--color-text-muted);
 }
 .group-head {
@@ -396,13 +454,24 @@ main { min-height: calc(100vh - 48px); }
 .group-label { font-size: 13px; font-weight: 500; }
 .group-label[data-tone="accent"] { color: var(--color-accent-300); }
 .group-count { font-size: 11px; color: var(--color-text-muted); }
+.group-head-note { font-size: 11px; color: var(--color-text-muted); }
 .group-empty { font-size: 12px; color: var(--color-text-muted); padding: 8px 10px; }
 .show-all { font-size: 12px; margin-top: 6px; align-self: flex-start; }
 
+/* ══ Done-group archiving (design 06) ═══════════════════════════════════ */
+.board-row-archive { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.board-floating-bar {
+  position: sticky; bottom: 16px; align-self: center;
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 16px; border-radius: 999px;
+  background: var(--color-neutral-900); box-shadow: 0 0 0 1px var(--color-divider), 0 8px 24px rgba(0,0,0,0.4);
+  font-size: 13px;
+}
+
 .board-row {
-  display: grid; grid-template-columns: 1fr 260px 120px;
+  display: grid; grid-template-columns: 22px 1fr 280px 170px;
   gap: 20px; align-items: center;
-  padding: 10px; border-radius: 8px;
+  padding: 10px; border-radius: 8px; cursor: pointer;
   /* The same fading hairline every other list row in the interface carries
      (spec §2). Without it a row's own gate actions sit as close to the next
      title as to the one they belong to, and the most consequential control on
@@ -420,6 +489,12 @@ main { min-height: calc(100vh - 48px); }
       transparent, var(--color-divider) 48px,
       var(--color-divider) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
 }
+/* Selected row (peek open on it, design 05): accent-tinted background plus an
+   inset ring, so the row reads as "open" without a border pushing layout. */
+.board-row[data-selected] {
+  background-color: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  box-shadow: inset 0 0 0 1px var(--color-accent-700);
+}
 .board-row-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .board-row-title {
   font-size: 14px; font-weight: 500; color: var(--color-text); text-decoration: none;
@@ -436,6 +511,37 @@ main { min-height: calc(100vh - 48px); }
   font-size: 12px; color: var(--color-accent-300); white-space: nowrap;
 }
 .tag-tight { padding: 0 5px; font-size: 10px; gap: 4px; }
+
+/* ══ peek pane (design 05) ═══════════════════════════════════════════════
+   440px, slides in beside the list -- narrows it, is not an overlay. */
+.peek-pane {
+  position: sticky; top: 48px; align-self: start;
+  width: 440px; max-height: calc(100vh - 48px); overflow-y: auto;
+  padding: 18px; margin: 16px 20px 24px 0;
+  border-left: 1px solid var(--color-divider);
+  display: flex; flex-direction: column; gap: 12px;
+  animation: peek-in 200ms ease-out;
+}
+@keyframes peek-in {
+  from { transform: translateX(24px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+.peek-head { display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+.peek-head code { font-family: ui-monospace, Menlo, monospace; color: var(--color-neutral-400); }
+.peek-meta {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px; color: var(--color-neutral-500);
+}
+.peek-title { font-size: 18px; font-weight: 500; margin: 0; }
+.peek-log {
+  display: flex; flex-direction: column; gap: 2px;
+  font-family: ui-monospace, Menlo, monospace; font-size: 11px;
+  color: var(--color-neutral-400);
+  background: var(--hairline-24); border-radius: 8px; padding: 8px 10px;
+}
+.peek-log-line { white-space: pre-wrap; word-break: break-word; }
+.peek-log-time { color: var(--color-neutral-600); margin-right: 6px; }
+.peek-updated { font-size: 11px; color: var(--color-text-muted); margin: 0; }
 
 /* ══ gate (design 2a inline · 4a card) ════════════════════════════════════ */
 .gate-inline {
@@ -883,6 +989,22 @@ main { min-height: calc(100vh - 48px); }
 }
 .search-hint { padding: 18px 16px; font-size: 12px; color: var(--color-text-muted); }
 
+/* ══ palette sections (design 09) ═══════════════════════════════════════ */
+.search-sections { display: flex; flex-direction: column; max-height: 52vh; overflow: auto; }
+.search-section { padding: 6px 8px; }
+.search-section .section-label { margin: 4px 4px 2px; }
+.search-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 8px 10px; border: 0; border-radius: 6px;
+  color: inherit; font: inherit; text-align: left; text-decoration: none; cursor: pointer;
+  background: transparent;
+}
+.search-row:hover, .search-row[data-active] { background: color-mix(in srgb, var(--color-text) 6%, transparent); }
+.search-row-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.search-row-title { font-size: 13px; font-weight: 500; }
+.search-row-sub { font-size: 11px; color: var(--color-neutral-500); }
+.search-result[data-active] { background: color-mix(in srgb, var(--color-text) 4%, transparent); }
+
 /* ══ intake (design 1g) ═══════════════════════════════════════════════════ */
 .intake { width: 460px; max-width: 100%; gap: 14px; padding: 20px 22px; }
 /* Both form dialogs, one size — "Add repo" was inheriting Nocturne's 20px while
@@ -1047,32 +1169,19 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; }
   .chain-gate { display: none; }
 
   .board, .settings, .analytics { grid-template-columns: 1fr; }
-  .board-sidebar {
-    /* The base rule (styles.css:~340) is `position: sticky; top: 48px;
-       max-height: calc(100vh - 48px); overflow-y: auto` — built for the
-       desktop 2-column layout, where the sidebar sticks while the list
-       scrolls independently beside it. Stacked single-column on phone, that
-       serves nothing and stacks a second sticky context under `.app-header`
-       (top: 0) — two sticky elements in one scroll container is a known
-       mobile-Chrome jank/overlap source during scroll, invisible to a
-       synthetic (non-momentum) scroll in headless testing. */
-    position: static; max-height: none; overflow-y: visible;
-    flex-direction: row; flex-wrap: wrap; gap: 10px;
-    border-right: 0; border-bottom: 1px solid var(--color-divider); padding: 12px;
-  }
-  .facet { flex-direction: row; flex-wrap: wrap; gap: 6px; }
-  .facet .section-label { width: 100%; margin: 0; }
+  .board-filter-row { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 2px; }
   .board-foot { margin-top: 0; }
 
   .board-groups, .settings-body, .analytics-body { padding: 12px; }
-  /* the chain bar and current-node column stack under the title */
+  /* the chain bar and current-node column stack under the title; the leading
+     glyph column collapses too -- StatusGlyph moves inline with the title on
+     phone (m01) rather than eating a grid column that has nowhere to go. */
   .board-row { grid-template-columns: 1fr; gap: 10px; padding: 12px 8px; }
   .board-row-meta { flex-wrap: wrap; white-space: normal; }
   .gate-inline .btn, .board-row .btn { min-height: 44px; }
 
   .detail { padding: 16px 12px 24px; }
   .detail-title { font-size: 22px; }
-  .desktop-only { display: none; }
 
   .row, .doc-row, .event-row, .hook-row, .cap-row, .node-row, .repo-row {
     background: var(--hairline-24);
@@ -1143,17 +1252,29 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; }
      already scrolls, so don't also cap results to half the viewport */
   .search-page .search-results { max-height: none; }
 
-  .bottom-nav { display: flex; }
-  main { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
-
-  .app-sidebar, .app-rail { display: none; }
 }
 
 /* the two halves of the phone rule (design 1n) */
 .phone-only { display: none; }
 .open-on-desktop { font-size: 12px; color: var(--color-neutral-500); margin: 0; }
-@media (max-width: 640px) {
+
+/* ══ shared shell breakpoint (UI v2 common spec: "the Board group moves the
+   shared shell rules -- tab bar, AppNav/Header hiding -- from 640 to 767")
+   ═══════════════════════════════════════════════════════════════════════
+   One number for "is this a phone", used by the tab bar, the sidebar/rail,
+   the header's compacting, and the `.phone-only`/`.desktop-only` utility
+   pair every screen's own phone rules build on -- kept together so the
+   switch never fires at two different widths for two halves of one thing. */
+@media (max-width: 767px) {
+  .app-header .kbd { display: none; }
+  .app-header .btn-secondary { display: none; }
+
+  .bottom-nav { display: flex; }
+  main { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
+  .app-sidebar, .app-rail { display: none; }
+
   .phone-only { display: block; }
+  .desktop-only { display: none; }
 }
 
 /* the live bead strip under the search results (design 1h) */

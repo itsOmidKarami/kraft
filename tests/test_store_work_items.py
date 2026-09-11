@@ -530,3 +530,55 @@ def test_repos_for_is_empty_for_a_single_repo_item(tmp_path):
         chain_definition="{}",
     )
     assert store.repos_for(conn, "w1") == []
+
+
+def _mk_item(conn, wid="w1", status="active"):
+    store.create_work_item(
+        conn,
+        id=wid,
+        bead_id="B-1",
+        title="t",
+        repo="/r",
+        chain_template="quick-task",
+        chain_definition=CHAIN,
+    )
+    conn.execute("UPDATE work_items SET status = ? WHERE id = ?", (status, wid))
+
+
+def test_archive_sets_archived_at_and_by_without_touching_status(tmp_path):
+    conn = db._connect(tmp_path / "s.db")
+    db.migrate(conn)
+    _mk_item(conn, status="completed")
+
+    store.archive_work_item(conn, "w1", "you")
+
+    row = conn.execute(
+        "SELECT status, archived_at, archived_by FROM work_items WHERE id='w1'"
+    ).fetchone()
+    assert row["status"] == "completed"
+    assert row["archived_by"] == "you"
+    assert row["archived_at"]
+
+
+def test_restore_clears_archived_columns(tmp_path):
+    conn = db._connect(tmp_path / "s.db")
+    db.migrate(conn)
+    _mk_item(conn, status="abandoned")
+    store.archive_work_item(conn, "w1", "auto")
+
+    store.restore_work_item(conn, "w1")
+
+    row = conn.execute("SELECT archived_at, archived_by FROM work_items WHERE id='w1'").fetchone()
+    assert row["archived_at"] is None
+    assert row["archived_by"] is None
+
+
+def test_archive_appends_work_item_archived_event(tmp_path):
+    conn = db._connect(tmp_path / "s.db")
+    db.migrate(conn)
+    _mk_item(conn, status="completed")
+
+    store.archive_work_item(conn, "w1", "you")
+
+    evs = [e for e in events.read_after(conn, 0, "w1") if e["type"] == "work_item_archived"]
+    assert evs and evs[0]["payload"] == {"by": "you"}

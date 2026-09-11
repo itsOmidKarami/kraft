@@ -8,8 +8,8 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
+from kraft import archive, ci_wait, executor, rate_limit_retry, reattach
 from kraft import auth as auth_mod
-from kraft import ci_wait, executor, rate_limit_retry, reattach
 from kraft import config as config_mod
 from kraft import intake as intake_mod
 from kraft import notify as notify_mod
@@ -171,6 +171,11 @@ async def lifespan(app: FastAPI):
     # parked on a pipeline has to be woken by something, and that something
     # cannot be the coroutine that used to sit in the wait (Kraft-ru98).
     app.state.ci_wait_task = asyncio.ensure_future(ci_wait.poller(app))
+    # Always on, for the same reason the rate-limit and ci-wait pollers are:
+    # an item aged past policy.archive_after_days has to be archived by
+    # something, and an operator who forgets to check the board is exactly
+    # who auto-archive exists for (UI v2 · 03).
+    app.state.archive_task = asyncio.ensure_future(archive.poller(app))
     # PUT /intake swaps this task, and the swap has to await the cancellation of
     # the old one. Without the lock two overlapping saves both read the same old
     # task, both start a poller, and only the last assignment is reachable --
@@ -206,6 +211,8 @@ async def lifespan(app: FastAPI):
             await asyncio.gather(app.state.trigger_task, return_exceptions=True)
         app.state.ci_wait_task.cancel()
         await asyncio.gather(app.state.ci_wait_task, return_exceptions=True)
+        app.state.archive_task.cancel()
+        await asyncio.gather(app.state.archive_task, return_exceptions=True)
         tasks = list(app.state.tasks.values())
         for task in tasks:
             task.cancel()
