@@ -42,15 +42,16 @@ test("create a work item and watch it complete", async ({ page }) => {
   // 4B/4B-UI: the agent's session summary is ingested and linked to this item,
   // and the panel renders it. Proof of the whole path in a browser. Documents
   // live behind a tab on the redesigned detail screen.
+  // DocumentModal is gone — documents render in the right pane instead of
+  // opening a dialog from a row click.
   await page.getByRole("tab", { name: /Documents/ }).click();
   const docs = page.locator(".linked-docs");
   await expect(docs.getByText(/\.engineering\/sessions\//)).toBeVisible({ timeout: 30_000 });
   await docs.getByRole("button").first().click();
-  const viewer = page.getByRole("dialog", { name: "document" });
+  const viewer = page.getByTestId("right-pane-doc");
   await expect(viewer).toBeVisible();
-  // the modal's meta line carries the document's kind, falling back to its source
+  // the pane's meta line carries the document's kind, falling back to its source
   await expect(viewer.getByText("sessions", { exact: true })).toBeVisible();
-  await viewer.getByRole("button", { name: /close/i }).click();
 
   // Back on the Board, this item has moved into the Done group — the redesigned
   // board conveys status by grouping, not by a per-row badge. Scoped by id: the

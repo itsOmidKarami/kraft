@@ -181,6 +181,32 @@ export const useStore = create<State>((set, get) => ({
         }
         case "fix_cycle_started":
           return { ...base, ...patchItem(s, id, (w) => ({ ...w, fixCycle: p.cycle })) };
+        // Kraft-qqz8: the hero task bar and the Tasks tab's plan list update
+        // the moment the implementer reports, not on the next 60s poll. The
+        // full `tasks` list (each one's own state) is `combine()`'s to build
+        // server-side — patched here from what the event already carries
+        // when there is a prior list to carry forward, and backfilled by the
+        // queued hydrate otherwise (first report of a fresh run).
+        case "task_progress":
+          return {
+            ...base,
+            ...patchItem(s, id, (w) => ({
+              ...w,
+              progress: {
+                current: p.task as number,
+                total: p.total as number,
+                title: p.title as string,
+                tasks:
+                  w.progress?.tasks.map((t) => ({
+                    ...t,
+                    state: (t.n < p.task ? "done" : t.n === p.task ? "current" : "pending") as
+                      | "done"
+                      | "current"
+                      | "pending",
+                  })) ?? [],
+              },
+            })),
+          };
         case "gate_requested":
           // store.request_gate flips the row to needs_human in the same
           // transaction that appends this event, so mirror it here — otherwise

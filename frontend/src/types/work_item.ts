@@ -7,6 +7,34 @@ export interface ChainNode {
   fix_loop?: string;
   /** Where rejecting this node's gate sends the chain; null re-runs this node. */
   reject_to?: string | null;
+  /** Whether an agent may review this node's gate before a human sees it
+   *  (Kraft-zr3s). Only meaningful beside `gate_after`. */
+  auto_escalate?: boolean | null;
+}
+
+/** A node id's overridden fields, from the item's own `node_overrides`
+ *  (UI v2 · 04 point 1). Today only `auto_escalate` is supported. */
+export type NodeOverrides = Record<string, { auto_escalate?: boolean }>;
+
+/** Where the implementer is in its plan (Kraft-qqz8): "Task 3 of 6", derived
+ *  server-side from the plan's `## Task N` headings, the latest
+ *  `task_progress` report and the highest task a commit subject names
+ *  (`progress.combine`). `null`/absent off the implementation node or for a
+ *  plan with no headings. */
+export interface TaskProgress {
+  current: number;
+  total: number;
+  title: string;
+  tasks: { n: number; title: string; state: "done" | "current" | "pending" }[];
+}
+
+/** The Config tab's "$5.00 · $2.41 used" line and its `policy default` /
+ *  `item` source tag (UI v2 · 04 point 4). Named `budget_cap`, not `budget`
+ *  -- `WorkItem.budget` is a different, event-derived field (see there). */
+export interface BudgetCap {
+  cap_usd: number | null;
+  source: "item" | "policy";
+  spent_usd: number;
 }
 
 export interface ChainDefinition {
@@ -96,6 +124,20 @@ export interface WorkItem {
   /** The root repo's merge request, once `open_mr` has run; null before then.
    *  Only on the detail endpoint. */
   mr_ref?: { number: number; url: string } | null;
+  /** Only on the detail endpoint; see `TaskProgress`. */
+  progress?: TaskProgress | null;
+  /** `chain_definition` with `node_overrides` folded over each node -- what
+   *  actually runs. Only on the detail endpoint (UI v2 · 04 point 3). */
+  effective_chain?: ChainDefinition;
+  /** This item's own per-node field overrides, `{}` when there are none.
+   *  Only on the detail endpoint. */
+  node_overrides?: NodeOverrides;
+  /** `Object.keys(node_overrides).length` -- the Config tab's "default + N
+   *  overrides" count. Only on the detail endpoint. */
+  node_overrides_count?: number;
+  /** This item's effective spend cap and its source. Only on the detail
+   *  endpoint. */
+  budget_cap?: BudgetCap;
 }
 
 export interface Finding {

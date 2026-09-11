@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 24
+SCHEMA_VERSION = 25
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -73,6 +73,20 @@ CREATE TABLE work_items (
   -- chain_definition, so a paused item can be made cheaper or stronger
   -- before its next retry.
   agent_overrides TEXT,
+  -- per-item spend cap (UI v2 · 04). `budget_set` distinguishes "never
+  -- customized" (0, `budget_usd` ignored, policy default applies) from an
+  -- explicit choice (1): `budget_usd` NULL then means "no cap", and a
+  -- number means that cap. See `store.budget.effective_work_item_cap`,
+  -- the only place that resolves these two columns.
+  budget_set INTEGER NOT NULL DEFAULT 0,
+  budget_usd REAL,
+  -- per-node field overrides materialized on top of this item's own
+  -- chain_definition (UI v2 · 04): JSON {node_id: {field: value}}. Applies
+  -- only to fields this MR added support for (today: auto_escalate). NULL
+  -- or {} means no overrides. `store.chain.effective_chain` folds this over
+  -- chain_definition at read time -- nothing else reads chain_definition's
+  -- node fields directly once this exists.
+  node_overrides TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
@@ -572,6 +586,13 @@ FROM worker_sessions""",
         "DROP TABLE worker_sessions",
         "ALTER TABLE worker_sessions_new RENAME TO worker_sessions",
         "CREATE INDEX idx_worker_sessions_status ON worker_sessions(status)",
+    ],
+    # UI v2 · 04: per-item budget cap and per-node overrides. Both plain
+    # additive columns -- no CHECK involved, so no rebuild.
+    24: [
+        "ALTER TABLE work_items ADD COLUMN budget_set INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE work_items ADD COLUMN budget_usd REAL",
+        "ALTER TABLE work_items ADD COLUMN node_overrides TEXT",
     ],
 }
 

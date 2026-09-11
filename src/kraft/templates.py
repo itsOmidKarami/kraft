@@ -572,10 +572,20 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
     return TemplateSet(valid=valid, invalid=invalid)
 
 
-def materialize(template: Template, *, satisfied_gates: frozenset[str] = frozenset()) -> dict:
+def materialize(
+    template: Template,
+    *,
+    satisfied_gates: frozenset[str] = frozenset(),
+    skip_nodes: frozenset[str] = frozenset(),
+) -> dict:
     """The template's nodes, minus any whose gate an intake attachment already
     satisfies — the item genuinely has no spec node, rather than one skipped at
-    runtime (Kraft-dgh)."""
+    runtime (Kraft-dgh) — and minus any in `skip_nodes` (UI v2 · 04 point 6):
+    the intake-time click-to-skip, same "genuinely not in the chain" posture,
+    including a gated node (the design strikes `spec` through in 10/m09 even
+    though it gates) -- a human choosing this at intake is the same trust an
+    attachment trim already gets, so a gate skipped this way is not a gate
+    bypassed at runtime, it never existed for this item."""
     return {
         "template_id": template.id,
         "nodes": [
@@ -590,6 +600,6 @@ def materialize(template: Template, *, satisfied_gates: frozenset[str] = frozens
                 "auto_escalate": n.get("auto_escalate"),
             }
             for n in template.nodes
-            if n.get("gate_after") not in satisfied_gates
+            if n.get("gate_after") not in satisfied_gates and n["id"] not in skip_nodes
         ],
     }
