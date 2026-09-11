@@ -332,7 +332,7 @@ export function Tabs({
 /* — switch (spec §4) —————————————————————————————————————————————————— */
 
 /** 34×20 toggle, keyboard-operable via native `<button>`. Replaces the four
- *  hand-rolled `.switch` buttons `views/Settings.tsx` had (repos/plugins/
+ *  hand-rolled `.switch` buttons `views/settings/` had (repos/plugins/
  *  intake/notify pages) — same markup, one definition. */
 export function Switch({
   checked,

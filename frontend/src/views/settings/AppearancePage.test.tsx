@@ -1,0 +1,45 @@
+import { fireEvent, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as api from "../../api";
+import { renderAt, setupSettingsMocks } from "./testing";
+
+beforeEach(() => {
+  setupSettingsMocks();
+});
+
+describe("Settings · appearance", () => {
+  it("lists all 5 palettes and the light/dark/system control", async () => {
+    renderAt("/settings/appearance");
+    expect(await screen.findByText("Nocturne")).toBeInTheDocument();
+    for (const name of ["Rose", "Forest", "Amber", "Slate"]) {
+      expect(screen.getByText(name)).toBeInTheDocument();
+    }
+    expect(screen.getByRole("radiogroup", { name: /mode/i })).toBeInTheDocument();
+  });
+
+  it("previews live on click and saves on Save", async () => {
+    const put = vi.spyOn(api, "putTheme").mockResolvedValue({ palette: "forest", mode: "dark" });
+    renderAt("/settings/appearance");
+    await screen.findByText("Nocturne");
+
+    fireEvent.click(screen.getByText("Forest"));
+    expect(document.documentElement.dataset.palette).toBe("forest");
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(put).toHaveBeenCalledWith({ palette: "forest", mode: "dark" });
+  });
+
+  it("Discard reverts the live preview back to the loaded value", async () => {
+    renderAt("/settings/appearance");
+    await screen.findByText("Nocturne");
+
+    fireEvent.click(screen.getByText("Rose"));
+    expect(document.documentElement.dataset.palette).toBe("rose");
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+    expect(document.documentElement.dataset.palette).toBe("nocturne");
+  });
+});
