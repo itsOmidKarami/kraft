@@ -1,5 +1,9 @@
 # Plugin Adapters
 
+> **Status:** historical design record. It captures why the system was designed
+> this way, and is not maintained against the code. Current intended behaviour
+> lives in `docs/intent/` (today: `gates` only).
+
 > Component 2 of the decomposition (`01_conceptual_model.md` §12): the **first-party
 > plugin adapters** — work-graph (beads), planning, execution worker, env-prepare,
 > chain review, review, CI/MR. Every plugin conforms to the plugin contract (`01`

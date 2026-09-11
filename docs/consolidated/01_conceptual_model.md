@@ -1,6 +1,8 @@
 # Conceptual Model
 
-> **Status:** v1, agreed, not yet built. This is the model to build against.
+> **Status:** historical design record. It captures why the system was designed
+> this way, and is not maintained against the code. Current intended behaviour
+> lives in `docs/intent/` (today: `gates` only).
 > Companion documents: `02_orchestrator_core.md`, `03_plugin_adapters.md`,
 > `04_indexer_search.md`, `05_ui.md`, `06_cross_repo_federation.md`. Start with
 > `00_overview.md` for reading order and glossary.

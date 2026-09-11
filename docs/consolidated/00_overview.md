@@ -3,10 +3,9 @@
 Consolidated design documentation for a personal, plugin-based, semi-autonomous
 software engineering workflow system.
 
-**Status:** v1 design, agreed, **not yet built**. Every retry/timeout number, several
-tool identities (remote-review CLI, exact `bd` CLI surface, local embedding model),
-and all Codex support are explicit placeholders — see each document's §"Open
-Questions".
+> **Status:** historical design record. It captures why the system was designed
+> this way, and is not maintained against the code. Current intended behaviour
+> lives in `docs/intent/` (today: `gates` only).
 
 This set was consolidated from 10 layered documents (one base conceptual model +
 five component designs + four addendums), since removed. `DECISION_MAP.md` traces

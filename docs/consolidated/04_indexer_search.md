@@ -1,5 +1,9 @@
 # Indexer + Search Backend
 
+> **Status:** historical design record. It captures why the system was designed
+> this way, and is not maintained against the code. Current intended behaviour
+> lives in `docs/intent/` (today: `gates` only).
+
 > Component 3 of the decomposition (`01_conceptual_model.md` §12): the **Indexer +
 > search backend** — local SQLite FTS5 (+ `sqlite-vec`) ingestion of `.engineering/`
 > artifact files and session summaries, across every connected repo, powering

@@ -1,5 +1,9 @@
 # Cross-Repo / Federation
 
+> **Status:** historical design record. It captures why the system was designed
+> this way, and is not maintained against the code. Current intended behaviour
+> lives in `docs/intent/` (today: `gates` only).
+
 > Component 5 of the decomposition (`01_conceptual_model.md` §12): **cross-repo /
 > federation** — wiring up work items that span more than one repository. The last
 > component, held open from the start on one research item: nobody had read beads'
