@@ -49,9 +49,18 @@ describe("styles.css specificity", () => {
   });
 });
 
-describe("styles.css specificity — phone header", () => {
-  it("re-qualifies .desktop-only so it outranks .app-nav .nav-link / .app-nav .btn", () => {
+describe("Hairline utility", () => {
+  it("defines --hairline-24/--hairline-48 and exposes them as .hairline/.hairline-section", () => {
     const css = readFileSync(join(here, "styles.css"), "utf-8");
-    expect(css).toMatch(/\.app-nav \.nav-link\.desktop-only,\s*\n\s*\.app-nav \.btn\.desktop-only \{ display: none; \}/);
+    expect(css).toMatch(/--hairline-24:/);
+    expect(css).toMatch(/--hairline-48:/);
+    expect(css).toMatch(/\.hairline\s*,?\s*[^{]*\{\s*background:\s*var\(--hairline-24\);?\s*\}/);
+    expect(css).toMatch(/\.hairline-section\s*\{\s*background:\s*var\(--hairline-48\);?\s*\}/);
+  });
+
+  it("points .row's default background at the shared --hairline-48 token", () => {
+    const css = readFileSync(join(here, "styles.css"), "utf-8");
+    const rowRule = css.split(".row {")[1]?.split("}")[0] ?? "";
+    expect(rowRule).toMatch(/var\(--hairline-48\)/);
   });
 });

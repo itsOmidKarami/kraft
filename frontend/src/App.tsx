@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { BrowserRouter, Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
-import { ArrowLeft, MagnifyingGlass, Plus } from "@phosphor-icons/react";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
 import * as api from "./api";
-import { ConnBadge } from "./components/ConnBadge";
-import { HealthBadge } from "./components/HealthBadge";
+import { AppNav } from "./components/AppNav";
+import { Header } from "./components/Header";
 import { IntakeModal } from "./components/IntakeModal";
 import { BottomNav } from "./components/BottomNav";
 import { SearchOverlay } from "./components/SearchOverlay";
@@ -13,45 +12,6 @@ import { Login } from "./views/Login";
 import { SearchView } from "./views/Search";
 import { Settings } from "./views/Settings";
 import { WorkItemDetail } from "./views/WorkItemDetail";
-
-/**
- * The one header bar (design 2a / 4a): brand, health, Search, and — on the
- * board only — the primary "New work item". Detail screens lead with a back
- * link instead.
- */
-function Nav({ onSearch, onNew }: { onSearch: () => void; onNew: () => void }) {
-  const onBoard = useLocation().pathname === "/";
-  return (
-    <header className="nav app-nav">
-      {!onBoard && (
-        <Link to="/" className="nav-back">
-          <ArrowLeft size={14} />
-          Board
-        </Link>
-      )}
-      <span className="nav-brand">Kraft</span>
-      <ConnBadge />
-      <HealthBadge />
-      <NavLink to="/analytics" className="nav-link desktop-only">
-        Analytics
-      </NavLink>
-      <NavLink to="/settings" className="nav-link desktop-only">
-        Settings
-      </NavLink>
-      <button className="btn btn-secondary desktop-only" onClick={onSearch}>
-        <MagnifyingGlass size={14} />
-        Search
-        <span className="kbd">⌘K</span>
-      </button>
-      {onBoard && (
-        <button className="btn btn-primary" onClick={onNew}>
-          <Plus size={14} />
-          New work item
-        </button>
-      )}
-    </header>
-  );
-}
 
 export function App() {
   const [search, setSearch] = useState(false);
@@ -97,16 +57,21 @@ export function App() {
 
   return (
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <Nav onSearch={() => setSearch(true)} onNew={() => setIntake(true)} />
-      <main>
-        <Routes>
-          <Route path="/" element={<Board />} />
-          <Route path="/work-items/:id" element={<WorkItemDetail />} />
-          <Route path="/analytics" element={<AnalyticsView />} />
-          <Route path="/settings/*" element={<Settings />} />
-          <Route path="/search" element={<SearchView />} />
-        </Routes>
-      </main>
+      <div className="app-shell">
+        <AppNav />
+        <div className="app-content">
+          <Header onSearch={() => setSearch(true)} onNew={() => setIntake(true)} />
+          <main>
+            <Routes>
+              <Route path="/" element={<Board />} />
+              <Route path="/work-items/:id" element={<WorkItemDetail />} />
+              <Route path="/analytics" element={<AnalyticsView />} />
+              <Route path="/settings/*" element={<Settings />} />
+              <Route path="/search" element={<SearchView />} />
+            </Routes>
+          </main>
+        </div>
+      </div>
       <BottomNav />
       {search && <SearchOverlay onClose={() => setSearch(false)} />}
       {intake && <IntakeModal onClose={() => setIntake(false)} />}

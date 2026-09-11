@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { NavLink, Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import { Check, Plus, WarningCircle } from "@phosphor-icons/react";
 import * as api from "../api";
 import { ago, until } from "../format";
 import { DraftDiff } from "../components/DraftDiff";
-import { ChainBar, OverflowMenu, Row, RowText, SectionLabel } from "../components/ui";
+import { MiniChain, OverflowMenu, Row, RowText, SectionLabel, Switch } from "../components/ui";
+import { SETTINGS_NAV } from "../settingsNav";
 import { backdropProps, useModal } from "../useModal";
 import { PALETTES, applyTheme } from "../theme";
 import type {
@@ -27,18 +28,6 @@ import type {
  * (`02` §4.7 revised), so each one ends in the same save row: what file is
  * written, and what re-runs when it lands.
  */
-
-const PAGES = [
-  { to: "repos", label: "Repos" },
-  { to: "templates", label: "Chain templates" },
-  { to: "plugins", label: "Plugins" },
-  { to: "steering", label: "Steering" },
-  { to: "policy", label: "Policy" },
-  { to: "appearance", label: "Appearance" },
-  { to: "intake", label: "Auto-intake" },
-  { to: "notify", label: "Notifications" },
-  { to: "access", label: "Access" },
-];
 
 /** Load-once-then-edit, the shape every page here needs. */
 function useResource<T>(load: () => Promise<T>) {
@@ -404,9 +393,9 @@ function TemplatesPage() {
           {/* The diagram tracks what is typed: `parsed` is the draft, so it
               updates as the textarea changes and vanishes into the "not valid
               JSON" line below when it cannot be read. No graph library — a
-              chain is a list with gates, and ChainBar already draws one. */}
+              chain is a list with gates, and MiniChain already draws one. */}
           {parsed && (
-            <ChainBar
+            <MiniChain
               nodes={parsed}
               invalid={(report?.unresolved ?? []).map((u) => u.node)}
               size="lg"
@@ -503,15 +492,11 @@ function PluginsPage() {
         <div key={hook} className="hook-row" data-hook={hook}>
           <span className="hook-name">{hook}</span>
           <span className="row-sub">{adapterOf(binding)}</span>
-          <button
-            className="switch"
-            role="switch"
-            aria-checked={!!binding.interactive}
-            aria-label={`steerable: ${hook}`}
-            onClick={() => toggle(hook)}
-          >
-            <span className="switch-knob" />
-          </button>
+          <Switch
+            checked={!!binding.interactive}
+            onChange={() => toggle(hook)}
+            label={`steerable: ${hook}`}
+          />
         </div>
       ))}
       <SaveRow
@@ -581,16 +566,12 @@ function IntakePage() {
           <section className="settings-section">
             <h6>Poller</h6>
             <div className="save-row">
-              <button
-                className="switch"
-                role="switch"
-                aria-label="Auto-intake"
-                aria-checked={intake.enabled}
+              <Switch
+                checked={intake.enabled}
+                onChange={(v) => set("enabled", v)}
+                label="Auto-intake"
                 disabled={busy}
-                onClick={() => set("enabled", !intake.enabled)}
-              >
-                <span className="switch-knob" />
-              </button>
+              />
               <span className="save-hint">
                 {intake.enabled
                   ? "on — Kraft picks up ready beads on its own"
@@ -1114,16 +1095,12 @@ function NotifyPage() {
           <section className="settings-section">
             <h6>Channel</h6>
             <div className="save-row">
-              <button
-                className="switch"
-                role="switch"
-                aria-label="Notifications"
-                aria-checked={notify.enabled}
+              <Switch
+                checked={notify.enabled}
+                onChange={(v) => put({ enabled: v }, "channel")}
+                label="Notifications"
                 disabled={busy}
-                onClick={() => put({ enabled: !notify.enabled }, "channel")}
-              >
-                <span className="switch-knob" />
-              </button>
+              />
               <span className="save-hint">
                 {message?.where === "channel"
                   ? message.text
@@ -1210,13 +1187,9 @@ function NotifyPage() {
                 (PluginsPage, Settings.tsx:472-480). */}
             {NOTIFY_EVENTS.map((e) => (
               <div key={e.id} className="save-row">
-                <button
-                  className="switch"
-                  role="switch"
-                  aria-checked={notify.events.includes(e.id)}
-                  aria-label={e.id}
-                  disabled={busy}
-                  onClick={() =>
+                <Switch
+                  checked={notify.events.includes(e.id)}
+                  onChange={() =>
                     put(
                       {
                         events: notify.events.includes(e.id)
@@ -1226,9 +1199,9 @@ function NotifyPage() {
                       e.id,
                     )
                   }
-                >
-                  <span className="switch-knob" />
-                </button>
+                  label={e.id}
+                  disabled={busy}
+                />
                 <span className="save-hint">
                   {message?.where === e.id ? (
                     message.text
@@ -1420,32 +1393,30 @@ function AccessPage() {
 
 export function Settings() {
   return (
-    <div className="board settings">
-      <aside className="board-sidebar">
-        <div className="facet">
-          <SectionLabel>Settings</SectionLabel>
-          {PAGES.map((p) => (
-            <NavLink key={p.to} to={`/settings/${p.to}`} className="facet-opt settings-link">
-              {p.label}
-            </NavLink>
-          ))}
-        </div>
-        <div className="board-foot">config written to versioned YAML in templates/</div>
-      </aside>
-      <div className="settings-body">
-        <Routes>
-          <Route index element={<Navigate to="repos" replace />} />
-          <Route path="repos" element={<ReposPage />} />
-          <Route path="templates" element={<TemplatesPage />} />
-          <Route path="plugins" element={<PluginsPage />} />
-          <Route path="steering" element={<SteeringPage />} />
-          <Route path="policy" element={<PolicyPage />} />
-          <Route path="appearance" element={<AppearancePage />} />
-          <Route path="intake" element={<IntakePage />} />
-          <Route path="notify" element={<NotifyPage />} />
-          <Route path="access" element={<AccessPage />} />
-        </Routes>
-      </div>
+    <div className="settings-body">
+      <Routes>
+        <Route index element={<Navigate to="repos" replace />} />
+        <Route path="templates" element={<Navigate to="/settings/chains" replace />} />
+        {SETTINGS_NAV.map((n) => (
+          <Route
+            key={n.to}
+            path={n.to}
+            element={
+              {
+                repos: <ReposPage />,
+                chains: <TemplatesPage />,
+                plugins: <PluginsPage />,
+                policy: <PolicyPage />,
+                steering: <SteeringPage />,
+                intake: <IntakePage />,
+                notify: <NotifyPage />,
+                access: <AccessPage />,
+                appearance: <AppearancePage />,
+              }[n.to]
+            }
+          />
+        ))}
+      </Routes>
     </div>
   );
 }

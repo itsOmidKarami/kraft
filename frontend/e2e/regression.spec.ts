@@ -19,7 +19,7 @@ test("settings: connect a repo", async ({ page }) => {
 });
 
 test("settings: chain templates page loads and validates", async ({ page }) => {
-  await page.goto("/settings/templates");
+  await page.goto("/settings/chains");
   await expect(page.getByLabel("template nodes")).toBeVisible({ timeout: 15_000 });
   await page.getByRole("button", { name: /check|validate/i }).click();
   await expect(page.locator(".save-hint, .settings-note").first()).toBeVisible();

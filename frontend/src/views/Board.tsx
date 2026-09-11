@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Clock, Prohibit } from "@phosphor-icons/react";
-import { ChainBar } from "../components/ui";
+import { MiniChain } from "../components/ui";
 import { Gate } from "../components/Gate";
+import { deriveState } from "../deriveState";
 import { ago, clock, repoName } from "../format";
 import { useStore } from "../store";
 import type { WorkItem } from "../types";
@@ -58,18 +59,6 @@ function Facet({
 
 const DONE_PREVIEW = 5;
 
-/** A created-but-never-resumed item: `paused` with no current node (api.py:527-529).
- *  Distinct from a mid-chain pause, which is still `paused` but has run at least
- *  one node — that one is waiting on the same person as `needs_human`, so it groups
- *  with "Needs you" instead. */
-function notStarted(i: WorkItem) {
-  return i.status === "paused" && i.current_node_id === null;
-}
-
-function needsYou(i: WorkItem) {
-  return i.status === "needs_human" || (i.status === "paused" && !notStarted(i));
-}
-
 /** A status the poller drives forward on its own, not a person: not
  *  mid-agent-call, but not waiting on a human either. `rate_limited` (an API
  *  limit resetting) and `waiting` (a pipeline settling, Kraft-ru98) are two
@@ -81,18 +70,20 @@ function pollerDriven(i: WorkItem) {
 }
 
 const STATUS_GROUPS: { id: string; label: string; test: (i: WorkItem) => boolean }[] = [
-  { id: "needs", label: "Needs you", test: needsYou },
+  { id: "needs", label: "Needs you", test: (i) => deriveState(i).needsYou },
   {
     id: "running",
     label: "Running",
-    // A poller-driven item is not waiting on a person -- the same story
-    // "Running" already tells for an active item. Leaving one out drops it
-    // off the main view, which is "a slow run looks like a hung one" from the
-    // other direction.
-    test: (i) => i.status === "active" || pollerDriven(i),
+    // A rate-limited or waiting item is not mid-agent-call, but it is not
+    // waiting on a person either -- the poller drives it forward on its own,
+    // the same story "Running" already tells for an active item. Leaving
+    // either out would drop it off the main view, which is "a slow run
+    // looks like a hung one" from the other direction.
+    test: (i) =>
+      ["running", "rate_limited", "waiting"].includes(deriveState(i).state),
   },
-  { id: "not_started", label: "Not started", test: notStarted },
-  { id: "done", label: "Done", test: (i) => i.status === "completed" },
+  { id: "not_started", label: "Not started", test: (i) => deriveState(i).state === "not_started" },
+  { id: "done", label: "Done", test: (i) => deriveState(i).state === "done" },
 ];
 
 const SORTS: Record<string, (a: WorkItem, b: WorkItem) => number> = {
@@ -265,11 +256,14 @@ function BoardRow({ item }: { item: WorkItem }) {
           <Gate item={item} gate={gate} variant="inline" />
         )}
       </div>
-      <ChainBar
+      <MiniChain
         nodes={item.chain_definition.nodes}
         currentNodeId={item.current_node_id}
         done={item.completedNodes}
         size="sm"
+        paused={["paused", "capped", "abandoned", "rate_limited", "waiting"].includes(
+          deriveState(item).state,
+        )}
       />
       <div className="board-row-current">
         {item.current_node_id}

@@ -14,6 +14,16 @@
      redundant visual signals between consequential and benign options). Rose at
      the ramp's own lightness, 5.9:1 on a card and 6.8:1 on the board ground. */
   --color-danger: #e5849a;
+
+  /* Hairline (spec §4): the fading-gradient row divider, never a full-width
+     solid border between rows. 24px insets by default; 48px ("section
+     header" per the README) for the main content column's own rows. */
+  --hairline-24: linear-gradient(to right,
+    transparent, var(--color-divider) 24px,
+    var(--color-divider) calc(100% - 24px), transparent) no-repeat bottom / 100% 1px;
+  --hairline-48: linear-gradient(to right,
+    transparent, var(--color-divider) 48px,
+    var(--color-divider) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
 }
 
 /* Kraft's own layer. Every token comes from nocturne.css, which is imported
@@ -21,7 +31,7 @@
    The old pre-Nocturne rules — cards, chips, chain strip, ad-hoc modals — are
    gone with the views that used them; what follows is the redesign only. */
 
-main { min-height: calc(100vh - 45px); }
+main { min-height: calc(100vh - 48px); }
 
 .empty { font-size: 12px; color: var(--color-text-muted); padding: 10px 0; }
 .form-error { font-size: 12px; color: var(--color-neutral-200); margin-top: 6px; }
@@ -53,24 +63,19 @@ main { min-height: calc(100vh - 45px); }
   font-size: 13px;
   /* the rule is a background strip so it fades to transparent over the outer
      48px — never a solid border-bottom (spec §2) */
-  background: linear-gradient(to right,
-    transparent, var(--color-divider) 48px,
-    var(--color-divider) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
+  background: var(--hairline-48);
 }
 .row:hover {
   background:
     linear-gradient(color-mix(in srgb, var(--color-text) 4%, transparent),
                     color-mix(in srgb, var(--color-text) 4%, transparent)) no-repeat 0 0 / 100% 100%,
-    linear-gradient(to right,
-      transparent, var(--color-divider) 48px,
-      var(--color-divider) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
+    var(--hairline-48);
 }
 /* narrow asides and the phone fade over 24px instead of 48px */
-aside .row, .narrow .row {
-  background: linear-gradient(to right,
-    transparent, var(--color-divider) 24px,
-    var(--color-divider) calc(100% - 24px), transparent) no-repeat bottom / 100% 1px;
+.hairline, aside .row, .narrow .row {
+  background: var(--hairline-24);
 }
+.hairline-section { background: var(--hairline-48); }
 
 .row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .row-title { font-size: 14px; color: var(--color-text); }
@@ -97,6 +102,18 @@ aside .row, .narrow .row {
 .glyph[data-status="paused"]     { color: var(--color-neutral-400);  border-color: var(--color-neutral-600); }
 .glyph[data-status="unknown"]    { color: var(--color-neutral-500);  border-color: var(--color-neutral-800); }
 .glyph[data-status="pending"]    { color: var(--color-text-muted);  border-color: var(--color-neutral-800); }
+/* item-level design states (deriveState, UI v2 · 01) — Prototype's glyph() */
+.glyph[data-status="gate"]        { color: var(--color-accent);      border-color: var(--color-accent-700); }
+.glyph[data-status="capped"]      { color: var(--color-accent-300);  border-color: var(--color-accent-700); }
+.glyph[data-status="question"]    { color: var(--color-accent);      border-color: var(--color-accent-700); }
+.glyph[data-status="budget"]      { color: var(--color-accent);      border-color: var(--color-accent-700); }
+.glyph[data-status="not_started"] { color: var(--color-neutral-500); border-color: var(--color-neutral-800); }
+.glyph[data-status="abandoned"]   { color: var(--color-neutral-500); border-color: var(--color-neutral-800); }
+/* Prototype gives rate_limited/waiting their own color too, distinct from the
+   unstyled-fallback neutral-500/800 they had before (no rule existed for
+   either key) -- this improves the existing session-row rendering as well. */
+.glyph[data-status="rate_limited"],
+.glyph[data-status="waiting"]     { color: var(--color-neutral-400); border-color: var(--color-neutral-600); }
 
 /* — chain bar (spec §4) — */
 .chain-bar { display: flex; gap: 3px; align-items: flex-start; min-width: 0; }
@@ -125,8 +142,8 @@ aside .row, .narrow .row {
    what .diff-del already uses for the wrong thing. */
 .chain-seg[data-state="invalid"] .chain-fill { background: var(--color-accent-2); }
 .chain-gate {
-  position: absolute; right: -3px; top: -6px;
-  width: 1.5px; height: 18px; background: var(--color-accent-400);
+  position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
+  color: var(--color-accent-400); pointer-events: none;
 }
 .chain-label {
   font-size: 9.5px; letter-spacing: -0.01em; white-space: nowrap;
@@ -168,9 +185,7 @@ aside .row, .narrow .row {
 /* — tabs — */
 .tabs {
   display: flex; gap: 18px;
-  background: linear-gradient(to right,
-    transparent, var(--color-divider) 48px,
-    var(--color-divider) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
+  background: var(--hairline-48);
 }
 .tab {
   font: inherit; font-size: 13px; cursor: pointer;
@@ -185,35 +200,6 @@ aside .row, .narrow .row {
 }
 .tab-count { margin-left: 6px; font-size: 11px; color: var(--color-text-muted); }
 
-/* ══ header (design 2a / 4a) ══════════════════════════════════════════════ */
-.app-nav {
-  gap: 10px;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--color-divider);
-  /* pinned so it survives scrolling the board/detail body under it (main's
-     45px offset above assumes this height) */
-  position: sticky; top: 0; z-index: 30;
-  background: var(--color-bg);
-}
-.app-nav .nav-brand { font-size: 16px; }
-/* One type treatment across the whole bar. `.nav-back` and `.nav-link` asked
-   for 13px to match the buttons beside them, but Nocturne's `.nav a` (one
-   specificity point higher) silently won and rendered them 14px/400 next to a
-   13px/500 button — four controls in a row, two different typefaces' worth of
-   weight. Scope these to `.app-nav` so the intent applies, and take the
-   buttons' heading weight so the labels read as siblings. */
-.app-nav .btn { font-size: 13px; padding: 5px 10px; }
-.app-nav .nav-back,
-.app-nav .nav-link {
-  font-size: 13px; font-weight: var(--font-heading-weight);
-  font-family: var(--font-heading);
-  display: inline-flex; align-items: center; min-height: 24px;
-}
-.nav-back {
-  display: inline-flex; align-items: center; gap: 6px;
-  text-decoration: none; color: var(--color-neutral-400);
-}
-.nav-back:hover { color: var(--color-text); }
 .kbd { opacity: 0.5; font-size: 11px; margin-left: 4px; }
 
 /* ══ bottom nav (mobile app shell) ═══════════════════════════════════════ */
@@ -231,6 +217,128 @@ aside .row, .narrow .row {
 }
 .bottom-nav-tab.active { color: var(--color-accent); }
 
+/* ══ app shell: sidebar + rail (designs 01/02/03) ══════════════════════ */
+.app-shell { display: flex; min-height: 100vh; }
+.app-sidebar, .app-rail {
+  position: sticky; top: 0; align-self: flex-start;
+  height: 100vh; overflow-y: auto; flex: none;
+  border-right: 1px solid var(--color-divider);
+  display: flex; flex-direction: column;
+}
+.app-sidebar { width: 220px; padding: 12px 10px; gap: 6px; }
+.app-sidebar-top {
+  display: flex; align-items: center; gap: 8px; padding: 0 6px 12px;
+}
+.app-sidebar-brand { font-size: 15px; font-weight: 500; letter-spacing: -0.01em; }
+.app-sidebar-live {
+  font-size: 10px; padding: 1px 7px; border-radius: 999px;
+  background: var(--color-accent-900); color: var(--color-accent-300);
+}
+.app-sidebar-collapse {
+  margin-left: auto; border: 0; background: transparent;
+  color: var(--color-neutral-500); cursor: pointer; font-size: 15px; padding: 2px;
+}
+.app-sidebar-nav { display: flex; flex-direction: column; gap: 2px; }
+.app-sidebar-row {
+  display: flex; align-items: center; gap: 10px; padding: 7px 8px;
+  border-radius: 6px; font-size: 13px; text-decoration: none;
+  color: var(--color-neutral-400); background: transparent; border: 0;
+  font: inherit; text-align: left; cursor: pointer; width: 100%;
+}
+.app-sidebar-row-label { flex: 1; }
+.app-sidebar-row.active {
+  color: var(--color-accent-200);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+/* Settings' own row when its group is open (screen 01): brighter text, no
+   accent tint — that tint means "this is the current route", and Settings
+   itself is a toggle, not a route (clicking it only expands/collapses the
+   group, per the Prototype's `navBtn`). Distinct from `.active` above. */
+.app-sidebar-row[aria-expanded="true"] { color: var(--color-text); }
+.app-sidebar-badge {
+  font-size: 10px; padding: 0 6px; border-radius: 999px; line-height: 16px;
+  background: var(--color-accent-800); color: var(--color-accent-200);
+}
+.app-sidebar-sub {
+  display: flex; flex-direction: column; gap: 1px;
+  margin: 2px 0 4px 14px; padding-left: 10px;
+  border-left: 1px solid var(--color-divider);
+}
+.app-sidebar-eyebrow {
+  font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--color-neutral-500); padding: 8px 8px 4px;
+}
+.app-sidebar-row-sm { padding: 6px 8px; font-size: 12.5px; }
+.app-sidebar-row-sm.active {
+  color: var(--color-accent-200);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+.app-sidebar-foot {
+  margin-top: auto; font-size: 11px; color: var(--color-neutral-500);
+  padding: 0 6px; display: flex; flex-direction: column; gap: 4px;
+}
+
+.app-rail {
+  width: 56px; align-items: center; padding: 14px 0; gap: 6px;
+}
+.rail-avatar {
+  width: 28px; height: 28px; border-radius: 7px;
+  background: var(--color-accent-800); color: var(--color-accent-200);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 500; margin-bottom: 10px;
+}
+.rail-btn {
+  width: 36px; height: 36px; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 17px; text-decoration: none; color: var(--color-neutral-400);
+  background: transparent; position: relative;
+}
+.rail-btn.active {
+  color: var(--color-accent-200);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+.rail-btn-sm { width: 32px; height: 32px; border-radius: 7px; font-size: 15px; color: var(--color-neutral-500); }
+.rail-btn-sm.active {
+  color: var(--color-accent-200);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+.rail-dot {
+  position: absolute; top: 4px; right: 4px; width: 7px; height: 7px;
+  border-radius: 50%; background: var(--color-accent);
+}
+.rail-divider { width: 24px; height: 1px; background: var(--color-divider); margin: 6px 0; }
+.rail-expand {
+  margin-top: auto; border: 0; background: transparent;
+  color: var(--color-neutral-500); cursor: pointer; font-size: 16px;
+}
+
+.app-content { flex: 1; min-width: 0; }
+.app-header {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 20px; height: 48px; box-sizing: border-box;
+  border-bottom: 1px solid var(--color-divider);
+  position: sticky; top: 0; z-index: 30; background: var(--color-bg);
+}
+/* min-width: 0 down the chain so the item id ellipsizes instead of pushing
+   the header (and the page) past a 390px phone */
+.app-header-crumb {
+  display: flex; align-items: center; gap: 6px; font-size: 13px;
+  color: var(--color-neutral-500); min-width: 0; white-space: nowrap;
+}
+.app-header-crumb-part { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.app-header-crumb-current {
+  color: var(--color-text); min-width: 0; overflow: hidden; text-overflow: ellipsis;
+}
+.app-header-crumb-link { text-decoration: none; color: var(--color-neutral-500); }
+.app-header-crumb-link:hover { color: var(--color-text); }
+.app-header-crumb-sub { font-size: 11px; color: var(--color-neutral-600); margin-left: 6px; }
+.app-header-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.app-header .btn { font-size: 13px; padding: 5px 10px; }
+@media (max-width: 640px) {
+  .app-header .kbd { display: none; }
+  .app-header .btn-secondary { display: none; }
+}
+
 /* ══ board (design 2a) ════════════════════════════════════════════════════ */
 .board { display: grid; grid-template-columns: 200px 1fr; min-height: 560px; }
 
@@ -241,8 +349,8 @@ aside .row, .narrow .row {
   font-size: 13px;
   /* pinned under the sticky header; scrolls internally rather than off-screen
      once the board list runs past the viewport */
-  position: sticky; top: 45px; align-self: start;
-  max-height: calc(100vh - 45px); overflow-y: auto;
+  position: sticky; top: 48px; align-self: start;
+  max-height: calc(100vh - 48px); overflow-y: auto;
 }
 .facet { display: flex; flex-direction: column; gap: 2px; }
 .facet .section-label { margin: 0 0 6px; color: var(--color-text-muted); }
@@ -900,20 +1008,34 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; }
 .palette-swatch-dot { width: 32px; height: 32px; border-radius: 50%; }
 
 .switch {
-  width: 38px; height: 24px; padding: 0; border-radius: 12px; cursor: pointer;
-  border: 1px solid var(--color-divider); background: transparent; position: relative;
+  width: 34px; height: 20px; padding: 0; border-radius: 10px; cursor: pointer;
+  border: 1px solid var(--color-neutral-700); background: transparent; position: relative;
 }
 .switch[aria-checked="true"] {
   border-color: var(--color-accent);
   background: color-mix(in srgb, var(--color-accent) 25%, transparent);
 }
 .switch-knob {
-  position: absolute; top: 4px; left: 4px; width: 14px; height: 14px; border-radius: 50%;
+  position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%;
   background: var(--color-neutral-500); transition: transform 0.12s ease, background 0.12s ease;
 }
 .switch[aria-checked="true"] .switch-knob {
   transform: translateX(14px); background: var(--color-accent);
 }
+
+/* — chip (spec §4, board filter row) — */
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border-radius: 999px;
+  border: 1px solid var(--color-neutral-800); background: transparent;
+  color: var(--color-neutral-400); font: inherit; font-size: 12px; cursor: pointer;
+}
+.chip[aria-pressed="true"] {
+  border-color: var(--color-accent-700);
+  background: var(--color-accent-900);
+  color: var(--color-accent-300);
+}
+.chip-count { font-size: 10px; opacity: 0.7; }
 
 .access-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .session-current { font-size: 11px; color: var(--color-accent-300); }
@@ -922,16 +1044,15 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; }
    Same grouped rows at touch size. Needs-you rows stay actionable; the rest is
    a status view, and the detail screen says so. */
 @media (max-width: 640px) {
-  .app-nav { flex-wrap: wrap; gap: 8px; padding: 8px 12px; }
-  .app-nav .kbd { display: none; }
+  .chain-gate { display: none; }
 
   .board, .settings, .analytics { grid-template-columns: 1fr; }
   .board-sidebar {
-    /* The base rule (styles.css:~229) is `position: sticky; top: 45px;
-       max-height: calc(100vh - 45px); overflow-y: auto` — built for the
+    /* The base rule (styles.css:~340) is `position: sticky; top: 48px;
+       max-height: calc(100vh - 48px); overflow-y: auto` — built for the
        desktop 2-column layout, where the sidebar sticks while the list
        scrolls independently beside it. Stacked single-column on phone, that
-       serves nothing and stacks a second sticky context under `.app-nav`
+       serves nothing and stacks a second sticky context under `.app-header`
        (top: 0) — two sticky elements in one scroll container is a known
        mobile-Chrome jank/overlap source during scroll, invisible to a
        synthetic (non-momentum) scroll in headless testing. */
@@ -954,9 +1075,7 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; }
   .desktop-only { display: none; }
 
   .row, .doc-row, .event-row, .hook-row, .cap-row, .node-row, .repo-row {
-    background: linear-gradient(to right,
-      transparent, var(--color-divider) 24px,
-      var(--color-divider) calc(100% - 24px), transparent) no-repeat bottom / 100% 1px;
+    background: var(--hairline-24);
   }
   .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   /* by-node is 7 columns, by-repo is 5 — no readable width at 390px even
@@ -1026,25 +1145,8 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; }
 
   .bottom-nav { display: flex; }
   main { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
-  /* `.app-nav .nav-link` / `.app-nav .btn` are 2-class selectors
-     (specificity 0,2,0) and beat a bare `.desktop-only` (0,1,0) regardless of
-     source order — these re-qualify with `.desktop-only` so the header's
-     Analytics/Settings/Search controls actually disappear on phone. */
-  .app-nav .nav-link.desktop-only,
-  .app-nav .btn.desktop-only { display: none; }
 
-  /* 9 settings pages wrapped as chips is cramped; `.settings .board-sidebar`
-     (2-class selector) already outranks the generic 1-class `.board-sidebar`
-     phone rule above on specificity alone, so this needs no ordering care. */
-  .settings .board-sidebar { flex-direction: column; flex-wrap: nowrap; }
-  .settings .board-sidebar .facet-opt { min-height: 44px; font-size: 14px; }
-  /* The line above reorders the *outer* `<aside>` but the page links actually
-     live in a nested `.facet` div, and the generic phone rule just above
-     (`.facet { flex-direction: row; flex-wrap: wrap; }`) still wins there —
-     same 1-class-vs-2-class gap as `.board-sidebar` had, just one level
-     deeper. Missed in the original pass because nothing renders `.settings`
-     in jsdom or the e2e phone spec at this exact route/viewport combo. */
-  .settings .facet { flex-direction: column; flex-wrap: nowrap; }
+  .app-sidebar, .app-rail { display: none; }
 }
 
 /* the two halves of the phone rule (design 1n) */

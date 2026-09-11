@@ -787,11 +787,10 @@ describe("Settings → Notifications", () => {
   });
 });
 
-describe("Settings · sidebar nav", () => {
-  it("replaces the section in the URL rather than appending to it", async () => {
-    renderAt("/settings/access");
-    const link = await screen.findByRole("link", { name: "Auto-intake" });
-    expect(link).toHaveAttribute("href", "/settings/intake");
+describe("Settings · route rename (UI v2 · 01)", () => {
+  it("redirects the old /settings/templates path to /settings/chains", async () => {
+    renderAt("/settings/templates");
+    expect(await screen.findByRole("heading", { name: /template/i })).toBeInTheDocument();
   });
 });
 

@@ -47,6 +47,7 @@ from kraft import notify as notify_mod
 from kraft import policy as policy_mod
 from kraft import steering as steering_mod
 from kraft import triggers as triggers_mod
+from kraft import update as update_mod
 from kraft.adapters import agent as agent_mod
 from kraft.adapters import beads as beads_mod
 from kraft.adapters import forge as forge_mod
@@ -3237,6 +3238,9 @@ async def health(request: Request):
         "index": st.indexer.health(),
         # public: the login screen says which address it is asking a password for
         "bind": st.access["bind"],
+        "port": st.access["port"],
+        # public: the sidebar footer names its own build (UI v2 · 01)
+        "version": update_mod.installed(),
     }
 
 
