@@ -1985,3 +1985,125 @@ def test_a_subprocess_hook_falls_back_to_the_registry_command(tmp_path, monkeypa
 
     asyncio.run(scenario())
     assert marker.read_text() == "registry"
+
+
+# ── test-scope selection (Kraft-9wzy) ───────────────────────────────────────
+
+
+def test_matched_scopes_single_scope_covers_everything():
+    scopes = [{"paths": ["**"], "command": "cmd"}]
+    assert executor._matched_scopes(scopes, ["a.py", "b.py"]) == scopes
+
+
+def test_matched_scopes_picks_only_the_scope_a_path_falls_under():
+    backend = {"paths": ["src/**"], "command": "backend"}
+    frontend = {"paths": ["frontend/**"], "command": "frontend"}
+    assert executor._matched_scopes([backend, frontend], ["frontend/x.ts"]) == [frontend]
+
+
+def test_matched_scopes_dedupes_and_preserves_declaration_order():
+    backend = {"paths": ["src/**"], "command": "backend"}
+    frontend = {"paths": ["frontend/**"], "command": "frontend"}
+    changed = ["frontend/a.ts", "src/x.py", "frontend/b.ts"]
+    assert executor._matched_scopes([backend, frontend], changed) == [backend, frontend]
+
+
+def test_matched_scopes_a_path_matching_two_scopes_returns_both():
+    everything = {"paths": ["**"], "command": "all"}
+    frontend = {"paths": ["frontend/**"], "command": "frontend"}
+    assert executor._matched_scopes([everything, frontend], ["frontend/x.ts"]) == [
+        everything,
+        frontend,
+    ]
+
+
+def test_matched_scopes_an_unmatched_path_fails_open_to_every_scope():
+    """Under-testing is the bug this exists to close (Kraft-9wzy) — a path the
+    config is silent about must never narrow what runs."""
+    backend = {"paths": ["src/**"], "command": "backend"}
+    frontend = {"paths": ["frontend/**"], "command": "frontend"}
+    scopes = [backend, frontend]
+    assert executor._matched_scopes(scopes, ["README.md"]) == scopes
+
+
+def test_matched_scopes_an_empty_diff_fails_open_to_every_scope():
+    scopes = [{"paths": ["src/**"], "command": "backend"}, {"paths": ["**"], "command": "all"}]
+    assert executor._matched_scopes(scopes, []) == scopes
+
+
+def test_matched_scopes_honours_the_exclusion_form():
+    root = {"paths": ["*", "src/**", "docs/**", "!frontend/**"], "command": "root"}
+    frontend = {"paths": ["frontend/**"], "command": "frontend"}
+    assert executor._matched_scopes([root, frontend], ["frontend/x.ts"]) == [frontend]
+    assert executor._matched_scopes([root, frontend], ["src/x.py"]) == [root]
+
+
+def test_dispatch_runs_matched_scopes_in_order_and_stops_at_the_first_failure(
+    tmp_path, monkeypatch
+):
+    """Two overlapping scopes; the changed path matches both, both run, in
+    declaration order, and a first-command failure short-circuits the
+    second (test-scope design §3.6)."""
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    marker1 = tmp_path / "frontend-ran.txt"
+    marker2 = tmp_path / "root-ran.txt"
+
+    fail_script = tmp_path / "fail.py"
+    fail_script.write_text(
+        f"import pathlib, sys\npathlib.Path({str(marker1)!r}).write_text('ran')\nsys.exit(1)\n"
+    )
+    succeed_script = tmp_path / "succeed.py"
+    succeed_script.write_text(f"import pathlib\npathlib.Path({str(marker2)!r}).write_text('ran')\n")
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            base_sha = git_read(repo, "rev-parse", "HEAD")
+            (repo / "frontend").mkdir()
+            (repo / "frontend" / "x.txt").write_text("hi")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "touch frontend")
+            await database.write(lambda c: store.set_base_ref(c, wid, base_sha))
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+            registry = Registry(hooks={"on.test.run": {"kind": "subprocess"}})
+            return await executor._dispatch(
+                database,
+                rd,
+                "on.test.run",
+                {"id": "verify"},
+                row,
+                registry,
+                repo,
+                launch=executor.LaunchContext(
+                    repo_entry={
+                        "test_scopes": [
+                            {
+                                "paths": ["frontend/**"],
+                                "command": f"{sys.executable} {fail_script}",
+                            },
+                            {"paths": ["**"], "command": f"{sys.executable} {succeed_script}"},
+                        ]
+                    },
+                    steering_dir=None,
+                ),
+            )
+        finally:
+            await database.close()
+
+    status = asyncio.run(scenario())
+    assert status == "failed"
+    assert marker1.read_text() == "ran"
+    assert not marker2.exists(), "the first scope's failure must short-circuit the second"
