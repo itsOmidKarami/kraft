@@ -96,6 +96,37 @@ def _normalize_forge(repo: dict) -> None:
     repo.setdefault("project", None)
 
 
+def _normalize_test_scopes(scopes: object) -> list[dict] | None:
+    """Validated `test_scopes`, or None if the entry has none of its own.
+
+    Deliberately does *not* synthesize a `["**"]` scope from a legacy
+    `test_command` here: that synthesis used to be written into the loaded
+    entry, and any route that then re-saved repos.yaml (`PATCH`/`DELETE
+    /repos`) persisted it -- baking in whatever `test_command` was current at
+    load time. A later edit to `test_command` left that stale synthesized
+    scope in place, silently overriding the edit forever (verify finding,
+    Kraft-9wzy). Callers that need the wrap (`executor.py`) do it themselves
+    at the point of use instead, from the un-synthesized `test_command` this
+    function leaves untouched.
+    """
+    if scopes is None:
+        return None
+    if not isinstance(scopes, list) or not scopes:
+        raise ConfigError("repos.yaml: 'test_scopes' must be a non-empty list of mappings")
+    for s in scopes:
+        if not isinstance(s, dict):
+            raise ConfigError("repos.yaml: 'test_scopes' entries must be mappings")
+        paths = s.get("paths")
+        if not isinstance(paths, list) or not paths or not all(isinstance(x, str) for x in paths):
+            raise ConfigError(
+                "repos.yaml: 'test_scopes' entry needs a non-empty list of string 'paths'"
+            )
+        command = s.get("command")
+        if not isinstance(command, str) or not command:
+            raise ConfigError("repos.yaml: 'test_scopes' entry needs a non-empty string 'command'")
+    return scopes
+
+
 def load_repos(
     path: str | Path, *, steering_dir: Path | None = None, validate_steering: bool = True
 ) -> list[dict]:
@@ -131,6 +162,7 @@ def load_repos(
         r.setdefault("test_command", None)
         if r.get("test_command") is not None and not isinstance(r["test_command"], str):
             raise ConfigError("repos.yaml: 'test_command' must be a string")
+        r["test_scopes"] = _normalize_test_scopes(r.get("test_scopes"))
         for key in ("deny_tools", "steering"):
             v = r.setdefault(key, [])
             if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
@@ -268,6 +300,54 @@ def normalized_repo_root(p: Path) -> Path | None:
     return Path(common).parent if common and Path(common).name == ".git" else Path(toplevel)
 
 
+def _first_test_command(directory: Path) -> str | None:
+    return next((cmd for marker, cmd in _TEST_COMMANDS if (directory / marker).is_file()), None)
+
+
+def _probe_test_scopes(root: Path) -> tuple[str | None, list[dict]]:
+    """(legacy singular `test_command`, `test_scopes` list) for `root` (design §2).
+
+    Walks the same `_TEST_COMMANDS` markers, but at the repo root *and* one
+    level under it -- deliberately shallow, matching both Kraft's own repo
+    (`pyproject.toml` at root, `package.json` under `frontend/`) and the
+    common monorepo layout. A marker match in a subdirectory becomes a
+    "nested scope"; the root scope's `paths` then excludes every directory a
+    nested scope claimed, so a frontend-only diff cannot also match the
+    backend scope. No nested scopes -> unchanged single-stack behavior
+    (`paths: ["**"]`).
+    """
+    root_command = _first_test_command(root)
+    try:
+        subdirs = sorted(d for d in root.iterdir() if d.is_dir() and not d.name.startswith("."))
+    except OSError:
+        subdirs = []
+    nested = [(d.name, cmd) for d in subdirs if (cmd := _first_test_command(d)) is not None]
+
+    if not nested:
+        scopes = [{"paths": ["**"], "command": root_command}] if root_command else []
+        return root_command, scopes
+
+    claimed = {name for name, _ in nested}
+    try:
+        # `/**` on every directory: fnmatch has no notion of "this dir and
+        # everything under it", so a bare "src" never matches a changed path
+        # like "src/foo.py" and a backend-only diff fails open to every scope,
+        # nested ones included (verify finding, Kraft-9wzy). A top-level file
+        # (e.g. "pyproject.toml") has no children to cover, so it stays literal.
+        top_level = sorted(
+            f"{p.name}/**" if p.is_dir() else p.name
+            for p in root.iterdir()
+            if p.name not in claimed
+        )
+    except OSError:
+        top_level = []
+    scopes = []
+    if root_command:
+        scopes.append({"paths": top_level, "command": root_command})
+    scopes.extend({"paths": [f"{name}/**"], "command": cmd} for name, cmd in nested)
+    return root_command or nested[0][1], scopes
+
+
 def probe_repo(path: str | Path) -> dict:
     """What Kraft can tell about a candidate repo without changing anything.
 
@@ -305,7 +385,7 @@ def probe_repo(path: str | Path) -> dict:
     remote = git_read(root, "remote", "get-url", "origin", expected_failure=True) or ""
     forge, project = _detect_forge(remote)
 
-    test_command = next((cmd for marker, cmd in _TEST_COMMANDS if (root / marker).is_file()), None)
+    test_command, test_scopes = _probe_test_scopes(root)
 
     return {
         "path": str(root),
@@ -317,6 +397,7 @@ def probe_repo(path: str | Path) -> dict:
         "beads_export_git_add": bool(export.get("git-add")),
         "has_engineering": (root / ".engineering").is_dir(),
         "test_command": test_command,
+        "test_scopes": test_scopes,
         "forge": forge,
         "project": project,
     }
