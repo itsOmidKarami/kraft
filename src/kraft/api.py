@@ -2601,6 +2601,11 @@ async def add_repo(body: RepoBody, request: Request):
         "name": body.name or probed["name"],
         "default_chain_template": body.default_chain_template or "default",
         "test_command": body.test_command or probed["test_command"],
+        # Only when the connecting caller left `test_command` unset: an
+        # explicit override there means one command for every diff, and
+        # `test_scopes` wrapping it (config.load_repos) already gives that
+        # the same effect without a stale probed scope list beside it.
+        "test_scopes": None if body.test_command else (probed.get("test_scopes") or None),
         "forge": body.forge or probed["forge"],
         "project": body.project or probed["project"],
         "enabled": body.enabled,
