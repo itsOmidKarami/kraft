@@ -251,7 +251,7 @@ def test_repo_default_model_reaches_the_agent_launch(tmp_path, monkeypatch):
 
     argvs = _argv_lines(argv_log)
     assert len(argvs) == 1  # quick-task's only agent dispatch is implementation
-    assert argvs[0][-2:] == ["--model", "haiku"]
+    assert argvs[0][argvs[0].index("--model") + 1] == "haiku"
 
 
 def test_run_gathers_multi_task_node(tmp_path):

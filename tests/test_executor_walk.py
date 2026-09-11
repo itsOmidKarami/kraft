@@ -534,7 +534,7 @@ def test_fix_cycle_dispatch_gets_the_same_launch_context(tmp_path, monkeypatch):
 
     argvs = _argv_lines(argv_log)
     assert len(argvs) == 1  # only the fix cycle ever launches the fake agent
-    assert argvs[0][-2:] == ["--model", "haiku"]
+    assert argvs[0][argvs[0].index("--model") + 1] == "haiku"
 
 
 # --- rebase-and-drift-review before open_mr (Kraft-4bgg) --------------------
