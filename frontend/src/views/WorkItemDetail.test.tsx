@@ -386,8 +386,12 @@ describe("WorkItemDetail", () => {
     expect(answer).toBeDisabled();
     await userEvent.type(screen.getByLabelText(/answer/i), "use postgres");
     expect(answer).toBeEnabled();
+    const before = vi.mocked(useStore.getState().hydrateItem).mock.calls.length;
     await userEvent.click(answer);
     expect(spy).toHaveBeenCalledWith("w1", "use postgres");
+    // A successful answer that outraces its own ws event must not leave this
+    // card stuck on screen — the click pulls the fresh item itself.
+    expect(useStore.getState().hydrateItem).toHaveBeenCalledTimes(before + 1);
   });
 
   it("offers escalate on a needs_context stop too", async () => {

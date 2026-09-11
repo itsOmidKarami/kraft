@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../api";
+import { useStore } from "../store";
 import { CappedCard } from "./CappedCard";
 import type { KraftEvent, WorkItem, WorkerSession } from "../types";
 
@@ -149,6 +150,19 @@ describe("CappedCard", () => {
     renderCard();
     await userEvent.click(screen.getByRole("button", { name: /steer and retry/i }));
     expect(spy).toHaveBeenCalledWith("w1", undefined);
+  });
+
+  // A successful retry that outraces its own ws event, or lands mid-reconnect,
+  // must not leave the card stuck on screen forever — the click has to pull
+  // the fresh item itself, not only wait on the socket.
+  it("hydrates the item after a successful retry, not just via the ws push", async () => {
+    vi.spyOn(api, "retryWorkItem").mockResolvedValue({
+      id: "w1", node_id: "verify", loop: "verify_fix_loop", steer: null,
+    });
+    const hydrateItem = vi.spyOn(useStore.getState(), "hydrateItem").mockResolvedValue();
+    renderCard();
+    await userEvent.click(screen.getByRole("button", { name: /steer and retry/i }));
+    expect(hydrateItem).toHaveBeenCalledWith("w1");
   });
 
   it("surfaces a failed retry instead of silently doing nothing", async () => {
