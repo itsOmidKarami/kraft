@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Literal, Protocol
 
 from kraft import events
+from kraft.config import main_ignore_args
 
 CIState = Literal["pending", "success", "failed"]
 
@@ -200,44 +201,57 @@ async def _run(repo: Path, args: list[str]) -> str:
     return done.stdout
 
 
+#: Roots Kraft itself writes into and never means to commit. `.engineering/`
+#: is session notes and gate artifacts (`agent.py:artifact_path`); `docs/
+#: superpowers/` is the legacy convention the same content used to live under
+#: (CLAUDE.md) -- both gitignored on `main`, both still landing in a spec/plan
+#: attachment a stale worktree copies in (Kraft-vu26).
+_KRAFT_ROOTS = (".engineering", "docs/superpowers")
+
+
 async def _kraft_written_paths(repo: Path) -> list[str]:
-    """Untracked paths under `.engineering/` -- Kraft's own artifacts and
+    """Untracked paths under `_KRAFT_ROOTS` -- Kraft's own artifacts and
     session notes, which hooks write straight to disk and never `git add`.
 
     Deliberately not a static pathspec: a path this repo already tracked
-    under `.engineering/` before this worktree existed shows as modified
+    under one of these roots before this worktree existed shows as modified
     ('M'), not untracked ('??'), so it is never in this list. An edit to that
     file is the repo's own content and real work product, not Kraft's
     bookkeeping -- excluding it outright, the way a blanket
     `:(exclude).engineering` pathspec used to, silently dropped it from every
     merge request (caught in review: a worker's edit to a pre-existing,
     already-committed `.engineering/specs/x.md` would otherwise vanish).
+
+    `main_ignore_args` rides along so a root `main` ignores but this
+    worktree's own stale `.gitignore` does not yet is treated the same as one
+    it always knew about, instead of showing up here as merely untracked.
     """
-    raw = await _run(repo, ["git", "status", "--porcelain", "--", ".engineering"])
+    with main_ignore_args(repo) as ignore_args:
+        raw = await _run(repo, ["git", *ignore_args, "status", "--porcelain", "--", *_KRAFT_ROOTS])
     return [line[3:] for line in raw.splitlines() if line.startswith("??")]
 
 
 async def _work_product_pathspec(repo: Path) -> list[str]:
-    """`.`, plus an exclusion for every path Kraft itself wrote into this
-    worktree's `.engineering/` -- session summaries, and now
-    spec/plan/chain_review/review_brief too. None of it is the agent's work
-    product, so neither the clean check nor the straggler sweep may treat it
-    as such: it is ingested straight into the index at gate approval instead
-    (`Indexer.ingest_gate_artifact`), and never lands in the connected repo's
-    git history at all.
+    """`.`, plus an exclusion for every path Kraft itself wrote into
+    `_KRAFT_ROOTS` -- session summaries, spec/plan/chain_review/review_brief,
+    and a spec/plan attachment copied in under `docs/superpowers/`. None of
+    it is the agent's work product, so neither the clean check nor the
+    straggler sweep may treat it as such: it is ingested straight into the
+    index at gate approval instead (`Indexer.ingest_gate_artifact`), and never
+    lands in the connected repo's git history at all.
 
     Computed per call rather than a fixed list: which paths are Kraft's own
     depends on what this repo already tracked before Kraft touched it
     (`_kraft_written_paths`), which no static pathspec can know.
 
     Individual paths rather than a `.gitignore` line or a blanket
-    `:(exclude).engineering`: this repo ignores `.engineering/` for exactly
-    this reason (.gitignore:54), but a repo Kraft was pointed at five minutes
-    ago does not, and Kraft must not put its own bookkeeping into that repo's
-    first merge request — or refuse to open one over it (Kraft-z8gj, widened:
-    the same argument that carved out session summaries applies to
+    `:(exclude).engineering`: this repo ignores both `_KRAFT_ROOTS` for
+    exactly this reason, but a repo Kraft was pointed at five minutes ago does
+    not, and Kraft must not put its own bookkeeping into that repo's first
+    merge request — or refuse to open one over it (Kraft-z8gj, widened: the
+    same argument that carved out session summaries applies to
     spec/plan/chain_review/review_brief once none of them are committed
-    either) — without also assuming every path under `.engineering/` is ours.
+    either) — without also assuming every path under a Kraft root is ours.
     """
     return [".", *(f":(exclude){p}" for p in await _kraft_written_paths(repo))]
 
@@ -260,9 +274,19 @@ async def _assert_clean(repo: Path) -> None:
     push a submodule commit nowhere while every guard reported clean).
     """
     pathspec = await _work_product_pathspec(repo)
-    raw = await _run(
-        repo, ["git", "status", "--porcelain", "--ignore-submodules=none", "--", *pathspec]
-    )
+    with main_ignore_args(repo) as ignore_args:
+        raw = await _run(
+            repo,
+            [
+                "git",
+                *ignore_args,
+                "status",
+                "--porcelain",
+                "--ignore-submodules=none",
+                "--",
+                *pathspec,
+            ],
+        )
     dirty = [line[3:] for line in raw.splitlines() if line.strip()]
     if dirty:
         shown = ", ".join(dirty[:5])
@@ -289,19 +313,21 @@ async def commit_stragglers(repo: Path, *, message: str) -> bool:
     of the merge request even in a repo that has never heard of them.
     """
     pathspec = await _work_product_pathspec(repo)
-    if not (await _run(repo, ["git", "status", "--porcelain", "--", *pathspec])).strip():
-        return False
-    await _run(repo, ["git", "add", "-A", "--", *pathspec])
-    try:
-        await _run(repo, ["git", "commit", "-m", message])
-    except ForgeError:
-        # A commit hook that reformats what it is given exits non-zero with the
-        # files rewritten under it. Re-adding takes its edits; --no-verify then
-        # refuses to let a second opinion cost us the work, which is the whole
-        # point of this function. A hook that fails for any other reason loses
-        # nothing either -- the commit is what keeps the work reachable.
-        await _run(repo, ["git", "add", "-A", "--", *pathspec])
-        await _run(repo, ["git", "commit", "--no-verify", "-m", message])
+    with main_ignore_args(repo) as ignore_args:
+        status = await _run(repo, ["git", *ignore_args, "status", "--porcelain", "--", *pathspec])
+        if not status.strip():
+            return False
+        await _run(repo, ["git", *ignore_args, "add", "-A", "--", *pathspec])
+        try:
+            await _run(repo, ["git", "commit", "-m", message])
+        except ForgeError:
+            # A commit hook that reformats what it is given exits non-zero with the
+            # files rewritten under it. Re-adding takes its edits; --no-verify then
+            # refuses to let a second opinion cost us the work, which is the whole
+            # point of this function. A hook that fails for any other reason loses
+            # nothing either -- the commit is what keeps the work reachable.
+            await _run(repo, ["git", *ignore_args, "add", "-A", "--", *pathspec])
+            await _run(repo, ["git", "commit", "--no-verify", "-m", message])
     return True
 
 
