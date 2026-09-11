@@ -378,14 +378,33 @@ def _render_list(items: list[dict]) -> str:
         {
             **item,
             "status": render.paint(item["status"], render.STATUS_COLORS.get(item["status"], "")),
+            "current_node_id": (
+                f"{item['current_node_id']} {p['current']}/{p['total']}"
+                if (p := item.get("progress"))
+                else item["current_node_id"]
+            ),
         }
         for item in items
     ]
     return render.table(painted, _LIST_COLUMNS)
 
 
+_PROGRESS_MARKS = {"done": "✓", "current": "▸", "pending": "·"}
+
+
+def _progress_text(p: dict) -> str:
+    lines = [f"Task {p['current']}/{p['total']} — {p['title']}"]
+    lines += [f"{_PROGRESS_MARKS[t['state']]} {t['n']}. {t['title']}" for t in p.get("tasks", [])]
+    return "\n".join(lines)
+
+
 def _render_show(item: dict) -> str:
-    return render.kv([(key, str(value)) for key, value in item.items()])
+    return render.kv(
+        [
+            (key, _progress_text(value) if key == "progress" and value else str(value))
+            for key, value in item.items()
+        ]
+    )
 
 
 def _render_search(payload: dict) -> str:
@@ -488,6 +507,10 @@ def _cmd_retry(ns: argparse.Namespace) -> None:
 
 def _cmd_skip(ns: argparse.Namespace) -> None:
     emit(asyncio.run(client.skip(ns.note, ns.id)), _render_action, ns.json)
+
+
+def _cmd_progress(ns: argparse.Namespace) -> None:
+    emit(asyncio.run(client.report_progress(ns.task, ns.id)), _render_action, ns.json)
 
 
 def _cmd_escalate(ns: argparse.Namespace) -> None:
@@ -811,6 +834,13 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     skip.add_argument("id", nargs="?")
     skip.add_argument("--note", help="optional reason, recorded on the node_skipped event")
     skip.set_defaults(func=_cmd_skip)
+
+    progress = subs.add_parser(
+        "progress", parents=[common], help="say which plan task the implementation has started"
+    )
+    progress.add_argument("task", type=int, help="the N of the plan's '## Task N' heading")
+    progress.add_argument("id", nargs="?")
+    progress.set_defaults(func=_cmd_progress)
 
     escalate = subs.add_parser(
         "escalate", parents=[common], help="ask an agent to help resolve a needs_human stop"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 
@@ -189,3 +190,38 @@ def test_escalate_on_a_needs_human_item_schedules_a_turn(wired, tmp_path):
 
     result = run_with_app(wired, scenario)
     assert result["status"] == "escalating"
+
+
+def test_a_worker_reports_progress_on_its_own_item(monkeypatch):
+    """Every other act verb refuses a worker's own item; reporting where you
+    are is not deciding anything, so this one must not."""
+    seen = {}
+
+    async def fake_act(path, payload=None):
+        seen.update(path=path, payload=payload)
+        return {"id": "w1"}
+
+    monkeypatch.setenv("KRAFT_WORK_ITEM_ID", "w1")
+    monkeypatch.setattr(client, "_act", fake_act)
+    asyncio.run(client.report_progress(2))
+    assert seen == {"path": "/work-items/w1/progress", "payload": {"task": 2}}
+
+
+def test_the_board_and_the_item_keep_progress(monkeypatch):
+    p = {"current": 2, "total": 3, "title": "serve"}
+    row = {
+        "id": "w1",
+        "title": "t",
+        "repo": "/r",
+        "status": "active",
+        "current_node_id": "implementation",
+        "pending_gate": None,
+        "progress": p,
+    }
+    assert client.trim_work_items([row])[0]["progress"] == p
+
+    async def fake_get(path):
+        return {**row, "chain_definition": {"nodes": []}}
+
+    monkeypatch.setattr(client, "_get", fake_get)
+    assert asyncio.run(client.get_work_item("w1"))["progress"] == p

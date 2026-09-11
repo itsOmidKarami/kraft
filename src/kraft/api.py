@@ -45,6 +45,7 @@ from kraft import intake as intake_mod
 from kraft import logs as logs_mod
 from kraft import notify as notify_mod
 from kraft import policy as policy_mod
+from kraft import progress as progress_mod
 from kraft import steering as steering_mod
 from kraft import triggers as triggers_mod
 from kraft import update as update_mod
@@ -914,6 +915,11 @@ class Skip(BaseModel):
     note: str | None = None
 
 
+class Progress(BaseModel):
+    #: the N of the plan's `## Task N` heading the agent is starting
+    task: int
+
+
 class MrLabels(BaseModel):
     labels: list[str]
 
@@ -979,10 +985,17 @@ async def list_work_items(request: Request):
             "pending_gate": pending.get(r["id"]),
             "attachments": json.loads(r["attachments"]) if r["attachments"] else [],
             "retry_at": r["retry_at"],
+            "progress": _board_progress(st, r),
         }
         for r in rows
     ]
     return {"items": items, "cursor": cursor}
+
+
+def _board_progress(st, row) -> dict | None:
+    """The board's share of `progress`: position and title, not the task list."""
+    p = progress_mod.for_item(st.db, row, st.run_dirs.worktrees / row["id"])
+    return {k: p[k] for k in ("current", "total", "title")} if p else None
 
 
 def _completed_nodes(st, wid: str) -> set[str]:
@@ -1093,6 +1106,9 @@ async def get_work_item(wid: str, request: Request):
         "attachments": json.loads(row["attachments"]) if row["attachments"] else [],
         "worker_sessions": [{k: s[k] for k in s.keys()} for s in sessions],
         "usage": st.db.read(lambda c: store.usage_rollup(c, wid)),
+        # Where the implementer is in its plan ("Task 3 of 6"), or None off the
+        # implementation node or for a plan with no `## Task N` headings.
+        "progress": progress_mod.for_item(st.db, row, st.run_dirs.worktrees / wid),
         # empty on a single-repo item; the detail's repos panel is multi-repo only
         "repos": st.db.read(lambda c: store.repos_for(c, wid)),
         # local-only: the checkout the agents are editing, for "Open worktree"
@@ -1744,6 +1760,31 @@ async def pause_work_item(wid: str, request: Request):
     for s in sessions:
         _terminate(s["pid"])
     return {"id": wid, "paused_sessions": ids}
+
+
+@api_router.post("/work-items/{wid}/progress")
+async def report_progress(wid: str, body: Progress, request: Request):
+    """The implementer saying which plan task it is starting. Recorded as a
+    `task_progress` event carrying everything a client needs to show it."""
+    st = request.app.state
+    row = _work_item_row(st, wid)
+    node_id = progress_mod.active_implementation_node(row)
+    if node_id is None:
+        raise HTTPException(409, "work item is not running its implementation node")
+    worktree = st.run_dirs.worktrees / wid
+    tasks = progress_mod.tasks_for(row, worktree)
+    if not tasks:
+        raise HTTPException(400, "this work item's plan has no '## Task N' headings")
+    if not 1 <= body.task <= len(tasks):
+        raise HTTPException(400, f"task must be between 1 and {len(tasks)}")
+    payload = {
+        "node_id": node_id,
+        "task": body.task,
+        "total": len(tasks),
+        "title": tasks[body.task - 1],
+    }
+    await st.db.write(lambda c: events.append(c, wid, "task_progress", payload))
+    return {"id": wid, "progress": progress_mod.for_item(st.db, row, worktree)}
 
 
 def _node_has_agent_task(node: dict, registry: Registry) -> bool:

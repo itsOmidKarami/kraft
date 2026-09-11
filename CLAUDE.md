@@ -97,6 +97,7 @@ kraft item create "title" [--description "..."] [--spec P] [--plan P] [--auto-ga
 kraft item approve [ID] / kraft item reject [ID] --note "why"
 kraft item pause [ID] / kraft item resume [ID] --steer "..."
 kraft item retry [ID] [--steer "..."]       # the only door back onto a stopped item
+kraft item progress K [ID]                  # a worker saying it started plan task K
 kraft view search "query"
 kraft view logs [ID] [-f] [-n N]            # a worker session's log; --json is NDJSON
 kraft view events [ID] [--after N] [--type T]

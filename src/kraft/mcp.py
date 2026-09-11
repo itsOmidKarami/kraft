@@ -112,6 +112,13 @@ def build() -> MCPServer:
         return await client.pause(work_item_id)
 
     @server.tool()
+    async def report_progress(task: int, work_item_id: str | None = None) -> dict:
+        """Say which task of the plan you are starting while implementing a
+        Kraft work item. `task` is the N of the plan's `## Task N` heading.
+        Defaults to the work item this session is running in."""
+        return await client.report_progress(task, work_item_id)
+
+    @server.tool()
     async def resume_work_item(steer: str | None = None, work_item_id: str | None = None) -> dict:
         """Start or restart a paused Kraft work item. `steer` is carried into the
         next attempt's prompt. This is also how a work item created by
