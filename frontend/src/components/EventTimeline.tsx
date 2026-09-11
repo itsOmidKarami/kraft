@@ -21,6 +21,9 @@ function detailOf(e: KraftEvent): string | null {
   if (e.type === "work_item_rate_limited" && typeof p.retry_at === "string") {
     return `retries at ${p.retry_at}`;
   }
+  if (e.type === "work_item_waiting" && typeof p.retry_at === "string") {
+    return `waiting on CI, next check at ${p.retry_at}`;
+  }
   // A done and a failed exit looked identical, and the 6ms noop-handler exit
   // was invisible for what it is (Kraft-zxu4). Concerns keep their place at
   // the end — they are the longest part of the line.

@@ -225,4 +225,21 @@ describe("Board", () => {
     renderBoard();
     expect(screen.getByText(/retry/i)).toBeInTheDocument();
   });
+
+  it("groups a waiting item under Running, not Needs you", () => {
+    // Kraft-knym: ru98 landed 'waiting' on the backend with no frontend
+    // treatment at all, so a parked item matched no board group and vanished
+    // from the board entirely -- worse than the "looks hung" bug it was filed
+    // to fix.
+    setItems(wi({ id: "w3", status: "waiting", current_node_id: "mr_checks" }));
+    renderBoard();
+    expect(within(group("Running")).getByText("Item")).toBeInTheDocument();
+    expect(within(group("Needs you")).queryByText("Item")).not.toBeInTheDocument();
+  });
+
+  it("shows the retry time on a waiting card", () => {
+    setItems(wi({ id: "w3", status: "waiting", retry_at: "2026-09-10T05:00:00Z" }));
+    renderBoard();
+    expect(screen.getByText(/retry/i)).toBeInTheDocument();
+  });
 });

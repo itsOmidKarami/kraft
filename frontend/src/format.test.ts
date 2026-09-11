@@ -54,6 +54,10 @@ describe("statusWord", () => {
     expect(statusWord("rate_limited")).toBe("rate limited");
   });
 
+  it("renders waiting in plain words", () => {
+    expect(statusWord("waiting")).toBe("waiting on CI");
+  });
+
   it("falls back to the raw string for anything unmapped", () => {
     expect(statusWord("active")).toBe("active");
   });
