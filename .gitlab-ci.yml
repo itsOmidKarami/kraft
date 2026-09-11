@@ -87,6 +87,8 @@ lint-and-test:
     - uv run ruff check .
     - uv run ruff format --check .
     - uv run pytest -m "not e2e and not slow"
+    # ~1s, no tests run: catches a renamed pinned test the suite above would not.
+    - uv run python -m kraft.intent
   after_script:
     - uv cache prune --ci
 

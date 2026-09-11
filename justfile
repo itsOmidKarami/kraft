@@ -103,6 +103,10 @@ install: bundle
 test *ARGS:
     COVERAGE_CORE=ctrace uv run pytest --testmon {{ARGS}}
 
+# Check the intent tree: every enforced-by pin resolves, and list what nothing pins.
+intent:
+    uv run python -m kraft.intent
+
 # Regenerate the Lite plugin's chain artifact from the YAML templates.
 lite-build:
     uv run python dev/build_lite_chain.py
