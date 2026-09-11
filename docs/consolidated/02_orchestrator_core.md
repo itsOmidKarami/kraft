@@ -1,5 +1,9 @@
 # Orchestrator Core
 
+> **Status:** historical design record. It captures why the system was designed
+> this way, and is not maintained against the code. Current intended behaviour
+> lives in `docs/intent/` (today: `gates` only).
+
 > Component 1 of the decomposition (`01_conceptual_model.md` §12): the **skeleton**
 > everything else plugs into — chain executor, plugin registry + validator, policy
 > engine, event bus, session tracking, and the local API the UI talks to. No real
