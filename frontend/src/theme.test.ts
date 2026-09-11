@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { applyTheme, PALETTES } from "./theme";
+import { applyDensity, applyTheme, PALETTES } from "./theme";
 
 function mockMatchMedia(initialMatches: boolean) {
   const listeners: ((e: MediaQueryListEvent) => void)[] = [];
@@ -77,5 +77,14 @@ describe("applyTheme", () => {
     // a change firing after teardown must not resurrect system behaviour
     media.fire(true);
     expect(document.documentElement.dataset.mode).toBe("dark");
+  });
+});
+
+describe("applyDensity", () => {
+  it("sets data-density on the root element", () => {
+    applyDensity("comfortable");
+    expect(document.documentElement.dataset.density).toBe("comfortable");
+    applyDensity("compact");
+    expect(document.documentElement.dataset.density).toBe("compact");
   });
 });

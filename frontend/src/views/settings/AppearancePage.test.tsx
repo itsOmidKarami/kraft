@@ -19,7 +19,12 @@ describe("Settings · appearance", () => {
   });
 
   it("previews live on click and saves on Save", async () => {
-    const put = vi.spyOn(api, "putTheme").mockResolvedValue({ palette: "forest", mode: "dark" });
+    const put = vi.spyOn(api, "putTheme").mockResolvedValue({
+      palette: "forest",
+      mode: "dark",
+      density: "compact",
+      board: { group_by: "status", show_done: 5, open_in: "peek" },
+    });
     renderAt("/settings/appearance");
     await screen.findByText("Nocturne");
 
@@ -28,7 +33,40 @@ describe("Settings · appearance", () => {
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Save" }));
-    expect(put).toHaveBeenCalledWith({ palette: "forest", mode: "dark" });
+    expect(put).toHaveBeenCalledWith(
+      expect.objectContaining({ palette: "forest", mode: "dark" }),
+    );
+  });
+
+  it("previews density live and saves it", async () => {
+    const put = vi.spyOn(api, "putTheme").mockResolvedValue({
+      palette: "nocturne",
+      mode: "dark",
+      density: "comfortable",
+      board: { group_by: "status", show_done: 5, open_in: "peek" },
+    });
+    renderAt("/settings/appearance");
+    await screen.findByText("Nocturne");
+    await userEvent.click(screen.getByRole("radio", { name: "Comfortable" }));
+    expect(document.documentElement.dataset.density).toBe("comfortable");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(put).toHaveBeenCalledWith(expect.objectContaining({ density: "comfortable" }));
+  });
+
+  it("changes the board group-by preference", async () => {
+    const put = vi.spyOn(api, "putTheme").mockResolvedValue({
+      palette: "nocturne",
+      mode: "dark",
+      density: "compact",
+      board: { group_by: "repo", show_done: 5, open_in: "peek" },
+    });
+    renderAt("/settings/appearance");
+    await screen.findByText("Nocturne");
+    await userEvent.click(screen.getByRole("radio", { name: "repo" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(put).toHaveBeenCalledWith(
+      expect.objectContaining({ board: { group_by: "repo", show_done: 5, open_in: "peek" } }),
+    );
   });
 
   it("Discard reverts the live preview back to the loaded value", async () => {

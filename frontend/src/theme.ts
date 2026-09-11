@@ -45,3 +45,7 @@ export function applyTheme(palette: PaletteId, mode: ThemeMode): void {
     root.dataset.mode = mode;
   }
 }
+
+export function applyDensity(density: "compact" | "comfortable"): void {
+  document.documentElement.dataset.density = density;
+}

@@ -142,6 +142,8 @@ async def _start(app, repo: dict, row: dict) -> str | None:
             # the bead was never filed in KRAFT_BD_CWD — it is adopted from the
             # repo's own .beads and can only be closed there.
             bead_cwd=repo["path"],
+            source="auto_intake",
+            bead_priority=row.get("priority"),
         )
     except Exception:  # noqa: BLE001 -- one bad bead must not stop the poller
         logger.exception("auto-intake: could not file %s", row["id"])

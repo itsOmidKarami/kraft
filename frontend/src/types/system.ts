@@ -7,6 +7,10 @@ export interface Health {
   /** Paired with `bind` for the sidebar footer ("127.0.0.1:8765"); absent on
    *  an older server that hasn't picked up this field yet. */
   port?: number;
+  /** The Access page's session length, needed for the login screen's "stay
+   *  signed in · N days" before a session exists to ask `/access` for it.
+   *  Absent on an older server that hasn't picked up this field yet. */
+  session_expiry_days?: number;
   /** This build's installed version, or "0.0.0+source" for a checkout that
    *  was never installed (`kraft.update.installed()`). Sidebar footer only. */
   version?: string;
@@ -26,6 +30,13 @@ export interface Analytics {
     cost_complete: boolean;
     rounds: number;
     capped_out: number;
+    completed: number;
+    completed_prev: number | null;
+    median_lead_ms: number;
+    human_wait_pct: number;
+    fix_cycles: number;
+    fix_cycles_capped: number;
+    rejected_gates: number;
   };
   weekly_merged: { week_start: string; n: number }[];
   by_node: {
@@ -46,5 +57,9 @@ export interface Analytics {
     tokens: number;
     cost_usd: number;
     cost_complete: boolean;
+    done: number;
+    cycles: number;
   }[];
+  rejected_gates_by_gate: { gate: string; n: number }[];
+  stop_reasons: { label: string; n: number }[];
 }

@@ -67,6 +67,14 @@ def create_work_item(
     budget_set: bool = False,
     budget_usd: float | None = None,
     node_overrides: dict[str, dict] | None = None,
+    #: Set when this item was filed by the auto-intake poller, not a person
+    #: (`intake.py::_start`). Recorded on `work_item_created` only -- never a
+    #: column -- so "recent pickups" and "last picked up per repo" (design 31)
+    #: can be read back from the event log with no schema change.
+    source: str | None = None,
+    #: The bead's own priority at pickup time (P0-P4), carried the same way --
+    #: Kraft's own row has no priority column, the bead does.
+    bead_priority: int | None = None,
 ) -> None:
     """`submodules` are the cross-repo paths chosen at intake (06, design 1g).
 
@@ -110,12 +118,13 @@ def create_work_item(
             json.dumps(node_overrides) if node_overrides else None,
         ),
     )
-    events.append(
-        conn,
-        id,
-        "work_item_created",
-        {"title": title, "repo": repo, "chain_template": chain_template},
-    )
+    payload = {"title": title, "repo": repo, "chain_template": chain_template}
+    if source:
+        payload["source"] = source
+        payload["bead_id"] = bead_id
+        if bead_priority is not None:
+            payload["priority"] = bead_priority
+    events.append(conn, id, "work_item_created", payload)
     if attachments:
         # Its own event, not a field on work_item_created: the timeline has to
         # explain why this item's chain has no spec node.
@@ -412,3 +421,44 @@ def resume_work_item(conn: sqlite3.Connection, work_item_id: str, steer: str | N
         (_now(), work_item_id),
     )
     events.append(conn, work_item_id, "work_item_resumed", {"steer": steer})
+
+
+def recent_auto_pickups(conn: sqlite3.Connection, limit: int = 10) -> list[dict]:
+    """Work items auto-intake started, newest first (design 31 "Recent pickups").
+    Only items whose `work_item_created` event carries `source: "auto_intake"` --
+    a skipped candidate never got a work item, so a skip never appears here
+    (Kraft-e6x0: tracked, not built)."""
+    rows = conn.execute(
+        "SELECT e.work_item_id, e.payload, e.created_at, w.status "
+        "FROM events e JOIN work_items w ON w.id = e.work_item_id "
+        "WHERE e.type = 'work_item_created' "
+        "AND json_extract(e.payload, '$.source') = 'auto_intake' "
+        "ORDER BY e.created_at DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    out = []
+    for r in rows:
+        payload = json.loads(r["payload"])
+        out.append(
+            {
+                "work_item_id": r["work_item_id"],
+                "bead_id": payload.get("bead_id"),
+                "title": payload.get("title"),
+                "repo": payload.get("repo"),
+                "priority": payload.get("priority"),
+                "status": r["status"],
+                "at": r["created_at"],
+            }
+        )
+    return out
+
+
+def last_auto_pickup_at(conn: sqlite3.Connection) -> dict[str, str]:
+    """Repo path -> ISO timestamp of its most recent auto-intake start."""
+    rows = conn.execute(
+        "SELECT json_extract(e.payload, '$.repo') AS repo, MAX(e.created_at) AS at "
+        "FROM events e WHERE e.type = 'work_item_created' "
+        "AND json_extract(e.payload, '$.source') = 'auto_intake' "
+        "GROUP BY repo"
+    ).fetchall()
+    return {r["repo"]: r["at"] for r in rows if r["repo"]}

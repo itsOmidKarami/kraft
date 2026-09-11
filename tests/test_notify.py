@@ -562,6 +562,7 @@ def test_get_notify_defaults_before_the_file_exists(api_client):
         "url_set": False,
         "base_url": None,
         "events": ["gate_requested", "work_item_needs_human"],
+        "last_test": None,
     }
 
 
@@ -822,3 +823,46 @@ def test_put_notify_with_a_malformed_yaml_file_returns_a_clean_422(api_client):
 
     assert res.status_code == 422
     assert "t0ken" not in res.text
+
+
+def test_send_test_records_status_and_latency(tmp_path):
+    async def scenario():
+        database = await _database(tmp_path)
+        n = _notifier(tmp_path, database, [])
+        result = await n.send_test()
+        assert result["status"] == 200
+        assert result["ms"] >= 0
+        assert result["error"] is None
+        assert n.last_test == result
+        await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_send_test_without_a_url_raises(tmp_path):
+    async def scenario():
+        database = await _database(tmp_path)
+        n = _notifier(tmp_path, database, [])
+        n._config["url"] = None
+        with pytest.raises(ValueError):
+            await n.send_test()
+        await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_notify_test_endpoint_needs_a_url(api_client):
+    resp = api_client.post("/api/notify/test")
+    assert resp.status_code == 422
+
+
+def test_get_notify_carries_last_test_after_a_send(api_client, monkeypatch):
+    api_client.put("/api/notify", json={"url": "https://ntfy.sh/x", "enabled": True})
+
+    async def fake_transport(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200)
+
+    api_client.app.state.notifier._transport = httpx.MockTransport(fake_transport)
+    resp = api_client.post("/api/notify/test")
+    assert resp.status_code == 200
+    assert api_client.get("/api/notify").json()["last_test"] is not None

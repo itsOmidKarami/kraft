@@ -27,7 +27,7 @@ describe("Settings · access (5e)", () => {
       sessions: [
         {
           id: "abc",
-          label: "Firefox",
+          label: "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0",
           ip: "192.168.1.9",
           created_at: new Date().toISOString(),
           last_seen_at: new Date().toISOString(),
@@ -38,7 +38,7 @@ describe("Settings · access (5e)", () => {
     });
     const revoke = vi.spyOn(api, "revokeSession").mockResolvedValue(undefined);
     renderAt("/settings/access");
-    expect(await screen.findByText("Firefox")).toBeInTheDocument();
+    expect(await screen.findByText(/Linux · Firefox/)).toBeInTheDocument();
     expect(screen.getByText("current")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /^session /i }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Revoke" }));
@@ -74,5 +74,65 @@ describe("Settings · access (5e)", () => {
 
     await screen.findByText("saved");
     expect(screen.getByLabelText("New password")).toBeInTheDocument();
+  });
+
+  it("adds a host on Enter and removes it on click", async () => {
+    const put = vi.spyOn(api, "putAccess").mockResolvedValue({
+      ...access,
+      allowed_hosts: ["kraft.local"],
+    });
+    renderAt("/settings/access");
+    const input = await screen.findByPlaceholderText(/add a host or ip/i);
+    await userEvent.type(input, "kraft.local{Enter}");
+    expect(put).toHaveBeenCalledWith({ allowed_hosts: ["kraft.local"] });
+  });
+
+  it("refuses to remove the host this browser is connected as", async () => {
+    // jsdom's default location is localhost — this is the host the test
+    // "browser" is using, so removing it must be refused rather than PUT.
+    const put = vi.spyOn(api, "putAccess");
+    vi.spyOn(api, "getAccess").mockResolvedValue({
+      ...access,
+      allowed_hosts: ["localhost", "kraft.local"],
+    });
+    renderAt("/settings/access");
+    await screen.findByRole("button", { name: /localhost/ });
+
+    await userEvent.click(screen.getByRole("button", { name: /localhost/ }));
+    expect(put).not.toHaveBeenCalled();
+    expect(screen.getByText(/can't remove the host you're connected as/i)).toBeInTheDocument();
+
+    put.mockResolvedValue({ ...access, allowed_hosts: ["localhost"] });
+    await userEvent.click(screen.getByRole("button", { name: /kraft\.local/ }));
+    expect(put).toHaveBeenCalledWith({ allowed_hosts: ["localhost"] });
+  });
+
+  it("warns when a LAN bind has no allowed hosts", async () => {
+    vi.spyOn(api, "getAccess").mockResolvedValue({
+      ...access,
+      bind: "0.0.0.0",
+      allowed_hosts: [],
+    });
+    renderAt("/settings/access");
+    expect(await screen.findByText(/refuses every browser/i)).toBeInTheDocument();
+  });
+
+  it("parses the session's user agent into a device and browser", async () => {
+    vi.spyOn(api, "getAuthSessions").mockResolvedValue({
+      sessions: [
+        {
+          id: "s1",
+          label:
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+          ip: "1.2.3.4",
+          created_at: "",
+          last_seen_at: "",
+          expires_at: "",
+          current: true,
+        },
+      ],
+    });
+    renderAt("/settings/access");
+    expect(await screen.findByText(/Mac · Safari/)).toBeInTheDocument();
   });
 });

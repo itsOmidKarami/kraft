@@ -43,4 +43,46 @@ describe("Settings · auto-intake", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(await screen.findByText("interval_s: too small")).toBeInTheDocument();
   });
+
+  it("shows each repo's item count and last pickup", async () => {
+    vi.spyOn(api, "getIntake").mockResolvedValue({
+      enabled: true,
+      interval_s: 120,
+      priority_ceiling: 2,
+      repos: ["/repo-a"],
+      repo_pickups: {
+        "/repo-a": {
+          items: 18,
+          last_picked_up: new Date(Date.now() - 2 * 3_600_000).toISOString(),
+        },
+      },
+      recent_pickups: [],
+    });
+    renderAt("/settings/intake");
+    expect(await screen.findByText(/18 items/)).toBeInTheDocument();
+    expect(screen.getByText(/last picked up 2h ago/)).toBeInTheDocument();
+  });
+
+  it("lists recent pickups with priority and status", async () => {
+    vi.spyOn(api, "getIntake").mockResolvedValue({
+      enabled: true,
+      interval_s: 120,
+      priority_ceiling: 2,
+      repos: [],
+      repo_pickups: {},
+      recent_pickups: [
+        {
+          work_item_id: "w1",
+          bead_id: "B-1",
+          title: "Retry-After on 429",
+          repo: "/repo-a",
+          priority: 1,
+          status: "active",
+          at: new Date(Date.now() - 2 * 3_600_000).toISOString(),
+        },
+      ],
+    });
+    renderAt("/settings/intake");
+    expect(await screen.findByText(/P1 · Retry-After on 429/)).toBeInTheDocument();
+  });
 });

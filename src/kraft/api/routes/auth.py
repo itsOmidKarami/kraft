@@ -13,13 +13,14 @@ from kraft.api import api_router
 
 class Login(BaseModel):
     password: str
+    stay_signed_in: bool = True
 
 
 @api_router.post("/login")
 async def login(body: Login, request: Request):
     st = request.app.state
     if not auth_mod.verify_password(body.password, st.access["password_hash"]):
-        raise HTTPException(401, "wrong password")
+        raise HTTPException(401, "Wrong password.")
     token = auth_mod.new_token()
     await st.db.write(
         lambda c: auth_mod.create_session(
@@ -36,7 +37,12 @@ async def login(body: Login, request: Request):
         token,
         httponly=True,
         samesite="lax",
-        max_age=int(st.access["session_expiry_days"]) * 86400,
+        # `stay_signed_in=False` drops the cookie's Max-Age, making it a
+        # session cookie the browser clears on close. The DB-side session
+        # (and its real expiry_days) is unchanged either way -- unchecking
+        # the switch changes how long the browser remembers you, not how
+        # long the session itself is valid for revocation/listing purposes.
+        max_age=int(st.access["session_expiry_days"]) * 86400 if body.stay_signed_in else None,
         path="/",
     )
     return response
@@ -81,6 +87,9 @@ async def health(request: Request):
         # public: the login screen says which address it is asking a password for
         "bind": st.access["bind"],
         "port": st.access["port"],
+        # public: the login screen's "stay signed in · N days" needs this
+        # before a session exists to ask `/access` for it.
+        "session_expiry_days": st.access["session_expiry_days"],
         # public: the sidebar footer names its own build (UI v2 · 01)
         "version": update_mod.installed(),
     }

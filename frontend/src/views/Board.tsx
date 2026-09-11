@@ -9,7 +9,7 @@ import { RepoSheet } from "../components/RepoSheet";
 import { deriveState } from "../deriveState";
 import { ago, clock, repoName } from "../format";
 import { useStore } from "../store";
-import type { Repo, WorkItem } from "../types";
+import type { Repo, Theme, WorkItem } from "../types";
 
 const FILTERS_KEY = "kraft.board_filters";
 
@@ -58,8 +58,6 @@ function Facet({
   );
 }
 
-const DONE_PREVIEW = 5;
-
 /** A status the poller drives forward on its own, not a person: not
  *  mid-agent-call, but not waiting on a human either. `rate_limited` (an API
  *  limit resetting) and `waiting` (a pipeline settling, Kraft-ru98) are two
@@ -100,6 +98,34 @@ const SORTS: Record<string, (a: WorkItem, b: WorkItem) => number> = {
   repo: (a, b) => a.repo.localeCompare(b.repo),
 };
 
+/** "Needs you" always leads regardless of axis — the one cross-cutting group
+ *  the redesign's group-by control doesn't touch (design 34's "group by" is
+ *  about the rest of the board, not about hiding what needs a person). */
+function axisGroups(items: WorkItem[], axis: "repo" | "template", sort: keyof typeof SORTS) {
+  const needsItems = items.filter((i) => deriveState(i).needsYou);
+  const rest = items.filter((i) => !deriveState(i).needsYou);
+  const key = axis === "repo" ? (i: WorkItem) => i.repo : (i: WorkItem) => i.chain_template;
+  const byKey = new Map<string, WorkItem[]>();
+  for (const i of rest) {
+    const k = key(i);
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k)!.push(i);
+  }
+  const groups = [...byKey.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, its]) => ({
+      id: k,
+      label: axis === "repo" ? repoName(k) : k,
+      tone: undefined as "accent" | undefined,
+      items: its.sort(SORTS[sort]),
+    }));
+  if (needsItems.length === 0) return groups;
+  return [
+    { id: "needs", label: "Needs you", tone: "accent" as const, items: needsItems.sort(SORTS[sort]) },
+    ...groups,
+  ];
+}
+
 /** Persisted facet/sort state (design 04: "Chip + repo filter persist
  *  (localStorage/URL)") -- read once at mount, written on every change. A
  *  missing or unparsable key falls back to today's defaults rather than
@@ -136,6 +162,15 @@ export function Board({ onNewWorkItem }: { onNewWorkItem?: () => void } = {}) {
     // which hides the loadErr banner and reads as "connect a repo" instead
     // of "could not load the board".
     api.getRepos().then((r) => setRepos(r.repos)).catch(() => {});
+  }, []);
+
+  const [boardPrefs, setBoardPrefs] = useState<Theme["board"]>({
+    group_by: "status",
+    show_done: 5,
+    open_in: "peek",
+  });
+  useEffect(() => {
+    api.getTheme().then((t) => setBoardPrefs(t.board)).catch(() => {});
   }, []);
 
   const [archivedCount, setArchivedCount] = useState<number | null>(null);
@@ -227,12 +262,15 @@ export function Board({ onNewWorkItem }: { onNewWorkItem?: () => void } = {}) {
   const visibleStatusGroups =
     status.size === 0 ? STATUS_GROUPS : STATUS_GROUPS.filter((g) => status.has(g.label));
 
-  const groups = visibleStatusGroups.map((g) => ({
-    id: g.id,
-    label: g.label,
-    tone: g.id === "needs" ? ("accent" as const) : undefined,
-    items: shown.filter(g.test).sort(SORTS[sort]),
-  }));
+  const groups =
+    boardPrefs.group_by === "status"
+      ? visibleStatusGroups.map((g) => ({
+          id: g.id,
+          label: g.label,
+          tone: g.id === "needs" ? ("accent" as const) : undefined,
+          items: shown.filter(g.test).sort(SORTS[sort]),
+        }))
+      : axisGroups(shown, boardPrefs.group_by, sort);
 
   const setPeek = (id: string | null) => {
     setSearchParams(
@@ -337,7 +375,7 @@ export function Board({ onNewWorkItem }: { onNewWorkItem?: () => void } = {}) {
             {g.items.length === 0 && (
               <div className="group-empty">nothing here for this filter</div>
             )}
-            {(g.id === "done" && !allDone ? g.items.slice(0, DONE_PREVIEW) : g.items).map((i) => (
+            {(g.id === "done" && !allDone ? g.items.slice(0, boardPrefs.show_done) : g.items).map((i) => (
               <BoardRow
                 key={i.id}
                 item={i}
@@ -354,7 +392,7 @@ export function Board({ onNewWorkItem }: { onNewWorkItem?: () => void } = {}) {
                 onArchive={() => api.archiveWorkItem(i.id).then(() => useStore.getState().bootstrap()).then(refreshArchivedCount)}
                 onLongPress={() => setPeek(i.id)}
                 onSelect={(metaKey) => {
-                  if (metaKey) {
+                  if (metaKey || boardPrefs.open_in === "full") {
                     navigate(`/work-items/${i.id}`);
                     return;
                   }
@@ -362,7 +400,7 @@ export function Board({ onNewWorkItem }: { onNewWorkItem?: () => void } = {}) {
                 }}
               />
             ))}
-            {g.id === "done" && !allDone && g.items.length > DONE_PREVIEW && (
+            {g.id === "done" && !allDone && g.items.length > boardPrefs.show_done && (
               <button className="btn btn-ghost show-all" onClick={() => setAllDone(true)}>
                 show all {g.items.length}
               </button>
