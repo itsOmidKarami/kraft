@@ -117,3 +117,39 @@ def test_dispatch_resumes_an_existing_thread(tmp_path, monkeypatch):
 
     asyncio.run(scenario())
     assert seen["resume_session_id"] == "cli-existing"
+
+
+def test_dispatch_records_the_message_as_an_event(tmp_path, monkeypatch):
+    async def fake_run_agent_task(db, run_dirs, *, session_id, cwd, task_instruction, **kw):
+        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(
+            json.dumps({"type": "system", "subtype": "init", "session_id": "cli-abc"}) + "\n"
+        )
+        return "done"
+
+    monkeypatch.setattr("kraft.escalate._agent.run_agent_task", fake_run_agent_task)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await Database.open(rd.db)
+        try:
+            wid = "w1"
+            await _seed_needs_human(database, rd, wid)
+            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+            await escalate.dispatch(
+                database, rd, work_item_id=wid, message="look at src/widget.py", launch=launch
+            )
+            from kraft import events as events_mod
+
+            evs = database.read(lambda c: events_mod.read_after(c, 0, wid))
+            msg_events = [e for e in evs if e["type"] == "escalation_message"]
+            assert len(msg_events) == 1
+            assert msg_events[0]["payload"]["message"] == "look at src/widget.py"
+            assert isinstance(msg_events[0]["payload"]["session_id"], str)
+        finally:
+            await database.close()
+
+    import asyncio
+
+    asyncio.run(scenario())

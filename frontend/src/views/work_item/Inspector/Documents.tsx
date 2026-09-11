@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Eye, FileText, ListChecks, Notebook } from "@phosphor-icons/react";
 import * as api from "../../../api";
 import type { WorkItemDocument } from "../../../types";
@@ -21,11 +21,16 @@ export function Documents({
   eventCount,
   selected,
   onSelect,
+  preselectPath,
 }: {
   workItemId: string;
   eventCount: number;
   selected: string | null;
   onSelect: (documentId: string) => void;
+  /** The gate card's "Read <doc>" (06) names a specific artifact by repo
+   *  path (`item.gate_artifact`) — preferred over "just pick the first
+   *  document" once the list lands with a matching row. */
+  preselectPath?: string | null;
 }) {
   const [docs, setDocs] = useState<WorkItemDocument[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -45,16 +50,44 @@ export function Documents({
     };
   }, [workItemId, eventCount]);
 
-  // Default the selection to the first document once the list lands, so the
-  // right pane never sits empty for a tab that has content.
+  // Default the selection once the list lands, so the right pane never sits
+  // empty for a tab that has content: the gate's own artifact by path when
+  // one was asked for, the first document otherwise. `autoPickRef` marks a
+  // selection this effect made itself (not a row click) -- a gate's artifact
+  // can land in the index a scan behind the gate appearing, so an earlier
+  // auto-pick (the wrong document, all that existed yet) has to be free to
+  // upgrade once the real match shows up; a person's own click never should.
+  //
+  // When a preselectPath is given, a miss must not fall back to docs[0]: a
+  // gate's artifact isn't ingested until approval
+  // (artifacts._ingest_approved_gate_artifact), so "no match yet" is the
+  // normal pre-approval state, not a reason to show some unrelated document.
+  const autoPickRef = useRef<string | null>(null);
+  const preselectMissing = !!preselectPath && !!docs && !docs.some((d) => d.path === preselectPath);
   useEffect(() => {
-    if (!selected && docs && docs.length > 0) onSelect(docs[0].document_id);
-  }, [docs, selected, onSelect]);
+    if (!docs || docs.length === 0) return;
+    if (selected && selected !== autoPickRef.current) return; // a real row click
+    if (preselectPath) {
+      const match = docs.find((d) => d.path === preselectPath);
+      if (!match) return; // don't auto-pick an unrelated document
+      if (match.document_id === selected) return;
+      autoPickRef.current = match.document_id;
+      onSelect(match.document_id);
+      return;
+    }
+    const pick = docs[0].document_id;
+    if (pick === selected) return;
+    autoPickRef.current = pick;
+    onSelect(pick);
+  }, [docs, selected, onSelect, preselectPath]);
 
   return (
     <div className="inspector-list linked-docs" data-testid="inspector-documents">
       {error && <p className="form-error" role="alert">{error}</p>}
       {!error && docs?.length === 0 && <p className="empty">no linked documents yet</p>}
+      {!error && preselectMissing && (
+        <p className="empty">the gate's document isn't available yet</p>
+      )}
       {docs?.map((d) => {
         const Icon = KIND_ICONS[d.kind ?? ""] ?? FileText;
         return (

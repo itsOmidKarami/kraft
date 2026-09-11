@@ -196,6 +196,19 @@ def session_exited(
     events.append(conn, row["work_item_id"], "worker_session_exited", payload)
 
 
+def stop_escalation_session(conn: sqlite3.Connection, work_item_id: str, session_id: str) -> None:
+    """Kill a running escalation turn without touching the item's own status
+    (06 'Stop agent') -- the item was, and remains, needs_human; only the turn
+    stops. Mirrors the per-session half of `pause_work_item`, minus the
+    work_items UPDATE that function also does."""
+    now = _now()
+    conn.execute(
+        "UPDATE worker_sessions SET status = 'paused', exited_at = ? WHERE id = ?",
+        (now, session_id),
+    )
+    events.append(conn, work_item_id, "worker_session_paused", {"session_id": session_id})
+
+
 def session_unknown(conn: sqlite3.Connection, session_id) -> None:
     conn.execute(
         "UPDATE worker_sessions SET status = 'unknown', exited_at = ? WHERE id = ?",

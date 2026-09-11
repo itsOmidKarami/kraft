@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures";
+import { connectRepo, expect, test } from "./fixtures";
 
 // Assumes an orchestrator is already running at baseURL with:
 //   - KRAFT_FRONTEND_DIST pointed at ../dist
@@ -6,26 +6,24 @@ import { expect, test } from "./fixtures";
 //   - KRAFT_E2E_REPO set to a git repo path with a failing test
 // See e2e/README.md and e2e/serve.py for the setup.
 const REPO = process.env.KRAFT_E2E_REPO!;
+const REPO_NAME = REPO.split("/").pop()!;
 
 test("create a work item and watch it complete", async ({ page }) => {
+  await connectRepo(page, REPO);
   await page.goto("/");
   await page.getByRole("button", { name: /new work item/i }).click();
 
   const modal = page.getByRole("dialog", { name: "New work item" });
-  await modal.getByLabel("repo").fill(REPO);
+  await modal.getByRole("button", { name: new RegExp(REPO_NAME, "i") }).click();
   await modal.getByLabel("title").fill("make the failing test pass");
   // Explicit: this spec watches a chain run to completion unattended, which
   // only the gateless quick-task chain does. `default` is what the modal now
   // pre-selects, and it stops at spec_approval.
-  //
-  // By label text, not `getByRole("radio")`: the input itself is visually
-  // hidden behind the segmented control, so a real browser refuses to click it
-  // even though jsdom is happy to. Same shape as lifecycle.spec.ts's helper.
   await modal
     .getByRole("radiogroup", { name: "template" })
-    .getByText("quick-task", { exact: true })
+    .locator("label.seg-opt", { hasText: /^quick-task\b/ })
     .click();
-  await modal.getByRole("button", { name: /create/i }).click();
+  await modal.getByRole("button", { name: /create and start/i }).click();
 
   // Navigated to the detail route.
   await expect(page.locator(".detail h2")).toHaveText("make the failing test pass");

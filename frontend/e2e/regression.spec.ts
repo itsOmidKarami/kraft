@@ -8,6 +8,16 @@ const REPO = process.env.KRAFT_E2E_REPO!;
 
 
 test("settings: connect a repo", async ({ page }) => {
+  // Earlier specs connect REPO through fixtures.connectRepo, so take it off
+  // again to drive the real Add repo flow. The server stores the resolved path,
+  // so look it up instead of sending REPO as typed.
+  const name = REPO.split("/").pop()!;
+  const { repos } = await (await page.request.get("/api/repos")).json();
+  const stored = repos.find((r: { path: string }) => r.path.endsWith(`/${name}`));
+  if (stored) {
+    const del = await page.request.delete(`/api/repos?path=${encodeURIComponent(stored.path)}`);
+    expect(del.ok()).toBe(true);
+  }
   await page.goto("/settings/repos");
   await page.getByRole("button", { name: /connect a repo|add repo|connect/i }).first().click();
   const dlg = page.getByRole("dialog", { name: "Add repo" });
@@ -19,7 +29,6 @@ test("settings: connect a repo", async ({ page }) => {
   // the row navigates into the detail pane, not just the list. By data-repo,
   // not text: the name also appears in the probe note and other repos' rows.
   // A suffix match, since the server stores the resolved path.
-  const name = REPO.split("/").pop()!;
   await page.locator(`[data-repo$="/${name}"]`).click();
   await expect(page.getByRole("heading", { name })).toBeVisible();
 });

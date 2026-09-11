@@ -106,6 +106,11 @@ async def dispatch(
         raise LookupError(f"unknown work_item {work_item_id!r}")
 
     session_id = uuid.uuid4().hex
+    await db.write(
+        lambda c: events.append(
+            c, work_item_id, "escalation_message", {"session_id": session_id, "message": message}
+        )
+    )
     worktree = run_dirs.worktrees / work_item_id
 
     task_instruction = _STATE.format(

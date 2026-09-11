@@ -226,6 +226,7 @@ export function PhoneNode({
             <Tasks
               item={item}
               sessions={sessions}
+              events={events}
               nodeId={nodeId}
               selected={selection.kind === "session" ? selection.id : null}
               onSelect={(id) => onSelect({ kind: "session", id })}
@@ -254,6 +255,7 @@ export function PhoneNode({
               eventCount={events.length}
               selected={selection.kind === "document" ? selection.id : null}
               onSelect={(id) => onSelect({ kind: "document", id })}
+              preselectPath={item.gate_artifact}
             />
             {selection.kind === "document" && selection.id ? (
               <Doc id={selection.id} />
