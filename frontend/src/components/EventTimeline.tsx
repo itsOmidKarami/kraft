@@ -49,7 +49,11 @@ function detailOf(e: KraftEvent): string | null {
     return `${p.event_type} → ${p.host} · ${why}`;
   }
   if (e.type === "fix_cycle_started" && Array.isArray(p.failed_tasks)) {
-    return `cycle ${p.cycle}: ${(p.failed_tasks as string[]).join(", ")}`;
+    // A cycle can open on eligible findings alone, with no task actually
+    // failing (a review that exits clean but flags something) — `failed_tasks`
+    // is then empty, and joining it left a bare "cycle N: ".
+    const failed = (p.failed_tasks as string[]).join(", ");
+    return `cycle ${p.cycle}: ${failed || "findings only"}`;
   }
   // The whole point of this event (Kraft-hf12) is a trail to why work got
   // left uncommitted -- without the error text it is just as blank a row as
