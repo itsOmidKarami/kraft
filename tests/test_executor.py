@@ -446,6 +446,55 @@ def test_a_waiting_task_marks_the_row_and_ends_the_run(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
+def test_needs_human_reason_names_a_failed_forge_task_s_kind(tmp_path, monkeypatch):
+    """Kraft-5m7t: `on.ci.poll` is forge-kind, not an agent session -- a
+    `retry --steer` against a node whose only failed task is this one has
+    nowhere for the steer text to land. Naming the kind in the stop reason
+    is the cheapest way a human (or `retry`'s own caller) can tell that
+    before burning a retry on it."""
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    fake = _forge.FakeForge(ci_states=["failed"])
+    monkeypatch.setattr(_forge, "resolve", lambda name: fake)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = Registry(
+                hooks={"on.ci.poll": {"kind": "forge", "handler": "ci_poll", "backend": "fake"}}
+            )
+            tmpl = Template(
+                id="mr-checks-only",
+                nodes=[
+                    {
+                        "id": "mr_checks",
+                        "tasks": ["on.ci.poll"],
+                        "gate_after": None,
+                        "fix_loop": None,
+                    }
+                ],
+            )
+            wid = await executor.intake(
+                database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
+            )
+            result = await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+            assert result == "needs_human"
+            stopped = next(
+                e["payload"]
+                for e in database.read(lambda c: events.read_after(c, 0, wid))
+                if e["type"] == "work_item_needs_human"
+            )
+            return stopped["reason"]
+        finally:
+            await database.close()
+
+    reason = asyncio.run(scenario())
+    assert "on.ci.poll [forge]" in reason
+
+
 def test_run_gathers_multi_task_node(tmp_path):
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
