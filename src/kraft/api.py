@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
+import psutil
 import yaml
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -1625,6 +1626,44 @@ def _terminate(pid: int | None) -> None:
         pass  # already gone, or not ours — the row still moves to paused
 
 
+def _kill_orphans_under(worktree: Path) -> list[int]:
+    """SIGTERM any process whose cwd sits inside the worktree, before it is deleted.
+
+    Abandon only stops sessions Kraft itself launched (`_terminate`, via
+    `pause`'s own path). A server or other long-lived process an agent started
+    by hand from inside the worktree — `just dev`, most often — is invisible to
+    that path and outlives the directory removal, still listening on its port
+    with an interpreter whose `.venv` no longer exists (Kraft-ugm6). Matched by
+    cwd rather than command line: cheap, exact, and does not require guessing
+    at argv shapes.
+
+    Best-effort, like the removal beside it: a `psutil` per-process call can
+    race the process exiting mid-scan, and a process that ignores SIGTERM
+    (Kraft-9oab) is a separate problem this does not try to solve.
+    """
+    worktree = worktree.resolve()
+    killed = []
+    for proc in psutil.process_iter(["pid"]):
+        try:
+            cwd = proc.cwd()
+        except psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess:
+            continue
+        if not cwd:
+            continue
+        try:
+            under = Path(cwd).resolve().is_relative_to(worktree)
+        except OSError:
+            continue
+        if not under:
+            continue
+        try:
+            proc.terminate()
+        except psutil.NoSuchProcess, psutil.AccessDenied:
+            continue
+        killed.append(proc.pid)
+    return killed
+
+
 async def _remove_worktree(repo: Path, worktree: Path, branch: str) -> bool:
     """Reclaim the worktree and its branch.
 
@@ -1658,7 +1697,9 @@ async def abandon_work_item(wid: str, request: Request):
 
     Refuses while the item is active rather than killing its sessions itself:
     `pause` already owns stopping an attempt, and doing both here would leave
-    two places that know how to terminate an agent.
+    two places that know how to terminate an agent. That only covers sessions
+    Kraft itself launched, though, so anything else started from inside the
+    worktree is reaped separately, right before the worktree goes (Kraft-ugm6).
     """
     st = request.app.state
     row = _work_item_row(st, wid)
@@ -1667,9 +1708,11 @@ async def abandon_work_item(wid: str, request: Request):
     if row["status"] == "abandoned":
         return {"id": wid, "status": "abandoned", "worktree_removed": False}
     await st.db.write(lambda c: store.abandon_work_item(c, wid))
-    removed = await _remove_worktree(
-        Path(row["repo"]), st.run_dirs.worktrees / wid, store.branch_for(row)
-    )
+    worktree = st.run_dirs.worktrees / wid
+    killed = await asyncio.to_thread(_kill_orphans_under, worktree)
+    if killed:
+        logger.warning("abandon %s: killed orphaned process(es) %s under worktree", wid, killed)
+    removed = await _remove_worktree(Path(row["repo"]), worktree, store.branch_for(row))
     # Best-effort, like the worktree removal beside it: the row is already
     # abandoned, and a failure to delete a directory must not leave the item in
     # a state the board cannot show.
