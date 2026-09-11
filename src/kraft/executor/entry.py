@@ -57,6 +57,8 @@ async def intake(
     budget_set: bool = False,
     budget_usd: float | None = None,
     node_overrides: dict[str, dict] | None = None,
+    source: str | None = None,
+    bead_priority: int | None = None,
 ) -> str:
     work_item_id = uuid.uuid4().hex
     # A daemon's cwd is an accident of how it was launched — launchd, a login
@@ -118,6 +120,8 @@ async def intake(
             budget_set=budget_set,
             budget_usd=budget_usd,
             node_overrides=node_overrides,
+            source=source,
+            bead_priority=bead_priority,
         )
         if bead_warning:
             # Same transaction as the row: an item with no bead and no record of

@@ -44,6 +44,12 @@ beforeEach(() => {
   // non-empty default keeps every other test on the normal board.
   vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [{ path: "/repo-a" } as never] });
   vi.spyOn(api, "listArchivedWorkItems").mockResolvedValue({ items: [], cursor: 0 });
+  vi.spyOn(api, "getTheme").mockResolvedValue({
+    palette: "nocturne",
+    mode: "dark",
+    density: "compact",
+    board: { group_by: "status", show_done: 5, open_in: "peek" },
+  });
 });
 
 const renderBoard = () =>
@@ -376,5 +382,60 @@ describe("Board", () => {
       "aria-pressed",
       "true",
     );
+  });
+
+  it("groups by repo when the board prefs say so", async () => {
+    vi.spyOn(api, "getTheme").mockResolvedValue({
+      palette: "nocturne",
+      mode: "dark",
+      density: "compact",
+      board: { group_by: "repo", show_done: 5, open_in: "peek" },
+    });
+    setItems(
+      wi({ id: "w1", repo: "/repo-a", status: "active" }),
+      wi({ id: "w2", repo: "/repo-b", status: "active" }),
+    );
+    renderBoard();
+    expect(await screen.findAllByText("repo-a")).not.toHaveLength(0);
+    expect(screen.getAllByText("repo-b").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Running", { selector: ".group-label" })).toBeNull();
+  });
+
+  it("respects a configured show-done count", async () => {
+    vi.spyOn(api, "getTheme").mockResolvedValue({
+      palette: "nocturne",
+      mode: "dark",
+      density: "compact",
+      board: { group_by: "status", show_done: 2, open_in: "peek" },
+    });
+    setItems(
+      ...Array.from({ length: 5 }, (_, i) => wi({ id: `d${i}`, status: "completed" })),
+    );
+    renderBoard();
+    await screen.findByText(/show all 5/);
+    expect(group("Done").querySelectorAll(".board-row")).toHaveLength(2);
+  });
+
+  it("opens the full page on row click when open_in is full", async () => {
+    vi.spyOn(api, "getTheme").mockResolvedValue({
+      palette: "nocturne",
+      mode: "dark",
+      density: "compact",
+      board: { group_by: "status", show_done: 5, open_in: "full" },
+    });
+    render(
+      <MemoryRouter
+        initialEntries={["/"]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <Routes>
+          <Route path="/" element={<Board />} />
+          <Route path="/work-items/:id" element={<div>item page</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const rows = await screen.findAllByTestId("board-card");
+    fireEvent.click(rows[0]);
+    expect(screen.getByText("item page")).toBeInTheDocument();
   });
 });

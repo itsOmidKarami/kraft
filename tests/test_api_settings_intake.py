@@ -94,3 +94,10 @@ def test_put_intake_no_longer_requires_max_concurrent(client):
         json={"enabled": False, "interval_s": 300, "priority_ceiling": 2, "repos": []},
     )
     assert body.status_code == 200, body.text
+
+
+def test_get_intake_carries_repo_pickup_stats(client, templates_dir):
+    body = client.get("/api/intake").json()
+    assert "repo_pickups" in body
+    assert "recent_pickups" in body
+    assert body["recent_pickups"] == []

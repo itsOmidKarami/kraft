@@ -471,7 +471,7 @@ main { min-height: calc(100vh - 48px); }
 .board-row {
   display: grid; grid-template-columns: 22px 1fr 280px 170px;
   gap: 20px; align-items: center;
-  padding: 10px; border-radius: 8px; cursor: pointer;
+  padding: var(--density-row-pad); border-radius: 8px; cursor: pointer;
   /* The same fading hairline every other list row in the interface carries
      (spec §2). Without it a row's own gate actions sit as close to the next
      title as to the one they belong to, and the most consequential control on
@@ -841,87 +841,8 @@ main { min-height: calc(100vh - 48px); }
 }
 .log-following .live-dot { background: var(--color-accent); animation: kpulse 1.8s infinite; }
 
-/* ══ analytics (design 6b) ════════════════════════════════════════════════ */
 .nav-link { text-decoration: none; color: var(--color-neutral-400); }
 .nav-link:hover, .nav-link.active { color: var(--color-accent); }
-
-.analytics-body { padding: 24px 32px 32px; display: flex; flex-direction: column; gap: 30px; }
-.analytics-head { display: flex; align-items: baseline; gap: 12px; }
-.analytics-head h2 { font-size: 20px; margin: 0; }
-.analytics-scope { font-size: 12px; color: var(--color-neutral-500); }
-
-.kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 20px; }
-.kpi {
-  display: flex; flex-direction: column; gap: 6px;
-  padding-left: 12px; border-left: 1px solid var(--color-accent-700);
-}
-.kpi-label {
-  font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
-  color: var(--color-text-muted);
-}
-.kpi-value { font-size: 26px; line-height: 1; font-weight: 500; letter-spacing: -0.02em; }
-.kpi-sub { font-size: 11px; color: var(--color-neutral-500); line-height: 1.4; }
-
-.chart { display: flex; flex-direction: column; gap: 10px; }
-.chart-head { display: flex; align-items: baseline; gap: 10px; }
-.chart-title { font-size: 13px; font-weight: 500; }
-.chart-note { font-size: 11px; color: var(--color-text-muted); }
-.bars {
-  display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px;
-  align-items: end; height: 96px; padding-bottom: 1px;
-  background: linear-gradient(to right,
-    transparent, var(--color-divider) 48px,
-    var(--color-divider) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
-}
-.bar-col {
-  display: flex; flex-direction: column; align-items: center; gap: 6px;
-  height: 100%; justify-content: flex-end;
-}
-.bar-n { font-size: 11px; color: var(--color-neutral-500); }
-.bar {
-  width: 100%; min-height: 2px; border-radius: 3px 3px 0 0;
-  background: var(--color-accent-800); border-top: 2px solid var(--color-accent);
-}
-.bar-col[data-partial] .bar { opacity: 0.6; }
-.bar-labels { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; }
-.bar-labels span { font-size: 10px; color: var(--color-text-muted); text-align: center; }
-
-.analytics-tables {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
-  gap: 32px; align-items: start;
-}
-.table-block { display: flex; flex-direction: column; }
-.table-title { font-size: 13px; font-weight: 500; margin-bottom: 8px; }
-.node-row, .repo-row {
-  display: grid; gap: 10px; align-items: center; padding: 9px 0; font-size: 12.5px;
-  background: linear-gradient(to right,
-    transparent, var(--color-divider) 48px,
-    var(--color-divider) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
-}
-.node-row { grid-template-columns: 100px minmax(40px, 1fr) 36px 66px 50px 46px 80px; }
-.repo-row { grid-template-columns: minmax(56px, 1fr) 40px 36px 50px 46px; }
-.node-head, .repo-head {
-  padding: 0 0 6px; background: none;
-  font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
-  color: var(--color-text-muted);
-}
-.node-head span:not(:first-child):not(:nth-child(2)),
-.repo-head span:not(:first-child) { text-align: right; }
-.node-name { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
-.share {
-  height: 4px; border-radius: 2px; background: var(--color-neutral-900); overflow: hidden;
-}
-.share > span { display: block; height: 100%; background: var(--color-accent); opacity: 0.8; }
-.num { text-align: right; color: var(--color-neutral-400); }
-.num.strong { color: var(--color-text); }
-.table-foot {
-  font-size: 12px; color: var(--color-text-muted); padding: 14px 0 0; margin: 0; line-height: 1.5;
-}
-
-@media (max-width: 900px) {
-  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .analytics-tables { grid-template-columns: 1fr; }
-}
 
 /* ══ search overlay (design 1h) ═══════════════════════════════════════════ */
 .search-overlay { width: 700px; max-width: 100%; padding: 0; gap: 0; overflow: hidden; }

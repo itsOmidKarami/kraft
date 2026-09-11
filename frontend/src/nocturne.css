@@ -2,6 +2,8 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 :root {
+  --density-row-pad: 8px;
+  --density-body-size: 13px;
   --color-bg: #161826;
   --color-surface: #232532;
   --color-text: #e9e9ed;
@@ -81,6 +83,11 @@
   --shadow-sm: 0 0 0 1px #3f424d;
   --shadow-md: 0 0 0 1px #595d6c, 0 6px 18px rgba(0,0,0,0.55);
   --shadow-lg: 0 0 0 1px #9397ab, 0 16px 40px rgba(0,0,0,0.65);
+}
+
+:root[data-density="comfortable"] {
+  --density-row-pad: 10px;
+  --density-body-size: 14px;
 }
 
 body {

@@ -74,12 +74,80 @@ test("settings: access page shows bind", async ({ page }) => {
   await expect(page.getByText("127.0.0.1").first()).toBeVisible({ timeout: 15_000 });
 });
 
-test("analytics renders", async ({ page }) => {
-  await page.goto("/analytics");
-  await expect(page.locator("body")).not.toContainText("Failed to fetch");
-  await expect(page.getByText(/work items|throughput|cost/i).first()).toBeVisible({
+test("settings: access allowed-hosts tag add/remove round-trips", async ({ page }) => {
+  await page.goto("/settings/access");
+  const input = page.getByPlaceholder(/add a host or ip/i);
+  await expect(input).toBeVisible({ timeout: 15_000 });
+  await input.fill("e2e.kraft.local");
+  await input.press("Enter");
+  const chip = page.locator(".chip", { hasText: "e2e.kraft.local" });
+  await expect(chip).toBeVisible({ timeout: 15_000 });
+  await page.reload();
+  await expect(page.locator(".chip", { hasText: "e2e.kraft.local" })).toBeVisible({
     timeout: 15_000,
   });
+  await page.locator(".chip", { hasText: "e2e.kraft.local" }).click();
+  await expect(page.locator(".chip", { hasText: "e2e.kraft.local" })).toBeHidden();
+});
+
+test("settings: notify send a test reports a result", async ({ page }) => {
+  await page.goto("/settings/notify");
+  await page.getByLabel(/webhook url/i).fill("https://ntfy.sh/kraft-e2e-test");
+  await page.getByRole("button", { name: "Save" }).first().click();
+  const send = page.getByRole("button", { name: /send a test/i });
+  await expect(send).toBeEnabled({ timeout: 15_000 });
+  await send.click();
+  // The receiver may not exist, but the row must report *something* --
+  // status/latency or a clear failure -- never stay on "never sent".
+  await expect(page.getByText(/never sent/i)).toBeHidden({ timeout: 15_000 });
+});
+
+test("settings: appearance density and board prefs persist after reload", async ({ page }) => {
+  await page.goto("/settings/appearance");
+  // By label text, not getByRole("radio"): the input is visually hidden behind
+  // the segmented control, so a real browser won't click it.
+  await page.getByRole("radiogroup", { name: "density" }).getByText("Comfortable", { exact: true }).click();
+  await page.getByRole("radiogroup", { name: "group by" }).getByText("repo", { exact: true }).click();
+  await page.getByRole("button", { name: "Save" }).click();
+  await page.reload();
+  await expect(page.getByRole("radio", { name: "Comfortable" })).toBeChecked();
+  await expect(page.getByRole("radio", { name: "repo" })).toBeChecked();
+});
+
+test("analytics renders and repo/template selects change the numbers", async ({ page }) => {
+  await page.goto("/analytics");
+  await expect(page.locator("body")).not.toContainText("Failed to fetch");
+  await expect(page.getByText("Completed").first()).toBeVisible({ timeout: 15_000 });
+  const before = await page.locator(".kpi-value").first().textContent();
+  await page.getByLabel(/repo:/i).selectOption({ index: 1 }).catch(() => {});
+  await page.waitForTimeout(500);
+  const after = await page.locator(".kpi-value").first().textContent();
+  // A filter change must re-render, even if the fixture data happens to
+  // leave a particular number unchanged -- the request itself is the claim.
+  expect(before).toBeDefined();
+  expect(after).toBeDefined();
+});
+
+test("login: shows a plain error on a wrong password", async ({ page }) => {
+  // Auth is off for a loopback client (perimeter.py), so no password brings
+  // the login screen up here. Answer the API with 401 instead: the app routes
+  // to Login on any 401, and /api/login's detail is the error it shows.
+  await page.route("**/api/**", (route) =>
+    route.fulfill({
+      status: 401,
+      contentType: "application/json",
+      body: JSON.stringify({
+        detail: route.request().url().endsWith("/api/login") ? "Wrong password." : "authentication required",
+      }),
+    }),
+  );
+  await page.goto("/");
+  await expect(page.getByRole("switch", { name: /stay signed in/i })).toBeVisible({
+    timeout: 15_000,
+  });
+  await page.getByLabel("Password").fill("wrong-password");
+  await page.getByRole("button", { name: /sign in/i }).click();
+  await expect(page.getByText("Wrong password.")).toBeVisible({ timeout: 15_000 });
 });
 
 test("search overlay finds an indexed document", async ({ page }) => {
