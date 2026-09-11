@@ -144,6 +144,57 @@ def test_merge_accepts_a_pushed_head_against_real_git(tmp_path, monkeypatch):
     assert _glab_argv(tmp_path)[:2] == ["mr", "merge"]
 
 
+def test_push_publishes_a_rebased_branch_against_real_git(tmp_path, monkeypatch):
+    """Kraft-z6i8. A rebase moves the branch off of what origin last saw --
+    here, `main` gaining a commit and the branch rebasing onto it -- and a
+    plain `push -u` would die non-fast-forward. `forge._push`'s
+    `--force-with-lease` must still publish it."""
+    repo = _repo_with_origin(tmp_path)
+    origin = tmp_path / "origin.git"
+    main_clone = tmp_path / "main-clone"
+    _git(tmp_path, "clone", "-q", str(origin), str(main_clone))
+    _git(main_clone, "config", "user.email", "t@t")
+    _git(main_clone, "config", "user.name", "t")
+    (main_clone / "elsewhere.txt").write_text("moved on without you\n")
+    _git(main_clone, "add", "-A")
+    _git(main_clone, "commit", "-q", "-m", "main moved on")
+    _git(main_clone, "push", "-q", "origin", "main")
+    _git(repo, "fetch", "-q", "origin", "main")
+    _git(repo, "rebase", "-q", "origin/main")
+
+    asyncio.run(forge._push(repo, BRANCH))
+
+    remote_head = _git(origin, "rev-parse", BRANCH).strip()
+    assert remote_head == _git(repo, "rev-parse", "HEAD").strip()
+
+
+def test_push_refuses_when_the_remote_moved_under_the_lease(tmp_path):
+    """The other half of Kraft-z6i8's fix: a genuine concurrent writer --
+    someone else pushing to the same branch between this worktree's last
+    observation and its own push -- must still be rejected, not silently
+    clobbered."""
+    repo = _repo_with_origin(tmp_path)
+    origin = tmp_path / "origin.git"
+    other_clone = tmp_path / "other-clone"
+    _git(tmp_path, "clone", "-q", "-b", BRANCH, str(origin), str(other_clone))
+    _git(other_clone, "config", "user.email", "t@t")
+    _git(other_clone, "config", "user.name", "t")
+    (other_clone / "elsewhere.txt").write_text("someone else's commit\n")
+    _git(other_clone, "add", "-A")
+    _git(other_clone, "commit", "-q", "-m", "a concurrent writer")
+    _git(other_clone, "push", "-q", "origin", BRANCH)
+    # This worktree never saw that push -- its own remote-tracking ref is
+    # still the stale sha from `_repo_with_origin`'s own push.
+    (repo / "work.txt").write_text("rewritten locally\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "--amend", "-m", "rewritten")
+
+    with pytest.raises(forge.ForgeError, match="stale info|rejected"):
+        asyncio.run(forge._push(repo, BRANCH))
+
+    assert _git(origin, "rev-parse", BRANCH).strip() != _git(repo, "rev-parse", "HEAD").strip()
+
+
 def test_commit_stragglers_commits_everything_the_agent_left(tmp_path):
     """Kraft-7fip. A worker that edits a tracked file, adds a new one and exits
     without committing leaves work that `_assert_clean` refuses two nodes later
