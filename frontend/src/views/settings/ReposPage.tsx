@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, Plus, WarningCircle } from "@phosphor-icons/react";
+import { CaretRight, Check, Plus, WarningCircle } from "@phosphor-icons/react";
 import { useSearchParams } from "react-router-dom";
 import * as api from "../../api";
 import { OverflowMenu, Row, RowText, SectionLabel, Switch } from "../../components/ui";
@@ -586,7 +586,33 @@ export function ReposPage() {
           )}
           {error && <p className="form-error">{error}</p>}
           {repos.length === 0 && !error && <p className="empty">no repos connected yet</p>}
-          {repos.map((r: Repo) => (
+          {/* m12: a phone row is name, one sub-line and a chevron; the path,
+              switch and menu live on the repo page */}
+          {phone &&
+            repos.map((r: Repo) => (
+              <Row
+                key={r.path}
+                columns="minmax(0, 1fr) auto"
+                data-repo={r.path}
+                role="button"
+                tabIndex={0}
+                onClick={() => setParams({ repo: r.path })}
+              >
+                <RowText
+                  title={r.name}
+                  sub={[
+                    r.default_chain_template,
+                    r.forge && `${r.forge} ${r.project ?? ""}`.trim(),
+                    r.submodules.length > 0 && `${r.submodules.length} submodules`,
+                    !r.enabled && "disabled",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                />
+                <CaretRight size={14} />
+              </Row>
+            ))}
+          {!phone && repos.map((r: Repo) => (
             <Row
               key={r.path}
               columns="1fr 110px 160px 160px 110px auto"

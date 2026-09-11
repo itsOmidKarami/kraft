@@ -15,10 +15,13 @@ test("settings: connect a repo", async ({ page }) => {
   // probe is debounced; the submit button unlocks once it lands
   await expect(dlg.getByRole("button", { name: /add|connect/i })).toBeEnabled({ timeout: 15_000 });
   await dlg.getByRole("button", { name: /add|connect/i }).click();
-  await expect(page.getByText(REPO.split("/").pop()!, { exact: false }).first()).toBeVisible();
-  // the row navigates into the detail pane, not just the list
-  await page.getByText(REPO.split("/").pop()!).first().click();
-  await expect(page.getByRole("heading", { name: REPO.split("/").pop()! })).toBeVisible();
+  await expect(dlg).toBeHidden();
+  // the row navigates into the detail pane, not just the list. By data-repo,
+  // not text: the name also appears in the probe note and other repos' rows.
+  // A suffix match, since the server stores the resolved path.
+  const name = REPO.split("/").pop()!;
+  await page.locator(`[data-repo$="/${name}"]`).click();
+  await expect(page.getByRole("heading", { name })).toBeVisible();
 });
 
 test("settings: chain templates page loads and validates", async ({ page }) => {

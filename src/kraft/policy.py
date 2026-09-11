@@ -67,6 +67,11 @@ class Policy:
     #: `Cap`: a rate-limit wait can run for hours, and `Cap.wall_clock_s` would
     #: read that as an immediate breach.
     rate_limit_retries: int = 5
+    #: Days after completion/abandonment before `archive_poller` archives an
+    #: item automatically, `archived_by: "auto"`. None or 0 disables it — a
+    #: fresh install ships with no auto-archive rather than a guessed default
+    #: (UI v2 · 03).
+    archive_after_days: int | None = None
     triggers: list[Trigger] = field(default_factory=list)
     #: How many work items may be `status == 'active'` at once, across every
     #: repo, however they were started. Moved here from intake.yaml (UI v2 ·
@@ -115,6 +120,19 @@ def _budget(name: str, raw: object) -> Budget:
         work_item_usd=_usd(f"{name}.work_item_usd", raw.get("work_item_usd")),
         daily_usd=_usd(f"{name}.daily_usd", raw.get("daily_usd")),
     )
+
+
+def _archive_after_days(name: str, raw: object) -> int | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise PolicyError(f"{name}: expected a mapping")
+    after_days = raw.get("after_days")
+    if after_days is None:
+        return None
+    if not isinstance(after_days, int) or isinstance(after_days, bool) or after_days < 0:
+        raise PolicyError(f"{name}: 'after_days' must be a non-negative int, or absent")
+    return after_days
 
 
 def _cron_fields(name: str, expr: str) -> tuple[str, str, str, str, str]:
@@ -225,11 +243,13 @@ def load_policy(path: str | Path) -> Policy:
         raw_mc = 3
     if not isinstance(raw_mc, int) or isinstance(raw_mc, bool) or raw_mc < 1:
         raise PolicyError(f"{path.name}: 'max_concurrent' must be a positive int")
+    archive_after_days = _archive_after_days(f"{path.name}: 'archive'", data.get("archive"))
     return Policy(
         loops=loops,
         default=_cap("default", data["default"]),
         loop_severities=severities,
         budget=budget,
+        archive_after_days=archive_after_days,
         rate_limit_retries=raw_retries,
         triggers=triggers,
         max_concurrent=raw_mc,

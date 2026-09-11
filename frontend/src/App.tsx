@@ -8,6 +8,7 @@ import { BottomNav } from "./components/BottomNav";
 import { SearchOverlay } from "./components/SearchOverlay";
 import { AnalyticsView } from "./views/Analytics";
 import { Board } from "./views/Board";
+import { ArchivedView } from "./views/board/Archived";
 import { Login } from "./views/Login";
 import { SearchView } from "./views/Search";
 import { Settings } from "./views/settings";
@@ -63,7 +64,8 @@ export function App() {
           <Header onSearch={() => setSearch(true)} onNew={() => setIntake(true)} />
           <main>
             <Routes>
-              <Route path="/" element={<Board />} />
+              <Route path="/" element={<Board onNewWorkItem={() => setIntake(true)} />} />
+              <Route path="/archived" element={<ArchivedView />} />
               <Route path="/work-items/:id" element={<WorkItemDetail />} />
               <Route path="/analytics" element={<AnalyticsView />} />
               <Route path="/settings/*" element={<Settings />} />

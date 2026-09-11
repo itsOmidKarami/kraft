@@ -20,12 +20,13 @@ export type NodeOverrides = Record<string, { auto_escalate?: boolean }>;
  *  server-side from the plan's `## Task N` headings, the latest
  *  `task_progress` report and the highest task a commit subject names
  *  (`progress.combine`). `null`/absent off the implementation node or for a
- *  plan with no headings. */
+ *  plan with no headings. The list endpoint (`_board_progress`) sends it too,
+ *  without `tasks`, for the board row's "Task 3/6" line. */
 export interface TaskProgress {
   current: number;
   total: number;
   title: string;
-  tasks: { n: number; title: string; state: "done" | "current" | "pending" }[];
+  tasks?: { n: number; title: string; state: "done" | "current" | "pending" }[];
 }
 
 /** The Config tab's "$5.00 · $2.41 used" line and its `policy default` /
@@ -79,6 +80,10 @@ export interface WorkItem {
   /** Set while `status` is `"rate_limited"` or `"waiting"`: when the poller
    *  next acts on this item. */
   retry_at?: string | null;
+  /** Set once the item has been archived (UI v2 · 03); null otherwise. Status
+   *  never changes on archive — "Ended as" keeps reading completed/abandoned. */
+  archived_at?: string | null;
+  archived_by?: "you" | "auto" | null;
   created_at: string;
   updated_at: string;
   /** The gate waiting on a person, straight from the server — a rejected gate

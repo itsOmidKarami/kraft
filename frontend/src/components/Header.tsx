@@ -1,9 +1,29 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { CaretRight, DotsThree, MagnifyingGlass, Plus } from "@phosphor-icons/react";
+import * as api from "../api";
 import { SETTINGS_NAV } from "../settingsNav";
 import { useStore } from "../store";
 import { repoName } from "../format";
+
+/** How many repos are connected — a fresh install has 0 items *and* 0 repos,
+ *  which reads differently from "0 items, repos connected" (design 08). Not
+ *  derivable from work items alone, so this is its own small fetch, the same
+ *  shape `AppNav.tsx`'s `useHealth()` already uses. Refetches on every route
+ *  change so returning to the board after connecting a repo from the empty
+ *  state's ReposPage picks up the new count instead of staying stuck at 0
+ *  until a reload. */
+function useRepoCount(): number | null {
+  const [n, setN] = useState<number | null>(null);
+  const { pathname } = useLocation();
+  useEffect(() => {
+    api
+      .getRepos()
+      .then((r) => setN(r.repos.length))
+      .catch(() => {});
+  }, [pathname]);
+  return n;
+}
 
 /** `to` set only where Final's own markup draws an `<a href>` — the item
  *  page's "Board" segment (screen 11: `<a href="#04">Board</a>`), so a
@@ -13,7 +33,10 @@ import { repoName } from "../format";
  *  settings page — not every non-final segment is a link. */
 type Crumb = { text: string; sub?: string; to?: string };
 
-function useCrumb(): { crumb: Crumb[]; primary: "new" | "more" | null } {
+function useCrumb(
+  repoCount: number | null,
+  archivedCount: number | null,
+): { crumb: Crumb[]; primary: "new" | "more" | null } {
   const { pathname } = useLocation();
   const items = useStore((s) => Object.values(s.workItems));
   const itemMatch = pathname.match(/^\/work-items\/([^/]+)/);
@@ -23,9 +46,20 @@ function useCrumb(): { crumb: Crumb[]; primary: "new" | "more" | null } {
   return useMemo(() => {
     if (pathname === "/") {
       const repos = new Set(items.map((i) => i.repo)).size;
+      const sub =
+        repoCount === 0 ? "0 work items · no repos" : `${items.length} work items across ${repos} repos`;
       return {
-        crumb: [{ text: "Board", sub: `${items.length} work items across ${repos} repos` }],
+        crumb: [{ text: "Board", sub }],
         primary: "new",
+      };
+    }
+    if (pathname === "/archived") {
+      return {
+        crumb: [
+          { text: "Board", to: "/" },
+          { text: `Archived ${archivedCount ?? 0} items` },
+        ],
+        primary: null,
       };
     }
     if (itemMatch && item) {
@@ -47,11 +81,31 @@ function useCrumb(): { crumb: Crumb[]; primary: "new" | "more" | null } {
       };
     }
     return { crumb: [{ text: "Board" }], primary: null };
-  }, [pathname, items, itemMatch, item, settingsMatch]);
+  }, [pathname, items, itemMatch, item, settingsMatch, repoCount, archivedCount]);
+}
+
+/** Same small-fetch shape as `useRepoCount` -- the "Archived N items"
+ *  breadcrumb (design 07) needs a count the default work-item list, which
+ *  excludes archived items, cannot supply. Refetches whenever the store's
+ *  archivedVersion bumps (any work_item_archived/restored WS event, not
+ *  just clicks made from this tab), so the count on /archived doesn't go
+ *  stale while the poller or another tab archives or restores items. */
+function useArchivedCount(): number | null {
+  const [n, setN] = useState<number | null>(null);
+  const archivedVersion = useStore((s) => s.archivedVersion);
+  useEffect(() => {
+    api
+      .listArchivedWorkItems()
+      .then((r) => setN(r.items.length))
+      .catch(() => {});
+  }, [archivedVersion]);
+  return n;
 }
 
 export function Header({ onSearch, onNew }: { onSearch: () => void; onNew: () => void }) {
-  const { crumb, primary } = useCrumb();
+  const repoCount = useRepoCount();
+  const archivedCount = useArchivedCount();
+  const { crumb, primary } = useCrumb(repoCount, archivedCount);
 
   return (
     <header className="app-header">
@@ -79,7 +133,7 @@ export function Header({ onSearch, onNew }: { onSearch: () => void; onNew: () =>
           <span className="kbd">⌘K</span>
         </button>
         {primary === "new" && (
-          <button className="btn btn-primary" onClick={onNew}>
+          <button className="btn btn-primary" onClick={onNew} disabled={repoCount === 0}>
             <Plus size={14} />
             New work item
           </button>

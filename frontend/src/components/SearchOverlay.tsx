@@ -1,21 +1,38 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { CirclesThree, MagnifyingGlass } from "@phosphor-icons/react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { Check, CirclesThree, MagnifyingGlass } from "@phosphor-icons/react";
 import * as api from "../api";
 import { repoName } from "../format";
 import { backdropProps } from "../useModal";
+import { SectionLabel } from "./ui";
 import { useStore } from "../store";
+import { SETTINGS_NAV } from "../settingsNav";
 import type { Bead, SearchResult } from "../types";
 import { DocumentModal } from "./DocumentModal";
 import { Snippet } from "./Snippet";
 
 /**
- * Search over indexed artifacts (design 1h). The results are a lagging shadow
- * of the repo, never live state — the header says so, and no row renders a
- * status (spec §7).
+ * The ⌘K palette (UI v2 · 09). Sections, in order: Actions (pending gates
+ * first), Work items, Documents (the pre-existing indexed-artifact search,
+ * relabelled), Go to (settings pages and other screens). One flat list under
+ * the hood — `rows` — so ↑/↓/Enter can move across sections without four
+ * separately-indexed arrays.
  */
 
 const uniq = (xs: string[]) => [...new Set(xs)].sort();
 const MODES = ["hybrid", "fts", "vector"];
+
+const GOTO_PAGES = [
+  { label: "Board", to: "/" },
+  { label: "Analytics", to: "/analytics" },
+  ...SETTINGS_NAV.map((n) => ({ label: n.label, to: `/settings/${n.to}` })),
+];
+
+type Row =
+  | { kind: "action"; key: string; label: string; sub: string; act: () => void }
+  | { kind: "workitem"; key: string; label: string; sub: string; to: string }
+  | { kind: "document"; key: string; result: SearchResult }
+  | { kind: "goto"; key: string; label: string; to: string };
 
 export function SearchOverlay({
   onClose,
@@ -24,6 +41,8 @@ export function SearchOverlay({
   onClose: () => void;
   embedded?: boolean;
 }) {
+  const navigate = useNavigate();
+  const workItems = useStore((s) => Object.values(s.workItems));
   const repos = useStore((s) => uniq(Object.values(s.workItems).map((w) => w.repo)));
   const [q, setQ] = useState("");
   const [mode, setMode] = useState("hybrid");
@@ -33,8 +52,10 @@ export function SearchOverlay({
   const [repo, setRepo] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [gateError, setGateError] = useState<string | null>(null);
   const [openDoc, setOpenDoc] = useState<string | null>(null);
   const [beads, setBeads] = useState<Bead[]>([]);
+  const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -78,26 +99,102 @@ export function SearchOverlay({
     return () => clearTimeout(t);
   }, [q]);
 
-  const body = useMemo(() => {
+  const openDocument = (r: SearchResult) => {
+    const wid = r.links[0]?.work_item_id;
+    if (wid) {
+      // UI v2 · 05 (Item page group) has not necessarily merged yet, and
+      // `WorkItemDetail.tsx`'s tab state is local, not router-read today —
+      // this is a harmless no-op until that group wires
+      // `location.state.tab`/`documentId` (Kraft-d2i5).
+      navigate(`/work-items/${wid}`, { state: { tab: "documents", documentId: r.id } });
+      onClose();
+      return;
+    }
+    setOpenDoc(r.id);
+  };
+
+  // Gates first (design 09): the palette's own contextual-actions list.
+  // `pending_gate` is the last gate_requested event, not scoped to
+  // needs_human — a paused or abandoned item still carries one, so this
+  // also requires status === "needs_human" to actually be actionable.
+  const gated = workItems.filter((i) => i.pending_gate && i.status === "needs_human");
+  const actionRows: Extract<Row, { kind: "action" }>[] = gated
+    .filter((i) => !q.trim() || `approve ${i.pending_gate} ${i.title}`.toLowerCase().includes(q.toLowerCase()))
+    .map((i) => ({
+      kind: "action" as const,
+      key: `action:${i.id}`,
+      label: `Approve ${i.pending_gate}`,
+      sub: i.title,
+      act: () => {
+        // human_review_approval carries a deferred-findings roll-up that
+        // this palette has nowhere to show — Gate.tsx refuses to approve
+        // it inline for the same reason. Route to the item instead.
+        if (i.pending_gate === "human_review_approval") {
+          navigate(`/work-items/${i.id}`);
+          onClose();
+          return;
+        }
+        api
+          .approveGate(i.id, i.pending_gate as string)
+          .then(onClose)
+          .catch((e) => setGateError(e instanceof Error ? e.message : String(e)));
+      },
+    }));
+
+  const workItemRows: Extract<Row, { kind: "workitem" }>[] = workItems
+    .filter((i) => q.trim() && i.title.toLowerCase().includes(q.toLowerCase()))
+    .slice(0, 5)
+    .map((i) => ({
+      kind: "workitem" as const,
+      key: `wi:${i.id}`,
+      label: i.title,
+      sub: `${repoName(i.repo)} · ${i.chain_template} · ${i.status}`,
+      to: `/work-items/${i.id}`,
+    }));
+
+  const documentRows: Extract<Row, { kind: "document" }>[] = results.map((r) => ({
+    kind: "document" as const,
+    key: `doc:${r.id}`,
+    result: r,
+  }));
+
+  const gotoRows: Extract<Row, { kind: "goto" }>[] = GOTO_PAGES.filter(
+    (p) => !q.trim() || p.label.toLowerCase().includes(q.toLowerCase()),
+  ).map((p) => ({ kind: "goto" as const, key: `goto:${p.to}`, label: p.label, to: p.to }));
+
+  const rows: Row[] = [...actionRows, ...workItemRows, ...documentRows, ...gotoRows];
+
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [q]);
+
+  const activate = (row: Row | undefined) => {
+    if (!row) return;
+    if (row.kind === "action") row.act();
+    else if (row.kind === "workitem" || row.kind === "goto") {
+      navigate(row.to);
+      onClose();
+    } else if (row.kind === "document") openDocument(row.result);
+  };
+
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIndex((i) => Math.min(i + 1, rows.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIndex((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      activate(rows[activeIndex]);
+    }
+  };
+
+  const documentsBody = useMemo(() => {
     if (error) return <p className="form-error">{error}</p>;
     if (!q.trim()) return <p className="search-hint">type to search specs, plans, summaries</p>;
     if (!results.length) return <p className="search-hint">no matches</p>;
-    return (
-      <div className="search-results">
-        {results.map((r) => (
-          <button key={r.id} className="search-result" onClick={() => setOpenDoc(r.id)}>
-            <span className="search-result-title">{r.title}</span>
-            <span className="search-result-where">
-              <span className="search-result-kind">{r.kind ?? r.source_kind}</span>·
-              <span title={r.repo}>{repoName(r.repo)}</span>
-            </span>
-            <span className="search-result-snippet">
-              <Snippet text={r.snippet} />
-            </span>
-          </button>
-        ))}
-      </div>
-    );
+    return null;
   }, [error, q, results]);
 
   const content = (
@@ -111,6 +208,7 @@ export function SearchOverlay({
           placeholder="Search…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
+          onKeyDown={onKeyDown}
         />
         <span className="seg search-mode">
           {MODES.map((m) => (
@@ -185,7 +283,91 @@ export function SearchOverlay({
         </div>
       )}
 
-      {body}
+      <div className="search-sections">
+        {actionRows.length > 0 && (
+          <section className="search-section" data-section="actions">
+            <SectionLabel>Actions</SectionLabel>
+            {gateError && <p className="form-error">{gateError}</p>}
+            {actionRows.map((row) => (
+              <button
+                key={row.key}
+                className="search-row"
+                data-active={rows[activeIndex] === row || undefined}
+                onClick={() => activate(row)}
+              >
+                <Check size={14} />
+                <span className="search-row-text">
+                  <span className="search-row-title">{row.label}</span>
+                  <span className="search-row-sub">{row.sub}</span>
+                </span>
+              </button>
+            ))}
+          </section>
+        )}
+
+        {workItemRows.length > 0 && (
+          <section className="search-section" data-section="work-items">
+            <SectionLabel>Work items</SectionLabel>
+            {workItemRows.map((row) => (
+              <button
+                key={row.key}
+                className="search-row"
+                data-active={rows[activeIndex] === row || undefined}
+                onClick={() => activate(row)}
+              >
+                <span className="search-row-text">
+                  <span className="search-row-title">{row.label}</span>
+                  <span className="search-row-sub">{row.sub}</span>
+                </span>
+              </button>
+            ))}
+          </section>
+        )}
+
+        <section className="search-section" data-section="documents">
+          <SectionLabel>Documents</SectionLabel>
+          {documentsBody}
+          {documentRows.map((row) => {
+            const r = row.result;
+            return (
+              <button
+                key={row.key}
+                className="search-result"
+                data-active={rows[activeIndex] === row || undefined}
+                onClick={() => activate(row)}
+              >
+                <span className="search-result-title">{r.title}</span>
+                <span className="search-result-where">
+                  <span className="search-result-kind">{r.kind ?? r.source_kind}</span>·
+                  <span title={r.repo}>{repoName(r.repo)}</span>
+                </span>
+                <span className="search-result-snippet">
+                  <Snippet text={r.snippet} />
+                </span>
+              </button>
+            );
+          })}
+        </section>
+
+        {gotoRows.length > 0 && (
+          <section className="search-section" data-section="goto">
+            <SectionLabel>Go to</SectionLabel>
+            {gotoRows.map((row) => (
+              <Link
+                key={row.key}
+                to={row.to}
+                className="search-row"
+                data-active={rows[activeIndex] === row || undefined}
+                onClick={onClose}
+              >
+                <span className="search-row-text">
+                  <span className="search-row-title">{row.label}</span>
+                </span>
+              </Link>
+            ))}
+          </section>
+        )}
+      </div>
 
       <div className="bead-strip">
         <CirclesThree size={15} className="bead-icon" />

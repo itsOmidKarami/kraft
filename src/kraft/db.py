@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 25
+SCHEMA_VERSION = 26
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -87,6 +87,13 @@ CREATE TABLE work_items (
   -- chain_definition at read time -- nothing else reads chain_definition's
   -- node fields directly once this exists.
   node_overrides TEXT,
+  -- who and when a completed/abandoned item was archived (UI v2 · 03).
+  -- NULL means "not archived". Never set on any other status -- archiving
+  -- does not change `status` -- "Ended as" keeps reading completed/
+  -- abandoned. 'you' | 'auto', enforced in kraft.store, not by a CHECK:
+  -- the two writers are archive_work_item's only two callers.
+  archived_at      TEXT,
+  archived_by      TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
@@ -593,6 +600,10 @@ FROM worker_sessions""",
         "ALTER TABLE work_items ADD COLUMN budget_set INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE work_items ADD COLUMN budget_usd REAL",
         "ALTER TABLE work_items ADD COLUMN node_overrides TEXT",
+    ],
+    25: [
+        "ALTER TABLE work_items ADD COLUMN archived_at TEXT",
+        "ALTER TABLE work_items ADD COLUMN archived_by TEXT",
     ],
 }
 
