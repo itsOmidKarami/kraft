@@ -10,7 +10,7 @@ import { AnalyticsView } from "./views/Analytics";
 import { Board } from "./views/Board";
 import { Login } from "./views/Login";
 import { SearchView } from "./views/Search";
-import { Settings } from "./views/Settings";
+import { Settings } from "./views/settings";
 import { WorkItemDetail } from "./views/WorkItemDetail";
 
 export function App() {
