@@ -40,6 +40,12 @@ _CTX = (
     "up, so if you are missing more than one fact, ask for all of them in "
     "that one question rather than stopping once per fact.\n"
     "\n"
+    "This session ends the moment your turn ends — there is no notification, "
+    "no callback, and nothing runs after you stop responding. Do not start a "
+    "job in the background and end your turn to wait for it: run every "
+    "command to completion in the foreground, however long it takes, before "
+    "you write your result and report status.\n"
+    "\n"
     "You are working in a git worktree cut for this work item, on its own "
     "branch. Commit everything you change before you exit — `git add` and "
     "`git commit`, in this worktree. Work left uncommitted never reaches the "
@@ -450,4 +456,5 @@ async def run_agent_task(
         post_resolve=_resolve_status(artifact, work_item_id, cwd),
         round=round,
         head_sha=head_sha,
+        require_result_file=True,
     )
