@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import shutil
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
 from kraft import logs, store
+from kraft.adapters.forge import _default_branch
 from kraft.config import git_read, main_ignore_args
 
 logger = logging.getLogger(__name__)
@@ -305,8 +307,9 @@ async def ensure_worktree(
             "SELECT base_ref, branch, id FROM work_items WHERE id = ?", (work_item_id,)
         ).fetchone()
     )
+    head = None
     if row is not None and row["base_ref"] is None:
-        head = git_read(Path(repo), "rev-parse", "HEAD")
+        head = await upstream_head(Path(repo))
         if head:
             await db.write(lambda c: store.set_base_ref(c, work_item_id, head))
         else:
@@ -333,7 +336,12 @@ async def ensure_worktree(
         subprocess.run, ["git", "worktree", "prune"], cwd=repo, capture_output=True, text=True
     )
     args = ["git", "worktree", "add"]
-    args += [str(worktree), branch] if exists else [str(worktree), "-b", branch]
+    # A sha, not `origin/<default>`: a remote-tracking start point would make
+    # git set it as the new branch's upstream.
+    if exists:
+        args += [str(worktree), branch]
+    else:
+        args += [str(worktree), "-b", branch] + ([head] if head else [])
     done = await asyncio.to_thread(subprocess.run, args, cwd=repo, capture_output=True, text=True)
     if done.returncode != 0:
         # Raised, not returned: this runs outside a session, so there is no
@@ -377,9 +385,59 @@ async def ensure_worktree(
     return worktree
 
 
+async def upstream_head(repo: Path) -> str | None:
+    """The tip of origin's default branch, fetched now; the last fetched tip
+    when the fetch fails; `repo`'s own HEAD only when there is no `origin`
+    or it was never fetched.
+
+    An item's MR targets origin's branch, and the connected checkout is only
+    as fresh as its owner's last pull -- Kraft merges on the forge, so nothing
+    here ever moves it (Kraft-k647). Forking and rebasing onto that checkout
+    started items behind and made every `pre_mr_rebase` answer "nothing to
+    rebase". A failed fetch (offline, credentials the server process cannot
+    reach, a concurrent fetch holding the ref lock) still prefers the stale
+    remote-tracking ref over the checkout, which may be on another branch or
+    carry unpushed commits that would then ride into the MR unseen.
+
+    The refspec is explicit because a `--single-branch` clone's configured
+    one may not cover the default branch, leaving its ref unmoved. No prompt
+    may reach a foreground `kraft`'s terminal: `GIT_TERMINAL_PROMPT=0` for
+    git's own, ssh `BatchMode` for passphrases and unknown hosts -- unless the
+    user already chose an ssh command, which an env var would override.
+    """
+    if git_read(repo, "remote", "get-url", "origin", expected_failure=True):
+        default = await _default_branch(repo)
+        ref = f"refs/remotes/origin/{default}"
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+        if "GIT_SSH_COMMAND" not in env and not git_read(
+            repo, "config", "core.sshCommand", expected_failure=True
+        ):
+            env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes"
+        try:
+            done = await asyncio.to_thread(
+                subprocess.run,
+                ["git", "fetch", "-q", "origin", f"+refs/heads/{default}:{ref}"],
+                cwd=repo,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                env=env,
+            )
+            detail = (done.stderr.strip() or "failed") if done.returncode else None
+        except subprocess.TimeoutExpired:
+            detail = "timed out"
+        if detail is not None:
+            logger.warning("could not fetch origin/%s in %s: %s", default, repo, detail)
+        tip = git_read(repo, "rev-parse", "--verify", "--quiet", ref, expected_failure=True)
+        if tip:
+            return tip
+    return git_read(repo, "rev-parse", "HEAD")
+
+
 async def refresh_worktree_base(worktree: Path, repo: Path, branch: str) -> str | None:
-    """Rebase `worktree`'s branch onto `repo`'s current HEAD, so a paused or
-    retried item's next commit lands on top of whatever landed on `repo`
+    """Rebase `worktree`'s branch onto origin's default branch (`upstream_head`),
+    so a paused or retried item's next commit lands on top of whatever landed
     while the item sat stopped, not the commit it forked from.
 
     Returns the new HEAD sha when the rebase moved the branch (the caller
@@ -398,17 +456,13 @@ async def refresh_worktree_base(worktree: Path, repo: Path, branch: str) -> str 
     """
     if not worktree.is_dir():
         return None
-    head = git_read(repo, "rev-parse", "HEAD")
-    if not head:
-        logger.warning("refresh_worktree_base: rev-parse HEAD failed in %s", repo)
-        return None
-    # Cheaper, purely local check first: a branch already pushed past a prior
-    # open_mr gate must not be silently rewritten here -- a reviewer or a
-    # pipeline may already be looking at those commits, and this is a quiet
-    # auto-refresh on resume/retry, not a deliberate rebase someone asked
-    # for. `forge._push` can publish a rewritten branch now (Kraft-z6i8), so
-    # this skip is a policy choice about *when* to rewrite, not a workaround
-    # for push being unable to.
+    # Cheaper, purely local check first -- ahead of `upstream_head`'s fetch: a
+    # branch already pushed past a prior open_mr gate must not be silently
+    # rewritten here -- a reviewer or a pipeline may already be looking at
+    # those commits, and this is a quiet auto-refresh on resume/retry, not a
+    # deliberate rebase someone asked for. `forge._push` can publish a
+    # rewritten branch now (Kraft-z6i8), so this skip is a policy choice about
+    # *when* to rewrite, not a workaround for push being unable to.
     if git_read(
         worktree,
         "rev-parse",
@@ -418,6 +472,10 @@ async def refresh_worktree_base(worktree: Path, repo: Path, branch: str) -> str 
         expected_failure=True,
     ):
         logger.info("refresh_worktree_base: %s already pushed to origin, skipping", branch)
+        return None
+    head = await upstream_head(repo)
+    if not head:
+        logger.warning("refresh_worktree_base: rev-parse HEAD failed in %s", repo)
         return None
     # Already up to date: exit 0 means head is already an ancestor of the tip.
     if (
@@ -465,7 +523,7 @@ async def mr_rebase(
     branch: str,
     head_sha: str | None = None,
 ) -> str:
-    """Rebase onto `repo`'s current HEAD right before `open_mr`, so an item
+    """Rebase onto origin's default branch right before `open_mr`, so an item
     that ran straight through the chain -- no pause, no `/retry` -- doesn't
     open its MR however many commits behind (Kraft-4bgg). A thin wrapper:
     `refresh_worktree_base` is already the whole implementation, shared with
