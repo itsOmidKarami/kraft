@@ -40,7 +40,7 @@ GATE_NAMES = {"spec_approval", "plan_approval", "chain_finalized", "human_review
 #: prompt never teaches an agent to reproduce (Kraft-eod0) -- its schema is
 #: `{id, tasks, gate_after, fix_loop}`, four of the eight keys a real node
 #: carries. An agent emitting an "unchanged" node only knows those four, so
-#: the splice that replaces the tail wholesale (`api._splice_chain_review`)
+#: the splice that replaces the tail wholesale (`kraft.api.routes.gates._splice_chain_review`)
 #: must carry these forward from the node they replace rather than trust an
 #: agent-authored dict to know they exist.
 NODE_CARRYOVER_FIELDS = ("on_failure", "reject_to", "rebase_bounce_to", "auto_escalate")
@@ -293,7 +293,7 @@ def validate_nodes(nodes: list, registry: Registry) -> list[str]:
     checks over an agent's revised tail before it reaches `chain_definition`
     -- one rule set, two callers, not a second, drifting copy of it
     (Kraft-unk). `load_templates` below calls it once per template at load
-    time; `api.approve_gate` calls it once per `revised_chain_nodes` payload
+    time; `kraft.api.routes.gates.approve_gate` calls it once per `revised_chain_nodes` payload
     at gate-approval time.
 
     Returns error strings, empty if valid. Stops at the first failing rule
@@ -352,7 +352,7 @@ def validate_agent_overrides(overrides: dict) -> list[str]:
     hook's own `model`/`escalate_model`/`effort`: keys are a subset of
     `{"model", "escalate_model", "effort"}`; `model` and `escalate_model` are
     strings or `None`; `effort` is one of `_EFFORT_LEVELS`. One rule set, one
-    exported function -- `api.py` calls this rather than reaching for the
+    exported function -- `kraft.api.routes.work_items` calls this rather than reaching for the
     private `_EFFORT_LEVELS` itself, the same "validate in one place"
     reasoning `validate_nodes` gives for its own two callers, so a work item's
     override and a template's binding cannot drift into two different ideas

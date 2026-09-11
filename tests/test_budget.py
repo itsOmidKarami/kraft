@@ -12,6 +12,7 @@ from pathlib import Path
 from support.harness import fake_registry, isolated_bd, make_repo
 
 from kraft import db, events, executor, policy, store
+from kraft.executor import dispatch as dispatch_module
 from kraft.paths import RunDirs
 from kraft.templates import Template
 
@@ -334,12 +335,12 @@ def test_a_co_task_exception_is_logged_even_when_budget_wins(monkeypatch, caplog
         async def write(self, fn):
             return None
 
-    async def dispatch(db, run_dirs, task, node, row, registry, worktree, **kw):
+    async def fake_dispatch_node(db, run_dirs, task, node, row, registry, worktree, **kw):
         if task == "on.test.run":
             raise RuntimeError("co-task blew up")
         return executor.BUDGET
 
-    monkeypatch.setattr(executor, "_dispatch", dispatch)
+    monkeypatch.setattr(dispatch_module, "dispatch_node", fake_dispatch_node)
     node = {
         "id": "work",
         "tasks": ["on.implementation.start", "on.test.run"],
@@ -348,7 +349,7 @@ def test_a_co_task_exception_is_logged_even_when_budget_wins(monkeypatch, caplog
     }
     with caplog.at_level("ERROR", logger="kraft.executor"):
         verdict, failed, excs = asyncio.run(
-            executor._measure_node(_NoopDb(), None, "w1", node, None, None, None)
+            executor.measure_node(_NoopDb(), None, "w1", node, None, None, None)
         )
     assert verdict == executor.BUDGET
     assert failed == [] and excs == []

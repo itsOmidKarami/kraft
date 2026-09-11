@@ -464,9 +464,10 @@ def test_workers_are_told_not_to_push_or_merge(monkeypatch):
 
 def test_the_artifact_contract_does_not_claim_the_gate_cannot_see_uncommitted_files(monkeypatch):
     """Kraft-i47n. `_ARTIFACT` justified its commit sentence with "an
-    uncommitted file is invisible to them", which is false: `_gate_artifact`
-    (api.py:620) resolves the path and `GET /work-items/{wid}/artifact` reads
-    the file off disk from the worktree, deliberately. With the contract in
+    uncommitted file is invisible to them", which is false:
+    `kraft.api.routes.board._gate_artifact` resolves the path and
+    `GET /work-items/{wid}/artifact` reads the file off disk from the worktree,
+    deliberately. With the contract in
     `_CTX` the artifact needs no commit rule of its own, and must not state one
     twice."""
     seen = _capture_cmd(monkeypatch)
@@ -993,8 +994,8 @@ def test_needs_context_survives_the_artifact_guard(tmp_path, monkeypatch):
     """A worker that stopped to ask a question wrote no artifact *because* it
     stopped — rewriting that to `failed` loses the question.
 
-    `executor._needs_context_question` matches on the session row's status, so
-    a downgrade here makes the stop reason generic and `api._needs_context_stop`
+    `kraft.executor.dispatch.needs_context_question` matches on the session row's status, so
+    a downgrade here makes the stop reason generic and `kraft.api.routes.board._needs_context_stop`
     false, which 409s both /steer and /resume. The guard is for a worker that
     claimed success without producing its artifact, not for one that said
     plainly it could not finish.

@@ -87,7 +87,7 @@ class Indexer:
         """Repos connected through Settings (`repos.yaml`), read live because
         that file is edited by the Settings screens while Kraft runs.
 
-        Degrades like `api._launch` rather than raising: a malformed file must
+        Degrades like `kraft.api.deps.launch` rather than raising: a malformed file must
         not take down a scan of the repos that are still fine. Steering is not
         validated here — indexing has nothing to do with steering files.
         """
@@ -243,7 +243,7 @@ class Indexer:
         never lands in the connected repo's git history
         (`forge._work_product_pathspec`), so once the worktree that holds it is
         gone, this row is all there is.
-        The caller (`api.approve_gate`) is what makes "gate approval" the right
+        The caller (`kraft.api.routes.gates.approve_gate`) is what makes "gate approval" the right
         moment -- it is the first point the content is accepted rather than
         still being drafted, and reuses the same worktree-containment-checked
         read as the reviewer-facing endpoint.

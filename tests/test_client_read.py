@@ -27,7 +27,7 @@ _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 
 @pytest.fixture
 def wired(tmp_path, monkeypatch):
-    """The app, with client.http() pointed at it in-process."""
+    """The app, with client.transport.http() pointed at it in-process."""
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))))
@@ -38,7 +38,7 @@ def wired(tmp_path, monkeypatch):
     import kraft.api as api
 
     monkeypatch.setattr(
-        client,
+        client.transport,
         "http",
         lambda: httpx.AsyncClient(
             transport=httpx.ASGITransport(app=api.app), base_url="http://kraft"
@@ -69,7 +69,7 @@ def run_with_app(api, scenario):
 
 
 async def _create(repo, title="read me") -> str:
-    async with client.http() as http:
+    async with client.transport.http() as http:
         response = await http.post("/api/work-items", json={"title": title, "repo": str(repo)})
     assert response.status_code == 201, response.text
     return response.json()["id"]
@@ -146,7 +146,7 @@ def test_get_work_item_names_the_next_node(wired, tmp_path):
     repo = make_repo(tmp_path)
 
     async def scenario():
-        async with client.http() as http:
+        async with client.transport.http() as http:
             created = await http.post(
                 "/api/work-items",
                 json={"title": "chain me", "repo": str(repo), "autostart": False},
@@ -171,7 +171,7 @@ def test_the_last_node_has_no_next_node(wired, tmp_path):
     repo = make_repo(tmp_path)
 
     async def scenario():
-        async with client.http() as http:
+        async with client.transport.http() as http:
             created = await http.post(
                 "/api/work-items",
                 json={"title": "nearly done", "repo": str(repo), "autostart": False},
@@ -180,6 +180,6 @@ def test_the_last_node_has_no_next_node(wired, tmp_path):
             wid = created.json()["id"]
             full = (await http.get(f"/api/work-items/{wid}")).json()
         full["current_node_id"] = full["chain_definition"]["nodes"][-1]["id"]
-        return client._next_node_id(full)
+        return client.reads._next_node_id(full)
 
     assert run_with_app(wired, scenario) is None

@@ -504,7 +504,7 @@ def test_a_paused_item_is_not_woken_by_the_ci_wait_poller(tmp_path, monkeypatch)
 
 
 def test_abandoning_a_waiting_item_is_accepted(tmp_path, monkeypatch):
-    """abandon refuses only 'active' (api.py) -- a waiting item has no session
+    """abandon refuses only 'active' (kraft.api.routes.lifecycle) -- a waiting item has no session
     to stop, so it can go straight to abandoned and reclaim its worktree."""
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:

@@ -8,12 +8,13 @@ import os
 import signal
 
 import pytest
+import uvicorn
 from support.harness import fake_templates_dir
 
 from kraft import cli, client
 from kraft.paths import RunDirs
 
-# `app` fixture: tests/conftest.py (sub-project A Task 4). It wires client.http()
+# `app` fixture: tests/conftest.py (sub-project A Task 4). It wires client.transport.http()
 # to the ASGI app with the lifespan entered per client.
 
 
@@ -102,8 +103,8 @@ def test_serve_writes_and_clears_the_pidfile(tmp_path, monkeypatch):
     def fake_run(*args, **kwargs):
         seen["pid"] = RunDirs(tmp_path / "run").pid.read_text().strip()
 
-    monkeypatch.setattr(cli.uvicorn, "run", fake_run)
-    cli._serve()
+    monkeypatch.setattr(uvicorn, "run", fake_run)
+    cli.admin._serve()
     assert seen["pid"] == str(os.getpid())
     assert not RunDirs(tmp_path / "run").pid.exists()
 
@@ -116,9 +117,9 @@ def test_a_second_serve_refuses_while_one_is_live(tmp_path, monkeypatch, capsys)
     pid_path = RunDirs(tmp_path / "run").pid
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     pid_path.write_text(str(os.getpid()))
-    monkeypatch.setattr(cli.uvicorn, "run", lambda *a, **k: pytest.fail("started anyway"))
+    monkeypatch.setattr(uvicorn, "run", lambda *a, **k: pytest.fail("started anyway"))
     with pytest.raises(SystemExit):
-        cli._serve()
+        cli.admin._serve()
     assert "already running" in capsys.readouterr().err
     assert pid_path.exists()
 
@@ -131,8 +132,8 @@ def test_a_stale_pidfile_does_not_block_serve(tmp_path, monkeypatch):
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     pid_path.write_text("999999")
     started = []
-    monkeypatch.setattr(cli.uvicorn, "run", lambda *a, **k: started.append(True))
-    cli._serve()
+    monkeypatch.setattr(uvicorn, "run", lambda *a, **k: started.append(True))
+    cli.admin._serve()
     assert started == [True]
 
 
@@ -150,7 +151,7 @@ def test_stop_signals_the_running_pid(tmp_path, monkeypatch, capsys):
             signalled.append((pid, sig))
             alive[0] = False
 
-    monkeypatch.setattr(cli.os, "kill", fake_kill)
+    monkeypatch.setattr(os, "kill", fake_kill)
     cli.main(["admin", "stop"])
     assert signalled == [(4171, signal.SIGTERM)]
     assert "4171" in capsys.readouterr().out
@@ -212,7 +213,7 @@ def test_start_prints_the_update_notice(monkeypatch, capsys):
     monkeypatch.delenv("KRAFT_NO_UPDATE_CHECK", raising=False)
     monkeypatch.setattr(update, "latest", lambda **_: update.Release("v9.9.9", "u"))
     monkeypatch.setattr(update, "installed", lambda: "0.1.0")
-    cli._update_notice()
+    cli.admin._update_notice()
     assert "9.9.9" in capsys.readouterr().out
 
 
@@ -221,5 +222,5 @@ def test_start_notice_is_silenced_by_the_env_var(monkeypatch, capsys):
 
     monkeypatch.setenv("KRAFT_NO_UPDATE_CHECK", "1")
     monkeypatch.setattr(update, "latest", lambda **_: pytest.fail("checked with the env var set"))
-    cli._update_notice()
+    cli.admin._update_notice()
     assert capsys.readouterr().out == ""
