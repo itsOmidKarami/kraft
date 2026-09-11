@@ -42,7 +42,7 @@ def split_lines(text: str) -> list[str]:
 
 #: Rendered lines are capped here. The modal renders every line and a
 #: `tool_result` for a large file read is tens of KB; the plain-text endpoint
-#: (`FileResponse`, api.py) serves the file itself and stays whole.
+#: (`FileResponse`, kraft.api.routes.sessions) serves the file itself and stays whole.
 MAX_TEXT = 2000
 
 

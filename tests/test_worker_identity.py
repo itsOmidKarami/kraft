@@ -86,4 +86,4 @@ def test_a_worker_in_its_own_worktree_is_still_a_worker(monkeypatch, tmp_path):
 
     assert client.resolve_context() == ("w1", "worker")
     with pytest.raises(PermissionError):
-        client._forbid_self_action(None)
+        client.context._forbid_self_action(None)

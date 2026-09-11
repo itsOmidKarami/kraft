@@ -1,4 +1,4 @@
-"""Every verb through cli.main(), with client.http() on the ASGI app.
+"""Every verb through cli.main(), with client.transport.http() on the ASGI app.
 
 This tests the dispatch table and the rendering, not httpx: the client layer has
 its own tests in test_client_*.py.
@@ -20,7 +20,7 @@ from kraft import cli, client
 def test_bare_kraft_still_serves(monkeypatch):
     """The zero-argument default predates the CLI and must survive it."""
     served = []
-    monkeypatch.setattr(cli, "_serve", lambda: served.append(True))
+    monkeypatch.setattr(cli.admin, "_serve", lambda: served.append(True))
     cli.main([])
     assert served == [True]
 
@@ -60,7 +60,7 @@ def _make_item(app, repo, title="a thing"):
     import asyncio
 
     async def go():
-        async with client.http() as http:
+        async with client.transport.http() as http:
             response = await http.post(
                 "/api/work-items",
                 json={"title": title, "repo": str(repo), "autostart": False},
@@ -195,7 +195,7 @@ def test_item_create_passes_auto_gate(monkeypatch):
         seen["auto_gate"] = auto_gate
         return {"id": "w1"}
 
-    monkeypatch.setattr("kraft.cli.client.create_work_item", fake_create)
+    monkeypatch.setattr("kraft.client.create_work_item", fake_create)
     cli.main(["item", "create", "t", "--repo", "/r", "--auto-gate"])
     assert seen["auto_gate"] is True
 
@@ -283,7 +283,7 @@ def test_create_attaches_a_spec_from_the_flag(app, tmp_path, monkeypatch, capsys
     import asyncio
 
     async def _fetch_full():
-        async with client.http() as http:
+        async with client.transport.http() as http:
             return (await http.get(f"/api/work-items/{created['id']}")).json()
 
     full = asyncio.run(_fetch_full())
@@ -512,11 +512,12 @@ def test_moved_covers_every_verb_that_existed():
 
 def test_no_source_string_tells_a_user_to_run_a_removed_verb():
     """A hint that names a dead command is worse than no hint at all."""
-    src = pathlib.Path(cli.__file__).parent
+    cli_dir = pathlib.Path(cli.__file__).parent
+    src = cli_dir.parent
     pattern = re.compile(r"`kraft (" + "|".join(sorted(cli.MOVED)) + r")\b")
     offenders = []
     for path in sorted(src.rglob("*.py")):
-        if path.name == "cli.py":  # MOVED itself lists every one of them
+        if path.parent == cli_dir:  # the cli package itself defines every one of them
             continue
         for n, line in enumerate(path.read_text().splitlines(), 1):
             if pattern.search(line):

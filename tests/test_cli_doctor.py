@@ -14,7 +14,7 @@ from support.harness import make_repo
 
 from kraft import auth, cli, client, doctor
 
-# `app` fixture: tests/conftest.py. It wires client.http() to the ASGI app.
+# `app` fixture: tests/conftest.py. It wires client.transport.http() to the ASGI app.
 
 
 def _names(rows):

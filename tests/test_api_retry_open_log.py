@@ -52,10 +52,8 @@ def _as_authenticated_lan_peer(client, monkeypatch):
 def _spy_on_launches(monkeypatch):
     """Every editor is installed and every launch is recorded, never performed."""
     launched = []
-    monkeypatch.setattr("kraft.api.shutil.which", lambda name: f"/usr/bin/{name}")
-    monkeypatch.setattr(
-        "kraft.api.subprocess.Popen", lambda argv, **kw: launched.append(argv) or object()
-    )
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: launched.append(argv) or object())
     return launched
 
 
@@ -340,7 +338,7 @@ def test_open_document_reports_501_when_no_editor_is_installed(tmp_path, monkeyp
         doc_id = docs[0]["document_id"]
         _as_git_scan_doc(client, monkeypatch, doc_id)
 
-        monkeypatch.setattr("kraft.api.shutil.which", lambda _: None)
+        monkeypatch.setattr("shutil.which", lambda _: None)
         r = client.post(f"/api/documents/{doc_id}/open", json={"editor": "zed"})
         assert r.status_code == 501
 

@@ -56,10 +56,8 @@ def test_resume_from_verify_with_env_and_impl_done(tmp_path, monkeypatch):
             wt = rd.worktrees / wid
             env_node = {"id": "env_setup", "tasks": ["on.env.prepare"]}
             impl_node = {"id": "implementation", "tasks": ["on.implementation.start"]}
-            assert await executor._walk_node(database, rd, wid, env_node, row, registry, wt) == "ok"
-            assert (
-                await executor._walk_node(database, rd, wid, impl_node, row, registry, wt) == "ok"
-            )
+            assert await executor.walk_node(database, rd, wid, env_node, row, registry, wt) == "ok"
+            assert await executor.walk_node(database, rd, wid, impl_node, row, registry, wt) == "ok"
             # current_node_id now points at implementation (last enter_node). Move it to verify
             # the way a crash-recovery would NOT — instead leave it and call resume, which
             # should see implementation's session done and advance.
@@ -112,8 +110,8 @@ def test_resume_no_session_for_current_node_dispatches_fresh(tmp_path, monkeypat
             env_node = {"id": "env_setup", "tasks": ["on.env.prepare"]}
             impl_node = {"id": "implementation", "tasks": ["on.implementation.start"]}
             await database.write(lambda c: store.load_chain(c, wid, "env_setup"))
-            await executor._walk_node(database, rd, wid, env_node, row, registry, wt)
-            await executor._walk_node(database, rd, wid, impl_node, row, registry, wt)
+            await executor.walk_node(database, rd, wid, env_node, row, registry, wt)
+            await executor.walk_node(database, rd, wid, impl_node, row, registry, wt)
             # Simulate a crash between enter_node(env_setup) and its create_session:
             # drop env_setup's session rows and point current_node_id back at it.
             # The worktree it already created must not break the fresh re-dispatch.

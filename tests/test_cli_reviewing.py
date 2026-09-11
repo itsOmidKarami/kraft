@@ -10,13 +10,13 @@ from support.harness import make_repo
 
 from kraft import cli, client, render
 
-# `app` fixture: tests/conftest.py (sub-project A Task 4). It wires client.http()
+# `app` fixture: tests/conftest.py (sub-project A Task 4). It wires client.transport.http()
 # to the ASGI app with the lifespan entered per client.
 
 
 def _make_item(repo, title="review me"):
     async def go():
-        async with client.http() as http:
+        async with client.transport.http() as http:
             response = await http.post(
                 "/api/work-items", json={"title": title, "repo": str(repo), "autostart": False}
             )

@@ -182,7 +182,7 @@ def test_dispatch_is_a_worker_with_no_resume(tmp_path, monkeypatch):
             )
             kw = seen["kwargs"]
             # The safety property: a worker cannot clear its own gate, and
-            # `client._forbid_self_action` is what enforces that. Flipping this
+            # `client.context._forbid_self_action` is what enforces that. Flipping this
             # flag would silently hand the agent the human's standing.
             assert kw.get("identify_as_worker", True) is True
             assert kw["hook_point"] == "gate_review"
@@ -232,16 +232,17 @@ async def _seed_at_gate(database, rd, wid, chain, *, auto_gate):
 
 
 async def _passthrough_approve(row, gate):
-    """What `api.apply_approval` returns for a gate with nothing to splice."""
+    """What `kraft.api.routes.gates.apply_approval` returns for a gate with nothing to splice."""
     return json.loads(row["chain_definition"]), None
 
 
 async def _review_from_gate(
     database, rd, chain, *, auto_gate, wid="w1", on_approve=_passthrough_approve
 ):
-    """Enter `_review_gates` exactly as `run` does when its walk stopped at a gate."""
+    """Enter `kraft.executor.gates.review_gates` exactly as `run` does when
+    its walk stopped at a gate."""
     await _seed_at_gate(database, rd, wid, chain, auto_gate=auto_gate)
-    return await executor._review_gates(
+    return await executor.review_gates(
         "awaiting_gate",
         database,
         rd,
@@ -266,7 +267,7 @@ def _stub_walk(monkeypatch, calls, status="completed"):
         calls.append((kw.get("start_index"), kw.get("steer")))
         return status
 
-    monkeypatch.setattr("kraft.executor._run_once", fake_run_once)
+    monkeypatch.setattr("kraft.executor.walk.run_once", fake_run_once)
 
 
 @pytest.mark.parametrize(
@@ -395,7 +396,7 @@ def test_repeated_fixed_verdicts_breach_the_reject_loop(tmp_path, monkeypatch):
         )
         return "awaiting_gate"
 
-    monkeypatch.setattr("kraft.executor._run_once", fake_run_once)
+    monkeypatch.setattr("kraft.executor.walk.run_once", fake_run_once)
 
     async def scenario():
         rd = RunDirs(tmp_path / "run").ensure()
@@ -427,7 +428,7 @@ def test_budget_exhaustion_skips_the_review(tmp_path, monkeypatch):
 
     monkeypatch.setattr("kraft.executor.gate_review.review", fake_review)
     monkeypatch.setattr(
-        "kraft.executor._budget_breach",
+        "kraft.executor.stops.budget_breach",
         lambda db, wid, budget: {
             "scope": "work_item",
             "spent_usd": 11.0,

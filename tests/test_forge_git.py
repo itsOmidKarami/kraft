@@ -1,6 +1,6 @@
 """The two git guards, against a real `git` and a real remote.
 
-Kraft-8mi8. `_assert_clean` and `_assert_pushed` are the last two things
+Kraft-8mi8. `assert_clean` and `_assert_pushed` are the last two things
 standing between a chain and landing an empty or a stale merge request, and
 every other test drives them through a stub `git` on PATH that answers with
 whatever the test wrote into it — so they prove the caller reacts to a string,
@@ -103,7 +103,7 @@ def test_open_mr_ignores_gitignored_paths_against_real_git(tmp_path, monkeypatch
 
 def test_open_mr_accepts_a_worktree_whose_attachment_was_copied_in(tmp_path, monkeypatch):
     """Kraft-8iw6's symptom against the real binary: the document Kraft copied
-    in is committed by Kraft's own primitive, so `_assert_clean` passes and glab
+    in is committed by Kraft's own primitive, so `assert_clean` passes and glab
     is reached instead of the node failing with "1 uncommitted path(s)"."""
     repo = _repo_with_origin(tmp_path)
     _stub_glab(tmp_path, monkeypatch)
@@ -147,7 +147,7 @@ def test_merge_accepts_a_pushed_head_against_real_git(tmp_path, monkeypatch):
 def test_push_publishes_a_rebased_branch_against_real_git(tmp_path, monkeypatch):
     """Kraft-z6i8. A rebase moves the branch off of what origin last saw --
     here, `main` gaining a commit and the branch rebasing onto it -- and a
-    plain `push -u` would die non-fast-forward. `forge._push`'s
+    plain `push -u` would die non-fast-forward. `forge.push`'s
     `--force-with-lease` must still publish it."""
     repo = _repo_with_origin(tmp_path)
     origin = tmp_path / "origin.git"
@@ -162,7 +162,7 @@ def test_push_publishes_a_rebased_branch_against_real_git(tmp_path, monkeypatch)
     _git(repo, "fetch", "-q", "origin", "main")
     _git(repo, "rebase", "-q", "origin/main")
 
-    asyncio.run(forge._push(repo, BRANCH))
+    asyncio.run(forge.push(repo, BRANCH))
 
     remote_head = _git(origin, "rev-parse", BRANCH).strip()
     assert remote_head == _git(repo, "rev-parse", "HEAD").strip()
@@ -190,14 +190,14 @@ def test_push_refuses_when_the_remote_moved_under_the_lease(tmp_path):
     _git(repo, "commit", "-q", "--amend", "-m", "rewritten")
 
     with pytest.raises(forge.ForgeError, match="stale info|rejected"):
-        asyncio.run(forge._push(repo, BRANCH))
+        asyncio.run(forge.push(repo, BRANCH))
 
     assert _git(origin, "rev-parse", BRANCH).strip() != _git(repo, "rev-parse", "HEAD").strip()
 
 
 def test_commit_stragglers_commits_everything_the_agent_left(tmp_path):
     """Kraft-7fip. A worker that edits a tracked file, adds a new one and exits
-    without committing leaves work that `_assert_clean` refuses two nodes later
+    without committing leaves work that `assert_clean` refuses two nodes later
     and a worktree prune destroys. Kraft owns the worktree, so it commits."""
     repo = _repo_with_origin(tmp_path)
     (repo / "work.txt").write_text("edited, never committed\n")
@@ -244,14 +244,14 @@ def test_kraft_session_notes_are_not_the_agents_work_product(tmp_path):
     assert asyncio.run(forge.commit_stragglers(repo, message="wip: implementation")) is False
     assert _git(repo, "rev-parse", "HEAD") == before
     # ... and open_mr is not blocked by it either
-    asyncio.run(forge._assert_clean(repo))
+    asyncio.run(forge.assert_clean(repo))
 
     (repo / ".engineering" / "specs").mkdir()
     (repo / ".engineering" / "specs" / "abc.md").write_text("the design\n")
 
     assert asyncio.run(forge.commit_stragglers(repo, message="wip: implementation")) is False
     assert _git(repo, "rev-parse", "HEAD") == before
-    asyncio.run(forge._assert_clean(repo))
+    asyncio.run(forge.assert_clean(repo))
     assert _git(repo, "ls-files", ".engineering").split() == []
 
 
@@ -315,7 +315,7 @@ def test_commit_stragglers_ignores_a_root_main_gitignored_after_the_branch_forke
     committed = asyncio.run(forge.commit_stragglers(repo, message="wip: implementation"))
 
     assert committed is False
-    asyncio.run(forge._assert_clean(repo))
+    asyncio.run(forge.assert_clean(repo))
     # Collapses to the first new directory level, `docs/` -- `docs` itself
     # did not exist on the branch before, same collapse `git status` does for
     # any new untracked directory.
@@ -323,7 +323,7 @@ def test_commit_stragglers_ignores_a_root_main_gitignored_after_the_branch_forke
 
 
 def test_commit_stragglers_ignores_gitignored_paths(tmp_path):
-    """Same exclusion `_assert_clean` relies on: a `.pytest_cache/` left behind
+    """Same exclusion `assert_clean` relies on: a `.pytest_cache/` left behind
     is not work, and committing it would put junk in the merge request."""
     repo = _repo_with_origin(tmp_path)
     (repo / ".gitignore").write_text("junk/\n")
@@ -337,3 +337,58 @@ def test_commit_stragglers_ignores_gitignored_paths(tmp_path):
 
     assert committed is False
     assert _git(repo, "rev-parse", "HEAD") == before
+
+
+def test_assert_clean_sees_a_submodule_with_ignore_all(tmp_path):
+    """`submodule.<path>.ignore = all` is a legitimate thing for a human to
+    set on a six-submodule workspace -- it must not blind Kraft's own guard
+    to a submodule commit that never left the worktree (the real failure on
+    work item 9d0ab38ff3c9439b90506df0f6966660)."""
+    root = tmp_path / "root"
+    root.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True)
+    (root / "README.md").write_text("root\n")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=root, check=True)
+
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=sub, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=sub, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=sub, check=True)
+    (sub / "f.txt").write_text("1\n")
+    subprocess.run(["git", "add", "-A"], cwd=sub, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=sub, check=True)
+
+    subprocess.run(
+        ["git", "-c", "protocol.file.allow=always", "submodule", "add", str(sub), "pkg"],
+        cwd=root,
+        check=True,
+    )
+    subprocess.run(["git", "config", "submodule.pkg.ignore", "all"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "add submodule"], cwd=root, check=True)
+
+    # The submodule checkout has its own gitdir under root/.git/modules and
+    # does not inherit `sub`'s identity, so a runner with no global git
+    # config (CI, unlike a dev machine) hits "unable to auto-detect email
+    # address" on the commit below without this.
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=root / "pkg", check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=root / "pkg", check=True)
+
+    # New commit inside the submodule, root pointer left untouched -- exactly
+    # what "do not bump the workspace submodule pointer" produces.
+    (root / "pkg" / "f.txt").write_text("2\n")
+    subprocess.run(["git", "add", "-A"], cwd=root / "pkg", check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "metric change"], cwd=root / "pkg", check=True)
+
+    with pytest.raises(forge.ForgeError, match="pkg"):
+        asyncio.run(forge.assert_clean(root))
+
+
+def test_commits_on_a_branch_without_origin_main_is_empty_not_an_error(tmp_path):
+    """A description is not worth failing a node over."""
+    repo = make_repo(tmp_path)
+
+    assert asyncio.run(forge.commits_on(repo, "kraft/nope")) == ()

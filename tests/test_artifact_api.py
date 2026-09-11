@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from support.harness import fake_templates_dir, isolated_bd, make_repo
 
 from kraft import api, templates
+from kraft.api.routes import board
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
@@ -190,7 +191,7 @@ def test_open_no_symlinks_refuses_an_ancestor_directory_swapped_for_a_symlink(tm
     scenario a round-1 fix (leaf-only `O_NOFOLLOW`) let through -- the walk
     below must refuse it at the `.engineering` component, not just the leaf.
     """
-    from kraft.api import _open_no_symlinks
+    from kraft.api.routes.artifacts import _open_no_symlinks
 
     root = tmp_path / "root"
     (root / ".engineering" / "specs").mkdir(parents=True)
@@ -216,7 +217,7 @@ def test_artifact_over_the_cap_truncates_without_500ing_on_a_split_codepoint(
     codepoint, so the file is built to put the two-byte lead byte of an "é"
     exactly at the cut point.
     """
-    from kraft.api import DIFF_MAX_BYTES
+    from kraft.api.routes.artifacts import DIFF_MAX_BYTES
 
     before = b"a" * (DIFF_MAX_BYTES - 1)  # cut lands right after this
     split_char = "é".encode()  # 2 bytes; the cut falls between them
@@ -310,5 +311,5 @@ def test_the_review_gate_still_resolves_its_brief(tmp_path):
     row = {"id": "w1", "chain_definition": json.dumps(chain)}
 
     assert (
-        api._gate_artifact(st, row, "human_review_approval") == ".engineering/review_briefs/w1.md"
+        board._gate_artifact(st, row, "human_review_approval") == ".engineering/review_briefs/w1.md"
     )

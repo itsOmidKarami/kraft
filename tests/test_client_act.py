@@ -29,7 +29,7 @@ def wired(tmp_path, monkeypatch):
     import kraft.api as api
 
     monkeypatch.setattr(
-        client,
+        client.transport,
         "http",
         lambda: httpx.AsyncClient(
             transport=httpx.ASGITransport(app=api.app), base_url="http://kraft"
@@ -202,7 +202,7 @@ def test_a_worker_reports_progress_on_its_own_item(monkeypatch):
         return {"id": "w1"}
 
     monkeypatch.setenv("KRAFT_WORK_ITEM_ID", "w1")
-    monkeypatch.setattr(client, "_act", fake_act)
+    monkeypatch.setattr(client.transport, "_act", fake_act)
     asyncio.run(client.report_progress(2))
     assert seen == {"path": "/work-items/w1/progress", "payload": {"task": 2}}
 
@@ -223,5 +223,5 @@ def test_the_board_and_the_item_keep_progress(monkeypatch):
     async def fake_get(path):
         return {**row, "chain_definition": {"nodes": []}}
 
-    monkeypatch.setattr(client, "_get", fake_get)
+    monkeypatch.setattr(client.transport, "_get", fake_get)
     assert asyncio.run(client.get_work_item("w1"))["progress"] == p

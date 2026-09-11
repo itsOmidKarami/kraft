@@ -646,7 +646,7 @@ def test_put_reloads_the_running_notifier(api_client):
 def test_the_notifier_is_on_the_commit_fan_out(api_client, tmp_path):
     """`_task is not None` alone is set by `start()` regardless of whether the
     fan-out actually wakes it -- deleting `notifier.notify()` from the
-    `set_on_commit` lambda in api.py would still pass that assertion. Drive a
+    `set_on_commit` lambda in kraft.api.startup would still pass that assertion. Drive a
     real commit through the app instead: on a fresh DB the cursor starts at 0,
     so it can only advance if the commit really reached the notifier."""
     notifier = api_client.app.state.notifier
