@@ -224,6 +224,12 @@ async def run_task(
     progress_s: float = 5.0,
     round: int = 0,
     head_sha: str | None = None,
+    #: Every agent hook is told by `_CTX` to write $KRAFT_RESULT_PATH,
+    #: regardless of whether it also declares `artifact:` -- this holds it to
+    #: that half of the contract on its own (Kraft-avpe). Only run_agent_task
+    #: sets this; a subprocess-kind hook a template binds directly has no such
+    #: contract.
+    require_result_file: bool = False,
 ) -> str:
     log_path = run_dirs.logs / f"{session_id}.log"
     result_path = run_dirs.results / f"{session_id}.json"
@@ -323,6 +329,15 @@ async def run_task(
     watcher.join(timeout=2)
     returncode = proc.returncode
     status = _resolve(result_path, returncode)
+    # A session that exits clean with no result file at all never reached the
+    # end of its own contract -- `_resolve`'s exit-code fallback cannot tell
+    # "no contract" (a plain subprocess hook) from "broke the contract" (an
+    # agent hook), so the caller who knows which one this is says so
+    # explicitly (Kraft-avpe). Before the rate-limit check below: a rejected
+    # launch also has no result file "by construction", and that branch's own
+    # unconditional overwrite is what protects it, not an exclusion here.
+    if require_result_file and status == "done" and _resolve_result_file(result_path) is None:
+        status = "failed"
     rate_limit = _rate_limit_rejection(log_path)
     if rate_limit is not None:
         # A rejected launch produced no artifact by construction, so this
