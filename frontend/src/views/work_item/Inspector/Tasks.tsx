@@ -43,7 +43,7 @@ export function Tasks({
     <div className="inspector-list" data-testid="inspector-tasks">
       {/* Kraft-qqz8: the implementer's own plan, task by task — only while
           it's the selected node and the plan parsed at least one heading. */}
-      {item.progress && item.current_node_id === nodeId && (
+      {item.progress?.tasks && item.current_node_id === nodeId && (
         <ul className="plan-list" data-testid="plan-list">
           {item.progress.tasks.map((t) => (
             <li key={t.n} data-state={t.state}>

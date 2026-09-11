@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as api from "../api";
 import { useStore } from "../store";
 import { Header } from "./Header";
 import type { WorkItem } from "../types";
@@ -52,11 +53,28 @@ describe("Header", () => {
     expect(screen.getByText("Chains")).toBeInTheDocument();
   });
 
+  it("shows Board › Archived N items on the archived route", async () => {
+    vi.spyOn(api, "listArchivedWorkItems").mockResolvedValue({
+      items: [{ id: "a" } as never],
+      cursor: 1,
+    });
+    renderAt("/archived");
+    expect(await screen.findByText("Archived 1 items")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Board" })).toHaveAttribute("href", "/");
+  });
+
   it("shows the bare Analytics breadcrumb with no primary action", () => {
     renderAt("/analytics");
     expect(screen.getByText("Analytics")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /New work item/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "More" })).not.toBeInTheDocument();
+  });
+
+  it("disables New work item and shows '0 work items · no repos' with zero repos", async () => {
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] });
+    renderAt("/");
+    expect(await screen.findByText(/no repos/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /new work item/i })).toBeDisabled();
   });
 
   it("calls onSearch from the Search button", async () => {

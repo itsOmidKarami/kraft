@@ -15,7 +15,7 @@ import { expect, test } from "./fixtures";
 const REPO = process.env.KRAFT_E2E_REPO!;
 const SHOTS = "e2e-shots";
 
-// iPhone 14 CSS pixels. Comfortably inside the 640px phone breakpoint, and the
+// iPhone 14 CSS pixels. Comfortably inside the 767px phone breakpoint, and the
 // narrowest device anyone is realistically reading a diff on.
 test.use({ viewport: { width: 390, height: 844 } });
 

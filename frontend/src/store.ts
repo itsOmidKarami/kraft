@@ -10,6 +10,10 @@ interface State {
   eventsByItem: Record<string, KraftEvent[]>;
   lastSeq: number;
   connection: Connection;
+  /** Bumped on every work_item_archived/restored event so a count fetched
+   *  from the archive endpoint (Header's breadcrumb, the board's Archived
+   *  chip) knows to refetch instead of only refreshing after its own click. */
+  archivedVersion: number;
   bootstrap: () => Promise<void>;
   hydrateItem: (id: string) => Promise<void>;
   applyEvent: (ev: KraftEvent) => void;
@@ -32,6 +36,7 @@ export const useStore = create<State>((set, get) => ({
   eventsByItem: {},
   lastSeq: 0,
   connection: "connecting",
+  archivedVersion: 0,
 
   setConnection: (connection) => set({ connection }),
 
@@ -197,7 +202,7 @@ export const useStore = create<State>((set, get) => ({
                 total: p.total as number,
                 title: p.title as string,
                 tasks:
-                  w.progress?.tasks.map((t) => ({
+                  w.progress?.tasks?.map((t) => ({
                     ...t,
                     state: (t.n < p.task ? "done" : t.n === p.task ? "current" : "pending") as
                       | "done"
@@ -267,12 +272,46 @@ export const useStore = create<State>((set, get) => ({
               budget: (p.budget as WorkItem["budget"]) ?? null,
             })),
           };
+        case "work_item_rate_limited":
+          return {
+            ...base,
+            ...patchItem(s, id, (w) => ({
+              ...w,
+              status: "rate_limited",
+              retry_at: p.retry_at as string,
+            })),
+          };
+        case "work_item_waiting":
+          return {
+            ...base,
+            ...patchItem(s, id, (w) => ({
+              ...w,
+              status: "waiting",
+              retry_at: p.retry_at as string,
+            })),
+          };
         case "work_item_completed":
           return { ...base, ...patchItem(s, id, (w) => ({ ...w, status: "completed" })) };
         case "work_item_abandoned":
           // A live board would otherwise keep offering actions on a worktree
           // that has already been removed.
           return { ...base, ...patchItem(s, id, (w) => ({ ...w, status: "abandoned" })) };
+        case "work_item_archived":
+          return {
+            ...base,
+            archivedVersion: s.archivedVersion + 1,
+            ...patchItem(s, id, (w) => ({
+              ...w,
+              archived_at: ev.created_at,
+              archived_by: p.by as "you" | "auto",
+            })),
+          };
+        case "work_item_restored":
+          return {
+            ...base,
+            archivedVersion: s.archivedVersion + 1,
+            ...patchItem(s, id, (w) => ({ ...w, archived_at: null, archived_by: null })),
+          };
         default:
           return base;
       }

@@ -30,3 +30,8 @@ budget:
 # limit before it gives up and stops for a human. Not a fix-loop cap: a rate
 # limit wait can run for hours, this only counts attempts.
 rate_limit_retries: 5
+
+# Completed/abandoned items older than this get auto-archived (UI v2 · 03).
+# The board's Done group header states this number, so keep them in sync.
+archive:
+  after_days: 30

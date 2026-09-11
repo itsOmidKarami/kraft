@@ -192,6 +192,7 @@ class PolicyBody(BaseModel):
     max_concurrent: int = Field(default=3, ge=1)
     rate_limit_retries: int | None = None
     triggers: list[dict] | None = None
+    archive: dict | None = None
 
 
 @api_router.get("/policy")
@@ -216,6 +217,8 @@ async def put_policy(body: PolicyBody, request: Request):
         data["rate_limit_retries"] = body.rate_limit_retries
     if body.triggers is not None:
         data["triggers"] = body.triggers
+    if body.archive is not None:
+        data["archive"] = body.archive
     with tempfile.TemporaryDirectory() as tmp:
         candidate = Path(tmp) / "policy.yaml"
         candidate.write_text(yaml.safe_dump(data))

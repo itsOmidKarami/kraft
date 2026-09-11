@@ -18,6 +18,7 @@ Ctrl-C to tear the server down. The temp dir is left behind for inspection.
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import signal
@@ -34,6 +35,7 @@ sys.path.insert(0, str(REPO / "tests"))
 from support.harness import (  # noqa: E402
     fake_templates_dir,
     isolated_bd,
+    make_repo,
     make_repo_with_engineering,
 )
 
@@ -175,6 +177,19 @@ def main() -> int:
             f"http://127.0.0.1:{PORT}/api/health still answers — another server holds "
             f"the port; nothing below would have been the fixture instance"
         )
+
+    # With no repo connected the board is the fresh-install empty state (design
+    # 08), where the header's New work item is disabled. Connect a separate repo
+    # so specs get the normal board, and KRAFT_E2E_REPO stays unconnected for
+    # regression.spec's "connect a repo".
+    connected = make_repo(tmp, name="connected")
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{PORT}/api/repos",
+        data=json.dumps({"path": str(connected)}).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    urllib.request.urlopen(req, timeout=10).close()
 
     print(f"\n  server up on http://127.0.0.1:{PORT}  (temp: {tmp})")
     print(f"  KRAFT_E2E_REPO={repo}\n", flush=True)

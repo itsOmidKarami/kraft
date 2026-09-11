@@ -14,11 +14,14 @@ function mockFetch(status: number, body: unknown) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("api", () => {
-  it("listWorkItems GETs /work-items and returns items + cursor", async () => {
+  it("listWorkItems GETs /work-items with include_abandoned and returns items + cursor", async () => {
     const f = mockFetch(200, { items: [], cursor: 7 });
     vi.stubGlobal("fetch", f);
     expect(await api.listWorkItems()).toEqual({ items: [], cursor: 7 });
-    expect(f).toHaveBeenCalledWith("/api/work-items", expect.anything());
+    expect(f).toHaveBeenCalledWith(
+      "/api/work-items?include_abandoned=true",
+      expect.anything(),
+    );
   });
 
   it("createWorkItem posts JSON and returns the id", async () => {
@@ -94,7 +97,7 @@ describe("api", () => {
     // what a stopped server actually produces: a bare `TypeError`, not a response
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
     await expect(api.listWorkItems()).rejects.toThrow(
-      /could not reach the Kraft server \(GET \/work-items\)/,
+      /could not reach the Kraft server \(GET \/work-items\?include_abandoned=true\)/,
     );
   });
 });

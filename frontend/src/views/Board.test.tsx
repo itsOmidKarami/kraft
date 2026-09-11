@@ -1,7 +1,8 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as api from "../api";
 import { useStore } from "../store";
 import type { WorkItem } from "../types";
 import { Board } from "./Board";
@@ -31,6 +32,7 @@ const setItems = (...items: WorkItem[]) =>
   useStore.setState({ workItems: Object.fromEntries(items.map((i) => [i.id, i])) } as never);
 
 beforeEach(() => {
+  localStorage.clear();
   setItems(
     wi({ id: "w1", repo: "/repo-a", status: "active" }),
     wi({ id: "w2", repo: "/repo-b", status: "completed", chain_template: "default" }),
@@ -38,6 +40,10 @@ beforeEach(() => {
   vi.restoreAllMocks();
   // Board re-bootstraps on mount; keep it inert so tests keep the state set above.
   vi.spyOn(useStore.getState(), "bootstrap").mockResolvedValue();
+  // Board checks repo count for the fresh-install branch (design 08); a
+  // non-empty default keeps every other test on the normal board.
+  vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [{ path: "/repo-a" } as never] });
+  vi.spyOn(api, "listArchivedWorkItems").mockResolvedValue({ items: [], cursor: 0 });
 });
 
 const renderBoard = () =>
@@ -51,6 +57,11 @@ const renderBoard = () =>
 const group = (label: string) =>
   screen.getByText(label, { selector: ".group-label" }).closest("section") as HTMLElement;
 
+// Scopes a facet-chip query to the filter row: a board row is a role="button"
+// too now (peek toggle), and its accessible name can include the same text
+// (a chain template, a status word) a facet chip carries.
+const filters = () => screen.getByRole("group", { name: /filters/i });
+
 describe("Board", () => {
   it("groups by attention rather than showing a status column", () => {
     renderBoard();
@@ -62,19 +73,19 @@ describe("Board", () => {
 
   it("filters on the repo facet and clears it when the same facet is clicked again", async () => {
     renderBoard();
-    await userEvent.click(screen.getByRole("button", { name: /^repo-a/ }));
+    await userEvent.click(within(filters()).getByRole("button", { name: /^repo-a/ }));
     expect(screen.getAllByTestId("board-card")).toHaveLength(1);
-    await userEvent.click(screen.getByRole("button", { name: /^repo-a/ }));
+    await userEvent.click(within(filters()).getByRole("button", { name: /^repo-a/ }));
     expect(screen.getAllByTestId("board-card")).toHaveLength(2);
   });
 
   it("combines the repo and template facets, and counts each under the other", async () => {
     renderBoard();
     // With /repo-a picked, the template facet only counts that repo's items.
-    await userEvent.click(screen.getByRole("button", { name: /^repo-a/ }));
-    expect(screen.getByRole("button", { name: /quick-task/ })).toHaveTextContent("1");
-    expect(screen.queryByRole("button", { name: /default/ })).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: /quick-task/ }));
+    await userEvent.click(within(filters()).getByRole("button", { name: /^repo-a/ }));
+    expect(within(filters()).getByRole("button", { name: /quick-task/ })).toHaveTextContent("1");
+    expect(within(filters()).queryByRole("button", { name: /default/ })).toBeNull();
+    await userEvent.click(within(filters()).getByRole("button", { name: /quick-task/ }));
     expect(screen.getAllByTestId("board-card")).toHaveLength(1);
   });
 
@@ -241,5 +252,129 @@ describe("Board", () => {
     setItems(wi({ id: "w3", status: "waiting", retry_at: "2026-09-10T05:00:00Z" }));
     renderBoard();
     expect(screen.getByText(/retry/i)).toBeInTheDocument();
+  });
+
+  it("Task N/M · title renders in the meta line when progress is set", () => {
+    setItems(
+      wi({ id: "w1", status: "active", progress: { current: 3, total: 6, title: "wire the store" } }),
+    );
+    renderBoard();
+    expect(screen.getByText("Task 3/6 · wire the store")).toBeInTheDocument();
+  });
+
+  it("plain click toggles the peek param; ⌘-click navigates instead", async () => {
+    setItems(wi({ id: "w1" }));
+    renderBoard();
+    await userEvent.click(screen.getByTestId("board-card"));
+    expect(screen.getByTestId("board-card")).toHaveAttribute("data-selected", "true");
+    await userEvent.click(screen.getByTestId("board-card"));
+    expect(screen.getByTestId("board-card")).not.toHaveAttribute("data-selected");
+  });
+
+  it("Select all selects every visible Done row and the floating bar shows the count", async () => {
+    setItems(
+      wi({ id: "w1", status: "completed" }),
+      wi({ id: "w2", status: "abandoned" }),
+    );
+    renderBoard();
+    await userEvent.click(within(group("Done")).getByRole("button", { name: /select all/i }));
+    expect(screen.getByText(/2 selected/i)).toBeInTheDocument();
+  });
+
+  it("Archive on the floating bar calls the API for every selected id and clears the selection", async () => {
+    const spy = vi
+      .spyOn(api, "archiveWorkItem")
+      .mockResolvedValue({ id: "w1", archived_by: "you", worktree_removed: true });
+    vi.spyOn(api, "listArchivedWorkItems").mockResolvedValue({ items: [], cursor: 0 });
+    setItems(wi({ id: "w1", status: "completed" }));
+    renderBoard();
+    await userEvent.click(within(group("Done")).getAllByRole("checkbox")[0]);
+    await userEvent.click(screen.getByTestId("archive-selected"));
+    expect(spy).toHaveBeenCalledWith("w1");
+    expect(screen.queryByText(/selected/i)).toBeNull();
+  });
+
+  it("the ⋯ menu offers Archive and Copy id, and never Reopen or Delete worktree", async () => {
+    setItems(wi({ id: "w1", status: "completed" }));
+    renderBoard();
+    await userEvent.click(within(group("Done")).getByRole("button", { name: /more/i }));
+    expect(screen.getByRole("menuitem", { name: /^archive$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /reopen/i })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: /delete worktree/i })).toBeNull();
+  });
+
+  it("long-press opens the peek pane instead of navigating (phone)", async () => {
+    vi.stubGlobal("matchMedia", (q: string) => ({ matches: true, media: q }) as never);
+    setItems(wi({ id: "w1" }));
+    renderBoard();
+    const row = screen.getByTestId("board-card");
+    fireEvent.pointerDown(row);
+    await new Promise((r) => setTimeout(r, 550));
+    fireEvent.pointerUp(row);
+    fireEvent.click(row);
+    expect(await screen.findByLabelText("peek")).toBeInTheDocument();
+  });
+
+  it("a plain tap navigates to the item on phone instead of toggling peek", async () => {
+    vi.stubGlobal("matchMedia", (q: string) => ({ matches: true, media: q }) as never);
+    setItems(wi({ id: "w1" }));
+    const { container } = render(
+      <MemoryRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        initialEntries={["/"]}
+      >
+        <Board />
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByTestId("board-card"));
+    expect(container.querySelector('[aria-label="peek"]')).toBeNull();
+  });
+
+  it("renders the fresh-install card when there are no repos", async () => {
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] });
+    setItems();
+    renderBoard();
+    expect(await screen.findByText(/nothing on the board yet/i)).toBeInTheDocument();
+  });
+
+  it("keeps rendering the board, not the fresh-install card, when getRepos fails", async () => {
+    vi.spyOn(api, "getRepos").mockRejectedValue(new Error("boom"));
+    renderBoard();
+    expect(await screen.findAllByTestId("board-card")).toHaveLength(2);
+    expect(screen.queryByText(/nothing on the board yet/i)).toBeNull();
+  });
+
+  it("Enter on the row navigates, but Enter bubbling from a focused child does not", async () => {
+    setItems(wi({ id: "w1", status: "completed" }));
+    render(
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <Routes>
+          <Route path="/" element={<Board />} />
+          <Route path="/work-items/:id" element={<div>item page</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const row = screen.getByTestId("board-card");
+    const checkbox = within(row).getByRole("checkbox");
+
+    fireEvent.keyDown(checkbox, { key: "Enter" });
+    expect(screen.queryByText("item page")).toBeNull();
+
+    fireEvent.keyDown(row, { key: "Enter" });
+    expect(screen.getByText("item page")).toBeInTheDocument();
+  });
+
+  it("facet selection survives a remount via localStorage", async () => {
+    setItems(wi({ id: "w1", repo: "/repo-a" }), wi({ id: "w2", repo: "/repo-b" }));
+    const { unmount } = renderBoard();
+    const chip = within(filters()).getByRole("button", { name: /^repo-a/ });
+    await userEvent.click(chip);
+    expect(chip).toHaveAttribute("aria-pressed", "true");
+    unmount();
+    renderBoard();
+    expect(within(filters()).getByRole("button", { name: /^repo-a/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 });

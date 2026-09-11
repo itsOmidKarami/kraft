@@ -1,5 +1,7 @@
 import { NavLink } from "react-router-dom";
 import { ChartBar, GearSix, MagnifyingGlass, SquaresFour } from "@phosphor-icons/react";
+import { deriveState } from "../deriveState";
+import { useStore } from "../store";
 
 /**
  * The phone app shell's tab bar (mobile app shell design, §1). Desktop keeps
@@ -14,12 +16,18 @@ const TABS: { to: string; label: string; icon: typeof SquaresFour; end?: boolean
 ];
 
 export function BottomNav() {
+  const needsYouCount = useStore((s) =>
+    Object.values(s.workItems).filter((i) => deriveState(i).needsYou).length,
+  );
   return (
     <nav className="bottom-nav" aria-label="primary">
       {TABS.map(({ to, label, icon: Icon, end }) => (
         <NavLink key={to} to={to} end={end} className="bottom-nav-tab">
           <Icon size={22} />
           <span>{label}</span>
+          {to === "/" && needsYouCount > 0 && (
+            <span className="bottom-nav-badge">{needsYouCount}</span>
+          )}
         </NavLink>
       ))}
     </nav>
