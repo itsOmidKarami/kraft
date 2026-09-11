@@ -432,6 +432,14 @@ def test_the_context_asks_for_one_question_per_stop():
     assert "ask for all of them in that one question" in agent._CTX
 
 
+def test_the_context_says_backgrounding_does_not_work():
+    """Kraft-avpe: a 231-turn implementation session started a background test
+    job and ended its turn to wait for it. A headless session has no next turn
+    to receive that notification -- nothing told the agent so."""
+    assert "there is no notification" in agent._CTX
+    assert "background" in agent._CTX
+
+
 def test_every_agent_node_is_told_to_commit_its_work(monkeypatch):
     """Kraft-brq. The only commit sentence used to live in `_ARTIFACT`, which
     is appended only for a binding declaring `artifact:`. `on.implementation.start`
