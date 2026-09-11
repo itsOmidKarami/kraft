@@ -69,6 +69,11 @@ just test-ui    # frontend unit tests
 just lint       # ruff check + format check
 ```
 
+**Never call `pytest` / `uv run pytest` directly.** Always go through `just
+test` (add `-k pattern` or a path to target specific tests; use
+`--no-testmon` for a full run). Calling pytest raw skips testmon's
+change-tracking and burns the full ~14min suite.
+
 ## Running Kraft
 
 Two ways, and neither is `python -m kraft` by hand.
