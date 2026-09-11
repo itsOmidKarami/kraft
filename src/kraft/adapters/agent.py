@@ -45,7 +45,14 @@ _CTX = (
     "`git commit`, in this worktree. Work left uncommitted never reaches the "
     "merge request this chain opens, and is destroyed with the worktree. Do "
     "not push and do not merge: Kraft pushes the branch and opens, updates "
-    "and merges the merge request itself."
+    "and merges the merge request itself.\n"
+    "\n"
+    "Exception: `.engineering/` (your session summary, and any spec/plan/"
+    "review document a hook asked you to write) is gitignored on purpose. "
+    "Kraft reads those files straight off disk, never from git, so they must "
+    "not reach the merge request. If `git add` refuses one of those paths, "
+    "that is git working as intended — do not `git add -f` it or otherwise "
+    "force it in."
 )
 
 
