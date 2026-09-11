@@ -62,11 +62,19 @@ not a patch. The orchestrator splices it in wholesale on approval. If you are
 changing one node, the other tail nodes still appear, unchanged, in your output
 — omitting a node deletes it.
 
-Every node is exactly:
+Every node you write is exactly:
 
 ```
 { id: string, tasks: [hook_point, ...], gate_after: string|null, fix_loop: string|null }
 ```
+
+A real node also carries `on_failure`, `reject_to`, `rebase_bounce_to`, and
+`auto_escalate` — fields you never set. For any node id that already existed in
+the tail, the orchestrator carries those fields forward from the node you are
+replacing, so an "unchanged" node keeps its repair hooks and reject targets
+without you naming them. A node id you invented (one you are adding) gets
+`null` for all four — you cannot give a new node a repair task or a reject
+target this way.
 
 - `tasks` — hook points, and **only names from the allowed hook set**. A name you
   invented is not a task the orchestrator can run; it is a chain that fails

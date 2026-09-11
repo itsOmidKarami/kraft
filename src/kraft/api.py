@@ -66,6 +66,7 @@ from kraft.templates import (
     GATE_NAMES,
     Registry,
     RegistryError,
+    carry_forward_node_fields,
     load_registry,
     load_templates,
     materialize,
@@ -886,6 +887,12 @@ def _splice_chain_review(st, row) -> tuple[dict | None, str | None]:
     tail_start = _gate_node_index(chain, "chain_finalized") + 1
     # No special-case for an unchanged tail (spec: splicing the same list back
     # in is a no-op in effect) -- one code path for both, not two that drift.
+    # `nodes` only carries the four fields the skill's schema teaches
+    # (Kraft-eod0); carry the rest -- on_failure, reject_to, rebase_bounce_to,
+    # auto_escalate -- forward from the node each one replaces, or a reviewer
+    # that says "unchanged" silently strips the repair/reject/escalate config
+    # those nodes had.
+    nodes = carry_forward_node_fields(chain["nodes"][tail_start:], nodes)
     chain["nodes"][tail_start:] = nodes
     return chain, None
 
