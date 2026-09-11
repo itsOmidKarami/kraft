@@ -51,3 +51,11 @@ def test_every_hook_point_it_cites_is_registered(text):
 def test_it_states_the_node_schema_fields(text):
     for field in ("id", "tasks", "gate_after", "fix_loop"):
         assert f"{field}" in text, f"node schema field {field!r} undocumented"
+
+
+def test_it_documents_carried_over_fields(text):
+    """Kraft-eod0: the skill's schema is only 4 of a node's 8 real keys. It
+    must say the other 4 (on_failure among them) are preserved for it, or a
+    reviewer following the schema to the letter looks like it strips them."""
+    for field in ("on_failure", "reject_to", "rebase_bounce_to", "auto_escalate"):
+        assert field in text, f"carried-over field {field!r} undocumented"
