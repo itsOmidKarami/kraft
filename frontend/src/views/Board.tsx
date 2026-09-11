@@ -70,18 +70,26 @@ function needsYou(i: WorkItem) {
   return i.status === "needs_human" || (i.status === "paused" && !notStarted(i));
 }
 
+/** A status the poller drives forward on its own, not a person: not
+ *  mid-agent-call, but not waiting on a human either. `rate_limited` (an API
+ *  limit resetting) and `waiting` (a pipeline settling, Kraft-ru98) are two
+ *  instances of the same shape, both carrying `retry_at` for when the poller
+ *  next acts. Named once, used everywhere this file cares which statuses
+ *  those are, so a third instance is one addition instead of two. */
+function pollerDriven(i: WorkItem) {
+  return i.status === "rate_limited" || i.status === "waiting";
+}
+
 const STATUS_GROUPS: { id: string; label: string; test: (i: WorkItem) => boolean }[] = [
   { id: "needs", label: "Needs you", test: needsYou },
   {
     id: "running",
     label: "Running",
-    // A rate-limited item is not mid-agent-call, but it is not waiting on a
-    // person either -- the poller drives it forward on its own, the same
-    // story "Running" already tells for an active item. A `waiting` item is
-    // the same story for a pipeline (Kraft-ru98): leaving it out would drop it
+    // A poller-driven item is not waiting on a person -- the same story
+    // "Running" already tells for an active item. Leaving one out drops it
     // off the main view, which is "a slow run looks like a hung one" from the
     // other direction.
-    test: (i) => i.status === "active" || i.status === "rate_limited" || i.status === "waiting",
+    test: (i) => i.status === "active" || pollerDriven(i),
   },
   { id: "not_started", label: "Not started", test: notStarted },
   { id: "done", label: "Done", test: (i) => i.status === "completed" },
@@ -233,8 +241,7 @@ export function Board() {
 function BoardRow({ item }: { item: WorkItem }) {
   const gate = item.status === "needs_human" ? (item.pending_gate ?? null) : null;
   const capped = item.status === "completed" ? null : item.cappedOut;
-  const retryAt =
-    item.status === "rate_limited" || item.status === "waiting" ? item.retry_at : null;
+  const retryAt = pollerDriven(item) ? item.retry_at : null;
   return (
     <div className="board-row" data-testid="board-card">
       <div className="board-row-main">
