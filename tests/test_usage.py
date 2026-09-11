@@ -131,6 +131,21 @@ def test_read_falls_back_to_the_last_line_of_the_log(tmp_path):
     assert usage.read(log, result) == Usage(7, 3)
 
 
+def test_read_finds_usage_behind_a_trailing_line_that_has_none(tmp_path):
+    """Claude Code's stream-json output appends a `system/task_summary` line
+    after the `result` line that carries `usage`/`total_cost_usd` (Kraft-xob8).
+    The literal last line must not shadow the cost one line above it."""
+    log = tmp_path / "s.log"
+    result = tmp_path / "s.json"
+    log.write_text(
+        json.dumps({"usage": {"input_tokens": 7, "output_tokens": 3}, "total_cost_usd": 0.42})
+        + "\n"
+        + json.dumps({"type": "system", "subtype": "task_summary"})
+    )
+    result.write_text(json.dumps({"status": "done"}))
+    assert usage.read(log, result) == Usage(7, 3, 0.42)
+
+
 def test_read_survives_missing_and_unparseable_files(tmp_path):
     assert usage.read(tmp_path / "nope.log", tmp_path / "nope.json") is None
     (tmp_path / "bad.log").write_text("not json at all")
