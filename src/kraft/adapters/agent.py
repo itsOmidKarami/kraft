@@ -305,8 +305,8 @@ def _resolve_status(artifact: str | None, work_item_id: str, cwd: Path):
         status = _envelope_is_error(base_status, log_path, returncode)
         # Only a *claim of success* is held to the artifact. A worker that
         # stopped to ask a question wrote nothing precisely because it
-        # stopped, and `executor._needs_context_question` matches on this
-        # status: downgrading it to `failed` loses the question, makes the
+        # stopped, and `kraft.executor.dispatch.needs_context_question` matches
+        # on this status: downgrading it to `failed` loses the question, makes the
         # stop reason generic, and 409s both /steer and /resume.
         if artifact is None or status not in ("done", "done_with_concerns"):
             return status
@@ -351,7 +351,7 @@ async def run_agent_task(
     #: `False` only for an escalation turn: the child then gets no
     #: `KRAFT_WORK_ITEM_ID`, so `client.resolve_context()` resolves it as a
     #: human's own session rather than a worker's, and the existing
-    #: self-action guard (`client._forbid_self_action`) lets it act on the
+    #: self-action guard (`client.context._forbid_self_action`) lets it act on the
     #: very item it is escalating — see spec "The self-resume trick". Every
     #: existing caller keeps today's behavior by leaving this `True`.
     identify_as_worker: bool = True,

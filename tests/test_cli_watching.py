@@ -15,13 +15,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 
 
-# `app` fixture: tests/conftest.py (sub-project A Task 4). It wires client.http()
+# `app` fixture: tests/conftest.py (sub-project A Task 4). It wires client.transport.http()
 # to the ASGI app with the lifespan entered per client.
 
 
 def _make_item(repo, title="watch me"):
     async def go():
-        async with client.http() as http:
+        async with client.transport.http() as http:
             response = await http.post(
                 "/api/work-items", json={"title": title, "repo": str(repo), "autostart": False}
             )
@@ -141,7 +141,7 @@ def test_events_follow_returns_at_once_on_an_item_that_already_ended(
     monkeypatch.setattr(client, "stream_events", never_ends)
 
     async def abandon():
-        async with client.http() as http:
+        async with client.transport.http() as http:
             assert (await http.post(f"/api/work-items/{wid}/abandon")).status_code == 200
 
     asyncio.run(abandon())
@@ -181,7 +181,7 @@ def test_logs_backlog_renders_lines(app, tmp_path, monkeypatch, capsys):
         }
 
     monkeypatch.setattr(client, "latest_session", fake_latest)
-    monkeypatch.setattr(client, "_get", fake_get)
+    monkeypatch.setattr(client.transport, "_get", fake_get)
     cli.main(["view", "logs", wid])
     out = capsys.readouterr().out
     assert "first" in out and "second" in out
@@ -202,7 +202,7 @@ def test_logs_n_limits_the_backlog(app, tmp_path, monkeypatch, capsys):
         }
 
     monkeypatch.setattr(client, "latest_session", fake_latest)
-    monkeypatch.setattr(client, "_get", fake_get)
+    monkeypatch.setattr(client.transport, "_get", fake_get)
     cli.main(["view", "logs", wid, "-n", "3"])
     out = capsys.readouterr().out.strip().splitlines()
     assert len(out) == 3
@@ -220,7 +220,7 @@ def test_logs_json_is_ndjson(app, tmp_path, monkeypatch, capsys):
         return {"lines": [{"n": 0, "t": None, "src": "stdout", "text": "one"}]}
 
     monkeypatch.setattr(client, "latest_session", fake_latest)
-    monkeypatch.setattr(client, "_get", fake_get)
+    monkeypatch.setattr(client.transport, "_get", fake_get)
     cli.main(["view", "logs", wid, "--json"])
     out = capsys.readouterr().out.strip()
     # one JSON object per line, no enclosing array: a stream has no closing bracket
@@ -321,7 +321,7 @@ def test_logs_n_zero_prints_no_backlog(app, tmp_path, monkeypatch, capsys):
         return {"lines": [{"n": i, "t": None, "src": "stdout", "text": f"l{i}"} for i in range(5)]}
 
     monkeypatch.setattr(client, "latest_session", fake_latest)
-    monkeypatch.setattr(client, "_get", fake_get)
+    monkeypatch.setattr(client.transport, "_get", fake_get)
     cli.main(["view", "logs", wid, "-n", "0"])
     assert capsys.readouterr().out == ""
 
@@ -351,7 +351,7 @@ def test_watch_draws_a_frame_per_event_and_starts_at_the_live_cursor(
 
 def test_watch_reads_the_board_through_the_public_client(app, tmp_path, monkeypatch, capsys):
     """Kraft-8okl, the same class as Kraft-t5s9: `_cmd_watch` reached for
-    `client._get("/work-items")` because `list_work_items` drops the cursor the
+    `client.transport._get("/work-items")` because `list_work_items` drops the cursor the
     stream has to start from. `board()` returns both, so there is no reason left
     to go under the public surface.
 
@@ -372,14 +372,14 @@ def test_watch_reads_the_board_through_the_public_client(app, tmp_path, monkeypa
         return rows, cursor
 
     got = []
-    real_get = client._get
+    real_get = client.transport._get
 
     async def spy_get(path, **params):
         got.append(path)
         return await real_get(path, **params)
 
     monkeypatch.setattr(client, "board", spy_board)
-    monkeypatch.setattr(client, "_get", spy_get)
+    monkeypatch.setattr(client.transport, "_get", spy_get)
 
     async def one_event(after_seq=0):
         yield {"type": "node_started", "seq": after_seq + 1}
@@ -391,7 +391,7 @@ def test_watch_reads_the_board_through_the_public_client(app, tmp_path, monkeypa
     # `board()` itself does one `_get("/work-items")` per call -- that request
     # is unavoidable, since it is how the board is fetched. What is pinned is
     # that `frame()` makes no *second*, redundant one of its own: if it still
-    # reached for `client._get("/work-items")` directly (the bug), this count
+    # reached for `client.transport._get("/work-items")` directly (the bug), this count
     # would be double `len(boards)` rather than equal to it.
     assert [p for p in got if p.startswith("/work-items")].count("/work-items") == len(boards)
     assert "through the front door" in capsys.readouterr().out
@@ -419,7 +419,7 @@ def test_log_backlog_limits_live_in_client(monkeypatch):
         assert path == "/worker-sessions/sess-1/log" and params == {"format": "jsonl"}
         return {"lines": [{"n": i, "text": f"line{i}"} for i in range(5)]}
 
-    monkeypatch.setattr(client, "_get", fake_get)
+    monkeypatch.setattr(client.transport, "_get", fake_get)
     assert len(asyncio.run(client.log_backlog("sess-1"))) == 5
     assert [e["n"] for e in asyncio.run(client.log_backlog("sess-1", 2))] == [3, 4]
     # 0 means none, and must not read as "no limit"

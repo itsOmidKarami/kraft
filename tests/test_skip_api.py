@@ -46,7 +46,8 @@ def _wait_for_status(client, wid, status, timeout=30):
 
 
 def test_skip_is_refused_on_an_item_that_has_not_started(tmp_path, monkeypatch):
-    """`autostart: false` is api.py's own "not started" case (api.py:693-696):
+    """`autostart: false` is `create_work_item`'s own "not started" case
+    (kraft.api.routes.work_items):
     `current_node_id` stays NULL until `/resume`. `chain_template: quick-task`'s
     fake agent otherwise finishes so fast that a plain create would already
     have a `current_node_id` by the time this second request lands."""

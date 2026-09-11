@@ -39,7 +39,7 @@ def test_a_dead_server_is_a_sentence_not_a_traceback(monkeypatch, tmp_path):
 
 @pytest.fixture
 def wired(tmp_path, monkeypatch):
-    """The app, with client.http() pointed at it in-process (as test_client_read)."""
+    """The app, with client.transport.http() pointed at it in-process (as test_client_read)."""
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))))
@@ -50,7 +50,7 @@ def wired(tmp_path, monkeypatch):
     import kraft.api as api
 
     monkeypatch.setattr(
-        client,
+        client.transport,
         "http",
         lambda: httpx.AsyncClient(
             transport=httpx.ASGITransport(app=api.app), base_url="http://kraft"

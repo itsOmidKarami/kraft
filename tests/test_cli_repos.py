@@ -14,13 +14,13 @@ from support.harness import make_repo
 
 from kraft import cli, client
 
-# `app` fixture: tests/conftest.py (sub-project A Task 4). It wires client.http()
+# `app` fixture: tests/conftest.py (sub-project A Task 4). It wires client.transport.http()
 # to the ASGI app with the lifespan entered per client.
 
 
 def _make_item(repo, title="locate me"):
     async def go():
-        async with client.http() as http:
+        async with client.transport.http() as http:
             response = await http.post(
                 "/api/work-items", json={"title": title, "repo": str(repo), "autostart": False}
             )
@@ -180,7 +180,7 @@ def test_repos_says_disabled_in_words_not_only_in_colour(app, tmp_path, monkeypa
     asyncio.run(client.ensure_repo(str(off)))
 
     async def go():
-        async with client.http() as http:
+        async with client.transport.http() as http:
             response = await http.patch(
                 "/api/repos", params={"path": str(off)}, json={"enabled": False}
             )

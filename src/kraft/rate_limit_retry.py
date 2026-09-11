@@ -66,7 +66,7 @@ async def tick(app) -> list[str]:
 
 
 async def _retry_one(app, row) -> bool:
-    from kraft.api import _bd_cwd, _guard, _launch, _spawn
+    from kraft.api import deps
 
     st = app.state
     wid = row["id"]
@@ -89,10 +89,10 @@ async def _retry_one(app, row) -> bool:
     start = next(i for i, n in enumerate(chain["nodes"]) if n["id"] == node_id)
     from kraft import executor  # deferred: avoids a kraft.api <-> kraft.executor import cycle
 
-    _spawn(
+    deps.spawn(
         app,
         wid,
-        _guard(
+        deps.guard(
             st.db,
             wid,
             executor.run(
@@ -100,11 +100,11 @@ async def _retry_one(app, row) -> bool:
                 st.run_dirs,
                 work_item_id=wid,
                 registry=st.registry,
-                bd_cwd=_bd_cwd(),
+                bd_cwd=deps.bd_cwd(),
                 start_index=start,
                 policy=st.policy,
                 steer=RESUME_PROMPT,
-                launch=_launch(st, row["repo"]),
+                launch=deps.launch(st, row["repo"]),
             ),
         ),
     )

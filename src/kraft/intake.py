@@ -48,7 +48,7 @@ def _daily_breached(db, budget: policy_mod.Budget) -> bool:
 
 async def tick(app) -> list[str]:
     """One poll. Returns the work item ids started, which is usually none."""
-    from kraft.api import _repos_path
+    from kraft.api import deps
 
     st = app.state
     cfg = st.intake
@@ -67,7 +67,7 @@ async def tick(app) -> list[str]:
         return []
 
     try:
-        repos = config_mod.load_repos(_repos_path(st), validate_steering=False)
+        repos = config_mod.load_repos(deps.repos_path(st), validate_steering=False)
     except config_mod.ConfigError as exc:
         logger.warning("auto-intake: repo config invalid, skipping this tick: %s", exc)
         return []
@@ -109,7 +109,7 @@ async def tick(app) -> list[str]:
 
 
 async def _start(app, repo: dict, row: dict) -> str | None:
-    from kraft.api import _bd_cwd, _guard, _launch, _spawn
+    from kraft.api import deps
 
     st = app.state
     template = st.templates.valid.get(repo.get("default_chain_template") or "default")
@@ -137,7 +137,7 @@ async def _start(app, repo: dict, row: dict) -> str | None:
             description=row.get("description"),
             repo=repo["path"],
             template=template,
-            bd_cwd=_bd_cwd(),
+            bd_cwd=deps.bd_cwd(),
             bead_id=row["id"],
             # the bead was never filed in KRAFT_BD_CWD — it is adopted from the
             # repo's own .beads and can only be closed there.
@@ -147,10 +147,10 @@ async def _start(app, repo: dict, row: dict) -> str | None:
         logger.exception("auto-intake: could not file %s", row["id"])
         return None
     logger.info("auto-intake: started %s from %s", wid, row["id"])
-    _spawn(
+    deps.spawn(
         app,
         wid,
-        _guard(
+        deps.guard(
             st.db,
             wid,
             executor.run(
@@ -158,9 +158,9 @@ async def _start(app, repo: dict, row: dict) -> str | None:
                 st.run_dirs,
                 work_item_id=wid,
                 registry=st.registry,
-                bd_cwd=_bd_cwd(),
+                bd_cwd=deps.bd_cwd(),
                 policy=st.policy,
-                launch=_launch(st, repo["path"]),
+                launch=deps.launch(st, repo["path"]),
             ),
         ),
     )

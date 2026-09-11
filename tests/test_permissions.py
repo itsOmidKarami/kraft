@@ -18,6 +18,7 @@ from support.harness import fake_templates_dir, isolated_bd
 
 from kraft import client as client_mod
 from kraft import store
+from kraft.client import transport
 
 _HOOK = "on.implementation.start"
 
@@ -133,7 +134,7 @@ def test_the_worker_side_fails_closed(monkeypatch):
         raise ValueError("no Kraft server at http://127.0.0.1:8765 — start one with `kraft`")
 
     monkeypatch.setenv("KRAFT_SESSION_ID", "s1")
-    monkeypatch.setattr(client_mod, "_post", dead)
+    monkeypatch.setattr(transport, "_post", dead)
     answer = asyncio.run(client_mod.permission_request("Bash", {"command": "ls"}))
     assert answer["behavior"] == "deny"
     assert "no Kraft server" in answer["message"]

@@ -3,9 +3,10 @@
 
 Dispatched through the same `run_agent_task` engine every chain node uses, and
 deliberately *as a worker*: `identify_as_worker=True` means
-`client._forbid_self_action` already refuses to let this session approve or
+`client.context._forbid_self_action` already refuses to let this session approve or
 reject its own item. The agent therefore cannot clear the gate however it is
-prompted -- it must report a verdict, and `executor._review_gates` applies it.
+prompted -- it must report a verdict, and `kraft.executor.gates.review_gates`
+applies it.
 That is the opposite choice from `escalate.py`, which is not a worker precisely
 so that a human's escalation agent *can* act.
 """
@@ -104,7 +105,8 @@ async def review(
         launch.repo_entry,
         launch.steering_dir,
         skills_dir=launch.skills_dir,
-        # Uniform with every other dispatch (executor._dispatch) -- an item
+        # Uniform with every other dispatch (kraft.executor.dispatch.dispatch_node)
+        # -- an item
         # marked cheap stays cheap for its gate reviews too (Kraft-ui79: no
         # per-gate floor).
         item_override=json.loads(row["agent_overrides"]) if row["agent_overrides"] else None,

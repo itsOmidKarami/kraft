@@ -1,0 +1,282 @@
+from __future__ import annotations
+
+import json
+
+from fastapi import Request
+
+from kraft import config as config_mod
+from kraft import events, executor, findings, store
+from kraft import policy as policy_mod
+from kraft import progress as progress_mod
+from kraft.api import api_router, deps
+
+
+def _pending_gate(st, wid: str) -> str | None:
+    return executor.pending_gate(st.db, wid)
+
+
+#: The event types that bound a `work_item_needs_human` stop, newest wins —
+#: the same shape of boundary `_pending_gate` models. A stop needs one because
+#: `store.request_gate` also sets status 'needs_human' while appending no
+#: `work_item_needs_human`: without this set a first-match scan reads an
+#: answered-and-resumed stop, or a pending gate, as a live one forever.
+_STOP_BOUNDARY = (
+    "work_item_needs_human",
+    "gate_requested",
+    "gate_rejected",
+    "work_item_resumed",
+    "work_item_retried",
+    "work_item_completed",
+    "work_item_rate_limited",
+)
+
+
+def _stop_reason(st, wid: str) -> str | None:
+    """The reason of the stop the item is *currently* sitting on, or None if
+    anything in `_STOP_BOUNDARY` superseded it."""
+    for e in reversed(st.db.read(lambda c: events.read_after(c, 0, wid))):
+        if e["type"] in _STOP_BOUNDARY:
+            return e["payload"]["reason"] if e["type"] == "work_item_needs_human" else None
+    return None
+
+
+def _needs_context_stop(st, wid: str) -> bool:
+    """True iff the item's current stop is a `needs_context` — a
+    `work_item_needs_human` reason of the form `needs_context: <question>`
+    (kraft.executor.dispatch.needs_context_question). Answerable via /steer and
+    /resume the same as a pause, unlike any other needs_human reason."""
+    reason = _stop_reason(st, wid)
+    return reason is not None and reason.startswith("needs_context:")
+
+
+def _gate_node_index(chain: dict, gate: str) -> int:
+    return executor.gate_node_index(chain, gate)
+
+
+def _gate_artifact(st, row, gate: str | None) -> str | None:
+    return executor.gate_artifact(st.registry, st.run_dirs, row, gate)
+
+
+@api_router.get("/work-items")
+async def list_work_items(request: Request):
+    st = request.app.state
+    # Read outside `_read`: that closure runs on the database thread and has no
+    # request to ask.
+    include_abandoned = request.query_params.get("include_abandoned") == "true"
+
+    def _read(c):
+        rows = c.execute(
+            "SELECT * FROM work_items WHERE (? OR status != 'abandoned') ORDER BY created_at",
+            (include_abandoned,),
+        ).fetchall()
+        cursor = c.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()[0]
+        # The latest gate_* event per item, in one pass — the board renders a gate
+        # prompt per row and must not offer Approve on a rejected gate.
+        gates = c.execute(
+            "SELECT work_item_id, type, payload FROM events WHERE seq IN ("
+            "  SELECT MAX(seq) FROM events"
+            "  WHERE type IN ('gate_requested', 'gate_approved', 'gate_rejected')"
+            "  GROUP BY work_item_id)"
+        ).fetchall()
+        return rows, cursor, gates
+
+    rows, cursor, gate_rows = st.db.read(_read)
+    pending = {
+        g["work_item_id"]: json.loads(g["payload"])["gate"]
+        for g in gate_rows
+        if g["type"] == "gate_requested"
+    }
+    items = [
+        {
+            "id": r["id"],
+            "title": r["title"],
+            "description": r["description"],
+            "repo": r["repo"],
+            "status": r["status"],
+            "chain_template": r["chain_template"],
+            "chain_definition": json.loads(r["chain_definition"]),
+            "current_node_id": r["current_node_id"],
+            "bead_id": r["bead_id"],
+            "created_at": r["created_at"],
+            "updated_at": r["updated_at"],
+            "pending_gate": pending.get(r["id"]),
+            "attachments": json.loads(r["attachments"]) if r["attachments"] else [],
+            "retry_at": r["retry_at"],
+            "progress": _board_progress(st, r),
+        }
+        for r in rows
+    ]
+    return {"items": items, "cursor": cursor}
+
+
+def _board_progress(st, row) -> dict | None:
+    """The board's share of `progress`: position and title, not the task list."""
+    p = progress_mod.for_item(st.db, row, st.run_dirs.worktrees / row["id"])
+    return {k: p[k] for k in ("current", "total", "title")} if p else None
+
+
+def _completed_nodes(st, wid: str) -> set[str]:
+    return {
+        e["payload"].get("node_id")
+        for e in st.db.read(lambda c: events.read_after(c, 0, wid))
+        if e["type"] == "node_completed"
+    }
+
+
+def _deferred_findings(st, wid: str) -> list[dict]:
+    """Findings that never entered the loop, for the human at the gate.
+
+    A roll-up nobody reads is a silent discard, so these are rendered at the
+    gate rather than merely recorded.
+    """
+    loop_severities = getattr(st.policy, "loop_severities", policy_mod.DEFAULT_LOOP_SEVERITIES)
+    seen: dict[str, dict] = {}
+    for e in st.db.read(lambda c: events.read_after(c, 0, wid)):
+        if e["type"] != "findings_measured":
+            continue
+        for raw in e["payload"].get("findings", []):
+            if raw.get("severity") in loop_severities:
+                continue
+            seen.setdefault(findings.from_payload(raw).fingerprint, raw)
+    return list(seen.values())
+
+
+def _concerns(st, wid: str) -> list[str]:
+    """`done_with_concerns` text from every session that reported one, oldest
+    first — the same shape of thing as `_deferred_findings` (something a
+    machine noticed and owes a human before approval), read from the event log
+    `adapters.subprocess.run_task` stamps at session exit, never from
+    `result_path` on disk.
+
+    Bounded at the last resolved gate, the way `_stop_reason` is: spec §2 puts a
+    concern at the *next* gate, and the detail screen now passes concerns to
+    every gate rather than only `human_review_approval`. Without a boundary one
+    concern would be re-posed at every later gate the item reaches, long after
+    the human who approved that gate already answered for it (Kraft-ub2).
+    """
+    out: list[str] = []
+    for e in reversed(st.db.read(lambda c: events.read_after(c, 0, wid))):
+        if e["type"] in ("gate_approved", "gate_rejected"):
+            break
+        if e["type"] == "worker_session_exited" and e["payload"].get("concerns"):
+            out.append(e["payload"]["concerns"])
+    out.reverse()  # oldest first
+    return out
+
+
+def _mr_ref(st, wid: str) -> dict | None:
+    """The most recent `mr_opened` event's `{number, url}`, or None before
+    `open_mr` has ever run.
+
+    A single-repo item gets no `work_item_repos` row (`repos_for`'s own
+    docstring), so its merge request has nowhere to live but the event log --
+    `adapters.forge.run_task` emits `mr_opened` for exactly this reason
+    (Kraft-d2sq: "an event, not a work-item column"). Reversed scan, first hit
+    wins, same as `_stop_reason`: a retried `open_mr` that reused the existing
+    MR still logs a fresh event, so this always names the current one, not a
+    stale first-open URL for a since-force-pushed branch.
+
+    Single-repo only: a multi-repo item's `open_mr` node emits one
+    `mr_opened` per target repo (root and every declared submodule), and the
+    event carries no repo identifier to tell them apart. Returning "the
+    latest one" there would as often name a submodule's merge request as the
+    root's and label it "the" MR regardless -- silence until a per-repo
+    answer exists is better than a link to the wrong PR.
+    """
+    if st.db.read(lambda c: store.repos_for(c, wid)):
+        return None
+    for e in reversed(st.db.read(lambda c: events.read_after(c, 0, wid))):
+        if e["type"] == "mr_opened":
+            return {"number": e["payload"]["number"], "url": e["payload"]["url"]}
+    return None
+
+
+def _needs_context_question(st, wid: str) -> str | None:
+    """The agent's question, straight from the `needs_context: <question>`
+    reason `_needs_context_stop` already trusts — not a scan of
+    `worker_session_exited.question` events, which has no boundary at the
+    triggering stop: a later needs_context whose result file omitted the
+    field would otherwise resurface an earlier, already-answered question
+    instead of falling through to
+    `kraft.executor.dispatch.needs_context_question`'s own
+    `"(no question given)"` guard, which the reason string always carries.
+    """
+    reason = _stop_reason(st, wid)
+    if reason is None or not reason.startswith("needs_context:"):
+        return None
+    return reason.removeprefix("needs_context: ")
+
+
+@api_router.get("/work-items/{wid}")
+async def get_work_item(wid: str, request: Request):
+    from kraft.api.routes import lifecycle
+
+    st = request.app.state
+    row = deps._work_item_row(st, wid)
+    sessions = st.db.read(
+        lambda c: c.execute(
+            "SELECT * FROM worker_sessions WHERE work_item_id = ? ORDER BY created_at", (wid,)
+        ).fetchall()
+    )
+    pending = _pending_gate(st, wid)
+    chain = json.loads(row["chain_definition"])
+    return {
+        **{k: row[k] for k in row.keys()},
+        "chain_definition": chain,
+        "attachments": json.loads(row["attachments"]) if row["attachments"] else [],
+        "worker_sessions": [{k: s[k] for k in s.keys()} for s in sessions],
+        "usage": st.db.read(lambda c: store.usage_rollup(c, wid)),
+        # Where the implementer is in its plan ("Task 3 of 6"), or None off the
+        # implementation node or for a plan with no `## Task N` headings.
+        "progress": progress_mod.for_item(st.db, row, st.run_dirs.worktrees / wid),
+        # empty on a single-repo item; the detail's repos panel is multi-repo only
+        "repos": st.db.read(lambda c: store.repos_for(c, wid)),
+        # local-only: the checkout the agents are editing, for "Open worktree"
+        "worktree_path": str(st.run_dirs.worktrees / wid),
+        # What the *diff on screen* is, so the gate can tell a measurement taken
+        # on this commit from one taken three commits ago (Kraft-lu2).
+        # `git_read` returns None for a worktree that does not exist yet.
+        "head_sha": config_mod.git_read(st.run_dirs.worktrees / wid, "rev-parse", "HEAD"),
+        # The gate actually waiting on a person. Inferring it client-side from
+        # "the node has a gate_after and its sessions are done" cannot see a
+        # rejection, and offers Approve on a gate the API will 409 (Kraft).
+        "pending_gate": pending,
+        # The document the gate is a decision about — the spec at
+        # spec_approval, the plan at plan_approval. The detail screen offers
+        # "Review spec" only when this is set.
+        "gate_artifact": _gate_artifact(st, row, pending),
+        # Why the item is stopped, when it is: the detail screen has to tell a
+        # loop escalation from an unrelated crash on the same node (Kraft-esc).
+        "stop_reason": _stop_reason(st, wid),
+        "deferred_findings": _deferred_findings(st, wid),
+        "concerns": _concerns(st, wid),
+        "needs_context_question": _needs_context_question(st, wid),
+        # The root repo's merge request, once `open_mr` has run -- the detail
+        # screen's one link out to the forge.
+        "mr_ref": _mr_ref(st, wid),
+        # Whether a stranded-at-this-node retry could ever carry a steer note
+        # anywhere downstream (Kraft-bz9b): the detail screen uses this to
+        # drop the steer box entirely rather than offer text `retry` would
+        # 409 on. Fails open (True) when the node isn't in its own chain --
+        # an unmapped edge case is not a reason to hide a control that may
+        # still work.
+        "steerable": (
+            lifecycle._steer_reachable(chain["nodes"], row["current_node_id"], st.registry)
+            if any(n["id"] == row["current_node_id"] for n in chain["nodes"])
+            else True
+        ),
+    }
+
+
+@api_router.get("/work-items/{wid}/events")
+async def get_events(wid: str, request: Request, after_seq: int = 0):
+    st = request.app.state
+    deps._work_item_row(st, wid)
+    return st.db.read(lambda c: events.read_after(c, after_seq, wid))
+
+
+@api_router.get("/work-items/{wid}/documents")
+async def get_work_item_documents(wid: str, request: Request):
+    st = request.app.state
+    deps._work_item_row(st, wid)  # 404s on an unknown work item
+    return {"work_item_id": wid, "documents": st.indexer.documents_for_work_item(wid)}

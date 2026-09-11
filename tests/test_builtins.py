@@ -1043,8 +1043,9 @@ def test_the_worktree_and_the_forge_agree_on_the_branch(tmp_path, monkeypatch):
     """Kraft-nhps. Three places used to build `kraft/<uuid>` and none of them
     shared a line. They now read the one value written at intake, which is the
     only way two derivations of one string cannot drift."""
-    from kraft import api as kraft_api
     from kraft import executor
+    from kraft.api.routes import lifecycle
+    from kraft.executor import dispatch
     from kraft.templates import Registry, Template
 
     repo = make_repo(tmp_path)
@@ -1055,7 +1056,7 @@ def test_the_worktree_and_the_forge_agree_on_the_branch(tmp_path, monkeypatch):
         captured.update(kw)
         return "done"
 
-    monkeypatch.setattr(executor._forge, "run_task", fake_forge_run_task)
+    monkeypatch.setattr(dispatch._forge, "run_task", fake_forge_run_task)
 
     async def scenario():
         rd = RunDirs(tmp_path / "run").ensure()
@@ -1090,7 +1091,7 @@ def test_the_worktree_and_the_forge_agree_on_the_branch(tmp_path, monkeypatch):
             # what the forge adapter was handed
             assert captured["branch"] == branch
             # and what abandon reclaims
-            assert await kraft_api._remove_worktree(repo, rd.worktrees / wid, branch)
+            assert await lifecycle._remove_worktree(repo, rd.worktrees / wid, branch)
             listed = subprocess.run(
                 ["git", "branch", "--list", branch],
                 cwd=repo,

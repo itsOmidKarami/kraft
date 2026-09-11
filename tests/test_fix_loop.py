@@ -166,7 +166,7 @@ def test_resume_mid_fix_loop_reenters_and_continues_budget(tmp_path, monkeypatch
             # env_setup for real so the worktree pytest + the fix agent use exists
             await database.write(lambda c: store.load_chain(c, wid, "env_setup"))
             env_node = {"id": "env_setup", "tasks": ["on.env.prepare"], "fix_loop": None}
-            assert await executor._walk_node(database, rd, wid, env_node, row, registry, wt) == "ok"
+            assert await executor.walk_node(database, rd, wid, env_node, row, registry, wt) == "ok"
 
             # seed `verify` mid-fix-loop: a failed cycle-0 measure + a counter row at 1
             await database.write(lambda c: store.enter_node(c, wid, "verify"))
@@ -219,10 +219,11 @@ def test_fix_loop_wall_clock_breach(tmp_path, monkeypatch):
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
-    # executor.check() reads the current time via executor._now (a seam re-exported
-    # from store). Pin it far in the future so the very first breach check trips on
-    # elapsed wall-clock, regardless of the (large) attempts cap.
-    monkeypatch.setattr("kraft.executor._now", lambda: "2099-01-01T00:00:00+00:00")
+    # executor.check() reads the current time via kraft.executor.walk's own
+    # `_now` (a seam re-exported from store). Pin it far in the future so the
+    # very first breach check trips on elapsed wall-clock, regardless of the
+    # (large) attempts cap.
+    monkeypatch.setattr("kraft.executor.walk._now", lambda: "2099-01-01T00:00:00+00:00")
 
     async def scenario():
         rd = RunDirs(tmp_path / "run").ensure()

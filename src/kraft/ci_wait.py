@@ -1,6 +1,6 @@
 """Re-enter a node parked on a pipeline that has not settled.
 
-`ci_poll` (`adapters/forge.py`) no longer blocks in-process for up to
+`ci_poll` (`adapters/forge/run.py`) no longer blocks in-process for up to
 `poll_timeout`: it makes one CI check, and a pending pipeline becomes a row
 the scheduler owns -- `status = 'waiting'` plus `retry_at`, set by
 `store.mark_waiting` (Kraft-ru98). This is the poller that owns that row:
@@ -61,7 +61,7 @@ async def tick(app) -> list[str]:
 
 
 async def _re_enter_one(app, row) -> bool:
-    from kraft.api import _bd_cwd, _guard, _launch, _spawn
+    from kraft.api import deps
 
     st = app.state
     wid = row["id"]
@@ -85,10 +85,10 @@ async def _re_enter_one(app, row) -> bool:
     # No steer: there is no agent to address here, and a note handed to a
     # forge node would sit unconsumed until the next agent launch -- a
     # different node's business.
-    _spawn(
+    deps.spawn(
         app,
         wid,
-        _guard(
+        deps.guard(
             st.db,
             wid,
             executor.run(
@@ -96,10 +96,10 @@ async def _re_enter_one(app, row) -> bool:
                 st.run_dirs,
                 work_item_id=wid,
                 registry=st.registry,
-                bd_cwd=_bd_cwd(),
+                bd_cwd=deps.bd_cwd(),
                 start_index=start,
                 policy=st.policy,
-                launch=_launch(st, row["repo"]),
+                launch=deps.launch(st, row["repo"]),
             ),
         ),
     )

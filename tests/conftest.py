@@ -58,7 +58,7 @@ def _isolated_kraft_home(tmp_path, monkeypatch):
 
 @pytest.fixture
 def app(tmp_path, monkeypatch):
-    """The app wired to client.http(), with its lifespan entered per call.
+    """The app wired to client.transport.http(), with its lifespan entered per call.
 
     cli.main() runs asyncio.run() itself, so — unlike test_client_read.py, where
     one coroutine owns the loop — the lifespan cannot stay open across the call.
@@ -87,7 +87,7 @@ def app(tmp_path, monkeypatch):
             await self._ctx.__aexit__(*exc)
 
     monkeypatch.setattr(
-        client,
+        client.transport,
         "http",
         lambda: Lifespan(transport=httpx.ASGITransport(app=api.app), base_url="http://kraft"),
     )
