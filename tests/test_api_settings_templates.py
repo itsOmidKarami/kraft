@@ -46,6 +46,34 @@ def test_template_put_validates_before_it_writes(client, templates_dir):
     assert client.get("/api/templates/nope").status_code == 404
 
 
+def test_reload_picks_up_a_template_added_on_disk_without_a_restart(client, templates_dir):
+    assert not any(t["id"] == "hand-edited" for t in client.get("/api/templates").json())
+    (templates_dir / "hand-edited.yaml").write_text(
+        yaml.safe_dump({"id": "hand-edited", "nodes": NODES})
+    )
+
+    r = client.post("/api/templates/reload")
+    assert r.status_code == 200
+    assert "hand-edited" in r.json()["valid"]
+    assert r.json()["invalid_templates"] == {}
+    assert any(t["id"] == "hand-edited" for t in client.get("/api/templates").json())
+
+
+def test_reload_with_a_broken_registry_keeps_the_last_good_config(client, templates_dir):
+    good = (templates_dir / "registry.yaml").read_text()
+    (templates_dir / "registry.yaml").write_text(
+        yaml.safe_dump({"hooks": {"on.x": {"kind": "nope"}}})
+    )
+
+    r = client.post("/api/templates/reload")
+    assert r.status_code == 422
+
+    # the running server kept serving the last good config, not the broken file
+    assert client.get("/api/registry").json()["hooks"] == yaml.safe_load(good)["hooks"]
+    valid_ids = {t["id"] for t in client.get("/api/templates").json()}
+    assert {"quick-task", "default"} <= valid_ids
+
+
 def test_an_unknown_gate_is_refused(client):
     nodes = [{"id": "a", "tasks": ["on.test.run"], "gate_after": "made_up_gate"}]
     r = client.post("/api/templates/scratch/validate", json={"nodes": nodes})
