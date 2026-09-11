@@ -158,11 +158,10 @@ describe("WorkItemDetail (item page)", () => {
     expect(screen.getByTestId("inspector-config").textContent).toMatch(/# override/);
   });
 
-  it("renders the not-started card (21) with no stage graph for an unstarted item", () => {
+  it("shows the not_started bar (21) for an unstarted item", () => {
     setup({ current_node_id: null, status: "paused" });
     renderDetail();
-    expect(screen.getByTestId("not-started-card")).toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: /chain stages/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^start$/i })).toBeInTheDocument();
   });
 
   it("shows the hero task bar and the Tasks-tab plan list from item.progress", async () => {

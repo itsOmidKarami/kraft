@@ -1,16 +1,22 @@
 import { useEffect, useState } from "react";
-import { CaretDown, CaretRight, X } from "@phosphor-icons/react";
+import { CaretDown, CaretRight, Flag, X } from "@phosphor-icons/react";
 import { Link, useNavigate } from "react-router-dom";
 import * as api from "../api";
-import { useStore } from "../store";
-import type { SearchResult, TemplateSummary } from "../types";
+import type {
+  NodeOverrides,
+  Policy,
+  Repo,
+  SearchResult,
+  TemplateSummary,
+} from "../types";
+import { Switch } from "./ui";
 import { backdropProps, useModal } from "../useModal";
 
 /**
- * New work item (design 1g). The "Advanced · cross-repo" disclosure is collapsed
- * by default and only has anything in it when the repo actually has submodules —
- * they come from probing the repo's own .gitmodules, never from a list Kraft
- * keeps of its own.
+ * New work item (UI v2 · 10, mobile m09). The "Advanced · cross-repo"
+ * disclosure is collapsed by default and only has anything in it when the
+ * repo actually has submodules — they come from probing the repo's own
+ * .gitmodules, never from a list Kraft keeps of its own.
  */
 
 const MERGE_POLICIES = [
@@ -22,23 +28,30 @@ const MERGE_POLICIES = [
 // The gate each kind satisfies documents why picking one skips a chain phase;
 // the server is the one that actually trims the chain.
 const KINDS = [
-  { kind: "spec" as const, docKind: "specs", gate: "spec_approval", label: "spec" },
-  { kind: "plan" as const, docKind: "plans", gate: "plan_approval", label: "plan" },
+  {
+    kind: "spec" as const,
+    docKind: "specs",
+    gate: "spec_approval",
+    label: "spec",
+  },
+  {
+    kind: "plan" as const,
+    docKind: "plans",
+    gate: "plan_approval",
+    label: "plan",
+  },
 ];
+
 export function IntakeModal({ onClose }: { onClose: () => void }) {
   const nav = useNavigate();
-  // Design 5.1 says this field offers the connected-repo set. Reading it off
-  // existing work items instead left a fresh install with an empty field, no
-  // suggestions and nothing saying a repo has to be connected first — the app's
-  // primary action, dead on arrival. Connected repos lead; repos already in
-  // flight follow, so an item outlives its repo being disconnected.
-  const itemRepos = useStore((s) => Object.values(s.workItems).map((w) => w.repo));
-  const [connected, setConnected] = useState<string[]>([]);
-  const knownRepos = [...new Set([...connected, ...itemRepos])];
+  const [allRepos, setAllRepos] = useState<Repo[]>([]);
   const [templates, setTemplates] = useState<string[]>(["default"]);
   // GET /templates already returns each template's nodes (§8 chain preview
   // needs them); kept alongside the id list rather than re-fetched per pick.
-  const [templateSummaries, setTemplateSummaries] = useState<TemplateSummary[]>([]);
+  const [templateSummaries, setTemplateSummaries] = useState<TemplateSummary[]>(
+    [],
+  );
+  const [policy, setPolicy] = useState<Policy | null>(null);
   const [repo, setRepo] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -54,6 +67,12 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
   const [attachPath, setAttachPath] = useState<Record<string, string>>({});
   const [query, setQuery] = useState<Record<string, string>>({});
   const [hits, setHits] = useState<Record<string, SearchResult[]>>({});
+  // 06 Overrides: auto-escalate every gate (node_overrides), auto_gate
+  // (Kraft-zr3s, arm agent review of those escalations), and a budget draft.
+  const [autoEscalate, setAutoEscalate] = useState(false);
+  const [autoGate, setAutoGate] = useState(true);
+  const [budgetDraft, setBudgetDraft] = useState("");
+  const [skipped, setSkipped] = useState<Set<string>>(new Set());
   const ref = useModal<HTMLFormElement>(onClose);
 
   useEffect(() => {
@@ -73,9 +92,19 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
       .catch(() => {});
     api
       .getRepos()
-      .then(({ repos }) => setConnected(repos.filter((r) => r.enabled).map((r) => r.path)))
+      .then(({ repos }) => setAllRepos(repos))
+      .catch(() => {});
+    api
+      .getPolicy()
+      .then(setPolicy)
       .catch(() => {});
   }, []);
+
+  // Reset the skip set whenever the template changes -- a node id from one
+  // template's chain is meaningless against another's.
+  useEffect(() => {
+    setSkipped(new Set());
+  }, [tpl]);
 
   // Probing is read-only, so it can follow the repo field as it is typed.
   useEffect(() => {
@@ -112,20 +141,41 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
     return () => clearTimeout(t);
   }, [repo, query]);
 
-  const attachments = KINDS.filter(({ kind }) => attachPath[kind]?.trim()).map(({ kind }) => ({
-    kind,
-    path: attachPath[kind].trim(),
-  }));
+  const attachments = KINDS.filter(({ kind }) => attachPath[kind]?.trim()).map(
+    ({ kind }) => ({
+      kind,
+      path: attachPath[kind].trim(),
+    }),
+  );
   // §8: attaching a kind is the statement that its gate is satisfied, so the
   // node carrying that gate_after drops out of the chain — same rule as
   // `templates.materialize` on the server, applied here only to preview it.
   const satisfiedGates = new Set(
-    KINDS.filter(({ kind }) => attachPath[kind]?.trim()).map(({ gate }) => gate),
+    KINDS.filter(({ kind }) => attachPath[kind]?.trim()).map(
+      ({ gate }) => gate,
+    ),
   );
-  const selectedNodes = templateSummaries.find((t) => t.id === tpl)?.nodes ?? [];
+  const selectedNodes =
+    templateSummaries.find((t) => t.id === tpl)?.nodes ?? [];
+  const nodeOverrides: NodeOverrides = autoEscalate
+    ? Object.fromEntries(
+        selectedNodes
+          .filter((n) => n.gate_after)
+          .map((n) => [n.id, { auto_escalate: true }]),
+      )
+    : {};
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submit = async (autostart: boolean, e?: React.FormEvent) => {
+    e?.preventDefault();
+    // `Number("$20")` and `Number("20 usd")` are both NaN, and NaN through
+    // JSON.stringify becomes `null` -- the server reads an explicit `null`
+    // as "no cap", so a typo here would silently drop the spend cap instead
+    // of failing loud.
+    const budgetUsd = budgetDraft.trim() ? Number(budgetDraft) : undefined;
+    if (budgetUsd !== undefined && !Number.isFinite(budgetUsd)) {
+      setError(`budget must be a plain number, not "${budgetDraft}"`);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -134,8 +184,17 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
         title,
         ...(description.trim() ? { description } : {}),
         ...(tpl === "default" ? {} : { chain_template: tpl }),
-        ...(picked.length ? { submodules: picked, root_merge_policy: mergePolicy } : {}),
+        ...(picked.length
+          ? { submodules: picked, root_merge_policy: mergePolicy }
+          : {}),
         ...(attachments.length ? { attachments } : {}),
+        skip_nodes: [...skipped],
+        ...(budgetUsd !== undefined ? { budget_usd: budgetUsd } : {}),
+        ...(Object.keys(nodeOverrides).length
+          ? { node_overrides: nodeOverrides }
+          : {}),
+        auto_gate: autoGate,
+        autostart,
       });
       onClose();
       nav(`/work-items/${id}`);
@@ -145,34 +204,22 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
     }
   };
 
-  return (
-    <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label="New work item" {...backdropProps(onClose)}>
-      <form className="dialog intake" onSubmit={submit} ref={ref}>
-        <div className="dialog-title">New work item</div>
+  const runCount = selectedNodes.length - skipped.size - satisfiedGates.size;
 
-        <div className="field">
-          <label htmlFor="intake-repo">Repo</label>
-          <input
-            id="intake-repo"
-            className="input"
-            aria-label="repo"
-            list="intake-repos"
-            value={repo}
-            onChange={(e) => setRepo(e.target.value)}
-            required
-          />
-          <datalist id="intake-repos">
-            {knownRepos.map((r) => (
-              <option key={r} value={r} />
-            ))}
-          </datalist>
-          {knownRepos.length === 0 && (
-            <span className="field-hint">
-              no repos connected yet — <Link to="/settings/repos">connect one in Settings</Link>,
-              or type an absolute path
-            </span>
-          )}
-        </div>
+  return (
+    <div
+      className="dialog-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="New work item"
+      {...backdropProps(onClose)}
+    >
+      <form
+        className="dialog intake"
+        onSubmit={(e) => submit(true, e)}
+        ref={ref}
+      >
+        <div className="dialog-title">New work item</div>
 
         <div className="field">
           <label htmlFor="intake-title">Title</label>
@@ -189,21 +236,59 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
         <div className="field">
           <label htmlFor="intake-description">
             Description{" "}
-            <span className="field-hint">· the brief the spec is written from</span>
+            <span className="field-hint">
+              · becomes the brief every node reads
+            </span>
           </label>
           <textarea
             id="intake-description"
             className="input"
             aria-label="description"
             rows={4}
+            placeholder="Context, constraints, what done looks like"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
           />
         </div>
 
         <div className="field">
+          <label>Repo</label>
+          <div className="repo-chips" role="radiogroup" aria-label="repo">
+            {allRepos.map((r) => (
+              <button
+                key={r.path}
+                type="button"
+                className="chip"
+                aria-pressed={repo === r.path}
+                disabled={!r.enabled}
+                onClick={() => {
+                  setRepo(r.path);
+                  if (r.default_chain_template) {
+                    setTpl((cur) =>
+                      templates.includes(r.default_chain_template!)
+                        ? r.default_chain_template!
+                        : cur,
+                    );
+                  }
+                }}
+              >
+                {r.name}
+                {!r.enabled && " · disabled"}
+              </button>
+            ))}
+          </div>
+          {allRepos.length === 0 && (
+            <span className="field-hint">
+              no repos connected yet —{" "}
+              <Link to="/settings/repos">connect one in Settings</Link>
+            </span>
+          )}
+        </div>
+
+        <div className="field">
           <label>
-            Start from existing <span className="field-hint">· skips the phases these cover</span>
+            Start from existing{" "}
+            <span className="field-hint">· skips the phase it covers</span>
           </label>
           {KINDS.map(({ kind, label }) => (
             <div key={kind} className="attachment-row">
@@ -212,14 +297,18 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
                 aria-label={`existing ${label}`}
                 placeholder={`search ${label}s in this repo`}
                 value={query[kind] ?? ""}
-                onChange={(e) => setQuery((q) => ({ ...q, [kind]: e.target.value }))}
+                onChange={(e) =>
+                  setQuery((q) => ({ ...q, [kind]: e.target.value }))
+                }
               />
               <input
                 className="input"
                 aria-label={`${label} path`}
                 placeholder="or a repo-relative path"
                 value={attachPath[kind] ?? ""}
-                onChange={(e) => setAttachPath((p) => ({ ...p, [kind]: e.target.value }))}
+                onChange={(e) =>
+                  setAttachPath((p) => ({ ...p, [kind]: e.target.value }))
+                }
               />
               {(hits[kind] ?? []).map((h) => (
                 <button
@@ -243,33 +332,95 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
             Chain template <span className="field-hint">· repo default</span>
           </label>
           <div className="seg" role="radiogroup" aria-label="template">
-            {templates.map((t) => (
-              <label key={t} className="seg-opt">
-                <input
-                  type="radio"
-                  name="intake-template"
-                  value={t}
-                  checked={tpl === t}
-                  onChange={() => setTpl(t)}
-                />
-                {t}
-              </label>
-            ))}
+            {templates.map((t) => {
+              const n = templateSummaries.find((s) => s.id === t)?.nodes.length;
+              return (
+                <label key={t} className="seg-opt">
+                  <input
+                    type="radio"
+                    name="intake-template"
+                    value={t}
+                    checked={tpl === t}
+                    onChange={() => setTpl(t)}
+                  />
+                  {t}
+                  {n != null && ` · ${n}`}
+                </label>
+              );
+            })}
           </div>
-          {attachments.length > 0 && selectedNodes.length > 0 && (
-            <p className="field-hint chain-preview">
+        </div>
+
+        {selectedNodes.length > 0 && (
+          <div className="field chain-preview">
+            <p className="field-hint">
+              {runCount} node{runCount === 1 ? "" : "s"} will run · tap a node
+              to skip it
+            </p>
+            <p className="field-hint">
               {selectedNodes.map((n, i) => {
-                const struck = n.gate_after != null && satisfiedGates.has(n.gate_after);
+                const autoSkipped =
+                  n.gate_after != null && satisfiedGates.has(n.gate_after);
+                const struck = autoSkipped || skipped.has(n.id);
                 return (
                   <span key={n.id}>
                     {i > 0 && " → "}
-                    {struck ? <s>{n.id}</s> : <span>{n.id}</span>}
+                    <button
+                      type="button"
+                      className="chain-preview-node"
+                      disabled={autoSkipped}
+                      onClick={() =>
+                        setSkipped((s) => {
+                          const next = new Set(s);
+                          if (next.has(n.id)) next.delete(n.id);
+                          else next.add(n.id);
+                          return next;
+                        })
+                      }
+                    >
+                      {struck ? <s>{n.id}</s> : n.id}
+                      {n.gate_after && <Flag size={9} weight="fill" />}
+                    </button>
                   </span>
                 );
               })}
             </p>
-          )}
+          </div>
+        )}
+
+        <div className="field">
+          <label>Overrides</label>
+          <label className="control-row">
+            <Switch
+              checked={autoEscalate}
+              onChange={setAutoEscalate}
+              label="auto-escalate every gate"
+            />
+            auto-escalate every gate
+          </label>
+          <label className="control-row">
+            <Switch
+              checked={autoGate}
+              onChange={setAutoGate}
+              label="auto-review those escalations"
+            />
+            auto_gate — let an agent review before a human sees it
+          </label>
+          <input
+            className="input"
+            inputMode="decimal"
+            aria-label="budget"
+            placeholder={`$ ${policy?.budget?.work_item_usd ?? "no cap"} (policy default)`}
+            value={budgetDraft}
+            onChange={(e) => setBudgetDraft(e.target.value)}
+          />
         </div>
+
+        <p className="field-hint">
+          Will happen on start: {runCount} node{runCount === 1 ? "" : "s"} run
+          {autoEscalate ? ", every gate escalates before you see it" : ""}
+          {autoGate ? " and an agent reviews first" : ""}.
+        </p>
 
         {available.length > 0 && (
           <div className="disclosure">
@@ -286,7 +437,8 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
               <>
                 <div className="field">
                   <label>
-                    Submodules <span className="field-hint">· from .gitmodules</span>
+                    Submodules{" "}
+                    <span className="field-hint">· from .gitmodules</span>
                   </label>
                   <div className="submodules">
                     {available.map((path) => {
@@ -299,7 +451,9 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
                           aria-pressed={on}
                           onClick={() =>
                             setPicked(
-                              on ? picked.filter((p) => p !== path) : [...picked, path],
+                              on
+                                ? picked.filter((p) => p !== path)
+                                : [...picked, path],
                             )
                           }
                         >
@@ -337,8 +491,16 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
           <button type="button" className="btn btn-secondary" onClick={onClose}>
             Cancel
           </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={busy}
+            onClick={() => submit(false)}
+          >
+            + Create paused
+          </button>
           <button type="submit" className="btn btn-primary" disabled={busy}>
-            Create
+            ▷ Create and start
           </button>
         </div>
       </form>

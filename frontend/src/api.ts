@@ -105,6 +105,11 @@ export const createWorkItem = (body: {
   /** `undefined`: policy default. `null`: explicit "no cap". A number: that cap. */
   budget_usd?: number | null;
   node_overrides?: NodeOverrides;
+  /** False creates the item without running it (design §6 rule 1). Defaults
+   *  server-side to true; the dialog sends it explicitly either way. */
+  autostart?: boolean;
+  /** Arms agent gate review for this item's `auto_escalate` gates (Kraft-zr3s). */
+  auto_gate?: boolean;
 }) => req<{ id: string }>("/work-items", json("POST", body));
 
 /** Absent fields are untouched, not cleared: the title editor and the
@@ -191,6 +196,12 @@ export const skipWorkItem = (id: string, note?: string) =>
 
 export const escalateWorkItem = (id: string, message: string) =>
   req<{ id: string; status: string }>(`/work-items/${id}/escalate`, json("POST", { message }));
+
+export const stopEscalation = (id: string) =>
+  req<{ id: string; session_id: string; status: string }>(
+    `/work-items/${id}/escalate/stop`,
+    { method: "POST" },
+  );
 
 export const openDocument = (id: string, editor?: string) =>
   req<{ document_id: string; path: string; editor: string }>(

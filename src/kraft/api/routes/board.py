@@ -214,6 +214,20 @@ def _needs_context_question(st, wid: str) -> str | None:
     return reason.removeprefix("needs_context: ")
 
 
+def _rate_limit_retries(st, row) -> dict | None:
+    """06's rate-limited sub-row: 'N of M relaunches used'. Reads the same
+    counter `rate_limit_retry._retry_one` bumps rather than keeping a second
+    one -- None off a rate-limited item (nothing to show), or when there is
+    no current node to key the counter by."""
+    if row["status"] != "rate_limited" or row["current_node_id"] is None:
+        return None
+    counter = st.db.read(
+        lambda c: store.read_counter(c, row["id"], f"rate_limit:{row['current_node_id']}")
+    )
+    cap = st.policy.rate_limit_retries if st.policy else 5
+    return {"count": counter["count"] if counter else 0, "cap": cap}
+
+
 @api_router.get("/work-items/{wid}")
 async def get_work_item(wid: str, request: Request):
     from kraft.api.routes import lifecycle
@@ -252,6 +266,7 @@ async def get_work_item(wid: str, request: Request):
         # response's truthy `budget` object read as "the item is stopped for
         # budget" even when it is running fine under its cap.
         "budget_cap": {"cap_usd": cap_usd, "source": cap_source, "spent_usd": spent_usd},
+        "rate_limit": _rate_limit_retries(st, row),
         "attachments": json.loads(row["attachments"]) if row["attachments"] else [],
         "worker_sessions": [{k: s[k] for k in s.keys()} for s in sessions],
         "usage": st.db.read(lambda c: store.usage_rollup(c, wid)),
