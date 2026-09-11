@@ -156,6 +156,12 @@ export interface Health {
   invalid_policy: string[];
   /** Where the server is listening — the login screen tells the user. */
   bind?: string;
+  /** Paired with `bind` for the sidebar footer ("127.0.0.1:8765"); absent on
+   *  an older server that hasn't picked up this field yet. */
+  port?: number;
+  /** This build's installed version, or "0.0.0+source" for a checkout that
+   *  was never installed (`kraft.update.installed()`). Sidebar footer only. */
+  version?: string;
 }
 
 export interface DocumentLink {

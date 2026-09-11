@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { ChainBar, OverflowMenu, RowState, StatusGlyph, Tabs } from "./ui";
+import { Chip, MiniChain, OverflowMenu, RowState, StatusGlyph, Switch, Tabs } from "./ui";
 
 const NODES = [
   { id: "env_setup", tasks: ["a"], gate_after: null },
@@ -9,9 +9,9 @@ const NODES = [
   { id: "merge", tasks: ["c"], gate_after: "human_review_approval" },
 ];
 
-describe("ChainBar", () => {
+describe("MiniChain", () => {
   it("marks done, current and todo segments and ticks gated nodes", () => {
-    render(<ChainBar nodes={NODES} currentNodeId="verify" done={["env_setup"]} size="lg" />);
+    render(<MiniChain nodes={NODES} currentNodeId="verify" done={["env_setup"]} size="lg" />);
     expect(screen.getByTestId("node-env_setup")).toHaveAttribute("data-state", "done");
     expect(screen.getByTestId("node-verify")).toHaveAttribute("data-state", "current");
     expect(screen.getByTestId("node-merge")).toHaveAttribute("data-state", "todo");
@@ -19,23 +19,23 @@ describe("ChainBar", () => {
   });
 
   it("labels segments only at lg; sm falls back to a title tooltip", () => {
-    const { unmount } = render(<ChainBar nodes={NODES} currentNodeId="verify" size="lg" />);
+    const { unmount } = render(<MiniChain nodes={NODES} currentNodeId="verify" size="lg" />);
     expect(screen.getByText("verify")).toBeInTheDocument();
     unmount();
-    render(<ChainBar nodes={NODES} currentNodeId="verify" size="sm" />);
+    render(<MiniChain nodes={NODES} currentNodeId="verify" size="sm" />);
     expect(screen.queryByText("verify")).not.toBeInTheDocument();
     expect(screen.getByTitle("verify")).toBeInTheDocument();
   });
 
   it("drops the current segment to paused when the item is paused", () => {
-    render(<ChainBar nodes={NODES} currentNodeId="verify" size="lg" paused />);
+    render(<MiniChain nodes={NODES} currentNodeId="verify" size="lg" paused />);
     expect(screen.getByTestId("node-verify")).toHaveAttribute("data-state", "paused");
   });
 
   it("draws a node list with no work item behind it", () => {
     // The chain-template editor draws a draft that has no work item: nothing is
     // current, nothing is done, and every segment is todo.
-    render(<ChainBar nodes={NODES} size="lg" />);
+    render(<MiniChain nodes={NODES} size="lg" />);
     expect(screen.getByTestId("node-env_setup")).toHaveAttribute("data-state", "todo");
     expect(screen.getByTestId("node-verify")).toHaveAttribute("data-state", "todo");
     expect(screen.getByText("merge")).toBeInTheDocument();
@@ -44,9 +44,7 @@ describe("ChainBar", () => {
   it("marks an unresolved segment", () => {
     // Invalid outranks current: in the editor a node whose task does not
     // resolve is the thing to look at.
-    render(
-      <ChainBar nodes={NODES} currentNodeId="verify" invalid={["verify"]} size="lg" />,
-    );
+    render(<MiniChain nodes={NODES} currentNodeId="verify" invalid={["verify"]} size="lg" />);
     expect(screen.getByTestId("node-verify")).toHaveAttribute("data-state", "invalid");
   });
 });
@@ -85,6 +83,21 @@ describe("StatusGlyph / RowState", () => {
       rateLimited.querySelector("svg")?.outerHTML,
     );
   });
+
+  it("has a glyph for every item-level design state", () => {
+    for (const status of [
+      "gate",
+      "capped",
+      "question",
+      "budget",
+      "not_started",
+      "abandoned",
+    ] as const) {
+      const { unmount } = render(<StatusGlyph status={status} />);
+      expect(screen.getByRole("img", { name: status })).toBeInTheDocument();
+      unmount();
+    }
+  });
 });
 
 describe("OverflowMenu", () => {
@@ -115,5 +128,41 @@ describe("Tabs", () => {
     expect(screen.getByRole("tab", { name: /Tasks/ })).toHaveAttribute("aria-selected", "true");
     await userEvent.click(screen.getByRole("tab", { name: "Timeline" }));
     expect(onChange).toHaveBeenCalledWith("timeline");
+  });
+});
+
+describe("Switch", () => {
+  it("is a role=switch that reports its toggled value and carries a label", async () => {
+    const onChange = vi.fn();
+    render(<Switch checked={false} onChange={onChange} label="Auto-intake" />);
+    const el = screen.getByRole("switch", { name: "Auto-intake" });
+    expect(el).toHaveAttribute("aria-checked", "false");
+    await userEvent.click(el);
+    expect(onChange).toHaveBeenCalledWith(true);
+  });
+
+  it("does not fire when disabled", async () => {
+    const onChange = vi.fn();
+    render(<Switch checked={true} onChange={onChange} label="Auto-intake" disabled />);
+    await userEvent.click(screen.getByRole("switch", { name: "Auto-intake" }));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("Chip", () => {
+  it("renders a count and reports selection via aria-pressed", async () => {
+    const onClick = vi.fn();
+    render(<Chip label="Needs you" count={3} selected onClick={onClick} />);
+    const el = screen.getByRole("button", { name: /Needs you/ });
+    expect(el).toHaveAttribute("aria-pressed", "true");
+    expect(el).toHaveTextContent("3");
+    await userEvent.click(el);
+    expect(onClick).toHaveBeenCalledOnce();
+  });
+
+  it("defaults to unselected with no count shown", () => {
+    render(<Chip label="Running" />);
+    const el = screen.getByRole("button", { name: "Running" });
+    expect(el).toHaveAttribute("aria-pressed", "false");
   });
 });

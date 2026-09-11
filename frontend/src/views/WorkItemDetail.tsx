@@ -13,7 +13,8 @@ import { ARTIFACT_LABELS, Gate } from "../components/Gate";
 import { LinkedDocuments } from "../components/LinkedDocuments";
 import { PausedCard } from "../components/PausedCard";
 import { SkipControl } from "../components/SkipControl";
-import { ChainBar, Row, RowState, RowText, StatusGlyph, Tabs } from "../components/ui";
+import { MiniChain, Row, RowState, RowText, StatusGlyph, Tabs } from "../components/ui";
+import { deriveState } from "../deriveState";
 import { elapsed, repoName, statusWord, tokens, usd } from "../format";
 import { useStore } from "../store";
 import type { KraftEvent, SessionStatus, WorkerSession, WorkItem } from "../types";
@@ -438,11 +439,14 @@ export function WorkItemDetail() {
         </div>
       </div>
 
-      <ChainBar
+      <MiniChain
         nodes={item.chain_definition.nodes}
         currentNodeId={item.current_node_id}
         done={item.completedNodes}
         size="lg"
+        paused={["paused", "capped", "abandoned", "rate_limited", "waiting"].includes(
+          deriveState(item).state,
+        )}
       />
 
       {/* Multi-repo only (design 3a): a single-repo item's `repos` is empty. */}
