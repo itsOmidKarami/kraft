@@ -41,10 +41,12 @@ _CTX = (
     "that one question rather than stopping once per fact.\n"
     "\n"
     "This session ends the moment your turn ends — there is no notification, "
-    "no callback, and nothing runs after you stop responding. Do not start a "
-    "job in the background and end your turn to wait for it: run every "
-    "command to completion in the foreground, however long it takes, before "
-    "you write your result and report status.\n"
+    "no callback, and nothing runs after you stop responding. Do not run a "
+    "command with run_in_background and end your turn to wait for it: run "
+    "every command to completion in the foreground, however long it takes, "
+    "before you write your result and report status. The Monitor tool is "
+    "disabled here for the same reason — it has no later turn to resume "
+    "into.\n"
     "\n"
     "You are working in a git worktree cut for this work item, on its own "
     "branch. Commit everything you change before you exit — `git add` and "
@@ -357,6 +359,13 @@ async def run_agent_task(
     identify_as_worker: bool = True,
     head_sha: str | None = None,
 ) -> str:
+    # Kraft-avpe: wording alone didn't hold -- a later session read "don't
+    # background work" as forbidding only a separate watcher, backgrounded a
+    # test run anyway, and ended its turn to wait on a notification a
+    # one-shot `claude -p` process will never deliver. Monitor is never
+    # legitimate in that process shape (no later turn for it to resume into),
+    # so deny it outright instead of trusting the prompt to be read narrowly.
+    deny_tools = tuple(dict.fromkeys((*deny_tools, "Monitor")))
     ctx = _CTX.format(
         title=title,
         task_instruction=task_instruction,

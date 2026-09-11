@@ -507,6 +507,8 @@ def test_default_profile_reproduces_todays_command_line(monkeypatch):
         "auto",
         "--permission-prompt-tool",
         "mcp__kraft__permission_request",
+        "--disallowed-tools",
+        "Monitor",
     ]
 
 
@@ -527,7 +529,8 @@ def test_agent_command_streams_ndjson(monkeypatch):
 def test_model_is_passed_through_as_a_flag(monkeypatch):
     seen = _capture_cmd(monkeypatch)
     _run(model="opus")
-    assert seen["cmd"][-2:] == ["--model", "opus"]
+    cmd = seen["cmd"]
+    assert cmd[cmd.index("--model") + 1] == "opus"
 
 
 def test_no_model_emits_no_model_flag(monkeypatch):
@@ -540,14 +543,22 @@ def test_no_model_emits_no_model_flag(monkeypatch):
 def test_deny_tools_become_one_comma_joined_flag(monkeypatch):
     seen = _capture_cmd(monkeypatch)
     _run(deny_tools=("WebFetch", "Bash"))
-    assert seen["cmd"][-2:] == ["--disallowed-tools", "WebFetch,Bash"]
+    assert seen["cmd"][-2:] == ["--disallowed-tools", "WebFetch,Bash,Monitor"]
 
 
-def test_empty_deny_tools_emits_no_flag(monkeypatch):
-    """Regression guard: passes before this task too."""
+def test_monitor_is_always_denied(monkeypatch):
+    """Kraft-avpe: Monitor has no later turn to resume into in a one-shot
+    `claude -p` session, so it is denied unconditionally rather than left to
+    a prompt an agent can read narrowly."""
     seen = _capture_cmd(monkeypatch)
     _run()
-    assert "--disallowed-tools" not in seen["cmd"]
+    assert seen["cmd"][-2:] == ["--disallowed-tools", "Monitor"]
+
+
+def test_monitor_is_not_duplicated_when_a_caller_already_denies_it(monkeypatch):
+    seen = _capture_cmd(monkeypatch)
+    _run(deny_tools=("Monitor", "Bash"))
+    assert seen["cmd"][-2:] == ["--disallowed-tools", "Monitor,Bash"]
 
 
 def test_allowed_tools_and_permission_mode_come_from_the_binding(monkeypatch):
