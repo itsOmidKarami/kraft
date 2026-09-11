@@ -6,7 +6,7 @@ dispatch is deliberately not a Kraft worker (`identify_as_worker=False`):
 `client.resolve_context()` then resolves it the same as a human's own
 session standing in the worktree, which is what lets it call
 `kraft item retry` on the very item it is escalating without any change to
-`client._forbid_self_action`.
+`client.context._forbid_self_action`.
 """
 
 from __future__ import annotations
@@ -49,7 +49,8 @@ def _description_line(row) -> str:
 def _reason(db, work_item_id: str) -> str:
     """The most recent `work_item_needs_human` event's reason -- the live
     answer to "why is this stopped", same reverse-scan idiom
-    `executor._last_measurement`/`_needs_context_question` already use."""
+    `kraft.executor.dispatch.last_measurement`/`needs_context_question`
+    already use."""
     evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
     for e in reversed(evts):
         if e["type"] == "work_item_needs_human":
@@ -95,7 +96,7 @@ async def dispatch(
     thread, resuming it if `work_items.escalation_session_id` is already set.
 
     Assumes its caller already checked the item is `needs_human` and that no
-    escalation turn is currently running for it -- api.py's job, the same
+    escalation turn is currently running for it -- kraft.api.routes.lifecycle's job, the same
     separation `executor.run`/`resume` keep from their own preconditions.
     """
     row = db.read(

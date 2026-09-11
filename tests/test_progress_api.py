@@ -8,8 +8,8 @@ import os
 import sqlite3
 from pathlib import Path
 
+from support.api import _client, _force_node
 from support.harness import _git, make_repo
-from test_api import _client, _force_node
 
 from kraft import events
 from kraft.config import git_read

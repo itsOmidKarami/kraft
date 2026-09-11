@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from kraft import logs, store
-from kraft.adapters.forge import _default_branch
+from kraft.adapters.forge import git
 from kraft.config import git_read, main_ignore_args
 
 logger = logging.getLogger(__name__)
@@ -389,7 +389,7 @@ async def ensure_worktree(
     done = await asyncio.to_thread(subprocess.run, args, cwd=repo, capture_output=True, text=True)
     if done.returncode != 0:
         # Raised, not returned: this runs outside a session, so there is no
-        # session status to carry the failure. `api._guard` turns it into
+        # session status to carry the failure. `kraft.api.deps.guard` turns it into
         # needs_human with the git stderr in the reason.
         detail = done.stderr.strip() or done.stdout.strip()
         raise RuntimeError(f"git worktree add failed for {work_item_id}: {detail}")
@@ -450,7 +450,7 @@ async def upstream_head(repo: Path) -> str | None:
     user already chose an ssh command, which an env var would override.
     """
     if git_read(repo, "remote", "get-url", "origin", expected_failure=True):
-        default = await _default_branch(repo)
+        default = await git.default_branch(repo)
         ref = f"refs/remotes/origin/{default}"
         env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
         if "GIT_SSH_COMMAND" not in env and not git_read(
@@ -490,7 +490,7 @@ async def refresh_worktree_base(worktree: Path, repo: Path, branch: str) -> str 
     contains that HEAD, the branch already has an `origin` remote-tracking
     ref, or the worktree has uncommitted changes -- all four are best-effort
     skips (logged), same posture as `ensure_worktree`'s other git steps.
-    The dirty-tree case comes from a pause via SIGTERM (`api.py:_terminate`)
+    The dirty-tree case comes from a pause via SIGTERM (`kraft.api.routes.lifecycle._terminate`)
     catching an agent mid-edit with nothing committed yet, and `git rebase`
     itself refuses a dirty tree; the pushed-branch case is covered below.
 

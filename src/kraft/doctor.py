@@ -395,7 +395,7 @@ def _version_check() -> dict:
 
     here = update.installed()
     if os.environ.get("KRAFT_NO_UPDATE_CHECK"):
-        # The same switch `cli._update_notice` honours: one env var turns off
+        # The same switch `cli.admin._update_notice` honours: one env var turns off
         # every version check, so an air-gapped machine never reaches for the
         # network and a test suite never depends on gitlab.com being up.
         return _check("version", True, f"{here} (skipped: KRAFT_NO_UPDATE_CHECK)", skipped=True)

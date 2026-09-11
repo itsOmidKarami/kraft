@@ -261,7 +261,7 @@ def test_fix_dispatch_after_resume_still_carries_the_previous_attempt(tmp_path, 
             # env_setup for real so the worktree pytest runs inside exists.
             await database.write(lambda c: store.load_chain(c, wid, "env_setup"))
             env_node = {"id": "env_setup", "tasks": ["on.env.prepare"], "fix_loop": None}
-            assert await executor._walk_node(database, rd, wid, env_node, row, registry, wt) == "ok"
+            assert await executor.walk_node(database, rd, wid, env_node, row, registry, wt) == "ok"
 
             # Seed a full cycle 1 that ran before the crash: cycle-0 measure fails,
             # a fix task runs and reports done, and its re-measure fails again --
@@ -342,7 +342,7 @@ def test_previous_attempt_note_omits_the_summary_sentence_when_absent():
     """A fix task that ran without writing a session summary (e.g. a
     subprocess-kind fix hook) must not leave a dangling summary sentence
     behind."""
-    note = executor._previous_attempt_note(
+    note = executor.previous_attempt_note(
         {"result_path": "/r/cycle1.json", "session_summary_ref": None}
     )
     assert "/r/cycle1.json" in note
@@ -350,7 +350,7 @@ def test_previous_attempt_note_omits_the_summary_sentence_when_absent():
 
 
 def test_previous_attempt_note_includes_the_summary_sentence_when_present():
-    note = executor._previous_attempt_note(
+    note = executor.previous_attempt_note(
         {"result_path": "/r/cycle1.json", "session_summary_ref": ".engineering/sessions/x.md"}
     )
     assert "/r/cycle1.json" in note
@@ -358,7 +358,7 @@ def test_previous_attempt_note_includes_the_summary_sentence_when_present():
 
 
 def test_previous_attempt_note_is_empty_with_no_previous_attempt():
-    assert executor._previous_attempt_note(None) == ""
+    assert executor.previous_attempt_note(None) == ""
 
 
 def test_a_fix_cycle_past_escalate_after_launches_with_escalate_model(tmp_path, monkeypatch):

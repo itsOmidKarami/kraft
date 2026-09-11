@@ -1,7 +1,7 @@
 """Kraft-m2q: REPEAT marking and no-progress escalation read the same
 measurement but ask different questions of it.
 
-`_last_measurement` used to be `_previous_fingerprints`, which returned None
+`kraft.executor.dispatch.last_measurement` used to be `_previous_fingerprints`, which returned None
 unless a fix cycle had followed the measurement. That gate is right for
 escalation and wrong for REPEAT marking, which only needs "was this finding in
 the last measurement" -- so on the first fix cycle after a steered `POST /retry`
@@ -28,7 +28,7 @@ from kraft.templates import Registry, Template
 
 def _seed(tmp_path, seq):
     """Run `seq` as (event_type, payload) against one work item, then return
-    `_last_measurement` for node 'verify'."""
+    `kraft.executor.dispatch.last_measurement` for node 'verify'."""
     repo = make_repo(tmp_path)
 
     async def scenario():
@@ -48,7 +48,7 @@ def _seed(tmp_path, seq):
             )
             for etype, payload in seq:
                 await database.write(lambda c, e=etype, p=payload: events.append(c, "w1", e, p))
-            return executor._last_measurement(database, "w1", "verify")
+            return executor.last_measurement(database, "w1", "verify")
         finally:
             await database.close()
 

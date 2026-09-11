@@ -48,8 +48,8 @@ def _fake_forge(monkeypatch):
     """Every backend resolves to one shared FakeForge, so the test can read
     back what `set_labels` was called with."""
     fake = forge_mod.FakeForge()
-    monkeypatch.setattr("kraft.api.forge_mod.backend_for", lambda *a, **k: "fake")
-    monkeypatch.setattr("kraft.api.forge_mod.resolve", lambda name: fake)
+    monkeypatch.setattr("kraft.adapters.forge.backend_for", lambda *a, **k: "fake")
+    monkeypatch.setattr("kraft.adapters.forge.resolve", lambda name: fake)
     return fake
 
 
@@ -94,6 +94,7 @@ def test_set_mr_labels_is_not_a_self_action(tmp_path, monkeypatch):
     rule 2 is about gates, not this), so the client helper must not refuse it
     the way `retry`/`approve_gate` refuse a worker acting on itself."""
     from kraft import client as client_mod
+    from kraft.client import transport
 
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     (tmp_path / "run" / "worktrees").mkdir(parents=True)
@@ -105,7 +106,7 @@ def test_set_mr_labels_is_not_a_self_action(tmp_path, monkeypatch):
         posted["path"], posted["payload"] = path, payload
         return {"work_item_id": "mine", "labels": payload["labels"]}
 
-    monkeypatch.setattr(client_mod, "_act", fake_act)
+    monkeypatch.setattr(transport, "_act", fake_act)
 
     import asyncio
 

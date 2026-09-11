@@ -46,7 +46,7 @@ origin: docs/consolidated/01_conceptual_model.md §3.1
 
 ## REQ reject-without-a-note-is-rejected
 IF a gate rejection carries no note, THEN the system SHALL reject the request.
-enforced-by: tests/test_api.py::test_gate_reject_requires_note_and_re_runs_the_producer
+enforced-by: tests/test_api_gates.py::test_gate_reject_requires_note_and_re_runs_the_producer
 origin: docs/consolidated/02_orchestrator_core.md §10.1
 
 ## REQ reject-without-a-note-leaves-the-gate-open
@@ -62,7 +62,7 @@ origin: docs/consolidated/02_orchestrator_core.md §7.2
 ## REQ producer-gate-reject-reinvokes-the-producing-hook
 WHEN a `spec_approval` or `plan_approval` gate is rejected, the system SHALL
 re-invoke that node's own producing hook.
-enforced-by: tests/test_planning_chain.py::test_spec_gate_offers_the_document_then_reject_and_approve, tests/test_planning_chain.py::test_a_rejected_plan_rerun_is_framed_as_a_revision, tests/test_api.py::test_gate_reject_requires_note_and_re_runs_the_producer
+enforced-by: tests/test_planning_chain.py::test_spec_gate_offers_the_document_then_reject_and_approve, tests/test_planning_chain.py::test_a_rejected_plan_rerun_is_framed_as_a_revision, tests/test_api_gates.py::test_gate_reject_requires_note_and_re_runs_the_producer
 origin: docs/consolidated/02_orchestrator_core.md §7.2
 
 ## REQ chain-finalized-reject-reinvokes-chain-review
@@ -79,7 +79,7 @@ origin: docs/consolidated/02_orchestrator_core.md §7.2
 ## REQ producer-gate-reject-increments-its-reject-loop-counter
 WHEN a `spec_approval` gate is rejected, the system SHALL increment the
 `spec_approval_reject_loop` counter for that work item.
-enforced-by: tests/test_api.py::test_gate_reject_is_bounded_by_its_reject_loop
+enforced-by: tests/test_api_gates.py::test_gate_reject_is_bounded_by_its_reject_loop
 origin: docs/consolidated/02_orchestrator_core.md §7.2
 
 ## REQ plan-approval-reject-increments-its-reject-loop-counter
@@ -100,7 +100,7 @@ origin: docs/consolidated/02_orchestrator_core.md §7.2
 ## REQ reject-loop-breach-sets-needs-human
 IF a `<gate>_reject_loop` counter is at its cap, THEN the system SHALL leave the
 work item in `needs_human`.
-enforced-by: tests/test_gate_review.py::test_repeated_fixed_verdicts_breach_the_reject_loop, tests/test_api.py::test_gate_reject_is_bounded_by_its_reject_loop
+enforced-by: tests/test_gate_review.py::test_repeated_fixed_verdicts_breach_the_reject_loop, tests/test_api_gates.py::test_gate_reject_is_bounded_by_its_reject_loop
 origin: docs/consolidated/02_orchestrator_core.md §7.2
 
 ## REQ reinvoked-node-reopens-its-own-gate
@@ -112,13 +112,13 @@ origin: docs/consolidated/02_orchestrator_core.md §7.2
 ## REQ reject-to-re-enters-the-named-node
 WHERE a gate's node declares a `reject_to` node, the system SHALL move the work
 item to that node when the gate is rejected.
-enforced-by: tests/test_gate_review.py::test_verdict_reenters_the_walk_at_the_right_node[reject-0], tests/test_api.py::test_rejecting_the_final_gate_re_enters_at_implementation
+enforced-by: tests/test_gate_review.py::test_verdict_reenters_the_walk_at_the_right_node[reject-0], tests/test_api_gates.py::test_rejecting_the_final_gate_re_enters_at_implementation
 origin: templates/default.yaml
 
 ## REQ reject-to-carries-the-note-as-steer
 WHERE a gate's node declares a `reject_to` node, the system SHALL carry the
 reviewer's note into the re-entered node as steer context.
-enforced-by: tests/test_gate_review.py::test_verdict_reenters_the_walk_at_the_right_node[reject-0], tests/test_api.py::test_rejecting_the_final_gate_re_enters_at_implementation
+enforced-by: tests/test_gate_review.py::test_verdict_reenters_the_walk_at_the_right_node[reject-0], tests/test_api_gates.py::test_rejecting_the_final_gate_re_enters_at_implementation
 origin: templates/default.yaml
 
 ## REQ chain-review-gate-requires-a-plan-node
@@ -129,7 +129,7 @@ origin: docs/consolidated/01_conceptual_model.md §3.5
 ## REQ chain-finalized-approval-splices-the-revised-chain
 WHEN the `chain_finalized` gate is approved, the system SHALL splice the revised
 chain nodes into the work item's `chain_definition`.
-enforced-by: tests/test_api.py::test_chain_review_splice_runs_the_revised_tail
+enforced-by: tests/test_api_gates.py::test_chain_review_splice_runs_the_revised_tail
 origin: docs/consolidated/02_orchestrator_core.md §7.2
 
 ## REQ chain-revision-leaves-executed-nodes-alone
@@ -158,12 +158,12 @@ origin: docs/consolidated/01_conceptual_model.md §8.1
 ## REQ intake-copies-a-gate-trimming-attachment
 WHEN intake trims a gate for an attachment, the system SHALL copy that attachment
 into Kraft's own storage.
-enforced-by: tests/test_executor.py::test_intake_copies_an_attachment_into_kraft_storage, tests/test_executor.py::test_the_copy_survives_the_original_being_deleted
+enforced-by: tests/test_executor_entry.py::test_intake_copies_an_attachment_into_kraft_storage, tests/test_executor_entry.py::test_the_copy_survives_the_original_being_deleted
 origin: docs/consolidated/01_conceptual_model.md §8.1
 
 ## REQ intake-refuses-an-uncopyable-attachment
 IF intake cannot copy an attachment, THEN the system SHALL refuse the intake.
-enforced-by: tests/test_executor.py::test_intake_refuses_an_attachment_it_cannot_copy
+enforced-by: tests/test_executor_entry.py::test_intake_refuses_an_attachment_it_cannot_copy
 origin: docs/consolidated/01_conceptual_model.md §8.1
 
 ## REQ missing-stored-attachment-fails-loudly

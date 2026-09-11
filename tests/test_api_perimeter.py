@@ -10,6 +10,8 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 from support.harness import fake_templates_dir, isolated_bd, make_repo
 
+from kraft import auth
+
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 
@@ -48,9 +50,14 @@ def _set_password(client, monkeypatch):
     monkeypatch.setattr(st, "access", {**st.access, "password_hash": "x"}, raising=False)
 
 
+@pytest.fixture
+def templates_dir(tmp_path):
+    return fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
+
+
 def test_client_is_local_reads_the_peer_address():
     """Fails closed: anything that is not a parseable loopback IP is remote."""
-    from kraft.api import _client_is_local
+    from kraft.api.perimeter import _client_is_local
 
     def peer(host):
         addr = None if host is None else type("Addr", (), {"host": host})()
@@ -285,3 +292,152 @@ def test_the_websocket_perimeter_stands_on_its_own(tmp_path, monkeypatch):
             with lan.websocket_connect("/api/ws/events"):
                 pass
         assert exc.value.code == 1008
+
+
+def test_the_spa_bundle_loads_before_a_session_exists(tmp_path, monkeypatch, templates_dir):
+    """The login page cannot render if its own JS comes back 401."""
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<!doctype html>")
+    (dist / "assets" / "app.js").write_text("console.log(1)")
+    monkeypatch.setenv("KRAFT_HOST", "0.0.0.0")
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path, name=next(_bd_names))))
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates_dir))
+    monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(dist))
+    import kraft.api as api
+
+    with TestClient(api.app, client=("127.0.0.1", 54321)) as client:
+        client.put("/api/access", json={"bind": "0.0.0.0", "password": "hunter2"})
+        client.cookies.clear()
+        assert client.get("/assets/app.js").status_code == 200
+        assert client.get("/api/work-items").status_code == 401
+        # Kraft-qntj: any non-/api GET is the SPA shell now, same trust level as
+        # a static asset — but traversal must still land on the shell, not on a
+        # file outside dist. 200 here is the shell, not a leak.
+        r = client.get("/../pyproject.toml")
+        assert r.status_code == 200, r.text
+        assert r.text == "<!doctype html>"
+
+
+def test_the_event_stream_needs_a_session_too(tmp_path, monkeypatch):
+    """HTTP middleware does not run for websockets; the check has to be in the
+    endpoint or a LAN bind leaves the live stream wide open."""
+    with _client(tmp_path, monkeypatch, host="0.0.0.0") as client:
+        client.put("/api/access", json={"bind": "0.0.0.0", "password": "hunter2"})
+        client.cookies.clear()
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect("/api/ws/events") as ws:
+                ws.receive_text()
+
+        client.post("/api/login", json={"password": "hunter2"})
+        # a fresh item's events arrive on the stream once the session is real
+        with client.websocket_connect("/api/ws/events") as ws:
+            client.post("/api/work-items", json={"title": "hello", "repo": str(tmp_path)})
+            assert ws.receive_json()["type"] == "work_item_created"
+
+
+def test_a_forged_navigation_header_cannot_write(tmp_path, monkeypatch, templates_dir):
+    """`sec-fetch-dest` is a request header any client can send. It must never be
+    a way past the session check into a real handler — every route it could
+    forge its way into lives under /api/, which the shell-diversion branches
+    exclude outright, so a forged header there just hits the real 401."""
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<!doctype html>")
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path, name=next(_bd_names))))
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates_dir))
+    monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(dist))
+    monkeypatch.setenv("KRAFT_HOST", "0.0.0.0")
+    import kraft.api as api
+
+    with TestClient(api.app, client=("127.0.0.1", 54321)) as client:
+        client.put("/api/access", json={"bind": "0.0.0.0", "password": "hunter2"})
+        client.cookies.clear()
+        forged = {"sec-fetch-dest": "document"}
+
+        # a POST is never a navigation
+        assert client.post("/api/work-items/x/pause", json={}, headers=forged).status_code == 401
+        assert (
+            client.put("/api/access", json={"bind": "0.0.0.0"}, headers=forged).status_code == 401
+        )
+        assert client.delete("/api/sessions/abc", headers=forged).status_code == 401
+
+        # a GET navigation gets the real 401, not a way in and not the shell —
+        # /api/ is unambiguous JSON, forged header or not
+        r = client.get("/api/work-items", headers=forged)
+        assert r.status_code == 401
+        assert not r.text.startswith("<!doctype html>")
+
+        # the same header on a client-side route still gets the shell — that
+        # part of the mechanism is unchanged, just no longer reachable under /api/
+        shell = client.get("/work-items", headers=forged)
+        assert shell.status_code == 200
+        assert shell.text.startswith("<!doctype html>")
+
+
+def test_a_bind_change_does_not_lock_out_a_server_still_on_loopback(tmp_path, monkeypatch):
+    """The bind takes effect on restart, so auth has to follow what the process
+    actually bound — otherwise saving the setting logs the local operator out of
+    a server that is still only listening on 127.0.0.1."""
+    with _client(tmp_path, monkeypatch) as client:
+        client.put("/api/access", json={"bind": "0.0.0.0", "password": "hunter2"})
+        client.cookies.clear()
+        assert client.get("/api/work-items").status_code == 200
+        assert client.get("/api/access").json()["auth_required"] is False
+
+
+def test_a_failed_write_does_not_sign_everyone_out(tmp_path, monkeypatch):
+    """Revoking first and then failing to persist the new hash would sign every
+    session out while leaving the old password live."""
+    with _client(tmp_path, monkeypatch, host="0.0.0.0") as client:
+        client.put("/api/access", json={"bind": "0.0.0.0", "password": "first"})
+        client.post("/api/login", json={"password": "first"})
+        before = [s["id"] for s in client.get("/api/sessions").json()["sessions"]]
+        assert len(before) == 1
+
+        monkeypatch.setattr(
+            "kraft.config.save_access",
+            lambda *a, **k: (_ for _ in ()).throw(OSError("read-only")),
+        )
+        with pytest.raises(OSError):
+            client.put("/api/access", json={"password": "second"})
+        # still signed in, still on the old password (last_seen_at moves; the
+        # session itself is what must survive)
+        assert [s["id"] for s in client.get("/api/sessions").json()["sessions"]] == before
+        assert client.get("/api/work-items").status_code == 200
+
+
+def test_a_bearer_token_authenticates_where_a_cookie_would(tmp_path, monkeypatch):
+    """`kraft mcp` has no cookie jar. The token file is its credential (design §5)."""
+    with _client(tmp_path, monkeypatch, host="0.0.0.0") as client:
+        assert (
+            client.put("/api/access", json={"bind": "0.0.0.0", "password": "hunter2"}).status_code
+            == 200
+        )
+        client.cookies.clear()
+        assert client.get("/api/work-items").status_code == 401
+
+        token = auth.read_mcp_token(tmp_path / "run")
+        assert token, "serving should have created the token file"
+        assert (
+            client.get("/api/work-items", headers={"Authorization": f"Bearer {token}"}).status_code
+            == 200
+        )
+        assert (
+            client.get("/api/work-items", headers={"Authorization": "Bearer wrong"}).status_code
+            == 401
+        )
+        # a bare token without the scheme is not a credential
+        assert client.get("/api/work-items", headers={"Authorization": token}).status_code == 401
+
+
+def test_a_document_navigation_cannot_slip_past_the_bearer_check(tmp_path, monkeypatch):
+    """The SPA-shell branch runs first, so it must not become an auth bypass for
+    JSON: with no dist configured there is no shell, and the request still 401s."""
+    with _client(tmp_path, monkeypatch, host="0.0.0.0") as client:
+        client.put("/api/access", json={"bind": "0.0.0.0", "password": "hunter2"})
+        client.cookies.clear()
+        r = client.get("/api/work-items", headers={"sec-fetch-dest": "document"})
+        assert r.status_code == 401

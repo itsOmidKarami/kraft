@@ -62,9 +62,10 @@ def test_autostart_defaults_true_so_the_ui_is_unaffected(client, tmp_path):
 
 
 def test_resuming_a_never_started_item_begins_at_node_zero(client, tmp_path):
-    """api.py's `next(..., 0)` default is what makes a NULL current_node_id
-    resolve to the first node. Nothing else was written for this case, so if that
-    expression is ever refactored, this test is the thing that notices."""
+    """`kraft.api.routes.lifecycle.resume_work_item`'s `next(..., 0)` default is
+    what makes a NULL current_node_id resolve to the first node. Nothing else
+    was written for this case, so if that expression is ever refactored, this
+    test is the thing that notices."""
     repo = make_repo(tmp_path)
     wid = client.post(
         "/api/work-items", json={"title": "start me", "repo": str(repo), "autostart": False}

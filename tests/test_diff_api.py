@@ -135,9 +135,9 @@ def test_diff_landed_and_in_flight_truncate_independently(
 ):
     """Each side gets the whole DIFF_MAX_BYTES budget and its own flag: the
     in-flight change must not be squeezed by the size of the paperwork."""
-    import kraft.api as api_mod
+    from kraft.api.routes import artifacts
 
-    monkeypatch.setattr(api_mod, "DIFF_MAX_BYTES", 200)
+    monkeypatch.setattr(artifacts, "DIFF_MAX_BYTES", 200)
     for i in range(20):
         _write(worktree / f"landed{i}.py", "x = 1\n" * 100)
     subprocess.run(["git", "add", "-A"], cwd=worktree, check=True)
@@ -229,9 +229,9 @@ def test_diff_500s_when_git_fails_rather_than_returning_empty(client, seeded_ite
 
 
 def test_diff_truncates_at_a_file_boundary(client, seeded_item, worktree, monkeypatch):
-    import kraft.api as api_mod
+    from kraft.api.routes import artifacts
 
-    monkeypatch.setattr(api_mod, "DIFF_MAX_BYTES", 200)
+    monkeypatch.setattr(artifacts, "DIFF_MAX_BYTES", 200)
     for i in range(20):
         _write(worktree / f"f{i}.py", "x = 1\n" * 100)
     subprocess.run(["git", "add", "-A"], cwd=worktree, check=True)
@@ -249,7 +249,7 @@ def test_truncate_bounds_a_single_file_bigger_than_the_cap():
     # `kept` is empty on the very first chunk regardless of its size, so a
     # lone oversized file must not be returned whole just because there was
     # no earlier chunk to compare it against.
-    from kraft.api import _truncate_at_file_boundary
+    from kraft.api.routes.artifacts import _truncate_at_file_boundary
 
     diff = "diff --git a/big.bin b/big.bin\n" + ("x" * 50 + "\n") * 20
     assert len(diff.encode()) > 200

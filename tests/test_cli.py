@@ -4,9 +4,11 @@ it is just the server the rest of the suite already covers."""
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
+import uvicorn
 
 from kraft import cli, paths
 
@@ -34,7 +36,7 @@ def _bundle(monkeypatch, tmp_path) -> Path:
     # in the bundle so seed_home is proven to strip it, not just to never have
     # been given one.
     (bundled / "notify.yaml").write_text("url: https://hook.invalid/t0ken\n")
-    monkeypatch.setattr(cli, "BUNDLED", tmp_path / "_bundled")
+    monkeypatch.setattr(cli.admin, "BUNDLED", tmp_path / "_bundled")
     return bundled
 
 
@@ -65,7 +67,7 @@ def test_seed_home_says_so_when_there_is_nothing_to_seed_with(monkeypatch, tmp_p
     die on a bare FileNotFoundError for registry.yaml; say what is wrong instead."""
     import pytest
 
-    monkeypatch.setattr(cli, "BUNDLED", tmp_path / "missing")
+    monkeypatch.setattr(cli.admin, "BUNDLED", tmp_path / "missing")
     home = tmp_path / "home" / "templates"
 
     with pytest.raises(SystemExit, match="no bundled defaults"):
@@ -94,14 +96,14 @@ def test_seed_home_leaves_no_half_seeded_home_behind(monkeypatch, tmp_path):
 
 def test_bare_kraft_still_serves(monkeypatch):
     served = []
-    monkeypatch.setattr(cli, "_serve", lambda: served.append(True))
+    monkeypatch.setattr(cli.admin, "_serve", lambda: served.append(True))
     cli.main([])
     assert served == [True]
 
 
 def test_unknown_subcommand_exits_with_a_usable_message(monkeypatch, capsys):
     """argparse owns usage errors now: exit 2, message on stderr, naming the verb."""
-    monkeypatch.setattr(cli, "_serve", lambda: pytest.fail("must not serve"))
+    monkeypatch.setattr(cli.admin, "_serve", lambda: pytest.fail("must not serve"))
     with pytest.raises(SystemExit) as exc:
         cli.main(["wat"])
     assert exc.value.code == 2
@@ -125,7 +127,7 @@ def _servable_home(monkeypatch, tmp_path, access_yaml: str) -> Path:
 def test_serve_verb_reaches_uvicorn_with_the_configured_bind(monkeypatch, tmp_path):
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
     seen = {}
-    monkeypatch.setattr(cli.uvicorn, "run", lambda app, **kw: seen.update(kw))
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: seen.update(kw))
     cli.main(["admin", "start"])
     assert seen["host"] == "127.0.0.1"
     assert seen["port"] == 8765
@@ -134,7 +136,7 @@ def test_serve_verb_reaches_uvicorn_with_the_configured_bind(monkeypatch, tmp_pa
 def test_serve_flags_override_access_yaml(monkeypatch, tmp_path):
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
     seen = {}
-    monkeypatch.setattr(cli.uvicorn, "run", lambda app, **kw: seen.update(kw))
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: seen.update(kw))
     cli.main(["admin", "start", "--port", "9001"])
     assert seen["port"] == 9001
     assert seen["host"] == "127.0.0.1"  # untouched: only the flag given changes
@@ -144,7 +146,7 @@ def test_serve_flag_beats_env(monkeypatch, tmp_path):
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
     monkeypatch.setenv("KRAFT_PORT", "9002")
     seen = {}
-    monkeypatch.setattr(cli.uvicorn, "run", lambda app, **kw: seen.update(kw))
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: seen.update(kw))
     cli.main(["admin", "start", "--port", "9003"])
     assert seen["port"] == 9003
 
@@ -153,7 +155,7 @@ def test_serve_host_flag_cannot_bypass_the_password_check(monkeypatch, tmp_path)
     """The security regression test for this sub-project. A flag must not be a
     way around a check an env var respects."""
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
-    monkeypatch.setattr(cli.uvicorn, "run", lambda app, **kw: pytest.fail("must not bind"))
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: pytest.fail("must not bind"))
     with pytest.raises(SystemExit, match="refusing to bind 0.0.0.0"):
         cli.main(["admin", "start", "--host", "0.0.0.0"])
 
@@ -161,7 +163,7 @@ def test_serve_host_flag_cannot_bypass_the_password_check(monkeypatch, tmp_path)
 def test_bare_kraft_and_kraft_serve_are_the_same_path(monkeypatch, tmp_path):
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
     calls = []
-    monkeypatch.setattr(cli.uvicorn, "run", lambda app, **kw: calls.append(kw))
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: calls.append(kw))
     cli.main([])
     cli.main(["admin", "start"])
     assert calls[0] == calls[1]
@@ -193,7 +195,7 @@ def test_detach_returns_once_the_child_writes_the_pidfile(monkeypatch, tmp_path,
             on_start=lambda: paths.RunDirs(run_dir).ensure().pid.write_text(fake_child_pid)
         )
 
-    monkeypatch.setattr(cli.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
     cli.main(["admin", "start", "--detach"])
     out = capsys.readouterr().out
     assert "127.0.0.1:8765" in out
@@ -208,9 +210,7 @@ def test_detach_refuses_while_one_is_already_running(monkeypatch, tmp_path, caps
     pid_path = paths.RunDirs(run_dir).pid
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     pid_path.write_text(str(os.getpid()))
-    monkeypatch.setattr(
-        cli.subprocess, "Popen", lambda *a, **k: pytest.fail("spawned a second server")
-    )
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("spawned a second server"))
     with pytest.raises(SystemExit):
         cli.main(["admin", "start", "--detach"])
     assert "already running" in capsys.readouterr().err
@@ -220,7 +220,7 @@ def test_detach_reports_a_child_that_exits_before_binding(monkeypatch, tmp_path,
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
     run_dir = tmp_path / "run"
     monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
-    monkeypatch.setattr(cli.subprocess, "Popen", lambda *a, **k: _FakePopen(exit_code=1))
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: _FakePopen(exit_code=1))
     with pytest.raises(SystemExit):
         cli.main(["admin", "start", "--detach"])
     assert "detached start failed" in capsys.readouterr().err
@@ -231,9 +231,7 @@ def test_detach_host_flag_cannot_bypass_the_password_check(monkeypatch, tmp_path
     a check an env var respects, detached or not."""
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setattr(
-        cli.subprocess, "Popen", lambda *a, **k: pytest.fail("must not spawn a child")
-    )
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("must not spawn a child"))
     with pytest.raises(SystemExit, match="refusing to bind 0.0.0.0"):
         cli.main(["admin", "start", "--detach", "--host", "0.0.0.0"])
 

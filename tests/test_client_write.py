@@ -28,7 +28,7 @@ def wired(tmp_path, monkeypatch):
     import kraft.api as api
 
     monkeypatch.setattr(
-        client,
+        client.transport,
         "http",
         lambda: httpx.AsyncClient(
             transport=httpx.ASGITransport(app=api.app), base_url="http://kraft"
