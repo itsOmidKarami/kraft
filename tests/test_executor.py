@@ -1987,6 +1987,63 @@ def test_a_subprocess_hook_falls_back_to_the_registry_command(tmp_path, monkeypa
     assert marker.read_text() == "registry"
 
 
+def _implementation_prompt(tmp_path, monkeypatch, plan_text: str) -> str:
+    """The one prompt quick-task sends, for an item whose attached plan is `plan_text`."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    plan_doc = repo / ".engineering" / "plans" / "p.md"
+    plan_doc.parent.mkdir(parents=True, exist_ok=True)
+    plan_doc.write_text(plan_text)
+    prompts = tmp_path / "prompts.txt"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompts))
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="make the failing test pass",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+                attachments=[{"kind": "plan", "path": ".engineering/plans/p.md"}],
+            )
+            await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    sent = [p for p in prompts.read_text().split("\n\x00\n") if p.strip()]
+    assert len(sent) == 1
+    return sent[0]
+
+
+def test_the_implementer_is_told_to_report_progress_through_a_tasked_plan(tmp_path, monkeypatch):
+    prompt = _implementation_prompt(
+        tmp_path, monkeypatch, "# p\n\n## Task 1 — parse\n\n## Task 2 — serve\n"
+    )
+    assert "This plan has 2 tasks." in prompt
+    assert "`kraft item progress K`" in prompt
+    assert "(task K)" in prompt
+    # after the attachment note, before the bead note that always closes the prompt
+    assert (
+        prompt.index("Do not re-plan.")
+        < prompt.index("This plan has 2 tasks.")
+        < prompt.index("Do not run `bd close`")
+    )
+
+
+def test_a_plan_without_task_headings_gets_no_progress_note(tmp_path, monkeypatch):
+    prompt = _implementation_prompt(tmp_path, monkeypatch, "# p\n\n## Step one\n")
+    assert "kraft item progress" not in prompt
+
+
 # ── test-scope selection (Kraft-9wzy) ───────────────────────────────────────
 
 

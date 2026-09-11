@@ -20,6 +20,7 @@ from kraft import config as _config
 from kraft import events, gate_review, store
 from kraft import findings as _findings
 from kraft import policy as _policy
+from kraft import progress as _progress
 from kraft import review as _review
 from kraft.adapters import agent as _agent
 from kraft.adapters import beads
@@ -153,6 +154,24 @@ _BEAD_NOTE = (
     "completes; closing it here would mark work done before verify, review "
     "and merge have run."
 )
+
+# How the implementer reports where it is in the plan, so the board can say
+# "Task 3 of 6" instead of leaving a human to read the log. The commit tag is
+# the fallback Kraft reads when a report was never made.
+_PROGRESS_NOTE = (
+    "\n\nThis plan has {total} tasks. When you start task K, run "
+    "`kraft item progress K`. Include `(task K)` in the subject of each "
+    "commit for that task."
+)
+
+
+def _progress_note(task_hook: str, work_item_row, worktree) -> str:
+    """Only on the implementation hook, and only for a plan with `## Task N`
+    headings to count."""
+    if task_hook != _progress.IMPLEMENTATION_HOOK:
+        return ""
+    tasks = _progress.tasks_for(work_item_row, Path(worktree))
+    return _PROGRESS_NOTE.format(total=len(tasks)) if tasks else ""
 
 
 def _brief(work_item_row) -> str:
@@ -640,7 +659,11 @@ async def _dispatch(
         note = steer.take() if steer else None
         instruction = (
             instruction_override
-            or (_brief(work_item_row) + _attachment_note(_attachments(work_item_row)))
+            or (
+                _brief(work_item_row)
+                + _attachment_note(_attachments(work_item_row))
+                + _progress_note(task_hook, work_item_row, worktree)
+            )
         ) + _BEAD_NOTE
         inv = _agent.resolve_invocation(
             binding,

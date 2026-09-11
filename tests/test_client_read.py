@@ -92,6 +92,7 @@ def test_list_work_items_is_trimmed(wired, tmp_path):
         "status",
         "current_node_id",
         "pending_gate",
+        "progress",
     }
 
 
