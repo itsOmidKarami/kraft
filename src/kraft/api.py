@@ -901,6 +901,10 @@ class Retry(BaseModel):
     steer: str | None = None
 
 
+class Skip(BaseModel):
+    note: str | None = None
+
+
 class MrLabels(BaseModel):
     labels: list[str]
 
@@ -1920,6 +1924,72 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         ),
     )
     return {"id": wid, "node_id": node_id, "loop": key, "steer": steer}
+
+
+@api_router.post("/work-items/{wid}/skip")
+async def skip_work_item(wid: str, body: Skip, request: Request):
+    """Advance past the current node or pending gate without running or
+    approving it (docs/superpowers/specs/2026-09-11-skip-step-design.md).
+
+    Works from any status the other doors cover between them — active/waiting
+    (kills the running session first, same ordering as pause), paused, or
+    needs_human, gate or no gate — because unlike retry/resume/approve/reject,
+    skip does not care what state stopped the item, only what node is current.
+    """
+    st = request.app.state
+    row = _work_item_row(st, wid)
+    if row["status"] not in ("active", "waiting", "paused", "needs_human"):
+        raise HTTPException(409, f"work item is {row['status']}, cannot skip")
+    running = _escalation_running(st, wid)
+    if running is not None:
+        raise HTTPException(409, f"an escalation turn ({running}) is already running")
+
+    chain = json.loads(row["chain_definition"])
+    gate = _pending_gate(st, wid)
+    if gate is not None:
+        node_index = _gate_node_index(chain, gate)
+    else:
+        node_index = next(
+            (i for i, n in enumerate(chain["nodes"]) if n["id"] == row["current_node_id"]), None
+        )
+        if node_index is None:
+            raise HTTPException(409, "work item has no current node to skip")
+    node_id = chain["nodes"][node_index]["id"]
+
+    sessions = []
+    if row["status"] in ("active", "waiting"):
+        sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
+
+    note = (body.note or "").strip() or None
+    session_ids = [s["id"] for s in sessions]
+    # mark first, then signal: same race pause_work_item guards against — a
+    # SIGTERM landing before the row says 'paused' resolves as 'failed'.
+    await st.db.write(
+        lambda c: store.skip_node(c, wid, node_id, gate, note, session_ids=session_ids)
+    )
+    for s in sessions:
+        _terminate(s["pid"])
+
+    _spawn(
+        request.app,
+        wid,
+        _guard(
+            st.db,
+            wid,
+            executor.run(
+                st.db,
+                st.run_dirs,
+                work_item_id=wid,
+                registry=st.registry,
+                bd_cwd=_bd_cwd(),
+                start_index=node_index + 1,
+                policy=st.policy,
+                launch=_launch(st, row["repo"]),
+                on_approve=_on_approve(st),
+            ),
+        ),
+    )
+    return {k: v for k, v in dict(_work_item_row(st, wid)).items()}
 
 
 @api_router.post("/work-items/{wid}/escalate")

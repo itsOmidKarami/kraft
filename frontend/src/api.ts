@@ -131,6 +131,9 @@ export const retryWorkItem = (id: string, steer?: string) =>
     json("POST", { steer: steer ?? null }),
   );
 
+export const skipWorkItem = (id: string, note?: string) =>
+  req<void>(`/work-items/${id}/skip`, json("POST", { note: note ?? null }));
+
 export const escalateWorkItem = (id: string, message: string) =>
   req<{ id: string; status: string }>(`/work-items/${id}/escalate`, json("POST", { message }));
 

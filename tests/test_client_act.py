@@ -115,8 +115,9 @@ def test_approve_gate_defaults_to_the_pending_gate(wired, tmp_path):
         lambda wid: client.reject_gate("no good", "spec_approval", work_item_id=wid),
         lambda wid: client.pause(work_item_id=wid),
         lambda wid: client.resume(work_item_id=wid),
+        lambda wid: client.skip(work_item_id=wid),
     ],
-    ids=["approve", "reject", "pause", "resume"],
+    ids=["approve", "reject", "pause", "resume", "skip"],
 )
 def test_every_act_function_refuses_a_worker_acting_on_itself(wired, tmp_path, monkeypatch, call):
     """The guard has to be wired into all four, not just the one that was
@@ -141,6 +142,17 @@ def test_retry_on_an_item_that_is_not_stopped_is_a_readable_409(wired, tmp_path)
     async def scenario():
         created = await client.create_work_item("not stopped", repo=str(repo))
         return await client.retry(work_item_id=created["id"])
+
+    with pytest.raises(ValueError, match="409"):
+        run_with_app(wired, scenario)
+
+
+def test_skip_on_an_item_that_has_not_started_is_a_readable_409(wired, tmp_path):
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        created = await client.create_work_item("not started", repo=str(repo))
+        return await client.skip(work_item_id=created["id"])
 
     with pytest.raises(ValueError, match="409"):
         run_with_app(wired, scenario)

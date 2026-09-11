@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Check, Flag } from "@phosphor-icons/react";
 import * as api from "../api";
 import { Escalate } from "./Escalate";
+import { SkipControl } from "./SkipControl";
 import type { Finding, WorkerSession, WorkItem } from "../types";
 
 /**
@@ -237,6 +238,7 @@ export function Gate({
           {approve}
           {startReject}
           <Escalate item={item} sessions={sessions} />
+          <SkipControl itemId={item.id} />
         </div>
       ) : (
         rejectForm

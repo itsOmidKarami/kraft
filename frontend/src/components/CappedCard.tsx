@@ -5,6 +5,7 @@ import { elapsed } from "../format";
 import type { KraftEvent, WorkItem, WorkerSession } from "../types";
 import { Escalate, escalating } from "./Escalate";
 import { LogModal } from "./LogModal";
+import { SkipControl } from "./SkipControl";
 
 /**
  * The stranded-fix-loop attention card (design 4b). It replaces the control row
@@ -164,6 +165,7 @@ export function CappedCard({
           {steerable ? "Steer and retry" : "Retry"}
         </button>
         <Escalate item={item} sessions={sessions} />
+        <SkipControl itemId={item.id} />
       </div>
       {!escalatingNow && (
         <p className="control-hint capped-hint">
