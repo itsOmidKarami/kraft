@@ -47,7 +47,9 @@ class _Stub:
     state: SimpleNamespace
 
 
-async def _stub(tmp_path, *, repo_entry=None, budget=policy.NO_BUDGET, **intake_overrides) -> _Stub:
+async def _stub(
+    tmp_path, *, repo_entry=None, budget=policy.NO_BUDGET, max_concurrent=3, **intake_overrides
+) -> _Stub:
     rd = RunDirs(tmp_path / "run").ensure()
     database = await db.Database.open(rd.db)
     templates_dir = fake_templates_dir(tmp_path, sys.executable)
@@ -65,7 +67,10 @@ async def _stub(tmp_path, *, repo_entry=None, budget=policy.NO_BUDGET, **intake_
             templates_dir=templates_dir,
             skills_dir=tmp_path / "skills",
             policy=policy.Policy(
-                loops={}, default=policy.Cap(attempts=3, wall_clock_s=3600), budget=budget
+                loops={},
+                default=policy.Cap(attempts=3, wall_clock_s=3600),
+                budget=budget,
+                max_concurrent=max_concurrent,
             ),
             invalid_policy=[],
             intake={**config.INTAKE_DEFAULT, "enabled": True, **intake_overrides},

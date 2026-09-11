@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import os
+import sqlite3
 from pathlib import Path
 
 import pytest
 import yaml
 from support.api_settings import _client
-from support.harness import fake_templates_dir
+from support.harness import fake_templates_dir, make_repo
 
 _FAKE_AGENT = Path(__file__).resolve().parents[0] / "support" / "fake_agent.py"
 
@@ -163,3 +165,72 @@ def test_templates_lists_only_resolvable_sorted(tmp_path, monkeypatch):
         assert "broken" not in ids
         assert ids == sorted(ids)
         assert "quick-task" in ids
+
+
+def test_parse_template_yaml_round_trips_default(client):
+    text = (Path(__file__).resolve().parents[1] / "templates" / "default.yaml").read_text()
+    body = client.post("/api/templates/parse", json={"text": text}).json()
+    assert body["error"] is None
+    assert body["nodes"][0]["id"] == "spec"
+    assert len(body["nodes"]) == 12
+
+
+def test_parse_template_yaml_reports_a_syntax_error(client):
+    body = client.post("/api/templates/parse", json={"text": "nodes: [unterminated"}).json()
+    assert body["nodes"] is None
+    assert body["error"]
+
+
+def test_parse_template_yaml_reports_a_shape_error(client):
+    body = client.post("/api/templates/parse", json={"text": "id: x\n"}).json()
+    assert body["nodes"] is None
+    assert "nodes" in body["error"]
+
+
+def test_hook_runs_lists_recent_sessions_for_the_hook(tmp_path, client, templates_dir):
+    repo = make_repo(tmp_path)
+    client.post("/api/repos", json={"path": str(repo), "test_command": "pytest"})
+    wid = client.post(
+        "/api/work-items",
+        json={"title": "x", "repo": str(repo), "chain_template": "quick-task", "autostart": False},
+    ).json()["id"]
+
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    try:
+        conn.execute(
+            "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, pid, "
+            "pid_start_time, log_path, result_path, status, attempt, created_at, exited_at, "
+            "round, head_sha) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, 'done', 1, ?, NULL, ?, NULL)",
+            (
+                "s1",
+                wid,
+                "implementation",
+                "on.test.run",
+                "/tmp/a",
+                "/tmp/a.json",
+                "2026-01-01T00:00:00Z",
+                0,
+            ),
+        )
+        conn.execute(
+            "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, pid, "
+            "pid_start_time, log_path, result_path, status, attempt, created_at, exited_at, "
+            "round, head_sha) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, 'done', 1, ?, NULL, ?, NULL)",
+            (
+                "s2",
+                wid,
+                "verify",
+                "on.test.run",
+                "/tmp/b",
+                "/tmp/b.json",
+                "2026-01-02T00:00:00Z",
+                2,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    runs = client.get("/api/registry/on.test.run/runs").json()["runs"]
+    assert runs[0]["node_id"] == "verify"  # newest first
+    assert len(runs) == 2

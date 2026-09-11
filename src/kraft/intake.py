@@ -62,7 +62,7 @@ async def tick(app) -> list[str]:
         return []
     # Every active item counts, not only auto-started ones: a person working on
     # three things must not find the poller adding a fourth.
-    slots = int(cfg.get("max_concurrent", 1)) - st.db.read(store.active_count)
+    slots = int(st.policy.max_concurrent if st.policy else 1) - st.db.read(store.active_count)
     if slots <= 0:
         return []
 

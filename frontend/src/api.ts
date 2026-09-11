@@ -11,6 +11,7 @@ import type {
   SessionStatus,
   SteeringList,
   HookBinding,
+  HookRun,
   Notify,
   Policy,
   Repo,
@@ -224,6 +225,11 @@ export const putTemplate = (id: string, nodes: TemplateNode[]) =>
     `/templates/${encodeURIComponent(id)}`,
     json("PUT", { nodes }),
   );
+export const parseTemplateYaml = (text: string) =>
+  req<{ nodes: TemplateNode[] | null; error: string | null }>(
+    "/templates/parse",
+    json("POST", { text }),
+  );
 
 export const getRegistry = () => req<{ hooks: Record<string, HookBinding> }>("/registry");
 export const putRegistry = (hooks: Record<string, HookBinding>) =>
@@ -231,6 +237,8 @@ export const putRegistry = (hooks: Record<string, HookBinding>) =>
     "/registry",
     json("PUT", { hooks }),
   );
+export const getHookRuns = (hook: string) =>
+  req<{ runs: HookRun[] }>(`/registry/${encodeURIComponent(hook)}/runs`);
 
 export const getPolicy = () => req<Policy>("/policy");
 export const putPolicy = (policy: Policy) => req<Policy>("/policy", json("PUT", policy));

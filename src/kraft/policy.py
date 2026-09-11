@@ -68,6 +68,12 @@ class Policy:
     #: read that as an immediate breach.
     rate_limit_retries: int = 5
     triggers: list[Trigger] = field(default_factory=list)
+    #: How many work items may be `status == 'active'` at once, across every
+    #: repo, however they were started. Moved here from intake.yaml (UI v2 ·
+    #: settings-how-work-runs, notes 10 "Concurrency") — auto-intake was never
+    #: the only door onto a running item, so the cap belongs where every door
+    #: (`resume`, `retry`) can read the same number.
+    max_concurrent: int = 3
 
 
 def _cap(name: str, raw: object) -> Cap:
@@ -202,6 +208,23 @@ def load_policy(path: str | Path) -> Policy:
     if not isinstance(triggers_raw, list):
         raise PolicyError(f"{path.name}: 'triggers' must be a list")
     triggers = [_trigger(f"{path.name}: triggers[{i}]", t) for i, t in enumerate(triggers_raw)]
+    raw_mc = data.get("max_concurrent")
+    if raw_mc is None:
+        # Compat: an intake.yaml written before the move still names the
+        # operator's real limit under the old key. Honour it once rather than
+        # silently reverting every upgraded install to the default of 3.
+        legacy_path = path.parent / "intake.yaml"
+        if legacy_path.is_file():
+            try:
+                legacy = yaml.safe_load(legacy_path.read_text())
+            except OSError, ValueError, yaml.YAMLError:
+                legacy = None
+            if isinstance(legacy, dict) and isinstance(legacy.get("max_concurrent"), int):
+                raw_mc = legacy["max_concurrent"]
+    if raw_mc is None:
+        raw_mc = 3
+    if not isinstance(raw_mc, int) or isinstance(raw_mc, bool) or raw_mc < 1:
+        raise PolicyError(f"{path.name}: 'max_concurrent' must be a positive int")
     return Policy(
         loops=loops,
         default=_cap("default", data["default"]),
@@ -209,6 +232,7 @@ def load_policy(path: str | Path) -> Policy:
         budget=budget,
         rate_limit_retries=raw_retries,
         triggers=triggers,
+        max_concurrent=raw_mc,
     )
 
 

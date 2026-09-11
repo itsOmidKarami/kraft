@@ -86,3 +86,11 @@ def test_put_intake_rejects_a_setting_the_poller_would_not_honour(client, over):
         **over,
     }
     assert client.put("/api/intake", json=body).status_code == 422
+
+
+def test_put_intake_no_longer_requires_max_concurrent(client):
+    body = client.put(
+        "/api/intake",
+        json={"enabled": False, "interval_s": 300, "priority_ceiling": 2, "repos": []},
+    )
+    assert body.status_code == 200, body.text

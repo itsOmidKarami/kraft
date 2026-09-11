@@ -339,11 +339,16 @@ export function Switch({
   onChange,
   label,
   disabled,
+  title,
 }: {
   checked: boolean;
   onChange: (next: boolean) => void;
   label: string;
   disabled?: boolean;
+  /** Shown on hover, and readable by assistive tech, when `disabled` — the
+   *  reason it can't be flipped from here (design 28's "a subprocess has
+   *  nothing to steer"). */
+  title?: string;
 }) {
   return (
     <button
@@ -353,6 +358,7 @@ export function Switch({
       aria-checked={checked}
       aria-label={label}
       disabled={disabled}
+      title={title}
       onClick={() => onChange(!checked)}
     >
       <span className="switch-knob" />
