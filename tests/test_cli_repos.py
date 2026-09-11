@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import json
 import os
 from pathlib import Path
@@ -293,3 +294,133 @@ def test_repos_yaml_rejects_a_non_string_test_command(tmp_path):
     p.write_text("repos:\n  - path: /r\n    test_command: 3\n")
     with pytest.raises(config.ConfigError):
         config.load_repos(p, validate_steering=False)
+
+
+# ── test_scopes (Kraft-9wzy) ─────────────────────────────────────────────────
+
+
+def test_repos_yaml_does_not_synthesize_test_scopes_from_test_command(tmp_path):
+    """The wrap-into-`["**"]` happens where scopes are used (`executor.py`),
+    not on load -- baking it into the loaded entry is what let a `PATCH
+    /repos` re-save persist a stale synthesized scope past a later
+    `test_command` edit (verify finding, Kraft-9wzy)."""
+    from kraft import config
+
+    p = tmp_path / "repos.yaml"
+    config.save_repos(p, [{"path": "/r", "test_command": "just ci"}])
+    (entry,) = config.load_repos(p, validate_steering=False)
+    assert entry["test_scopes"] is None
+    assert entry["test_command"] == "just ci"
+
+
+def test_repos_yaml_test_command_edit_is_not_shadowed_by_a_stale_scope(tmp_path):
+    """Regression for the exact sequence that used to go stale: load (which
+    used to synthesize and persist a scope for the old command), edit
+    `test_command`, save, reload."""
+    from kraft import config
+
+    p = tmp_path / "repos.yaml"
+    config.save_repos(p, [{"path": "/r", "test_command": "just ci"}])
+    (entry,) = config.load_repos(p, validate_steering=False)
+    entry["test_command"] = "just ci-v2"
+    config.save_repos(p, [entry])
+    (reloaded,) = config.load_repos(p, validate_steering=False)
+    assert reloaded["test_command"] == "just ci-v2"
+    assert reloaded["test_scopes"] is None
+
+
+def test_repos_yaml_test_scopes_is_none_when_both_fields_are_absent(tmp_path):
+    from kraft import config
+
+    p = tmp_path / "repos.yaml"
+    p.write_text("repos:\n  - path: /r\n")
+    (entry,) = config.load_repos(p, validate_steering=False)
+    assert entry["test_scopes"] is None
+
+
+def test_repos_yaml_round_trips_explicit_test_scopes(tmp_path):
+    from kraft import config
+
+    p = tmp_path / "repos.yaml"
+    scopes = [
+        {"paths": ["frontend/**"], "command": "just test-ui"},
+        {"paths": ["*", "src/**", "!frontend/**"], "command": "just test"},
+    ]
+    config.save_repos(p, [{"path": "/r", "test_scopes": scopes}])
+    (entry,) = config.load_repos(p, validate_steering=False)
+    assert entry["test_scopes"] == scopes
+
+
+def test_repos_yaml_rejects_test_scopes_missing_paths(tmp_path):
+    from kraft import config
+
+    p = tmp_path / "repos.yaml"
+    p.write_text("repos:\n  - path: /r\n    test_scopes:\n      - command: just test\n")
+    with pytest.raises(config.ConfigError):
+        config.load_repos(p, validate_steering=False)
+
+
+def test_repos_yaml_rejects_test_scopes_with_an_empty_command(tmp_path):
+    from kraft import config
+
+    p = tmp_path / "repos.yaml"
+    p.write_text(
+        "repos:\n  - path: /r\n    test_scopes:\n      - paths: ['**']\n        command: ''\n"
+    )
+    with pytest.raises(config.ConfigError):
+        config.load_repos(p, validate_steering=False)
+
+
+def test_repos_yaml_rejects_a_non_list_test_scopes(tmp_path):
+    from kraft import config
+
+    p = tmp_path / "repos.yaml"
+    p.write_text("repos:\n  - path: /r\n    test_scopes: nope\n")
+    with pytest.raises(config.ConfigError):
+        config.load_repos(p, validate_steering=False)
+
+
+def test_probe_repo_excludes_the_nested_scope_from_the_root_scope(tmp_path):
+    """Mirrors Kraft's own layout — root `pyproject.toml`, `package.json`
+    under `frontend/` — the failure mode Kraft-9wzy names directly."""
+    from support.harness import make_repo
+
+    from kraft import config
+
+    repo = make_repo(tmp_path)
+    (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
+    frontend = repo / "frontend"
+    frontend.mkdir()
+    (frontend / "package.json").write_text("{}")
+
+    probed = config.probe_repo(repo)
+    nested = next(s for s in probed["test_scopes"] if s["command"] == "npm test")
+    assert nested["paths"] == ["frontend/**"]
+    root = next(s for s in probed["test_scopes"] if s["command"] == "uv run pytest -q")
+    assert "frontend" not in root["paths"]
+    assert "pyproject.toml" in root["paths"]
+
+
+def test_probe_repo_root_scope_globs_match_files_inside_its_directories(tmp_path):
+    """A bare directory name in `paths` (e.g. "src") never matches
+    `fnmatch`-checked paths like "src/foo.py", so a backend-only diff failed
+    open to every scope, nested ones included (verify finding, Kraft-9wzy).
+    Root-level directories need the `/**` suffix; root-level files don't."""
+    from support.harness import make_repo
+
+    from kraft import config
+
+    repo = make_repo(tmp_path)
+    (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
+    src = repo / "src"
+    src.mkdir()
+    frontend = repo / "frontend"
+    frontend.mkdir()
+    (frontend / "package.json").write_text("{}")
+
+    probed = config.probe_repo(repo)
+    root = next(s for s in probed["test_scopes"] if s["command"] == "uv run pytest -q")
+    assert "src/**" in root["paths"]
+    assert "pyproject.toml" in root["paths"]
+    src_pattern = next(p for p in root["paths"] if p.startswith("src"))
+    assert fnmatch.fnmatchcase("src/kraft/config.py", src_pattern)

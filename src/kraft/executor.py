@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import json
 import logging
 import re
@@ -192,6 +193,37 @@ class LaunchContext:
     repo_entry: dict | None
     steering_dir: Path | None
     skills_dir: Path | None = None
+
+
+def _path_matches(path: str, patterns: list[str]) -> bool:
+    """Gitignore-style precedence over one scope's own `paths` list: the last
+    pattern `path` matches wins, so a later `!excl/**` overrides an earlier
+    inclusive glob (test-scope design §3.4)."""
+    matched = False
+    for pattern in patterns:
+        if pattern.startswith("!"):
+            if fnmatch.fnmatchcase(path, pattern[1:]):
+                matched = False
+        elif fnmatch.fnmatchcase(path, pattern):
+            matched = True
+    return matched
+
+
+def _matched_scopes(scopes: list[dict], changed_paths: list[str]) -> list[dict]:
+    """Scopes covering `changed_paths`, deduped and in `scopes`' own order.
+
+    Fails open in both directions the design calls out: a changed path
+    matching no scope at all, or an empty diff to begin with, runs every
+    scope rather than guess. Under-testing is the bug this exists to close;
+    it must never reopen it here (test-scope design §3.5).
+    """
+    hit: set[int] = set()
+    for path in changed_paths:
+        path_hit = {i for i, scope in enumerate(scopes) if _path_matches(path, scope["paths"])}
+        if not path_hit:
+            return list(scopes)
+        hit |= path_hit
+    return [scopes[i] for i in sorted(hit)] if hit else list(scopes)
 
 
 class Steer:
@@ -687,27 +719,59 @@ async def _dispatch(
             )
         return status
     if kind == "subprocess":
-        # The repo's own command wins over the registry's. The registry is per
-        # install and one command for every repo on it; the test command is a
-        # property of the repo, and a hardcoded one is how verify ends up
-        # running something CI does not (Kraft-579). Same source the forge
-        # branch below reads for `forge`.
-        override = (launch.repo_entry or {}).get("test_command") if launch else None
-        cmd = shlex.split(override) if override else list(binding["command"])
-        return await _subprocess.run_task(
-            db,
-            run_dirs,
-            hook_point=task_hook,
-            cmd=cmd,
-            cwd=worktree,
-            # The fix loop re-runs the test command after an agent edits source in
-            # the same worktree. A .pyc written on an earlier cycle has the same
-            # second-resolution mtime and (often) size as the fixed source, so
-            # CPython would import the stale bytecode and the re-measure would
-            # never see the fix. Never writing bytecode keeps every cycle honest.
-            env={"PYTHONDONTWRITEBYTECODE": "1"},
-            **common,
+        # The repo's own command(s) win over the registry's. The registry is
+        # per install and one command for every repo on it; test_scopes is a
+        # property of the repo, and a hardcoded single command is how verify
+        # ends up running something CI does not, or the wrong stack's suite
+        # entirely (Kraft-579, Kraft-9wzy). Same source the forge branch below
+        # reads for `forge`. `config.load_repos` already wraps a legacy
+        # `test_command` into a single `["**"]` scope, so this is one shape
+        # regardless of which field an operator set.
+        repo_entry = (launch.repo_entry or {}) if launch else {}
+        repo_scopes = repo_entry.get("test_scopes")
+        if not repo_scopes and repo_entry.get("test_command"):
+            # `config.load_repos` already wraps a bare `test_command` into a
+            # `test_scopes` entry for any repo it reads off disk -- this
+            # mirrors that for a `LaunchContext` built by hand (tests, or any
+            # future caller that skips the yaml round-trip).
+            repo_scopes = [{"paths": ["**"], "command": repo_entry["test_command"]}]
+        scopes = (
+            [{"paths": s["paths"], "cmd": shlex.split(s["command"])} for s in repo_scopes]
+            if repo_scopes
+            else [{"paths": ["**"], "cmd": list(binding["command"])}]
         )
+        # test-scope design §3.2-3.3: the diff since base_ref decides which of
+        # those scopes actually apply. Re-queried fresh rather than trusting
+        # `work_item_row`, matching `_review_package`'s base_ref read above --
+        # `work_item_row` can predate `env_setup`'s stamp. `git_read` never
+        # raises; a git failure or missing base_ref means "cannot tell", which
+        # fails open to every scope rather than guessing at fewer.
+        base_ref = _current_base_ref(db, work_item_row["id"])
+        diff = (
+            _config.git_read(Path(worktree), "diff", "--name-only", f"{base_ref}...HEAD")
+            if base_ref
+            else None
+        )
+        to_run = scopes if diff is None else _matched_scopes(scopes, diff.splitlines())
+        status = "done"
+        for scope in to_run:
+            status = await _subprocess.run_task(
+                db,
+                run_dirs,
+                hook_point=task_hook,
+                cmd=scope["cmd"],
+                cwd=worktree,
+                # The fix loop re-runs the test command after an agent edits source in
+                # the same worktree. A .pyc written on an earlier cycle has the same
+                # second-resolution mtime and (often) size as the fixed source, so
+                # CPython would import the stale bytecode and the re-measure would
+                # never see the fix. Never writing bytecode keeps every cycle honest.
+                env={"PYTHONDONTWRITEBYTECODE": "1"},
+                **{**common, "session_id": uuid.uuid4().hex},
+            )
+            if status != "done":
+                break
+        return status
     if kind == "forge":
         # Only what the binding actually sets, so the adapter's constants stay
         # the one place a default lives.
