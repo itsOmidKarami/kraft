@@ -825,6 +825,55 @@ def test_chain_review_unchanged_tail_round_trips(tmp_path, monkeypatch):
         assert after == before
 
 
+def test_chain_review_splice_keeps_on_failure_from_schema_only_nodes(tmp_path, monkeypatch):
+    """Kraft-eod0: the skill's documented node schema is only 4 of a node's 8
+    real keys. A reviewer following it to the letter emits nodes with just
+    `{id, tasks, gate_after, fix_loop}` -- the splice must not read that as
+    "delete on_failure", or mr_checks's repair hook silently stops firing on
+    every chain review that says the chain is fine as-is."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        for gate in ("spec_approval", "plan_approval"):
+            _await_gate(client, wid, gate)
+            assert client.post(f"/api/work-items/{wid}/gates/{gate}/approve").status_code == 200
+        _await_gate(client, wid, "chain_finalized")
+
+        before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
+        mr_checks_before = next(n for n in before if n["id"] == "mr_checks")
+        assert mr_checks_before["on_failure"] == ["on.mr_checks.repair"]
+
+        tail = [n for n in before if n["id"] not in ("spec", "plan", "chain_review")]
+        # Only the 4 keys the skill's schema teaches -- reproduces a reviewer
+        # that followed it to the letter, not one that happened to echo extra
+        # keys back.
+        schema_only = [
+            {
+                "id": n["id"],
+                "tasks": n["tasks"],
+                "gate_after": n["gate_after"],
+                "fix_loop": n["fix_loop"],
+            }
+            for n in tail
+        ]
+        _write_chain_review(
+            client,
+            wid,
+            {
+                "status": "ready_for_approval",
+                "revised_chain_nodes": schema_only,
+                "rationale": "no change",
+            },
+        )
+
+        r = client.post(f"/api/work-items/{wid}/gates/chain_finalized/approve")
+        assert r.status_code == 200, r.text
+        after = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
+        mr_checks_after = next(n for n in after if n["id"] == "mr_checks")
+        assert mr_checks_after["on_failure"] == ["on.mr_checks.repair"]
+
+
 @pytest.mark.parametrize(
     ("envelope", "reason_has"),
     [
