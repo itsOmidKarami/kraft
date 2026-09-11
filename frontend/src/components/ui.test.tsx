@@ -67,6 +67,11 @@ describe("StatusGlyph / RowState", () => {
     render(<StatusGlyph status="rate_limited" />);
     expect(screen.getByRole("img", { name: "rate_limited" })).toBeInTheDocument();
   });
+
+  it("has a glyph for waiting, not the unknown-status fallback", () => {
+    render(<StatusGlyph status="waiting" />);
+    expect(screen.getByRole("img", { name: "waiting" })).toBeInTheDocument();
+  });
 });
 
 describe("OverflowMenu", () => {

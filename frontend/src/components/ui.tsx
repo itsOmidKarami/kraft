@@ -80,6 +80,9 @@ const GLYPHS: Record<SessionStatus, typeof Check> = {
   // A task that never launched -- no agent can fix a missing binary or cwd by
   // editing source, so it reads the same as capped_out: stopped, not failed.
   config_error: Prohibit,
+  // Parked on a pipeline, woken by a poller -- the same shape as rate_limited,
+  // so the same glyph: not running, not broken (Kraft-ru98).
+  waiting: Clock,
 };
 
 /** 20px ring, 1px border, Phosphor glyph. Only `running` animates. */

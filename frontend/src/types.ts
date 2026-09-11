@@ -21,7 +21,10 @@ export type WorkItemStatus =
   | "abandoned"
   // Waiting on an API rate limit to reset; the poller relaunches it, no
   // human paged.
-  | "rate_limited";
+  | "rate_limited"
+  // Parked on a pipeline that has not settled; the ci_wait poller re-enters
+  // the node when retry_at comes due, no human paged (Kraft-ru98).
+  | "waiting";
 
 export interface WorkItemAttachment {
   kind: "spec" | "plan";
@@ -111,7 +114,10 @@ export type SessionStatus =
   | "paused"
   | "unknown"
   | "rate_limited"
-  | "config_error";
+  | "config_error"
+  // A forge task (ci_poll) parked on a pipeline that has not settled; the
+  // ci_wait poller re-enters it when retry_at comes due (Kraft-ru98).
+  | "waiting";
 
 export interface WorkerSession {
   id: string;
