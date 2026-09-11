@@ -218,6 +218,62 @@ def test_live_pid_matching_identity_is_adopted(tmp_path):
     asyncio.run(scenario())
 
 
+def test_a_crashed_adopt_marks_the_work_item_needs_human(monkeypatch, tmp_path):
+    """Kraft-mjwz: `reattach()` hands its tasks straight to the caller rather
+    than through `api._spawn`'s `_guard`, so a crash anywhere in `_adopt`
+    outside its own per-tick try (its opening DB read, or `_exit_from_file` at
+    the end) used to vanish -- no log, no needs_human, task leaked forever.
+    `_guarded_adopt` is the fix; this pins its catch, not the log-polling loop
+    (that's Kraft-jgs6, covered elsewhere)."""
+
+    async def _boom(db, session_id, pid, poll_s=0.1, progress_s=5.0):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(reattach, "_adopt", _boom)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="implementation",
+                    hook_point="on.implementation.start",
+                    log_path=str(rd.logs / "s1.log"),
+                    result_path=str(rd.results / "s1.json"),
+                )
+            )
+            # A pid that is certainly alive and passes the identity check (this
+            # test process itself) — the crash under test is in _adopt, not in
+            # the identity check that decides whether it even runs.
+            import os
+
+            import psutil
+
+            pst = psutil.Process(os.getpid()).create_time()
+            await database.write(lambda c: store.session_running(c, "s1", os.getpid(), pst))
+            summary, adopted = await reattach.reattach(database, rd, _REG)
+            assert summary.adopted == ["s1"]
+            await asyncio.gather(*adopted.values(), return_exceptions=True)
+
+            row = database.read(
+                lambda c: c.execute("SELECT status FROM work_items WHERE id='w1'").fetchone()
+            )
+            assert row["status"] == "needs_human"
+            events_seen = database.read(lambda c: events.read_after(c, 0, "w1"))
+            crash = next(e for e in events_seen if e["type"] == "work_item_needs_human")
+            assert "reattach crashed" in crash["payload"]["reason"]
+            assert "boom" in crash["payload"]["reason"]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 def test_a_restart_mid_ci_poll_has_a_row_to_reattach(tmp_path):
     """Kraft-7xt: `forge.run_task` now creates its session row before the poll
     (Kraft-41b), so a restart mid-wait finds it -- it has no pid (the work
@@ -348,6 +404,79 @@ def test_a_session_resolved_from_file_records_its_usage(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_an_adopted_session_carries_live_tokens_before_it_exits(tmp_path):
+    """Kraft-jgs6: the child survives the restart that orphaned this task
+    (`run_task` starts it `start_new_session=True` precisely so it can) and
+    keeps writing its own log regardless. Before `_adopt` had its own progress
+    loop, tokens_in/out sat frozen at whatever `run_task`'s loop last wrote
+    before the restart, for the rest of the session's life -- looking exactly
+    like Kraft-41f7 (the poller dying) recurring, but it was a different loop
+    entirely, one that never polled the log at all."""
+
+    script = (
+        'printf \'{"type":"assistant","request_id":"req_1","message":'
+        '{"model":"claude-opus-5","usage":{"input_tokens":1000,"output_tokens":200}}}\\n\'; '
+        "sleep 3"
+    )
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        log_path = rd.logs / "s1.log"
+        log_file = open(log_path, "w")
+        proc = subprocess.Popen(
+            ["sh", "-c", script],
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        log_file.close()  # the child holds its own dup'd fd
+        live = None
+        try:
+            import psutil
+
+            pst = psutil.Process(proc.pid).create_time()
+            await _seed_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="implementation",
+                    hook_point="on.implementation.start",
+                    log_path=str(log_path),
+                    result_path=str(rd.results / "s1.json"),
+                )
+            )
+            await database.write(lambda c: store.session_running(c, "s1", proc.pid, pst))
+            # Calls `_adopt` directly (rather than through `reattach()`) so the
+            # test can shorten `progress_s` -- the default 5s would make this
+            # test as slow as the bug it is pinning.
+            task = asyncio.create_task(
+                reattach._adopt(database, "s1", proc.pid, poll_s=0.05, progress_s=0.2)
+            )
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + 10
+            while not task.done() and loop.time() < deadline:
+                row = _usage_row(database)
+                if row is not None and row["tokens_in"]:
+                    live = dict(row)
+                    break
+                await asyncio.sleep(0.05)
+            (rd.results / "s1.json").write_text('{"status": "done"}')
+            await task
+            proc.wait()
+        finally:
+            proc.wait()
+            await database.close()
+        return live
+
+    live = asyncio.run(scenario())
+    assert live is not None, "tokens_in never appeared on the row before the child exited"
+    assert live["model"] == "claude-opus-5"
+    assert (live["tokens_in"], live["tokens_out"]) == (1000, 200)
 
 
 def test_an_adopted_session_records_its_usage(tmp_path):
