@@ -13,15 +13,19 @@ import {
   ChatText,
   Circle,
   Clock,
+  Coins,
   CircleNotch,
   DotsThree,
+  Flag,
   Pause,
   Prohibit,
   Question,
   WarningCircle,
+  X,
   XCircle,
 } from "@phosphor-icons/react";
 import { statusWord } from "../format";
+import type { ItemDisplayState } from "../deriveState";
 import type { ChainNode, SessionStatus } from "../types";
 
 /* — rows ————————————————————————————————————————————————————————————— */
@@ -64,7 +68,7 @@ export function RowState({ status, children }: { status: SessionStatus; children
 
 /* — status ————————————————————————————————————————————————————————————— */
 
-const GLYPHS: Record<SessionStatus, typeof Check> = {
+const GLYPHS: Record<SessionStatus | ItemDisplayState, typeof Check> = {
   running: CircleNotch,
   done: Check,
   done_with_concerns: WarningCircle,
@@ -83,10 +87,25 @@ const GLYPHS: Record<SessionStatus, typeof Check> = {
   // Parked on a pipeline, woken by a poller -- the same shape as rate_limited,
   // so the same glyph: not running, not broken (Kraft-ru98).
   waiting: Clock,
+  // Item-level design states (deriveState, UI v2 · 01). `capped`/`question`
+  // are session-level `capped_out`/`needs_context` under a different name at
+  // the work-item level -- distinct keys, same family of meaning.
+  gate: Flag,
+  capped: Prohibit,
+  question: ChatText,
+  budget: Coins,
+  not_started: Circle,
+  abandoned: X,
 };
 
 /** 20px ring, 1px border, Phosphor glyph. Only `running` animates. */
-export function StatusGlyph({ status, size = 13 }: { status: SessionStatus; size?: number }) {
+export function StatusGlyph({
+  status,
+  size = 13,
+}: {
+  status: SessionStatus | ItemDisplayState;
+  size?: number;
+}) {
   const Icon = GLYPHS[status] ?? Question;
   return (
     <span className="glyph" data-status={status} aria-label={status} role="img">
@@ -95,7 +114,7 @@ export function StatusGlyph({ status, size = 13 }: { status: SessionStatus; size
   );
 }
 
-/* — chain bar (spec §4) ——————————————————————————————————————————————— */
+/* — mini chain (spec §4) ————————————————————————————————————————————— */
 
 /**
  * One segment per node, equal width. Fix cycles and concurrent tasks are
@@ -107,9 +126,12 @@ export function StatusGlyph({ status, size = 13 }: { status: SessionStatus; size
  * this.
  *
  * Segment state precedence: invalid, then current, then done, then todo. In the
- * editor nothing is current, so `invalid` is what shows.
+ * editor nothing is current, so `invalid` is what shows. `paused` (set by the
+ * caller from `deriveState(item).state` being one of paused/capped/abandoned/
+ * rate_limited/waiting — the Prototype's `mini()` "off" set) drops the current
+ * segment to the same dimmed rendering.
  */
-export function ChainBar({
+export function MiniChain({
   nodes,
   currentNodeId = null,
   done = [],
@@ -145,7 +167,11 @@ export function ChainBar({
             data-state={state}
           >
             <span className="chain-fill" title={size === "sm" ? n.id : undefined}>
-              {n.gate_after && <span className="chain-gate" title={n.gate_after} />}
+              {n.gate_after && (
+                <span className="chain-gate" title={n.gate_after}>
+                  <Flag weight="fill" size={9} />
+                </span>
+              )}
             </span>
             {size === "lg" && <span className="chain-label">{n.id}</span>}
           </span>
@@ -300,5 +326,63 @@ export function Tabs({
         </button>
       ))}
     </div>
+  );
+}
+
+/* — switch (spec §4) —————————————————————————————————————————————————— */
+
+/** 34×20 toggle, keyboard-operable via native `<button>`. Replaces the four
+ *  hand-rolled `.switch` buttons `views/Settings.tsx` had (repos/plugins/
+ *  intake/notify pages) — same markup, one definition. */
+export function Switch({
+  checked,
+  onChange,
+  label,
+  disabled,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  label: string;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      className="switch"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+    >
+      <span className="switch-knob" />
+    </button>
+  );
+}
+
+/* — chip (spec §4, board filter row) ————————————————————————————————— */
+
+/** Radius-999 pill with an optional trailing count and a selected state —
+ *  the board's status/repo/template filter row (design 04). Colors are the
+ *  Prototype's own `pill()` method: selected border accent-700/bg
+ *  accent-900/text accent-300, unselected border neutral-800/text
+ *  neutral-400. Not consumed inside UI v2 · 01 — the board filter row that
+ *  uses it is UI v2 · 02. */
+export function Chip({
+  label,
+  count,
+  selected = false,
+  onClick,
+}: {
+  label: ReactNode;
+  count?: number;
+  selected?: boolean;
+  onClick?: () => void;
+}) {
+  return (
+    <button type="button" className="chip" aria-pressed={selected} onClick={onClick}>
+      {label}
+      {count != null && <span className="chip-count">{count}</span>}
+    </button>
   );
 }
