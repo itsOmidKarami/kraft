@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import subprocess
 import threading
@@ -14,6 +15,8 @@ import psutil
 
 from kraft import events, logs, store
 from kraft import usage as _usage
+
+logger = logging.getLogger(__name__)
 
 _AGENT_STATUSES = ("done", "failed", "done_with_concerns", "needs_context")
 
@@ -320,10 +323,17 @@ async def run_task(
         if time.monotonic() < next_progress:
             continue
         next_progress = time.monotonic() + progress_s
-        chunk, log_offset = _read_new(log_path, log_offset)
-        live = _usage.from_stream(logs.split_lines(chunk), seen_usage)
-        if live is not None:
-            await db.write(lambda c, u=live: store.session_progress(c, session_id, u))
+        # A bad line or a write hiccup here must not kill this task: the child
+        # keeps running and writing its own log fd regardless, so losing this
+        # loop silently freezes tokens_in/out for the rest of the session with
+        # nothing to show it happened (Kraft-41f7).
+        try:
+            chunk, log_offset = _read_new(log_path, log_offset)
+            live = _usage.from_stream(logs.split_lines(chunk), seen_usage)
+            if live is not None:
+                await db.write(lambda c, u=live: store.session_progress(c, session_id, u))
+        except Exception:
+            logger.exception("usage progress tick failed for session %s", session_id)
     # the child is gone; let the watcher record whatever it wrote on the way out
     stop.set()
     watcher.join(timeout=2)
