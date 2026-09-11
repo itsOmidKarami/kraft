@@ -662,6 +662,10 @@ async def _dispatch(
         # rather than tolerated here -- Kraft-cppp.) Losing the sweep only puts
         # us back where Kraft-7fip found us: the work is still on disk and
         # `_assert_clean` names it at open_mr.
+        # Before the sweep, not after: a straggler committed while HEAD sat on
+        # a diagnostic branch an agent forgot to check out of would land on
+        # that branch instead of the item's own (Kraft-v5qd).
+        _builtins.restore_branch(Path(worktree), store.branch_for(work_item_row))
         try:
             await _forge.commit_stragglers(
                 Path(worktree), message=f"wip: uncommitted work from {node['id']}"
@@ -827,6 +831,14 @@ def _collect_findings(db, work_item_id: str, node: dict, round: int):
             reported.add(hook)
         found.extend(parsed)
     return found, reported
+
+
+def _named_with_kind(hook: str, registry: Registry) -> str:
+    """`hook`, with its binding's `kind` alongside for a failure reason
+    (Kraft-5m7t) -- `[forge]`/`[builtin]`/`[subprocess]` reads as "no agent
+    here to steer" without a human having to open registry.yaml to check."""
+    kind = registry.hooks.get(hook, {}).get("kind")
+    return f"{hook} [{kind}]" if kind else hook
 
 
 def _needs_context_question(db, work_item_id: str, node: dict, round: int) -> str | None:
@@ -1067,7 +1079,15 @@ async def _walk_node(
                 if question is not None:
                     reason = f"needs_context: {question}"
                 else:
-                    reason = f"task failed in node {node['id']}: {', '.join(failed)}"
+                    # Kraft-5m7t: a `retry --steer` against this node only
+                    # reaches an agent that reads it; a forge/builtin/subprocess
+                    # task -- ci_poll among them -- has no session for a steer
+                    # to land in, so it silently no-ops and a human can burn
+                    # several retries assuming otherwise. Naming each failed
+                    # task's kind here is the cheapest way to tell them apart
+                    # without guessing whether *this* retry's steer would land.
+                    named = ", ".join(_named_with_kind(t, registry) for t in failed)
+                    reason = f"task failed in node {node['id']}: {named}"
                     if excs:
                         reason += f" ({', '.join(repr(e) for e in excs)})"
                     if node.get("on_failure"):
