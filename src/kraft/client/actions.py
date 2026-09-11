@@ -300,3 +300,9 @@ async def set_agent_overrides(
                 "kraft: set-overrides needs --model, --escalate-model, --effort, or --clear"
             )
     return await transport._patch(f"/work-items/{target}", {"agent_overrides": overrides})
+
+
+async def reload_templates() -> dict:
+    """Reread every chain template and the hook registry from disk into the
+    running server, no restart."""
+    return await transport._act("/templates/reload")

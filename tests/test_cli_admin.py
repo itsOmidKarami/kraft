@@ -6,9 +6,11 @@ import asyncio
 import json
 import os
 import signal
+from pathlib import Path
 
 import pytest
 import uvicorn
+import yaml
 from support.harness import fake_templates_dir
 
 from kraft import cli, client
@@ -33,6 +35,44 @@ def test_reindex_all_returns_totals(app):
 def test_reindex_unknown_repo_is_a_readable_404(app):
     with pytest.raises(ValueError, match="404"):
         asyncio.run(client.reindex("/no/such/repo"))
+
+
+def test_reload_templates_returns_the_template_set(app):
+    payload = asyncio.run(client.reload_templates())
+    assert set(payload) == {"valid", "invalid_templates"}
+    assert {"quick-task", "default"} <= set(payload["valid"])
+
+
+def test_reload_prints_the_count(app, capsys):
+    cli.main(["admin", "reload"])
+    out = capsys.readouterr().out
+    assert "reloaded 2 template(s)" in out
+
+
+def test_reload_reports_invalid_templates_and_exits_1(app, capsys):
+    templates_dir = Path(os.environ["KRAFT_TEMPLATES_DIR"])
+    node = {"id": "x", "tasks": ["on.does.not.exist"], "gate_after": None}
+    (templates_dir / "broken.yaml").write_text(yaml.safe_dump({"id": "broken", "nodes": [node]}))
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["admin", "reload"])
+    assert caught.value.code == 1
+    assert "broken" in capsys.readouterr().out
+
+
+def test_reload_broken_registry_is_a_kraft_message(app, monkeypatch, capsys):
+    # Not a real broken registry.yaml on disk: the `app` fixture reboots (and
+    # re-reads registry.yaml) on every call, so a broken file would crash at
+    # lifespan startup before the endpoint ever ran. Mocking the client call,
+    # like `test_health_exit_code_follows_status` does, isolates the thing
+    # this test actually checks: `main()`'s ValueError-to-exit-1 handling.
+    async def broken():
+        raise ValueError("kraft 422: registry.yaml: hook 'on.x' has unknown kind 'nope'")
+
+    monkeypatch.setattr(client, "reload_templates", broken)
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["admin", "reload"])
+    assert caught.value.code == 1
+    assert "422" in capsys.readouterr().err
 
 
 def test_health_exit_code_follows_status(app, monkeypatch, capsys):

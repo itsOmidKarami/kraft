@@ -143,6 +143,16 @@ async def put_registry(body: RegistryBody, request: Request):
     return {"hooks": body.hooks, "invalid_templates": checked.invalid}
 
 
+@api_router.post("/templates/reload")
+async def reload_templates_endpoint(request: Request):
+    st = request.app.state
+    try:
+        deps._reload_templates(st)
+    except RegistryError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"valid": sorted(st.templates.valid), "invalid_templates": st.templates.invalid}
+
+
 class PolicyBody(BaseModel):
     loops: dict
     default: dict
