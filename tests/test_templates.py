@@ -1016,3 +1016,36 @@ def test_the_default_chain_sends_a_rejected_review_back_to_implementation():
     by_id = {n["id"]: n for n in templates.materialize(tmpl)["nodes"]}
     assert by_id["human_review"]["reject_to"] == "implementation"
     assert by_id["plan"]["reject_to"] is None
+
+
+def test_load_registry_accepts_timeout_on_subprocess(tmp_path):
+    reg = tmp_path / "registry.yaml"
+    reg.write_text("hooks:\n  on.test.run: { kind: subprocess, command: [pytest], timeout: 20 }\n")
+    registry = templates.load_registry(reg)
+    assert registry.hooks["on.test.run"]["timeout"] == 20
+
+
+def test_load_registry_rejects_timeout_on_builtin(tmp_path):
+    reg = tmp_path / "registry.yaml"
+    reg.write_text("hooks:\n  on.env.prepare: { kind: builtin, handler: env_setup, timeout: 5 }\n")
+    with pytest.raises(templates.RegistryError):
+        templates.load_registry(reg)
+
+
+def test_load_registry_accepts_per_repo_override(tmp_path):
+    reg = tmp_path / "registry.yaml"
+    reg.write_text(
+        "hooks:\n  on.test.run: { kind: subprocess, command: [pytest], "
+        "repos: { /repo-a: { enabled: true, command: [pytest, -q] } } }\n"
+    )
+    registry = templates.load_registry(reg)
+    assert registry.hooks["on.test.run"]["repos"]["/repo-a"]["enabled"] is True
+
+
+def test_load_registry_rejects_repo_override_missing_enabled(tmp_path):
+    reg = tmp_path / "registry.yaml"
+    reg.write_text(
+        "hooks:\n  on.test.run: { kind: subprocess, command: [pytest], repos: { /repo-a: {} } }\n"
+    )
+    with pytest.raises(templates.RegistryError):
+        templates.load_registry(reg)

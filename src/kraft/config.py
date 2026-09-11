@@ -24,6 +24,7 @@ from pathlib import Path
 import yaml
 
 from kraft import steering as _steering
+from kraft.store.repos import ROOT_MERGE_POLICIES
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +128,45 @@ def _normalize_test_scopes(scopes: object) -> list[dict] | None:
     return scopes
 
 
+def _normalize_submodules(raw: object) -> list[dict]:
+    """Per-submodule settings a repo entry carries alongside the paths its own
+    `.gitmodules` names at probe time (design 25 "SUBMODULES"): whether the
+    submodule is declarable on a work item, its own test command override, and
+    its own chain override. Never populated from a probe — an operator turns
+    these on by hand, one row per submodule path they choose to manage here.
+    """
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ConfigError("repos.yaml: 'submodules' must be a list of mappings")
+    out = []
+    for s in raw:
+        if not isinstance(s, dict) or not isinstance(s.get("path"), str) or not s["path"]:
+            raise ConfigError("repos.yaml: every 'submodules' entry needs a string 'path'")
+        enabled = s.get("enabled", False)
+        if not isinstance(enabled, bool):
+            raise ConfigError(f"repos.yaml: submodule {s['path']!r} 'enabled' must be a boolean")
+        test_command = s.get("test_command")
+        if test_command is not None and not isinstance(test_command, str):
+            raise ConfigError(
+                f"repos.yaml: submodule {s['path']!r} 'test_command' must be a string"
+            )
+        chain_override = s.get("chain_override")
+        if chain_override is not None and not isinstance(chain_override, str):
+            raise ConfigError(
+                f"repos.yaml: submodule {s['path']!r} 'chain_override' must be a string"
+            )
+        out.append(
+            {
+                "path": s["path"],
+                "enabled": enabled,
+                "test_command": test_command,
+                "chain_override": chain_override,
+            }
+        )
+    return out
+
+
 def load_repos(
     path: str | Path, *, steering_dir: Path | None = None, validate_steering: bool = True
 ) -> list[dict]:
@@ -167,6 +207,16 @@ def load_repos(
             v = r.setdefault(key, [])
             if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
                 raise ConfigError(f"repos.yaml: {key!r} must be a list of strings")
+        r.setdefault("allow_cross_repo", False)
+        if not isinstance(r["allow_cross_repo"], bool):
+            raise ConfigError("repos.yaml: 'allow_cross_repo' must be a boolean")
+        r.setdefault("default_root_merge_policy", "bump")
+        if r["default_root_merge_policy"] not in ROOT_MERGE_POLICIES:
+            raise ConfigError(
+                f"repos.yaml: 'default_root_merge_policy' must be one of "
+                f"{sorted(ROOT_MERGE_POLICIES)}"
+            )
+        r["submodules"] = _normalize_submodules(r.get("submodules"))
         if validate_steering:
             try:
                 _steering.validate(steering_dir, r.get("steering", []), where="repos.yaml")
@@ -470,7 +520,6 @@ def save_notify(path: str | Path, notify: dict) -> None:
 INTAKE_DEFAULT: dict = {
     "enabled": False,
     "interval_s": 300,
-    "max_concurrent": 3,
     "repos": [],
     "priority_ceiling": 2,
 }

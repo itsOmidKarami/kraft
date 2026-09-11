@@ -75,7 +75,8 @@ def test_probe_finds_submodules_and_a_test_command(tmp_path, client):
 def test_repo_crud_round_trips_through_the_yaml(tmp_path, client, templates_dir):
     repo = make_repo(tmp_path)
     created = client.post(
-        "/api/repos", json={"path": str(repo), "default_chain_template": "default"}
+        "/api/repos",
+        json={"path": str(repo), "default_chain_template": "default", "enabled": False},
     )
     assert created.status_code == 201
     path = created.json()["path"]
@@ -93,7 +94,12 @@ def test_repo_crud_round_trips_through_the_yaml(tmp_path, client, templates_dir)
 
     # POST stores git's resolved toplevel, so the path a client connected with is
     # not always the path stored — patch and delete must still find it.
-    assert client.patch(f"/api/repos?path={repo}", json={"enabled": True}).status_code == 200
+    assert (
+        client.patch(
+            f"/api/repos?path={repo}", json={"enabled": True, "test_command": "pytest"}
+        ).status_code
+        == 200
+    )
 
     assert client.delete(f"/api/repos?path={path}").status_code == 204
     assert client.get("/api/repos").json()["repos"] == []
@@ -108,6 +114,7 @@ def test_add_repo_round_trips_default_model_and_steering(tmp_path, client, templ
         "/api/repos",
         json={
             "path": str(repo),
+            "enabled": False,
             "default_model": "anything-at-all",
             "deny_tools": ["WebFetch"],
             "steering": ["house-style"],
@@ -140,7 +147,7 @@ def test_add_repo_with_a_missing_steering_name_is_refused(tmp_path, client, temp
 
 def test_patch_repo_with_a_missing_steering_name_is_refused(tmp_path, client, templates_dir):
     repo = make_repo(tmp_path)
-    client.post("/api/repos", json={"path": str(repo)})
+    client.post("/api/repos", json={"path": str(repo), "enabled": False})
     before = (templates_dir / "repos.yaml").read_text()
 
     r = client.patch(f"/api/repos?path={repo}", json={"steering": ["does-not-exist"]})
@@ -154,7 +161,7 @@ def test_patch_repo_with_a_missing_steering_name_is_refused(tmp_path, client, te
 def test_add_repo_stores_probed_forge(client, tmp_path):
     repo = make_repo(tmp_path, name="ghrepo")
     _set_origin(repo, "git@github.com:owner/repo.git")
-    r = client.post("/api/repos", json={"path": str(repo)})
+    r = client.post("/api/repos", json={"path": str(repo), "enabled": False})
     assert r.status_code == 201
     assert r.json()["forge"] == "github"
     assert r.json()["project"] == "owner/repo"
@@ -163,7 +170,7 @@ def test_add_repo_stores_probed_forge(client, tmp_path):
 
 def test_patch_repo_overrides_forge(client, tmp_path):
     repo = make_repo(tmp_path, name="patchrepo")
-    client.post("/api/repos", json={"path": str(repo)})
+    client.post("/api/repos", json={"path": str(repo), "enabled": False})
     r = client.patch(f"/api/repos?path={repo}", json={"forge": "gitea", "project": "t/r"})
     assert r.status_code == 200
     (entry,) = [
@@ -171,6 +178,26 @@ def test_patch_repo_overrides_forge(client, tmp_path):
     ]
     assert entry["forge"] == "gitea"
     assert entry["project"] == "t/r"
+
+
+def test_patch_repo_can_clear_a_field_with_an_explicit_null(client, tmp_path):
+    """PATCH must distinguish an omitted key (leave alone) from an explicit
+    `null` (clear) — the RepoDetail draft sends the whole Repo back, nulls
+    included, when e.g. the forge is set back to 'none'."""
+    repo = make_repo(tmp_path, name="clearrepo")
+    _set_origin(repo, "git@github.com:owner/repo.git")
+    client.post("/api/repos", json={"path": str(repo), "enabled": False})
+    r = client.patch(
+        f"/api/repos?path={repo}",
+        json={"forge": None, "project": None, "default_model": None},
+    )
+    assert r.status_code == 200, r.text
+    (entry,) = [
+        x for x in client.get("/api/repos").json()["repos"] if x["path"] == str(repo.resolve())
+    ]
+    assert entry["forge"] is None
+    assert entry["project"] is None
+    assert entry["default_model"] is None
 
 
 def _set_origin(repo, url):
@@ -440,7 +467,10 @@ def test_connected_repos_default_model_reaches_the_agent_launch(tmp_path, monkey
     repo = make_repo(tmp_path)
 
     with _client(tmp_path, monkeypatch, templates_dir) as client:
-        added = client.post("/api/repos", json={"path": str(repo), "default_model": "haiku"})
+        added = client.post(
+            "/api/repos",
+            json={"path": str(repo), "default_model": "haiku", "test_command": "pytest"},
+        )
         assert added.status_code == 201
 
         # quick-task: the only agent hook this fixture binds is
@@ -476,7 +506,9 @@ def test_connected_repos_steering_reaches_the_agent_launch(tmp_path, monkeypatch
     repo = make_repo(tmp_path)
 
     with _client(tmp_path, monkeypatch, templates_dir) as client:
-        added = client.post("/api/repos", json={"path": str(repo), "steering": ["house"]})
+        added = client.post(
+            "/api/repos", json={"path": str(repo), "steering": ["house"], "test_command": "pytest"}
+        )
         assert added.status_code == 201, added.text
 
         # quick-task: the only agent hook this fixture binds is
@@ -558,3 +590,97 @@ def test_probe_of_a_submodule_stays_the_submodule(tmp_path):
         Path(config.probe_repo(super_repo / "libs" / "sub")["path"])
         == (super_repo / "libs" / "sub").resolve()
     )
+
+
+def test_load_repos_defaults_submodule_fields(tmp_path):
+    path = tmp_path / "repos.yaml"
+    config.write_yaml(path, {"repos": [{"path": "/r"}]})
+    (repo,) = config.load_repos(path)
+    assert repo["allow_cross_repo"] is False
+    assert repo["default_root_merge_policy"] == "bump"
+    assert repo["submodules"] == []
+
+
+def test_load_repos_round_trips_submodule_table(tmp_path):
+    path = tmp_path / "repos.yaml"
+    config.write_yaml(
+        path,
+        {
+            "repos": [
+                {
+                    "path": "/r",
+                    "allow_cross_repo": True,
+                    "default_root_merge_policy": "skip",
+                    "submodules": [
+                        {"path": "libs/a", "enabled": True, "test_command": "pytest libs/a"},
+                    ],
+                }
+            ]
+        },
+    )
+    (repo,) = config.load_repos(path)
+    assert repo["allow_cross_repo"] is True
+    assert repo["default_root_merge_policy"] == "skip"
+    assert repo["submodules"] == [
+        {"path": "libs/a", "enabled": True, "test_command": "pytest libs/a", "chain_override": None}
+    ]
+
+
+def test_load_repos_rejects_unknown_root_merge_policy(tmp_path):
+    path = tmp_path / "repos.yaml"
+    config.write_yaml(path, {"repos": [{"path": "/r", "default_root_merge_policy": "nope"}]})
+    with pytest.raises(config.ConfigError):
+        config.load_repos(path)
+
+
+def test_add_repo_enabled_with_no_test_command_is_refused(tmp_path, monkeypatch):
+    # `noop_verify=True` leaves the registry's `on.test.run` without a
+    # `command` too, so this actually exercises "nothing to run anywhere" —
+    # the default `client` fixture's `on.test.run` is a real subprocess
+    # command, which the repo is now allowed to fall back on.
+    no_fallback_templates_dir = fake_templates_dir(tmp_path, "claude", noop_verify=True)
+    with _client(tmp_path, monkeypatch, no_fallback_templates_dir) as client:
+        repo = make_repo(tmp_path)  # sample_repo has no pyproject.toml/package.json marker
+        r = client.post("/api/repos", json={"path": str(repo), "enabled": True})
+        assert r.status_code == 422, r.text
+        assert "test command" in r.json()["detail"]
+
+
+def test_add_repo_enabled_with_no_repo_test_command_falls_back_to_registry(tmp_path, client):
+    # templates_dir binds `on.test.run` to a real subprocess command, so a
+    # repo with neither `test_command` nor `test_scopes` can still enable —
+    # `executor.dispatch` runs the registry's command for it.
+    repo = make_repo(tmp_path)
+    r = client.post("/api/repos", json={"path": str(repo), "enabled": True})
+    assert r.status_code == 201, r.text
+
+
+def test_add_repo_disabled_with_no_test_command_is_allowed(tmp_path, client):
+    repo = make_repo(tmp_path)
+    r = client.post("/api/repos", json={"path": str(repo), "enabled": False})
+    assert r.status_code == 201, r.text
+
+
+def test_patch_repo_cannot_enable_without_a_test_command(tmp_path, monkeypatch):
+    no_fallback_templates_dir = fake_templates_dir(tmp_path, "claude", noop_verify=True)
+    with _client(tmp_path, monkeypatch, no_fallback_templates_dir) as client:
+        repo = make_repo(tmp_path)
+        path = client.post("/api/repos", json={"path": str(repo), "enabled": False}).json()["path"]
+        r = client.patch(f"/api/repos?path={path}", json={"enabled": True})
+        assert r.status_code == 422, r.text
+
+
+def test_patch_repo_can_enable_relying_on_the_registrys_test_command(tmp_path, client):
+    repo = make_repo(tmp_path)
+    path = client.post("/api/repos", json={"path": str(repo), "enabled": False}).json()["path"]
+    r = client.patch(f"/api/repos?path={path}", json={"enabled": True})
+    assert r.status_code == 200, r.text
+
+
+def test_patch_repo_can_enable_alongside_a_test_command_in_the_same_request(
+    tmp_path, client, templates_dir
+):
+    repo = make_repo(tmp_path)
+    path = client.post("/api/repos", json={"path": str(repo), "enabled": False}).json()["path"]
+    r = client.patch(f"/api/repos?path={path}", json={"enabled": True, "test_command": "pytest"})
+    assert r.status_code == 200, r.text

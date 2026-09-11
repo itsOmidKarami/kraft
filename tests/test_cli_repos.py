@@ -176,11 +176,13 @@ def test_repos_says_disabled_in_words_not_only_in_colour(app, tmp_path, monkeypa
     monkeypatch.setenv("COLUMNS", "300")
     on = make_repo(tmp_path, name="on")
     off = make_repo(tmp_path, name="off")
-    asyncio.run(client.ensure_repo(str(on)))
-    asyncio.run(client.ensure_repo(str(off)))
 
     async def go():
         async with client.transport.http() as http:
+            r = await http.post("/api/repos", json={"path": str(on), "test_command": "pytest"})
+            assert r.status_code == 201, r.text
+            r = await http.post("/api/repos", json={"path": str(off), "test_command": "pytest"})
+            assert r.status_code == 201, r.text
             response = await http.patch(
                 "/api/repos", params={"path": str(off)}, json={"enabled": False}
             )

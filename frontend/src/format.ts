@@ -89,3 +89,14 @@ const STATUS_WORDS: Record<string, string> = {
 export function statusWord(status: string): string {
   return STATUS_WORDS[status] ?? status;
 }
+
+/** A hook binding's plain-text summary — the Plugins list's "Adapter" column
+ *  and the Chains node form's per-task line share this, so both read the
+ *  same command the same way. Display formatting with no view of its own. */
+export function adapterOf(b: { kind: string; handler?: string; command?: string | string[] }) {
+  return b.kind === "builtin"
+    ? `builtin · ${b.handler}`
+    : Array.isArray(b.command)
+      ? b.command.join(" ")
+      : (b.command ?? b.kind);
+}

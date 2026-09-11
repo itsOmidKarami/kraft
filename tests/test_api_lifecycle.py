@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import subprocess
 import time
@@ -126,7 +127,7 @@ def test_resume_refuses_when_all_slots_are_busy(tmp_path, monkeypatch):
         _poll_events(client, idle, "gate_requested")
         _set_status(busy, "active")
         _set_status(idle, "paused")
-        client.app.state.intake["max_concurrent"] = 1
+        client.app.state.policy = dataclasses.replace(client.app.state.policy, max_concurrent=1)
 
         r = client.post(f"/api/work-items/{idle}/resume", json={})
 
@@ -142,9 +143,41 @@ def test_resume_works_when_a_slot_is_free(tmp_path, monkeypatch):
         wid = _post_default(client, repo)
         _poll_events(client, wid, "gate_requested")
         _set_status(wid, "paused")
-        client.app.state.intake["max_concurrent"] = 1
+        client.app.state.policy = dataclasses.replace(client.app.state.policy, max_concurrent=1)
 
         r = client.post(f"/api/work-items/{wid}/resume", json={})
+
+        assert r.status_code == 200, r.text
+
+
+def test_retry_refuses_when_all_slots_are_busy(tmp_path, monkeypatch):
+    """The same door resume is bounded by (notes 10): a stopped item's
+    /retry must not restart it past the cap either."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        busy = _post_default(client, repo)
+        _poll_events(client, busy, "gate_requested")
+        stopped = _post_default(client, repo)
+        _poll_events(client, stopped, "gate_requested")
+        _set_status(busy, "active")
+        _force_node(stopped, "verify", "needs_human")
+        client.app.state.policy = dataclasses.replace(client.app.state.policy, max_concurrent=1)
+
+        r = client.post(f"/api/work-items/{stopped}/retry", json={})
+
+        assert r.status_code == 409, r.text
+        assert "1" in r.json()["detail"]
+
+
+def test_retry_works_when_a_slot_is_free(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+        _force_node(wid, "verify", "needs_human")
+        client.app.state.policy = dataclasses.replace(client.app.state.policy, max_concurrent=1)
+
+        r = client.post(f"/api/work-items/{wid}/retry", json={})
 
         assert r.status_code == 200, r.text
 

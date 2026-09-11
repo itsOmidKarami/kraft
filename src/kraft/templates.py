@@ -258,6 +258,44 @@ def load_registry(
                         "only to an agent hook"
                     )
 
+        if "timeout" in binding:
+            if kind == "builtin":
+                raise RegistryError(
+                    f"{path.name}: hook {hook!r} is kind 'builtin'; 'timeout' applies only to "
+                    "a subprocess, agent, or forge hook"
+                )
+            t = binding["timeout"]
+            if isinstance(t, bool) or not isinstance(t, int | float) or t <= 0:
+                raise RegistryError(
+                    f"{path.name}: hook {hook!r} 'timeout' must be a positive number of minutes"
+                )
+        if "repos" in binding:
+            repos_raw = binding["repos"]
+            if not isinstance(repos_raw, dict):
+                raise RegistryError(
+                    f"{path.name}: hook {hook!r} 'repos' must be a mapping of repo path to override"
+                )
+            for repo_path, override in repos_raw.items():
+                if not isinstance(override, dict) or "enabled" not in override:
+                    raise RegistryError(
+                        f"{path.name}: hook {hook!r} 'repos'[{repo_path!r}] "
+                        "needs at least 'enabled'"
+                    )
+                if not isinstance(override["enabled"], bool):
+                    raise RegistryError(
+                        f"{path.name}: hook {hook!r} 'repos'[{repo_path!r}] "
+                        "'enabled' must be a boolean"
+                    )
+                cmd = override.get("command")
+                if cmd is not None and not (
+                    isinstance(cmd, str)
+                    or (isinstance(cmd, list) and all(isinstance(x, str) for x in cmd))
+                ):
+                    raise RegistryError(
+                        f"{path.name}: hook {hook!r} 'repos'[{repo_path!r}] 'command' must be "
+                        "a string or list of strings"
+                    )
+
         # Last, so the agent-only keys keep their own sharper message above: a
         # key nobody reads is a setting that silently does nothing — a
         # `deny_tool:` typo denies no tool and fails nowhere, the same failure
@@ -268,10 +306,12 @@ def load_registry(
             known = {"kind", "handler", "backend", "poll_timeout", "poll_interval"}
         else:
             known = {"kind", "command"}
-        # `interactive` is UI-facing rather than dispatch-facing (02 §13): the
-        # registry round-trips it through Settings today, ahead of the screen
-        # that will read it.
-        known |= {"interactive"}
+        # `interactive`/`timeout`/`repos` are UI-facing rather than
+        # dispatch-facing (02 §13): the registry round-trips them through
+        # Settings today, ahead of the screen/executor that will read them.
+        # `timeout` is rejected for `builtin` above, so this stays a plain
+        # superset with no behaviour change for `builtin`.
+        known |= {"interactive", "timeout", "repos"}
         if kind == "agent":
             known |= set(agent_only)
         if "interactive" in binding and not isinstance(binding["interactive"], bool):

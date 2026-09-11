@@ -302,7 +302,10 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
     # The one door that starts new work. Deliberately not on `approve` or
     # `retry`: those continue an item that is already underway, and refusing
     # them would strand a human mid-chain with no way to finish (Kraft-n2d).
-    limit = int(st.intake.get("max_concurrent", 1))
+    # `st.policy` can be None when policy.yaml is invalid (`st.invalid_policy`
+    # non-empty) — fall back to the same "1" resume already used rather than
+    # crash a path that used to degrade gracefully.
+    limit = st.policy.max_concurrent if st.policy else 1
     if st.db.read(store.active_count) >= limit:
         raise HTTPException(
             409, f"all {limit} slots are busy; pause something or raise max_concurrent"
@@ -397,6 +400,12 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     running = _escalation_running(st, wid)
     if running is not None:
         raise HTTPException(409, f"an escalation turn ({running}) is already running")
+
+    limit = st.policy.max_concurrent if st.policy else 1
+    if st.db.read(store.active_count) >= limit:
+        raise HTTPException(
+            409, f"all {limit} slots are busy; pause something or raise max_concurrent"
+        )
 
     worktree = st.run_dirs.worktrees / wid
     try:

@@ -21,10 +21,17 @@ class RepoBody(BaseModel):
     test_command: str | None = None
     forge: str | None = None
     project: str | None = None
-    enabled: bool = True
+    # None means "pick a safe default": enabled if a test command was given or
+    # probed, disabled otherwise. An explicit True/False always wins, so a
+    # caller that does supply one still gets the enable-without-test-command
+    # refusal below.
+    enabled: bool | None = None
     default_model: str | None = None
     deny_tools: list[str] | None = None
     steering: list[str] | None = None
+    allow_cross_repo: bool | None = None
+    default_root_merge_policy: str | None = None
+    submodules: list[dict] | None = None
 
 
 class ProbeBody(BaseModel):
@@ -75,24 +82,30 @@ async def add_repo(body: RepoBody, request: Request):
     repos = config_mod.load_repos(deps.repos_path(st), validate_steering=False)
     if any(r["path"] == probed["path"] for r in repos):
         raise HTTPException(409, f"{probed['path']} is already connected")
+    test_command = body.test_command or probed["test_command"]
+    test_scopes = None if body.test_command else (probed.get("test_scopes") or None)
     entry = {
         "path": probed["path"],
         "name": body.name or probed["name"],
         "default_chain_template": body.default_chain_template or "default",
-        "test_command": body.test_command or probed["test_command"],
+        "test_command": test_command,
         # Only when the connecting caller left `test_command` unset: an
         # explicit override there means one command for every diff, and
         # `test_scopes` wrapping it (config.load_repos) already gives that
         # the same effect without a stale probed scope list beside it.
-        "test_scopes": None if body.test_command else (probed.get("test_scopes") or None),
+        "test_scopes": test_scopes,
         "forge": body.forge or probed["forge"],
         "project": body.project or probed["project"],
-        "enabled": body.enabled,
+        "enabled": body.enabled if body.enabled is not None else bool(test_command or test_scopes),
         "default_model": body.default_model,
         "deny_tools": body.deny_tools or [],
         "steering": body.steering or [],
+        "allow_cross_repo": body.allow_cross_repo if body.allow_cross_repo is not None else False,
+        "default_root_merge_policy": body.default_root_merge_policy or "bump",
+        "submodules": body.submodules or [],
     }
     repos.append(entry)
+    _refuse_enable_without_test_command(st, entry)
     _validate_repos(st, repos)
     config_mod.save_repos(deps.repos_path(st), repos)
     # Index it now: a repo connected mid-session would otherwise stay invisible
@@ -116,6 +129,29 @@ class RepoPatch(BaseModel):
     default_model: str | None = None
     deny_tools: list[str] | None = None
     steering: list[str] | None = None
+    allow_cross_repo: bool | None = None
+    default_root_merge_policy: str | None = None
+    submodules: list[dict] | None = None
+
+
+def _refuse_enable_without_test_command(st, entry: dict) -> None:
+    """25's "disabled — new items can't target it" is the read side of this:
+    the write side refuses to flip a repo on with nothing for `on.test.run`
+    to run, rather than let it enable silently and fail every verify.
+
+    A repo with neither `test_command` nor `test_scopes` still has something
+    to run: `executor.dispatch` falls back to the registry's `on.test.run`
+    binding (config.load_repos: "None keeps the registry's command"). Only
+    refuse when that fallback is also empty.
+    """
+    if entry.get("enabled") and not (entry.get("test_command") or entry.get("test_scopes")):
+        registry_command = st.registry.hooks.get("on.test.run", {}).get("command")
+        if not registry_command:
+            raise HTTPException(
+                422,
+                "cannot enable a repo with no test command — set one first "
+                "(Plugins → on.test.run, or per repo)",
+            )
 
 
 @api_router.patch("/repos")
@@ -125,7 +161,13 @@ async def update_repo(body: RepoPatch, request: Request, path: str):
     entry = deps._connected(repos, path)
     if entry is None:
         raise HTTPException(404, f"{path} is not connected")
-    entry.update({k: v for k, v in body.model_dump().items() if v is not None})
+    # exclude_unset, not `v is not None`: a field the caller left out of the
+    # JSON body must not clobber the saved value, but one sent as an explicit
+    # `null` (clearing forge, test_command, default_model, project — the
+    # RepoDetail draft round-trips the whole Repo, nulls included) has to
+    # actually take effect rather than being silently dropped.
+    entry.update(body.model_dump(exclude_unset=True))
+    _refuse_enable_without_test_command(st, entry)
     _validate_repos(st, repos)
     config_mod.save_repos(deps.repos_path(st), repos)
     return entry
