@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 from pathlib import Path
 
 import httpx
@@ -84,6 +85,27 @@ def test_resolve_repo_walks_up_from_a_subdirectory(wired, tmp_path):
     async def scenario():
         await client.ensure_repo(str(repo))
         return await client.resolve_repo(deep)
+
+    assert run_with_app(wired, scenario) == str(repo)
+
+
+def test_resolve_repo_maps_a_linked_worktree_to_its_connected_repo(wired, tmp_path):
+    """Kraft-tc33: a plain `git worktree add` checkout's `--show-toplevel` is
+    itself, not the main repo — resolve_repo must normalize through
+    `--git-common-dir` the way `config.probe_repo` already does, or a session
+    standing in a worktree of a connected repo reads as unconnected."""
+    repo = make_repo(tmp_path)
+    worktree = tmp_path / "wt"
+    subprocess.run(
+        ["git", "worktree", "add", "-b", "side", str(worktree)],
+        cwd=str(repo),
+        check=True,
+        capture_output=True,
+    )
+
+    async def scenario():
+        await client.ensure_repo(str(repo))
+        return await client.resolve_repo(worktree)
 
     assert run_with_app(wired, scenario) == str(repo)
 
