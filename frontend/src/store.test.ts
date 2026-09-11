@@ -138,6 +138,45 @@ describe("applyEvent", () => {
     expect(useStore.getState().workItems.w1.fixCycle).toBe(2);
   });
 
+  it("task_progress sets the hero task bar's progress", () => {
+    useStore
+      .getState()
+      .applyEvent(ev({ type: "task_progress", payload: { node_id: "env_setup", task: 3, total: 6, title: "wire the thing" } }));
+    expect(useStore.getState().workItems.w1.progress).toEqual({
+      current: 3,
+      total: 6,
+      title: "wire the thing",
+      tasks: [],
+    });
+  });
+
+  it("task_progress recomputes an existing plan list's states", () => {
+    useStore.setState((s) => ({
+      workItems: {
+        ...s.workItems,
+        w1: {
+          ...s.workItems.w1,
+          progress: {
+            current: 1,
+            total: 3,
+            title: "a",
+            tasks: [
+              { n: 1, title: "a", state: "current" },
+              { n: 2, title: "b", state: "pending" },
+              { n: 3, title: "c", state: "pending" },
+            ],
+          },
+        },
+      },
+    }));
+    useStore.getState().applyEvent(ev({ type: "task_progress", payload: { node_id: "env_setup", task: 2, total: 3, title: "b" } }));
+    expect(useStore.getState().workItems.w1.progress?.tasks.map((t) => t.state)).toEqual([
+      "done",
+      "current",
+      "pending",
+    ]);
+  });
+
   it("work_item_completed sets status", () => {
     useStore.getState().applyEvent(ev({ type: "work_item_completed", payload: {} }));
     expect(useStore.getState().workItems.w1.status).toBe("completed");

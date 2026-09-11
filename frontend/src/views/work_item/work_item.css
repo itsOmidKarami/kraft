@@ -1,0 +1,144 @@
+/* views/work_item/* (UI v2 · 05). New rules only — nothing here duplicates
+ * styles.css; `.detail`, `.card`, `.row*`, `.tag*`, `.btn*`, `.chip`,
+ * `.control-row`, `.field`, `.empty`, `.mono` etc. all come from there. */
+
+/* — action bar (11 right side + today's left-slot cards) ────────────── */
+.action-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-6);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-neutral-800);
+  background: color-mix(in srgb, var(--color-surface) 60%, transparent);
+}
+.action-bar-left { flex: 1; min-width: 0; }
+.action-bar-mid { font-size: 11px; color: var(--color-neutral-500); align-self: center; }
+.action-bar-right { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.action-bar-usage { font-size: 12px; color: var(--color-neutral-500); white-space: nowrap; }
+.mr-btn { display: inline-flex; align-items: center; gap: 4px; }
+
+/* — stage graph ───────────────────────────────────────────────────────── */
+.stage-graph { display: flex; flex-wrap: wrap; align-items: center; gap: 0; row-gap: var(--space-3); }
+.stage-link-wrap { display: flex; align-items: center; }
+.stage-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 9px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-neutral-800);
+  background: transparent;
+  color: var(--color-neutral-400);
+  font-size: 12px;
+  cursor: pointer;
+}
+.stage-pill[data-state="current"] {
+  border-color: var(--color-accent-700);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  color: var(--color-neutral-200);
+}
+.stage-pill[data-state="done"] { color: var(--color-neutral-300); }
+.stage-pill[data-selected="true"] {
+  border-color: var(--color-accent);
+  background: var(--color-accent-900);
+  color: var(--color-accent-300);
+}
+.stage-pill-escalate { color: var(--color-accent-300); }
+.stage-link { display: inline-flex; align-items: center; width: 14px; height: 1px; background: var(--color-neutral-800); position: relative; }
+.stage-link-gate { position: absolute; left: 50%; transform: translate(-50%, -50%); top: 0; color: var(--color-neutral-500); }
+
+/* — graph/lower split ─────────────────────────────────────────────────── */
+.graph-split { display: flex; flex-direction: column; }
+.graph-split-graph { overflow-y: auto; padding-bottom: var(--space-2); }
+.graph-split-handle {
+  height: 6px;
+  margin: var(--space-1) 0;
+  border-radius: 3px;
+  background: var(--color-neutral-800);
+  cursor: row-resize;
+}
+.graph-split-handle:hover { background: var(--color-neutral-700); }
+
+/* — inspector + right pane split ──────────────────────────────────────── */
+.item-split { display: grid; grid-template-columns: 340px 1fr; gap: var(--space-6); align-items: start; }
+.inspector { border-right: 1px solid var(--color-neutral-800); padding-right: var(--space-4); }
+.inspector-head { display: flex; align-items: center; gap: var(--space-3); font-size: 12px; padding-bottom: var(--space-2); }
+.inspector-body { padding-top: var(--space-2); }
+.inspector-list { display: flex; flex-direction: column; }
+.inspector-list [data-selected="true"] { background: var(--color-accent-900); border-radius: var(--radius-sm); }
+.inspector-scope { display: flex; gap: var(--space-2); padding-bottom: var(--space-2); }
+/* `.doc-row`'s grid is Documents' icon/title/kind/date; a change row is
+ * path/+/− with no icon, which put the path in the 20px icon column. */
+.doc-row.change-row { grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--space-2); }
+.change-row .doc-title { font-size: 12px; overflow-wrap: anywhere; }
+.plan-list { list-style: none; margin: 0 0 var(--space-3); padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.plan-list li { display: flex; gap: var(--space-2); font-size: 12px; padding: 2px 0; color: var(--color-neutral-500); }
+.plan-list li[data-state="done"] { color: var(--color-neutral-400); text-decoration: line-through; }
+.plan-list li[data-state="current"] { color: var(--color-accent-300); font-weight: 500; }
+.plan-task-n { width: 16px; text-align: right; opacity: 0.6; }
+.inspector-foot { font-size: 11.5px; color: var(--color-neutral-600); margin-top: var(--space-2); }
+.item-right-pane { min-width: 0; }
+.item-right-pane[data-maximized="true"] { grid-column: 1 / -1; }
+.pane.empty { padding: var(--space-6); }
+
+/* — Config tab ─────────────────────────────────────────────────────────── */
+.inspector-config { display: flex; flex-direction: column; gap: var(--space-6); }
+.config-block { display: flex; flex-direction: column; gap: var(--space-2); }
+.config-fields { display: grid; grid-template-columns: auto 1fr; gap: var(--space-1) var(--space-3); font-size: 12px; margin: 0; }
+.config-fields dt { color: var(--color-neutral-500); }
+.config-fields dd { margin: 0; color: var(--color-neutral-300); }
+.config-switch { gap: var(--space-2); font-size: 12px; }
+.config-budget-input { width: 140px; }
+.config-yaml {
+  font-size: 11.5px;
+  line-height: 1.5;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-neutral-900);
+  border: 1px solid var(--color-neutral-800);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* — hero task bar (Kraft-qqz8) ─────────────────────────────────────────── */
+.hero-task-bar { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-2); }
+.hero-task-label { font-size: 12px; color: var(--color-neutral-400); }
+.hero-task-segments { display: flex; gap: 2px; }
+.hero-task-seg { flex: 1; height: 3px; border-radius: 2px; background: var(--color-neutral-800); }
+.hero-task-seg[data-state="done"] { background: var(--color-accent-600); }
+.hero-task-seg[data-state="current"] { background: var(--color-accent); }
+
+/* — not-started (21) ───────────────────────────────────────────────────── */
+.not-started-card { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-6); text-align: center; }
+
+.log-show-all { width: 100%; justify-content: center; }
+
+/* Below the breakpoint, `usePhone` swaps `GraphSplit`/`.item-split` out for
+ * `Phone.tsx` entirely (index.tsx) — this query only has to reflow the
+ * pieces both layouts share (the action bar). */
+@media (max-width: 767px) {
+  .action-bar { flex-direction: column; }
+}
+
+/* — phone item + node page (m04/m05) ───────────────────────────────────── */
+.phone-topbar { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); padding-bottom: var(--space-2); }
+.phone-back {
+  color: var(--color-neutral-300);
+  font-size: 14px;
+  text-decoration: none;
+  background: none;
+  border: none;
+  padding: var(--space-2) 0;
+  cursor: pointer;
+}
+.phone-topbar-context { font-size: 12px; color: var(--color-neutral-500); white-space: nowrap; }
+.phone-stage-list { display: flex; flex-direction: column; gap: 2px; margin-top: var(--space-4); }
+.phone-stage-list .row { min-height: 44px; }
+.phone-stage-list .row[data-state="current"] { background: var(--color-accent-900); border-radius: var(--radius-sm); }
+.phone-node-log { margin-top: var(--space-4); }
+.phone-node { display: flex; flex-direction: column; }
+.phone-node-head { display: flex; flex-direction: column; gap: 2px; padding: var(--space-2) 0 var(--space-3); }
+.phone-node-title { display: flex; align-items: center; gap: 6px; font-size: 18px; font-weight: 600; }
+.phone-node-meta { font-size: 12px; color: var(--color-neutral-500); }
+.phone-node-body { display: flex; flex-direction: column; gap: var(--space-4); padding-top: var(--space-3); }

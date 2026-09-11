@@ -80,34 +80,32 @@ test("the diff viewer wraps a real diff instead of scrolling sideways", async ({
   await createItem(page, "phone diff", "quick-task");
   await expect(page.getByText(/completed|needs you/i).first()).toBeVisible({ timeout: 60_000 });
   await page.getByRole("button", { name: /review changes/i }).click();
-  const dialog = page.getByRole("dialog", { name: "changes" });
-  await expect(dialog).toBeVisible();
+  // DiffModal is gone — "Review changes" on a phone opens the m05 node page
+  // on the Changes tab instead of a dialog.
+  const nodePage = page.getByTestId("phone-node-page");
+  await expect(nodePage).toBeVisible();
   // A quick-task's edit is already committed by the time the chain reaches a
   // gate, so it renders under "Landed" — collapsed by default (Kraft-nceo).
   // Open the first file the same way a reader would.
-  await dialog.locator(".diff-files summary").first().click();
-  const lines = dialog.locator(".diff-body > div");
+  await nodePage.locator(".diff-files summary").first().click();
+  const lines = nodePage.locator(".diff-body > div");
   await expect(lines.first()).toBeVisible({ timeout: 15_000 });
   await page.screenshot({ path: `${SHOTS}/phone-04-diff.png`, fullPage: true });
 
   // The whole point of the phone rules: `white-space: pre` sent a long hunk off
   // the side of the screen with no way back.
-  expect(await overflowsX(dialog)).toBe(false);
-  expect(await overflowsX(dialog.locator(".diff-body"))).toBe(false);
+  expect(await overflowsX(nodePage)).toBe(false);
+  expect(await overflowsX(nodePage.locator(".diff-body"))).toBe(false);
   expect(await overflowsX(page.locator("body"))).toBe(false);
 
   // The untracked-file list carries session paths far longer than 390px. The
-  // modal clips them, so nothing "overflows" by scrollWidth — the path is just
+  // page clips them, so nothing "overflows" by scrollWidth — the path is just
   // silently cut in half. Measure the text against its own box instead.
-  const clipped = await dialog.locator(".diff-untracked li").evaluateAll((els) =>
+  const clipped = await nodePage.locator(".diff-untracked li").evaluateAll((els) =>
     els.filter((el) => el.scrollWidth > el.clientWidth + 1).map((el) => el.textContent),
   );
   expect(clipped).toEqual([]);
   expect(await lines.count()).toBeGreaterThan(0);
-
-  // The modal has to fit the viewport, not run past it.
-  const dbox = await dialog.boundingBox();
-  expect(dbox!.height).toBeLessThanOrEqual(844);
 });
 
 test("the chain bar's node labels do not collide on a phone", async ({ page }) => {
@@ -134,22 +132,27 @@ test("the chain bar's node labels do not collide on a phone", async ({ page }) =
   expect(overflowing).toEqual([]);
 });
 
-test("the document modal hides what a phone cannot do", async ({ page }) => {
+test("the document viewer hides what a phone cannot do", async ({ page }) => {
   await createItem(page, "phone documents", "default");
   await expect(page.getByText(/approve the spec to continue/i)).toBeVisible({ timeout: 30_000 });
-  await page.getByRole("tab", { name: /documents/i }).click();
-  const doc = page.locator(".doc-row").first();
+  // DocumentModal is gone — Documents lives behind a tab on the m05 node
+  // page, opened by tapping a stage on the phone list (m04).
+  await page.locator('[data-testid^="phone-stage-"]').first().click();
+  const nodePage = page.getByTestId("phone-node-page");
+  await expect(nodePage).toBeVisible();
+  await nodePage.getByRole("tab", { name: /documents/i }).click();
+  const doc = nodePage.locator(".doc-row").first();
   if ((await doc.count()) === 0) test.skip(true, "no linked document to open");
   await doc.click();
-  const modal = page.getByRole("dialog", { name: "document" });
-  await expect(modal).toBeVisible();
+  const viewer = nodePage.getByTestId("right-pane-doc");
+  await expect(viewer).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/phone-05-document.png`, fullPage: true });
 
   // Launching an editor needs a window on one machine or the other; a phone has
   // neither the server's desktop nor a vscode:// handler. Copy path does work.
-  await expect(modal.getByRole("button", { name: /open in/i })).toBeHidden();
-  await expect(modal.getByRole("button", { name: /choose editor/i })).toBeHidden();
-  await expect(modal.getByTitle("Copy path")).toBeVisible();
+  await expect(viewer.getByRole("button", { name: /open in/i })).toBeHidden();
+  await expect(viewer.getByRole("button", { name: /choose editor/i })).toBeHidden();
+  await expect(viewer.getByTitle("Copy path")).toBeVisible();
 });
 
 test("the bottom nav reaches every screen and highlights the active tab", async ({ page }) => {

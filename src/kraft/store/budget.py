@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import replace
 from datetime import UTC, datetime
+
+from kraft import events
+from kraft.store import _now as _now  # test seam for wall-clock checks
 
 
 def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
@@ -103,3 +107,53 @@ def budget_spend(
             (since,),
         ).fetchone()[0]
     return float(item), float(daily)
+
+
+def effective_work_item_cap(row, policy_budget) -> tuple[float | None, str]:
+    """`(cap_usd, source)` for one work item -- `source` is `"item"` when the
+    item has its own cap (set or explicitly cleared to "no cap"), else
+    `"policy"` for `policy_budget.work_item_usd` (UI v2 · 04, point 4).
+
+    `row["budget_set"]` is what makes an explicit "no cap" (`budget_usd`
+    NULL, `budget_set` 1) distinguishable from "never customized" (`budget_usd`
+    NULL, `budget_set` 0, defer to policy) -- a bare nullable column alone
+    cannot tell those apart.
+    """
+    if row["budget_set"]:
+        return row["budget_usd"], "item"
+    return policy_budget.work_item_usd, "policy"
+
+
+def effective_budget(row, policy_budget):
+    """`policy_budget` with `work_item_usd` replaced by this item's effective
+    cap (`effective_work_item_cap`). `daily_usd` is always policy-wide --
+    there is no per-item daily cap to override.
+    """
+    cap, _source = effective_work_item_cap(row, policy_budget)
+    return replace(policy_budget, work_item_usd=cap)
+
+
+def set_budget(conn: sqlite3.Connection, work_item_id: str, budget_usd: float | None) -> None:
+    """Set this item's own spend cap: a number, or `None` for an explicit "no
+    cap" (point 4). Always marks `budget_set`, so the item's choice -- even
+    "no cap" -- is never confused with "not customized, use the policy
+    default".
+    """
+    conn.execute(
+        "UPDATE work_items SET budget_set = 1, budget_usd = ?, updated_at = ? WHERE id = ?",
+        (budget_usd, _now(), work_item_id),
+    )
+    events.append(conn, work_item_id, "budget_changed", {"budget_usd": budget_usd})
+
+
+def raise_budget(conn: sqlite3.Connection, work_item_id: str, budget_usd: float | None) -> None:
+    """Raise the cap and note it as its own event (Prototype `raiseBudget`,
+    point 5) -- same write as `set_budget`, but distinguishing the timeline
+    entry: this fires from the "raise budget and continue" action on a
+    `needs_human`/budget item, `set_budget` from the Config tab.
+    """
+    conn.execute(
+        "UPDATE work_items SET budget_set = 1, budget_usd = ?, updated_at = ? WHERE id = ?",
+        (budget_usd, _now(), work_item_id),
+    )
+    events.append(conn, work_item_id, "budget_raised", {"budget_usd": budget_usd})
