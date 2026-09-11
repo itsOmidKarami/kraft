@@ -36,6 +36,36 @@ CONFIG_FILES = frozenset(
 # The complete gate set. Public because the API validates approve/reject against it
 # and the chain-review skill documents it — a second copy is how those drift apart.
 GATE_NAMES = {"spec_approval", "plan_approval", "chain_finalized", "human_review_approval"}
+#: Node keys `materialize()` sets from a template but the chain-review skill's
+#: prompt never teaches an agent to reproduce (Kraft-eod0) -- its schema is
+#: `{id, tasks, gate_after, fix_loop}`, four of the eight keys a real node
+#: carries. An agent emitting an "unchanged" node only knows those four, so
+#: the splice that replaces the tail wholesale (`api._splice_chain_review`)
+#: must carry these forward from the node they replace rather than trust an
+#: agent-authored dict to know they exist.
+NODE_CARRYOVER_FIELDS = ("on_failure", "reject_to", "rebase_bounce_to", "auto_escalate")
+
+
+def carry_forward_node_fields(old_nodes: list, new_nodes: list) -> list:
+    """Fill `NODE_CARRYOVER_FIELDS` on `new_nodes` from the old node sharing its
+    `id`, for whichever fields the new node did not itself set. A node id with
+    no old counterpart (one the reviewer added) is left alone -- the reviewer
+    cannot invent a repair task or a reject target the skill never taught it to
+    name, so a genuinely new node gets `None` for all of these, same as
+    `materialize()` gives any node lacking them."""
+    old_by_id = {
+        n["id"]: n for n in old_nodes if isinstance(n, dict) and isinstance(n.get("id"), str)
+    }
+    for n in new_nodes:
+        old = old_by_id.get(n.get("id"))
+        if old is None:
+            continue
+        for field in NODE_CARRYOVER_FIELDS:
+            if field not in n:
+                n[field] = old.get(field)
+    return new_nodes
+
+
 #: What an intake attachment stands in for (Kraft-dgh). Keyed on the gate rather
 #: than the node id: gate names are a validated closed vocabulary, node ids are
 #: free text a custom template chooses.
