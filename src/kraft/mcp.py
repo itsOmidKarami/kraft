@@ -183,6 +183,30 @@ def build() -> MCPServer:
         )
 
     @server.tool()
+    async def set_node_overrides(
+        node_id: str,
+        auto_escalate: bool | None = None,
+        auto_escalate_stuck: bool | None = None,
+        auto_escalate_delay_s: int | None = None,
+        clear: bool = False,
+        work_item_id: str | None = None,
+    ) -> dict:
+        """Set or clear one node's per-item auto-escalate override on a Kraft
+        work item, without touching the Policy screen's system defaults or the
+        chain template everyone else uses. `clear` resets this node back to
+        the template's own binding; naming a field replaces the whole stored
+        override for that node rather than merging with it. 409s once the
+        node has started."""
+        return await client.set_node_overrides(
+            node_id,
+            auto_escalate,
+            auto_escalate_stuck,
+            auto_escalate_delay_s,
+            clear=clear,
+            work_item_id=work_item_id,
+        )
+
+    @server.tool()
     async def permission_request(
         tool_name: str, input: dict, tool_use_id: str | None = None
     ) -> dict:

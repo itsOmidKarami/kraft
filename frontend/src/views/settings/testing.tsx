@@ -34,6 +34,9 @@ export const policy = {
   default: { attempts: 3, wall_clock_s: 3600 },
   max_concurrent: 3,
   rate_limit_retries: 5,
+  auto_escalate_stuck: true,
+  auto_escalate_stuck_cap: 3,
+  auto_escalate_delay_s: 0,
 };
 
 export const theme: Theme = {

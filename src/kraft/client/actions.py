@@ -302,6 +302,44 @@ async def set_agent_overrides(
     return await transport._patch(f"/work-items/{target}", {"agent_overrides": overrides})
 
 
+async def set_node_overrides(
+    node_id: str,
+    auto_escalate: bool | None = None,
+    auto_escalate_stuck: bool | None = None,
+    auto_escalate_delay_s: int | None = None,
+    *,
+    clear: bool = False,
+    work_item_id: str | None = None,
+) -> dict:
+    """Set or clear one node's per-item override on a Kraft work item
+    (Kraft-uxm3), the door onto the same `auto_escalate`/`auto_escalate_stuck`/
+    `auto_escalate_delay_s` fields the Policy screen sets system-wide and a
+    chain template sets per node -- without touching either of those. `clear`
+    sends `{}` for this node, dropping its overrides back to the template;
+    naming a field *replaces* that node's whole stored override, it does not
+    merge with what is already there. 409s once the node has started.
+    """
+    target = await context.resolve_work_item(work_item_id)
+    if clear:
+        fields: dict = {}
+    else:
+        fields = {
+            k: v
+            for k, v in {
+                "auto_escalate": auto_escalate,
+                "auto_escalate_stuck": auto_escalate_stuck,
+                "auto_escalate_delay_s": auto_escalate_delay_s,
+            }.items()
+            if v is not None
+        }
+        if not fields:
+            raise ValueError(
+                "kraft: set-node-override needs --auto-escalate, --auto-escalate-stuck, "
+                "--auto-escalate-delay-s, or --clear"
+            )
+    return await transport._patch(f"/work-items/{target}", {"node_overrides": {node_id: fields}})
+
+
 async def reload_templates() -> dict:
     """Reread every chain template and the hook registry from disk into the
     running server, no restart."""
