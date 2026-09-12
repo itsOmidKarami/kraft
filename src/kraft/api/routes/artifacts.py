@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
-from pathlib import Path
 
 from fastapi import HTTPException, Request
 
@@ -10,6 +8,7 @@ from kraft import events, review
 from kraft.api import api_router, deps
 from kraft.api.routes import board
 from kraft.index import ingest as ingest_mod
+from kraft.worktree_read import read_worktree_file
 
 logger = logging.getLogger(__name__)
 
@@ -116,29 +115,6 @@ async def get_work_item_diff(wid: str, request: Request):
     }
 
 
-def _open_no_symlinks(root: Path, rel: str) -> int:
-    """Open `rel` beneath `root`, refusing a symlink at every component.
-
-    A resolved path is a fact about the filesystem at the instant it was
-    resolved. The agent owns this worktree and can swap any component --
-    including a parent directory -- between the resolve and the open, so
-    containment has to be enforced by the open itself: walk down from the
-    root, one `openat` per component, never following a link.
-    """
-    parts = Path(rel).parts
-    # The root's own ancestors are server-owned, so following links above the
-    # worktree is fine (and necessary on macOS, where /tmp is a symlink).
-    dir_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        for part in parts[:-1]:
-            nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
-            os.close(dir_fd)
-            dir_fd = nxt
-        return os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dir_fd)
-    finally:
-        os.close(dir_fd)
-
-
 async def _refuse_artifact(st, wid: str, rel: str, reason: str) -> None:
     """Record why an artifact read was refused, on the item's own timeline.
 
@@ -156,58 +132,22 @@ async def _refuse_artifact(st, wid: str, rel: str, reason: str) -> None:
 
 
 async def _read_worktree_artifact(st, wid: str, rel: str) -> tuple[str, bool] | None:
-    """Safely read `rel` out of `wid`'s worktree: resolve, check containment,
-    open with no symlink followed anywhere along the path, and cap the read at
-    `DIFF_MAX_BYTES`. Records why via `_refuse_artifact` and returns None on
-    any failure -- shared by the reviewer-facing read and gate-approval
+    """Safely read `rel` out of `wid`'s worktree via `worktree_read.read_worktree_file`
+    (resolve, check containment, open with no symlink followed anywhere along the
+    path, cap the read at `DIFF_MAX_BYTES`), and record why via `_refuse_artifact`
+    on any failure -- shared by the reviewer-facing read and gate-approval
     ingestion (`approve_gate`) so both trust the exact same containment walk.
     """
     worktree = st.run_dirs.worktrees / wid
-    try:
-        root = worktree.resolve(strict=True)
-        target = (worktree / rel).resolve(strict=True)
-    except OSError:
-        await _refuse_artifact(st, wid, rel, "absent")
+    result, reason = read_worktree_file(worktree, rel, DIFF_MAX_BYTES)
+    if result is None:
+        if reason == "escaped_containment":
+            # A reviewer's browser learns nothing about the server's disk;
+            # this warning is for whoever is watching the server's own log.
+            logger.warning("artifact for %s resolves outside its worktree: %s", wid, rel)
+        await _refuse_artifact(st, wid, rel, reason)
         return None
-    if not target.is_relative_to(root):
-        # A symlink out of the worktree is the one way a derived, unstored path
-        # can still point somewhere it should not. Same answer as a missing
-        # file: a reviewer's browser learns nothing about the server's disk.
-        logger.warning("artifact for %s resolves outside its worktree: %s", wid, target)
-        await _refuse_artifact(st, wid, rel, "escaped_containment")
-        return None
-    try:
-        # The resolve+is_relative_to check above is what produces the warning
-        # and names the work item; it is a fact about the instant it ran, not
-        # a guarantee. This walk is the actual containment: the agent that
-        # owns this worktree can swap any component -- not just the leaf --
-        # for a symlink between that check and this open.
-        fd = _open_no_symlinks(root, rel)
-    except OSError:
-        await _refuse_artifact(st, wid, rel, "unreadable")
-        return None
-    try:
-        fh = os.fdopen(fd, "rb")
-    except OSError:
-        # fdopen failed before taking ownership of fd (e.g. the walk landed on
-        # a directory) -- close it ourselves, or it leaks.
-        os.close(fd)
-        await _refuse_artifact(st, wid, rel, "unreadable")
-        return None
-    try:
-        with fh:
-            # Capped at the read, not just at the response: an agent that writes
-            # a multi-gigabyte file by mistake must not be able to make the
-            # server read it into memory to decide it is too big (spec §4). One
-            # byte over the cap is how `truncated` is known without a stat race.
-            data = fh.read(DIFF_MAX_BYTES + 1)
-    except OSError:
-        await _refuse_artifact(st, wid, rel, "unreadable")
-        return None
-    truncated = len(data) > DIFF_MAX_BYTES
-    # Slicing bytes can land mid-codepoint; `errors="replace"` is what makes
-    # that a single replacement character instead of a 500.
-    return data[:DIFF_MAX_BYTES].decode(errors="replace"), truncated
+    return result.text, result.truncated
 
 
 @api_router.get("/work-items/{wid}/artifact")

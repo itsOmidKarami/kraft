@@ -191,7 +191,7 @@ def test_open_no_symlinks_refuses_an_ancestor_directory_swapped_for_a_symlink(tm
     scenario a round-1 fix (leaf-only `O_NOFOLLOW`) let through -- the walk
     below must refuse it at the `.engineering` component, not just the leaf.
     """
-    from kraft.api.routes.artifacts import _open_no_symlinks
+    from kraft.worktree_read import open_no_symlinks as _open_no_symlinks
 
     root = tmp_path / "root"
     (root / ".engineering" / "specs").mkdir(parents=True)
@@ -206,6 +206,28 @@ def test_open_no_symlinks_refuses_an_ancestor_directory_swapped_for_a_symlink(tm
 
     with pytest.raises(OSError):
         _open_no_symlinks(root, ".engineering/specs/x.md")
+
+
+def test_read_worktree_file_refuses_a_dot_ref_instead_of_raising(tmp_path):
+    """A `rel` of "." makes `Path(rel).parts` empty, so `open_no_symlinks`'s
+    `parts[-1]` used to raise `IndexError` instead of returning a refusal --
+    exactly the kind of agent-supplied path `read_worktree_file` must never
+    raise on (spec §5: a stray exception here strands the session row)."""
+    from kraft.worktree_read import read_worktree_file
+
+    result, reason = read_worktree_file(tmp_path, ".", max_bytes=1024)
+    assert result is None
+    assert reason == "unreadable"
+
+
+def test_read_worktree_file_refuses_a_nul_byte_ref_instead_of_raising(tmp_path):
+    """A NUL byte in `rel` makes `resolve()` raise `ValueError`, not
+    `OSError` -- also just an unreadable agent-supplied path."""
+    from kraft.worktree_read import read_worktree_file
+
+    result, reason = read_worktree_file(tmp_path, "a\x00b", max_bytes=1024)
+    assert result is None
+    assert reason == "absent"
 
 
 def test_artifact_over_the_cap_truncates_without_500ing_on_a_split_codepoint(

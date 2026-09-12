@@ -568,3 +568,35 @@ def test_running_sessions_for_node_includes_an_escalation_on_another_node(tmp_pa
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_session_summaries_for_item_orders_oldest_first_and_excludes_nulls(tmp_path):
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            for sid, ref in (
+                ("s1", "engineering/sessions/s1.md"),
+                ("s2", None),  # a non-agent node: never wrote a summary
+                ("s3", "engineering/sessions/s3.md"),
+            ):
+                await database.write(
+                    lambda c, sid=sid: store.create_session(
+                        c,
+                        id=sid,
+                        work_item_id="w1",
+                        node_id="implementation",
+                        hook_point="on.implementation.start",
+                        log_path="/l",
+                        result_path="/r",
+                    )
+                )
+                await database.write(
+                    lambda c, sid=sid, ref=ref: store.session_exited(c, sid, "done", ref)
+                )
+            refs = database.read(lambda c: store.session_summaries_for_item(c, "w1"))
+            assert refs == ["engineering/sessions/s1.md", "engineering/sessions/s3.md"]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
