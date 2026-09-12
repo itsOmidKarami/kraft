@@ -197,6 +197,9 @@ def test_fix_cycle_names_the_post_retry_attempt_not_the_abandoned_one(tmp_path, 
             assert first == "needs_human"  # cap breached; 2 abandoned fix sessions exist
 
             await database.write(
+                lambda c: store.claim_for_run(c, wid, from_statuses=["needs_human"])
+            )
+            await database.write(
                 lambda c: store.retry_after_cap(c, wid, "verify", "verify_fix_loop", None)
             )
             second = await executor.run(

@@ -7,10 +7,12 @@ a human's note leading its prompt.
 
 from __future__ import annotations
 
+import asyncio
 import subprocess
 import time
 from pathlib import Path
 
+import httpx
 from fastapi.testclient import TestClient
 from support.harness import _git, fake_templates_dir, isolated_bd, make_repo
 
@@ -512,3 +514,59 @@ def test_abandoning_a_waiting_item_is_accepted(tmp_path, monkeypatch):
         r = client.post("/api/work-items/w1/abandon", json={})
         assert r.status_code == 200
         assert client.get("/api/work-items/w1").json()["status"] == "abandoned"
+
+
+def test_pause_cancels_the_walk_task_not_just_the_session(tmp_path, monkeypatch):
+    """Kraft-e7pm: pause must stop the walk itself, not only signal the
+    session -- otherwise the task that was awaiting it keeps running past the
+    live node into the next one."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "30")
+    repo = make_repo(tmp_path)
+
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={"repo": str(repo), "title": "pause me", "chain_template": "quick-task"},
+        ).json()["id"]
+        _running_agent(client, wid)
+
+        r = client.post(f"/api/work-items/{wid}/pause", json={})
+        assert r.status_code == 200
+
+        task = client.app.state.tasks.get(wid)
+        assert task is None or task.done(), "pause returned before the walk task actually stopped"
+
+
+def test_two_concurrent_resumes_produce_one_two_hundred_and_one_409(tmp_path, monkeypatch):
+    """Kraft-11e0. Two callers racing `/resume` on the same paused item must
+    produce exactly one winner and one 409 -- never two walks."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={
+                "repo": str(repo),
+                "title": "t",
+                "chain_template": "quick-task",
+                "autostart": False,
+            },
+        ).json()["id"]
+        assert client.get(f"/api/work-items/{wid}").json()["status"] == "paused"
+        app = client.app
+
+        async def scenario():
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://kraft") as ac:
+                return await asyncio.gather(
+                    ac.post(f"/api/work-items/{wid}/resume", json={}),
+                    ac.post(f"/api/work-items/{wid}/resume", json={}),
+                )
+
+        # Run through `client.portal` -- the app's writer connection was opened
+        # in TestClient's own portal thread, so both concurrent requests have
+        # to run on that thread's event loop too (same reason as `_seed_waiting`
+        # above).
+        a, b = client.portal.call(scenario)
+        assert sorted([a.status_code, b.status_code]) == [200, 409]
+        assert len(client.app.state.tasks) <= 1

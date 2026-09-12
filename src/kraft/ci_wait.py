@@ -96,24 +96,28 @@ async def _re_enter_one(app, row) -> bool:
     # No steer: there is no agent to address here, and a note handed to a
     # forge node would sit unconsumed until the next agent launch -- a
     # different node's business.
-    deps.spawn(
-        app,
-        wid,
-        deps.guard(
-            st.db,
+    try:
+        deps.spawn(
+            app,
             wid,
-            executor.run(
+            deps.guard(
                 st.db,
-                st.run_dirs,
-                work_item_id=wid,
-                registry=st.registry,
-                bd_cwd=deps.bd_cwd(),
-                start_index=start,
-                policy=st.policy,
-                launch=deps.launch(st, row["repo"]),
+                wid,
+                executor.run(
+                    st.db,
+                    st.run_dirs,
+                    work_item_id=wid,
+                    registry=st.registry,
+                    bd_cwd=deps.bd_cwd(),
+                    start_index=start,
+                    policy=st.policy,
+                    launch=deps.launch(st, row["repo"]),
+                ),
             ),
-        ),
-    )
+        )
+    except deps.AlreadyRunning:
+        logger.warning("ci-wait: %s already has a live walk, skipping this tick", wid)
+        return False
     return True
 
 

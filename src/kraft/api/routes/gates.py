@@ -9,6 +9,7 @@ from kraft import executor, store
 from kraft.adapters import agent as agent_mod
 from kraft.api import api_router, deps
 from kraft.api.routes import artifacts, board
+from kraft.api.routes.lifecycle import _terminate
 from kraft.templates import GATE_NAMES, carry_forward_node_fields, validate_nodes
 
 
@@ -72,6 +73,24 @@ def _splice_chain_review(st, row) -> tuple[dict | None, str | None]:
     return chain, None
 
 
+async def _stop_live_review(st, wid: str) -> None:
+    """Stop a gate's own in-flight auto_escalate review before cancelling it.
+
+    Same ordering as pause_work_item: mark the node's running sessions paused
+    and SIGTERM them before `deps.cancel` tears down the task. `deps.cancel`
+    alone never kills the review agent's process (`run_task` only stops the
+    log watcher on CancelledError), so without this the agent survives as an
+    orphan in the item's worktree -- right where the approved walk's next
+    node is about to launch its own agent -- and the session's row is left
+    'running' forever, unreachable once current_node_id moves on.
+    """
+    sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
+    ids = [s["id"] for s in sessions]
+    await st.db.write(lambda c: store.pause_work_item(c, wid, ids))
+    for s in sessions:
+        _terminate(s["pid"])
+
+
 class GateReject(BaseModel):
     note: str
     #: Where the chain re-enters. Defaults to the gate node's `reject_to`, and
@@ -113,6 +132,17 @@ async def approve_gate(wid: str, gate: str, request: Request):
         raise HTTPException(404, f"unknown gate {gate!r}")
     if board._pending_gate(st, wid) != gate:
         raise HTTPException(409, f"gate {gate!r} is not pending")
+    if deps.task_is_live(request.app, wid):
+        # A pending gate's status is already needs_human (never active), so
+        # the only thing a live task can be here is this gate's own
+        # in-flight auto_escalate review -- and a human decision is exactly
+        # what outranks a verdict computed against stale state
+        # (executor/gates.py's gate_auto_review_discarded branch). Stop it
+        # and proceed, the same way pause/skip already stop a live walk
+        # before continuing, rather than 409 a human out for the review's
+        # whole duration.
+        await _stop_live_review(st, wid)
+        await deps.cancel(request.app, wid)
 
     chain, reason = await apply_approval(st, row, gate)
     if chain is None:
@@ -128,25 +158,28 @@ async def approve_gate(wid: str, gate: str, request: Request):
 
     await st.db.write(lambda c: store.approve_gate(c, wid, gate))
     start = board._gate_node_index(chain, gate) + 1
-    deps.spawn(
-        request.app,
-        wid,
-        deps.guard(
-            st.db,
+    try:
+        deps.spawn(
+            request.app,
             wid,
-            executor.run(
+            deps.guard(
                 st.db,
-                st.run_dirs,
-                work_item_id=wid,
-                registry=st.registry,
-                bd_cwd=deps.bd_cwd(),
-                start_index=start,
-                policy=st.policy,
-                launch=deps.launch(st, row["repo"]),
-                on_approve=deps._on_approve(st),
+                wid,
+                executor.run(
+                    st.db,
+                    st.run_dirs,
+                    work_item_id=wid,
+                    registry=st.registry,
+                    bd_cwd=deps.bd_cwd(),
+                    start_index=start,
+                    policy=st.policy,
+                    launch=deps.launch(st, row["repo"]),
+                    on_approve=deps._on_approve(st),
+                ),
             ),
-        ),
-    )
+        )
+    except deps.AlreadyRunning:
+        raise HTTPException(409, "a walk is already running for this work item") from None
     return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
 
 
@@ -166,14 +199,31 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
         raise HTTPException(404, f"unknown gate {gate!r}")
     if board._pending_gate(st, wid) != gate:
         raise HTTPException(409, f"gate {gate!r} is not pending")
-
-    chain = json.loads(row["chain_definition"])
-
     if st.invalid_policy:
         # Same posture as intake (§9): a re-run we cannot bound is not started.
+        # Before _stop_live_review, not after: this bail-out changes nothing,
+        # so it must not be reached having already paused the item and killed
+        # its review agent.
         raise HTTPException(
             503, f"policy config invalid, refusing work: {'; '.join(st.invalid_policy)}"
         )
+    chain = json.loads(row["chain_definition"])
+    try:
+        executor.reject_target(chain, executor.gate_node_index(chain, gate), body.node)
+    except ValueError as exc:
+        # Same posture as invalid_policy above: a bad target changes nothing,
+        # so it must not be reached having already paused the item and killed
+        # its review agent.
+        raise HTTPException(400, str(exc)) from exc
+
+    if deps.task_is_live(request.app, wid):
+        # Same reasoning as approve_gate: a live task here can only be this
+        # gate's own in-flight auto_escalate review, and a human's decision
+        # is meant to outrank it -- stop the review instead of locking the
+        # human out for its duration.
+        await _stop_live_review(st, wid)
+        await deps.cancel(request.app, wid)
+
     try:
         target = await executor.apply_rejection(
             st.db,
@@ -189,24 +239,27 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
     if target is None:
         return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
 
-    deps.spawn(
-        request.app,
-        wid,
-        deps.guard(
-            st.db,
+    try:
+        deps.spawn(
+            request.app,
             wid,
-            executor.run(
+            deps.guard(
                 st.db,
-                st.run_dirs,
-                work_item_id=wid,
-                registry=st.registry,
-                bd_cwd=deps.bd_cwd(),
-                start_index=target,
-                policy=st.policy,
-                steer=body.note,
-                launch=deps.launch(st, row["repo"]),
-                on_approve=deps._on_approve(st),
+                wid,
+                executor.run(
+                    st.db,
+                    st.run_dirs,
+                    work_item_id=wid,
+                    registry=st.registry,
+                    bd_cwd=deps.bd_cwd(),
+                    start_index=target,
+                    policy=st.policy,
+                    steer=body.note,
+                    launch=deps.launch(st, row["repo"]),
+                    on_approve=deps._on_approve(st),
+                ),
             ),
-        ),
-    )
+        )
+    except deps.AlreadyRunning:
+        raise HTTPException(409, "a walk is already running for this work item") from None
     return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}

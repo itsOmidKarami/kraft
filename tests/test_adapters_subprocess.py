@@ -845,3 +845,43 @@ def test_rate_limit_rejection_none_without_the_event(tmp_path):
 
 def test_rate_limit_rejection_best_effort_on_unreadable_log(tmp_path):
     assert sp._rate_limit_rejection(tmp_path / "missing.log") is None
+
+
+def test_run_task_aborts_before_popen_if_the_row_was_stopped_first(tmp_path, monkeypatch):
+    """Kraft-qx1q: a session row marked paused/stopped between `create_session`
+    and Popen must never actually launch -- nothing SIGTERMs a session with no
+    pid yet."""
+    original_create_session = store.create_session
+
+    def create_then_stop(conn, **kwargs):
+        original_create_session(conn, **kwargs)
+        conn.execute("UPDATE worker_sessions SET status = 'paused' WHERE id = ?", (kwargs["id"],))
+
+    monkeypatch.setattr(store, "create_session", create_then_stop)
+
+    def _boom(*a, **kw):
+        raise AssertionError("Popen must not run once the row is no longer pending")
+
+    monkeypatch.setattr(sp.subprocess, "Popen", _boom)
+    rd = RunDirs(tmp_path).ensure()
+
+    async def scenario():
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database)
+            return await sp.run_task(
+                database,
+                rd,
+                session_id="s1",
+                work_item_id="w1",
+                node_id="verify",
+                hook_point="on.test.run",
+                cmd=["true"],
+                cwd=tmp_path,
+            )
+        finally:
+            await database.close()
+
+    status = asyncio.run(scenario())
+    assert status == "paused"
+    assert not (rd.logs / "s1.log").exists()  # aborted before the log was even opened
