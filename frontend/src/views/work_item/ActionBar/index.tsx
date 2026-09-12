@@ -3,7 +3,7 @@ import { ArrowSquareOut, FolderOpen, Pause, Play } from "@phosphor-icons/react";
 import * as api from "../../../api";
 import { OverflowMenu } from "../../../components/ui";
 import { deriveState } from "../../../deriveState";
-import { tokens, usd, until } from "../../../format";
+import { judgeReasoning, tokens, usd, until } from "../../../format";
 import type { KraftEvent, WorkerSession, WorkItem } from "../../../types";
 import { BudgetComposer } from "./BudgetComposer";
 import { Composer } from "./Composer";
@@ -377,7 +377,9 @@ export function ActionBar({
             {err ??
               (item.cappedOut
                 ? `${node?.fix_loop ?? item.current_node_id} hit its cap · ${item.cappedOut.attempts} attempts`
-                : (item.stop_reason ?? "stopped without finishing · retry picks up where it left off"))}
+                : judgeReasoning(item.stop_reason) !== undefined
+                  ? `stopped early (judge) · ${judgeReasoning(item.stop_reason)}`
+                  : (item.stop_reason ?? "stopped without finishing · retry picks up where it left off"))}
           </span>
         </div>
       );

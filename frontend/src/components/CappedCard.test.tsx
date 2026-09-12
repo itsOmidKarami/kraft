@@ -211,4 +211,25 @@ describe("CappedCard", () => {
     expect(screen.getByText(/Kraft agent is on it/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /steer and retry/i })).toBeDisabled();
   });
+
+  it("calls a judge stop a judge stop, not a cap it never hit (judge design)", () => {
+    render(
+      <CappedCard
+        item={
+          {
+            ...item,
+            cappedOut: undefined,
+            stop_reason: "judge: findings keep recurring, not worth another cycle",
+          } as WorkItem
+        }
+        sessions={sessions}
+        events={events}
+      />,
+    );
+    expect(screen.getByText(/stopped early \(judge\)/)).toBeInTheDocument();
+    expect(screen.getByText(/findings keep recurring, not worth another cycle/)).toBeInTheDocument();
+    expect(screen.queryByText(/hit its cap/)).toBeNull();
+    // still the one way forward, judge stop or not
+    expect(screen.getByRole("button", { name: /steer and retry/i })).toBeInTheDocument();
+  });
 });

@@ -535,7 +535,13 @@ def test_fix_cycle_dispatch_gets_the_same_launch_context(tmp_path, monkeypatch):
 
     asyncio.run(scenario())
 
-    argvs = _argv_lines(argv_log)
+    # The fix-loop judge shares the same fake agent (fake_registry() binds
+    # both) and is asked once between the free first cycle and the cap
+    # catching it on the next -- filtered out here since this test is about
+    # the *fix* cycle's launch context, not the judge's.
+    argvs = [
+        a for a in _argv_lines(argv_log) if "is about to spend another cycle" not in " ".join(a)
+    ]
     assert len(argvs) == 1  # only the fix cycle ever launches the fake agent
     assert argvs[0][argvs[0].index("--model") + 1] == "haiku"
 

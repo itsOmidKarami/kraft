@@ -30,3 +30,9 @@ hooks:
   # a missing label, applies the fix via set_mr_labels. Judgment, not a rules
   # table -- see the skill.
   on.mr_checks.repair:       { kind: agent, command: claude, skill: mr-checks-repair, steering: [never-signal-processes-you-didnt-start] }
+  # Fix-loop judge (2026-09-12-verify-fix-loop-judge-design): asked before
+  # every fix cycle after the first, for any node with a fix_loop, whether
+  # that cycle is still worth spending. Dispatched directly by the executor,
+  # not from a node's own `tasks` list -- the same way on.implementation.start
+  # is -- so it is generic across every fix loop without a template change.
+  on.fix_loop.judge:         { kind: agent, command: claude, skill: fix-loop-judge, steering: [never-signal-processes-you-didnt-start] }

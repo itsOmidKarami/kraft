@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ChatText, Prohibit } from "@phosphor-icons/react";
 import * as api from "../api";
-import { elapsed } from "../format";
+import { elapsed, judgeReasoning } from "../format";
 import { useStore } from "../store";
 import type { KraftEvent, WorkItem, WorkerSession } from "../types";
 import { Escalate, escalating } from "./Escalate";
@@ -90,6 +90,7 @@ export function CappedCard({
   // fix-loop node — the same shape as a `no_progress` escalation. The reason
   // string is what tells them apart (Kraft-esc); retry is still the way out.
   const crashed = item.stop_reason?.startsWith("executor crashed:") ?? false;
+  const judged = !crashed ? judgeReasoning(item.stop_reason) : undefined;
   // An escalation turn is already in this worktree; a concurrent retry would
   // race it (both touch the same checkout), and "no agent to steer" reads as
   // a lie while `Escalate` shows one running right there.
@@ -122,6 +123,11 @@ export function CappedCard({
           <span className="attention-title">
             {crashed ? (
               "Kraft crashed while running this node"
+            ) : judged !== undefined ? (
+              <>
+                {node?.fix_loop ?? node?.id ?? "this node"} stopped early (judge)
+                {span && `, ${span}`}
+              </>
             ) : (
               <>
                 {node?.fix_loop ?? node?.id ?? "this node"}{" "}
@@ -134,7 +140,9 @@ export function CappedCard({
           <span className="attention-sub">
             {crashed
               ? `${item.stop_reason} `
-              : failedHooks.length > 0 && `${failedHooks.join(", ")} never went clean. `}
+              : judged !== undefined
+                ? `${judged} `
+                : failedHooks.length > 0 && `${failedHooks.join(", ")} never went clean. `}
             The chain did not move; nothing was merged.
           </span>
         </div>

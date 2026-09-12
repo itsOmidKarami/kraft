@@ -7,6 +7,7 @@ import logging
 import shlex
 import sqlite3
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 from kraft import builtins as _builtins
@@ -27,6 +28,7 @@ from kraft.executor.context import (
     LaunchContext,
     Steer,
 )
+from kraft.store import _now as _now
 from kraft.templates import Registry
 
 logger = logging.getLogger(__name__)
@@ -419,10 +421,19 @@ def needs_context_question(db, work_item_id: str, node: dict, round: int) -> str
     task (`on.implementation.start`) is dispatched with this same round, and
     including it is exactly how a fix task's own `needs_context` is meant to
     surface, one iteration later.
+
+    `JUDGE_HOOK` is the one exception. The judge is a brake bolted onto the
+    cap and never a second way to get stuck (`_judge_result` fails open
+    in-process), but its session row persists -- so without this filter a
+    judge that exited `needs_context` would strand the item on the judge's
+    own question at the next re-entry, which is exactly the design's
+    forbidden case arriving one iteration late.
     """
     rows = db.read(lambda c: store.sessions_for_round(c, work_item_id, node["id"], round))
     latest: dict[str, sqlite3.Row] = {}
     for row in rows:
+        if row["hook_point"] == JUDGE_HOOK:
+            continue
         latest[row["hook_point"]] = row  # ordered by created_at, so last wins
     for row in latest.values():
         if row["status"] == "needs_context":
@@ -460,3 +471,155 @@ def last_measurement(db, work_item_id: str, node_id: str) -> tuple[list[str] | N
         elif e["type"] == "findings_measured" and e["payload"].get("node_id") == node_id:
             return e["payload"].get("fingerprints"), fix_seen
     return None, False
+
+
+#: The fix loop's judge hook (2026-09-12-verify-fix-loop-judge-design):
+#: dispatched directly by `kraft.executor.walk.walk_node`, the same way
+#: `on.implementation.start` is -- not from a node's own `tasks` list, so it
+#: never contaminates `collect_findings`/`needs_context_question`'s per-task
+#: reads, and every node with a `fix_loop` gets it unconditionally (spec
+#: decision 4: no new policy field).
+JUDGE_HOOK = "on.fix_loop.judge"
+
+#: Statuses that mean the judge session actually finished thinking -- the
+#: same "was this a real judgement" gate `gate_review._UNTRUSTWORTHY`
+#: applies, phrased as the allowlist its own `VERDICTS` check mirrors.
+_JUDGE_TRUSTED_STATUS = frozenset({"done", "done_with_concerns"})
+_JUDGE_VERDICTS = frozenset({"continue", "stop_needs_human", "stop_downgrade"})
+
+
+def _judge_result(status: str, verdict: str | None) -> str:
+    """Fail open to "continue" for anything the judge cannot be trusted on --
+    an untrusted status, a missing or unknown verdict. The judge is a brake
+    bolted onto the existing fix-loop cap, never a second way to get stuck:
+    whatever this returns, the cap and the stuck detector in
+    `kraft.executor.walk.walk_node` run exactly as they do today.
+    """
+    if status in _JUDGE_TRUSTED_STATUS and verdict in _JUDGE_VERDICTS:
+        return verdict
+    return "continue"
+
+
+def judge_history(
+    db, work_item_id: str, node_id: str, loop_severities: frozenset[str]
+) -> list[dict]:
+    """Every round measured so far for this node, oldest first: the judge's
+    cross-round view (spec's "cheap pointers, not full transcripts" input) --
+    each round's eligible findings, with the fingerprint stable across
+    rounds already computed, and that round's fix session's own result-file
+    path.
+
+    Reconstructed from the event log and `worker_sessions` rather than
+    carried in a local across calls, the same resume-safety reasoning
+    `last_measurement` gives for reading its own history back from events
+    instead of a stack frame.
+    """
+    # Kept in event order in a list, never keyed by the event's own `cycle`:
+    # `walk_node` resets `round` to 0 on every re-entry (ci_wait poller, crash
+    # resume, /retry) while the loop counter persists, so two entries' first
+    # measurements both land on cycle 0. A dict keyed on that number silently
+    # dropped the older one and then `sorted()` re-labelled the *newest*
+    # measurement as round 0, the oldest -- handing the judge a truncated
+    # trend pointing the wrong way, on mr_checks/on.ci.poll every time.
+    # _REPAIR_ROUND (-1) is a repair pass, not a paid fix cycle -- it has
+    # nothing to do with the budget the judge is weighing.
+    measured: list[tuple[int, list[_findings.Finding]]] = []
+    for e in db.read(lambda c: events.read_after(c, 0, work_item_id)):
+        if e["type"] == "findings_measured" and e["payload"].get("node_id") == node_id:
+            cycle = e["payload"]["cycle"]
+            if cycle < 0:
+                continue
+            measured.append(
+                (
+                    cycle,
+                    [
+                        _findings.from_payload(f)
+                        for f in e["payload"].get("findings", [])
+                        if f.get("severity") in loop_severities
+                    ],
+                )
+            )
+    fix_rows = db.read(
+        lambda c: c.execute(
+            "SELECT round, result_path FROM worker_sessions WHERE work_item_id = ? "
+            "AND node_id = ? AND hook_point = 'on.implementation.start' ORDER BY round",
+            (work_item_id, node_id),
+        ).fetchall()
+    )
+    # Fix rounds come from `bump_counter`, which does not reset across
+    # re-entries, so unlike the measurements these are collision-free.
+    fix_by_round = {r["round"]: r["result_path"] for r in fix_rows}
+    return [
+        {"round": i, "findings": found, "fix_result_path": fix_by_round.get(cycle)}
+        for i, (cycle, found) in enumerate(measured)
+    ]
+
+
+async def judge_verdict(
+    db,
+    run_dirs,
+    work_item_id: str,
+    node: dict,
+    row,
+    registry: Registry,
+    worktree,
+    *,
+    round: int,
+    key: str,
+    eligible: list[_findings.Finding],
+    policy: _policy.Policy,
+    launch: LaunchContext | None,
+    budget: _policy.Budget,
+) -> tuple[str, str]:
+    """Ask the fix loop's judge whether the cycle about to be dispatched is
+    still worth it (2026-09-12-verify-fix-loop-judge-design). Returns
+    `(verdict, reasoning)`; `verdict` is `"paused"` (propagate, no event) or
+    one of `"continue"`/`"stop_needs_human"`/`"stop_downgrade"`, never
+    anything else -- `_judge_result` is the only place that decides which.
+
+    A registry with no `JUDGE_HOOK` binding at all -- a hand-built test
+    registry, or a real install's `registry.yaml` from before this feature
+    landed -- fails open the same as any other untrusted outcome, rather
+    than a `KeyError` out of `dispatch_node`'s own lookup.
+    """
+    if JUDGE_HOOK not in registry.hooks:
+        return "continue", ""
+    cap = _policy.resolve_cap(policy, key)
+    counter = db.read(lambda c: store.read_counter(c, work_item_id, key))
+    attempts_used = counter["count"] if counter else 0
+    started_at = counter["started_at"] if counter else _now()
+    elapsed = (datetime.fromisoformat(_now()) - datetime.fromisoformat(started_at)).total_seconds()
+    history = judge_history(db, work_item_id, node["id"], policy.loop_severities)
+    instruction = prompts.JUDGE_PROMPT.format(
+        node_id=node["id"],
+        history=prompts.format_judge_history(history),
+        attempts_used=attempts_used,
+        cap_attempts=cap.attempts,
+        elapsed_s=int(elapsed),
+        cap_wall_clock_s=cap.wall_clock_s,
+    )
+    status = await dispatch_node(
+        db,
+        run_dirs,
+        JUDGE_HOOK,
+        node,
+        row,
+        registry,
+        worktree,
+        instruction_override=instruction,
+        round=round,
+        launch=launch,
+        budget=budget,
+    )
+    if status == "paused":
+        return "paused", ""
+    session = None
+    for s in db.read(lambda c: store.sessions_for_round(c, work_item_id, node["id"], round)):
+        if s["hook_point"] == JUDGE_HOOK:
+            session = s  # ordered by created_at -- last one wins
+    if session is None:
+        return "continue", ""
+    result_path = Path(session["result_path"])
+    verdict = _judge_result(status, _subprocess.read_verdict(result_path))
+    reasoning = _subprocess.read_concerns(result_path) or ""
+    return verdict, reasoning
