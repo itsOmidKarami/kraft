@@ -228,7 +228,10 @@ frontend-e2e:
     - export KRAFT_E2E_BASE=$(sed -n 's/.*KRAFT_E2E_BASE=//p' e2e-server.log)
     - test -n "$KRAFT_E2E_REPO" || { cat e2e-server.log; exit 1; }
     - test -n "$KRAFT_E2E_BASE" || { cat e2e-server.log; exit 1; }
-    - cd frontend && npm run e2e
+    # Bail after 3 failures instead of paying the full 120s timeout serially
+    # for all 38 specs (workers: 1) — a systemic break turns a ~1min green run
+    # into ~76min of dead runner time otherwise.
+    - cd frontend && npm run e2e -- --max-failures=3
   after_script:
     - cat e2e-server.log || true
 
