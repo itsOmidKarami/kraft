@@ -221,6 +221,14 @@ async def create_work_item(body: NewWorkItem, request: Request):
             raise HTTPException(422, f"node {node_id!r}: auto_escalate must be a boolean")
         if "auto_escalate_stuck" in fields and not isinstance(fields["auto_escalate_stuck"], bool):
             raise HTTPException(422, f"node {node_id!r}: auto_escalate_stuck must be a boolean")
+        if "auto_escalate_delay_s" in fields and (
+            not isinstance(fields["auto_escalate_delay_s"], int)
+            or isinstance(fields["auto_escalate_delay_s"], bool)
+            or fields["auto_escalate_delay_s"] < 0
+        ):
+            raise HTTPException(
+                422, f"node {node_id!r}: auto_escalate_delay_s must be a non-negative int"
+            )
     try:
         wid = await executor.intake(
             st.db,
@@ -410,6 +418,14 @@ def _validate_node_overrides(st, row, patch: dict[str, dict]) -> None:
                 fields["auto_escalate_stuck"], bool
             ):
                 raise HTTPException(422, f"node {node_id!r}: auto_escalate_stuck must be a boolean")
+            if "auto_escalate_delay_s" in fields and (
+                not isinstance(fields["auto_escalate_delay_s"], int)
+                or isinstance(fields["auto_escalate_delay_s"], bool)
+                or fields["auto_escalate_delay_s"] < 0
+            ):
+                raise HTTPException(
+                    422, f"node {node_id!r}: auto_escalate_delay_s must be a non-negative int"
+                )
             if store.node_started(c, row["id"], node_id):
                 raise HTTPException(409, f"node {node_id!r} has started; its config is locked")
 

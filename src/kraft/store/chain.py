@@ -10,7 +10,9 @@ from kraft.store import _now as _now  # test seam for wall-clock checks
 #: else in a `node_overrides` patch is rejected by the route before it gets
 #: here -- keep this list and `templates.validate_agent_overrides`-style
 #: validation in the route in sync.
-OVERRIDABLE_NODE_FIELDS = frozenset({"auto_escalate", "auto_escalate_stuck"})
+OVERRIDABLE_NODE_FIELDS = frozenset(
+    {"auto_escalate", "auto_escalate_stuck", "auto_escalate_delay_s"}
+)
 
 
 def load_chain(conn: sqlite3.Connection, work_item_id, first_node_id) -> None:
@@ -183,6 +185,33 @@ def effective_auto_escalate_stuck(row, default: bool) -> bool:
     chain = effective_chain(chain_definition, node_overrides_of(row))
     node = next((n for n in chain["nodes"] if n["id"] == row["current_node_id"]), None)
     value = node.get("auto_escalate_stuck") if node else None
+    return default if value is None else value
+
+
+def effective_auto_escalate_delay_s(row, default: int) -> int:
+    """Per-item node override -> chain node value -> `default` -- the same
+    override chain `effective_auto_escalate_stuck` resolves, for the seconds
+    a delayed `auto_escalate`/`auto_escalate_stuck` waits after its
+    triggering event before firing (Kraft-vyk8).
+
+    `default` is the caller's already-resolved `policy.auto_escalate_delay_s`,
+    or 0 when policy failed to load entirely -- 0 is also this feature's own
+    "immediate, unchanged" default, so a missing policy degrades to exactly
+    today's behaviour rather than a more conservative one (unlike
+    `effective_auto_escalate_stuck`'s conservative `False` fallback, which
+    exists because *unset* there means "don't auto-act at all").
+
+    Reads the node the item is *currently* stopped on
+    (`row["current_node_id"]`), same reasoning as
+    `effective_auto_escalate_stuck`: while an item sits `awaiting_gate` or
+    `needs_human`, that is still the node the gate/stop belongs to.
+    """
+    chain_definition = json.loads(row["chain_definition"])
+    if "nodes" not in chain_definition:
+        return default
+    chain = effective_chain(chain_definition, node_overrides_of(row))
+    node = next((n for n in chain["nodes"] if n["id"] == row["current_node_id"]), None)
+    value = node.get("auto_escalate_delay_s") if node else None
     return default if value is None else value
 
 

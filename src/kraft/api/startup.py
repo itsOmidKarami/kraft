@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
-from kraft import archive, ci_wait, executor, rate_limit_retry, reattach
+from kraft import archive, auto_escalate_delay, ci_wait, executor, rate_limit_retry, reattach
 from kraft import auth as auth_mod
 from kraft import config as config_mod
 from kraft import intake as intake_mod
@@ -181,6 +181,11 @@ async def lifespan(app: FastAPI):
     # parked on a pipeline has to be woken by something, and that something
     # cannot be the coroutine that used to sit in the wait (Kraft-ru98).
     app.state.ci_wait_task = asyncio.ensure_future(ci_wait.poller(app))
+    # Always on, for the same reason rate-limit/ci-wait are: an item sitting
+    # past its own auto_escalate_delay_s has to be re-checked by something,
+    # and that something cannot be the coroutine that made the original
+    # inline call and already returned (Kraft-vyk8).
+    app.state.auto_escalate_delay_task = asyncio.ensure_future(auto_escalate_delay.poller(app))
     # Always on, for the same reason the rate-limit and ci-wait pollers are:
     # an item aged past policy.archive_after_days has to be archived by
     # something, and an operator who forgets to check the board is exactly
@@ -221,6 +226,8 @@ async def lifespan(app: FastAPI):
             await asyncio.gather(app.state.trigger_task, return_exceptions=True)
         app.state.ci_wait_task.cancel()
         await asyncio.gather(app.state.ci_wait_task, return_exceptions=True)
+        app.state.auto_escalate_delay_task.cancel()
+        await asyncio.gather(app.state.auto_escalate_delay_task, return_exceptions=True)
         app.state.archive_task.cancel()
         await asyncio.gather(app.state.archive_task, return_exceptions=True)
         tasks = list(app.state.tasks.values())

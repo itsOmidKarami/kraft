@@ -294,3 +294,53 @@ def test_effective_auto_escalate_stuck_survives_a_bare_chain_definition_with_an_
     # override to -> the caller's default, not a crash.
     assert store.effective_auto_escalate_stuck(row, True) is True
     assert store.effective_auto_escalate_stuck(row, False) is False
+
+
+def test_effective_auto_escalate_delay_s_falls_back_to_the_default(tmp_path):
+    chain = {"nodes": [{"id": "implementation", "tasks": []}]}
+    database = _seeded(tmp_path, "w1", chain, "implementation")
+    row = database.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", ("w1",)).fetchone()
+    )
+    assert store.effective_auto_escalate_delay_s(row, 0) == 0
+    assert store.effective_auto_escalate_delay_s(row, 300) == 300
+
+
+def test_effective_auto_escalate_delay_s_the_node_value_beats_the_default(tmp_path):
+    chain = {"nodes": [{"id": "implementation", "tasks": [], "auto_escalate_delay_s": 60}]}
+    database = _seeded(tmp_path, "w1", chain, "implementation")
+    row = database.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", ("w1",)).fetchone()
+    )
+    assert store.effective_auto_escalate_delay_s(row, 0) == 60
+
+
+def test_effective_auto_escalate_delay_s_the_override_beats_the_node_value(tmp_path):
+    chain = {"nodes": [{"id": "implementation", "tasks": [], "auto_escalate_delay_s": 60}]}
+    database = _seeded(
+        tmp_path,
+        "w1",
+        chain,
+        "implementation",
+        node_overrides={"implementation": {"auto_escalate_delay_s": 5}},
+    )
+    row = database.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", ("w1",)).fetchone()
+    )
+    assert store.effective_auto_escalate_delay_s(row, 0) == 5
+
+
+def test_effective_auto_escalate_delay_s_survives_a_bare_chain_definition_with_an_override(
+    tmp_path,
+):
+    database = _seeded(
+        tmp_path,
+        "w1",
+        {},
+        "implementation",
+        node_overrides={"implementation": {"auto_escalate_delay_s": 5}},
+    )
+    row = database.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", ("w1",)).fetchone()
+    )
+    assert store.effective_auto_escalate_delay_s(row, 30) == 30

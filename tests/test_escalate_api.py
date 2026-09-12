@@ -98,19 +98,23 @@ def test_escalate_refuses_a_second_call_while_one_is_running(tmp_path, monkeypat
         assert "running-turn" in r.json()["detail"]
 
 
-def test_retry_refuses_while_an_escalation_turn_is_running(tmp_path, monkeypatch):
+def test_retry_kills_a_running_escalation_turn_and_proceeds(tmp_path, monkeypatch):
     """`retry` dispatches into the same worktree an escalation agent may
-    already be committing in -- it has to check the same guard `escalate`
-    itself does, not just rely on the UI disabling its own button."""
+    already be committing in -- a stranger's retry (no matching session
+    header) now kills that turn first rather than refusing outright
+    (Kraft-vyk8; see test_api_lifecycle.py's
+    test_retry_kills_a_strangers_running_escalation_and_proceeds for the
+    self-retry-vs-stranger distinction this pins from the other side)."""
     repo = make_repo(tmp_path)
+    terminated = []
+    monkeypatch.setattr("kraft.api.routes.lifecycle._terminate", lambda pid: terminated.append(pid))
     with _client(tmp_path, monkeypatch) as client:
         wid = _needs_human_item(client, repo)
         node_id = client.get(f"/api/work-items/{wid}").json()["current_node_id"]
         _seed_running_escalation(tmp_path, wid, node_id)
 
         r = client.post(f"/api/work-items/{wid}/retry", json={})
-        assert r.status_code == 409
-        assert "running-turn" in r.json()["detail"]
+        assert r.status_code == 200, r.text
 
 
 def test_resume_refuses_while_an_escalation_turn_is_running(tmp_path, monkeypatch):

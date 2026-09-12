@@ -49,6 +49,7 @@ NODE_CARRYOVER_FIELDS = (
     "rebase_bounce_to",
     "auto_escalate",
     "auto_escalate_stuck",
+    "auto_escalate_delay_s",
 )
 
 
@@ -579,6 +580,29 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
             )
             continue
 
+        # Same "meaningful everywhere" posture as auto_escalate_stuck: a
+        # delay is a wait before whichever mechanism this node's gate or stop
+        # already uses, not itself gate-specific.
+        bad_delay = next(
+            (
+                n["id"]
+                for n in nodes
+                if n.get("auto_escalate_delay_s") is not None
+                and (
+                    not isinstance(n["auto_escalate_delay_s"], int)
+                    or isinstance(n["auto_escalate_delay_s"], bool)
+                    or n["auto_escalate_delay_s"] < 0
+                )
+            ),
+            None,
+        )
+        if bad_delay is not None:
+            invalid[tid] = (
+                f"template {tid!r}: node {bad_delay!r} 'auto_escalate_delay_s' "
+                f"must be a non-negative int"
+            )
+            continue
+
         valid[tid] = Template(id=tid, nodes=nodes)
 
     return TemplateSet(valid=valid, invalid=invalid)
@@ -611,6 +635,7 @@ def materialize(
                 "rebase_bounce_to": n.get("rebase_bounce_to"),
                 "auto_escalate": n.get("auto_escalate"),
                 "auto_escalate_stuck": n.get("auto_escalate_stuck"),
+                "auto_escalate_delay_s": n.get("auto_escalate_delay_s"),
             }
             for n in template.nodes
             if n.get("gate_after") not in satisfied_gates and n["id"] not in skip_nodes

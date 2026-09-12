@@ -8,19 +8,25 @@ import { useActionBar } from "./useActionBar";
 
 /** 06's escalating pill: "● Agent is on it · turn N" + Stop agent, the
  *  Steer & retry / Escalate buttons visibly disabled ("one escalation turn
- *  at a time"). */
+ *  at a time") -- or, when the turn fired unattended, "● Auto-escalated ·
+ *  turn N" with a hint saying why (Kraft-vyk8). `auto` absent or false
+ *  renders today's copy unchanged. */
 export function EscalatingPill({
   turn,
+  auto,
   onStop,
   busy,
 }: {
   turn: number;
+  auto?: boolean;
   onStop: () => void;
   busy: boolean;
 }) {
   return (
     <div className="control-row escalating-pill" data-testid="escalating-pill">
-      <span className="tag tag-accent">● Agent is on it · turn {turn}</span>
+      <span className="tag tag-accent">
+        {auto ? `● Auto-escalated · turn ${turn}` : `● Agent is on it · turn ${turn}`}
+      </span>
       <button className="btn btn-secondary" disabled={busy} onClick={onStop}>
         Stop agent
       </button>
@@ -30,7 +36,11 @@ export function EscalatingPill({
       <button className="btn btn-ghost" disabled>
         Escalate
       </button>
-      <span className="control-hint">one escalation turn at a time</span>
+      <span className="control-hint">
+        {auto
+          ? "fired automatically — nobody had acted on it yet"
+          : "one escalation turn at a time"}
+      </span>
     </div>
   );
 }

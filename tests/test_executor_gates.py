@@ -121,6 +121,46 @@ def test_review_gates_reads_the_items_own_node_override_not_the_templates(tmp_pa
     asyncio.run(scenario())
 
 
+def test_review_gates_skips_before_its_delay_has_elapsed(tmp_path, monkeypatch):
+    from kraft import policy as _policy
+
+    chain = {
+        "nodes": [
+            {"id": "a", "tasks": [], "gate_after": "g", "auto_escalate": True},
+        ]
+    }
+
+    def _boom(*a, **kw):
+        raise AssertionError("gate_review.review must not run before the delay elapses")
+
+    monkeypatch.setattr(gates_module.gate_review, "review", _boom)
+    pol = _policy.Policy(loops={}, default=_policy.Cap(1, 1), auto_escalate_delay_s=600)
+
+    async def scenario():
+        database = await db.Database.open(tmp_path / "k.db")
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="w1",
+                    bead_id=None,
+                    title="t",
+                    repo="/r",
+                    chain_template="default",
+                    chain_definition=json.dumps(chain),
+                    auto_gate=True,
+                )
+            )
+            await database.write(lambda c: events.append(c, "w1", "gate_requested", {"gate": "g"}))
+            return await gates_module.review_gates(
+                "awaiting_gate", database, tmp_path, work_item_id="w1", registry=None, policy=pol
+            )
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario()) == "awaiting_gate"
+
+
 def test_reject_target_rejects_a_forward_node_with_a_value_error():
     chain = {
         "nodes": [
@@ -197,6 +237,37 @@ def test_auto_escalate_stuck_skips_a_pending_gate(tmp_path):
     assert asyncio.run(scenario()) == "needs_human"
 
 
+def test_pending_gate_closes_on_a_node_skipped_event(tmp_path):
+    """`kraft item skip` writes `node_skipped`, never `gate_approved`/
+    `gate_rejected` -- without treating it as a boundary too, a gate
+    bypassed by skip reads as pending forever (code review finding)."""
+
+    async def scenario():
+        database = await db.Database.open(tmp_path / "k.db")
+        try:
+            wid = "w1"
+            chain = {"nodes": [{"id": "spec", "tasks": [], "gate_after": "spec_approval"}]}
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id=wid,
+                    bead_id=None,
+                    title="t",
+                    repo="/r",
+                    chain_template="default",
+                    chain_definition=json.dumps(chain),
+                )
+            )
+            await database.write(lambda c: store.enter_node(c, wid, "spec"))
+            await database.write(lambda c: store.request_gate(c, wid, "spec", "spec_approval"))
+            await database.write(lambda c: store.skip_node(c, wid, "spec", "spec_approval", None))
+            return executor.pending_gate(database, wid)
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario()) is None
+
+
 def test_auto_escalate_stuck_skips_a_needs_context_reason(tmp_path):
     from kraft.paths import RunDirs
 
@@ -239,6 +310,60 @@ def test_auto_escalate_stuck_skips_when_disabled_by_policy(tmp_path):
             await database.close()
 
     assert asyncio.run(scenario()) == "needs_human"
+
+
+def test_auto_escalate_stuck_skips_before_its_delay_has_elapsed(tmp_path):
+    from kraft.paths import RunDirs
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = "w1"
+            await _seed_stuck(database, wid, reason="budget exhausted")
+            from kraft import policy as _policy
+
+            pol = _policy.Policy(loops={}, default=_policy.Cap(1, 1), auto_escalate_delay_s=600)
+            return await gates_module.auto_escalate_stuck(
+                "needs_human", database, rd, work_item_id=wid, registry=None, policy=pol
+            )
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario()) == "needs_human"
+
+
+def test_auto_escalate_stuck_fires_once_its_delay_has_elapsed(tmp_path, monkeypatch):
+    from kraft.paths import RunDirs
+
+    calls = []
+
+    async def fake_dispatch(database, run_dirs, *, work_item_id, message, launch, auto, evts=None):
+        calls.append(1)
+        return "done"
+
+    monkeypatch.setattr("kraft.executor.gates.escalate.dispatch", fake_dispatch)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = "w1"
+            await _seed_stuck(database, wid, reason="budget exhausted")
+            from kraft import policy as _policy
+
+            # A delay of 0 must behave exactly like no delay at all -- the
+            # zero-regression guarantee.
+            pol = _policy.Policy(loops={}, default=_policy.Cap(1, 1), auto_escalate_delay_s=0)
+            return await gates_module.auto_escalate_stuck(
+                "needs_human", database, rd, work_item_id=wid, registry=None, policy=pol
+            )
+        finally:
+            await database.close()
+
+    status = asyncio.run(scenario())
+    assert status == "needs_human"
+    assert len(calls) == 1
 
 
 def test_auto_escalate_stuck_dispatches_when_eligible(tmp_path, monkeypatch):
@@ -611,3 +736,37 @@ def test_resume_after_escalation_drops_a_self_retry_on_a_moved_item(tmp_path):
     assert types.count("work_item_self_retry_dropped") == 1
     # Nothing re-entered the chain.
     assert "work_item_retried" not in types
+
+
+def _evt(t, **payload):
+    return {"type": t, "payload": payload, "created_at": "2026-09-12T00:00:00+00:00"}
+
+
+def test_gate_already_reviewed_counts_the_started_event():
+    """`gate_review.review` writes `gate_auto_review_started` before it
+    launches anything, so a review that crashed mid-flight -- no verdict, no
+    skip event -- still suppresses the next tick's re-attempt."""
+    evts = [_evt("gate_requested", gate="g"), _evt("gate_auto_review_started", gate="g")]
+    assert gates_module._gate_already_reviewed(evts, "g") is True
+
+
+def test_gate_already_reviewed_resets_at_a_run_boundary():
+    """Otherwise a crashed review demotes the gate to human-only for good:
+    a human's resume re-enters review_gates, hits the marker, and returns
+    unchanged with nothing logged (code review finding)."""
+    evts = [
+        _evt("gate_requested", gate="g"),
+        _evt("gate_auto_review_started", gate="g"),
+        _evt("work_item_resumed"),
+    ]
+    assert gates_module._gate_already_reviewed(evts, "g") is False
+
+
+def test_gate_already_reviewed_ignores_a_previous_requests_attempt():
+    evts = [
+        _evt("gate_requested", gate="g"),
+        _evt("gate_auto_review_skipped", gate="g", reason="undecided"),
+        _evt("gate_rejected", gate="g"),
+        _evt("gate_requested", gate="g"),
+    ]
+    assert gates_module._gate_already_reviewed(evts, "g") is False
