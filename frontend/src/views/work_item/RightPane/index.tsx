@@ -4,7 +4,8 @@ import type { InspectorTab, Selection } from "../selection";
 import { usePhone } from "../usePhone";
 import { ConfigPane } from "./ConfigPane";
 import { Diff } from "./Diff";
-import { Doc } from "./Doc";
+import { Doc, type DocSource } from "./Doc";
+import { GATE_DOC_ID } from "../selection";
 import { Events } from "./Events";
 import { Log } from "./Log";
 
@@ -84,7 +85,9 @@ export function RightPane({
     if (selection.kind !== "document" || !selection.id) {
       return <p className="empty pane">select a document to view it</p>;
     }
-    return <Doc id={selection.id} item={item} maximized={maximized} onToggleMaximize={onToggleMaximize} />;
+    const source: DocSource =
+      selection.id === GATE_DOC_ID ? { kind: "artifact", workItemId: item.id } : { kind: "document", id: selection.id };
+    return <Doc source={source} item={item} maximized={maximized} onToggleMaximize={onToggleMaximize} />;
   }
 
   // timeline

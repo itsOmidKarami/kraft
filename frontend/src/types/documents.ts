@@ -52,6 +52,7 @@ export interface WorkItemArtifact {
   title: string;
   content: string;
   truncated: boolean;
+  artifact_max_bytes: number;
 }
 
 export interface SearchResult {
