@@ -19,6 +19,7 @@ class RepoBody(BaseModel):
     name: str | None = None
     default_chain_template: str | None = None
     test_command: str | None = None
+    test_scopes: list[dict] | None = None
     forge: str | None = None
     project: str | None = None
     # None means "pick a safe default": enabled if a test command was given or
@@ -76,23 +77,37 @@ async def probe_repo(body: ProbeBody, request: Request):
 async def add_repo(body: RepoBody, request: Request):
     st = request.app.state
     try:
-        probed = config_mod.probe_repo(body.path)
+        probed = config_mod.probe_repo(body.path, test_command=body.test_command)
     except config_mod.ConfigError as exc:
         raise HTTPException(400, str(exc)) from exc
     repos = config_mod.load_repos(deps.repos_path(st), validate_steering=False)
     if any(r["path"] == probed["path"] for r in repos):
         raise HTTPException(409, f"{probed['path']} is already connected")
     test_command = body.test_command or probed["test_command"]
-    test_scopes = None if body.test_command else (probed.get("test_scopes") or None)
+    # Probed regardless of test_command now (Kraft-k4mx): probe_repo already
+    # folded body.test_command into the root scope's command above, so there
+    # is no longer a reason to suppress the nested scopes it finds alongside
+    # it. body.test_scopes, when a caller supplies it directly, wins outright
+    # -- the same "explicit beats probed" rule test_command already followed.
+    #
+    # A single-stack repo has no nested scopes, so probe_repo hands back one
+    # root `["**"]` scope that just repeats test_command. Persisting that
+    # would shadow every later test_command edit forever, the same
+    # stale-override bug _normalize_test_scopes's docstring describes
+    # (Kraft-9wzy) -- so only a probe that actually found a nested scope (one
+    # whose paths are not the root `["**"]`) is worth persisting here.
+    # Counting the scopes would be wrong: a repo whose only marker is nested
+    # (frontend/package.json, no root pyproject.toml) probes to exactly one
+    # scope, and that one is real.
+    probed_scopes = probed.get("test_scopes") or []
+    has_nested = any(scope.get("paths") != ["**"] for scope in probed_scopes)
+    nested_probed_scopes = probed_scopes if has_nested else None
+    test_scopes = body.test_scopes if body.test_scopes is not None else nested_probed_scopes
     entry = {
         "path": probed["path"],
         "name": body.name or probed["name"],
         "default_chain_template": body.default_chain_template or "default",
         "test_command": test_command,
-        # Only when the connecting caller left `test_command` unset: an
-        # explicit override there means one command for every diff, and
-        # `test_scopes` wrapping it (config.load_repos) already gives that
-        # the same effect without a stale probed scope list beside it.
         "test_scopes": test_scopes,
         "forge": body.forge or probed["forge"],
         "project": body.project or probed["project"],
@@ -123,6 +138,7 @@ class RepoPatch(BaseModel):
     name: str | None = None
     default_chain_template: str | None = None
     test_command: str | None = None
+    test_scopes: list[dict] | None = None
     forge: str | None = None
     project: str | None = None
     enabled: bool | None = None
