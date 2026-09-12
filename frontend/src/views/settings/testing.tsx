@@ -10,6 +10,7 @@ export const repo = {
   name: "repo-a",
   default_chain_template: "default",
   test_command: "uv run pytest -q",
+  test_scopes: null as { paths: string[]; command: string }[] | null,
   forge: "github",
   project: "acme/repo-a",
   enabled: true,

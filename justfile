@@ -130,6 +130,34 @@ test-ui:
 e2e:
     cd frontend && npm run e2e
 
+# `just e2e` assumes a human already started the fixture server (README in
+# frontend/e2e/serve.py) -- not a contract a worker can meet. This builds the
+# SPA, starts serve.py in the background, waits for it to print its base URL,
+# points Playwright at it, and tears the server down on exit either way.
+# Mirrors .gitlab-ci.yml's frontend-e2e job script; that job is the proof this
+# sequence works, run on every frontend-touching MR.
+e2e-ci:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd frontend
+    npm ci --no-audit --no-fund && npx playwright install --with-deps chromium
+    npm run build
+    cd ..
+    LOG=$(mktemp -t kraft-e2e-serve.XXXXXX)
+    uv run python frontend/e2e/serve.py > "$LOG" 2>&1 &
+    SERVE_PID=$!
+    trap 'kill "$SERVE_PID" 2>/dev/null; wait "$SERVE_PID" 2>/dev/null; rm -f "$LOG"' EXIT
+    for i in $(seq 1 60); do
+        grep -q KRAFT_E2E_BASE "$LOG" && break
+        kill -0 "$SERVE_PID" 2>/dev/null || { cat "$LOG"; exit 1; }
+        sleep 1
+    done
+    export KRAFT_E2E_REPO=$(sed -n 's/.*KRAFT_E2E_REPO=//p' "$LOG")
+    export KRAFT_E2E_BASE=$(sed -n 's/.*KRAFT_E2E_BASE=//p' "$LOG")
+    test -n "${KRAFT_E2E_REPO:-}" || { cat "$LOG"; exit 1; }
+    test -n "${KRAFT_E2E_BASE:-}" || { cat "$LOG"; exit 1; }
+    cd frontend && npm run e2e -- --max-failures=3
+
 # Lint + format check
 lint:
     uv run ruff check .
@@ -139,6 +167,26 @@ lint:
 fix:
     uv run ruff check --fix .
     uv run ruff format .
+
+# What CI's blocking jobs run, in the same order, without --testmon: the
+# recipe `verify` calls instead of `test` (Kraft-579). `just test` stays
+# change-selected -- the right default for a human editing one file, and what
+# CLAUDE.md tells contributors to use -- but a change-selected suite is a
+# different question than "does this pass CI", and verify exists to answer
+# the second one. No --testmon also means an empty selection cannot report
+# success by accident: pytest's own exit code for "collected 0 items" is 5,
+# which `adapters/subprocess.py`'s `_resolve` already reads as failed
+# (Kraft-44t0) -- nothing here needs to special-case that, and nothing should.
+#
+# `tests/test_gitlab_ci_config.py::test_ci_test_recipe_covers_every_blocking_ci_script_line`
+# fails if this drifts from `.gitlab-ci.yml`'s lint-and-test/slow-tests jobs --
+# that test is where the second copy of this list lives; keep the two in step.
+ci-test:
+    uv run ruff check .
+    uv run ruff format --check .
+    uv run pytest -m "not e2e and not slow"
+    uv run pytest -m "slow"
+    uv run python -m kraft.intent
 
 # Publish plugins/ as one marketplace holding both plugins, tagged per release.
 #

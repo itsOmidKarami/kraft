@@ -354,7 +354,9 @@ def _first_test_command(directory: Path) -> str | None:
     return next((cmd for marker, cmd in _TEST_COMMANDS if (directory / marker).is_file()), None)
 
 
-def _probe_test_scopes(root: Path) -> tuple[str | None, list[dict]]:
+def _probe_test_scopes(
+    root: Path, *, test_command: str | None = None
+) -> tuple[str | None, list[dict]]:
     """(legacy singular `test_command`, `test_scopes` list) for `root` (design §2).
 
     Walks the same `_TEST_COMMANDS` markers, but at the repo root *and* one
@@ -365,8 +367,15 @@ def _probe_test_scopes(root: Path) -> tuple[str | None, list[dict]]:
     nested scope claimed, so a frontend-only diff cannot also match the
     backend scope. No nested scopes -> unchanged single-stack behavior
     (`paths: ["**"]`).
+
+    `test_command`, when given, stands in for whatever marker-derived command
+    the root would otherwise have gotten. This is what lets a repo connected
+    with an explicit `test_command` still get its nested scopes probed
+    (Kraft-k4mx): the command an operator supplies at connect time is what a
+    root scope's command always was, so it takes exactly that place rather
+    than suppressing probing altogether.
     """
-    root_command = _first_test_command(root)
+    root_command = test_command or _first_test_command(root)
     try:
         subdirs = sorted(d for d in root.iterdir() if d.is_dir() and not d.name.startswith("."))
     except OSError:
@@ -398,12 +407,15 @@ def _probe_test_scopes(root: Path) -> tuple[str | None, list[dict]]:
     return root_command or nested[0][1], scopes
 
 
-def probe_repo(path: str | Path) -> dict:
+def probe_repo(path: str | Path, *, test_command: str | None = None) -> dict:
     """What Kraft can tell about a candidate repo without changing anything.
 
     Read-only on purpose (design 5a): "Kraft flags it but does not change repo
     files". Everything is best-effort — a field it cannot determine comes back
     None or empty rather than failing the probe.
+
+    `test_command`, when given, overrides the marker-derived root command
+    probing would otherwise use -- see `_probe_test_scopes`.
     """
     p = Path(path).expanduser()
     if not p.is_dir():
@@ -435,7 +447,7 @@ def probe_repo(path: str | Path) -> dict:
     remote = git_read(root, "remote", "get-url", "origin", expected_failure=True) or ""
     forge, project = _detect_forge(remote)
 
-    test_command, test_scopes = _probe_test_scopes(root)
+    test_command, test_scopes = _probe_test_scopes(root, test_command=test_command)
 
     return {
         "path": str(root),

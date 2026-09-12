@@ -200,6 +200,88 @@ def test_patch_repo_can_clear_a_field_with_an_explicit_null(client, tmp_path):
     assert entry["default_model"] is None
 
 
+def test_add_repo_with_a_test_command_still_records_probed_scopes(tmp_path, client):
+    """Kraft-k4mx: an explicit test_command used to skip test_scopes probing
+    entirely and for good -- there was no field to add scopes back with after
+    connecting. This repo's own entry ran `pytest --testmon` against
+    frontend-only diffs for weeks because of exactly this."""
+    repo = make_repo(tmp_path, name="scoperepo")
+    (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
+    frontend = repo / "frontend"
+    frontend.mkdir()
+    (frontend / "package.json").write_text("{}")
+
+    r = client.post(
+        "/api/repos",
+        json={"path": str(repo), "enabled": False, "test_command": "just test"},
+    )
+    assert r.status_code == 201, r.text
+    scopes = r.json()["test_scopes"]
+    assert scopes is not None, "test_command must no longer suppress probing"
+    by_paths = {tuple(s["paths"]): s["command"] for s in scopes}
+    # the explicit test_command replaces the *root* scope's command...
+    assert "just test" in by_paths.values()
+    # ...but the nested frontend scope _probe_test_scopes found on its own
+    # survives untouched, not silently dropped by the override.
+    assert by_paths[("frontend/**",)] == "npm test"
+
+
+def test_add_repo_without_nested_scopes_does_not_persist_a_root_scope(tmp_path, client):
+    """A single-stack repo has no nested scopes to probe, so the only thing
+    _probe_test_scopes finds is a root `["**"]` scope that just repeats
+    test_command. Persisting it would shadow every later test_command edit
+    forever -- the stale-override bug `_normalize_test_scopes`'s docstring
+    describes (Kraft-9wzy) -- so add_repo must leave test_scopes unset here."""
+    repo = make_repo(tmp_path, name="plainscoperepo")
+    (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
+    r = client.post("/api/repos", json={"path": str(repo), "enabled": False})
+    assert r.status_code == 201, r.text
+    assert r.json()["test_scopes"] is None
+
+
+def test_add_repo_keeps_a_lone_nested_scope(tmp_path, client):
+    """A repo whose only test marker is nested probes to exactly one scope --
+    a real nested one. Counting scopes would discard it and run the command
+    against every diff (verify finding on this item)."""
+    repo = make_repo(tmp_path, name="frontendonly")
+    frontend = repo / "frontend"
+    frontend.mkdir()
+    (frontend / "package.json").write_text("{}")
+
+    r = client.post("/api/repos", json={"path": str(repo), "enabled": False})
+    assert r.status_code == 201, r.text
+    assert r.json()["test_scopes"] == [{"paths": ["frontend/**"], "command": "npm test"}]
+
+
+def test_patch_repo_sets_test_scopes_on_an_existing_entry(client, tmp_path):
+    """Kraft-k4mx: the missing half. Editing scopes after connecting used to
+    have no field to write through."""
+    repo = make_repo(tmp_path, name="patchscopes")
+    client.post("/api/repos", json={"path": str(repo), "enabled": False})
+    scopes = [{"paths": ["frontend/**"], "command": "just test-ui"}]
+    r = client.patch(f"/api/repos?path={repo}", json={"test_scopes": scopes})
+    assert r.status_code == 200, r.text
+    assert r.json()["test_scopes"] == scopes
+    (entry,) = [
+        x for x in client.get("/api/repos").json()["repos"] if x["path"] == str(repo.resolve())
+    ]
+    assert entry["test_scopes"] == scopes
+
+
+def test_patch_repo_can_clear_test_scopes_with_an_explicit_null(client, tmp_path):
+    repo = make_repo(tmp_path, name="clearscopes")
+    (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
+    client.post("/api/repos", json={"path": str(repo), "enabled": False})
+    client.patch(
+        f"/api/repos?path={repo}",
+        json={"test_scopes": [{"paths": ["**"], "command": "uv run pytest -q"}]},
+    )
+    assert client.get("/api/repos").json()["repos"][0]["test_scopes"] is not None
+    r = client.patch(f"/api/repos?path={repo}", json={"test_scopes": None})
+    assert r.status_code == 200, r.text
+    assert r.json()["test_scopes"] is None
+
+
 def _set_origin(repo, url):
     subprocess.run(["git", "remote", "add", "origin", url], cwd=repo, check=True)
 
