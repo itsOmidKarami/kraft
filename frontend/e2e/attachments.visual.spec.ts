@@ -12,20 +12,20 @@ test("intake from an existing plan, end to end", async ({ page }) => {
   await page.getByRole("button", { name: /new work item/i }).click();
 
   const modal = page.getByRole("dialog", { name: "New work item" });
-  await modal.getByRole("button", { name: new RegExp(REPO_NAME, "i") }).click();
+  await modal.getByLabel("repo").selectOption({ label: REPO_NAME });
   await modal.getByLabel("title").fill("add auth from an existing plan");
-  await modal.locator("label.seg-opt", { hasText: /^default\b/ }).click();
+  await modal.getByRole("radio", { name: /^default\b/ }).click();
   await page.screenshot({ path: "e2e-shots/0-modal.png", fullPage: true });
 
   // type-to-search picker
-  await modal.getByLabel("existing plan").fill("board");
-  const hit = modal.getByRole("button", { name: /UI plan/ });
+  await modal.getByLabel("plan").fill("board");
+  const hit = modal.getByRole("option", { name: /UI plan/ });
   await hit.waitFor({ timeout: 20_000 });
   await page.screenshot({ path: "e2e-shots/1-picker.png", fullPage: true });
   await hit.click();
 
   // free-path fallback, for a document the picker cannot offer
-  await modal.getByLabel("spec path").fill(".engineering/specs/ws.md");
+  await modal.getByLabel("spec").fill(".engineering/specs/ws.md");
   await page.waitForTimeout(500);
   await page.screenshot({ path: "e2e-shots/2-preview.png", fullPage: true });
 

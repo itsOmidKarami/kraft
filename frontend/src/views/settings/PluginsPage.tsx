@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import * as api from "../../api";
-import { SectionLabel, Switch } from "../../components/ui";
+import { SectionLabel, Segmented, Switch } from "../../components/ui";
 import { adapterOf, ago } from "../../format";
 import type { HookBinding, HookRun, TemplateSummary } from "../../types";
 import "./plugins.css";
@@ -128,18 +128,17 @@ export function PluginsPage() {
       <SectionLabel>Binding</SectionLabel>
       <div className="field">
         <label>kind</label>
-        <div className="submodules">
-          {(["builtin", "agent", "subprocess", "forge"] as const).map((k) => (
-            <button
-              key={k}
-              type="button"
-              className={`tag ${k === binding.kind ? "" : "tag-off"}`}
-              disabled
-            >
-              {k}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          options={[
+            { id: "builtin", label: "builtin" },
+            { id: "subprocess", label: "subprocess" },
+            { id: "agent", label: "agent" },
+            { id: "forge", label: "forge" },
+          ]}
+          value={binding.kind}
+          onChange={() => {}}
+          disabled
+        />
       </div>
       {(binding.kind === "agent" || binding.kind === "subprocess") && (
         <div className="field">
@@ -199,8 +198,14 @@ export function PluginsPage() {
       {repos.map((r) => {
         const override = binding.repos?.[r.path];
         return (
-          <div key={r.path} className="hook-row" data-repo={r.path}>
+          <div key={r.path} className="plugin-repo-row" data-repo={r.path}>
             <span className="row-sub">{r.name}</span>
+            <Switch
+              checked={override?.enabled ?? true}
+              onChange={() => {}}
+              disabled
+              label={`enable ${selectedHook} for ${r.name}`}
+            />
             <input
               className="input mono"
               placeholder="inherit"
@@ -211,12 +216,6 @@ export function PluginsPage() {
               }
               disabled
             />
-            <Switch
-              checked={override?.enabled ?? true}
-              onChange={() => {}}
-              disabled
-              label={`enable ${selectedHook} for ${r.name}`}
-            />
           </div>
         );
       })}
@@ -224,24 +223,20 @@ export function PluginsPage() {
       <SectionLabel>Last runs</SectionLabel>
       {runs.length === 0 && <p className="empty">no runs yet</p>}
       {runs.map((run, i) => (
-        <div key={i} className="row-sub">
-          {run.work_item_id} · {run.node_id} · cycle {run.round} ·{" "}
-          {run.wall_ms != null ? `${(run.wall_ms / 1000).toFixed(1)}s` : "—"} · {run.status}
-          {run.created_at && ` · ${ago(run.created_at)}`}
+        <div key={i} className="plugin-run-row">
+          <span className="row-sub">
+            {run.work_item_id} · {run.node_id} · cycle {run.round}
+          </span>
+          <span className="row-sub plugin-run-result">
+            {run.wall_ms != null ? `${(run.wall_ms / 1000).toFixed(1)}s` : "—"} · {run.status}
+            {run.created_at && ` · ${ago(run.created_at)}`}
+          </span>
         </div>
       ))}
 
-      <div className="save-row">
-        <button className="btn btn-primary" disabled={busy || !dirty} onClick={save}>
-          Save
-        </button>
-        <button className="btn btn-ghost" disabled={!dirty} onClick={() => setDraft(null)}>
-          Discard
-        </button>
-        <span className="save-hint">
-          {message ?? "writes registry.yaml · validator re-runs · affects intake only"}
-        </span>
-      </div>
+      <p className="save-hint">
+        {message ?? "writes registry.yaml · validator re-runs · affects intake only"}
+      </p>
     </div>
   );
 
@@ -249,14 +244,33 @@ export function PluginsPage() {
     if (!selectedHook) {
       return (
         <>
-          <PhoneHeader back="Settings" backTo="/settings" title="Plugins" subtitle={`${hookIds.length} hooks`} />
+          <PhoneHeader
+            back="Settings"
+            backTo="/settings"
+            title="Plugins"
+            subtitle={`${hookIds.length} hooks`}
+            action={
+              <button className="btn btn-primary" disabled={busy || !dirty} onClick={save}>
+                Save
+              </button>
+            }
+          />
           {list}
         </>
       );
     }
     return (
       <>
-        <PhoneHeader back="Plugins" backTo="/settings/plugins" title={selectedHook} />
+        <PhoneHeader
+          back="Plugins"
+          backTo="/settings/plugins"
+          title={selectedHook}
+          action={
+            <button className="btn btn-primary" disabled={busy || !dirty} onClick={save}>
+              Save
+            </button>
+          }
+        />
         {detail}
       </>
     );
@@ -264,7 +278,20 @@ export function PluginsPage() {
 
   return (
     <>
-      <PageHead title="Plugins" note="one binding per hook in v1" />
+      <PageHead
+        title="Plugins"
+        note="one binding per hook in v1"
+        action={
+          <div className="save-row">
+            <button className="btn btn-ghost" disabled={!dirty} onClick={() => setDraft(null)}>
+              Revert
+            </button>
+            <button className="btn btn-primary" disabled={busy || !dirty} onClick={save}>
+              Save
+            </button>
+          </div>
+        }
+      />
       <div className="template-editor plugins-editor">
         <div className="template-list">{list}</div>
         {detail}

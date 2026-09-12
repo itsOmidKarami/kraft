@@ -9,14 +9,16 @@ import type {
   SearchResult,
   TemplateSummary,
 } from "../types";
-import { Switch } from "./ui";
+import { SectionLabel, Switch } from "./ui";
 import { backdropProps, useModal } from "../useModal";
 
 /**
- * New work item (UI v2 · 10, mobile m09). The "Advanced · cross-repo"
- * disclosure is collapsed by default and only has anything in it when the
- * repo actually has submodules — they come from probing the repo's own
- * .gitmodules, never from a list Kraft keeps of its own.
+ * New work item (design 10, mobile m09). Two columns: the form on the left,
+ * "OVERRIDES FOR THIS ITEM" + "Will happen on start" pinned to a 280px right
+ * rail. The "Advanced · cross-repo" disclosure is collapsed by default and
+ * only has anything in it when the repo actually has submodules — they come
+ * from probing the repo's own .gitmodules, never from a list Kraft keeps of
+ * its own.
  */
 
 const MERGE_POLICIES = [
@@ -62,12 +64,13 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
   const [available, setAvailable] = useState<string[]>([]);
   const [picked, setPicked] = useState<string[]>([]);
   const [mergePolicy, setMergePolicy] = useState("bump");
-  // Intake from existing artifacts (design task 7): kind -> the path that will
-  // actually be attached, kind -> the search box's typed text, and kind -> its hits.
+  // Intake from existing artifacts (design §4): kind -> the path once
+  // attached (the field becomes a chip), kind -> the search box's typed
+  // text while it isn't, kind -> its hits.
   const [attachPath, setAttachPath] = useState<Record<string, string>>({});
   const [query, setQuery] = useState<Record<string, string>>({});
   const [hits, setHits] = useState<Record<string, SearchResult[]>>({});
-  // 06 Overrides: auto-escalate every gate (node_overrides), auto_gate
+  // Overrides: auto-escalate every gate (node_overrides), auto_gate
   // (Kraft-zr3s, arm agent review of those escalations), and a budget draft.
   const [autoEscalate, setAutoEscalate] = useState(false);
   const [autoGate, setAutoGate] = useState(true);
@@ -206,6 +209,23 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
 
   const runCount = selectedNodes.length - skipped.size - satisfiedGates.size;
 
+  // Once attached (found via search or typed by hand and blurred), the
+  // field becomes a chip -- one control does both jobs, not a search box
+  // plus a separate path box.
+  const attachOne = (kind: string, path: string) => {
+    const trimmed = path.trim();
+    if (!trimmed) return;
+    setAttachPath((p) => ({ ...p, [kind]: trimmed }));
+    setQuery((q) => ({ ...q, [kind]: "" }));
+    setHits((h) => ({ ...h, [kind]: [] }));
+  };
+
+  // A hit selection or Enter is an explicit "attach this" — always trusted.
+  // A blur is not: it fires on every click away from the field, including a
+  // click on "Create and start", so raw search text ("auth") would otherwise
+  // be attached as a path. Only treat it as one when it looks like one.
+  const looksLikePath = (text: string) => /[/.]/.test(text);
+
   return (
     <div
       className="dialog-backdrop"
@@ -219,51 +239,66 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
         onSubmit={(e) => submit(true, e)}
         ref={ref}
       >
-        <div className="dialog-title">New work item</div>
-
-        <div className="field">
-          <label htmlFor="intake-title">Title</label>
-          <input
-            id="intake-title"
-            className="input"
-            aria-label="title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            required
-          />
+        <div className="dialog-title">
+          ⊕ New work item
+          <span className="field-hint">
+            {" "}
+            · created paused — nothing spends tokens until you start it
+          </span>
+          <button
+            type="button"
+            className="dialog-close"
+            aria-label="close"
+            onClick={onClose}
+          >
+            <X size={16} />
+          </button>
         </div>
 
-        <div className="field">
-          <label htmlFor="intake-description">
-            Description{" "}
-            <span className="field-hint">
-              · becomes the brief every node reads
-            </span>
-          </label>
-          <textarea
-            id="intake-description"
-            className="input"
-            aria-label="description"
-            rows={4}
-            placeholder="Context, constraints, what done looks like"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
-        </div>
+        <div className="intake-grid">
+          <div className="intake-main">
+            <div className="field">
+              <label htmlFor="intake-title">Title</label>
+              <input
+                id="intake-title"
+                className="input"
+                aria-label="title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                required
+              />
+            </div>
 
-        <div className="field">
-          <label>Repo</label>
-          <div className="repo-chips" role="radiogroup" aria-label="repo">
-            {allRepos.map((r) => (
-              <button
-                key={r.path}
-                type="button"
-                className="chip"
-                aria-pressed={repo === r.path}
-                disabled={!r.enabled}
-                onClick={() => {
-                  setRepo(r.path);
-                  if (r.default_chain_template) {
+            <div className="field">
+              <label htmlFor="intake-description">
+                Description{" "}
+                <span className="field-hint">
+                  · becomes the brief every node reads
+                </span>
+              </label>
+              <textarea
+                id="intake-description"
+                className="input"
+                aria-label="description"
+                rows={4}
+                placeholder="Context, constraints, what done looks like"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+              />
+            </div>
+
+            <div className="field">
+              <label htmlFor="intake-repo">Repo</label>
+              <select
+                id="intake-repo"
+                className="input"
+                aria-label="repo"
+                value={repo}
+                onChange={(e) => {
+                  const path = e.target.value;
+                  setRepo(path);
+                  const r = allRepos.find((x) => x.path === path);
+                  if (r?.default_chain_template) {
                     setTpl((cur) =>
                       templates.includes(r.default_chain_template!)
                         ? r.default_chain_template!
@@ -272,235 +307,288 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
                   }
                 }}
               >
-                {r.name}
-                {!r.enabled && " · disabled"}
-              </button>
-            ))}
-          </div>
-          {allRepos.length === 0 && (
-            <span className="field-hint">
-              no repos connected yet —{" "}
-              <Link to="/settings/repos">connect one in Settings</Link>
-            </span>
-          )}
-        </div>
-
-        <div className="field">
-          <label>
-            Start from existing{" "}
-            <span className="field-hint">· skips the phase it covers</span>
-          </label>
-          {KINDS.map(({ kind, label }) => (
-            <div key={kind} className="attachment-row">
-              <input
-                className="input"
-                aria-label={`existing ${label}`}
-                placeholder={`search ${label}s in this repo`}
-                value={query[kind] ?? ""}
-                onChange={(e) =>
-                  setQuery((q) => ({ ...q, [kind]: e.target.value }))
-                }
-              />
-              <input
-                className="input"
-                aria-label={`${label} path`}
-                placeholder="or a repo-relative path"
-                value={attachPath[kind] ?? ""}
-                onChange={(e) =>
-                  setAttachPath((p) => ({ ...p, [kind]: e.target.value }))
-                }
-              />
-              {(hits[kind] ?? []).map((h) => (
-                <button
-                  type="button"
-                  key={h.id}
-                  className="attachment-hit"
-                  onClick={() => {
-                    setAttachPath((p) => ({ ...p, [kind]: h.path }));
-                    setQuery((q) => ({ ...q, [kind]: "" }));
-                  }}
-                >
-                  {h.title} <span className="field-hint">{h.path}</span>
-                </button>
-              ))}
+                <option value="" disabled>
+                  select a repo…
+                </option>
+                {allRepos.map((r) => (
+                  <option key={r.path} value={r.path} disabled={!r.enabled}>
+                    {r.name}
+                    {!r.enabled && " · disabled"}
+                  </option>
+                ))}
+              </select>
+              {allRepos.length === 0 && (
+                <span className="field-hint">
+                  no repos connected yet —{" "}
+                  <Link to="/settings/repos">connect one in Settings</Link>
+                </span>
+              )}
             </div>
-          ))}
-        </div>
 
-        <div className="field">
-          <label>
-            Chain template <span className="field-hint">· repo default</span>
-          </label>
-          <div className="seg" role="radiogroup" aria-label="template">
-            {templates.map((t) => {
-              const n = templateSummaries.find((s) => s.id === t)?.nodes.length;
-              return (
-                <label key={t} className="seg-opt">
-                  <input
-                    type="radio"
-                    name="intake-template"
-                    value={t}
-                    checked={tpl === t}
-                    onChange={() => setTpl(t)}
-                  />
-                  {t}
-                  {n != null && ` · ${n}`}
-                </label>
-              );
-            })}
-          </div>
-        </div>
-
-        {selectedNodes.length > 0 && (
-          <div className="field chain-preview">
-            <p className="field-hint">
-              {runCount} node{runCount === 1 ? "" : "s"} will run · tap a node
-              to skip it
-            </p>
-            <p className="field-hint">
-              {selectedNodes.map((n, i) => {
-                const autoSkipped =
-                  n.gate_after != null && satisfiedGates.has(n.gate_after);
-                const struck = autoSkipped || skipped.has(n.id);
-                return (
-                  <span key={n.id}>
-                    {i > 0 && " → "}
-                    <button
-                      type="button"
-                      className="chain-preview-node"
-                      disabled={autoSkipped}
-                      onClick={() =>
-                        setSkipped((s) => {
-                          const next = new Set(s);
-                          if (next.has(n.id)) next.delete(n.id);
-                          else next.add(n.id);
-                          return next;
-                        })
-                      }
-                    >
-                      {struck ? <s>{n.id}</s> : n.id}
-                      {n.gate_after && <Flag size={9} weight="fill" />}
-                    </button>
-                  </span>
-                );
-              })}
-            </p>
-          </div>
-        )}
-
-        <div className="field">
-          <label>Overrides</label>
-          <label className="control-row">
-            <Switch
-              checked={autoEscalate}
-              onChange={setAutoEscalate}
-              label="auto-escalate every gate"
-            />
-            auto-escalate every gate
-          </label>
-          <label className="control-row">
-            <Switch
-              checked={autoGate}
-              onChange={setAutoGate}
-              label="auto-review those escalations"
-            />
-            auto_gate — let an agent review before a human sees it
-          </label>
-          <input
-            className="input"
-            inputMode="decimal"
-            aria-label="budget"
-            placeholder={`$ ${policy?.budget?.work_item_usd ?? "no cap"} (policy default)`}
-            value={budgetDraft}
-            onChange={(e) => setBudgetDraft(e.target.value)}
-          />
-        </div>
-
-        <p className="field-hint">
-          Will happen on start: {runCount} node{runCount === 1 ? "" : "s"} run
-          {autoEscalate ? ", every gate escalates before you see it" : ""}
-          {autoGate ? " and an agent reviews first" : ""}.
-        </p>
-
-        {available.length > 0 && (
-          <div className="disclosure">
-            <button
-              type="button"
-              className="disclosure-head"
-              aria-expanded={advanced}
-              onClick={() => setAdvanced((v) => !v)}
-            >
-              {advanced ? <CaretDown size={12} /> : <CaretRight size={12} />}
-              Advanced · cross-repo
-            </button>
-            {advanced && (
-              <>
-                <div className="field">
-                  <label>
-                    Submodules{" "}
-                    <span className="field-hint">· from .gitmodules</span>
-                  </label>
-                  <div className="submodules">
-                    {available.map((path) => {
-                      const on = picked.includes(path);
-                      return (
+            <div className="field">
+              <label>
+                Start from existing{" "}
+                <span className="field-hint">· skips the phase it covers</span>
+              </label>
+              {KINDS.map(({ kind, label, gate }) => (
+                <div key={kind} className="attachment-row">
+                  {attachPath[kind] ? (
+                    <>
+                      <span className="chip attachment-chip">
+                        {attachPath[kind]}
                         <button
-                          key={path}
                           type="button"
-                          className={`tag ${on ? "tag-accent" : "tag-outline tag-off"}`}
-                          aria-pressed={on}
+                          aria-label={`remove ${label}`}
                           onClick={() =>
-                            setPicked(
-                              on
-                                ? picked.filter((p) => p !== path)
-                                : [...picked, path],
-                            )
+                            setAttachPath((p) => {
+                              const next = { ...p };
+                              delete next[kind];
+                              return next;
+                            })
                           }
                         >
-                          {path}
-                          {on && <X size={10} />}
+                          <X size={10} />
                         </button>
-                      );
-                    })}
-                  </div>
+                      </span>
+                      <p className="field-hint">
+                        {label} attached → {gate} satisfied
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <input
+                        className="input"
+                        aria-label={label}
+                        placeholder={`search ${label}s, or paste a repo-relative path`}
+                        value={query[kind] ?? ""}
+                        onChange={(e) =>
+                          setQuery((q) => ({ ...q, [kind]: e.target.value }))
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key !== "Enter") return;
+                          e.preventDefault();
+                          const kindHits = hits[kind];
+                          if (kindHits?.length) {
+                            attachOne(kind, kindHits[0].path);
+                          } else {
+                            attachOne(kind, query[kind] ?? "");
+                          }
+                        }}
+                        onBlur={() => {
+                          const q = query[kind] ?? "";
+                          if (looksLikePath(q)) attachOne(kind, q);
+                        }}
+                      />
+                      {(hits[kind] ?? []).length > 0 && (
+                        <div role="listbox" className="attachment-hits">
+                          {(hits[kind] ?? []).map((h) => (
+                            <button
+                              type="button"
+                              role="option"
+                              aria-selected={false}
+                              key={h.id}
+                              className="attachment-hit"
+                              // mousedown, not click: the field's onBlur fires
+                              // first on a click and would attach the raw
+                              // query text before this handler ever runs.
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                attachOne(kind, h.path);
+                              }}
+                            >
+                              {h.title} <span className="field-hint">{h.path}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
-                <div className="field">
-                  <label>Root merge policy</label>
-                  <div className="policy-radios">
-                    {MERGE_POLICIES.map((p) => (
-                      <label key={p.id} className="radio">
-                        <input
-                          type="radio"
-                          name="root-merge-policy"
-                          checked={mergePolicy === p.id}
-                          onChange={() => setMergePolicy(p.id)}
-                        />
-                        <span className="dot" />
-                        {p.label}
+              ))}
+            </div>
+
+            <div className="field">
+              <label>
+                Chain template <span className="field-hint">· repo default</span>
+              </label>
+              <div className="chain-template-chips" role="radiogroup" aria-label="template">
+                {templates.map((t) => {
+                  const n = templateSummaries.find((s) => s.id === t)?.nodes.length;
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      className="chip"
+                      role="radio"
+                      aria-checked={tpl === t}
+                      onClick={() => setTpl(t)}
+                    >
+                      {t}
+                      {n != null && <span className="chain-pill-count"> {n} nodes</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {selectedNodes.length > 0 && (
+              <div className="field chain-preview">
+                <p className="field-hint">
+                  {runCount} node{runCount === 1 ? "" : "s"} will run · click a
+                  node to skip it · edit templates in Chains
+                </p>
+                <p className="field-hint">
+                  {selectedNodes.map((n, i) => {
+                    const autoSkipped =
+                      n.gate_after != null && satisfiedGates.has(n.gate_after);
+                    const struck = autoSkipped || skipped.has(n.id);
+                    return (
+                      <span key={n.id}>
+                        {i > 0 && " → "}
+                        <button
+                          type="button"
+                          className="chain-preview-node"
+                          disabled={autoSkipped}
+                          onClick={() =>
+                            setSkipped((s) => {
+                              const next = new Set(s);
+                              if (next.has(n.id)) next.delete(n.id);
+                              else next.add(n.id);
+                              return next;
+                            })
+                          }
+                        >
+                          {struck ? <s>{n.id}</s> : n.id}
+                          {n.gate_after && <Flag size={9} weight="fill" />}
+                        </button>
+                      </span>
+                    );
+                  })}
+                </p>
+              </div>
+            )}
+
+            {available.length > 0 && (
+              <div className="disclosure">
+                <button
+                  type="button"
+                  className="disclosure-head"
+                  aria-expanded={advanced}
+                  onClick={() => setAdvanced((v) => !v)}
+                >
+                  {advanced ? <CaretDown size={12} /> : <CaretRight size={12} />}
+                  Advanced · cross-repo
+                </button>
+                {advanced && (
+                  <>
+                    <div className="field">
+                      <label>
+                        Submodules{" "}
+                        <span className="field-hint">· from .gitmodules</span>
                       </label>
-                    ))}
-                  </div>
-                </div>
-              </>
+                      <div className="submodules">
+                        {available.map((path) => {
+                          const on = picked.includes(path);
+                          return (
+                            <button
+                              key={path}
+                              type="button"
+                              className={`tag ${on ? "tag-accent" : "tag-outline tag-off"}`}
+                              aria-pressed={on}
+                              onClick={() =>
+                                setPicked(
+                                  on
+                                    ? picked.filter((p) => p !== path)
+                                    : [...picked, path],
+                                )
+                              }
+                            >
+                              {path}
+                              {on && <X size={10} />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div className="field">
+                      <label>Root merge policy</label>
+                      <div className="policy-radios">
+                        {MERGE_POLICIES.map((p) => (
+                          <label key={p.id} className="radio">
+                            <input
+                              type="radio"
+                              name="root-merge-policy"
+                              checked={mergePolicy === p.id}
+                              onChange={() => setMergePolicy(p.id)}
+                            />
+                            <span className="dot" />
+                            {p.label}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
             )}
           </div>
-        )}
+
+          <div className="intake-side">
+            <SectionLabel>Overrides for this item</SectionLabel>
+            <label className="control-row">
+              <Switch
+                checked={autoEscalate}
+                onChange={setAutoEscalate}
+                label="auto-escalate every gate"
+              />
+              auto-escalate every gate
+            </label>
+            <label className="control-row">
+              <Switch
+                checked={autoGate}
+                onChange={setAutoGate}
+                label="auto-review those escalations"
+              />
+              auto_gate — let an agent review before a human sees it
+            </label>
+            <div className="control-row">
+              <span>budget $</span>
+              <input
+                className="input"
+                inputMode="decimal"
+                aria-label="budget"
+                placeholder={`${policy?.budget?.work_item_usd ?? "no cap"} (policy default)`}
+                value={budgetDraft}
+                onChange={(e) => setBudgetDraft(e.target.value)}
+              />
+            </div>
+            <p className="field-hint">Blank uses the Policy default.</p>
+
+            <SectionLabel>Will happen on start</SectionLabel>
+            <p className="field-hint">
+              {runCount} node{runCount === 1 ? "" : "s"} run
+              {autoEscalate ? ", every gate escalates before you see it" : ""}
+              {autoGate ? " and an agent reviews first" : ""}.
+            </p>
+          </div>
+        </div>
 
         {error && <p className="form-error">{error}</p>}
-        <div className="dialog-actions">
-          <button type="button" className="btn btn-secondary" onClick={onClose}>
-            Cancel
-          </button>
+        <div className="dialog-actions intake-foot">
           <button
             type="button"
             className="btn btn-secondary"
             disabled={busy}
             onClick={() => submit(false)}
           >
-            + Create paused
+            ⊕ Create paused
           </button>
           <button type="submit" className="btn btn-primary" disabled={busy}>
             ▷ Create and start
+          </button>
+          <span className="save-hint">created paused unless you start it</span>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
+            Cancel
           </button>
         </div>
       </form>

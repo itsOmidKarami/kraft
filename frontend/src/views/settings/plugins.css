@@ -2,8 +2,10 @@
  * `.hook-row`, `.template-editor`, `.template-list`, `.submodules`, `.tag`
  * already live in styles.css and are reused here. */
 
-.plugins-editor {
-  grid-template-columns: 260px 1fr;
+/* Two classes, not one: see templates.css for why a single-class override of
+   `.template-editor` is inert. Root cause: Kraft-9fj8. */
+.template-editor.plugins-editor {
+  grid-template-columns: 500px minmax(0, 1fr);
 }
 
 .plugin-detail {
@@ -11,4 +13,37 @@
   flex-direction: column;
   gap: 8px;
   min-width: 0;
+}
+
+/* Per-repo override row: repo · switch · command override -- its own grid,
+   not .hook-row's (that one's 60px last column is sized for the list's
+   Steer switch, too narrow for a command string). */
+.plugin-repo-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px minmax(0, 2fr);
+  gap: 12px;
+  align-items: center;
+  padding: 9px 0;
+  background: linear-gradient(to right,
+    transparent, var(--color-divider) 48px,
+    var(--color-divider) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
+}
+
+/* Last runs: id/node/cycle left, result/duration/state right, hairline
+   between rows. */
+.plugin-run-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--color-divider);
+}
+.plugin-run-result { color: var(--color-text-muted); white-space: nowrap; }
+
+@media (max-width: 1023px) {
+  /* Task 1's specificity fix means the settings-wide `.template-editor,
+     .access-grid { grid-template-columns: 1fr }` rule (styles.css) can no
+     longer beat `.template-editor.plugins-editor` below the tablet
+     breakpoint either -- same two-class fix as the unconditional rule above. */
+  .template-editor.plugins-editor { grid-template-columns: 1fr; }
 }

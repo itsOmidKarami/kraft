@@ -2,8 +2,46 @@
  * only; `.template-editor`, `.template-list`, `.facet-opt`, `.validation`,
  * `.template-yaml` already live in styles.css and are reused here. */
 
-.chain-editor {
-  grid-template-columns: 200px 1fr 340px;
+/* Two classes, not one: styles.css is bundled after every page stylesheet
+   (main.tsx imports App before styles.css), so a single-class override of
+   `.template-editor` is inert -- it is why the YAML pane was rendering under
+   the templates list instead of in the third column. Root cause: Kraft-9fj8. */
+.template-editor.chain-editor {
+  grid-template-columns: 200px minmax(0, 1fr) 340px;
+  /* stretch, not the base rule's `align-items: start` -- the validity card
+     pins to the bottom of this column via margin-top: auto below, which
+     needs the column's own height to reach the row's full height. */
+  align-items: stretch;
+}
+
+.chain-editor .template-list { height: 100%; }
+
+/* Template row: left-aligned name + node count on one line, meta line under
+   it -- a bare button with no CSS at all used to centre "default12 nodes ·
+   4 gates ·" as one run of text (Task 2 finding, G10-02). Two classes, not
+   one, to beat `.facet-opt`'s own flex-row layout in styles.css (same
+   inert-override shape Task 1 fixed for the grid columns). */
+.facet-opt.template-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  text-align: left;
+}
+.template-row-top { display: flex; align-items: baseline; gap: 8px; }
+.template-row-name { font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.template-row-count { margin-left: auto; font-size: 11px; color: var(--color-text-muted); white-space: nowrap; }
+.template-row-meta { font-size: 11px; color: var(--color-text-muted); }
+
+.chain-add-node-row { width: 100%; margin-top: 8px; }
+
+.chain-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin: 0;
 }
 
 .chain-middle {
@@ -100,7 +138,7 @@
 }
 
 @media (max-width: 1200px) {
-  .chain-editor {
+  .template-editor.chain-editor {
     grid-template-columns: 1fr;
   }
 }
