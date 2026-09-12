@@ -7,11 +7,17 @@ export interface RepoSubmodule {
   chain_override: string | null;
 }
 
+export interface TestScope {
+  paths: string[];
+  command: string;
+}
+
 export interface Repo {
   path: string;
   name: string;
   default_chain_template: string;
   test_command: string | null;
+  test_scopes: TestScope[] | null;
   forge: string | null;
   project: string | null;
   enabled: boolean;
@@ -33,6 +39,7 @@ export interface RepoProbe {
   beads_export_git_add: boolean;
   has_engineering: boolean;
   test_command: string | null;
+  test_scopes: TestScope[] | null;
   forge: string | null;
   project: string | null;
 }

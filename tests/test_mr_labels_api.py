@@ -113,3 +113,31 @@ def test_set_mr_labels_is_not_a_self_action(tmp_path, monkeypatch):
     result = asyncio.run(client_mod.mr_labels(["release::patch"]))
     assert result["labels"] == ["release::patch"]
     assert posted["path"] == "/work-items/mine/mr-labels"
+
+
+def test_set_mr_labels_unpins_the_stale_pipeline(tmp_path, monkeypatch):
+    """Labelling re-creates the pipeline, so the pipeline `on.ci.poll` pinned
+    for this head sha is the red one the label was missing from. Leaving the
+    pin would make the next same-sha poll re-report the identical finding and
+    the fix loop call the item stuck (this item's own escalation)."""
+    from kraft import store
+
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _completed_item(client, repo)
+        fake = _fake_forge(monkeypatch)
+        import kraft.api as api
+
+        db = api.app.state.db
+        client.portal.call(db.write, lambda c: store.set_ci_pipeline_ref(c, wid, "deadbeef:111"))
+
+        r = client.post(f"/api/work-items/{wid}/mr-labels", json={"labels": ["x"]})
+        assert r.status_code == 200, r.text
+        assert fake.labels == ["x"]
+        row = client.portal.call(
+            db.write,
+            lambda c: c.execute(
+                "SELECT ci_pipeline_ref FROM work_items WHERE id = ?", (wid,)
+            ).fetchone(),
+        )
+        assert not row["ci_pipeline_ref"]

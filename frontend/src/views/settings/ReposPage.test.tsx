@@ -14,6 +14,7 @@ const probeFixture = {
   beads_export_git_add: true,
   has_engineering: true,
   test_command: null as string | null,
+  test_scopes: null as { paths: string[]; command: string }[] | null,
   forge: null as string | null,
   project: null as string | null,
 };
@@ -176,6 +177,68 @@ describe("Settings · repo detail (5b)", () => {
         submodules: expect.arrayContaining([
           expect.objectContaining({ path: "libs/a", enabled: true }),
         ]),
+      }),
+    );
+  });
+
+  it("test scopes are editable and round-trip through patchRepo", async () => {
+    const repoC = {
+      ...repo,
+      path: "/repo-c",
+      name: "repo-c",
+      test_scopes: [{ paths: ["frontend/**"], command: "just test-ui" }],
+    };
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [repo, repoC] });
+    const patch = vi.spyOn(api, "patchRepo").mockResolvedValue(repoC);
+    renderAt("/settings/repos?repo=/repo-c");
+
+    const commandInput = await screen.findByDisplayValue("just test-ui");
+    await userEvent.clear(commandInput);
+    await userEvent.type(commandInput, "just ci-test");
+    await userEvent.click(await screen.findByRole("button", { name: "Save" }));
+
+    expect(patch).toHaveBeenCalledWith(
+      "/repo-c",
+      expect.objectContaining({
+        test_scopes: [{ paths: ["frontend/**"], command: "just ci-test" }],
+      }),
+    );
+  });
+
+  it("re-probing offers the found scopes, and applying them stages a draft edit", async () => {
+    vi.spyOn(api, "probeRepo").mockResolvedValue({
+      path: "/repo-a",
+      name: "repo-a",
+      branch: "main",
+      submodules: [],
+      has_beads: true,
+      beads_export_auto: true,
+      beads_export_git_add: true,
+      has_engineering: true,
+      test_command: "just ci-test",
+      test_scopes: [
+        { paths: ["frontend/**"], command: "just test-ui" },
+        { paths: ["frontend/**"], command: "just e2e-ci" },
+        { paths: ["src/**"], command: "just ci-test" },
+      ],
+      forge: "github",
+      project: "acme/repo-a",
+    });
+    const patch = vi.spyOn(api, "patchRepo").mockResolvedValue(repo);
+    renderAt("/settings/repos?repo=/repo-a");
+
+    await userEvent.click(await screen.findByRole("button", { name: /re-probe/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /apply 3 probed scope/i }));
+    await userEvent.click(await screen.findByRole("button", { name: "Save" }));
+
+    expect(patch).toHaveBeenCalledWith(
+      "/repo-a",
+      expect.objectContaining({
+        test_scopes: [
+          { paths: ["frontend/**"], command: "just test-ui" },
+          { paths: ["frontend/**"], command: "just e2e-ci" },
+          { paths: ["src/**"], command: "just ci-test" },
+        ],
       }),
     );
   });
