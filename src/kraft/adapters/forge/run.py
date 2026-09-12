@@ -269,6 +269,17 @@ async def _run_one(
                     for j in ci_status.failed_jobs
                 ]
         case "sync_mr":
+            # An MR merged outside Kraft -- a human merging by hand and
+            # skipping `human_review` -- usually has its source branch
+            # deleted with it, and then this node's push dies `! [rejected]
+            # ... (stale info)`: the lease expects the sha origin last showed
+            # us, origin has no ref at all, and the item stops one node from
+            # the end with the work already on main (Kraft-7itv). Same
+            # shortcut `merge` takes, for the same reason: pushing to and
+            # re-describing a merged MR has nothing left to accomplish.
+            existing = await forge.find_mr(repo=repo, branch=branch)
+            if existing is not None and existing.state == "merged":
+                return f"already merged (!{existing.number}); nothing to sync\n", "done", findings
             # Push first: every commit after `open_mr` -- verify's fixes,
             # mr_checks' findings -- is local only until this runs, and
             # `merge` refuses a branch ahead of its remote (Kraft-nh5m).
