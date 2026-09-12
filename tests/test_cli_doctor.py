@@ -40,6 +40,7 @@ def test_doctor_on_a_live_instance_reaches_every_check(app, tmp_path):
         "health",
         "templates",
         "access.yaml",
+        "pidfile",
         "mcp token",
         "agent cli",
         "mcp server",
@@ -48,6 +49,15 @@ def test_doctor_on_a_live_instance_reaches_every_check(app, tmp_path):
         "worktrees",
     ):
         assert name in _names(rows)
+
+
+def test_doctor_flags_a_dead_pidfile(app, tmp_path):
+    _prime(tmp_path)
+    pid_path = tmp_path / "run" / "kraft.pid"
+    pid_path.write_text("999999")
+    row = _by_name(asyncio.run(doctor.run_checks()), "pidfile")
+    assert not row["ok"]
+    assert "not running" in row["detail"]
 
 
 def test_a_world_readable_mcp_token_fails(app, tmp_path):

@@ -6,6 +6,11 @@ import asyncio
 import json
 import os
 import signal
+import socket
+import subprocess
+import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -140,10 +145,10 @@ def test_serve_writes_and_clears_the_pidfile(tmp_path, monkeypatch):
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
     seen = {}
 
-    def fake_run(*args, **kwargs):
+    def fake_run(self, *args, **kwargs):
         seen["pid"] = RunDirs(tmp_path / "run").pid.read_text().strip()
 
-    monkeypatch.setattr(uvicorn, "run", fake_run)
+    monkeypatch.setattr(cli.admin._SignalLoggingServer, "run", fake_run)
     cli.admin._serve()
     assert seen["pid"] == str(os.getpid())
     assert not RunDirs(tmp_path / "run").pid.exists()
@@ -157,7 +162,11 @@ def test_a_second_serve_refuses_while_one_is_live(tmp_path, monkeypatch, capsys)
     pid_path = RunDirs(tmp_path / "run").pid
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     pid_path.write_text(str(os.getpid()))
-    monkeypatch.setattr(uvicorn, "run", lambda *a, **k: pytest.fail("started anyway"))
+    monkeypatch.setattr(
+        cli.admin._SignalLoggingServer,
+        "run",
+        lambda self, *a, **k: pytest.fail("started anyway"),
+    )
     with pytest.raises(SystemExit):
         cli.admin._serve()
     assert "already running" in capsys.readouterr().err
@@ -172,7 +181,11 @@ def test_a_stale_pidfile_does_not_block_serve(tmp_path, monkeypatch):
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     pid_path.write_text("999999")
     started = []
-    monkeypatch.setattr(uvicorn, "run", lambda *a, **k: started.append(True))
+    monkeypatch.setattr(
+        cli.admin._SignalLoggingServer,
+        "run",
+        lambda self, *a, **k: started.append(True),
+    )
     cli.admin._serve()
     assert started == [True]
 
@@ -195,6 +208,49 @@ def test_stop_signals_the_running_pid(tmp_path, monkeypatch, capsys):
     cli.main(["admin", "stop"])
     assert signalled == [(4171, signal.SIGTERM)]
     assert "4171" in capsys.readouterr().out
+
+
+def test_stop_waits_for_the_process_to_actually_exit(tmp_path, monkeypatch, capsys):
+    """The review finding behind this: the pidfile used to be unlinked at
+    signal *delivery*, so `stop` printed "stopped" while the old process was
+    still draining with the databases open. Real process, real SIGTERM, and
+    a deliberately slow exit."""
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    pid_path = RunDirs(tmp_path / "run").pid
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import signal,sys,time\n"
+            "signal.signal(signal.SIGTERM, lambda *a: (time.sleep(1.5), sys.exit(0)))\n"
+            "time.sleep(30)\n",
+        ]
+    )
+    # Reaped as it exits: an unwaited child stays a zombie, and `os.kill(pid, 0)`
+    # succeeds on a zombie. The real daemon is never the stopping shell's child.
+    reaper = threading.Thread(target=proc.wait, daemon=True)
+    reaper.start()
+    try:
+        pid_path.write_text(str(proc.pid))
+        cli.main(["admin", "stop"])
+        assert proc.poll() is not None, "stop returned while the process was still alive"
+        assert f"stopped (pid {proc.pid})" in capsys.readouterr().out
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        reaper.join(timeout=5)
+
+
+def test_handle_exit_leaves_the_pidfile_for_the_drain(tmp_path):
+    """`handle_exit` runs at signal delivery, before uvicorn drains -- the
+    pidfile has to keep naming the still-running process until it is gone."""
+    pid_path = tmp_path / "kraft.pid"
+    pid_path.write_text(str(os.getpid()))
+    server = cli.admin._SignalLoggingServer(uvicorn.Config("kraft.api:app"))
+    server.handle_exit(signal.SIGTERM, None)
+    assert server.should_exit
+    assert pid_path.read_text() == str(os.getpid())
 
 
 def test_stop_with_no_server_is_not_an_error(tmp_path, monkeypatch, capsys):
@@ -275,7 +331,217 @@ def test_serve_exports_its_identity_for_workers(tmp_path, monkeypatch):
     monkeypatch.setenv("KRAFT_PORT", "9321")
     monkeypatch.delenv("KRAFT_DAEMON_PID", raising=False)
     monkeypatch.delenv("KRAFT_DAEMON_PORT", raising=False)
-    monkeypatch.setattr(uvicorn, "run", lambda *a, **k: None)
+    # `_serve` runs a `_SignalLoggingServer`, not `uvicorn.run` -- patching the
+    # module function would let this test start a real server and never return.
+    monkeypatch.setattr(cli.admin._SignalLoggingServer, "run", lambda self, *a, **k: None)
     cli.admin._serve()
     assert os.environ["KRAFT_DAEMON_PID"] == str(os.getpid())
     assert os.environ["KRAFT_DAEMON_PORT"] == "9321"
+
+
+def _wait_for(predicate, timeout=10.0, interval=0.05) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(interval)
+    return False
+
+
+def test_kraft_9oab_sigterm_stops_the_real_server(tmp_path):
+    """Kraft-9oab: reproduce against the current build before concluding
+    anything (the bead's own last line, and the spec's). A mock cannot tell
+    us whether a real process actually exits — this spawns `kraft admin
+    start` for real, sends a real SIGTERM, and times the real exit.
+
+    `_isolated_kraft_home` (autouse, conftest.py) already points KRAFT_HOME
+    and KRAFT_PORT at an isolated tmp dir and a free ephemeral port; this
+    only adds KRAFT_RUN_DIR/KRAFT_TEMPLATES_DIR on top, same as every other
+    test in this file.
+    """
+    run_dir = tmp_path / "run"
+    templates = fake_templates_dir(tmp_path, "true")
+    env = {
+        **os.environ,
+        "KRAFT_RUN_DIR": str(run_dir),
+        "KRAFT_TEMPLATES_DIR": str(templates),
+    }
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "kraft", "admin", "start"],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    try:
+        pid_path = RunDirs(run_dir).pid
+        started = _wait_for(pid_path.is_file, timeout=10.0)
+        assert started, f"server never wrote a pidfile:\n{proc.stdout.read()}"
+        started_at = time.monotonic()
+        proc.send_signal(signal.SIGTERM)
+        stopped = _wait_for(lambda: proc.poll() is not None, timeout=14.0)
+        elapsed = time.monotonic() - started_at
+        assert stopped, (
+            f"kraft admin start did not exit within 14s of SIGTERM (Kraft-9oab): "
+            f"{proc.stdout.read()}"
+        )
+        # A clean exit is near-instant. Anything past ~8s means uvicorn's own
+        # 10s timeout_graceful_shutdown backstop is what actually ended it,
+        # not a graceful return -- the bead's literal complaint (stop reports
+        # failure) is fixed either way, but a backstop-triggered exit means
+        # the underlying stall is still real and undiagnosed.
+        print(f"kraft-9oab: exited {elapsed:.1f}s after SIGTERM")
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+
+def test_serve_refuses_when_the_address_already_answers(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as squatter:
+        squatter.bind(("127.0.0.1", 0))
+        squatter.listen(1)
+        port = squatter.getsockname()[1]
+        monkeypatch.setenv("KRAFT_HOST", "127.0.0.1")
+        monkeypatch.setenv("KRAFT_PORT", str(port))
+        with pytest.raises(SystemExit, match="already answering"):
+            cli.admin._serve()
+
+
+def test_serve_refuses_a_wildcard_listener_probed_from_loopback(tmp_path, monkeypatch):
+    """The exact Kraft-kquf shape: an existing daemon bound *:PORT, and we
+    are about to bind the specific loopback address next to it."""
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as squatter:
+        squatter.bind(("0.0.0.0", 0))
+        squatter.listen(1)
+        port = squatter.getsockname()[1]
+        monkeypatch.setenv("KRAFT_HOST", "127.0.0.1")
+        monkeypatch.setenv("KRAFT_PORT", str(port))
+        with pytest.raises(SystemExit, match="already answering"):
+            cli.admin._serve()
+
+
+def test_serve_probes_127_0_0_1_when_its_own_bind_is_a_wildcard(tmp_path, monkeypatch):
+    """The other direction: we are about to bind wildcard ourselves, and
+    something already sits on loopback -- connecting to 0.0.0.0 itself is
+    not a reliable client target, so the probe has to translate."""
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    templates_dir = fake_templates_dir(tmp_path, "true")
+    # A wildcard bind is refused outright without a password (_bind, unrelated
+    # to this test) -- set one so the address check is what actually runs.
+    (templates_dir / "access.yaml").write_text("password_hash: x\n")
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates_dir))
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as squatter:
+        squatter.bind(("127.0.0.1", 0))
+        squatter.listen(1)
+        port = squatter.getsockname()[1]
+        monkeypatch.setenv("KRAFT_HOST", "0.0.0.0")
+        monkeypatch.setenv("KRAFT_PORT", str(port))
+        with pytest.raises(SystemExit, match="already answering"):
+            cli.admin._serve()
+
+
+def test_serve_proceeds_when_the_address_is_free(tmp_path, monkeypatch):
+    """A free ephemeral port (nothing bound it) must not be refused."""
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()  # freed before _serve ever runs
+    monkeypatch.setenv("KRAFT_HOST", "127.0.0.1")
+    monkeypatch.setenv("KRAFT_PORT", str(port))
+    started = []
+    monkeypatch.setattr(
+        cli.admin._SignalLoggingServer,
+        "run",
+        lambda self, *a, **k: started.append(True),
+    )
+    cli.admin._serve()
+    assert started == [True]
+
+
+def test_shutdown_logs_the_signal(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    monkeypatch.setenv("KRAFT_LOG_REDIRECTED", "1")  # keep this test's own stderr intact
+
+    def fake_run(self, *a, **k):
+        self.handle_exit(signal.SIGTERM, None)
+
+    monkeypatch.setattr(cli.admin._SignalLoggingServer, "run", fake_run)
+    cli.admin._serve()
+    assert "signal SIGTERM" in capsys.readouterr().err
+
+
+def test_shutdown_logs_an_unhandled_exception(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    monkeypatch.setenv("KRAFT_LOG_REDIRECTED", "1")
+
+    def fake_run(self, *a, **k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(cli.admin._SignalLoggingServer, "run", fake_run)
+    with pytest.raises(RuntimeError):
+        cli.admin._serve()
+    err = capsys.readouterr().err
+    assert "unhandled exception" in err
+    assert "boom" in err
+    # the pidfile still comes down even though it crashed
+    assert not RunDirs(tmp_path / "run").pid.exists()
+
+
+def test_a_foreground_start_writes_server_log_too(tmp_path, monkeypatch, capfd):
+    """Kraft-mqwg: only --detach used to leave a file.
+
+    `_redirect_output_to_log` dup2s the real process fds 1/2 -- pytest's own
+    fd-level capture already has those dup'd to its own buffer, so the
+    exercise has to run with that capture suspended (`capfd.disabled()`), or
+    it corrupts capture for every test that runs after this one in-process.
+    """
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    monkeypatch.delenv("KRAFT_LOG_REDIRECTED", raising=False)
+
+    def fake_run(self, *a, **k):
+        self.handle_exit(signal.SIGTERM, None)
+
+    monkeypatch.setattr(cli.admin._SignalLoggingServer, "run", fake_run)
+    with capfd.disabled():
+        cli.admin._serve()
+    log_path = RunDirs(tmp_path / "run").logs / "server.log"
+    assert "signal SIGTERM" in log_path.read_text()
+
+
+def test_large_log_is_rotated_before_a_start(tmp_path, monkeypatch, capfd):
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    monkeypatch.delenv("KRAFT_LOG_REDIRECTED", raising=False)
+    log_path = RunDirs(tmp_path / "run").logs / "server.log"
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text("x" * 9_000_000)
+    monkeypatch.setattr(cli.admin._SignalLoggingServer, "run", lambda self, *a, **k: None)
+    with capfd.disabled():
+        cli.admin._serve()
+    assert log_path.with_suffix(".log.1").stat().st_size == 9_000_000
+    assert log_path.stat().st_size < 9_000_000
+
+
+def test_health_carries_run_dir_and_pid(app):
+    payload = asyncio.run(client.health())
+    assert payload["run_dir"] == os.environ["KRAFT_RUN_DIR"]
+    assert payload["pid"] == os.getpid()
+
+
+def test_client_refuses_a_mismatched_run_dir(app, monkeypatch):
+    async def wrong_instance(*a, **k):
+        return {"run_dir": "/somewhere/else", "status": "ok"}
+
+    monkeypatch.setattr(client.transport, "_get", wrong_instance)
+    with pytest.raises(ValueError, match="different instance"):
+        asyncio.run(client.health())

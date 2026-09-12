@@ -183,3 +183,18 @@ def test_the_last_node_has_no_next_node(wired, tmp_path):
         return client.reads._next_node_id(full)
 
     assert run_with_app(wired, scenario) is None
+
+
+def test_health_rejects_a_server_that_omits_run_dir(monkeypatch, tmp_path):
+    """A payload missing run_dir must not be waved through as this instance --
+    that is exactly how an older kraft daemon (or anything else on the port)
+    passed itself off as this one (Kraft-kquf)."""
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+
+    async def fake_get(path, **params):
+        return {"status": "ok"}
+
+    monkeypatch.setattr(client.reads.transport, "_get", fake_get)
+
+    with pytest.raises(ValueError, match="older kraft daemon"):
+        asyncio.run(client.reads.health())
