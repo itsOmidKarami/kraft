@@ -11,11 +11,11 @@ test("the peek overlays the list without moving a row", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: /new work item/i }).click();
   const modal = page.getByRole("dialog", { name: "New work item" });
-  await modal.getByRole("button", { name: new RegExp(REPO_NAME, "i") }).click();
+  await modal.getByLabel("repo").selectOption({ label: REPO_NAME });
   await modal.getByLabel("title").fill("a work item to check the board's responsive layout");
   await modal
     .getByRole("radiogroup", { name: "template" })
-    .locator("label.seg-opt", { hasText: /^quick-task\b/ })
+    .getByRole("radio", { name: /^quick-task\b/ })
     .click();
   await modal.getByRole("button", { name: /create and start/i }).click();
 

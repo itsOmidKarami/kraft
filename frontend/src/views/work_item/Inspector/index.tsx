@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { Tabs } from "../../../components/ui";
 import { elapsed } from "../../../format";
 import type { KraftEvent, WorkerSession, WorkItem, WorkItemDiff } from "../../../types";
@@ -47,9 +48,21 @@ export function Inspector({
   const running = nodeSessions.find((s) => s.status === "running");
   const runtime = running?.started_at ? elapsed(Date.now() - Date.parse(running.started_at)) : null;
 
+  // Two sticky siblings at the same `top: 0` stack on each other -- the tabs
+  // need to sit below the head's actual height, not a guessed 40px.
+  const headRef = useRef<HTMLDivElement>(null);
+  const [headHeight, setHeadHeight] = useState(40);
+  useLayoutEffect(() => {
+    if (headRef.current) setHeadHeight(headRef.current.offsetHeight);
+  });
+
   return (
-    <aside className="inspector" data-testid="inspector">
-      <div className="inspector-head">
+    <aside
+      className="inspector"
+      data-testid="inspector"
+      style={{ "--inspector-head-h": `${headHeight}px` } as CSSProperties}
+    >
+      <div className="inspector-head" ref={headRef}>
         <span className="mono">{nodeId ?? "—"}</span>
         {running && <span className="row-state" data-status="running">running{runtime ? ` · ${runtime}` : ""}</span>}
       </div>

@@ -163,6 +163,20 @@ describe("Settings · chains editor (task 8)", () => {
     expect(put).not.toHaveBeenCalled();
     expect(await screen.findByText(/already exists/)).toBeInTheDocument();
   });
+
+  it("renders template rows with the name and meta on separate lines", async () => {
+    renderAt("/settings/chains");
+    const row = await screen.findByRole("button", { name: /default/ });
+    expect(row.querySelector(".template-row-name")?.textContent).toBe("default");
+    expect(row.querySelector(".template-row-meta")?.textContent).toMatch(/gates · used by/);
+  });
+
+  it("shows the legend row for the node graph's glyphs", async () => {
+    renderAt("/settings/chains");
+    expect(await screen.findByText(/gate after/)).toBeInTheDocument();
+    expect(screen.getByText(/fix loop/)).toBeInTheDocument();
+    expect(screen.getByText(/auto-escalate/)).toBeInTheDocument();
+  });
 });
 
 describe("Settings · chains phone (task 9, m13)", () => {
@@ -180,6 +194,14 @@ describe("Settings · chains phone (task 9, m13)", () => {
     await userEvent.click(await screen.findByText("default"));
     expect(await screen.findByText(/verify/)).toBeInTheDocument();
     expect(screen.queryByLabelText("gate_after")).toBeNull();
+  });
+
+  it("phone: the node list is a stage list with a trailing + node row, not desktop pills", async () => {
+    renderAt("/settings/chains");
+    await userEvent.click(await screen.findByText("default"));
+    const row = (await screen.findByText("verify")).closest(".row");
+    expect(row?.querySelector(".glyph")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "+ node" })).toBeInTheDocument();
   });
 
   it("phone: opening a node shows the form and a read-only YAML sheet", async () => {

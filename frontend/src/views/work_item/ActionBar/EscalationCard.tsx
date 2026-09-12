@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { Robot } from "@phosphor-icons/react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import * as api from "../../../api";
 import type { KraftEvent, WorkerSession, WorkItem } from "../../../types";
 import { useActionBar } from "./useActionBar";
@@ -129,7 +131,14 @@ export function EscalatedCard({
           <span className="attention-title">
             Escalation · turn {session.attempt} · reported
           </span>
-          <span className="attention-sub">{text}</span>
+          {/* `attention-sub` used to be a <span>, but markdown emits block
+             elements (react-markdown always does), so it has to be a <div>
+             or React warns about a <p> inside a <span>. Rendering makes the
+             card taller, so it gets a max-height + scroll rather than
+             pushing the buttons below off screen. */}
+          <div className="attention-sub doc-modal-body attention-sub-md">
+            <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
+          </div>
         </div>
       </div>
       <div className="gate-actions">

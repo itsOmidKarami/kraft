@@ -53,6 +53,24 @@ describe("Header", () => {
     expect(screen.getByText("Chains")).toBeInTheDocument();
   });
 
+  it("hides on phone width on a settings sub-page (its own PhoneHeader is the one top bar), but not on the settings index", () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn().mockImplementation((query: string) => ({
+        matches: true,
+        media: query,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+    const { unmount } = renderAt("/settings/chains");
+    expect(screen.queryByText("Chains")).toBeNull();
+    unmount();
+    renderAt("/settings");
+    expect(screen.getByText("Settings")).toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+
   it("shows Board › Archived N items on the archived route", async () => {
     vi.spyOn(api, "listArchivedWorkItems").mockResolvedValue({
       items: [{ id: "a" } as never],

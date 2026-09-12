@@ -946,11 +946,20 @@ def test_run_task_escalates_to_sigkill_when_the_group_ignores_sigterm(tmp_path):
             )
             assert status == "done"
             grandchild = int(pidfile.read_text().strip())
+            # `_kill_group` returns the instant it sends SIGKILL, not once the
+            # kernel has finished reaping — a loaded CI box can still see the
+            # grandchild for a few ms after that. Poll instead of one
+            # synchronous check, which is racy against signal delivery, not a
+            # sign the kill logic under test is wrong.
+            deadline = time.monotonic() + 2.0
             alive = True
-            try:
-                os.kill(grandchild, 0)
-            except ProcessLookupError:
-                alive = False
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(grandchild, 0)
+                except ProcessLookupError:
+                    alive = False
+                    break
+                await asyncio.sleep(0.02)
             assert not alive
         finally:
             await database.close()

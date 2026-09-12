@@ -24,11 +24,11 @@ async function createItem(page: any, title: string, template: string) {
   await page.goto("/");
   await page.getByRole("button", { name: /new work item/i }).click();
   const modal = page.getByRole("dialog", { name: "New work item" });
-  await modal.getByRole("button", { name: new RegExp(REPO_NAME, "i") }).click();
+  await modal.getByLabel("repo").selectOption({ label: REPO_NAME });
   await modal.getByLabel("title").fill(title);
   await modal
     .getByRole("radiogroup", { name: "template" })
-    .locator("label.seg-opt", { hasText: new RegExp(`^${template}\\b`) })
+    .getByRole("radio", { name: new RegExp(`^${template}\\b`) })
     .click();
   await modal.getByRole("button", { name: /create and start/i }).click();
   await expect(page.locator(".detail h2")).toHaveText(title);
