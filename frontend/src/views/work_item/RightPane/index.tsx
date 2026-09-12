@@ -1,4 +1,3 @@
-import { useCallback } from "react";
 import type { KraftEvent, WorkerSession, WorkItem, WorkItemDiff } from "../../../types";
 import type { InspectorTab, Selection } from "../selection";
 import { usePhone } from "../usePhone";
@@ -23,7 +22,6 @@ export function RightPane({
   selection,
   diff,
   diffError,
-  onSelect,
   onViewLog,
   maximized,
   onToggleMaximize,
@@ -36,21 +34,11 @@ export function RightPane({
   selection: Selection;
   diff: WorkItemDiff | null;
   diffError: string | null;
-  onSelect: (s: Selection, opts?: { replace?: boolean }) => void;
   onViewLog: (sessionId: string) => void;
   maximized: boolean;
   onToggleMaximize: () => void;
 }) {
   const phone = usePhone();
-  // Stable identity: an inline arrow here would give Diff's effect a new
-  // `onVisibleFile` every render, tearing down and re-observing the
-  // IntersectionObserver each time (see Diff.tsx). `replace: true` because
-  // scroll fires per file crossed — pushing each would leave Back unable
-  // to exit the page.
-  const onVisibleFile = useCallback(
-    (path: string) => onSelect({ kind: "file", id: path }, { replace: true }),
-    [onSelect],
-  );
   if (tab === "config") return <ConfigPane item={item} nodeId={nodeId} />;
 
   if (tab === "tasks") {
@@ -74,7 +62,6 @@ export function RightPane({
         diff={diff}
         diffError={diffError}
         selectedFile={selection.kind === "file" ? selection.id : null}
-        onVisibleFile={onVisibleFile}
         maximized={maximized}
         onToggleMaximize={onToggleMaximize}
       />
