@@ -132,6 +132,11 @@ describe("GateCard", () => {
     expect(link).toHaveAttribute("href", expect.stringContaining("tab=documents"));
   });
 
+  it("offers Skip alongside Approve/Reject", () => {
+    card();
+    expect(screen.getByRole("button", { name: /skip/i })).toBeInTheDocument();
+  });
+
   it("disables Review spec with 'not written yet' when the artifact is absent", () => {
     render(
       <GateCard
