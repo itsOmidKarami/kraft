@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { CaretDown, ClipboardText, Clock, Prohibit } from "@phosphor-icons/react";
 import * as api from "../api";
-import { Chip, MiniChain, OverflowMenu, StatusGlyph } from "../components/ui";
+import { Chip, MiniChain, OverflowMenu, StatusGlyph, TaskLine } from "../components/ui";
 import { Gate } from "../components/Gate";
 import { PeekPane } from "../components/PeekPane";
 import { RepoSheet } from "../components/RepoSheet";
@@ -94,8 +94,19 @@ const STATUS_GROUPS: { id: string; label: string; test: (i: WorkItem) => boolean
 
 const SORTS: Record<string, (a: WorkItem, b: WorkItem) => number> = {
   updated: (a, b) => b.updated_at.localeCompare(a.updated_at),
+  created: (a, b) => b.created_at.localeCompare(a.created_at),
+  // Needs-you first, recently updated within each half (UI v3 · 04).
+  attention: (a, b) =>
+    Number(deriveState(b).needsYou) - Number(deriveState(a).needsYou) ||
+    b.updated_at.localeCompare(a.updated_at),
   title: (a, b) => a.title.localeCompare(b.title),
-  repo: (a, b) => a.repo.localeCompare(b.repo),
+};
+
+const SORT_LABELS: Record<keyof typeof SORTS, string> = {
+  updated: "recently updated",
+  created: "created",
+  attention: "needs attention",
+  title: "title",
 };
 
 /** "Needs you" always leads regardless of axis — the one cross-cutting group
@@ -139,7 +150,7 @@ function loadFilters(): { repo: string[]; tpl: string[]; status: string[]; sort:
       repo: Array.isArray(parsed.repo) ? parsed.repo : [],
       tpl: Array.isArray(parsed.tpl) ? parsed.tpl : [],
       status: Array.isArray(parsed.status) ? parsed.status : [],
-      sort: typeof parsed.sort === "string" ? parsed.sort : "updated",
+      sort: typeof parsed.sort === "string" && parsed.sort in SORTS ? parsed.sort : "updated",
     };
   } catch {
     return { repo: [], tpl: [], status: [], sort: "updated" };
@@ -311,42 +322,53 @@ export function Board({ onNewWorkItem }: { onNewWorkItem?: () => void } = {}) {
           />
         )}
         <div className="board-filter-row" role="group" aria-label="filters">
-          <Facet
-            label="Status"
-            rows={statusRows}
-            value={status}
-            onPick={(name, additive) => setStatus((cur) => toggleFacet(cur, name, additive))}
-          />
-          <span className="board-filter-divider" />
-          <Facet
-            label="Repos"
-            rows={repoRows}
-            value={repo}
-            onPick={(name, additive) => setRepo((cur) => toggleFacet(cur, name, additive))}
-          />
-          <Facet
-            label="Template"
-            rows={tplRows}
-            value={tpl}
-            onPick={(name, additive) => setTpl((cur) => toggleFacet(cur, name, additive))}
-          />
-          {archivedCount != null && (
-            <Link to="/archived" className="chip">
-              Archived <span className="chip-count">{archivedCount}</span>
-            </Link>
-          )}
-          <div className="board-sort">
-            <label htmlFor="board-sort">Sort</label>
-            <select
-              id="board-sort"
-              value={sort}
-              onChange={(e) => setSort(e.target.value as keyof typeof SORTS)}
-            >
-              <option value="updated">recently updated</option>
-              <option value="title">title (A–Z)</option>
-              <option value="repo">repo</option>
-            </select>
+          {/* Chips scroll as a unit below 1024; board-sort stays outside this
+              wrapper so its disclosure isn't clipped by the scroll box (a
+              scrolling axis forces both axes to clip, per CSS overflow). */}
+          <div className="board-filter-chips">
+            <Facet
+              label="Status"
+              rows={statusRows}
+              value={status}
+              onPick={(name, additive) => setStatus((cur) => toggleFacet(cur, name, additive))}
+            />
+            <span className="board-filter-divider" />
+            <Facet
+              label="Repos"
+              rows={repoRows}
+              value={repo}
+              onPick={(name, additive) => setRepo((cur) => toggleFacet(cur, name, additive))}
+            />
+            <Facet
+              label="Template"
+              rows={tplRows}
+              value={tpl}
+              onPick={(name, additive) => setTpl((cur) => toggleFacet(cur, name, additive))}
+            />
+            {archivedCount != null && (
+              <Link to="/archived" className="chip">
+                Archived <span className="chip-count">{archivedCount}</span>
+              </Link>
+            )}
           </div>
+          <details className="board-sort">
+            <summary>
+              Sort · {SORT_LABELS[sort]} <CaretDown size={11} />
+            </summary>
+            <div className="board-sort-menu">
+              {Object.keys(SORTS).map((k) => (
+                <button
+                  key={k}
+                  onClick={(e) => {
+                    setSort(k as keyof typeof SORTS);
+                    (e.currentTarget.closest("details") as HTMLDetailsElement).open = false;
+                  }}
+                >
+                  {SORT_LABELS[k]}
+                </button>
+              ))}
+            </div>
+          </details>
         </div>
         {loadErr && (
           <p className="form-error" role="alert">
@@ -482,6 +504,7 @@ function BoardRow({
     <div
       className="board-row"
       data-testid="board-card"
+      data-id={item.id}
       role="button"
       tabIndex={0}
       data-selected={selected || undefined}
@@ -526,25 +549,24 @@ function BoardRow({
         <StatusGlyph status={deriveState(item).state} />
       )}
       <div className="board-row-main">
-        <Link
-          className="board-row-title"
-          to={`/work-items/${item.id}`}
-          onClick={(e) => e.stopPropagation()}
-        >
+        {/* Not a link (UI v3 · G1-03): the whole row toggles the peek, and
+            only the peek's "Open →" and a ⌘-click go to the full page. */}
+        <span className="board-row-title" title={item.title}>
           {item.title}
-        </Link>
+        </span>
         <div className="board-row-meta">
+          {/* Tablet width (768-1023) drops the node column (50); this is
+              hidden by CSS everywhere else and only leads the line there. */}
+          <span className="board-row-meta-current">{item.current_node_id}</span>
           <span title={item.repo}>{repoName(item.repo)}</span>
           {item.bead_id && <code>{item.bead_id}</code>}
           <span>{item.chain_template}</span>
-          <span>{ago(item.updated_at)}</span>
           {/* Kraft-qqz8, board part: "Task N/M · title" when the implementation
-              node has reported progress. */}
-          {item.progress && (
-            <span>
-              Task {item.progress.current}/{item.progress.total} · {item.progress.title}
-            </span>
-          )}
+              node has reported progress — spec §4 order puts this before ago,
+              so the count (never dropped) outlives ago and the task title as
+              the line clips. */}
+          {item.progress && <TaskLine progress={item.progress} form="short" />}
+          <span>{ago(item.updated_at)}</span>
           {/* Provenance, not status: the right-hand column is a fixed 120px and
               nowrap, so a chip there pushed the whole row past the viewport. */}
           {item.attachments?.length ? (
@@ -569,7 +591,10 @@ function BoardRow({
         )}
       />
       <div className="board-row-current">
-        {item.current_node_id}
+        {/* Tablet (768-1023) drops just this text -- it leads the meta line
+            instead (.board-row-meta-current) -- but keeps the tags and the
+            Archive/overflow buttons below, per spec §1 "buttons hide last". */}
+        <span className="board-row-current-node">{item.current_node_id}</span>
         {item.fixCycle != null && (
           <span className="tag tag-outline tag-tight">fix·{item.fixCycle}</span>
         )}

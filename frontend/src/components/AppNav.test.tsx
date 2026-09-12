@@ -30,6 +30,7 @@ const renderAt = (path: string) =>
 
 beforeEach(() => {
   localStorage.clear();
+  vi.restoreAllMocks();
   useStore.setState({ workItems: {}, connection: "open" } as never);
   vi.spyOn(api, "getHealth").mockResolvedValue({
     status: "ok",
@@ -62,6 +63,19 @@ describe("AppNav", () => {
     );
     expect(screen.getAllByRole("button", { name: /Expand/ })[0]).toBeInTheDocument();
     unmount();
+  });
+
+  it("defaults to the rail under 1280 when the user has not chosen", () => {
+    vi.spyOn(window, "matchMedia").mockReturnValue({ matches: true } as never);
+    renderAt("/");
+    expect(document.querySelector(".app-rail")).not.toBeNull();
+  });
+
+  it("an explicit expanded choice beats the narrow default", () => {
+    localStorage.setItem("kraft.sidebar_collapsed", "false");
+    vi.spyOn(window, "matchMedia").mockReturnValue({ matches: true } as never);
+    renderAt("/");
+    expect(document.querySelector(".app-sidebar")).not.toBeNull();
   });
 
   it("shows the item's repo initial as the rail avatar on an item page, not the K default", async () => {
