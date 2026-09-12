@@ -917,5 +917,16 @@ async def set_mr_labels(wid: str, body: MrLabels, request: Request):
         await forge.set_labels(repo=worktree, mr=forge_mod.MR(number=0, url=""), labels=labels)
     except forge_mod.ForgeError as exc:
         raise HTTPException(502, str(exc)) from exc
-    await st.db.write(lambda c: events.append(c, wid, "mr_labels_set", {"labels": list(labels)}))
+
+    # `set_labels` re-creates the pipeline, so the pipeline `on.ci.poll`
+    # pinned for this same head sha (Kraft-ivh1) is now the stale, red one --
+    # and the pin survives a same-sha re-poll by design. Left alone, the next
+    # poll re-reads the pipeline that failed for the missing label, reports
+    # the identical finding, and the fix loop calls the item stuck having
+    # never looked at the pipeline this repair created.
+    def _record(c):
+        store.set_ci_pipeline_ref(c, wid, "")
+        events.append(c, wid, "mr_labels_set", {"labels": list(labels)})
+
+    await st.db.write(_record)
     return {"work_item_id": wid, "labels": list(labels)}

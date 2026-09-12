@@ -216,7 +216,11 @@ function RepoDetail({
     setBusy(true);
     setMessage(null);
     try {
-      await api.patchRepo(path, draft);
+      const payload = {
+        ...draft,
+        test_scopes: draft.test_scopes && draft.test_scopes.length > 0 ? draft.test_scopes : null,
+      };
+      await api.patchRepo(path, payload);
       setDraft(null);
       await reload();
       setMessage("saved");
@@ -327,6 +331,83 @@ function RepoDetail({
           value={current.test_command ?? ""}
           onChange={(e) => set({ test_command: e.target.value || null })}
         />
+      </div>
+
+      <div className="field">
+        <label>
+          test scopes <span className="field-hint">· verify runs every matching scope's command</span>
+        </label>
+        {(current.test_scopes ?? []).length > 0 && (
+          <div className="submodule-table">
+            {(current.test_scopes ?? []).map((scope, i) => (
+              <div key={i} className="scope-row">
+                <input
+                  className="input mono"
+                  placeholder="paths (comma-separated globs)"
+                  value={scope.paths.join(", ")}
+                  onChange={(e) => {
+                    const paths = e.target.value
+                      .split(",")
+                      .map((p) => p.trim())
+                      .filter(Boolean);
+                    set({
+                      test_scopes: (current.test_scopes ?? []).map((s, j) =>
+                        j === i ? { ...s, paths } : s,
+                      ),
+                    });
+                  }}
+                />
+                <input
+                  className="input mono"
+                  placeholder="command"
+                  value={scope.command}
+                  onChange={(e) =>
+                    set({
+                      test_scopes: (current.test_scopes ?? []).map((s, j) =>
+                        j === i ? { ...s, command: e.target.value } : s,
+                      ),
+                    })
+                  }
+                />
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  aria-label={`remove scope ${i + 1}`}
+                  onClick={() =>
+                    set({ test_scopes: (current.test_scopes ?? []).filter((_, j) => j !== i) })
+                  }
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="save-row">
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() =>
+              set({ test_scopes: [...(current.test_scopes ?? []), { paths: [], command: "" }] })
+            }
+          >
+            + add scope
+          </button>
+          {lastProbe?.path === path && lastProbe.probe.test_scopes && (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => set({ test_scopes: lastProbe.probe.test_scopes })}
+            >
+              apply {lastProbe.probe.test_scopes.length} probed scope
+              {lastProbe.probe.test_scopes.length === 1 ? "" : "s"}
+            </button>
+          )}
+        </div>
+        <p className="field-hint">
+          none set → every diff runs the test command above. Empty here on Save clears scopes the
+          same way.
+        </p>
       </div>
 
       <SectionLabel>Forge</SectionLabel>

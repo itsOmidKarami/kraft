@@ -11,6 +11,7 @@ const REPO_A = {
   enabled: true,
   default_chain_template: "default",
   test_command: null,
+  test_scopes: null,
   forge: null,
   project: null,
   default_model: null,
@@ -327,6 +328,7 @@ describe("IntakeModal", () => {
       beads_export_git_add: true,
       has_engineering: true,
       test_command: null,
+      test_scopes: null,
       forge: null,
       project: null,
     });
@@ -351,6 +353,7 @@ describe("IntakeModal", () => {
       beads_export_git_add: true,
       has_engineering: true,
       test_command: null,
+      test_scopes: null,
       forge: null,
       project: null,
     });
