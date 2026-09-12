@@ -44,6 +44,10 @@ def _make_policy(tmp_path, *, attempts=5, wall_clock_s=3600) -> policy.Policy:
     p.write_text(
         f"loops:\n  verify_fix_loop: {{ attempts: {attempts}, wall_clock_s: {wall_clock_s} }}\n"
         f"default: {{ attempts: {attempts}, wall_clock_s: {wall_clock_s} }}\n"
+        # Kraft-lpdd: this suite is about fix-cycle handoff, not the
+        # unrelated auto-escalate trigger a `needs_human` cap breach would
+        # otherwise also fire.
+        "auto_escalate_stuck: false\n"
     )
     return policy.load_policy(p)
 
@@ -382,6 +386,7 @@ def test_a_fix_cycle_past_escalate_after_launches_with_escalate_model(tmp_path, 
     p.write_text(
         "loops:\n  verify_fix_loop: { attempts: 4, wall_clock_s: 3600, escalate_after: 2 }\n"
         "default: { attempts: 4, wall_clock_s: 3600 }\n"
+        "auto_escalate_stuck: false\n"
     )
     pol = policy.load_policy(p)
 

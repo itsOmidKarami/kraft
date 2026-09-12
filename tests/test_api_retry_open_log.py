@@ -445,7 +445,15 @@ def test_retry_restarts_a_stopped_node_that_has_no_fix_loop(tmp_path, monkeypatc
         # KRAFT_FAIL steers the fake agent into failing its node
         wid = client.post(
             "/api/work-items",
-            json={"repo": str(repo), "title": "KRAFT_FAIL once", "chain_template": "quick-task"},
+            json={
+                "repo": str(repo),
+                "title": "KRAFT_FAIL once",
+                "chain_template": "quick-task",
+                # Kraft-lpdd: this test is about retry, not the unrelated
+                # auto-escalate trigger racing it onto the same needs_human
+                # stop the poll loop below is waiting on.
+                "node_overrides": {"implementation": {"auto_escalate_stuck": False}},
+            },
         ).json()["id"]
 
         deadline = time.monotonic() + 120
@@ -579,7 +587,15 @@ def test_retry_rebases_the_worktree_onto_a_moved_head(tmp_path, monkeypatch):
         # test_retry_restarts_a_stopped_node_that_has_no_fix_loop uses above
         wid = client.post(
             "/api/work-items",
-            json={"repo": str(repo), "title": "KRAFT_FAIL once", "chain_template": "quick-task"},
+            json={
+                "repo": str(repo),
+                "title": "KRAFT_FAIL once",
+                "chain_template": "quick-task",
+                # Kraft-lpdd: this test is about retry/rebase, not the
+                # unrelated auto-escalate trigger racing it onto the same
+                # needs_human stop the poll loop below is waiting on.
+                "node_overrides": {"implementation": {"auto_escalate_stuck": False}},
+            },
         ).json()["id"]
 
         deadline = time.monotonic() + 120

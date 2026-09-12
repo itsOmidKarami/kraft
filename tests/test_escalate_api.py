@@ -32,7 +32,15 @@ def _needs_human_item(client, repo, title="KRAFT_FAIL once"):
     """
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": title, "chain_template": "quick-task"},
+        json={
+            "repo": str(repo),
+            "title": title,
+            "chain_template": "quick-task",
+            # Kraft-lpdd: this file drives the manual escalate/stop-escalate
+            # routes by hand -- the unrelated auto-escalate trigger would
+            # otherwise race it onto the same needs_human stop.
+            "node_overrides": {"implementation": {"auto_escalate_stuck": False}},
+        },
     ).json()["id"]
     deadline = time.monotonic() + 120
     item = None
@@ -153,3 +161,71 @@ def test_stop_escalation_refuses_when_none_is_running(tmp_path, monkeypatch):
         wid = _needs_human_item(client, repo)
         r = client.post(f"/api/work-items/{wid}/escalate/stop")
         assert r.status_code == 409
+
+
+def _poll_events(client, wid, want, timeout=30):
+    deadline = time.monotonic() + timeout
+    seen = []
+    while time.monotonic() < deadline:
+        seen = client.get(f"/api/work-items/{wid}/events").json()
+        if any(e["type"] == want for e in seen):
+            return seen
+        time.sleep(0.2)
+    raise AssertionError(f"{want} not seen; got {[e['type'] for e in seen]}")
+
+
+def test_escalate_consumes_a_self_retry_left_by_a_human_escalated_agent(tmp_path, monkeypatch):
+    """A human escalates via `/escalate`, the agent fixes the problem and
+    calls `kraft item retry` on itself mid-turn (lifecycle.py's
+    `work_item_self_retry_requested` deferral), and the turn then exits.
+    Without a consumer on this manual path the item silently stayed
+    `needs_human` forever even though the caller got HTTP 200 (Kraft
+    code-review finding); it must now actually retry once the turn ends."""
+    import kraft.escalate as escalate_mod
+    from kraft import events
+
+    def fake_dispatch(node_id):
+        async def _fake(
+            database, run_dirs, *, work_item_id, message, launch, auto=False, evts=None
+        ):
+            await database.write(
+                lambda c: events.append(
+                    c,
+                    work_item_id,
+                    "work_item_self_retry_requested",
+                    {
+                        "session_id": "s1",
+                        "node_id": node_id,
+                        "key": None,
+                        "gate_key": None,
+                        "steer": "fixed it",
+                    },
+                )
+            )
+            return "done"
+
+        return _fake
+
+    async def fake_refresh(worktree, repo, branch):
+        return None
+
+    walk_calls = []
+
+    async def fake_walk_run(database, run_dirs, **kw):
+        walk_calls.append(kw)
+        return "completed"
+
+    monkeypatch.setattr("kraft.executor.gates._builtins.refresh_worktree_base", fake_refresh)
+    monkeypatch.setattr("kraft.executor.walk.run", fake_walk_run)
+
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _needs_human_item(client, repo)
+        node_id = client.get(f"/api/work-items/{wid}").json()["current_node_id"]
+        monkeypatch.setattr(escalate_mod, "dispatch", fake_dispatch(node_id))
+
+        r = client.post(f"/api/work-items/{wid}/escalate", json={"message": "please look"})
+        assert r.status_code == 200, r.text
+
+        _poll_events(client, wid, "work_item_retried")
+        assert walk_calls and walk_calls[0]["work_item_id"] == wid

@@ -539,3 +539,57 @@ def test_approve_walks_the_chain_the_approval_returned(tmp_path, monkeypatch):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_run_calls_auto_escalate_stuck_after_review_gates(tmp_path, monkeypatch):
+    calls = []
+
+    async def fake_run_once(db, run_dirs, **kw):
+        return "needs_human"
+
+    async def fake_auto_escalate_stuck(status, db, run_dirs, **kw):
+        calls.append((status, kw["work_item_id"]))
+        return "sentinel_status"
+
+    monkeypatch.setattr("kraft.executor.walk.run_once", fake_run_once)
+    monkeypatch.setattr("kraft.executor.gates.auto_escalate_stuck", fake_auto_escalate_stuck)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await Database.open(rd.db)
+        try:
+            return await executor.run(database, rd, work_item_id="w1", registry=_registry())
+        finally:
+            await database.close()
+
+    status = asyncio.run(scenario())
+    assert status == "sentinel_status"
+    assert calls == [("needs_human", "w1")]
+
+
+def test_resume_calls_auto_escalate_stuck_after_review_gates(tmp_path, monkeypatch):
+    calls = []
+
+    async def fake_resume_once(db, run_dirs, **kw):
+        return "needs_human"
+
+    async def fake_auto_escalate_stuck(status, db, run_dirs, **kw):
+        calls.append((status, kw["work_item_id"]))
+        return "sentinel_status"
+
+    monkeypatch.setattr("kraft.executor.resuming.resume_once", fake_resume_once)
+    monkeypatch.setattr("kraft.executor.gates.auto_escalate_stuck", fake_auto_escalate_stuck)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await Database.open(rd.db)
+        try:
+            return await executor.resume(
+                database, rd, work_item_id="w1", registry=_registry(), adopted={}
+            )
+        finally:
+            await database.close()
+
+    status = asyncio.run(scenario())
+    assert status == "sentinel_status"
+    assert calls == [("needs_human", "w1")]

@@ -54,6 +54,7 @@ def retry_after_cap(
     steer,
     *,
     gate_key: str | None = None,
+    escalated: bool = False,
 ):
     """Clear a breached loop cap so the node can run again (handoff spec §8, 4b).
 
@@ -85,6 +86,15 @@ def retry_after_cap(
     each other's backend name list, with the same "edit both together"
     comment -- the duplication is contained to this one function and
     `ci_wait.py`, not spread to every caller that wants a retry.
+
+    `escalated` is True only for a retry `gates.auto_escalate_stuck` performed
+    on the escalated agent's own behalf, after its escalation session exited.
+    Tagged on the `work_item_retried` event so `gates._auto_dispatch_count`
+    can tell it apart from a human's own retry: a human retrying resets the
+    auto-escalate cap fairly (a person looked at it), but a retry the
+    auto-escalation caused must not reset the very cap meant to bound it, or
+    an unfixable stop (e.g. a budget breach a retry cannot clear) escalates
+    forever.
     """
     counters = (key, gate_key, f"ci_wait:{node_id}", f"ci_infra:{node_id}")
     for counter in counters:
@@ -101,7 +111,7 @@ def retry_after_cap(
         conn,
         work_item_id,
         "work_item_retried",
-        {"node_id": node_id, "loop": key, "steer": steer},
+        {"node_id": node_id, "loop": key, "steer": steer, "escalated": escalated},
     )
 
 

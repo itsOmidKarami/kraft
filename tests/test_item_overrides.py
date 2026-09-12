@@ -114,6 +114,52 @@ def test_patch_node_overrides_rejects_an_unsupported_field(tmp_path, monkeypatch
         assert r.status_code == 422
 
 
+def test_patch_sets_an_auto_escalate_stuck_node_override(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        repo = make_repo(tmp_path)
+        wid = client.post(
+            "/api/work-items",
+            json={
+                "title": "t",
+                "repo": str(repo),
+                "chain_template": "default",
+                "autostart": False,
+            },
+        ).json()["id"]
+
+        r = client.patch(
+            f"/api/work-items/{wid}",
+            json={"node_overrides": {"implementation": {"auto_escalate_stuck": False}}},
+        )
+        assert r.status_code == 200, r.text
+
+        detail = client.get(f"/api/work-items/{wid}").json()
+        node = next(n for n in detail["effective_chain"]["nodes"] if n["id"] == "implementation")
+        assert node["auto_escalate_stuck"] is False
+
+
+def test_patch_rejects_non_bool_auto_escalate_stuck(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        repo = make_repo(tmp_path)
+        wid = client.post(
+            "/api/work-items",
+            json={
+                "title": "t",
+                "repo": str(repo),
+                "chain_template": "default",
+                "autostart": False,
+            },
+        ).json()["id"]
+
+        r = client.patch(
+            f"/api/work-items/{wid}",
+            json={"node_overrides": {"implementation": {"auto_escalate_stuck": "yes"}}},
+        )
+        assert r.status_code == 422
+
+
 def test_patch_node_overrides_409s_on_a_node_that_has_started(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     with client:
@@ -351,6 +397,10 @@ def _policy(*, work_item_usd=None, daily_usd=None) -> policy.Policy:
         loops={},
         default=policy.Cap(attempts=3, wall_clock_s=3600),
         budget=policy.Budget(work_item_usd=work_item_usd, daily_usd=daily_usd),
+        # Kraft-lpdd: this suite is about per-item budget overrides, not the
+        # unrelated auto-escalate trigger a budget breach would otherwise
+        # also fire.
+        auto_escalate_stuck=False,
     )
 
 

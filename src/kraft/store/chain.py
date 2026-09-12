@@ -10,7 +10,7 @@ from kraft.store import _now as _now  # test seam for wall-clock checks
 #: else in a `node_overrides` patch is rejected by the route before it gets
 #: here -- keep this list and `templates.validate_agent_overrides`-style
 #: validation in the route in sync.
-OVERRIDABLE_NODE_FIELDS = frozenset({"auto_escalate"})
+OVERRIDABLE_NODE_FIELDS = frozenset({"auto_escalate", "auto_escalate_stuck"})
 
 
 def load_chain(conn: sqlite3.Connection, work_item_id, first_node_id) -> None:
@@ -148,6 +148,42 @@ def effective_chain(chain_definition: dict, node_overrides: dict) -> dict:
         for node in chain_definition["nodes"]
     ]
     return {**chain_definition, "nodes": nodes}
+
+
+def effective_auto_escalate_stuck(row, default: bool) -> bool:
+    """Per-item node override -> chain node value -> `default` (mirrors
+    `store/budget.py:effective_budget`'s "override beats node beats
+    caller-supplied fallback" shape).
+
+    `default` is the caller's already-resolved policy value --
+    `policy.auto_escalate_stuck`, or a conservative `False` when policy
+    failed to load entirely -- the same way `effective_budget` takes
+    `policy_budget` already picked out of the whole `Policy` rather than
+    the `Policy` itself.
+
+    Reads the node the item is *currently* stopped on
+    (`row["current_node_id"]`): the field on any other node in the chain
+    has no bearing on whether *this* stop escalates.
+
+    The guard is on the raw `chain_definition`, before `effective_chain`
+    is ever called -- not on its result. `effective_chain` indexes
+    `chain_definition["nodes"]` directly whenever `node_overrides` is
+    non-empty (`store/chain.py:146-149`), so a work item seeded with a
+    bare `"{}"` chain_definition (as several existing tests do) plus any
+    node override at all raises `KeyError` *inside* `effective_chain`,
+    before a `chain.get("nodes", [])` on its return value would ever run.
+    Checking `"nodes" in chain_definition` first and returning `default`
+    when it's missing -- the same "no chain reads as no node value"
+    fallback, just placed where it actually has to sit -- skips the call
+    that would crash instead of trying to catch its result afterwards.
+    """
+    chain_definition = json.loads(row["chain_definition"])
+    if "nodes" not in chain_definition:
+        return default
+    chain = effective_chain(chain_definition, node_overrides_of(row))
+    node = next((n for n in chain["nodes"] if n["id"] == row["current_node_id"]), None)
+    value = node.get("auto_escalate_stuck") if node else None
+    return default if value is None else value
 
 
 def node_started(conn: sqlite3.Connection, work_item_id: str, node_id: str) -> bool:
