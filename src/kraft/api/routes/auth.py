@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import asdict
 
 from fastapi import HTTPException, Request, Response
@@ -87,6 +88,11 @@ async def health(request: Request):
         # public: the login screen says which address it is asking a password for
         "bind": st.access["bind"],
         "port": st.access["port"],
+        # public: which instance this is -- a monitor, or a human's CLI, needs
+        # this to tell a real answer from an impostor on the same port
+        # (Kraft-kquf: "status ok, documents 2" from somebody's e2e fixture).
+        "run_dir": str(st.run_dirs.base),
+        "pid": os.getpid(),
         # public: the login screen's "stay signed in · N days" needs this
         # before a session exists to ask `/access` for it.
         "session_expiry_days": st.access["session_expiry_days"],

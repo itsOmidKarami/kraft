@@ -6,20 +6,172 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import plistlib
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import time
+import traceback
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
+import httpx
 import uvicorn
 
 from kraft import client, config, render
 from kraft.cli import common
 from kraft.paths import BUNDLED, RunDirs, default_run_dir, default_templates_dir
+
+#: launchd label / systemd unit name. One daemon, one name -- not
+#: per-instance, since the spec is about supervising *the* daemon.
+_LAUNCHD_LABEL = "com.kraft.daemon"
+_SYSTEMD_UNIT = "kraft.service"
+
+#: Env vars that define which instance this is. Carried into the unit so the
+#: service supervises the same instance the human's shell was pointed at, not
+#: a fresh, empty ~/.kraft (spec §1: "the unit must carry the same
+#: environment the human's shell had -- KRAFT_HOME above all, or the service
+#: silently supervises a *different* instance").
+_INSTANCE_ENV_VARS = (
+    "KRAFT_HOME",
+    "KRAFT_RUN_DIR",
+    "KRAFT_TEMPLATES_DIR",
+    "KRAFT_SKILLS_DIR",
+    "KRAFT_HOST",
+    "KRAFT_PORT",
+)
+
+
+def _instance_env() -> dict[str, str]:
+    """The instance vars, plus PATH.
+
+    Every agent the daemon spawns is a bare `claude`/`bd` argv resolved
+    through PATH (adapters/subprocess.py's {**os.environ, ...}), and
+    launchd/systemd hand a supervised process their own minimal PATH, not
+    the shell's. Without this, the service starts, health reports ok, and
+    every agent launch fails. `_kraft_executable()` covers `kraft` itself;
+    this covers everything `kraft` then spawns.
+    """
+    env = {name: os.environ[name] for name in _INSTANCE_ENV_VARS if name in os.environ}
+    if "PATH" in os.environ:
+        env["PATH"] = os.environ["PATH"]
+    return env
+
+
+def _kraft_executable() -> str:
+    """The same binary a human would run by hand -- resolved once and
+    written into the unit, so it points at a real path rather than relying
+    on the service manager's own (usually minimal) PATH."""
+    found = shutil.which("kraft")
+    if not found:
+        raise SystemExit(
+            "kraft admin install-service: `kraft` is not on PATH - install it "
+            "the normal way first (`just install`, or install.sh)."
+        )
+    return found
+
+
+def _launchd_plist_path() -> Path:
+    return Path.home() / "Library" / "LaunchAgents" / f"{_LAUNCHD_LABEL}.plist"
+
+
+def _systemd_unit_path() -> Path:
+    return Path.home() / ".config" / "systemd" / "user" / _SYSTEMD_UNIT
+
+
+def _write_launchd_plist(kraft_bin: str) -> Path:
+    path = _launchd_plist_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Built with `plistlib`, not string-formatted XML: a `&` or a `<` in
+    # PATH or KRAFT_HOME would otherwise produce a plist launchd cannot parse.
+    path.write_bytes(
+        plistlib.dumps(
+            {
+                "Label": _LAUNCHD_LABEL,
+                "ProgramArguments": [kraft_bin, "admin", "start"],
+                "KeepAlive": True,
+                "RunAtLoad": True,
+                "EnvironmentVariables": _instance_env(),
+            }
+        )
+    )
+    return path
+
+
+def _write_systemd_unit(kraft_bin: str) -> Path:
+    path = _systemd_unit_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    # systemd reads the quoted value with C-style escapes, so a literal
+    # backslash or double quote in PATH/KRAFT_HOME has to be escaped or the
+    # unit fails to parse.
+    def escaped(value: str) -> str:
+        return value.replace("\\", "\\\\").replace('"', '\\"')
+
+    env_lines = "".join(
+        f'Environment="{key}={escaped(value)}"\n' for key, value in _instance_env().items()
+    )
+    path.write_text(
+        "[Unit]\n"
+        "Description=Kraft orchestrator daemon\n"
+        "\n"
+        "[Service]\n"
+        f"ExecStart={kraft_bin} admin start\n"
+        "Restart=always\n"
+        "RestartSec=2\n"
+        f"{env_lines}"
+        "\n"
+        "[Install]\n"
+        "WantedBy=default.target\n"
+    )
+    return path
+
+
+def _cmd_install_service(ns: argparse.Namespace) -> None:
+    """Adopt or refuse, never start a second one on the same run dir (spec
+    §1) -- refuse: there is no supported way to hand an already-running,
+    unmanaged process to the service manager without evicting or faking it.
+    """
+    running = _read_pid(_pid_path())
+    if running is not None:
+        raise SystemExit(
+            f"kraft admin install-service: a server is already running (pid {running}) - "
+            "`kraft admin stop` first, then install the service so it starts the next one."
+        )
+    kraft_bin = _kraft_executable()
+    if sys.platform == "darwin":
+        path = _write_launchd_plist(kraft_bin)
+        subprocess.run(["launchctl", "load", "-w", str(path)], check=True)
+        manager = "launchctl"
+    elif sys.platform.startswith("linux"):
+        path = _write_systemd_unit(kraft_bin)
+        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+        subprocess.run(["systemctl", "--user", "enable", "--now", _SYSTEMD_UNIT], check=True)
+        manager = "systemctl --user"
+    else:
+        raise SystemExit(f"kraft admin install-service: unsupported platform {sys.platform}")
+    print(f"kraft: wrote {path}, loaded with {manager}")
+
+
+def _cmd_uninstall_service(ns: argparse.Namespace) -> None:
+    if sys.platform == "darwin":
+        path = _launchd_plist_path()
+        if path.is_file():
+            subprocess.run(["launchctl", "unload", "-w", str(path)], check=False)
+            path.unlink()
+        print(f"kraft: removed {path}")
+    elif sys.platform.startswith("linux"):
+        path = _systemd_unit_path()
+        subprocess.run(["systemctl", "--user", "disable", "--now", _SYSTEMD_UNIT], check=False)
+        if path.is_file():
+            path.unlink()
+        subprocess.run(["systemctl", "--user", "daemon-reload"], check=False)
+        print(f"kraft: removed {path}")
+    else:
+        raise SystemExit(f"kraft admin uninstall-service: unsupported platform {sys.platform}")
 
 
 def seed_home(templates_dir: Path) -> bool:
@@ -79,9 +231,10 @@ def _read_pid(path: Path) -> int | None:
     treat its existence alone as "a server is running".
     """
     # ponytail: a pid can be recycled, so a stale file could name an unrelated
-    # process; check the command name too if that ever bites. Same for the gap
-    # between this read and _serve's write - two starts racing still collide on
-    # the port unless they were given different ones.
+    # process; check the command name too if that ever bites. `_refuse_if_addr_taken`
+    # closes the common two-run-dirs-one-port case (Kraft-kquf); a race between
+    # that check and the actual bind is still possible but is now a window of
+    # milliseconds, not "always collides silently".
     try:
         pid = int(path.read_text())
     except FileNotFoundError, ValueError:
@@ -114,21 +267,159 @@ def _update_notice() -> None:
         )
 
 
+_WILDCARDS = {"0.0.0.0", "::", ""}
+
+
+def _probe_host(host: str) -> str:
+    """127.0.0.1 is what a same-machine client actually reaches a wildcard
+    bind through -- connecting a socket to 0.0.0.0 itself is not a reliable
+    target on macOS or Linux."""
+    return "127.0.0.1" if host in _WILDCARDS else host
+
+
+def _describe_occupant(host: str, port: int) -> str:
+    """Best-effort identity of whatever already answers, for the refusal
+    message (spec: "exit with what answered and how to inspect it")."""
+    probe = _probe_host(host)
+    try:
+        response = httpx.get(f"http://{probe}:{port}/api/health", timeout=1.0)
+        data = response.json()
+        return f"a Kraft server (run_dir {data.get('run_dir')}, pid {data.get('pid')})"
+    except Exception:
+        return "something"
+
+
+def _refuse_if_addr_taken(host: str, port: int) -> None:
+    """Before binding, connect to host:port: if something answers, refuse
+    with what it is and how to inspect it, rather than letting uvicorn's
+    bind either fail cryptically or -- the macOS "127.0.0.1 next to *:"
+    case -- succeed alongside it (Kraft-kquf, admin half).
+    """
+    probe = _probe_host(host)
+    try:
+        with socket.create_connection((probe, port), timeout=0.5):
+            pass
+    except OSError:
+        return
+    occupant = _describe_occupant(host, port)
+    raise SystemExit(
+        f"kraft: refusing to start - {occupant} is already answering on "
+        f"{probe}:{port}. curl http://{probe}:{port}/api/health to inspect "
+        "it, or `kraft admin stop` if it's yours."
+    )
+
+
+def _rotate_if_large(log_path: Path, max_bytes: int = 8_000_000) -> None:
+    """Rotate before each start, not continuously (see the plan's ponytail
+    note) -- server.log was 176KB and unbounded (Kraft-mqwg)."""
+    try:
+        if log_path.stat().st_size <= max_bytes:
+            return
+    except FileNotFoundError:
+        return
+    backup = log_path.with_suffix(log_path.suffix + ".1")
+    backup.unlink(missing_ok=True)
+    log_path.rename(backup)
+
+
+class _Tee:
+    """Every write goes to both streams -- the log file, and whatever
+    `sys.stdout`/`sys.stderr` was before this replaced it (the real
+    terminal, for a foreground start).
+    """
+
+    def __init__(self, *streams) -> None:
+        self._streams = streams
+
+    def write(self, data: str) -> int:
+        for stream in self._streams:
+            stream.write(data)
+        return len(data)
+
+    def flush(self) -> None:
+        for stream in self._streams:
+            stream.flush()
+
+    def isatty(self) -> bool:
+        # The first stream is the real terminal (or whatever sys.stdout/
+        # stderr already was) -- uvicorn checks this to decide whether to
+        # colorize its own log output.
+        return self._streams[0].isatty()
+
+
+def _redirect_output_to_log(log_path: Path) -> None:
+    """A foreground start writes to server.log too now, not only --detach
+    (Kraft-mqwg) -- *too*, per spec §3: a human running bare `kraft`, or
+    `just dev`, still has to see the URL line, shutdown reason, tracebacks
+    and uvicorn errors on their own terminal, not just in the file.
+
+    Replaces the `sys.stdout`/`sys.stderr` objects rather than dup2'ing the
+    fds: `logging.lastResort` (the fallback handler behind every existing
+    `logging.warning(...)` call in the app) and every `print(..., file=...)`
+    call here resolve `sys.stderr` dynamically at write time, not once at
+    import, and uvicorn configures its own log handlers even later, once
+    `server.run()` starts -- so all three pick up the replacement with no
+    changes anywhere else, and land in both places instead of only the file.
+    """
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_file = open(log_path, "a")
+    sys.stdout = _Tee(sys.stdout, log_file)
+    sys.stderr = _Tee(sys.stderr, log_file)
+
+
+class _SignalLoggingServer(uvicorn.Server):
+    """The next silent death names itself (Kraft-mqwg): `_serve`'s `finally`
+    already ran on the way out and said nothing about why. `handle_exit` is
+    uvicorn's own signal callback -- log before deferring to its usual
+    graceful shutdown.
+
+    Deliberately does *not* clear the pidfile here. `handle_exit` runs at
+    signal *delivery*, and uvicorn then drains for up to
+    `timeout_graceful_shutdown` with the databases still open; a pidfile
+    removed at delivery would make `_cmd_stop` print "stopped" while the old
+    process is still alive, and would let a second `_serve` past both the
+    pidfile check and the address probe (uvicorn closes the listening socket
+    first) onto the same run dir. The pidfile of a process that died
+    signal-killed is stale, not a conflict, and `_read_pid` is what clears
+    it -- it checks the pid is alive on every read.
+    """
+
+    def handle_exit(self, sig, frame):
+        print(f"kraft: shutdown - signal {signal.Signals(sig).name}", file=sys.stderr, flush=True)
+        super().handle_exit(sig, frame)
+
+
 def _serve() -> None:
     templates_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    pid_path = _pid_path()
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path = RunDirs(pid_path.parent).logs / "server.log"
+    if not os.environ.get("KRAFT_LOG_REDIRECTED"):
+        # Before _bind/_refuse_if_addr_taken/the already-running exit, not
+        # after: a supervised daemon (launchd KeepAlive / systemd
+        # Restart=always, task 5) has no console and launchd's plist sets no
+        # StandardOutPath/StandardErrorPath, so a failure on any of those
+        # paths used to vanish into /dev/null and retry forever with no trace
+        # anywhere (Kraft-mqwg). --detach's parent (_start_detached) already
+        # ties fd 1/2 to this same file before spawning.
+        _rotate_if_large(log_path)
+        _redirect_output_to_log(log_path)
     if seed_home(templates_dir):
         print(f"kraft: seeded default config in {templates_dir}")
     host, port = _bind(templates_dir)
-    # After _bind, so a run refused for binding a LAN address without a password
-    # leaves no pidfile behind.
-    pid_path = _pid_path()
-    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    _refuse_if_addr_taken(host, port)
     running = _read_pid(pid_path)
     if running is not None:
         # Two servers on one run dir share databases and worktrees, and only
         # collide on the port if they were given the same one.
         print(f"kraft: already running (pid {running}) - kraft admin stop", file=sys.stderr)
         raise SystemExit(1)
+
+    # A signal landing between here and `server.run()` installing uvicorn's
+    # own handlers kills the process outright: no handler, no `finally`, no
+    # `handle_exit`, and the pidfile outlives it. That file names a dead pid,
+    # which `_read_pid` detects and clears on the next read -- so the gap
+    # needs no handler of its own.
     pid_path.write_text(str(os.getpid()))
     # Every worker Kraft launches inherits this environment (adapters/
     # subprocess.py's `full_env` starts from `os.environ`): a leftover
@@ -139,17 +430,25 @@ def _serve() -> None:
     _update_notice()
     print(f"kraft: http://{host}:{port}")
     try:
-        # A backstop, not the fix: the fix is `ws_events` returning when the
-        # connection goes away (Kraft-9oab). This bounds the next endpoint that
-        # forgets, and an in-flight HTTP request that hangs. 10s is comfortably
-        # above the slowest ordinary request (a forge call).
-        uvicorn.run(
-            "kraft.api:app",
-            host=host,
-            port=port,
-            log_level="warning",
-            timeout_graceful_shutdown=10,
+        server = _SignalLoggingServer(
+            uvicorn.Config(
+                "kraft.api:app",
+                host=host,
+                port=port,
+                log_level="warning",
+                # A backstop, not the fix: the fix is `ws_events` returning when
+                # the connection goes away (Kraft-9oab). This bounds the next
+                # endpoint that forgets, and an in-flight HTTP request that
+                # hangs. 10s is comfortably above the slowest ordinary request
+                # (a forge call).
+                timeout_graceful_shutdown=10,
+            )
         )
+        server.run()
+    except BaseException:
+        print("kraft: shutdown - unhandled exception:", file=sys.stderr, flush=True)
+        traceback.print_exc()
+        raise
     finally:
         pid_path.unlink(missing_ok=True)
 
@@ -197,8 +496,10 @@ def _start_detached() -> None:
     # a bad access.yaml fails this shell instead of showing up only as a child
     # that exited before ever writing a pidfile.
     host, port = _bind(templates_dir)
+    _refuse_if_addr_taken(host, port)
 
     log_path = run_dirs.logs / "server.log"
+    _rotate_if_large(log_path)
     with open(log_path, "ab") as log_file:
         proc = subprocess.Popen(
             [sys.executable, "-m", "kraft", "admin", "start"],
@@ -206,6 +507,7 @@ def _start_detached() -> None:
             stdout=log_file,
             stderr=log_file,
             start_new_session=True,
+            env={**os.environ, "KRAFT_LOG_REDIRECTED": "1"},
         )
 
     # Wait for the child to actually bind, not just fork: a bad config or a
@@ -240,8 +542,16 @@ def _cmd_stop(ns: argparse.Namespace) -> None:
     os.kill(pid, signal.SIGTERM)
     # 15s, not 5: the poll must not expire before the graceful-shutdown backstop
     # it is waiting on (`_serve`, timeout_graceful_shutdown=10).
+    #
+    # `_read_pid` returns None only once the pid it names is actually gone
+    # (it signals 0 on every read), so this waits for the real exit, not for
+    # a file to disappear -- the server holds its databases open for the
+    # whole graceful drain. A supervised daemon (launchd KeepAlive / systemd
+    # Restart=always, task 5) rewrites the pidfile with a fresh pid well
+    # inside this poll, which is the other way out.
     for _ in range(150):
-        if _read_pid(pid_path) is None:
+        current = _read_pid(pid_path)
+        if current is None or current != pid:
             print(f"kraft: stopped (pid {pid})")
             return
         time.sleep(0.1)
@@ -356,6 +666,14 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
 
     stop = subs.add_parser("stop", help="stop the running server")
     stop.set_defaults(func=_cmd_stop)
+
+    install_service = subs.add_parser(
+        "install-service", help="write and load an OS service unit (KeepAlive / Restart=always)"
+    )
+    install_service.set_defaults(func=_cmd_install_service)
+
+    uninstall_service = subs.add_parser("uninstall-service", help="remove the OS service unit")
+    uninstall_service.set_defaults(func=_cmd_uninstall_service)
 
     health = subs.add_parser("health", parents=[common], help="the server's own status")
     health.set_defaults(func=_cmd_health)
