@@ -206,12 +206,19 @@ def test_doctor_json_is_the_check_list(app, tmp_path, capsys):
     import json
 
     _prime(tmp_path)
+    # Whether a bare-primed instance has any failing check (e.g. "agent cli")
+    # depends on what's on the host's PATH, so the exit code itself can't be
+    # pinned to a literal -- but `_cmd_doctor`'s contract can: exit 1 iff a
+    # row came back not-ok, exit cleanly otherwise. The old version discarded
+    # the code and asserted nothing about it (Kraft-nja7).
     try:
         cli.main(["admin", "doctor", "--json"])
-    except SystemExit:
-        pass
+        code = 0
+    except SystemExit as exc:
+        code = exc.code
     rows = json.loads(capsys.readouterr().out)
     assert {"name", "ok", "detail", "skipped"} <= set(rows[0])
+    assert code == (1 if any(not row["ok"] for row in rows) else 0)
 
 
 def test_hooks_check_names_a_hook_left_on_noop(tmp_path, monkeypatch):

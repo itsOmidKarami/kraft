@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 from pathlib import Path
 
 import httpx
@@ -54,13 +53,7 @@ def test_default_chain_fix_loop_breach_over_http(tmp_path, monkeypatch):
         # verify (fix_loop) sits before the human_review gate, so the cap breach
         # drops the item to needs_human before human_review_approval is ever reached.
         for gate in ("spec_approval", "plan_approval", "chain_finalized"):
-            deadline = time.monotonic() + 60
-            while time.monotonic() < deadline:
-                r = client.post(f"/api/work-items/{wid}/gates/{gate}/approve")
-                if r.status_code == 200:
-                    break
-                time.sleep(0.2)
-            assert r.status_code == 200, r.text
+            assert _approve_gate(client, wid, gate, timeout=60).status_code == 200
         events = _poll_events(client, wid, "work_item_needs_human", timeout=60)
 
         assert len([e for e in events if e["type"] == "fix_cycle_started"]) == 2

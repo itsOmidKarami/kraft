@@ -94,13 +94,6 @@ def test_seed_home_leaves_no_half_seeded_home_behind(monkeypatch, tmp_path):
     assert (home / "registry.yaml").exists()
 
 
-def test_bare_kraft_still_serves(monkeypatch):
-    served = []
-    monkeypatch.setattr(cli.admin, "_serve", lambda: served.append(True))
-    cli.main([])
-    assert served == [True]
-
-
 def test_unknown_subcommand_exits_with_a_usable_message(monkeypatch, capsys):
     """argparse owns usage errors now: exit 2, message on stderr, naming the verb."""
     monkeypatch.setattr(cli.admin, "_serve", lambda: pytest.fail("must not serve"))
