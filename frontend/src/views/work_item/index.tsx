@@ -47,6 +47,21 @@ function useNodeSelection(defaultNodeId: string | null): [string | null, (id: st
   return [fromHash ?? defaultNodeId, select, fromHash != null];
 }
 
+/** Maximize is a layout state of the page, not of the pane (43), and it is
+ *  kept in the URL so a reload lands back in it. Same hash as the selected
+ *  node: `#node=implementation&log=max`. */
+function useMaximized(): [boolean, (on: boolean) => void] {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const params = new URLSearchParams(location.hash.replace(/^#/, ""));
+  const set = (on: boolean) => {
+    const next = new URLSearchParams(location.hash.replace(/^#/, ""));
+    on ? next.set("log", "max") : next.delete("log");
+    navigate({ hash: next.toString() });
+  };
+  return [params.get("log") === "max", set];
+}
+
 export function WorkItemDetail() {
   const { id = "" } = useParams();
   const item = useStore((s) => s.workItems[id]);
@@ -56,10 +71,20 @@ export function WorkItemDetail() {
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [tab, setTab] = useState<InspectorTab>("tasks");
   const [selectionByTab, setSelectionByTab] = useState<Record<InspectorTab, Selection>>(EMPTY_SELECTION);
-  const [maximizedLog, setMaximizedLog] = useState(false);
+  const [maximized, setMaximized] = useMaximized();
   const phone = usePhone();
 
   const [nodeId, selectNode, nodeExplicit] = useNodeSelection(item?.current_node_id ?? null);
+
+  useEffect(() => {
+    if (!maximized) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMaximized(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [maximized]);
 
   useEffect(() => {
     const load = () =>
@@ -150,6 +175,42 @@ export function WorkItemDetail() {
 
   const currentLogSessionId = selectionByTab.tasks.kind === "session" ? selectionByTab.tasks.id : null;
 
+  // Maximize is a page layout, not the pane's own state (43): the header,
+  // repos panel, action bar, graph and inspector all give way to a 36px
+  // strip, and the right pane gets the rest.
+  if (maximized) {
+    return (
+      <div className="detail item-page" data-maximized="true">
+        {phone && <PhoneTopBar item={item} />}
+        <div className="item-max-strip">
+          <span className="item-max-title">{item.title}</span>
+          <span className="item-max-node">
+            {item.current_node_id}
+            {item.progress && ` · Task ${item.progress.current} of ${item.progress.total}`}
+          </span>
+          <span className="item-max-actions">
+            <button className="btn btn-ghost" onClick={() => setMaximized(false)}>
+              Restore
+            </button>
+          </span>
+        </div>
+        <div className="item-right-pane" data-maximized="true">
+          <RightPane
+            item={item}
+            events={events}
+            sessions={sessions}
+            nodeId={nodeId}
+            tab={tab}
+            selection={selectionByTab[tab]}
+            onViewLog={goToLog}
+            maximized
+            onToggleMaximize={() => setMaximized(false)}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="detail item-page">
       {phone && <PhoneTopBar item={item} />}
@@ -232,7 +293,7 @@ export function WorkItemDetail() {
                 selection={selectionByTab[tab]}
                 onSelect={setSelection}
               />
-              <div className="item-right-pane" data-maximized={maximizedLog}>
+              <div className="item-right-pane">
                 <RightPane
                   item={item}
                   events={events}
@@ -241,8 +302,8 @@ export function WorkItemDetail() {
                   tab={tab}
                   selection={selectionByTab[tab]}
                   onViewLog={goToLog}
-                  maximized={maximizedLog}
-                  onToggleMaximize={() => setMaximizedLog((v) => !v)}
+                  maximized={false}
+                  onToggleMaximize={() => setMaximized(true)}
                 />
               </div>
             </div>

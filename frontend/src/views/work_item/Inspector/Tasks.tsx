@@ -52,32 +52,38 @@ export function Tasks({
       {/* Kraft-qqz8: the implementer's own plan, task by task — only while
           it's the selected node and the plan parsed at least one heading. */}
       {item.progress?.tasks && item.current_node_id === nodeId && (
-        <ul className="plan-list" data-testid="plan-list">
-          {item.progress.tasks.map((t) => (
-            <li key={t.n} data-state={t.state}>
-              <span className="plan-task-n">{t.n}</span>
-              <span className="plan-task-title">{t.title}</span>
-            </li>
-          ))}
-        </ul>
+        <>
+          <p className="section-label">PLAN · {item.progress.tasks.length} TASKS</p>
+          <ul className="plan-list" data-testid="plan-list">
+            {item.progress.tasks.map((t) => (
+              <li key={t.n} data-state={t.state}>
+                <span className="plan-task-n">{t.n}</span>
+                <span className="plan-task-title">{t.title}</span>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
-      <div className="inspector-scope">
-        <button
-          className="chip"
-          aria-pressed={scope === "node"}
-          onClick={() => setScope("node")}
-          disabled={!nodeId}
-        >
-          this node
-        </button>
-        <button
-          className="chip"
-          aria-pressed={scope === "all"}
-          onClick={() => setScope("all")}
-        >
-          all
-        </button>
-      </div>
+      <p className="section-label">
+        SESSIONS · {shown.length}
+        <span className="inspector-scope">
+          <button
+            className="chip"
+            aria-pressed={scope === "node"}
+            onClick={() => setScope("node")}
+            disabled={!nodeId}
+          >
+            this node
+          </button>
+          <button
+            className="chip"
+            aria-pressed={scope === "all"}
+            onClick={() => setScope("all")}
+          >
+            all
+          </button>
+        </span>
+      </p>
       {shown.length === 0 && (
         <p className="empty">
           no tasks {scope === "node" ? "on this node" : "yet"}
@@ -102,10 +108,11 @@ export function Tasks({
           return (
             <Row
               key={s.id}
+              className="task-row"
               data-testid={`task-row-${s.id}`}
               data-selected={s.id === selected}
               onClick={() => onSelect(s.id)}
-              columns="22px 1fr auto"
+              columns="16px 1fr auto"
             >
               <Robot size={16} className="attention-glyph" />
               <RowText title={`escalation · turn ${s.attempt}`} sub={sub} />
@@ -121,12 +128,13 @@ export function Tasks({
         return (
           <Row
             key={s.id}
+            className="task-row"
             data-testid={`task-row-${s.id}`}
             data-selected={s.id === selected}
             onClick={() => onSelect(s.id)}
-            columns="22px 1fr auto"
+            columns="16px 1fr auto"
           >
-            <StatusGlyph status={s.status} />
+            <StatusGlyph status={s.status} size={16} />
             <RowText
               title={s.hook_point}
               sub={`${s.node_id} · ${attempt}${m ? ` · ${m}` : ""}`}

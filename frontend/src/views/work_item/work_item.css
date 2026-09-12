@@ -44,16 +44,19 @@
 }
 
 /* — stage graph ───────────────────────────────────────────────────────── */
+/* One line to 11 nodes (45). Wrapping mid-chain at 1366 put `merge` on its
+   own line and broke the chain's one job: reading left to right. */
 .stage-graph {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 0;
-  row-gap: var(--space-3);
+  min-width: 0;
 }
 .stage-link-wrap {
   display: flex;
   align-items: center;
+  flex: none;
 }
 .stage-pill {
   display: inline-flex;
@@ -83,6 +86,18 @@
 .stage-pill-escalate {
   color: var(--color-accent-300);
 }
+.stage-pill-progress {
+  font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--color-accent-300);
+}
+
+@media (max-width: 1279px) {
+  .stage-graph { flex-wrap: wrap; row-gap: 18px; }
+}
+@media (max-width: 1023px) {
+  /* Horizontal scroll, current node centred (45). */
+  .stage-graph { flex-wrap: nowrap; overflow-x: auto; scroll-snap-type: x proximity; }
+  .stage-pill[data-state="current"] { scroll-snap-align: center; }
+}
 .stage-link {
   display: inline-flex;
   align-items: center;
@@ -98,6 +113,13 @@
   top: 0;
   color: var(--color-neutral-500);
 }
+
+/* — task row (12): a row, not a card ──────────────────────────────────── */
+.task-row { padding: 7px 6px; }
+.task-row .row-title { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; }
+.task-row .row-sub { font-size: 11px; }
+.task-row .row-state { font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+.task-row .glyph { width: 16px; height: 16px; }
 
 /* — graph/lower split ─────────────────────────────────────────────────── */
 .graph-split {
@@ -148,10 +170,14 @@
   background: var(--color-accent-900);
   border-radius: var(--radius-sm);
 }
+/* The SESSIONS eyebrow carries the this-node/all chips on its own row (38),
+   rather than a bare label above them. */
+.inspector-list .section-label {
+  display: flex; align-items: center; justify-content: space-between;
+}
 .inspector-scope {
   display: flex;
   gap: var(--space-2);
-  padding-bottom: var(--space-2);
 }
 /* `.doc-row`'s grid is Documents' icon/title/kind/date; a change row is
  * path/+/− with no icon, which put the path in the 20px icon column. */
@@ -199,12 +225,21 @@
 .item-right-pane {
   min-width: 0;
 }
-.item-right-pane[data-maximized="true"] {
-  grid-column: 1 / -1;
-}
 .pane.empty {
   padding: var(--space-6);
 }
+
+/* — maximize (43): a page layout, not the pane's own state ─────────────── */
+.item-max-strip {
+  display: flex; align-items: center; gap: 12px;
+  height: 36px; box-sizing: border-box; padding: 0 14px;
+  border-bottom: 1px solid var(--color-divider); min-width: 0;
+}
+.item-max-title { font-size: 13px; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-max-node { font-size: 12px; color: var(--color-neutral-500); white-space: nowrap; }
+.item-max-actions { margin-left: auto; display: flex; gap: 8px; flex: none; }
+.detail[data-maximized="true"] { padding: 0; gap: 0; height: 100%; }
+.detail[data-maximized="true"] .item-right-pane { height: 100%; }
 
 /* — Config tab ─────────────────────────────────────────────────────────── */
 .inspector-config {
@@ -249,34 +284,6 @@
   white-space: pre;
 }
 
-/* — hero task bar (Kraft-qqz8) ─────────────────────────────────────────── */
-.hero-task-bar {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  margin-top: var(--space-2);
-}
-.hero-task-label {
-  font-size: 12px;
-  color: var(--color-neutral-400);
-}
-.hero-task-segments {
-  display: flex;
-  gap: 2px;
-}
-.hero-task-seg {
-  flex: 1;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--color-neutral-800);
-}
-.hero-task-seg[data-state="done"] {
-  background: var(--color-accent-600);
-}
-.hero-task-seg[data-state="current"] {
-  background: var(--color-accent);
-}
-
 /* — gate card (19): "under the header, above the bar" ───────────────────── */
 .gate-card {
   box-shadow:
@@ -305,6 +312,10 @@ textarea.composer-input {
   font-style: italic;
   margin: 0;
 }
+/* Header line + 11px explanation (spec §3): `Steer verify · the note leads
+   attempt 2's system prompt`. */
+.composer-head { font-size: 12.5px; font-weight: 500; margin: 0; }
+.composer-explain { font-size: 11px; font-weight: 400; color: var(--color-text-muted); }
 .escalation-thread {
   display: flex;
   flex-direction: column;
@@ -348,6 +359,13 @@ textarea.composer-input {
     width: 100%;
     min-height: 44px;
   }
+  /* Buttons share one row; the hint gets its own line under them (m04).
+     Desktop's nowrap is exactly wrong here -- this is the one width where
+     the bar is allowed a second line, because the buttons are full-width. */
+  .item-page .control-row { flex-wrap: wrap; }
+  .item-page .control-row > .btn { flex: 1; min-height: 44px; }
+  .item-page .control-hint { flex: 1 0 100%; order: 10; }
+  .item-page .control-actions-right { order: 11; margin-left: auto; }
   /* Under 16px, mobile Safari zooms the viewport on focus and does not zoom
      back out -- same rule `.gate-reject textarea.input` already has
      (styles.css:1250), applied to the shared Composer's own textarea. */

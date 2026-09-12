@@ -39,6 +39,21 @@ export function PeekPane({ id, onClose }: { id: string; onClose: () => void }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // Clicking away closes it. The scrim (46) does this job under 1280, but
+  // above that width there is no scrim -- the pane sits beside rows that must
+  // stay clickable -- so the same gesture needs a listener instead. A board
+  // row is not "outside": clicking another row switches the peek to it, which
+  // is `onSelect`'s job, not this one's.
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      const target = e.target as Element | null;
+      if (target?.closest?.(".peek-pane, .board-row")) return;
+      onClose();
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [onClose]);
+
   const currentSession = [...sessions].reverse().find((s) => s.node_id === item?.current_node_id);
   const [lines, setLines] = useState<LogLine[]>([]);
   useEffect(() => {

@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -7,6 +10,8 @@ import type { KraftEvent, WorkerSession, WorkItem } from "../../../types";
 import { ActionBar } from ".";
 import { dismissTurn } from "./EscalationCard";
 import { NEEDS_HUMAN_EVENT, escSession, item } from "./testFixtures";
+
+const here = dirname(fileURLToPath(import.meta.url));
 
 function renderBar(
   item_: WorkItem,
@@ -160,7 +165,7 @@ describe("ActionBar", () => {
     await userEvent.click(screen.getByRole("button", { name: /^answer$/i }));
     expect(screen.getByText("which backoff?")).toBeInTheDocument();
     const submit = screen.getByRole("button", {
-      name: /^answer$/i,
+      name: /answer and resume/i,
       hidden: true,
     });
     expect(submit).toBeDisabled();
@@ -249,5 +254,25 @@ describe("ActionBar", () => {
     expect(screen.getByTestId("escalation-thread")).toHaveTextContent(
       "look at the widget",
     );
+  });
+
+  it("opens the steer composer inside the action bar, not as a sibling card", async () => {
+    const user = userEvent.setup();
+    renderBar(item({ status: "paused" }));
+    await user.click(screen.getByRole("button", { name: /steer/i }));
+    const bar = document.querySelector(".action-bar") as HTMLElement;
+    expect(bar).toBeTruthy();
+    expect(bar.querySelector("textarea")).toBeTruthy();
+  });
+
+  it("keeps the hint on one line and never wraps the bar", () => {
+    // jsdom has no cascade to compute a layout from; pin the source instead,
+    // the way styles.order.test.ts does.
+    const css = readFileSync(join(here, "../../../styles.css"), "utf-8");
+    expect(css).toMatch(/\.control-row\s*\{[^}]*flex-wrap:\s*nowrap/);
+    expect(css).toMatch(
+      /\.control-hint\s*\{[^}]*white-space:\s*nowrap;[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis/,
+    );
+    expect(css).toMatch(/\.control-hint\s*\{[^}]*min-width:\s*0/);
   });
 });

@@ -1,8 +1,9 @@
-import { useState } from "react";
-import { Prohibit } from "@phosphor-icons/react";
+import { useEffect, useState } from "react";
+import { PencilSimple, Prohibit } from "@phosphor-icons/react";
 import * as api from "../../api";
 import { elapsed, repoName, statusWord } from "../../format";
 import { useStore } from "../../store";
+import { OverflowMenu, TaskBar, TaskLine } from "../../components/ui";
 import type { KraftEvent, WorkItem } from "../../types";
 
 /**
@@ -32,13 +33,26 @@ function nodeRuntime(events: KraftEvent[], nodeId: string | null): string | null
   return Number.isNaN(ms) ? null : elapsed(ms);
 }
 
-/** The label. Read-only until asked. */
-function Title({ item }: { item: WorkItem }) {
+/** The label. Read-only until asked from the ⋯ menu or the hover pencil. */
+function Title({
+  item,
+  editing,
+  onEdit,
+  onDone,
+}: {
+  item: WorkItem;
+  editing: boolean;
+  onEdit: () => void;
+  onDone: () => void;
+}) {
   const hydrateItem = useStore((s) => s.hydrateItem);
-  const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.title);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (editing) setDraft(item.title);
+  }, [editing, item.title]);
 
   const save = async () => {
     setBusy(true);
@@ -46,7 +60,7 @@ function Title({ item }: { item: WorkItem }) {
     try {
       await api.updateWorkItem(item.id, { title: draft });
       await hydrateItem(item.id);
-      setEditing(false);
+      onDone();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -56,7 +70,7 @@ function Title({ item }: { item: WorkItem }) {
 
   if (editing) {
     return (
-      <div className="field">
+      <div className="field" data-testid="item-title">
         <label htmlFor="item-title-edit">Title</label>
         <input
           id="item-title-edit"
@@ -69,7 +83,7 @@ function Title({ item }: { item: WorkItem }) {
           <button className="btn btn-primary" disabled={busy || !draft.trim()} onClick={save}>
             Save
           </button>
-          <button className="btn" disabled={busy} onClick={() => setEditing(false)}>
+          <button className="btn" disabled={busy} onClick={onDone}>
             Cancel
           </button>
         </div>
@@ -79,19 +93,13 @@ function Title({ item }: { item: WorkItem }) {
   }
 
   return (
-    // The button is a sibling, not a child: `.detail h2` is an exact-text
-    // match across most of the e2e suite (the one element naming which work
-    // item is on screen).
-    <div className="control-row" data-testid="item-title">
+    // `.detail h2` is an exact-text match across most of the e2e suite (the
+    // one element naming which work item is on screen) — keep it a plain
+    // sibling of the pencil, not wrapped in a button.
+    <div className="detail-title-row" data-testid="item-title">
       <h2 className="detail-title">{item.title}</h2>
-      <button
-        className="btn btn-quiet"
-        onClick={() => {
-          setDraft(item.title);
-          setEditing(true);
-        }}
-      >
-        Edit
+      <button className="btn btn-quiet detail-title-pencil" aria-label="edit title" onClick={onEdit}>
+        <PencilSimple size={13} />
       </button>
     </div>
   );
@@ -99,12 +107,23 @@ function Title({ item }: { item: WorkItem }) {
 
 /** The brief. Read-only until asked, because editing it changes what every
  *  later node is told. */
-function Description({ item }: { item: WorkItem }) {
+function Description({
+  item,
+  editing,
+  onDone,
+}: {
+  item: WorkItem;
+  editing: boolean;
+  onDone: () => void;
+}) {
   const hydrateItem = useStore((s) => s.hydrateItem);
-  const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.description ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (editing) setDraft(item.description ?? "");
+  }, [editing, item.description]);
 
   const save = async () => {
     setBusy(true);
@@ -112,7 +131,7 @@ function Description({ item }: { item: WorkItem }) {
     try {
       await api.updateWorkItem(item.id, { description: draft });
       await hydrateItem(item.id);
-      setEditing(false);
+      onDone();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -136,7 +155,7 @@ function Description({ item }: { item: WorkItem }) {
           <button className="btn btn-primary" disabled={busy} onClick={save}>
             Save
           </button>
-          <button className="btn" disabled={busy} onClick={() => setEditing(false)}>
+          <button className="btn" disabled={busy} onClick={onDone}>
             Cancel
           </button>
         </div>
@@ -145,26 +164,11 @@ function Description({ item }: { item: WorkItem }) {
     );
   }
 
-  if (!item.description) {
-    return (
-      <button className="btn btn-quiet" onClick={() => setEditing(true)}>
-        Add a description
-      </button>
-    );
-  }
+  if (!item.description) return null;
 
   return (
     <p className="detail-description" data-testid="item-description">
       {item.description}
-      <button
-        className="btn btn-quiet"
-        onClick={() => {
-          setDraft(item.description ?? "");
-          setEditing(true);
-        }}
-      >
-        Edit
-      </button>
     </p>
   );
 }
@@ -174,6 +178,10 @@ export function Header({ item, events }: { item: WorkItem; events: KraftEvent[] 
   const at = nodes.findIndex((n) => n.id === item.current_node_id);
   const runtime = nodeRuntime(events, item.current_node_id);
   const mr = [...events].reverse().find((e) => e.type === "mr_opened");
+  // Everything not the one frequent action lives in the ⋯ menu (spec §2);
+  // editing the title/description moved here from an always-visible Edit
+  // button so the header's flow is free for the two-column grid.
+  const [editing, setEditing] = useState<"title" | "description" | null>(null);
 
   return (
     <div className="detail-head">
@@ -197,9 +205,24 @@ export function Header({ item, events }: { item: WorkItem; events: KraftEvent[] 
         <span className={`${STATUS_TAG[item.status]} detail-status`}>
           {statusWord(item.status)}
         </span>
+        <OverflowMenu
+          items={[
+            { label: "Edit title", onSelect: () => setEditing("title") },
+            { label: "Edit description", onSelect: () => setEditing("description") },
+          ]}
+        />
       </div>
-      <Title item={item} />
-      <Description item={item} />
+      <Title
+        item={item}
+        editing={editing === "title"}
+        onEdit={() => setEditing("title")}
+        onDone={() => setEditing(null)}
+      />
+      <Description
+        item={item}
+        editing={editing === "description"}
+        onDone={() => setEditing(null)}
+      />
       <div className="detail-hero">
         <span className="hero-node">{item.current_node_id ?? "—"}</span>
         {item.fixCycle != null && (
@@ -218,23 +241,13 @@ export function Header({ item, events }: { item: WorkItem; events: KraftEvent[] 
           {runtime && (item.status === "active" ? ` · running ${runtime}` : ` · ${runtime}`)}
           {at < 0 && !item.current_node_id && " · not started"}
         </span>
+        {item.progress && (
+          <>
+            <TaskLine progress={item.progress} />
+            <TaskBar progress={item.progress} />
+          </>
+        )}
       </div>
-      {item.progress && (
-        <div className="hero-task-bar" data-testid="hero-task-bar">
-          <span className="hero-task-label">
-            Task {item.progress.current} of {item.progress.total} — {item.progress.title}
-          </span>
-          <div className="hero-task-segments">
-            {Array.from({ length: item.progress.total }, (_, i) => i + 1).map((n) => (
-              <span
-                key={n}
-                className="hero-task-seg"
-                data-state={n < item.progress!.current ? "done" : n === item.progress!.current ? "current" : "pending"}
-              />
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
