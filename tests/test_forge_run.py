@@ -164,6 +164,24 @@ def test_sync_mr_pushes_before_it_rewrites_the_description(tmp_path, monkeypatch
     assert fake.bodies["kraft/w1"]
 
 
+def test_sync_mr_treats_an_already_merged_mr_as_done(tmp_path, monkeypatch):
+    """Kraft-7itv, from work item 45b06993: the MR was merged by hand, its
+    source branch deleted with it, and `human_review` skipped. mr_sync's
+    push then died `! [rejected] ... (stale info)` -- the lease expects the
+    sha origin last showed this worktree and origin had no ref at all -- and
+    the item stopped one node short with the work already on main."""
+    fake = forge.FakeForge()
+    mr = asyncio.run(fake.open_mr(repo=tmp_path, branch="kraft/w1", title="t", body="b"))
+    asyncio.run(fake.merge(repo=tmp_path, branch="kraft/w1", mr=mr))
+    fake.pushed.clear()
+
+    returned, recorded = _forge_session(tmp_path, monkeypatch, fake, "sync_mr", "s9")
+
+    assert (returned, recorded) == ("done", "done")
+    assert fake.pushed == [], "it pushed to a branch the forge has already merged and deleted"
+    assert "nothing to sync" in _session_log(tmp_path, "s9")
+
+
 def _session_log(tmp_path, session_id: str) -> str:
     return (tmp_path / "run" / "logs" / f"{session_id}.log").read_text()
 
