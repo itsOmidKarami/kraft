@@ -219,6 +219,8 @@ async def create_work_item(body: NewWorkItem, request: Request):
             raise HTTPException(422, f"node {node_id!r}: cannot override {sorted(extra)}")
         if "auto_escalate" in fields and not isinstance(fields["auto_escalate"], bool):
             raise HTTPException(422, f"node {node_id!r}: auto_escalate must be a boolean")
+        if "auto_escalate_stuck" in fields and not isinstance(fields["auto_escalate_stuck"], bool):
+            raise HTTPException(422, f"node {node_id!r}: auto_escalate_stuck must be a boolean")
     try:
         wid = await executor.intake(
             st.db,
@@ -404,6 +406,10 @@ def _validate_node_overrides(st, row, patch: dict[str, dict]) -> None:
                 raise HTTPException(422, f"node {node_id!r}: cannot override {sorted(extra)}")
             if "auto_escalate" in fields and not isinstance(fields["auto_escalate"], bool):
                 raise HTTPException(422, f"node {node_id!r}: auto_escalate must be a boolean")
+            if "auto_escalate_stuck" in fields and not isinstance(
+                fields["auto_escalate_stuck"], bool
+            ):
+                raise HTTPException(422, f"node {node_id!r}: auto_escalate_stuck must be a boolean")
             if store.node_started(c, row["id"], node_id):
                 raise HTTPException(409, f"node {node_id!r} has started; its config is locked")
 

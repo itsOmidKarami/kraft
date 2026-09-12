@@ -43,6 +43,13 @@ def http() -> httpx.AsyncClient:
     token = auth.read_mcp_token(run_dir)
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    session_id = os.environ.get("KRAFT_SESSION_ID")
+    if session_id:
+        # Lets a route exempt the caller's own session from a check that
+        # would otherwise block it on itself -- e.g. `retry`'s
+        # `escalation_running` guard against the very escalation turn
+        # calling it (`kraft.executor.gates.auto_escalate_stuck`).
+        headers["X-Kraft-Session-Id"] = session_id
     return httpx.AsyncClient(base_url=base_url(), headers=headers, timeout=30)
 
 

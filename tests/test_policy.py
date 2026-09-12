@@ -339,3 +339,37 @@ def test_load_policy_rejects_bad_max_concurrent(tmp_path):
     d.write_text("default: { attempts: 1, wall_clock_s: 1 }\nmax_concurrent: 0\n")
     with pytest.raises(policy.PolicyError):
         policy.load_policy(d)
+
+
+def test_load_policy_defaults_auto_escalate_stuck_on(tmp_path):
+    d = tmp_path / "policy.yaml"
+    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\n")
+    p = policy.load_policy(d)
+    assert p.auto_escalate_stuck is True
+    assert p.auto_escalate_stuck_cap == 3
+
+
+def test_load_policy_reads_auto_escalate_stuck(tmp_path):
+    d = tmp_path / "policy.yaml"
+    d.write_text(
+        "default: { attempts: 1, wall_clock_s: 1 }\n"
+        "auto_escalate_stuck: false\n"
+        "auto_escalate_stuck_cap: 5\n"
+    )
+    p = policy.load_policy(d)
+    assert p.auto_escalate_stuck is False
+    assert p.auto_escalate_stuck_cap == 5
+
+
+def test_load_policy_rejects_non_bool_auto_escalate_stuck(tmp_path):
+    d = tmp_path / "policy.yaml"
+    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\nauto_escalate_stuck: maybe\n")
+    with pytest.raises(policy.PolicyError):
+        policy.load_policy(d)
+
+
+def test_load_policy_rejects_bad_auto_escalate_stuck_cap(tmp_path):
+    d = tmp_path / "policy.yaml"
+    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\nauto_escalate_stuck_cap: 0\n")
+    with pytest.raises(policy.PolicyError):
+        policy.load_policy(d)

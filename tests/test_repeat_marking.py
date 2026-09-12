@@ -131,6 +131,10 @@ def _policy(tmp_path, *, attempts=5) -> policy.Policy:
     p.write_text(
         f"loops:\n  verify_fix_loop: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
         f"default: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
+        # Kraft-lpdd: this suite is about finding-repeat marking, not the
+        # unrelated auto-escalate trigger a `needs_human` stop would
+        # otherwise also fire.
+        "auto_escalate_stuck: false\n"
     )
     return policy.load_policy(p)
 

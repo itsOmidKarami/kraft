@@ -194,6 +194,8 @@ class PolicyBody(BaseModel):
     rate_limit_retries: int | None = None
     triggers: list[dict] | None = None
     archive: dict | None = None
+    auto_escalate_stuck: bool | None = None
+    auto_escalate_stuck_cap: int | None = None
 
 
 @api_router.get("/policy")
@@ -220,6 +222,10 @@ async def put_policy(body: PolicyBody, request: Request):
         data["triggers"] = body.triggers
     if body.archive is not None:
         data["archive"] = body.archive
+    if body.auto_escalate_stuck is not None:
+        data["auto_escalate_stuck"] = body.auto_escalate_stuck
+    if body.auto_escalate_stuck_cap is not None:
+        data["auto_escalate_stuck_cap"] = body.auto_escalate_stuck_cap
     with tempfile.TemporaryDirectory() as tmp:
         candidate = Path(tmp) / "policy.yaml"
         candidate.write_text(yaml.safe_dump(data))

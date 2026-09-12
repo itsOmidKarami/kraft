@@ -53,6 +53,10 @@ def _policy(tmp_path, *, attempts=3, severities=None) -> policy.Policy:
     text = (
         f"loops:\n  verify_fix_loop: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
         f"default: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
+        # Kraft-lpdd: this suite is about the findings loop's own cap, not
+        # the unrelated auto-escalate trigger a `needs_human` cap breach
+        # would otherwise also fire.
+        "auto_escalate_stuck: false\n"
     )
     if severities is not None:
         text += f"findings:\n  loop_severities: {json.dumps(severities)}\n"

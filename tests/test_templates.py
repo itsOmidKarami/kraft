@@ -286,6 +286,39 @@ def test_auto_escalate_must_be_a_bool_beside_a_gate(tmp_path):
     assert "auto_escalate" in ts.invalid["nogate"]
 
 
+_AUTO_STUCK_TEMPLATE = (
+    "id: autostuck\n"
+    "nodes:\n"
+    "  - { id: n1, tasks: [on.test.run], gate_after: null, auto_escalate_stuck: false }\n"
+    "  - { id: n2, tasks: [on.test.run], gate_after: null }\n"
+)
+
+
+def test_materialize_carries_auto_escalate_stuck_on_a_gateless_node(tmp_path):
+    d = _dir(tmp_path, **{"registry.yaml": REGISTRY_YAML, "autostuck.yaml": _AUTO_STUCK_TEMPLATE})
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    nodes = materialize(ts.valid["autostuck"])["nodes"]
+    assert nodes[0]["auto_escalate_stuck"] is False
+    assert nodes[1]["auto_escalate_stuck"] is None
+
+
+def test_auto_escalate_stuck_must_be_a_bool(tmp_path):
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "badtype.yaml": (
+                "id: badtype\n"
+                "nodes:\n"
+                "  - { id: n1, tasks: [on.test.run], gate_after: null, "
+                "auto_escalate_stuck: yes please }\n"
+            ),
+        },
+    )
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert "auto_escalate_stuck" in ts.invalid["badtype"]
+
+
 def _dir(tmp_path, **files):
     for name, body in files.items():
         (tmp_path / name).write_text(body)
@@ -495,6 +528,7 @@ def test_materialize_quick_task_from_shipped_templates():
                 "reject_to": None,
                 "rebase_bounce_to": None,
                 "auto_escalate": None,
+                "auto_escalate_stuck": None,
             },
             {
                 "id": "implementation",
@@ -505,6 +539,7 @@ def test_materialize_quick_task_from_shipped_templates():
                 "reject_to": None,
                 "rebase_bounce_to": None,
                 "auto_escalate": None,
+                "auto_escalate_stuck": None,
             },
             {
                 "id": "verify",
@@ -515,6 +550,7 @@ def test_materialize_quick_task_from_shipped_templates():
                 "reject_to": None,
                 "rebase_bounce_to": None,
                 "auto_escalate": None,
+                "auto_escalate_stuck": None,
             },
         ],
     }

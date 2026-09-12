@@ -121,6 +121,10 @@ def _make_policy(tmp_path, *, attempts=3, wall_clock_s=3600) -> policy.Policy:
     p.write_text(
         f"loops:\n  verify_fix_loop: {{ attempts: {attempts}, wall_clock_s: {wall_clock_s} }}\n"
         f"default: {{ attempts: {attempts}, wall_clock_s: {wall_clock_s} }}\n"
+        # Kraft-lpdd: this suite is about needs_context detection, not the
+        # unrelated auto-escalate trigger a real cap breach would otherwise
+        # also fire (and `executor.run` is called here without a `launch`).
+        "auto_escalate_stuck: false\n"
     )
     return policy.load_policy(p)
 

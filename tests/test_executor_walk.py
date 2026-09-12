@@ -760,6 +760,10 @@ def test_rebase_bounce_cap_escalates_to_needs_human(tmp_path, monkeypatch):
     pol_path.write_text(
         "loops:\n  rebase_bounce: { attempts: 1, wall_clock_s: 3600 }\n"
         "default: { attempts: 3, wall_clock_s: 3600 }\n"
+        # Kraft-lpdd: this test is about the rebase-bounce cap escalating to
+        # needs_human, not the unrelated auto-escalate trigger that stop
+        # would otherwise also fire.
+        "auto_escalate_stuck: false\n"
     )
     pol = policy.load_policy(pol_path)
 
