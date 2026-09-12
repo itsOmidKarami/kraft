@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -361,6 +361,15 @@ describe("WorkItemDetail (item page)", () => {
     const workItem = readFileSync(join(here, "work_item.css"), "utf-8");
     expect(detail).toMatch(/\.detail\.item-page\s*\{[^}]*height:\s*100%;\s*min-height:\s*0;\s*overflow:\s*hidden/);
     expect(workItem).toMatch(/\.inspector,\s*\.item-right-pane\s*\{\s*overflow-y:\s*auto;\s*min-height:\s*0;\s*\}/);
+  });
+
+  it("collapses the title and description when the top block is scrolled", () => {
+    renderDetail();
+    const top = document.querySelector(".detail-head") as HTMLElement;
+    fireEvent.wheel(top, { deltaY: 60 });
+    expect(document.querySelector(".detail[data-head='collapsed']")).toBeTruthy();
+    fireEvent.wheel(top, { deltaY: -60 });
+    expect(document.querySelector(".detail[data-head='collapsed']")).toBeNull();
   });
 
   it("maximizing hides the inspector and the graph and lands in the URL", async () => {

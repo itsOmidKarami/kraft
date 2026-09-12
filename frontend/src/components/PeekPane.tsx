@@ -54,7 +54,14 @@ export function PeekPane({ id, onClose }: { id: string; onClose: () => void }) {
     return () => document.removeEventListener("pointerdown", onDown);
   }, [onClose]);
 
-  const currentSession = [...sessions].reverse().find((s) => s.node_id === item?.current_node_id);
+  // A node runs more than one hook (implementation runs on.repos.scan too),
+  // so "last in the array" hands the pane a job that finished in 0s while the
+  // real work is still running. Running first, then newest -- the same rule
+  // `views/work_item/index.tsx` already uses for the Tasks tab.
+  const nodeSessions = sessions.filter((s) => s.node_id === item?.current_node_id);
+  const currentSession =
+    nodeSessions.find((s) => s.status === "running") ??
+    [...nodeSessions].sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
   const [lines, setLines] = useState<LogLine[]>([]);
   useEffect(() => {
     if (!currentSession?.id) {

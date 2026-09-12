@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
@@ -91,6 +91,15 @@ describe("Settings · plugins (5c)", () => {
     renderAt("/settings/plugins");
     await userEvent.click(await screen.findByText("on.test.run"));
     expect(await screen.findByText(/wi_1/)).toBeInTheDocument();
+  });
+
+  it("renders one segmented control for the binding kind, not four buttons", async () => {
+    renderAt("/settings/plugins");
+    await userEvent.click(await screen.findByText("on.mr.open"));
+    const seg = document.querySelector(".segmented") as HTMLElement;
+    expect(seg).toBeTruthy();
+    expect(within(seg).getAllByRole("button")).toHaveLength(4);
+    expect(seg.querySelector("[aria-pressed='true']")).toBeTruthy();
   });
 });
 

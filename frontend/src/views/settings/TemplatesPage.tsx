@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Flag, Shield, ArrowsClockwise, Check } from "@phosphor-icons/react";
+import { CaretRight, Flag, Shield, ArrowsClockwise, Check } from "@phosphor-icons/react";
 import { useSearchParams } from "react-router-dom";
 import * as api from "../../api";
 import { DraftDiff } from "../../components/DraftDiff";
-import { SectionLabel, Tabs } from "../../components/ui";
+import { Row, RowText, SectionLabel, StatusGlyph, Tabs } from "../../components/ui";
 import { adapterOf } from "../../format";
 import { useStore } from "../../store";
 import type { TemplateNode, TemplateSummary } from "../../types";
@@ -568,27 +568,33 @@ export function TemplatesPage() {
             subtitle={`${nodes.length} nodes`}
           />
           {nodes.map((n, i) => (
-            <div key={`${n.id}-${i}`}>
-              <button
-                className="facet-opt"
-                onClick={() => setParams({ tpl: current.id, node: n.id })}
-              >
-                {i + 1}. {n.id}
-                {n.gate_after && <Flag size={11} weight="fill" />}
-                {n.fix_loop && <ArrowsClockwise size={11} />}
-                {n.auto_escalate && <Shield size={11} />}
-                <span className="facet-count">{(n.tasks ?? []).length} tasks</span>
-              </button>
-              <button
-                type="button"
-                className="chain-insert"
-                aria-label={`insert node after ${n.id}`}
-                onClick={() => insertNode(i + 1)}
-              >
-                ⊕
-              </button>
-            </div>
+            <Row
+              key={`${n.id}-${i}`}
+              columns="22px 1fr auto 16px"
+              onClick={() => setParams({ tpl: current.id, node: n.id })}
+            >
+              <StatusGlyph status="pending" />
+              <RowText
+                title={
+                  <>
+                    {n.id}
+                    {n.gate_after && <Flag size={11} weight="fill" />}
+                    {n.fix_loop && <ArrowsClockwise size={11} />}
+                    {n.auto_escalate && <Shield size={11} />}
+                  </>
+                }
+              />
+              <span className="row-sub">{(n.tasks ?? []).length} tasks</span>
+              <CaretRight size={14} />
+            </Row>
           ))}
+          <button
+            type="button"
+            className="btn btn-secondary chain-add-node-row"
+            onClick={() => insertNode(nodes.length)}
+          >
+            + node
+          </button>
         </>
       );
     }
@@ -635,12 +641,12 @@ export function TemplatesPage() {
         note={`~/.kraft/templates/${current.id}.yaml · ${nodes.length} nodes · ${gatesOf(nodes)} gates`}
         action={
           <div className="save-row">
+            <button className="btn btn-ghost" disabled={!dirty} onClick={() => setDraftNodes(null)}>
+              Revert
+            </button>
             <button className="btn btn-primary" disabled={busy || !dirty || validation?.valid === false} onClick={save}>
               <Check size={14} />
               Save
-            </button>
-            <button className="btn btn-ghost" disabled={!dirty} onClick={() => setDraftNodes(null)}>
-              Revert
             </button>
             <span className="save-hint">{message}</span>
           </div>
@@ -652,14 +658,16 @@ export function TemplatesPage() {
           {templates.map((t) => (
             <button
               key={t.id}
-              className="facet-opt"
+              className="facet-opt template-row"
               aria-pressed={t.id === current.id}
               onClick={() => setParams({ tpl: t.id })}
             >
-              {t.id}
-              <span className="facet-count">
-                {t.nodes.length} nodes · {gatesOf(t.nodes)} gates · used by {usedBy[t.id] ?? 0}{" "}
-                items
+              <span className="template-row-top">
+                <span className="template-row-name">{t.id}</span>
+                <span className="template-row-count">{t.nodes.length} nodes</span>
+              </span>
+              <span className="template-row-meta">
+                {gatesOf(t.nodes)} gates · used by {usedBy[t.id] ?? 0} items
               </span>
             </button>
           ))}
@@ -681,6 +689,10 @@ export function TemplatesPage() {
             onInsert={insertNode}
             onMove={moveNode}
           />
+          <p className="chain-legend">
+            <Flag size={11} weight="fill" /> gate after · <ArrowsClockwise size={11} /> fix loop ·{" "}
+            <Shield size={11} /> auto-escalate · drag to reorder · ⊕ inserts
+          </p>
           {selectedNode ? (
             <NodeForm
               node={selectedNode}

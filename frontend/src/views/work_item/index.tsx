@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type WheelEvent } from "react";
 import { useLocation, useParams } from "react-router-dom";
 import * as api from "../../api";
 import { Row, RowState, RowText, StatusGlyph } from "../../components/ui";
@@ -42,6 +42,16 @@ export function WorkItemDetail() {
   const [diff, setDiff] = useState<WorkItemDiff | null>(null);
   const [diffError, setDiffError] = useState<string | null>(null);
   const phone = usePhone();
+
+  // Kraft-yx8v: a wheel over the top block collapses the title/description,
+  // latched with a threshold so trackpad momentum can't flip-flop the state.
+  // Wheel, not scroll: WI-3 made this page `overflow: hidden` and the top
+  // block is not itself a scroller, so there is no scroll event to listen for.
+  const [headCollapsed, setHeadCollapsed] = useState(false);
+  const onHeadWheel = (e: WheelEvent<HTMLDivElement>) => {
+    if (e.deltaY > 24 && !headCollapsed) setHeadCollapsed(true);
+    else if (e.deltaY < -24 && headCollapsed) setHeadCollapsed(false);
+  };
 
   const { nodeId, nodeExplicit, tab, selection, maximized, selectNode, setTab, select, setMaximized, goTo, goToNode, reviewHref } =
     useItemUrlState(item?.current_node_id ?? null);
@@ -184,9 +194,15 @@ export function WorkItemDetail() {
   }
 
   return (
-    <div className="detail item-page">
+    <div className="detail item-page" data-head={headCollapsed ? "collapsed" : undefined}>
       {phone && <PhoneTopBar item={item} />}
-      <Header item={item} events={events} />
+      <Header
+        item={item}
+        events={events}
+        collapsed={headCollapsed}
+        onWheel={onHeadWheel}
+        onExpand={() => setHeadCollapsed(false)}
+      />
 
       {!!item.repos?.length && (
         <section className="repos-panel">

@@ -146,6 +146,25 @@ describe("SearchOverlay", () => {
     expect(spy).toHaveBeenCalledWith("w1", "plan_approval");
   });
 
+  it("puts repo · node · Task N/M · title on a work-item row's second line", async () => {
+    useStore.setState({
+      workItems: {
+        w1: wi({
+          id: "w1",
+          title: "fix flaky test",
+          current_node_id: "implementation",
+          progress: { current: 3, total: 6, title: "open_mr refuses a dirty worktree" },
+        }),
+      },
+    } as never);
+    renderOverlay();
+    await userEvent.type(screen.getByRole("searchbox"), "fix flaky");
+    const row = await screen.findByRole("button", { name: /fix flaky test/ });
+    expect(row.querySelector(".search-row-sub")?.textContent).toMatch(
+      /implementation.*Task 3\/6.*open_mr refuses/,
+    );
+  });
+
   it("sections render in order: Actions, Work items, Documents, Go to", () => {
     useStore.setState({
       workItems: { w1: wi({ id: "w1", status: "needs_human", pending_gate: "plan_approval", title: "fix flaky test" }) },

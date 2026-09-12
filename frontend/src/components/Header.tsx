@@ -5,6 +5,7 @@ import * as api from "../api";
 import { SETTINGS_NAV } from "../settingsNav";
 import { useStore } from "../store";
 import { repoName } from "../format";
+import { usePhone } from "../views/settings/shared";
 
 /** How many repos are connected — a fresh install has 0 items *and* 0 repos,
  *  which reads differently from "0 items, repos connected" (design 08). Not
@@ -73,6 +74,10 @@ function useCrumb(
       };
     }
     if (pathname === "/analytics") return { crumb: [{ text: "Analytics" }], primary: null };
+    // The phone-only Settings index (m10, Kraft-j92g) has no page segment of
+    // its own to match `settingsMatch` -- it fell through to the default
+    // "Board" crumb, which read as the wrong app section entirely.
+    if (pathname === "/settings") return { crumb: [{ text: "Settings" }], primary: null };
     if (settingsMatch) {
       const page = SETTINGS_NAV.find((n) => n.to === settingsMatch[1]);
       return {
@@ -106,6 +111,13 @@ export function Header({ onSearch, onNew }: { onSearch: () => void; onNew: () =>
   const repoCount = useRepoCount();
   const archivedCount = useArchivedCount();
   const { crumb, primary } = useCrumb(repoCount, archivedCount);
+  const phone = usePhone();
+  const { pathname } = useLocation();
+  // m10: every settings sub-page has its own phone header (`shared.tsx`'s
+  // `PhoneHeader`, back · title · Save) already -- this breadcrumb was a
+  // second top bar stacked above it. The bare `/settings` index has no
+  // such header of its own, so it still needs this one.
+  if (phone && pathname.startsWith("/settings/")) return null;
 
   return (
     <header className="app-header">

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
@@ -35,8 +35,9 @@ function renderModal(onClose: () => void = () => {}) {
 }
 
 async function fillBasics(repoName = "repo-a", title = "t") {
-  await userEvent.click(
-    await screen.findByRole("button", { name: new RegExp(repoName, "i") }),
+  await userEvent.selectOptions(
+    await screen.findByLabelText("repo"),
+    repoName,
   );
   await userEvent.type(screen.getByLabelText("title"), title);
 }
@@ -53,7 +54,19 @@ describe("IntakeModal", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows a disabled repo as a disabled chip, not omitted", async () => {
+  it("lays the dialog out in two columns with an overrides column", async () => {
+    vi.spyOn(api, "getTemplates").mockResolvedValue([
+      { id: "default", nodes: [], gates: 0 },
+    ]);
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
+    renderModal();
+    const dlg = await screen.findByRole("dialog");
+    expect(dlg.querySelector(".intake-grid")).toBeTruthy();
+    expect(within(dlg).getByText(/OVERRIDES FOR THIS ITEM/i)).toBeTruthy();
+    expect(within(dlg).getByText(/Will happen on start/i)).toBeTruthy();
+  });
+
+  it("shows a disabled repo as a disabled option, not omitted", async () => {
     vi.spyOn(api, "getTemplates").mockResolvedValue([
       { id: "default", nodes: [], gates: 0 },
     ]);
@@ -64,9 +77,10 @@ describe("IntakeModal", () => {
       ],
     });
     renderModal();
-    expect(
-      await screen.findByRole("button", { name: /repo-c.*disabled/i }),
-    ).toBeDisabled();
+    const select = (await screen.findByLabelText("repo")) as HTMLSelectElement;
+    const opt = within(select).getByText(/repo-c.*disabled/i)
+      .closest("option") as HTMLOptionElement;
+    expect(opt.disabled).toBe(true);
   });
 
   it("preselects the chosen repo's default chain template", async () => {
@@ -86,9 +100,7 @@ describe("IntakeModal", () => {
       repos: [{ ...REPO_A, default_chain_template: "quick-task" }],
     });
     renderModal();
-    await userEvent.click(
-      await screen.findByRole("button", { name: /repo-a/i }),
-    );
+    await userEvent.selectOptions(await screen.findByLabelText("repo"), "repo-a");
     expect(screen.getByRole("radio", { name: /quick-task/i })).toBeChecked();
   });
 
@@ -312,9 +324,7 @@ describe("IntakeModal", () => {
       project: null,
     });
     renderModal();
-    await userEvent.click(
-      await screen.findByRole("button", { name: /repo-a/i }),
-    );
+    await userEvent.selectOptions(await screen.findByLabelText("repo"), "repo-a");
     await waitFor(() => expect(probe).toHaveBeenCalled());
     expect(screen.queryByRole("button", { name: /cross-repo/ })).toBeNull();
   });
@@ -367,6 +377,39 @@ describe("IntakeModal", () => {
     );
   });
 
+  it("attaches a spec through one search field that becomes a chip", async () => {
+    vi.spyOn(api, "getTemplates").mockResolvedValue([
+      { id: "default", nodes: [], gates: 0 },
+    ]);
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
+    vi.spyOn(api, "search").mockResolvedValue({
+      query: "submodule",
+      mode: "hybrid",
+      results: [
+        {
+          id: "d1",
+          repo: "/a",
+          kind: "specs",
+          source_kind: "artifact",
+          title: "submodule-pointers",
+          path: ".engineering/specs/submodule-pointers.md",
+          snippet: "",
+          score: 1,
+          links: [],
+        },
+      ],
+    });
+    renderModal();
+    await fillBasics();
+    await userEvent.type(screen.getByLabelText("spec"), "submodule");
+    await userEvent.click(
+      await screen.findByRole("option", { name: /submodule-pointers/ }),
+    );
+    expect(
+      screen.getByText(/spec attached → spec_approval satisfied/),
+    ).toBeInTheDocument();
+  });
+
   it("searches the chosen repo's artifacts and submits the picked plan", async () => {
     vi.spyOn(api, "getTemplates").mockResolvedValue([
       { id: "default", nodes: [], gates: 0 },
@@ -395,7 +438,7 @@ describe("IntakeModal", () => {
     renderModal();
 
     await fillBasics();
-    await userEvent.type(screen.getByLabelText("existing plan"), "auth");
+    await userEvent.type(screen.getByLabelText("plan"), "auth");
     await userEvent.click(await screen.findByText("Auth plan"));
     await userEvent.click(
       screen.getByRole("button", { name: /create and start/i }),
@@ -448,8 +491,8 @@ describe("IntakeModal", () => {
 
     await fillBasics();
     await userEvent.type(
-      screen.getByLabelText("spec path"),
-      ".engineering/specs/x.md",
+      screen.getByLabelText("spec"),
+      ".engineering/specs/x.md{Enter}",
     );
 
     const struckSpec = await screen.findByText("spec", { selector: "s" });
@@ -470,8 +513,8 @@ describe("IntakeModal", () => {
 
     await fillBasics();
     await userEvent.type(
-      screen.getByLabelText("spec path"),
-      ".engineering/specs/x.md",
+      screen.getByLabelText("spec"),
+      ".engineering/specs/x.md{Enter}",
     );
     await userEvent.click(
       screen.getByRole("button", { name: /create and start/i }),

@@ -230,6 +230,20 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 
 .kbd { opacity: 0.5; font-size: 11px; margin-left: 4px; }
 
+/* — segmented control — */
+.segmented {
+  display: inline-flex; gap: 2px; padding: 2px;
+  border-radius: 8px; background: var(--color-neutral-900);
+}
+.segmented-opt {
+  font: inherit; font-size: 12px; cursor: pointer;
+  padding: 5px 10px; border: 0; border-radius: 6px; background: transparent;
+  color: var(--color-text-muted);
+}
+.segmented-opt[aria-pressed="true"] {
+  background: var(--color-accent-900); color: var(--color-accent-300);
+}
+
 /* ══ bottom nav (mobile app shell) ═══════════════════════════════════════ */
 .bottom-nav {
   display: none; /* the phone block below turns this on */
@@ -696,6 +710,9 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 .attention-text { display: flex; flex-direction: column; min-width: 0; }
 .attention-title { font-size: 15px; font-weight: 500; }
 .attention-sub { font-size: 12px; color: var(--color-neutral-500); }
+/* Rendered markdown is taller than the plain-text line it replaced -- cap it
+   so the Apply/Reply/Dismiss buttons stay visible below the card. */
+.attention-sub-md { max-height: 160px; overflow-y: auto; }
 
 /* ══ work item detail (design 3a / 3b) ════════════════════════════════════ */
 .detail {
@@ -719,7 +736,7 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 /* Meta + title + description left, hero right (11 · 38). */
 .detail-head {
   display: grid; grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas: "meta hero" "title hero" "desc hero";
+  grid-template-areas: "meta hero" "body hero";
   column-gap: 24px; row-gap: 8px; align-items: start;
 }
 .detail-meta {
@@ -733,11 +750,19 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 /* Inline at the end of the meta parts, not floated to the far right (G7-04). */
 .detail-status { margin-left: 0; }
 .detail-meta .overflow { margin-left: auto; }
-.detail-head > [data-testid="item-title"] { grid-area: title; min-width: 0; }
+/* Title + description: one grid area ("body"), collapsible as a unit
+   (Kraft-yx8v) so a wheel over the top block hides both without touching the
+   meta line, action bar or stage graph. */
+.detail-head-collapsible {
+  grid-area: body; display: flex; flex-direction: column; gap: 8px; min-width: 0;
+  max-height: 300px; opacity: 1; overflow: hidden; transition: max-height 150ms, opacity 150ms;
+}
+.detail-head-collapsible[data-collapsed="true"] { max-height: 0; opacity: 0; }
+.detail-head-collapsible > [data-testid="item-title"] { min-width: 0; }
+.detail-head-expand { flex: none; }
 .detail-title-row { display: flex; align-items: center; gap: 8px; }
 .detail-title-pencil { opacity: 0; transition: opacity 120ms; }
 [data-testid="item-title"]:hover .detail-title-pencil { opacity: 1; }
-.detail-description { grid-area: desc; }
 /* The item's own title is the headline: it is the words the person wrote and
    the only thing that tells two open items apart. The node is where that work
    has got to — strong, but subordinate to what the work is. */
@@ -756,7 +781,7 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 
 @media (max-width: 1023px) {
   /* No room for two columns: the hero stacks under the description. */
-  .detail-head { grid-template-columns: minmax(0, 1fr); grid-template-areas: "meta" "title" "desc" "hero"; }
+  .detail-head { grid-template-columns: minmax(0, 1fr); grid-template-areas: "meta" "body" "hero"; }
   .detail-hero { align-items: flex-start; text-align: left; }
   .detail-hero .task-bar { width: 100%; }
 }
@@ -956,6 +981,7 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
   height: 41px; box-sizing: border-box; padding: 0 14px;
   border-bottom: 1px solid var(--color-divider);
   min-width: 0; flex-wrap: nowrap; overflow-x: auto;
+  position: sticky; top: 0; z-index: 2; background: var(--color-bg);
 }
 .log-static-title { font-size: 12.5px; font-weight: 500; flex: none; }
 .log-hook, .log-sid { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--color-text-muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1111,11 +1137,27 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 .search-row-sub { font-size: 11px; color: var(--color-neutral-500); }
 .search-result[data-active] { background: color-mix(in srgb, var(--color-text) 4%, transparent); }
 
-/* ══ intake (design 1g) ═══════════════════════════════════════════════════ */
-.intake { width: 460px; max-width: 100%; gap: 14px; padding: 20px 22px; }
+/* ══ intake (design 10) ═══════════════════════════════════════════════════ */
+.intake { width: 820px; max-width: 100%; gap: 14px; padding: 20px 22px; }
 /* Both form dialogs, one size — "Add repo" was inheriting Nocturne's 20px while
    "New work item" set 18px for itself. */
-.dialog .dialog-title { font-size: 18px; }
+.dialog .dialog-title { font-size: 18px; position: relative; }
+.dialog-close {
+  position: absolute; top: 0; right: 0; border: 0; background: transparent;
+  color: var(--color-text-muted); cursor: pointer;
+}
+.dialog-close:hover { color: var(--color-text); }
+
+.intake-grid { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 24px; align-items: start; }
+.intake-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.intake-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.intake-foot { position: sticky; bottom: 0; background: var(--color-surface); }
+.chain-template-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.attachment-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.attachment-chip button { border: 0; background: transparent; color: inherit; cursor: pointer; padding: 0; }
+.attachment-hits { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
 
 /* ══ paused card (design 4c) ══════════════════════════════════════════════ */
 .paused-card { padding: 16px 18px; gap: 12px; }
@@ -1172,6 +1214,20 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 
 .template-editor { display: grid; grid-template-columns: 200px 1fr; gap: 24px; align-items: start; }
 .template-list { display: flex; flex-direction: column; gap: 2px; }
+/* `.facet-opt`/`.facet-count` had no rules at all anywhere in the app --
+   every list built from them (Chains' phone template list, Steering's file
+   list) rendered as a bare centred button with name and meta run together.
+   One base rule, fixed where it's shared rather than per call site. */
+.facet-opt {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  padding: 8px 10px; border-radius: 8px; border: 1px solid transparent;
+  background: transparent; color: inherit; font: inherit; font-size: 13px; cursor: pointer;
+}
+.facet-opt:hover { background: var(--hairline-24); }
+.facet-opt[aria-pressed="true"] {
+  border-color: var(--color-accent-700); background: var(--color-accent-900); color: var(--color-accent-300);
+}
+.facet-count { margin-left: auto; font-size: 11px; color: var(--color-text-muted); white-space: nowrap; }
 .template-draft { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 /* `textarea.` is load-bearing: nocturne.css's `textarea.input { min-height: 90px }`
    is one element + one class and outranks a bare class selector regardless of
@@ -1179,7 +1235,7 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
    can still drag this. 420px, not 320: both users of this class (the chain
    template editor and the steering editor) hold documents, and the default
    chain template is 10 nodes pretty-printed. */
-textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; }
+textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; white-space: pre; overflow-x: auto; }
 .template-readout {
   white-space: pre-wrap; overflow-wrap: anywhere;
   font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.5;
@@ -1190,6 +1246,7 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; }
   font-size: 12px; display: flex; flex-direction: column; gap: 4px;
   padding: 10px 12px; border-radius: 8px; border: 1px solid var(--color-divider);
   color: var(--color-neutral-200);
+  margin-top: auto; /* pinned at the bottom of the Chains templates column */
 }
 .validation[data-valid="true"] { border-color: var(--color-accent-700); color: var(--color-accent-300); }
 
@@ -1199,14 +1256,19 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; }
     transparent, var(--color-divider) 48px,
     var(--color-divider) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
 }
-.hook-row { grid-template-columns: 1fr 240px 60px; }
-.cap-row { grid-template-columns: 1fr 110px 140px; }
-.budget-row { grid-template-columns: 1fr 140px; }
+.hook-row { grid-template-columns: minmax(0, 1fr) 240px 60px; }
+.cap-row { grid-template-columns: minmax(0, 1fr) 110px 140px; }
+.budget-row { grid-template-columns: minmax(0, 1fr) 140px; }
 .hook-head, .cap-head {
   padding: 0 0 6px; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--color-text-muted);
 }
 .cap-row .input { min-height: 30px; padding: 3px 10px; font-size: 13px; }
+/* Text-bearing first child of each row: without min-width: 0 a long hook name
+   widens the first track and pushes the switch columns over the panel. */
+.hook-row > .hook-name, .hook-row > .row-sub, .cap-row > .hook-name {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
 /* — appearance (theme palettes) — */
 .palette-grid {
@@ -1431,6 +1493,10 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; }
   /* m09: full-screen stacked, not a centered dialog -- same component as
      desktop 10 (README "one layout for both platforms"), CSS-only fork. */
   .intake { position: fixed; inset: 0; max-width: 100%; max-height: 100%; border-radius: 0; }
+  /* single-column grid: the 280px side rail no longer has room to hold its
+     width against, so the form column (title, description, repo, attachments)
+     collapses to a sliver without this override. */
+  .intake-grid { grid-template-columns: 1fr; }
   .intake .dialog-actions { position: sticky; bottom: 0; background: var(--color-surface); padding-top: 12px; margin-top: 0; }
   .doc-editor-menu { right: 0; }
 
@@ -1526,7 +1592,7 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; }
 .tag-off { border-color: var(--color-divider); color: var(--color-neutral-500); }
 
 /* intake from existing artifacts (design task 7) */
-.attachment-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.attachment-row { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
 .attachment-hit {
   display: flex; align-items: center; gap: 6px;
   padding: 4px 8px; border-radius: 6px; border: 1px solid var(--color-divider);
@@ -1535,8 +1601,7 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; }
 .chain-preview { margin-top: 4px; }
 .policy-radios { display: flex; gap: 16px; flex-wrap: wrap; }
 
-/* New work item (UI v2 · 10): repo chips, chain-preview click-to-skip. */
-.repo-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+/* New work item (design 10): chain-preview click-to-skip. */
 .chain-preview-node {
   display: inline-flex; align-items: center; gap: 2px;
   background: none; border: none; padding: 0; font: inherit; color: inherit; cursor: pointer;

@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -141,6 +141,17 @@ describe("PeekPane", () => {
     );
     expect(await screen.findByText("b")).toBeInTheDocument();
     expect(screen.queryByText("a")).toBeNull();
+  });
+
+  it("shows the running session's log, not a 0s job that finished later", async () => {
+    setOneItem({ current_node_id: "implementation" });
+    setSessions("w1", [
+      { id: "run", node_id: "implementation", status: "running", created_at: "2026-09-12T09:00:00Z" } as never,
+      { id: "scan", node_id: "implementation", status: "done", created_at: "2026-09-12T09:00:01Z" } as never,
+    ]);
+    const spy = vi.spyOn(api, "getLogLines").mockResolvedValue({ session_id: "run", status: "running", lines: [] });
+    renderPeek();
+    await waitFor(() => expect(spy).toHaveBeenCalledWith("run"));
   });
 
   // The scrim is display:none above 1280 (the pane sits beside clickable

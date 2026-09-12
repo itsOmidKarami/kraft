@@ -72,15 +72,22 @@ class Indexer:
     # ---- repo discovery ----
 
     def repos(self) -> list[str]:
+        # Resolved before landing in the set: `KRAFT_INDEX_REPOS` (an e2e-only
+        # bootstrap path) and `repos.yaml`/`work_items.repo` (canonicalized at
+        # connect time via `probe_repo`'s `git rev-parse`) can name the same
+        # directory with different strings — a symlinked tmp root (macOS's
+        # `/var` -> `/private/var`) is the case that actually happens. Two
+        # strings for one repo means two scans and two `documents` rows for
+        # the same file (Kraft-k7uq).
         seen = {
-            r["repo"]
+            str(Path(r["repo"]).resolve())
             for r in self._state.read(
                 lambda c: c.execute("SELECT DISTINCT repo FROM work_items").fetchall()
             )
         }
         if self._repos_env:
-            seen.update(p for p in self._repos_env.split(os.pathsep) if p)
-        seen.update(self._connected_repos())
+            seen.update(str(Path(p).resolve()) for p in self._repos_env.split(os.pathsep) if p)
+        seen.update(str(Path(p).resolve()) for p in self._connected_repos())
         return sorted(p for p in seen if Path(p).is_dir())
 
     def _connected_repos(self) -> list[str]:

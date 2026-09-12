@@ -4,10 +4,10 @@ import { Check, CirclesThree, MagnifyingGlass } from "@phosphor-icons/react";
 import * as api from "../api";
 import { repoName } from "../format";
 import { backdropProps } from "../useModal";
-import { SectionLabel } from "./ui";
+import { SectionLabel, TaskLine } from "./ui";
 import { useStore } from "../store";
 import { SETTINGS_NAV } from "../settingsNav";
-import type { Bead, SearchResult } from "../types";
+import type { Bead, SearchResult, TaskProgress } from "../types";
 import { DocumentModal } from "./DocumentModal";
 import { Snippet } from "./Snippet";
 
@@ -30,7 +30,14 @@ const GOTO_PAGES = [
 
 type Row =
   | { kind: "action"; key: string; label: string; sub: string; act: () => void }
-  | { kind: "workitem"; key: string; label: string; sub: string; to: string }
+  | {
+      kind: "workitem";
+      key: string;
+      label: string;
+      sub: string;
+      progress: TaskProgress | null;
+      to: string;
+    }
   | { kind: "document"; key: string; result: SearchResult }
   | { kind: "goto"; key: string; label: string; to: string };
 
@@ -148,7 +155,8 @@ export function SearchOverlay({
       kind: "workitem" as const,
       key: `wi:${i.id}`,
       label: i.title,
-      sub: `${repoName(i.repo)} · ${i.chain_template} · ${i.status}`,
+      sub: `${repoName(i.repo)} · ${i.current_node_id ?? i.chain_template} · ${i.status}`,
+      progress: i.progress ?? null,
       to: `/work-items/${i.id}`,
     }));
 
@@ -317,7 +325,15 @@ export function SearchOverlay({
               >
                 <span className="search-row-text">
                   <span className="search-row-title">{row.label}</span>
-                  <span className="search-row-sub">{row.sub}</span>
+                  <span className="search-row-sub">
+                    {row.sub}
+                    {row.progress && (
+                      <>
+                        {" · "}
+                        <TaskLine progress={row.progress} form="short" />
+                      </>
+                    )}
+                  </span>
                 </span>
               </button>
             ))}

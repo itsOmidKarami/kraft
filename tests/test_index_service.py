@@ -43,6 +43,30 @@ def test_repos_union_of_work_items_and_env(tmp_path):
     asyncio.run(scenario())
 
 
+def test_repos_dedupes_a_symlinked_path_against_its_target(tmp_path):
+    """Kraft-k7uq: `KRAFT_INDEX_REPOS` (an e2e-only bootstrap path) and a repo
+    connected through Settings can name the same directory two different ways
+    -- a symlinked tmp root (macOS's `/var` -> `/private/var`) is the case
+    that actually happens. Two strings for one repo meant two scans and two
+    `documents` rows for the same file; `repos()` must collapse them first."""
+
+    async def scenario():
+        state = await Database.open(tmp_path / "state.db")
+        conn = index_db.open_index(tmp_path / "index.db")
+        try:
+            real = make_repo_with_engineering(tmp_path, {".engineering/specs/a.md": "# A\nx\n"})
+            link = tmp_path / "link-to-real"
+            link.symlink_to(real)
+            await _seed_work_item(state, str(link))
+            ix = Indexer(conn, state, repos_env=str(real))
+            assert set(ix.repos()) == {str(real.resolve())}
+        finally:
+            conn.close()
+            await state.close()
+
+    asyncio.run(scenario())
+
+
 def test_startup_scan_then_search(tmp_path):
     async def scenario():
         state = await Database.open(tmp_path / "state.db")
