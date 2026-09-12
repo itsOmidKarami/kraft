@@ -8,10 +8,11 @@ It builds nothing (run `cd frontend && npm run build` first), boots
 `python -m kraft` against throwaway fixtures, waits for /api/health, then prints:
 
     KRAFT_E2E_REPO=<path>
+    KRAFT_E2E_BASE=http://127.0.0.1:<port>
 
-Copy that into the playwright command:
+Copy those into the playwright command:
 
-    cd frontend && KRAFT_E2E_REPO=<path> npx playwright test
+    cd frontend && KRAFT_E2E_REPO=<path> KRAFT_E2E_BASE=http://127.0.0.1:<port> npx playwright test
 
 Ctrl-C to tear the server down. The temp dir is left behind for inspection.
 """
@@ -39,8 +40,6 @@ from support.harness import (  # noqa: E402
     make_repo_with_engineering,
 )
 
-PORT = os.environ.get("KRAFT_PORT", "8765")
-
 
 def _listeners_on(port: int | str) -> list[str]:
     """PIDs holding the port, best effort — purely for the error message."""
@@ -57,27 +56,28 @@ def _listeners_on(port: int | str) -> list[str]:
 
 
 def ensure_port_free(port: int | str) -> None:
-    """Refuse to start when something already holds the port.
+    """Refuse to start when something already answers on the port.
 
-    Without this the health poll below is satisfied by whoever answers, and a
-    stale orchestrator from an earlier session answers instantly — before our
-    child has even attempted its bind. serve.py then prints "server up" while
-    the child dies, and the whole suite runs against the squatter's database,
-    templates and index (Kraft-dnv).
+    Only ever called for a `KRAFT_PORT` a human pinned explicitly —
+    `resolve_port`'s default (ephemeral) path has nothing to collide with.
 
-    SO_REUSEADDR matches what uvicorn will do, so a socket lingering in
-    TIME_WAIT does not cause a spurious refusal. It does not let this bind
-    succeed over a live listener, which is the case being detected.
+    Connects rather than binds: a `SO_REUSEADDR` bind on 127.0.0.1 succeeds
+    even while something else holds `*:PORT` (0.0.0.0), which is exactly the
+    live-listener case this exists to catch (Kraft-vhxe). A connect that
+    succeeds means someone is there; a connect that fails — refused, because
+    nothing is listening — means the port is free.
     """
     probe = socket.socket()
-    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
-        probe.bind(("127.0.0.1", int(port)))
-    except OSError as exc:
+        probe.settimeout(0.5)
+        probe.connect(("127.0.0.1", int(port)))
+    except OSError:
+        return  # nothing answered: the port is free
+    else:
         pids = _listeners_on(port)
         held = f" (held by PID {', '.join(pids)})" if pids else ""
         sys.exit(
-            f"port {port} is already in use{held}: {exc}\n"
+            f"port {port} is already in use{held}\n"
             f"  a leftover orchestrator would answer /api/health and impersonate this "
             f"fixture server.\n"
             f"  inspect: lsof -nP -iTCP:{port} -sTCP:LISTEN\n"
@@ -86,6 +86,38 @@ def ensure_port_free(port: int | str) -> None:
         )
     finally:
         probe.close()
+
+
+def _ephemeral_port() -> int:
+    """Bind 127.0.0.1:0, read the port the kernel picked, release it.
+
+    ponytail: TOCTOU between this close and the child's own bind in `main` —
+    another process can take the port in that window. Acceptable: the window
+    is milliseconds and a lost race fails loudly at the health poll, where the
+    alternative (teaching the daemon to publish its bound port) belongs to the
+    daemon-identity work, not here.
+    """
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def resolve_port() -> str:
+    """`KRAFT_PORT` wins if a human pinned one, and only then must it be free.
+    Unset picks a fresh ephemeral port every run, so two `serve.py` instances
+    never fight over 8765 (Kraft-f8u3, Kraft-m1e8).
+
+    A worker launched by a Kraft daemon inherits that daemon's own `KRAFT_PORT`
+    (adapters/subprocess.py builds worker envs as `{**os.environ, ...}`), which
+    looks identical to a human's pin. `KRAFT_DAEMON_PORT` is the daemon telling
+    its workers which port is its own (cli/admin.py); when the two agree, the
+    value is inherited, not pinned, so fall back to an ephemeral port instead
+    of colliding with the very daemon that spawned this worker."""
+    pinned = os.environ.get("KRAFT_PORT")
+    if pinned and pinned != os.environ.get("KRAFT_DAEMON_PORT"):
+        ensure_port_free(pinned)
+        return pinned
+    return str(_ephemeral_port())
 
 
 def _raise_interrupt(_signum, _frame) -> None:
@@ -113,7 +145,7 @@ def main() -> int:
     if not (dist / "index.html").exists():
         sys.exit(f"missing {dist}/index.html — run `cd frontend && npm run build` first")
 
-    ensure_port_free(PORT)
+    PORT = resolve_port()
 
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="kraft-e2e-"))
     # .engineering/ content so the indexer has something to find: the search
@@ -192,7 +224,8 @@ def main() -> int:
     urllib.request.urlopen(req, timeout=10).close()
 
     print(f"\n  server up on http://127.0.0.1:{PORT}  (temp: {tmp})")
-    print(f"  KRAFT_E2E_REPO={repo}\n", flush=True)
+    print(f"  KRAFT_E2E_REPO={repo}")
+    print(f"  KRAFT_E2E_BASE=http://127.0.0.1:{PORT}\n", flush=True)
     # Ctrl-C sends SIGINT; a CI runner or `kill` sends SIGTERM. Handle both, or
     # the orchestrator and its detached children outlive this script.
     signal.signal(signal.SIGTERM, _raise_interrupt)

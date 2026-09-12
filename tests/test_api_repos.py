@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from support.api_settings import _client
 from support.harness import fake_templates_dir, isolated_bd, make_repo
 
-from kraft import config, events, store
+from kraft import config, events, store, templates
 from kraft import db as kdb
 from kraft.paths import RunDirs
 
@@ -107,7 +107,7 @@ def test_repo_crud_round_trips_through_the_yaml(tmp_path, client, templates_dir)
 
 
 def test_add_repo_round_trips_default_model_and_steering(tmp_path, client, templates_dir):
-    (templates_dir / "steering").mkdir()
+    (templates_dir / "steering").mkdir(exist_ok=True)
     (templates_dir / "steering" / "house-style.md").write_text("# House style\nBe direct.\n")
     repo = make_repo(tmp_path)
     created = client.post(
@@ -498,7 +498,7 @@ def test_connected_repos_steering_reaches_the_agent_launch(tmp_path, monkeypatch
     `--append-system-prompt`. Both executor launch tests pass `steering_dir=None`
     and never exercise this join; this is the sibling that does."""
     templates_dir = fake_templates_dir(tmp_path, f"{sys.executable} {_FAKE_AGENT}")
-    (templates_dir / "steering").mkdir()
+    (templates_dir / "steering").mkdir(exist_ok=True)
     (templates_dir / "steering" / "house.md").write_text("Prefer tabs over spaces.")
     argv_log = tmp_path / "argv.jsonl"
     monkeypatch.setenv("KRAFT_FAKE_AGENT_ARGV_LOG", str(argv_log))
@@ -684,3 +684,16 @@ def test_patch_repo_can_enable_alongside_a_test_command_in_the_same_request(
     path = client.post("/api/repos", json={"path": str(repo), "enabled": False}).json()["path"]
     r = client.patch(f"/api/repos?path={path}", json={"enabled": True, "test_command": "pytest"})
     assert r.status_code == 200, r.text
+
+
+def test_packaged_registry_wires_the_never_signal_steering_rule():
+    """Kraft-f8u3: the rule the spec asks for actually ships wired to every
+    repo, via the hook binding -- not just to the one repo happening to be
+    listed in repos.yaml, which every real repo registered through POST
+    /api/repos would never see."""
+    templates_dir = Path(__file__).resolve().parents[1] / "templates"
+    registry = templates.load_registry(
+        templates_dir / "registry.yaml", steering_dir=templates_dir / "steering"
+    )
+    binding = registry.hooks["on.implementation.start"]
+    assert "never-signal-processes-you-didnt-start" in binding.get("steering", [])

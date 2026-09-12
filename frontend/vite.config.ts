@@ -2,7 +2,7 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig, type ProxyOptions } from "vite";
 
-const API = "http://127.0.0.1:8765";
+const API = `http://127.0.0.1:${process.env.KRAFT_PORT ?? "8765"}`;
 // Every backend route lives under /api/ (including /api/ws/events), so one
 // prefix covers all of them — no more per-route entries to keep in sync with
 // api.ts. src/vite.proxy.test.ts still fails if api.ts starts requesting a

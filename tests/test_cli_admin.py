@@ -264,3 +264,18 @@ def test_start_notice_is_silenced_by_the_env_var(monkeypatch, capsys):
     monkeypatch.setattr(update, "latest", lambda **_: pytest.fail("checked with the env var set"))
     cli.admin._update_notice()
     assert capsys.readouterr().out == ""
+
+
+def test_serve_exports_its_identity_for_workers(tmp_path, monkeypatch):
+    """A worker spawned later inherits KRAFT_DAEMON_PID/PORT, so it can check
+    whatever it finds on a port against the daemon it actually is, rather than
+    assume it is stale and kill it (Kraft-f8u3)."""
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    monkeypatch.setenv("KRAFT_PORT", "9321")
+    monkeypatch.delenv("KRAFT_DAEMON_PID", raising=False)
+    monkeypatch.delenv("KRAFT_DAEMON_PORT", raising=False)
+    monkeypatch.setattr(uvicorn, "run", lambda *a, **k: None)
+    cli.admin._serve()
+    assert os.environ["KRAFT_DAEMON_PID"] == str(os.getpid())
+    assert os.environ["KRAFT_DAEMON_PORT"] == "9321"

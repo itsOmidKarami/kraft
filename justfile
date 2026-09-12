@@ -20,7 +20,8 @@ setup-vector:
 # own home, and beads writing into the throwaway seed repo instead of this one.
 dev_env := "KRAFT_HOME=" + justfile_directory() + "/.dev" + \
     " KRAFT_BD_CWD=" + justfile_directory() + "/.dev/repo" + \
-    " KRAFT_FRONTEND_DIST=" + justfile_directory() + "/frontend/dist"
+    " KRAFT_FRONTEND_DIST=" + justfile_directory() + "/frontend/dist" + \
+    " KRAFT_PORT=8766"
 
 # The fake agent ahead of the real `claude`, so a dev instance never spends tokens.
 fake_agent := "PATH=" + justfile_directory() + "/fixtures/bin:$PATH"
@@ -36,20 +37,21 @@ _dev-home:
     @rm -f .dev/templates/access.yaml
     @{{dev_env}} uv run python dev/seed.py --repo-only
 
-# Run backend only, against the dev home (127.0.0.1:8765)
+# Run backend only, against the dev home (127.0.0.1:8766)
 api: _dev-home
     {{dev_env}} {{fake_agent}} uv run python -m kraft
 
 # Run frontend dev server only (localhost:5173, proxies to backend)
 ui:
-    cd frontend && npm run dev
+    cd frontend && KRAFT_PORT=8766 npm run dev
 
 # Dev instance: backend + vite, fake agents, state in .dev/ (Ctrl-C stops both)
 dev: _dev-home
     #!/usr/bin/env bash
     set -uo pipefail
     trap 'kill 0' EXIT
-    {{dev_env}} {{fake_agent}} uv run python -m kraft &
+    export {{dev_env}}
+    {{fake_agent}} uv run python -m kraft &
     cd frontend && npm run dev &
     wait
 
