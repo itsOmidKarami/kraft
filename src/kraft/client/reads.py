@@ -318,8 +318,30 @@ async def repos() -> list[dict]:
 
 
 async def health() -> dict:
-    """The server's own view of itself: invalid config, index state, reattach."""
-    return await transport._get("/health")
+    """The server's own view of itself: invalid config, index state, reattach.
+
+    Raises when the server's run_dir does not match this client's -- the CLI
+    resolved a live server on host:port, but it is not the instance
+    KRAFT_HOME/KRAFT_RUN_DIR says it should be (Kraft-kquf: "status ok,
+    documents 2" from somebody's e2e fixture on the same port). Reporting
+    somebody else's index as this machine's is exactly the failure this
+    guards against -- loud and naming both paths, not a quiet wrong answer.
+    """
+    payload = await transport._get("/health")
+    expected = str(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir()).resolve())
+    actual = payload.get("run_dir")
+    if actual != expected:
+        cause = (
+            "probably an older kraft daemon still running on this port - restart it"
+            if actual is None
+            else "probably a different KRAFT_HOME/KRAFT_RUN_DIR, or something "
+            "else already on this port"
+        )
+        raise ValueError(
+            f"kraft: the server at {transport.base_url()} is a different instance "
+            f"(run_dir {actual!r}, expected {expected!r}) - {cause}"
+        )
+    return payload
 
 
 async def reindex(repo: str | None = None) -> dict:

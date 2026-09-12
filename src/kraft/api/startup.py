@@ -31,7 +31,12 @@ DEFAULT_FRONTEND_DIST = BUNDLED / "web"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.tasks = {}
-    run_dirs = RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())).ensure()
+    # Resolved, so /health's run_dir matches the client's own
+    # str(Path(...).resolve()) (kraft.client.reads.health) even when
+    # KRAFT_RUN_DIR is relative or symlinked -- otherwise the honest server
+    # gets refused as "a different instance".
+    run_dir = Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir()).resolve()
+    run_dirs = RunDirs(run_dir).ensure()
     # The credential a non-browser client (kraft mcp, kraft <verb>) presents when
     # auth is on at all. Created once and kept, so a registered MCP client keeps
     # working across restarts.

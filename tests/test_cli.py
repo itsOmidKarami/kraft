@@ -121,13 +121,24 @@ def _servable_home(monkeypatch, tmp_path, access_yaml: str) -> Path:
     # so a delenv here would let that write leak into every later test.
     monkeypatch.setenv("KRAFT_HOST", "")
     monkeypatch.setenv("KRAFT_PORT", "")
+    # These tests use the literal port from access.yaml, which may be a real
+    # port on the machine running the suite (this is Kraft-kquf's own bug, on
+    # a dev box that already runs a real kraft daemon on 8765) — not what any
+    # of them are testing.
+    monkeypatch.setattr(cli.admin, "_refuse_if_addr_taken", lambda *a, **k: None)
     return home
 
 
 def test_serve_verb_reaches_uvicorn_with_the_configured_bind(monkeypatch, tmp_path):
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
     seen = {}
-    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: seen.update(kw))
+
+    class FakeConfig:
+        def __init__(self, app, **kw):
+            seen.update(kw)
+
+    monkeypatch.setattr(uvicorn, "Config", FakeConfig)
+    monkeypatch.setattr(cli.admin._SignalLoggingServer, "run", lambda self, *a, **k: None)
     cli.main(["admin", "start"])
     assert seen["host"] == "127.0.0.1"
     assert seen["port"] == 8765
@@ -136,7 +147,13 @@ def test_serve_verb_reaches_uvicorn_with_the_configured_bind(monkeypatch, tmp_pa
 def test_serve_flags_override_access_yaml(monkeypatch, tmp_path):
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
     seen = {}
-    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: seen.update(kw))
+
+    class FakeConfig:
+        def __init__(self, app, **kw):
+            seen.update(kw)
+
+    monkeypatch.setattr(uvicorn, "Config", FakeConfig)
+    monkeypatch.setattr(cli.admin._SignalLoggingServer, "run", lambda self, *a, **k: None)
     cli.main(["admin", "start", "--port", "9001"])
     assert seen["port"] == 9001
     assert seen["host"] == "127.0.0.1"  # untouched: only the flag given changes
@@ -146,7 +163,13 @@ def test_serve_flag_beats_env(monkeypatch, tmp_path):
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
     monkeypatch.setenv("KRAFT_PORT", "9002")
     seen = {}
-    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: seen.update(kw))
+
+    class FakeConfig:
+        def __init__(self, app, **kw):
+            seen.update(kw)
+
+    monkeypatch.setattr(uvicorn, "Config", FakeConfig)
+    monkeypatch.setattr(cli.admin._SignalLoggingServer, "run", lambda self, *a, **k: None)
     cli.main(["admin", "start", "--port", "9003"])
     assert seen["port"] == 9003
 
@@ -163,7 +186,13 @@ def test_serve_host_flag_cannot_bypass_the_password_check(monkeypatch, tmp_path)
 def test_bare_kraft_and_kraft_serve_are_the_same_path(monkeypatch, tmp_path):
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
     calls = []
-    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: calls.append(kw))
+
+    class FakeConfig:
+        def __init__(self, app, **kw):
+            calls.append(kw)
+
+    monkeypatch.setattr(uvicorn, "Config", FakeConfig)
+    monkeypatch.setattr(cli.admin._SignalLoggingServer, "run", lambda self, *a, **k: None)
     cli.main([])
     cli.main(["admin", "start"])
     assert calls[0] == calls[1]

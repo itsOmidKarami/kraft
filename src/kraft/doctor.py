@@ -53,6 +53,7 @@ async def run_checks() -> list[dict]:
         else [_check("health", True, "skipped: no server", skipped=True)]
     )
     checks.extend(_config_checks())
+    checks.append(_pidfile_check())
     checks.append(_agent_check())
     checks.append(await _mcp_check(health is not None))
     checks.append(_completion_check())
@@ -116,6 +117,31 @@ def _config_checks() -> list[dict]:
     checks.append(_hooks_check())
     checks.append(_token_check())
     return checks
+
+
+def _pidfile_check() -> dict:
+    """A pidfile naming a process that is gone looks, to every other check
+    here, exactly like no server ever started -- nothing before this ever
+    said so (Kraft-mqwg)."""
+    pid_path = RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())).pid
+    if not pid_path.is_file():
+        return _check("pidfile", True, "no pidfile")
+    try:
+        pid = int(pid_path.read_text())
+    except (OSError, ValueError) as exc:
+        return _check("pidfile", False, f"{pid_path}: {exc}")
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return _check(
+            "pidfile",
+            False,
+            f"{pid_path} names pid {pid}, which is not running - stale; "
+            "the next `kraft admin start` clears it",
+        )
+    except PermissionError:
+        pass  # alive, and not ours to signal
+    return _check("pidfile", True, f"{pid_path} (pid {pid})")
 
 
 def _is_noop(binding) -> bool:
