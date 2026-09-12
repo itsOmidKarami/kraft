@@ -25,7 +25,14 @@ _FIXED_DATE = "2026-01-01T00:00:00+00:00"
 
 def _git(cwd: Path, *args: str) -> None:
     env = {**os.environ, "GIT_AUTHOR_DATE": _FIXED_DATE, "GIT_COMMITTER_DATE": _FIXED_DATE}
-    subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True, env=env)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
+    )
 
 
 def make_repo(tmp_path: Path, name: str = "sample") -> Path:

@@ -20,6 +20,7 @@ from kraft.adapters import forge as forge_mod
 from kraft.api import api_router, deps
 from kraft.api.routes import board, search
 from kraft.api.routes.search import OpenDocument
+from kraft.config import git_read
 from kraft.templates import Registry
 
 logger = logging.getLogger(__name__)
@@ -387,6 +388,15 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         await st.db.write(lambda c: store.mark_needs_human(c, wid, row["current_node_id"], reason))
         return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
     if new_base:
+        worktree_head = git_read(worktree, "rev-parse", "HEAD", expected_failure=True)
+        await st.db.write(
+            lambda c: events.append(
+                c,
+                wid,
+                "worktree_rebase_verified",
+                {"reported_head": new_base, "worktree_head": worktree_head},
+            )
+        )
         await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
     await st.db.write(lambda c: store.resume_work_item(c, wid, steer))
 
@@ -552,6 +562,15 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         await st.db.write(lambda c: store.mark_needs_human(c, wid, node_id, reason))
         return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
     if new_base:
+        worktree_head = git_read(worktree, "rev-parse", "HEAD", expected_failure=True)
+        await st.db.write(
+            lambda c: events.append(
+                c,
+                wid,
+                "worktree_rebase_verified",
+                {"reported_head": new_base, "worktree_head": worktree_head},
+            )
+        )
         await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
 
     await st.db.write(

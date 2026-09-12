@@ -49,3 +49,41 @@ def test_every_script_line_is_a_string(key):
         f"': ' makes YAML read the line as a mapping. Quote the whole line:\n"
         + "\n".join(f"  {name}: {line!r}" for name, line in bad)
     )
+
+
+#: Paths deliberately absent from the repo -- a generated artifact, a
+#: lockfile not yet committed. Empty today: nothing in .gitlab-ci.yml's
+#: changes: rules is meant to miss.
+ALLOWLIST: frozenset[str] = frozenset()
+
+
+def _changes_paths() -> set[str]:
+    return {
+        pattern
+        for body in _jobs().values()
+        for rule in body.get("rules") or []
+        for pattern in rule.get("changes") or []
+    }
+
+
+def _dead_paths(root: Path, patterns) -> list[str]:
+    """Every pattern that matches no file under root."""
+    return [p for p in patterns if not any(root.glob(p))]
+
+
+def test_dead_paths_catches_a_glob_that_matches_nothing(tmp_path):
+    (tmp_path / "real.txt").write_text("x")
+    assert _dead_paths(tmp_path, {"real.txt"}) == []
+    assert _dead_paths(tmp_path, {"nope/**/*"}) == ["nope/**/*"]
+
+
+def test_every_changes_path_matches_something_in_the_repo():
+    """A changes: glob matching nothing is a typo or a file that moved --
+    Kraft-plyk found src/kraft/api.py long after it became a package. Either
+    way the job silently falls through to `when: manual` and the pipeline
+    goes green with no coverage."""
+    dead = _dead_paths(CONFIG.parent, _changes_paths() - ALLOWLIST)
+    assert not dead, (
+        "changes: path matches nothing in the repo (typo, or the file moved):\n"
+        + "\n".join(f"  {p}" for p in dead)
+    )

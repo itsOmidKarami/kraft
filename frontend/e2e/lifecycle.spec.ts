@@ -1,4 +1,5 @@
 import { connectRepo, expect, test } from "./fixtures";
+import { scaledTimeout } from "../e2e-timing";
 
 // Manual regression round, part 2: the human-in-the-loop controls on the detail
 // screen — gates, pause/steer/resume — driven from the real UI.
@@ -23,15 +24,15 @@ async function createItem(page: any, title: string, template: string) {
 
 test("gate: approve advances the chain from the UI", async ({ page }) => {
   await createItem(page, "ui gate approve", "default");
-  await expect(page.getByText(/approve the spec to continue/i)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/approve the spec to continue/i)).toBeVisible({ timeout: scaledTimeout(30_000) });
   await page.getByRole("button", { name: "Approve" }).first().click();
   // the next gate is the plan gate
-  await expect(page.getByText(/approve the plan to continue/i)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/approve the plan to continue/i)).toBeVisible({ timeout: scaledTimeout(30_000) });
 });
 
 test("gate: reject offers a way forward", async ({ page }) => {
   await createItem(page, "ui gate reject", "default");
-  await expect(page.getByText(/approve the spec to continue/i)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/approve the spec to continue/i)).toBeVisible({ timeout: scaledTimeout(30_000) });
   await page.getByRole("button", { name: /^Reject$/ }).first().click();
   await page.getByLabel("composer message").fill("the spec misses the error path");
   await page.getByRole("button", { name: /Reject and re-plan/ }).click();
@@ -41,12 +42,12 @@ test("gate: reject offers a way forward", async ({ page }) => {
   // the spec node re-runs with the note and asks for its gate again — the item
   // must never be left with no control at all
   await expect(page.locator(".attention-title")).toContainText(/approve the spec/i, {
-    timeout: 60_000,
+    timeout: scaledTimeout(60_000),
   });
   await expect(page.getByRole("button", { name: "Approve" }).first()).toBeEnabled();
   await page.getByRole("button", { name: "Approve" }).first().click();
   await expect(page.locator(".attention-title")).toContainText(/approve the plan/i, {
-    timeout: 60_000,
+    timeout: scaledTimeout(60_000),
   });
 });
 
@@ -73,22 +74,22 @@ test("pause, steer and resume from the detail screen", async ({ page }) => {
             s.node_id === "implementation" && s.status === "running",
         );
       },
-      { timeout: 30_000 },
+      { timeout: scaledTimeout(30_000) },
     )
     .toBe(true);
   const pause = page.getByRole("button", { name: /^Pause$/ });
-  await expect(pause).toBeEnabled({ timeout: 30_000 });
+  await expect(pause).toBeEnabled({ timeout: scaledTimeout(30_000) });
   await pause.click();
-  await expect(page.getByRole("button", { name: /^Steer$/ })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("button", { name: /^Steer$/ })).toBeVisible({ timeout: scaledTimeout(30_000) });
   await page.getByRole("button", { name: /^Steer$/ }).click();
   await expect(page.getByRole("button", { name: /Resume with this steer/ })).toBeVisible({
-    timeout: 30_000,
+    timeout: scaledTimeout(30_000),
   });
   await page.getByLabel("composer message").fill("try a different approach");
   await page.getByRole("button", { name: /Resume with this steer/ }).click();
   await page.getByRole("tab", { name: /Timeline/ }).click();
   await expect(page.locator('[data-type="work_item_completed"]')).toBeVisible({
-    timeout: 90_000,
+    timeout: scaledTimeout(90_000),
   });
 });
 
@@ -102,7 +103,7 @@ test("a deep link to a work item loads it, not an empty husk", async ({ page }) 
   await page.goto(`/work-items/${id}`); // full page load, not a client-side route
   await page.getByRole("tab", { name: /Timeline/ }).click();
   await expect(page.locator('[data-type="node_started"]').first()).toBeVisible({
-    timeout: 30_000,
+    timeout: scaledTimeout(30_000),
   });
   await page.getByRole("tab", { name: /Tasks/ }).click();
   // UI v2 · 05: the Tasks tab is the 340px inspector list now, not
