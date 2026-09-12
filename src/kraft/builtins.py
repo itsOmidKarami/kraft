@@ -479,7 +479,9 @@ async def upstream_head(repo: Path) -> str | None:
     return git_read(repo, "rev-parse", "HEAD")
 
 
-async def refresh_worktree_base(worktree: Path, repo: Path, branch: str) -> str | None:
+async def refresh_worktree_base(
+    worktree: Path, repo: Path, branch: str, *, force: bool = False
+) -> str | None:
     """Rebase `worktree`'s branch onto origin's default branch (`upstream_head`),
     so a paused or retried item's next commit lands on top of whatever landed
     while the item sat stopped, not the commit it forked from.
@@ -488,15 +490,22 @@ async def refresh_worktree_base(worktree: Path, repo: Path, branch: str) -> str 
     stores it as the item's `base_ref`), or None when there was nothing to
     do: no worktree yet, `repo`'s HEAD unreadable, the branch already
     contains that HEAD, the branch already has an `origin` remote-tracking
-    ref, or the worktree has uncommitted changes -- all four are best-effort
-    skips (logged), same posture as `ensure_worktree`'s other git steps.
-    The dirty-tree case comes from a pause via SIGTERM (`kraft.api.routes.lifecycle._terminate`)
-    catching an agent mid-edit with nothing committed yet, and `git rebase`
-    itself refuses a dirty tree; the pushed-branch case is covered below.
+    ref (unless `force`), or the worktree has uncommitted changes -- all are
+    best-effort skips (logged), same posture as `ensure_worktree`'s other git
+    steps. The dirty-tree case comes from a pause via SIGTERM
+    (`kraft.api.routes.lifecycle._terminate`) catching an agent mid-edit with
+    nothing committed yet, and `git rebase` itself refuses a dirty tree; the
+    pushed-branch case is covered below.
 
     Raises RuntimeError, with the rebase already aborted (`git rebase
     --abort`), on a conflict -- that is for a human to resolve, not to
     dispatch an agent into.
+
+    `force=True` (only `mr_checks`'s conflict-triggered rebase passes this,
+    via `mr_rebase_forced` below) skips the "already pushed, don't touch it"
+    guard: the caller already read the merge request back and confirmed it
+    cannot land as-is, so rewriting a branch a reviewer is looking at is
+    exactly what was asked for, not an accident.
     """
     if not worktree.is_dir():
         return None
@@ -507,7 +516,7 @@ async def refresh_worktree_base(worktree: Path, repo: Path, branch: str) -> str 
     # deliberate rebase someone asked for. `forge._push` can publish a
     # rewritten branch now (Kraft-z6i8), so this skip is a policy choice about
     # *when* to rewrite, not a workaround for push being unable to.
-    if git_read(
+    if not force and git_read(
         worktree,
         "rev-parse",
         "--verify",
@@ -597,6 +606,14 @@ async def mr_rebase(
         log=log,
         head_sha=head_sha,
     )
+
+
+async def mr_rebase_forced(worktree: Path, repo: Path, branch: str) -> str | None:
+    """`refresh_worktree_base` with the pushed-branch guard off, for
+    `ci_poll`'s conflict path (Kraft-9h7v) -- the one caller that has already
+    confirmed, from the forge's own re-fetched read, that this branch cannot
+    land as it stands."""
+    return await refresh_worktree_base(worktree, repo, branch, force=True)
 
 
 async def scan_submodules(
@@ -750,9 +767,19 @@ async def finish_session(
     session_id: str,
     status: str,
     log: str,
+    findings: list[dict] | None = None,
 ) -> str:
-    """Write the log and close out a session `start_session` already created."""
+    """Write the log and close out a session `start_session` already created.
+
+    `findings` is None for every caller that predates this (an agent/
+    subprocess task writes its own result file, and every existing builtin
+    has nothing to report) -- writing `result_path` only when it is given
+    keeps `_findings.parse`'s "missing file -> no findings" behaviour for
+    every one of them.
+    """
     log_path.write_text(log)
+    if findings is not None:
+        result_path.write_text(json.dumps({"findings": findings}))
     # A subprocess session gets its per-line timestamps from the adapter's drain
     # thread (`adapters/subprocess._watch_log`), which stamps each line as it
     # appears. A builtin writes its whole log in one call and has no drain

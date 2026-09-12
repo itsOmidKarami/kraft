@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 26
+SCHEMA_VERSION = 27
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -120,7 +120,7 @@ CREATE TABLE worker_sessions (
   status         TEXT NOT NULL CHECK (status IN
                    ('pending', 'running', 'done', 'failed', 'capped_out', 'paused', 'unknown',
                     'done_with_concerns', 'needs_context', 'rate_limited', 'config_error',
-                    'waiting')),
+                    'waiting', 'conflict', 'infra', 'infra_stop')),
   attempt        INTEGER NOT NULL DEFAULT 1,
   session_summary_ref TEXT,
   created_at     TEXT NOT NULL,
@@ -604,6 +604,51 @@ FROM worker_sessions""",
     25: [
         "ALTER TABLE work_items ADD COLUMN archived_at TEXT",
         "ALTER TABLE work_items ADD COLUMN archived_by TEXT",
+    ],
+    # `ci_poll`'s honest verdicts (Kraft-cbr): a settled-green-but-confirmed-
+    # unmergeable pipeline is 'conflict', not 'failed' (Task 2); a settled red
+    # pipeline whose every failed job is the forge's own fault is 'infra'
+    # while it is still retrying (Task 4), and 'infra_stop' once that retry
+    # budget is spent. SQLite cannot alter a constraint, so worker_sessions is
+    # rebuilt the same way migration 22/23 did.
+    26: [
+        """CREATE TABLE worker_sessions_new (
+  id             TEXT PRIMARY KEY,
+  work_item_id   TEXT NOT NULL REFERENCES work_items(id),
+  node_id        TEXT NOT NULL,
+  hook_point     TEXT NOT NULL,
+  pid            INTEGER,
+  pid_start_time REAL,
+  log_path       TEXT NOT NULL,
+  result_path    TEXT NOT NULL,
+  status         TEXT NOT NULL CHECK (status IN
+                   ('pending', 'running', 'done', 'failed', 'capped_out', 'paused', 'unknown',
+                    'done_with_concerns', 'needs_context', 'rate_limited', 'config_error',
+                    'waiting', 'conflict', 'infra', 'infra_stop')),
+  attempt        INTEGER NOT NULL DEFAULT 1,
+  session_summary_ref TEXT,
+  created_at     TEXT NOT NULL,
+  started_at     TEXT,
+  round          INTEGER NOT NULL DEFAULT 0,
+  model          TEXT,
+  tokens_in      INTEGER,
+  tokens_out     INTEGER,
+  cost_usd       REAL,
+  wall_ms        INTEGER,
+  exited_at      TEXT,
+  head_sha       TEXT
+)""",
+        """INSERT INTO worker_sessions_new (id, work_item_id, node_id, hook_point, pid,
+  pid_start_time, log_path, result_path, status, attempt, session_summary_ref,
+  created_at, started_at, round, model, tokens_in, tokens_out, cost_usd, wall_ms,
+  exited_at, head_sha)
+SELECT id, work_item_id, node_id, hook_point, pid, pid_start_time, log_path,
+       result_path, status, attempt, session_summary_ref, created_at, started_at,
+       round, model, tokens_in, tokens_out, cost_usd, wall_ms, exited_at, head_sha
+FROM worker_sessions""",
+        "DROP TABLE worker_sessions",
+        "ALTER TABLE worker_sessions_new RENAME TO worker_sessions",
+        "CREATE INDEX idx_worker_sessions_status ON worker_sessions(status)",
     ],
 }
 

@@ -638,7 +638,7 @@ def test_migrate_v9_to_v10_widens_worker_sessions_status(tmp_path):
             ),
             ("'unknown',", ""),
             ("done_with_concerns", ""),
-            ("                    'waiting')),", ""),
+            ("                    'waiting', 'conflict', 'infra', 'infra_stop')),", ""),
         ),
     )
     conn.execute(
@@ -690,6 +690,55 @@ def test_migrate_v9_to_v10_widens_worker_sessions_status(tmp_path):
     # both new statuses are now accepted by the rebuilt CHECK
     conn2.execute("UPDATE worker_sessions SET status = 'done_with_concerns' WHERE id = 's1'")
     conn2.execute("UPDATE worker_sessions SET status = 'needs_context' WHERE id = 's1'")
+
+
+def test_migrate_v26_to_v27_widens_worker_sessions_status_for_ci_verdicts(tmp_path):
+    """v26's worker_sessions CHECK has no 'conflict'/'infra'/'infra_stop' --
+    `ci_poll`'s honest verdicts (Kraft-cbr, Kraft-bjjm, Kraft-h81i). SQLite
+    cannot alter a constraint, so the table is rebuilt; every column has to
+    survive it."""
+    path = tmp_path / "orchestrator.db"
+    conn = db._connect(path)
+    _build_old_db(
+        conn,
+        26,
+        replace=(
+            (
+                "                    'waiting', 'conflict', 'infra', 'infra_stop')),",
+                "                    'waiting')),",
+            ),
+        ),
+    )
+    conn.execute(
+        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
+        "'active','now','now')"
+    )
+    conn.execute(
+        "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, pid, "
+        "pid_start_time, log_path, result_path, status, attempt, session_summary_ref, "
+        "created_at, started_at, round, model, tokens_in, tokens_out, cost_usd, "
+        "wall_ms, exited_at) VALUES ('s1', 'w1', 'mr_checks', 'on.ci.poll', 123, 456.7, "
+        "'/l', '/r', 'waiting', 1, NULL, 'now', 'started', 0, NULL, NULL, NULL, NULL, "
+        "NULL, NULL)"
+    )
+    conn.commit()
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("UPDATE worker_sessions SET status = 'conflict' WHERE id = 's1'")
+    conn.close()
+
+    conn2 = db._connect(path)
+    db.migrate(conn2)
+    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+
+    row = conn2.execute("SELECT * FROM worker_sessions WHERE id = 's1'").fetchone()
+    assert row["work_item_id"] == "w1"
+    assert row["node_id"] == "mr_checks"
+    assert row["status"] == "waiting"
+
+    conn2.execute("UPDATE worker_sessions SET status = 'conflict' WHERE id = 's1'")
+    conn2.execute("UPDATE worker_sessions SET status = 'infra' WHERE id = 's1'")
+    conn2.execute("UPDATE worker_sessions SET status = 'infra_stop' WHERE id = 's1'")
 
     index_names = {r[0] for r in conn2.execute("SELECT name FROM sqlite_master WHERE type='index'")}
     assert "idx_worker_sessions_status" in index_names
@@ -948,7 +997,7 @@ def test_migrate_v16_to_v17_rebuilds_for_rate_limited(tmp_path):
         16,
         drop_lines=(
             "                      'rate_limited', 'waiting')),",
-            "                    'waiting')),",
+            "                    'waiting', 'conflict', 'infra', 'infra_stop')),",
         ),
         replace=(
             (

@@ -8,6 +8,7 @@ import asyncio
 import logging
 from pathlib import Path
 
+from kraft.adapters.forge import git
 from kraft.adapters.forge.models import MR, CIStatus, Forge, ForgeError, MRRef
 
 logger = logging.getLogger(__name__)
@@ -86,26 +87,130 @@ async def poll_ci(
         interval = min(interval * 2, cap)
 
 
-def render_ci(ci: CIStatus) -> tuple[str, str]:
-    """Render the log line and verdict for one CI check. Shared by `ci_poll`'s
-    single check and `wait_for_ci`'s settled result, so the two callers
-    cannot drift in how they describe the same pipeline (Kraft-ru98).
+async def render_ci(
+    ci: CIStatus,
+    *,
+    forge: Forge,
+    repo: Path,
+    branch: str,
+    head_sha: str | None,
+    _retried: bool = False,
+) -> tuple[str, str]:
+    """Render the log line and verdict for one CI read.
 
-    Returns the log text and "done"/"failed"/"waiting" -- "waiting" only for a
-    pipeline that is still pending and mergeable, which `wait_for_ci` never
-    passes through here (it resolves pending itself, into a timeout).
+    Order matters and is the fix (Kraft-bjjm): a pipeline not for this head,
+    or still pending, is a wait — never a failure — however the merge status
+    reads, because GitLab recomputes merge status asynchronously after a push
+    and a head pushed seconds ago is routinely reported unmergeable for a
+    moment. Only a *settled* green pipeline's unmergeable reading is trusted,
+    and only after a second read confirms it (Kraft-ejj9 stays true, just
+    later). A settled red pipeline is `"infra"` when every failed job is the
+    forge's own fault, `"failed"` (code-red) otherwise, and green+confirmed-
+    unmergeable is `"conflict"`.
     """
     log = f"pipeline {ci.state}: {ci.url}\n" + "".join(f"  {j}\n" for j in ci.jobs)
-    if ci.mergeable is False:
-        # Green *and* unmergeable is the exact shape of the bug: the pipeline
-        # passes, the gate passes, and the merge node meets the conflict
-        # (Kraft-ejj9). `is False` and not falsiness: None is undecided, and
-        # undecided is this node's normal.
-        log += f"merge request is not mergeable: {ci.merge_detail or 'unknown'}\n"
-        return log, "failed"
+    if ci.sha and head_sha and ci.sha != head_sha:
+        return log, "waiting"
     if ci.state == "pending":
         return log, "waiting"
-    return log, "done" if ci.state == "success" else "failed"
+    if ci.state == "success" and ci.mergeable is False:
+        if _retried:
+            log += f"merge request is not mergeable: {ci.merge_detail or 'unknown'}\n"
+            return log, "conflict"
+        fresh = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
+        return await render_ci(
+            fresh, forge=forge, repo=repo, branch=branch, head_sha=head_sha, _retried=True
+        )
+    if ci.state == "success":
+        return log, "done"
+    if is_infra_red(ci):
+        return log, "infra"
+    return log, "failed"
+
+
+#: Kraft-h81i, Kraft-s8ul, Kraft-ddxn: a failed job whose own `failure_reason`
+#: names one of these is the forge's own infrastructure, not the branch's
+#: code. `script_failure`, an unrecognised reason, or a red pipeline that
+#: named no reason at all, are code-red — the failure a fix loop is for.
+#:
+#: Deliberately NOT `"cancelled"`. By the time a job's `failure_reason` is read
+#: here, `render_ci`'s sha guard has already confirmed this pipeline belongs to
+#: the current head, so nothing newer could have superseded it through
+#: GitLab's redundant-pipeline auto-cancel — the only thing left that could
+#: have cancelled *this* pipeline is a human clicking Cancel. Auto-retrying
+#: that through the forge would silently override a person's own decision,
+#: which is worse than spending one code-red fix cycle that finds nothing to
+#: change and reports back quickly with the cancellation named in the finding.
+_INFRA_REASONS = frozenset(
+    {
+        "runner_system_failure",
+        "stuck_or_timeout_failure",
+        "job_execution_timeout",
+        "scheduler_failure",
+    }
+)
+
+
+def is_infra_red(ci: CIStatus) -> bool:
+    """A settled red pipeline with no jobs at all (a config error stopped
+    anything from running) is infra-shaped by definition — there is no job to
+    blame, so there is nothing for a fix loop to fix.
+
+    `not ci.failed_jobs` must mean *the forge confirmed* zero jobs, never "we
+    could not find out" — that ambiguity is exactly Kraft-h81i's real
+    regression (caught on review of this plan): a `glab ci get` call that
+    itself fails (`ForgeError`, unparseable JSON) has nothing to report either,
+    and treating that the same as a genuine zero-job pipeline reads a
+    perfectly ordinary `script_failure` this fix loop exists to catch as
+    infra instead, self-retrying twice and stopping at `needs_human` with no
+    fix loop ever run. `glab.py`'s `_failure_detail` is the only caller that
+    can produce an empty `failed_jobs` tuple, and it is written so the
+    unreadable case never does — it returns a placeholder job with
+    `failure_reason=None` instead, which is not a member of `_INFRA_REASONS`,
+    so the `all(...)` below reads it as code-red by default. Only a
+    *successful* read that confirms no job ran returns the real empty tuple
+    this function treats as infra.
+    """
+    if not ci.failed_jobs:
+        return True
+    return all(j.failure_reason in _INFRA_REASONS for j in ci.failed_jobs)
+
+
+#: A runner failure or a config error resolves on its own or it does not --
+#: two retries, not thirty minutes of them (Kraft-h81i). Widen this if a real
+#: install's infra is flakier than that. The count that matters is run.py's
+#: persisted `ci_infra:<node_id>` counter, not a variable in this module --
+#: see `retry_infra_once`'s docstring for why.
+_INFRA_RETRY_CAP = 2
+#: Generous on purpose: this counter is bookkeeping across `ci_poll` entries,
+#: not a user-facing loop with its own `policy.yaml` entry, so its wall-clock
+#: side of the cap should essentially never be what trips it -- the attempts
+#: side always will be, first.
+_INFRA_WALL_CLOCK_S = 3600
+
+
+async def retry_infra_once(
+    forge: Forge, *, repo: Path, branch: str, head_sha: str | None, first: CIStatus
+) -> tuple[str, str]:
+    """Kick one retry of a settled infra-red pipeline through the forge, then
+    read it back once and hand back whatever verdict that read gives.
+
+    Deliberately not a loop over `_INFRA_RETRY_CAP`: `forge.retry_jobs` only
+    *starts* the job again -- the pipeline is not settled the instant it
+    returns, so a synchronous re-read immediately after almost always still
+    sees `"pending"` (verdict `"waiting"`). A loop with an immediate re-read
+    (this function's previous shape) therefore only ever spent one kick
+    before returning `"waiting"`, whatever its cap said, and reset that
+    "budget" to zero on every fresh call -- once per `ci_wait` re-entry,
+    forever. Real settlement takes real CI minutes, which only elapse
+    *between* separate calls to this node, so the retry budget is counted by
+    `run.py`'s persisted `ci_infra:<node_id>` counter instead, bumped once per
+    `ci_poll` entry that is still infra-red -- this function just does the one
+    kick-and-read that counter's caller decided was still within budget.
+    """
+    await forge.retry_jobs(repo=repo, ci=first)
+    ci_status = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
+    return await render_ci(ci_status, forge=forge, repo=repo, branch=branch, head_sha=head_sha)
 
 
 async def wait_for_ci(
@@ -135,7 +240,8 @@ async def wait_for_ci(
             f"  {j}\n" for j in ci.jobs
         )
         return log, "failed"
-    return render_ci(ci)
+    head_sha = await git._head_sha(repo)
+    return await render_ci(ci, forge=forge, repo=repo, branch=branch, head_sha=head_sha)
 
 
 async def poll_merged(

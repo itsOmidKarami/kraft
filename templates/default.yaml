@@ -38,10 +38,13 @@ nodes:
   - id: mr_checks
     tasks: [on.ci.poll, on.review.mr.run]
     gate_after: null
-    # One repair pass before this node gives up (Kraft-xh0q): read why the
-    # pipeline went red and, when it's a fixable MR-level thing like a
-    # missing label, fix it and let on.ci.poll re-measure for real rather
-    # than trust the repair's own word (Kraft-rv6i's on_failure).
+    fix_loop: ci_fix_loop
+    rebase_bounce_to: verify
+    # One repair pass before this node spends a fix cycle (Kraft-xh0q): read
+    # why the pipeline went red and, when it's a fixable MR-level thing like
+    # a missing label, fix it and let on.ci.poll re-measure for real rather
+    # than trust the repair's own word (Kraft-rv6i's on_failure). Runs inside
+    # the fix loop's own re-measure now (Kraft-cbr), not as a separate path.
     on_failure: [on.mr_checks.repair]
   - id: human_review
     tasks: [on.human_review.requested]

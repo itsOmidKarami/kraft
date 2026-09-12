@@ -117,3 +117,72 @@ def test_poll_ci_gives_up_after_too_many_consecutive_forge_errors(tmp_path):
 
     with pytest.raises(forge.ForgeError):
         asyncio.run(forge.poll_ci(fake, repo=tmp_path, branch="kraft/w1", timeout=5, interval=0))
+
+
+def test_fake_forge_ci_status_carries_sha_and_failed_jobs(tmp_path):
+    fake = forge.FakeForge(
+        ci_states=["failed"],
+        ci_shas=["abc123"],
+        ci_failed_jobs=[(forge.FailedJob("test", "failed", "script_failure"),)],
+    )
+    ci = asyncio.run(fake.ci_status(repo=tmp_path, mr=forge.MR(number=1, url="http://x")))
+    assert ci.sha == "abc123"
+    assert ci.failed_jobs == (forge.FailedJob("test", "failed", "script_failure"),)
+
+
+def test_fake_forge_retry_jobs_records_the_call(tmp_path):
+    fake = forge.FakeForge()
+    asyncio.run(fake.retry_jobs(repo=tmp_path, ci=forge.CIStatus(state="failed", url="http://x/1")))
+    assert fake.retried == ["http://x/1"]
+
+
+def test_render_ci_waits_on_a_pending_pipeline_even_when_unmergeable(tmp_path):
+    """The exact !171 bug: a transient unmergeable during GitLab's post-push
+    recompute window must never fail the node."""
+    fake = forge.FakeForge(ci_states=["pending"], mergeable=False, merge_detail="conflict")
+    ci_status = asyncio.run(fake.ci_status(repo=tmp_path, mr=forge.MR(1, "http://x")))
+    log, verdict = asyncio.run(
+        forge.ci.render_ci(ci_status, forge=fake, repo=tmp_path, branch="b", head_sha=None)
+    )
+    assert verdict == "waiting"
+
+
+def test_render_ci_waits_on_a_pipeline_not_for_the_branch_head(tmp_path):
+    fake = forge.FakeForge(ci_states=["success"], ci_shas=["old-sha"])
+    ci_status = asyncio.run(fake.ci_status(repo=tmp_path, mr=forge.MR(1, "http://x")))
+    log, verdict = asyncio.run(
+        forge.ci.render_ci(ci_status, forge=fake, repo=tmp_path, branch="b", head_sha="new-sha")
+    )
+    assert verdict == "waiting"
+
+
+def test_render_ci_fails_a_settled_green_pipeline_only_after_a_re_fetch_confirms_conflict(
+    tmp_path,
+):
+    fake = forge.FakeForge(
+        ci_states=["success", "success"], mergeable=False, merge_detail="conflict"
+    )
+    ci_status = asyncio.run(fake.ci_status(repo=tmp_path, mr=forge.MR(1, "http://x")))
+    log, verdict = asyncio.run(
+        forge.ci.render_ci(ci_status, forge=fake, repo=tmp_path, branch="b", head_sha=None)
+    )
+    assert verdict == "conflict"
+
+
+def test_render_ci_infra_red_vs_code_red(tmp_path):
+    infra = forge.CIStatus(
+        state="failed",
+        url="u",
+        failed_jobs=(forge.FailedJob("build", "failed", "runner_system_failure"),),
+    )
+    code = forge.CIStatus(
+        state="failed", url="u", failed_jobs=(forge.FailedJob("test", "failed", "script_failure"),)
+    )
+    fake = forge.FakeForge()
+    _, v1 = asyncio.run(
+        forge.ci.render_ci(infra, forge=fake, repo=tmp_path, branch="b", head_sha=None)
+    )
+    _, v2 = asyncio.run(
+        forge.ci.render_ci(code, forge=fake, repo=tmp_path, branch="b", head_sha=None)
+    )
+    assert (v1, v2) == ("infra", "failed")
