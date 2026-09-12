@@ -413,12 +413,15 @@ def test_needs_context_question_does_not_resurface_a_stale_answer(tmp_path, monk
 
 def test_work_item_detail_reports_steerable_per_current_node(tmp_path, monkeypatch):
     """Kraft-bz9b: the detail screen drops its steer box on `steerable: false`
-    rather than offer text `retry` would 409 on."""
+    rather than offer text `retry` would 409 on. `merge`, not `open_mr`
+    (Kraft-cbr): `mr_checks` right after `open_mr` now carries `fix_loop`,
+    so a steer given there could reach it; `merge` is the chain's last node
+    and forge-kind with no fix_loop, so nothing downstream can ever steer."""
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = _post_default(client, repo)
 
-        _force_node(wid, "open_mr", "needs_human")
+        _force_node(wid, "merge", "needs_human")
         assert client.get(f"/api/work-items/{wid}").json()["steerable"] is False
 
         _force_node(wid, "implementation", "needs_human")

@@ -103,6 +103,38 @@ def test_fingerprint_separates_file_plugin_and_message(tmp_path):
     assert base.fingerprint != Finding("important", "m", "a.py", 1, "q").fingerprint
 
 
+def test_fingerprint_differs_when_the_traced_error_changes_and_matches_when_it_does_not():
+    """A code-red `on.ci.poll` finding's message carries the failing job's own
+    trace tail (Kraft-cbr §3): two cycles of the same unresolved failure must
+    fingerprint identically (walk_node's no-progress stop reads that as
+    "stuck"), while a fix that changed *what* broke must fingerprint
+    differently (that reads as progress, however the job itself still
+    failed)."""
+    before = Finding(
+        "important",
+        "job test: failed\n  AssertionError: expected 3, got 4",
+        None,
+        None,
+        "on.ci.poll",
+    )
+    after_same_error = Finding(
+        "important",
+        "job test: failed\n  AssertionError: expected 3, got 4",
+        None,
+        None,
+        "on.ci.poll",
+    )
+    after_different_error = Finding(
+        "important",
+        "job test: failed\n  AssertionError: expected 3, got 5",
+        None,
+        None,
+        "on.ci.poll",
+    )
+    assert before.fingerprint == after_same_error.fingerprint  # nothing moved
+    assert before.fingerprint != after_different_error.fingerprint  # the fix changed the error
+
+
 def test_parse_non_utf8_bytes_is_not_an_error(tmp_path):
     p = tmp_path / "r.json"
     p.write_bytes(b"\xff\xfe\x00binary")

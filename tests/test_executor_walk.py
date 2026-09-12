@@ -297,7 +297,10 @@ def test_needs_human_reason_names_a_failed_forge_task_s_kind(tmp_path, monkeypat
     before burning a retry on it."""
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
-    fake = _forge.FakeForge(ci_states=["failed"])
+    fake = _forge.FakeForge(
+        ci_states=["failed"],
+        ci_failed_jobs=[(_forge.FailedJob("test", "failed", "script_failure"),)],
+    )
     monkeypatch.setattr(_forge.run, "resolve", lambda name: fake)
 
     async def scenario():
@@ -1036,3 +1039,32 @@ def test_a_node_without_on_failure_stops_exactly_as_before(tmp_path):
     assert not [e for e in evts if e["type"] == "node_recovery_started"]
     stopped = next(e for e in evts if e["type"] == "work_item_needs_human")
     assert "after on_failure" not in stopped["payload"]["reason"]
+
+
+def test_a_node_dict_lacking_on_failure_never_triggers_recovery(tmp_path):
+    """Kraft-o33x: `chain_definition` is a JSON snapshot taken once at intake
+    (`templates.materialize`), stored on the work item row and never
+    re-read from the current `templates/default.yaml` on disk. An item
+    created before `on_failure: [on.mr_checks.repair]` was added to
+    `mr_checks` has a stored node dict with no `on_failure` key at all --
+    `node.get("on_failure")` is None for it, by construction, for the
+    lifetime of that item, and `walk_node`'s `if node.get("on_failure"):`
+    guard is exactly the same check whether the key is missing or
+    explicitly `null`. This spec's own `ci_fix_loop` addition (Task 6) has
+    the identical exposure: an item whose `chain_definition` predates it
+    keeps running the old `mr_checks` node (no `fix_loop`, no
+    `rebase_bounce_to` either) until a `set-chain-template` or a chain_review
+    gate splice backfills it."""
+    flag = tmp_path / "never-written"
+    result, evts = _run_one_node(
+        tmp_path,
+        # No "on_failure" key at all -- not even None -- the exact shape a
+        # pre-Kraft-o33x item's stored chain_definition carries for mr_checks.
+        Template(id="stale-chain", nodes=[{"id": "mr_checks", "tasks": ["on.ci.poll"]}]),
+        Registry(hooks={"on.ci.poll": {"kind": "subprocess", "command": _gate_check(flag)}}),
+    )
+
+    assert result == "needs_human"
+    assert not [e for e in evts if e["type"] == "node_recovery_started"], (
+        "recover_node ran even though the stored node dict has no on_failure"
+    )

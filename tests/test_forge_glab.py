@@ -603,3 +603,127 @@ def test_glab_set_labels_re_creates_the_pipeline_for_the_sentinel_number(tmp_pat
     assert not any("merge_requests/0/" in a for a in argv), (
         "the sentinel 0 was used as a merge request id"
     )
+
+
+# `glab ci get -F json` for a failed pipeline whose job carries its own
+# `failure_reason` (Kraft-ddxn) -- captured shape, glab 1.117.0.
+GLAB_CI_GET_FAILED_WITH_REASON = (
+    '{"id":2826926700,"status":"failed","jobs":['
+    '{"id":16392037104,"name":"test","status":"failed","failure_reason":"script_failure"}]}'
+)
+
+# A pipeline with no jobs at all -- a config error stopped anything from being
+# created, so `glab ci get` reports the pipeline's own `yaml_errors` instead.
+GLAB_CI_GET_ZERO_JOBS_CONFIG_ERROR = (
+    '{"id":2826926700,"status":"failed","jobs":[],'
+    '"yaml_errors":"jobs config should contain at least one visible job"}'
+)
+
+# A pipeline the forge confirms has zero jobs, and no yaml_errors at all --
+# distinct from the config-error case above, and from an unreadable read.
+GLAB_CI_GET_ZERO_JOBS_NO_ERROR = '{"id":2826926700,"status":"failed","jobs":[]}'
+
+
+def test_glab_ci_status_carries_the_sha_and_pipeline_ref(tmp_path, monkeypatch):
+    _stub_routed(
+        tmp_path,
+        monkeypatch,
+        "glab",
+        {
+            "mr view": GLAB_MR_VIEW,
+            "ci list": GLAB_CI_FAILED,
+            "ci get": GLAB_CI_GET_FAILED_WITH_REASON,
+            "ci trace": GLAB_CI_TRACE,
+        },
+    )
+    _stub(tmp_path, monkeypatch, "git", "")
+
+    status = asyncio.run(
+        forge.GlabCli().ci_status(repo=tmp_path, mr=forge.MR(number=54, url="u"), branch="")
+    )
+
+    assert status.failed_jobs == (forge.FailedJob("test", "failed", "script_failure"),)
+    assert status.pipeline_ref == "2826926700"
+
+
+def test_glab_ci_status_reports_yaml_errors_for_a_zero_job_pipeline(tmp_path, monkeypatch):
+    _stub_routed(
+        tmp_path,
+        monkeypatch,
+        "glab",
+        {
+            "mr view": GLAB_MR_VIEW,
+            "ci list": GLAB_CI_FAILED,
+            "ci get": GLAB_CI_GET_ZERO_JOBS_CONFIG_ERROR,
+        },
+    )
+    _stub(tmp_path, monkeypatch, "git", "")
+
+    status = asyncio.run(
+        forge.GlabCli().ci_status(repo=tmp_path, mr=forge.MR(number=54, url="u"), branch="")
+    )
+
+    assert status.failed_jobs == (forge.FailedJob("(pipeline)", "failed", "config_error"),)
+
+
+def test_glab_retry_jobs_posts_the_pipeline_retry(tmp_path, monkeypatch):
+    _stub_routed(tmp_path, monkeypatch, "glab", {"api": "{}"})
+
+    asyncio.run(
+        forge.GlabCli().retry_jobs(
+            repo=tmp_path, ci=forge.CIStatus(state="failed", url="u", pipeline_ref="123")
+        )
+    )
+
+    argv = _argv(tmp_path, "glab")
+    assert argv[:3] == ["api", "-X", "POST"]
+    assert any("pipelines/123/retry" in a for a in argv)
+
+
+def test_glab_ci_status_reads_unreadable_detail_as_code_red_not_infra(tmp_path, monkeypatch):
+    """The fix for the human review's third point: a genuine code failure must
+    never read as infra just because its own detail fetch failed."""
+    argv = tmp_path / "glab.argv"
+    p = tmp_path / "glab"
+    p.write_text(
+        f'#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a" >> {argv}; done\n'
+        'case "$1 $2" in\n'
+        f"  'mr view') cat <<'STUBEOF'\n{GLAB_MR_VIEW}\nSTUBEOF\n  ;;\n"
+        f"  'ci list') cat <<'STUBEOF'\n{GLAB_CI_FAILED}\nSTUBEOF\n  ;;\n"
+        "  'ci get') echo 'ci get: transient error' >&2; exit 1 ;;\n"
+        "  *) exit 0 ;;\n"
+        "esac\n"
+    )
+    p.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+    _stub(tmp_path, monkeypatch, "git", "")
+
+    status = asyncio.run(
+        forge.GlabCli().ci_status(repo=tmp_path, mr=forge.MR(number=54, url="u"), branch="")
+    )
+
+    assert status.failed_jobs == forge.glab._UNREADABLE_JOBS
+    assert forge.ci.is_infra_red(status) is False
+
+
+def test_glab_ci_status_confirmed_zero_jobs_reads_as_infra(tmp_path, monkeypatch):
+    """The contrasting, correctly-infra case: a successful read confirming no
+    job ran at all is still infra-shaped."""
+    _stub_routed(
+        tmp_path,
+        monkeypatch,
+        "glab",
+        {
+            "mr view": GLAB_MR_VIEW,
+            "ci list": GLAB_CI_FAILED,
+            "ci get": GLAB_CI_GET_ZERO_JOBS_NO_ERROR,
+        },
+    )
+    _stub(tmp_path, monkeypatch, "git", "")
+
+    status = asyncio.run(
+        forge.GlabCli().ci_status(repo=tmp_path, mr=forge.MR(number=54, url="u"), branch="")
+    )
+
+    assert status.failed_jobs == ()
+    assert forge.ci.is_infra_red(status) is True

@@ -18,7 +18,15 @@ from kraft.adapters import agent as _agent
 from kraft.adapters import forge as _forge
 from kraft.adapters import subprocess as _subprocess
 from kraft.executor import entry, prompts, stops
-from kraft.executor.context import BUDGET, CONFIG_ERROR, RATE_LIMITED, WAITING, LaunchContext, Steer
+from kraft.executor.context import (
+    BUDGET,
+    CONFIG_ERROR,
+    INFRA_STOP,
+    RATE_LIMITED,
+    WAITING,
+    LaunchContext,
+    Steer,
+)
 from kraft.templates import Registry
 
 logger = logging.getLogger(__name__)
@@ -288,6 +296,10 @@ async def dispatch_node(
             # request from the *current branch*, and the repo is on whatever
             # the human has checked out.
             repo=worktree,
+            # The original repo path, not the worktree: a confirmed-conflict
+            # rebase (Kraft-9h7v) needs origin's current default branch tip,
+            # which `refresh_worktree_base` fetches from here.
+            orig_repo=Path(work_item_row["repo"]),
             branch=store.branch_for(work_item_row),
             title=work_item_row["title"],
             **poll,
@@ -349,6 +361,8 @@ async def measure_node(
         return RATE_LIMITED, [], []
     if any(r == WAITING for r in results):
         return WAITING, [], []
+    if any(r == INFRA_STOP for r in results):
+        return INFRA_STOP, [], []
     # Logged before the BUDGET rung returns: a co-task can raise in the same node
     # as a budget-refused agent, and that traceback is the only record of it.
     excs = [r for r in results if isinstance(r, BaseException)]
@@ -364,7 +378,7 @@ async def measure_node(
     failed = [
         tasks[i]
         for i, r in enumerate(results)
-        if isinstance(r, BaseException) or r in ("failed", "needs_context")
+        if isinstance(r, BaseException) or r in ("failed", "needs_context", "conflict")
     ]
     if failed:
         return "failed", failed, excs

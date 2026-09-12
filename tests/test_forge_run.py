@@ -10,12 +10,14 @@ import json
 import os
 import sqlite3
 import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 from support.harness import isolated_bd, make_repo, make_repo_with_submodule
 
 from kraft import builtins as _builtins
-from kraft import db, executor, store
+from kraft import db, events, executor, policy, store
 from kraft.adapters import forge
 from kraft.paths import RunDirs
 from kraft.templates import Registry, Template
@@ -119,7 +121,10 @@ def _forge_session(
 
 def test_ci_poll_records_failed_when_the_pipeline_is_red(tmp_path, monkeypatch):
     """Red CI must not read as a done node — the next node is merge."""
-    fake = forge.FakeForge(ci_states=["failed"])
+    fake = forge.FakeForge(
+        ci_states=["failed"],
+        ci_failed_jobs=[(forge.FailedJob("test", "failed", "script_failure"),)],
+    )
     returned, recorded = _forge_session(tmp_path, monkeypatch, fake, "ci_poll", "s1")
     assert returned == "failed"
     assert recorded == "failed"
@@ -210,23 +215,32 @@ def test_ci_poll_reports_waiting_on_a_pending_pipeline(tmp_path, monkeypatch):
 
 def test_ci_poll_still_resolves_a_settled_pipeline(tmp_path, monkeypatch):
     """The path that already worked must not change: success -> done,
-    failure -> failed, unmergeable -> failed."""
+    failure -> failed, unmergeable -> conflict (once a re-fetch confirms it,
+    Kraft-bjjm)."""
     fake = forge.FakeForge(ci_states=["success"])
     returned, recorded = _forge_session(tmp_path / "a", monkeypatch, fake, "ci_poll", "s5")
     assert (returned, recorded) == ("done", "done")
 
-    fake = forge.FakeForge(ci_states=["failed"])
+    fake = forge.FakeForge(
+        ci_states=["failed"],
+        ci_failed_jobs=[(forge.FailedJob("test", "failed", "script_failure"),)],
+    )
     returned, recorded = _forge_session(tmp_path / "b", monkeypatch, fake, "ci_poll", "s5b")
     assert (returned, recorded) == ("failed", "failed")
 
     fake = forge.FakeForge(ci_states=["success"], mergeable=False)
     returned, recorded = _forge_session(tmp_path / "c", monkeypatch, fake, "ci_poll", "s5c")
-    assert (returned, recorded) == ("failed", "failed"), "Kraft-ejj9: green and unmergeable"
+    assert (returned, recorded) == ("conflict", "conflict"), (
+        "Kraft-ejj9: green and unmergeable, confirmed by a re-fetch"
+    )
 
 
 def test_ci_poll_red_pipeline_is_not_reported_as_a_timeout(tmp_path, monkeypatch):
     """The human_review brief has to tell 'finished red' from 'never finished'."""
-    fake = forge.FakeForge(ci_states=["failed"])
+    fake = forge.FakeForge(
+        ci_states=["failed"],
+        ci_failed_jobs=[(forge.FailedJob("test", "failed", "script_failure"),)],
+    )
     _forge_session(tmp_path, monkeypatch, fake, "ci_poll", "s6", poll_interval=0)
     log = _session_log(tmp_path, "s6")
     assert "timed out" not in log
@@ -350,7 +364,10 @@ def test_back_half_runs_through_to_merge_with_a_green_pipeline(tmp_path, monkeyp
 
 def test_red_pipeline_stops_before_the_merge_node(tmp_path, monkeypatch):
     """The one that matters: a failed pipeline must never reach merge."""
-    fake = forge.FakeForge(ci_states=["failed"])
+    fake = forge.FakeForge(
+        ci_states=["failed"],
+        ci_failed_jobs=[(forge.FailedJob("test", "failed", "script_failure"),)],
+    )
 
     status = _run_back_half(tmp_path, monkeypatch, fake)
 
@@ -671,15 +688,16 @@ def test_merge_pushes_before_it_merges(tmp_path, monkeypatch):
 
 
 def test_ci_poll_fails_when_the_mr_cannot_be_merged(tmp_path, monkeypatch):
-    """Green pipeline, unmergeable branch: the node fails and the log names the
-    state, so the human_review brief has something to act on."""
+    """Green pipeline, unmergeable branch: the node reports 'conflict' once a
+    re-fetch confirms it, and the log names the state, so the human_review
+    brief has something to act on."""
     fake = forge.FakeForge(ci_states=["success"], mergeable=False, merge_detail="conflict")
 
     returned, recorded = _forge_session(
         tmp_path, monkeypatch, fake, "ci_poll", "e1", poll_interval=0
     )
 
-    assert (returned, recorded) == ("failed", "failed")
+    assert (returned, recorded) == ("conflict", "conflict")
     assert "not mergeable: conflict" in _session_log(tmp_path, "e1")
 
 
@@ -1041,3 +1059,447 @@ def test_the_shape_that_broke_on_9d0ab38ff3c9439b90506df0f6966660(tmp_path, monk
     assert submodule_row["state"] == "merged"
     root_row = next(r for r in repos if r["role"] == "root")
     assert root_row["state"] == "pending"  # skip: root untouched, as asked
+
+
+def test_ci_poll_retries_infra_red_across_separate_entries_then_stops_with_the_reason(
+    tmp_path, monkeypatch
+):
+    """Kraft-h81i, and the review's question about `retry_infra`'s immediate
+    re-read: the retry budget has to survive across separate ci_poll entries
+    (three separate calls here, standing in for three real ~30s-apart
+    ci_wait re-entries), not live inside one call's loop. Each entry's own
+    re-read after a kick sees "pending" (`"waiting"`), exactly like a real
+    forge would the instant after `retry_jobs` returns; only the *next*
+    entry's fresh read reflects the settled outcome once real CI time has
+    passed."""
+    fake = forge.FakeForge(
+        ci_states=["failed", "pending", "failed", "pending", "failed"],
+        ci_failed_jobs=[(forge.FailedJob("build", "failed", "runner_system_failure"),)] * 5,
+    )
+    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at) VALUES "
+                    "('w1','t','/r','default','{}','active','now','now')"
+                )
+            )
+            results = []
+            for session_id in ["i1", "i2", "i3"]:
+                results.append(
+                    await forge.run_task(
+                        database,
+                        rd,
+                        session_id=session_id,
+                        work_item_id="w1",
+                        node_id="mr_checks",
+                        hook_point="on.ci.poll",
+                        handler="ci_poll",
+                        backend="fake",
+                        repo=tmp_path,
+                        branch="kraft/w1",
+                        title="t",
+                        poll_interval=0,
+                    )
+                )
+            return results
+        finally:
+            await database.close()
+
+    first, second, third = asyncio.run(scenario())
+    assert first == "waiting"
+    assert second == "waiting"
+    assert third == "infra_stop"
+    # Two kicks (entries one and two); the third entry's count (3) breaches
+    # the cap before a third kick is made.
+    assert len(fake.retried) == 2
+
+
+def test_job_finding_message_carries_the_trace_tail_when_the_backend_gave_one():
+    """Task 3's glab shape: a header line plus indented trace lines."""
+    jobs = (
+        "pipeline 88: failed",
+        "job test: failed (script_failure)",
+        "  AssertionError: expected 3, got 4",
+        "  at test_foo.py:12",
+        "job lint: failed (script_failure)",
+        "  ruff: E501 line too long",
+    )
+    msg = forge.run._job_finding_message(jobs, forge.FailedJob("test", "failed", "script_failure"))
+    assert "AssertionError: expected 3, got 4" in msg
+    assert "ruff" not in msg  # only this job's own block, not the next one's
+
+
+def test_job_finding_message_falls_back_to_name_and_reason_with_no_trace():
+    """gh's one-liner shape has nothing to extract a block from."""
+    jobs = ("test: FAILURE",)
+    msg = forge.run._job_finding_message(jobs, forge.FailedJob("test", "failed", "script_failure"))
+    assert msg == "job test failed: script_failure"
+
+
+def test_ci_poll_writes_findings_for_a_code_red_pipeline(tmp_path, monkeypatch):
+    """`on.ci.poll` going code-red feeds the fix-loop plumbing the same way
+    any other measuring task does: one finding per failed job, result_path
+    populated (Kraft-cbr §3)."""
+    fake = forge.FakeForge(
+        ci_states=["failed"],
+        ci_failed_jobs=[(forge.FailedJob("test", "failed", "script_failure"),)],
+    )
+    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at) VALUES "
+                    "('w1','t','/r','default','{}','active','now','now')"
+                )
+            )
+            await forge.run_task(
+                database,
+                rd,
+                session_id="s-findings",
+                work_item_id="w1",
+                node_id="mr_checks",
+                hook_point="on.ci.poll",
+                handler="ci_poll",
+                backend="fake",
+                repo=tmp_path,
+                branch="kraft/w1",
+                title="t",
+            )
+            return rd
+        finally:
+            await database.close()
+
+    rd = asyncio.run(scenario())
+    result_path = rd.results / "s-findings.json"
+    payload = json.loads(result_path.read_text())
+    assert payload["findings"]
+    assert "test" in payload["findings"][0]["message"]
+
+
+def _ci_fixloop_template() -> Template:
+    """`mr_checks` with both `fix_loop` and `on_failure` (Task 6/7's shape),
+    isolated from open_mr/merge so this test only exercises the repair's own
+    re-measure."""
+    return Template(
+        id="ci-fixloop-waiting",
+        nodes=[
+            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None, "fix_loop": None},
+            {
+                "id": "mr_checks",
+                "tasks": ["on.ci.poll"],
+                "gate_after": None,
+                "fix_loop": "ci_fix_loop",
+                "on_failure": ["on.mr_checks.repair"],
+            },
+        ],
+    )
+
+
+def _ci_fixloop_registry(backend: str = "fake") -> Registry:
+    return Registry(
+        hooks={
+            "on.env.prepare": {"kind": "builtin", "handler": "env_setup"},
+            "on.ci.poll": {"kind": "forge", "handler": "ci_poll", "backend": backend},
+            # A metadata-only repair (Task 6's real on.mr_checks.repair contract) --
+            # `noop` stands in for it here since its own logic is out of scope for
+            # this test; what matters is that it "succeeds" and touches nothing
+            # `on.ci.poll` reads.
+            "on.mr_checks.repair": {"kind": "builtin", "handler": "noop"},
+        }
+    )
+
+
+def test_ci_fix_loop_stops_for_waiting_on_the_repairs_re_measure(tmp_path, monkeypatch):
+    """The human review's second point: `recover_node`'s re-measure calls
+    `on.ci.poll` again, and a repaired head's pipeline being merely `pending`
+    (WAITING) is the *routine* case, not the exception -- a metadata-only
+    repair touches nothing CI runs against, so the fix that would turn this
+    green is still to come. Before this task's fix, the fall-through line
+    handed WAITING to the ordinary fix-cycle machinery below, which would
+    have spent a paid fix cycle on a pipeline that had not even settled yet."""
+    fake = forge.FakeForge(
+        ci_states=["failed", "pending"],
+        ci_failed_jobs=[(forge.FailedJob("test", "failed", "script_failure"),)] * 2,
+    )
+    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    pol_path = tmp_path / "policy.yaml"
+    pol_path.write_text(
+        "loops:\n  ci_fix_loop: { attempts: 3, wall_clock_s: 3600 }\n"
+        "default: { attempts: 3, wall_clock_s: 3600 }\n"
+    )
+    pol = policy.load_policy(pol_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="waiting on repair re-measure",
+                repo=str(repo),
+                template=_ci_fixloop_template(),
+                bd_cwd=str(tracker),
+            )
+            result = await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=_ci_fixloop_registry(),
+                bd_cwd=str(tracker),
+                policy=pol,
+            )
+            assert result == "waiting"
+            types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, wid))]
+            assert "fix_cycle_started" not in types, (
+                "the repair's WAITING re-measure must stop the node, not spend a "
+                "paid fix cycle on a pipeline that has not settled yet"
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+            assert row["status"] == "waiting"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def _mr_checks_bounce_template() -> Template:
+    """`verify` then `mr_checks`, `mr_checks` carrying `rebase_bounce_to`
+    (Kraft-9h7v) but neither `fix_loop` nor `on_failure` -- this test is about
+    the bounce mechanism itself, not the fix loop Task 6/7 layers on top of
+    it, the same isolation `_rebase_chain_template` uses in
+    `tests/test_executor_walk.py` for `pre_mr_rebase`'s own version of this
+    bounce."""
+    return Template(
+        id="mr-checks-bounce",
+        nodes=[
+            {"id": "verify", "tasks": ["on.test.run"], "gate_after": None, "fix_loop": None},
+            {
+                "id": "mr_checks",
+                "tasks": ["on.ci.poll"],
+                "gate_after": None,
+                "fix_loop": None,
+                "rebase_bounce_to": "verify",
+            },
+        ],
+    )
+
+
+def _mr_checks_bounce_registry(backend: str = "fake") -> Registry:
+    return Registry(
+        hooks={
+            "on.test.run": {"kind": "subprocess", "command": [sys.executable, "-c", "exit(0)"]},
+            "on.ci.poll": {"kind": "forge", "handler": "ci_poll", "backend": backend},
+        }
+    )
+
+
+def _gitignore_engineering(repo):
+    """`refresh_worktree_base`'s dirty check has no way to know
+    `.engineering/sessions/*.md` is Kraft's own bookkeeping rather than an
+    agent's leftover work -- same fixture step
+    `test_a_moved_base_bounces_back_to_verify_with_a_drift_note` uses."""
+    (repo / ".gitignore").write_text(".engineering/\n")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "gitignore .engineering"], cwd=repo, check=True)
+
+
+def test_ci_poll_rebases_and_bounces_on_a_confirmed_conflict(tmp_path, monkeypatch):
+    """A settled green pipeline the forge still reports unmergeable, with a
+    clean rebase available, must not just move `base_ref` -- it has to
+    actually land the chain back on `verify`, the same way `pre_mr_rebase`'s
+    own bounce already does
+    (`test_a_moved_base_bounces_back_to_verify_with_a_drift_note`,
+    `tests/test_executor_walk.py`)."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    _gitignore_engineering(repo)
+
+    fake = forge.FakeForge(ci_states=["success"], mergeable=False, merge_detail="conflict")
+    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+
+    pol_path = tmp_path / "policy.yaml"
+    pol_path.write_text(
+        "loops:\n  rebase_bounce: { attempts: 2, wall_clock_s: 3600 }\n"
+        "default: { attempts: 3, wall_clock_s: 3600 }\n"
+    )
+    pol = policy.load_policy(pol_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="bounce on conflict",
+                repo=str(repo),
+                template=_mr_checks_bounce_template(),
+                bd_cwd=str(tracker),
+            )
+            await _builtins.ensure_worktree(database, rd, repo=str(repo), work_item_id=wid)
+
+            # Origin moves in a way the branch does not touch, so the forced
+            # rebase this triggers is clean.
+            (repo / "moved.txt").write_text("moved on\n")
+            subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-m", "moved on upstream"], cwd=repo, check=True)
+            new_head = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+            ).stdout.strip()
+
+            result = await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=_mr_checks_bounce_registry(),
+                bd_cwd=str(tracker),
+                policy=pol,
+            )
+            # Not "completed": the second pass through mr_checks hits the
+            # same FakeForge-reported "still unmergeable" verdict, but this
+            # time the branch is already up to date with `default`, so the
+            # forced rebase has nothing left to do (`refresh_worktree_base`'s
+            # own "already an ancestor" short-circuit returns None) and
+            # `status` stays "conflict" -- a bare node with neither `fix_loop`
+            # nor `on_failure` fails straight to needs_human at that point.
+            # That second failure is not a bug this test is pinning; it is
+            # FakeForge's `mergeable=False` being a constant rather than
+            # something a real forge would clear once the branch is current.
+            # What matters here is that the *first* pass bounced at all.
+            assert result == "needs_human"
+
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT base_ref FROM work_items WHERE id = ?", (wid,)
+                ).fetchone()
+            )
+            assert row["base_ref"] == new_head
+
+            starts = [
+                e["payload"]["node_id"]
+                for e in database.read(lambda c: events.read_after(c, 0, wid))
+                if e["type"] == "node_started"
+            ]
+            assert starts.count("verify") == 2, (
+                f"expected the confirmed conflict's forced rebase to bounce the "
+                f"chain back to verify a second time, got {starts}"
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_ci_poll_stops_for_a_human_on_a_real_rebase_conflict(tmp_path, monkeypatch):
+    """The other branch: the worktree's branch and origin each edit the same
+    line of `calc.py`, so the forced rebase itself conflicts -- the identical
+    fixture shape `test_refresh_worktree_base_raises_and_aborts_on_conflict`
+    (`tests/test_builtins.py`) already uses to pin `refresh_worktree_base`
+    alone; this test drives the same conflict through the whole `ci_poll`
+    node instead. `status` stays `"conflict"`, the node fails, and -- with no
+    `fix_loop`/`on_failure` on this bare template -- `walk_node` stops it for
+    a human directly; `base_ref` is never touched."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    _gitignore_engineering(repo)
+
+    fake = forge.FakeForge(ci_states=["success"], mergeable=False, merge_detail="conflict")
+    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+
+    pol_path = tmp_path / "policy.yaml"
+    pol_path.write_text(
+        "loops:\n  rebase_bounce: { attempts: 2, wall_clock_s: 3600 }\n"
+        "default: { attempts: 3, wall_clock_s: 3600 }\n"
+    )
+    pol = policy.load_policy(pol_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="real conflict",
+                repo=str(repo),
+                template=_mr_checks_bounce_template(),
+                bd_cwd=str(tracker),
+            )
+            worktree = await _builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id=wid
+            )
+            original_base = database.read(
+                lambda c: c.execute(
+                    "SELECT base_ref FROM work_items WHERE id = ?", (wid,)
+                ).fetchone()
+            )["base_ref"]
+
+            # Same line of calc.py, two diverging edits -- exactly
+            # test_refresh_worktree_base_raises_and_aborts_on_conflict's setup.
+            (worktree / "calc.py").write_text(
+                "def add(a, b):\n    return a - b - 1  # bug: should be +\n"
+            )
+            subprocess.run(["git", "add", "-A"], cwd=worktree, check=True)
+            subprocess.run(["git", "commit", "-m", "worktree edit"], cwd=worktree, check=True)
+
+            (repo / "calc.py").write_text(
+                "def add(a, b):\n    return a - b - 2  # bug: should be +\n"
+            )
+            subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "commit", "-m", "conflicting edit upstream"], cwd=repo, check=True
+            )
+
+            result = await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=_mr_checks_bounce_registry(),
+                bd_cwd=str(tracker),
+                policy=pol,
+            )
+            assert result == "needs_human"
+
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT base_ref FROM work_items WHERE id = ?", (wid,)
+                ).fetchone()
+            )
+            assert row["base_ref"] == original_base, "a real conflict must never move base_ref"
+
+            # walk_node's needs_human reason names the failed task's kind, not
+            # the detail -- that lives in the ci_poll session's own log, the
+            # same place a human reading this stop looks.
+            session_row = database.read(
+                lambda c: c.execute(
+                    "SELECT log_path FROM worker_sessions WHERE work_item_id = ? "
+                    "AND node_id = 'mr_checks' AND hook_point = 'on.ci.poll' "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (wid,),
+                ).fetchone()
+            )
+            log_text = Path(session_row["log_path"]).read_text()
+            assert "rebase" in log_text.lower() and "failed" in log_text.lower()
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())

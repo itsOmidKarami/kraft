@@ -70,8 +70,24 @@ def retry_after_cap(
     one. Retry is the human's override of the reject cap too (Kraft-ko7j §A4);
     without clearing it, the retried node re-opens its gate onto a spent
     counter and every rejection after that is refused forever.
+
+    Also clears `ci_wait:<node_id>` and `ci_infra:<node_id>` unconditionally,
+    built here from `node_id` rather than threaded in by the caller. A node
+    can have been parked mid-poll, or mid-infra-retry (the persisted
+    `ci_infra:<node_id>` counter Task 4 added), regardless of whether it has
+    a fix loop at all, and a retry is the human's explicit "give this a fresh
+    budget" for both of those too (Kraft-cs4s) -- not just for `key`, which is
+    None for a node with no fix loop.
+
+    Duplicates `ci_wait.py`'s private `_key()` format string (`f"ci_wait:
+    {node_id}"`) and Task 4's `ci_infra:{node_id}` format, the same way
+    `templates._FORGE_BACKENDS`/`adapters.forge.resolve` already duplicate
+    each other's backend name list, with the same "edit both together"
+    comment -- the duplication is contained to this one function and
+    `ci_wait.py`, not spread to every caller that wants a retry.
     """
-    for counter in (key, gate_key):
+    counters = (key, gate_key, f"ci_wait:{node_id}", f"ci_infra:{node_id}")
+    for counter in counters:
         if counter is not None:
             conn.execute(
                 "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?",

@@ -11,6 +11,7 @@ from kraft.executor import dispatch, entry, gates, prompts, stops
 from kraft.executor.context import (
     BUDGET,
     CONFIG_ERROR,
+    INFRA_STOP,
     RATE_LIMITED,
     WAITING,
     LaunchContext,
@@ -50,6 +51,46 @@ def _previous_fix_session(db, work_item_id: str, node_id: str) -> sqlite3.Row | 
     return rows[-1] if rows else None
 
 
+async def _diagnosis_bundle(db, work_item_id: str, node: dict, worktree) -> dict:
+    """What a human reconstructs by hand today, gathered once at the moment
+    the stuck detector gives up (Kraft-39ep): the worktree's own state, and
+    the last measuring session's concerns, if it left any.
+
+    Best-effort throughout -- a bundle missing a piece it could not read is
+    still more than the plain reason string this replaces, and nothing here
+    may itself fail the stop it is decorating.
+    """
+    from pathlib import Path
+
+    from kraft.config import git_read
+
+    status = git_read(Path(worktree), "status", "--porcelain", expected_failure=True) or ""
+    recent = git_read(Path(worktree), "log", "--oneline", "-5", expected_failure=True) or ""
+    evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
+    concerns = next(
+        (
+            e["payload"].get("concerns")
+            for e in reversed(evts)
+            if e["type"] == "worker_session_exited" and e["payload"].get("concerns")
+        ),
+        None,
+    )
+    return {
+        "git_status": status.strip(),
+        "recent_log": recent.strip(),
+        "last_session_concerns": concerns,
+    }
+
+
+#: The round `on_failure`'s pre-cycle repair (and its re-measure) writes its
+#: sessions under, inside a fix_loop node. Never a value `bump_counter` can
+#: produce for this node's own `key` counter (those start at 1 and only go
+#: up), so it can never alias a paid fix cycle's own round -- unlike the
+#: `round=1` `recover_node` used to hardcode, which is also the round the
+#: measurement after the *first* paid cycle uses.
+_REPAIR_ROUND = -1
+
+
 async def recover_node(
     db,
     run_dirs,
@@ -63,6 +104,7 @@ async def recover_node(
     steer: Steer | None,
     launch: LaunchContext | None,
     budget: _policy.Budget,
+    round: int = 1,
 ) -> tuple[str, list[str], list[BaseException]]:
     """One repair pass over a node whose tasks failed (Kraft-rv6i).
 
@@ -75,6 +117,19 @@ async def recover_node(
     Once per entry into the node, not a loop. A repair that did not take is a
     blocker Kraft does not understand, and the honest move is to stop for a
     human rather than to keep pulling the same lever.
+
+    `round` keys the repair hook's dispatch and its re-measure in
+    `sessions_for_round` (`dispatch.collect_findings`,
+    `dispatch.needs_context_question`) -- it must not collide with any other
+    round the *same node* writes sessions under. The no-fix-loop branch's call
+    below needs nothing special: a node with `on_failure` and no `fix_loop`
+    never runs `walk_node`'s paid-cycle loop at all, so `round=1` (the
+    default) can never alias anything else for that node. The fix-loop
+    branch, added in a later task, passes its own reserved round instead,
+    because for a node with *both* `fix_loop` and `on_failure` (Task 6 allows
+    this now; it used to be forbidden precisely to dodge this collision)
+    `round=1` already means "the measurement after the first paid fix cycle"
+    to that same node's `collect_findings`/`needs_context_question` calls.
     """
     hooks = list(node["on_failure"])
     await db.write(
@@ -85,10 +140,6 @@ async def recover_node(
             {"node_id": node["id"], "failed_tasks": failed, "tasks": hooks},
         )
     )
-    # `round=1` separates the repair's sessions and the re-measure's from the
-    # first attempt's, so per-round usage reads back without joining the events.
-    # Safe to borrow the fix-loop's counter here because a node may not have
-    # both `fix_loop` and `on_failure` (templates.py).
     verdict, r_failed, r_excs = await dispatch.measure_node(
         db,
         run_dirs,
@@ -97,7 +148,7 @@ async def recover_node(
         row,
         registry,
         worktree,
-        round=1,
+        round=round,
         steer=steer,
         launch=launch,
         budget=budget,
@@ -112,7 +163,7 @@ async def recover_node(
         row,
         registry,
         worktree,
-        round=1,
+        round=round,
         steer=steer,
         launch=launch,
         budget=budget,
@@ -173,6 +224,8 @@ async def walk_node(
             return await stops.stop_for_rate_limit(db, work_item_id, node)
         if verdict == WAITING:
             return await stops.stop_for_waiting(db, work_item_id, node)
+        if verdict == INFRA_STOP:
+            return await stops.stop_for_infra(db, work_item_id, node)
         if verdict == BUDGET:
             return await stops.stop_for_budget(db, work_item_id, node, budget)
         if verdict == "failed":
@@ -233,6 +286,10 @@ async def walk_node(
     # `round` is the fix-cycle index every session in this pass is stamped with,
     # so per-round usage can be read back without joining against the events.
     round = 0
+    # One repair per call to `walk_node` -- exactly one per entry into the
+    # node (a fresh call on every re-entry via `run_once`'s loop, a crash
+    # resume, or the `ci_wait` poller).
+    _repair_tried = False
     while True:
         verdict, failed, _excs = await dispatch.measure_node(
             db,
@@ -262,8 +319,80 @@ async def walk_node(
             return await stops.stop_for_rate_limit(db, work_item_id, node)
         if verdict == WAITING:
             return await stops.stop_for_waiting(db, work_item_id, node)
+        if verdict == INFRA_STOP:
+            return await stops.stop_for_infra(db, work_item_id, node)
         if verdict == BUDGET:
             return await stops.stop_for_budget(db, work_item_id, node, budget)
+
+        if verdict == "failed" and node.get("on_failure") and round == 0 and not _repair_tried:
+            # Once per entry into this node, and only ahead of the very first
+            # cycle: `recover_node` re-measures for real (on.ci.poll going
+            # green), so a repair that resolved things costs nothing further
+            # here, and one that didn't falls straight through to the normal
+            # fix cycle below with the failure it actually is.
+            _repair_tried = True
+            r_verdict, r_failed, _r_excs = await recover_node(
+                db,
+                run_dirs,
+                work_item_id,
+                node,
+                row,
+                registry,
+                worktree,
+                failed=failed,
+                steer=steer,
+                launch=launch,
+                budget=budget,
+                round=_REPAIR_ROUND,
+            )
+            if r_verdict == "paused":
+                return "paused"
+            # `recover_node`'s re-measure is a real `dispatch.measure_node` call
+            # against the node's own tasks again -- every sentinel that call can
+            # produce for the ordinary top-of-loop measure two lines above this
+            # block can just as well come back from here: a fix loop that fell
+            # through the WAITING case, in particular, would spend a paid fix
+            # cycle on a pipeline that has not even finished settling for the
+            # repaired head, every time the repair itself doesn't resolve
+            # things on the first try (the common case for a code failure,
+            # since a metadata-only repair almost never touches the code CI
+            # actually ran). Checked and handled here, in the same order and
+            # against the same `stops` functions `walk_node`'s own top-of-loop
+            # checks above already use for these sentinels, so a repair's
+            # re-measure stops exactly the way an ordinary measure would have.
+            if r_verdict == CONFIG_ERROR:
+                named = ", ".join(r_failed)
+                reason = f"could not start {named} in node {node['id']} — see the session log"
+                await db.write(
+                    lambda c, reason=reason: store.mark_needs_human(
+                        c, work_item_id, node["id"], reason
+                    )
+                )
+                return "needs_human"
+            if r_verdict == RATE_LIMITED:
+                return await stops.stop_for_rate_limit(db, work_item_id, node)
+            if r_verdict == WAITING:
+                return await stops.stop_for_waiting(db, work_item_id, node)
+            if r_verdict == INFRA_STOP:
+                return await stops.stop_for_infra(db, work_item_id, node)
+            if r_verdict == BUDGET:
+                return await stops.stop_for_budget(db, work_item_id, node, budget)
+            if r_verdict == "ok":
+                await db.write(lambda c: store.complete_node(c, work_item_id, node["id"]))
+                return "ok"
+            # Only "failed" reaches here (`dispatch.measure_node`'s remaining
+            # sentinel), and that fall-through is deliberate: the repair ran,
+            # didn't resolve things, and the ordinary paid fix cycle below
+            # should now see the failure for what it actually is.
+            #
+            # The repair's own re-measure just wrote its findings/session rows
+            # under `_REPAIR_ROUND`, not the `round` this loop was on when it
+            # entered this block (0, on the only entry this ever fires for) --
+            # the fall-through below reads `collect_findings`/
+            # `needs_context_question` at `round`, so `round` has to move to
+            # match, or those calls read the stale pre-repair rows instead of
+            # the fresher re-measure this repair just produced.
+            verdict, failed, round = r_verdict, r_failed, _REPAIR_ROUND
 
         previous_prints, fix_ran = dispatch.last_measurement(db, work_item_id, node["id"])
         found, reported = dispatch.collect_findings(db, work_item_id, node, round)
@@ -353,11 +482,14 @@ async def walk_node(
             return "needs_human"
 
         if prints and fix_ran and prints == previous_prints:
-            reason = f"no_progress: {len(prints)} finding(s) unchanged across cycle {count - 1}"
+            reason = f"stuck: {len(prints)} finding(s) unchanged across cycle {count - 1}"
+            bundle = await _diagnosis_bundle(db, work_item_id, node, worktree)
             # Deliberately NOT mark_sessions_capped_out: these sessions did not
             # cap out, and only a real cap breach may claim they did.
             await db.write(
-                lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node["id"], reason)
+                lambda c, reason=reason, bundle=bundle: store.mark_needs_human(
+                    c, work_item_id, node["id"], reason, bundle=bundle
+                )
             )
             return "needs_human"
 

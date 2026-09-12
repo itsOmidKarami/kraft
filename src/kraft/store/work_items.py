@@ -138,6 +138,7 @@ def mark_needs_human(
     reason,
     capped: dict | None = None,
     budget: dict | None = None,
+    bundle: dict | None = None,
 ) -> None:
     """`capped` carries {cycles, attempts} when a loop cap is what stopped the item.
 
@@ -148,6 +149,11 @@ def mark_needs_human(
     `budget` carries {scope, spent_usd, cap_usd} when a spend cap is what stopped
     the item: the card shows the figures and the board never fetches sessions per
     row, so the numbers ride the event for the same reason.
+
+    `bundle` carries the stuck-detector's diagnosis (Kraft-39ep): whatever a
+    human would otherwise reconstruct by hand from the worktree and the
+    event log, gathered once at the moment Kraft gives up rather than asked
+    for later.
     """
     conn.execute(
         "UPDATE work_items SET status = 'needs_human', retry_at = NULL, updated_at = ? "
@@ -178,6 +184,8 @@ def mark_needs_human(
         payload["capped"] = capped
     if budget is not None:
         payload["budget"] = budget
+    if bundle is not None:
+        payload["bundle"] = bundle
     events.append(conn, work_item_id, "work_item_needs_human", payload)
 
 
@@ -210,6 +218,20 @@ def mark_waiting(conn: sqlite3.Connection, work_item_id: str, node_id: str, retr
     )
     events.append(
         conn, work_item_id, "work_item_waiting", {"node_id": node_id, "retry_at": retry_at}
+    )
+
+
+def mark_reentered(conn: sqlite3.Connection, work_item_id: str) -> None:
+    """Flip a `waiting` (or `rate_limited`) item back to `active` the instant
+    its own poller decides to re-enter it, before the spawned run has done
+    anything -- so the *next* tick's `WHERE status = 'waiting'` no longer
+    matches this row (Kraft-ppk9). No event: `node_started` already narrates
+    the re-entry once the walk actually begins; this is bookkeeping to make
+    the row stop looking due, not something a human reads.
+    """
+    conn.execute(
+        "UPDATE work_items SET status = 'active', retry_at = NULL, updated_at = ? WHERE id = ?",
+        (_now(), work_item_id),
     )
 
 

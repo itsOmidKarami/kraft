@@ -83,18 +83,21 @@ def test_executor_crash_marks_needs_human(tmp_path, monkeypatch):
 
 
 def test_retry_refuses_explicit_steer_on_a_node_with_no_agent_task(tmp_path, monkeypatch):
-    """Kraft-bz9b: `open_mr` is forge-kind with no fix_loop, so nothing ever
-    calls `Steer.take()` for it. `--steer` used to be accepted and echoed back
-    as if it would reach the next launch, when it was silently dropped."""
+    """Kraft-bz9b: `merge` is forge-kind with no fix_loop and is the chain's
+    last node, so nothing downstream of it ever calls `Steer.take()`.
+    `--steer` used to be accepted and echoed back as if it would reach the
+    next launch, when it was silently dropped. (`open_mr`, this test's node
+    before Kraft-cbr, no longer qualifies: `mr_checks` right after it now
+    carries `fix_loop`, so a steer given at `open_mr` could reach that.)"""
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = _post_default(client, repo)
-        _force_node(wid, "open_mr", "needs_human")
+        _force_node(wid, "merge", "needs_human")
 
         r = client.post(f"/api/work-items/{wid}/retry", json={"steer": "commit the leftover file"})
 
         assert r.status_code == 409, r.text
-        assert "open_mr" in r.json()["detail"]
+        assert "merge" in r.json()["detail"]
 
 
 def test_retry_without_explicit_steer_still_works_on_a_node_with_no_agent_task(
@@ -106,7 +109,7 @@ def test_retry_without_explicit_steer_still_works_on_a_node_with_no_agent_task(
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = _post_default(client, repo)
-        _force_node(wid, "open_mr", "needs_human")
+        _force_node(wid, "merge", "needs_human")
 
         r = client.post(f"/api/work-items/{wid}/retry", json={})
 
@@ -277,3 +280,69 @@ def test_post_triggers_files_a_paused_item(tmp_path, monkeypatch):
         body = r.json()
         assert body["status"] == "paused"
         assert body["title"] == "from a trigger"
+
+
+def _seed_counter(wid: str, key: str, *, count: int = 2) -> None:
+    """A retry_counters row, as if the node had already re-entered a wait or
+    an infra retry a couple of times (Kraft-cs4s)."""
+    import sqlite3
+
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    try:
+        conn.execute(
+            "INSERT INTO retry_counters (work_item_id, key, count, cap_attempts, "
+            "cap_wall_s, started_at, updated_at) VALUES (?, ?, ?, 60, 1800, ?, ?)",
+            (wid, key, count, "2020-01-01T00:00:00+00:00", "2020-01-01T00:00:00+00:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _counter_exists(wid: str, key: str) -> bool:
+    import sqlite3
+
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM retry_counters WHERE work_item_id = ? AND key = ?", (wid, key)
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
+def test_retry_clears_the_ci_wait_counter_for_the_current_node(tmp_path, monkeypatch):
+    """Seed a ci_wait:<node> counter (as if the item had re-entered a wait
+    twice already), stop the item at needs_human, retry it, and assert the
+    counter row is gone -- a fresh ci_wait poll after retry starts back at
+    count 1, not 3."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+        _force_node(wid, "mr_checks", "needs_human")
+        _seed_counter(wid, "ci_wait:mr_checks")
+
+        r = client.post(f"/api/work-items/{wid}/retry", json={})
+
+        assert r.status_code == 200, r.text
+        assert not _counter_exists(wid, "ci_wait:mr_checks")
+
+
+def test_retry_clears_the_ci_infra_counter_for_the_current_node(tmp_path, monkeypatch):
+    """Same shape, for the persisted infra-retry counter: seed
+    ci_infra:<node> at count 2 (one kick short of the cap), retry, and
+    assert the counter row is gone -- the retried item's next infra-red
+    poll gets a fresh budget, not an instant breach on its first one."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+        _force_node(wid, "mr_checks", "needs_human")
+        _seed_counter(wid, "ci_infra:mr_checks")
+
+        r = client.post(f"/api/work-items/{wid}/retry", json={})
+
+        assert r.status_code == 200, r.text
+        assert not _counter_exists(wid, "ci_infra:mr_checks")

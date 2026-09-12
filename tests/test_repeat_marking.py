@@ -184,7 +184,7 @@ def test_the_fix_after_a_steered_retry_still_marks_the_finding_repeat(tmp_path, 
             evts = database.read(lambda c: events.read_after(c, 0, wid))
             stops = [e for e in evts if e["type"] == "work_item_needs_human"]
             reason = stops[-1]["payload"]["reason"]
-            assert reason.startswith("no_progress:")
+            assert reason.startswith("stuck:")
 
             before = len(_prompts(log))
             await database.write(

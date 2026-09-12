@@ -492,17 +492,6 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
             )
             continue
 
-        # Not both: a fix_loop node already re-measures itself after its fix
-        # task runs, so a second remediation would race the first for the same
-        # failure and neither would know what the other changed.
-        both = next((n["id"] for n in nodes if n.get("on_failure") and n.get("fix_loop")), None)
-        if both is not None:
-            invalid[tid] = (
-                f"template {tid!r}: node {both!r} has both 'fix_loop' and 'on_failure'; "
-                f"the fix loop is already that node's remediation"
-            )
-            continue
-
         # Where a rejected gate sends the chain (Kraft-ko7j). At or before the
         # declaring node, because a rejection is backward motion: a forward
         # target would let a gate skip the nodes between it and the target

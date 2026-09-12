@@ -28,6 +28,13 @@ CONFIG_ERROR = "config_error"
 #: `"paused"`, which is always a human's own instruction.
 WAITING = "waiting"
 
+#: A settled pipeline whose every failed job is the forge's own fault
+#: (Kraft-h81i, Kraft-s8ul). `ci_poll` retries it internally, through the
+#: forge, up to a small cap; this is what it returns once retries are
+#: exhausted and it is still red -- straight to `needs_human`, spending
+#: no agent turn on infrastructure a fix loop cannot fix.
+INFRA_STOP = "infra_stop"
+
 
 #: What one gate approval must also do, and the chain it leaves behind:
 #: `kraft.api.routes.gates.apply_approval`, partially applied over the app state. `None` means

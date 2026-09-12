@@ -316,8 +316,30 @@ def test_unchanged_findings_escalate_before_the_cap(tmp_path, monkeypatch):
         attempts=5,
     )
     assert out["result"] == "needs_human"
-    assert _needs_human_reason(out).startswith("no_progress:")
+    assert _needs_human_reason(out).startswith("stuck:")
     assert _cycles(out) < 5  # escalated at cycle 1, well short of the cap
+
+
+def test_no_progress_stop_attaches_a_diagnosis_bundle(tmp_path, monkeypatch):
+    """Kraft-39ep: the stuck stop gathers a diagnosis a human would otherwise
+    reconstruct by hand -- the worktree's own state, at minimum."""
+    same = [_finding("unfixed")]
+    out = _run(
+        tmp_path,
+        monkeypatch,
+        [
+            {"status": "failed", "findings": same},
+            {"status": "failed", "findings": same},
+            {"status": "failed", "findings": same},
+        ],
+        attempts=5,
+    )
+    payload = next(
+        e["payload"] for e in reversed(out["events"]) if e["type"] == "work_item_needs_human"
+    )
+    assert "bundle" in payload
+    assert "git_status" in payload["bundle"]
+    assert "recent_log" in payload["bundle"]
 
 
 def test_line_movement_alone_is_not_progress(tmp_path, monkeypatch):
@@ -332,7 +354,7 @@ def test_line_movement_alone_is_not_progress(tmp_path, monkeypatch):
         attempts=5,
     )
     assert out["result"] == "needs_human"
-    assert _needs_human_reason(out).startswith("no_progress:")
+    assert _needs_human_reason(out).startswith("stuck:")
 
 
 def test_a_new_finding_is_progress(tmp_path, monkeypatch):
@@ -375,7 +397,7 @@ def test_no_progress_does_not_mark_sessions_capped_out(tmp_path, monkeypatch):
         ],
         attempts=5,
     )
-    assert _needs_human_reason(out).startswith("no_progress:")
+    assert _needs_human_reason(out).startswith("stuck:")
     assert not any(s["status"] == "capped_out" for s in out["sessions"])
 
 
@@ -513,7 +535,7 @@ def test_retry_after_no_progress_dispatches_a_fix_instead_of_re_escalating(tmp_p
             )
             assert first == "needs_human"
             events_after_first = database.read(lambda c: events.read_after(c, 0, wid))
-            assert _needs_human_reason({"events": events_after_first}).startswith("no_progress:")
+            assert _needs_human_reason({"events": events_after_first}).startswith("stuck:")
 
             await database.write(
                 lambda c: store.retry_after_cap(c, wid, "review", "verify_fix_loop", None)
