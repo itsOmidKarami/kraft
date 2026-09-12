@@ -213,6 +213,28 @@ def test_set_base_ref(tmp_path):
     assert conn.execute("SELECT base_ref FROM work_items WHERE id='w1'").fetchone()[0] == "abc123"
 
 
+def test_set_ci_pipeline_ref_writes_the_column(tmp_path):
+    conn = db._connect(tmp_path / "s.db")
+    db.migrate(conn)
+    store.create_work_item(
+        conn,
+        id="w1",
+        bead_id="B",
+        title="t",
+        repo="/r",
+        chain_template="quick-task",
+        chain_definition="{}",
+    )
+    assert (
+        conn.execute("SELECT ci_pipeline_ref FROM work_items WHERE id='w1'").fetchone()[0] is None
+    )
+    store.set_ci_pipeline_ref(conn, "w1", "abc123:456")
+    assert (
+        conn.execute("SELECT ci_pipeline_ref FROM work_items WHERE id='w1'").fetchone()[0]
+        == "abc123:456"
+    )
+
+
 def test_set_escalation_session(tmp_path):
     conn = db._connect(tmp_path / "s.db")
     db.migrate(conn)

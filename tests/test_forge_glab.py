@@ -500,6 +500,71 @@ GLAB_CI_GET_FAILED = (
 )
 
 
+# `glab ci get -F json` for a pipeline read by id -- same shape `glab ci
+# list` returns per-row, since both proxy GitLab's pipeline object.
+GLAB_CI_GET_PINNED_SUCCESS = (
+    '{"id":2826926705,"status":"success","sha":"deadbeef",'
+    '"web_url":"https://gitlab.com/itsOmidKarami/kraft/-/pipelines/2826926705"}'
+)
+
+
+def test_glab_ci_status_reads_the_pinned_pipeline_directly(tmp_path, monkeypatch):
+    """A `pipeline_id` skips `glab ci list` entirely -- the caller already
+    knows which pipeline this head has, no need to re-resolve "latest"."""
+    _stub_routed(
+        tmp_path,
+        monkeypatch,
+        "glab",
+        {"mr view": GLAB_MR_VIEW, "ci get": GLAB_CI_GET_PINNED_SUCCESS},
+    )
+    _stub(tmp_path, monkeypatch, "git", "")
+
+    status = asyncio.run(
+        forge.GlabCli().ci_status(
+            repo=tmp_path,
+            mr=forge.MR(1, "http://x/1"),
+            branch="kraft/abc",
+            pipeline_id="2826926705",
+        )
+    )
+
+    assert status.state == "success"
+    assert status.pipeline_ref == "2826926705"
+    assert status.sha == "deadbeef"
+    assert "ci list" not in "\n".join(_argv(tmp_path, "glab"))
+
+
+def test_glab_ci_status_falls_back_when_the_pinned_pipeline_is_unreadable(tmp_path, monkeypatch):
+    """A deleted/unreadable pinned pipeline must not fail the whole poll --
+    fall back to resolving "latest on branch" the way an unpinned poll does."""
+    p = tmp_path / "glab"
+    argv = tmp_path / "glab.argv"
+    p.write_text(
+        f'#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a" >> {argv}; done\n'
+        'case "$1 $2" in\n'
+        f"  'mr view') cat <<'STUBEOF'\n{GLAB_MR_VIEW}\nSTUBEOF\n  ;;\n"
+        "  'ci get') echo 'ci get: pipeline not found' >&2; exit 1 ;;\n"
+        f"  'ci list') cat <<'STUBEOF'\n{GLAB_CI_SUCCESS}\nSTUBEOF\n  ;;\n"
+        "  *) exit 1 ;;\n"
+        "esac\n"
+    )
+    p.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+    _stub(tmp_path, monkeypatch, "git", "")
+
+    status = asyncio.run(
+        forge.GlabCli().ci_status(
+            repo=tmp_path,
+            mr=forge.MR(1, "http://x/1"),
+            branch="kraft/abc",
+            pipeline_id="999999",
+        )
+    )
+
+    assert status.state == "success"
+    assert status.pipeline_ref == "2826926699"
+
+
 # The tail of `glab ci trace release-impact`, which is the only place the
 # reason for MR !89's red pipeline was ever written down.
 GLAB_CI_TRACE = (

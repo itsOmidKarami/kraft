@@ -404,6 +404,21 @@ def set_base_ref(conn: sqlite3.Connection, work_item_id: str, sha: str) -> None:
     )
 
 
+def set_ci_pipeline_ref(conn: sqlite3.Connection, work_item_id: str, ref: str) -> None:
+    """Pin `on.ci.poll` to the pipeline it last saw, stored as
+    "<head_sha>:<pipeline_id>" (Kraft-ivh1). GitLab only -- GitHub's
+    `ci_status` never sets `CIStatus.pipeline_ref`, so this is never called
+    for a GitHub-backed item. Read back and compared against the current
+    head before the next poll trusts it (a rebase or a repair's push moves
+    the head, which invalidates it on its own -- no separate clear needed
+    for that case).
+    """
+    conn.execute(
+        "UPDATE work_items SET ci_pipeline_ref = ?, updated_at = ? WHERE id = ?",
+        (ref, _now(), work_item_id),
+    )
+
+
 def set_escalation_session(
     conn: sqlite3.Connection, work_item_id: str, cli_session_id: str
 ) -> None:

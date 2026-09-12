@@ -426,3 +426,111 @@ def test_session_exited_carries_concerns_and_question_on_the_event(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_create_session_reuses_a_waiting_row_for_the_same_wait_episode(tmp_path):
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            first_id, log1, result1 = await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="mr_checks",
+                    hook_point="on.ci.poll",
+                    log_path="/l1",
+                    result_path="/r1",
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "s1", "waiting"))
+
+            second_id, log2, result2 = await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s2",
+                    work_item_id="w1",
+                    node_id="mr_checks",
+                    hook_point="on.ci.poll",
+                    log_path="/l2",
+                    result_path="/r2",
+                    reuse_if_waiting=True,
+                )
+            )
+
+            assert (second_id, log2, result2) == (first_id, log1, result1)
+            count = database.read(
+                lambda c: c.execute(
+                    "SELECT count(*) FROM worker_sessions WHERE work_item_id='w1'"
+                ).fetchone()[0]
+            )
+            assert count == 1
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_create_session_inserts_fresh_when_reuse_if_waiting_finds_nothing(tmp_path):
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            new_id, log, result = await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="mr_checks",
+                    hook_point="on.ci.poll",
+                    log_path="/l1",
+                    result_path="/r1",
+                    reuse_if_waiting=True,
+                )
+            )
+            assert (new_id, log, result) == ("s1", "/l1", "/r1")
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_create_session_does_not_reuse_a_settled_session(tmp_path):
+    """A 'done'/'failed' prior session must not be mistaken for the same wait
+    episode -- only 'waiting' is reusable."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="mr_checks",
+                    hook_point="on.ci.poll",
+                    log_path="/l1",
+                    result_path="/r1",
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "s1", "done"))
+
+            new_id, _, _ = await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s2",
+                    work_item_id="w1",
+                    node_id="mr_checks",
+                    hook_point="on.ci.poll",
+                    log_path="/l2",
+                    result_path="/r2",
+                    reuse_if_waiting=True,
+                )
+            )
+            assert new_id == "s2"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())

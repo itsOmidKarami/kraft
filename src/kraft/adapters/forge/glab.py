@@ -124,7 +124,9 @@ class GlabCli:
             return "merged"
         return str(data.get("detailed_merge_status") or data.get("merge_status") or "")
 
-    async def ci_status(self, *, repo: Path, mr: MR, branch: str = "") -> CIStatus:
+    async def ci_status(
+        self, *, repo: Path, mr: MR, branch: str = "", pipeline_id: str = ""
+    ) -> CIStatus:
         # The merge request's own state first: a conflict fails the check node
         # whatever colour the pipeline is, and `ci.poll_ci` must not wait out a
         # pipeline to learn it (Kraft-ejj9).
@@ -143,6 +145,42 @@ class GlabCli:
                 merge_detail="merged",
             )
         mergeable = mr_ops.mergeable(detail)
+        if pipeline_id:
+            # Pinned to a pipeline the caller already resolved against the
+            # current head (Kraft-ivh1): no sha guard needed here, unlike
+            # `glab ci list` below, which can answer with the previous
+            # commit's pipeline for a few seconds after a push.
+            try:
+                raw = await git.run_git(
+                    repo, ["glab", "ci", "get", "--pipeline-id", pipeline_id, "-F", "json"]
+                )
+                top = mr_ops.parse_json(raw, "glab ci get")
+            except ForgeError:
+                top = None
+            if isinstance(top, dict) and top:
+                raw_state = str(top.get("status", ""))
+                state: CIState = _GLAB_STATES.get(raw_state, "failed")
+                url = str(top.get("web_url", ""))
+                sha = str(top.get("sha", ""))
+                pipeline_ref = str(top.get("id", pipeline_id))
+                jobs: tuple[str, ...] = (f"pipeline {pipeline_ref}: {raw_state}",)
+                failed_jobs: tuple[FailedJob, ...] = ()
+                if state == "failed":
+                    detail_lines, failed_jobs = await self._failure_detail(repo, pipeline_ref)
+                    jobs += detail_lines
+                return CIStatus(
+                    state=state,
+                    url=url,
+                    jobs=jobs,
+                    mergeable=mergeable,
+                    merge_detail=detail,
+                    sha=sha,
+                    failed_jobs=failed_jobs,
+                    pipeline_ref=pipeline_ref,
+                )
+            # Pinned id unreadable (deleted, transient CLI error) -- fall
+            # through to the ordinary "resolve latest on branch" path below
+            # rather than erroring the whole poll.
         # --ref, or this returns the newest pipeline in the whole project: a
         # green run on main would pass the gate for a red branch.
         ref = ["--ref", branch] if branch else []

@@ -107,6 +107,9 @@ def retry_after_cap(
                 "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?",
                 (work_item_id, counter),
             )
+    # A stale pinned pipeline must not survive a manual retry any more than
+    # the exhausted ci_wait/ci_infra counters above do (Kraft-ivh1).
+    conn.execute("UPDATE work_items SET ci_pipeline_ref = NULL WHERE id = ?", (work_item_id,))
     events.append(
         conn,
         work_item_id,
@@ -132,10 +135,15 @@ def mark_sessions_capped_out(
     # is not license to overwrite its status or lose its concerns text. Scoped
     # to the node's measuring hook points so the fix task's own session
     # (on.implementation.start) is not mislabelled as a capped-out measurement.
+    # 'waiting' is left alone too (Kraft-ivh1): an on.ci.poll session still
+    # waiting on a pipeline has its own separate cap (ci_wait:<node_id>) --
+    # this sweep is the node's *fix-cycle* cap, and breaching that is not
+    # license to steal a still-legitimately-waiting session out from under
+    # the cap that already governs it.
     placeholders = ",".join("?" * len(hook_points))
     where = (
         f"work_item_id = ? AND node_id = ? AND hook_point IN ({placeholders}) "
-        f"AND status NOT IN ('done', 'done_with_concerns', 'capped_out')"
+        f"AND status NOT IN ('done', 'done_with_concerns', 'capped_out', 'waiting')"
     )
     args = (work_item_id, node_id, *hook_points)
     capped = conn.execute(f"SELECT id FROM worker_sessions WHERE {where}", args).fetchall()
