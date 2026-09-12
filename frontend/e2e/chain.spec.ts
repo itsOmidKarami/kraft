@@ -14,14 +14,14 @@ test("create a work item and watch it complete", async ({ page }) => {
   await page.getByRole("button", { name: /new work item/i }).click();
 
   const modal = page.getByRole("dialog", { name: "New work item" });
-  await modal.getByRole("button", { name: new RegExp(REPO_NAME, "i") }).click();
+  await modal.getByLabel("repo").selectOption({ label: REPO_NAME });
   await modal.getByLabel("title").fill("make the failing test pass");
   // Explicit: this spec watches a chain run to completion unattended, which
   // only the gateless quick-task chain does. `default` is what the modal now
   // pre-selects, and it stops at spec_approval.
   await modal
     .getByRole("radiogroup", { name: "template" })
-    .locator("label.seg-opt", { hasText: /^quick-task\b/ })
+    .getByRole("radio", { name: /^quick-task\b/ })
     .click();
   await modal.getByRole("button", { name: /create and start/i }).click();
 

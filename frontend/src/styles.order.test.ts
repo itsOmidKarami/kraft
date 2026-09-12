@@ -49,6 +49,15 @@ describe("styles.css specificity", () => {
   });
 });
 
+describe("page stylesheet overrides", () => {
+  it("gives the chains and plugins grids a specificity that beats .template-editor", () => {
+    const chains = readFileSync(join(here, "views/settings/templates.css"), "utf-8");
+    const plugins = readFileSync(join(here, "views/settings/plugins.css"), "utf-8");
+    expect(chains).toMatch(/\.template-editor\.chain-editor\s*\{[^}]*grid-template-columns/);
+    expect(plugins).toMatch(/\.template-editor\.plugins-editor\s*\{[^}]*grid-template-columns/);
+  });
+});
+
 describe("Hairline utility", () => {
   it("defines --hairline-24/--hairline-48 and exposes them as .hairline/.hairline-section", () => {
     const css = readFileSync(join(here, "styles.css"), "utf-8");

@@ -82,6 +82,51 @@ describe("EscalationCard", () => {
     );
   });
 
+  it("renders the escalation report as markdown, not literal characters", () => {
+    const sess = {
+      id: "e1",
+      work_item_id: "w1",
+      node_id: "v",
+      hook_point: "escalation",
+      status: "done_with_concerns",
+      attempt: 1,
+      round: 0,
+      created_at: "t",
+      started_at: "t",
+      exited_at: "t",
+      tokens_in: null,
+      tokens_out: null,
+      cost_usd: null,
+      wall_ms: null,
+      model: null,
+      head_sha: null,
+    } as WorkerSession;
+    const evs = [
+      {
+        seq: 1,
+        work_item_id: "w1",
+        type: "worker_session_exited",
+        payload: {
+          session_id: "e1",
+          status: "done_with_concerns",
+          concerns: "## Fixed\n\n- **one** thing\n",
+        },
+        created_at: "t",
+      },
+    ] as KraftEvent[];
+    render(
+      <EscalatedCard
+        item={item()}
+        session={sess}
+        events={evs}
+        onOpenReply={() => {}}
+        onDismiss={() => {}}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "Fixed" })).toBeInTheDocument();
+    expect(screen.queryByText(/## Fixed/)).toBeNull();
+  });
+
   it("falls back to the session_summary_ref document when a clean 'done' turn carries no concerns/question, and offers Apply", async () => {
     const retrySpy = vi
       .spyOn(api, "retryWorkItem")

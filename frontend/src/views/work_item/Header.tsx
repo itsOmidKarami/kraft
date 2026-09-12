@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { PencilSimple, Prohibit } from "@phosphor-icons/react";
+import { useEffect, useState, type WheelEvent } from "react";
+import { CaretDown, PencilSimple, Prohibit } from "@phosphor-icons/react";
 import * as api from "../../api";
 import { elapsed, repoName, statusWord } from "../../format";
 import { useStore } from "../../store";
@@ -173,7 +173,23 @@ function Description({
   );
 }
 
-export function Header({ item, events }: { item: WorkItem; events: KraftEvent[] }) {
+export function Header({
+  item,
+  events,
+  collapsed = false,
+  onWheel,
+  onExpand,
+}: {
+  item: WorkItem;
+  events: KraftEvent[];
+  /** WI-3 · Kraft-yx8v: the title/description hide once the top block has
+   *  been scrolled past. Owned by the page (`index.tsx`), not this
+   *  component, since the collapsed flag is read by `.detail`'s
+   *  `data-head` attribute one level up. */
+  collapsed?: boolean;
+  onWheel?: (e: WheelEvent<HTMLDivElement>) => void;
+  onExpand?: () => void;
+}) {
   const nodes = item.chain_definition.nodes;
   const at = nodes.findIndex((n) => n.id === item.current_node_id);
   const runtime = nodeRuntime(events, item.current_node_id);
@@ -184,7 +200,7 @@ export function Header({ item, events }: { item: WorkItem; events: KraftEvent[] 
   const [editing, setEditing] = useState<"title" | "description" | null>(null);
 
   return (
-    <div className="detail-head">
+    <div className="detail-head" onWheel={onWheel}>
       <div className="detail-meta">
         <span title={item.repo}>{repoName(item.repo)}</span>
         {!!item.repos?.length && (
@@ -205,6 +221,19 @@ export function Header({ item, events }: { item: WorkItem; events: KraftEvent[] 
         <span className={`${STATUS_TAG[item.status]} detail-status`}>
           {statusWord(item.status)}
         </span>
+        {/* A wheel gesture collapses the block, but that's unreachable from
+            the keyboard on its own -- this chevron is the way back in
+            without one. */}
+        {collapsed && (
+          <button
+            type="button"
+            className="btn btn-quiet detail-head-expand"
+            aria-label="expand title and description"
+            onClick={onExpand}
+          >
+            <CaretDown size={13} />
+          </button>
+        )}
         <OverflowMenu
           items={[
             { label: "Edit title", onSelect: () => setEditing("title") },
@@ -212,17 +241,19 @@ export function Header({ item, events }: { item: WorkItem; events: KraftEvent[] 
           ]}
         />
       </div>
-      <Title
-        item={item}
-        editing={editing === "title"}
-        onEdit={() => setEditing("title")}
-        onDone={() => setEditing(null)}
-      />
-      <Description
-        item={item}
-        editing={editing === "description"}
-        onDone={() => setEditing(null)}
-      />
+      <div className="detail-head-collapsible" data-collapsed={collapsed && !editing}>
+        <Title
+          item={item}
+          editing={editing === "title"}
+          onEdit={() => setEditing("title")}
+          onDone={() => setEditing(null)}
+        />
+        <Description
+          item={item}
+          editing={editing === "description"}
+          onDone={() => setEditing(null)}
+        />
+      </div>
       <div className="detail-hero">
         <span className="hero-node">{item.current_node_id ?? "—"}</span>
         {item.fixCycle != null && (

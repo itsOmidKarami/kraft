@@ -173,7 +173,13 @@
   gap: var(--space-3);
   font-size: 12px;
   padding-bottom: var(--space-2);
+  z-index: 3; /* above .tabs, which sits right below it */
 }
+/* Two sticky siblings at the same `top: 0` stack on each other -- the node
+   row was sliding under the tab strip. Same shape the board already uses for
+   .board-filter-row / .group-head. `--inspector-head-h` is set from the
+   head's own measured height (Inspector/index.tsx), not a guessed 40px. */
+.inspector .tabs { top: var(--inspector-head-h, 40px); }
 .inspector-body {
   padding-top: var(--space-2);
 }
@@ -207,8 +213,10 @@
 
 /* — Changes tab folder tree (42, G4-01) ──────────────────────────────────── */
 .tree-section { margin-bottom: var(--space-4); }
+/* Caret first in the markup (Changes.tsx), so the caret -- not the name --
+   was taking the stretching track and shoving every name to the right edge. */
 .tree-row {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 8px; align-items: center; padding: 4px 6px;
   width: 100%; background: none; border: 0; text-align: left; font-size: 12px;
   /* 18px per level (42), as an inline --depth on the row. */

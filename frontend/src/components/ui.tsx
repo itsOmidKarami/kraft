@@ -380,6 +380,37 @@ export function Tabs({
   );
 }
 
+/* — segmented control (design 28's Binding kind, screen 45's mobile settings
+   header) — one active segment, not N independent toggle buttons. */
+export function Segmented<T extends string>({
+  options,
+  value,
+  onChange,
+  disabled,
+}: {
+  options: { id: T; label: string }[];
+  value: T;
+  onChange: (id: T) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="segmented" role="group">
+      {options.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          className="segmented-opt"
+          aria-pressed={o.id === value}
+          disabled={disabled}
+          onClick={() => onChange(o.id)}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /* — switch (spec §4) —————————————————————————————————————————————————— */
 
 /** 34×20 toggle, keyboard-operable via native `<button>`. Replaces the four
