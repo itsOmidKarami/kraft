@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 27
+SCHEMA_VERSION = 28
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -94,6 +94,10 @@ CREATE TABLE work_items (
   -- the two writers are archive_work_item's only two callers.
   archived_at      TEXT,
   archived_by      TEXT,
+  -- GitLab pipeline pinned by the last `on.ci.poll` read, stored as
+  -- "<head_sha>:<pipeline_id>" (Kraft-ivh1). Empty until the first poll,
+  -- cleared on retry_after_cap alongside the ci_wait/ci_infra counters.
+  ci_pipeline_ref  TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
@@ -650,6 +654,9 @@ FROM worker_sessions""",
         "ALTER TABLE worker_sessions_new RENAME TO worker_sessions",
         "CREATE INDEX idx_worker_sessions_status ON worker_sessions(status)",
     ],
+    # Pin `on.ci.poll` to the pipeline it already saw pending, instead of
+    # re-resolving "latest on branch" every re-entry (Kraft-ivh1).
+    27: ["ALTER TABLE work_items ADD COLUMN ci_pipeline_ref TEXT"],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins
