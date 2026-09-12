@@ -6,11 +6,11 @@ import { fileKey, type DiffSection } from "../selection";
 import { buildFileTree, type TreeNode } from "./fileTree";
 
 /**
- * Inspector · Changes (UI v2 · 05, 13 · UI v3 · 42, G4-01…04): a collapsible
- * folder tree, two sections — this node's own diff, and (optionally) what
- * already landed on the branch. Selecting a row scrolls `RightPane/Diff.tsx`
- * to that file; scrolling the pane moves the highlight back
- * (`RightPane/Diff.tsx`'s own `IntersectionObserver`). The diff is fetched
+ * Inspector · Changes (UI v2 · 05, 13 · UI v3 spec 2026-09-12 §1, supersedes
+ * screens 42/48): a collapsible folder tree, two sections — this node's own
+ * diff, and (optionally) what already landed on the branch. Selecting a row
+ * is what the pane renders: `RightPane/Diff.tsx` shows that file and nothing
+ * else, with no scroll-driven sync back to this tree. The diff is fetched
  * once, in `index.tsx`, and passed down here and to the pane.
  */
 
