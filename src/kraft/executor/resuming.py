@@ -250,7 +250,18 @@ async def resume(
         policy=policy,
         launch=launch,
     )
-    return await gates.review_gates(
+    status = await gates.review_gates(
+        status,
+        db,
+        run_dirs,
+        work_item_id=work_item_id,
+        registry=registry,
+        policy=policy,
+        launch=launch,
+        bd_cwd=bd_cwd,
+        on_approve=on_approve,
+    )
+    return await gates.auto_escalate_stuck(
         status,
         db,
         run_dirs,

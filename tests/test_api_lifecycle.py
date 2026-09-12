@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import sqlite3
 import subprocess
 import time
 from pathlib import Path
@@ -183,6 +184,71 @@ def test_retry_works_when_a_slot_is_free(tmp_path, monkeypatch):
         r = client.post(f"/api/work-items/{wid}/retry", json={})
 
         assert r.status_code == 200, r.text
+
+
+def _create_escalation_session(wid: str, session_id: str, node_id: str) -> None:
+    """A live `worker_sessions` row for `wid` (`hook_point='escalation'`,
+    `status='running'`) -- the shape `retry`'s self-retry check reads,
+    without actually dispatching an agent."""
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    try:
+        conn.execute(
+            "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, log_path, "
+            "result_path, status, created_at) VALUES (?, ?, ?, 'escalation', 'x', 'x', "
+            "'running', datetime('now'))",
+            (session_id, wid, node_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_retry_defers_instead_of_racing_its_own_still_running_escalation_session(
+    tmp_path, monkeypatch
+):
+    """The escalation agent calling `kraft item retry` on itself must not run
+    the rebase/spawn inline: its own session is still `running` (it is
+    mid-tool-call, blocked on this very response), so racing a `git rebase`
+    and a fresh spawn into the worktree it is still live in is exactly the
+    collision `escalation_running` exists to prevent everywhere else."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+        _force_node(wid, "verify", "needs_human")
+        _create_escalation_session(wid, "s1", "verify")
+
+        r = client.post(
+            f"/api/work-items/{wid}/retry",
+            json={},
+            headers={"x-kraft-session-id": "s1"},
+        )
+
+        assert r.status_code == 200, r.text
+        # Deferred, not run: the item is still parked at needs_human, and no
+        # `work_item_retried` (the rebase+spawn path) has fired yet.
+        assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
+        events_seen = client.get(f"/api/work-items/{wid}/events").json()
+        types = [e["type"] for e in events_seen]
+        assert "work_item_self_retry_requested" in types
+        assert "work_item_retried" not in types
+
+
+def test_retry_still_refuses_a_stranger_while_an_escalation_is_running(tmp_path, monkeypatch):
+    """A caller that is *not* the live escalation session (no header, or a
+    different one) must still be refused -- only the exact session calling
+    on itself gets the deferral."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+        _force_node(wid, "verify", "needs_human")
+        _create_escalation_session(wid, "s1", "verify")
+
+        r = client.post(f"/api/work-items/{wid}/retry", json={})
+
+        assert r.status_code == 409, r.text
+        assert "s1" in r.json()["detail"]
 
 
 def test_abandon_sets_terminal_status_and_removes_the_worktree(tmp_path, monkeypatch):

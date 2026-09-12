@@ -43,7 +43,13 @@ GATE_NAMES = {"spec_approval", "plan_approval", "chain_finalized", "human_review
 #: the splice that replaces the tail wholesale (`kraft.api.routes.gates._splice_chain_review`)
 #: must carry these forward from the node they replace rather than trust an
 #: agent-authored dict to know they exist.
-NODE_CARRYOVER_FIELDS = ("on_failure", "reject_to", "rebase_bounce_to", "auto_escalate")
+NODE_CARRYOVER_FIELDS = (
+    "on_failure",
+    "reject_to",
+    "rebase_bounce_to",
+    "auto_escalate",
+    "auto_escalate_stuck",
+)
 
 
 def carry_forward_node_fields(old_nodes: list, new_nodes: list) -> list:
@@ -556,6 +562,23 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
             )
             continue
 
+        # Unlike auto_escalate, meaningful on every node -- a needs_human stop
+        # has nothing to do with which node it happened on being a gate.
+        bad_aes = next(
+            (
+                n["id"]
+                for n in nodes
+                if n.get("auto_escalate_stuck") is not None
+                and not isinstance(n["auto_escalate_stuck"], bool)
+            ),
+            None,
+        )
+        if bad_aes is not None:
+            invalid[tid] = (
+                f"template {tid!r}: node {bad_aes!r} 'auto_escalate_stuck' must be a bool"
+            )
+            continue
+
         valid[tid] = Template(id=tid, nodes=nodes)
 
     return TemplateSet(valid=valid, invalid=invalid)
@@ -587,6 +610,7 @@ def materialize(
                 "reject_to": n.get("reject_to"),
                 "rebase_bounce_to": n.get("rebase_bounce_to"),
                 "auto_escalate": n.get("auto_escalate"),
+                "auto_escalate_stuck": n.get("auto_escalate_stuck"),
             }
             for n in template.nodes
             if n.get("gate_after") not in satisfied_gates and n["id"] not in skip_nodes

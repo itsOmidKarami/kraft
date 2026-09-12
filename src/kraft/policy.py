@@ -14,6 +14,7 @@ class PolicyError(Exception):
 
 
 DEFAULT_LOOP_SEVERITIES = frozenset({"critical", "important"})
+DEFAULT_AUTO_ESCALATE_STUCK_CAP = 3
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,17 @@ class Policy:
     #: the only door onto a running item, so the cap belongs where every door
     #: (`resume`, `retry`) can read the same number.
     max_concurrent: int = 3
+    #: Whether a `needs_human` stop for a reason other than a pending gate
+    #: auto-dispatches an escalation turn (Kraft-lpdd). Independent of
+    #: `auto_escalate` (gate review) -- different mechanism, different trigger,
+    #: must stay independently toggleable. Defaults on: ships opt-out, not
+    #: opt-in.
+    auto_escalate_stuck: bool = True
+    #: Attempts an item may be auto-escalated within one `needs_human` run
+    #: before this feature leaves it for a human, same posture as a fix loop's
+    #: `Cap.attempts` but counted over `escalation_message` events tagged
+    #: `{"auto": true}` rather than a `retry_counters` row.
+    auto_escalate_stuck_cap: int = DEFAULT_AUTO_ESCALATE_STUCK_CAP
 
 
 def _cap(name: str, raw: object) -> Cap:
@@ -244,6 +256,12 @@ def load_policy(path: str | Path) -> Policy:
     if not isinstance(raw_mc, int) or isinstance(raw_mc, bool) or raw_mc < 1:
         raise PolicyError(f"{path.name}: 'max_concurrent' must be a positive int")
     archive_after_days = _archive_after_days(f"{path.name}: 'archive'", data.get("archive"))
+    raw_aes = data.get("auto_escalate_stuck", True)
+    if not isinstance(raw_aes, bool):
+        raise PolicyError(f"{path.name}: 'auto_escalate_stuck' must be a bool")
+    raw_aes_cap = data.get("auto_escalate_stuck_cap", DEFAULT_AUTO_ESCALATE_STUCK_CAP)
+    if not isinstance(raw_aes_cap, int) or isinstance(raw_aes_cap, bool) or raw_aes_cap < 1:
+        raise PolicyError(f"{path.name}: 'auto_escalate_stuck_cap' must be a positive int")
     return Policy(
         loops=loops,
         default=_cap("default", data["default"]),
@@ -253,6 +271,8 @@ def load_policy(path: str | Path) -> Policy:
         rate_limit_retries=raw_retries,
         triggers=triggers,
         max_concurrent=raw_mc,
+        auto_escalate_stuck=raw_aes,
+        auto_escalate_stuck_cap=raw_aes_cap,
     )
 
 

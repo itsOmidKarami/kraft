@@ -43,6 +43,10 @@ def _make_policy(tmp_path, *, attempts=3, wall_clock_s=3600) -> policy.Policy:
     p.write_text(
         f"loops:\n  verify_fix_loop: {{ attempts: {attempts}, wall_clock_s: {wall_clock_s} }}\n"
         f"default: {{ attempts: {attempts}, wall_clock_s: {wall_clock_s} }}\n"
+        # Kraft-lpdd: this suite is about the fix loop's own cap, not the
+        # unrelated auto-escalate trigger a `needs_human` cap breach would
+        # otherwise also fire.
+        "auto_escalate_stuck: false\n"
     )
     return policy.load_policy(p)
 
@@ -408,6 +412,10 @@ def _run_repair_fixloop(tmp_path, repair_script: str, *, attempts=3, monkeypatch
             pol_path.write_text(
                 f"loops:\n  n1_fix: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
                 f"default: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
+                # Kraft-lpdd: this suite is about the fix loop's own cap, not
+                # the unrelated auto-escalate trigger a `needs_human` cap
+                # breach would otherwise also fire.
+                "auto_escalate_stuck: false\n"
             )
             pol = policy.load_policy(pol_path)
             wid = await executor.intake(

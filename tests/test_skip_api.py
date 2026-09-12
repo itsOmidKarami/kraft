@@ -77,7 +77,15 @@ def test_skip_advances_past_a_stopped_task_node_without_rerunning_it(tmp_path, m
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
             "/api/work-items",
-            json={"title": "KRAFT_FAIL once", "repo": str(repo), "chain_template": "quick-task"},
+            json={
+                "title": "KRAFT_FAIL once",
+                "repo": str(repo),
+                "chain_template": "quick-task",
+                # Kraft-lpdd: this test is about skip, not the unrelated
+                # auto-escalate trigger racing it onto the same needs_human
+                # stop `_wait_for_status` below is waiting on.
+                "node_overrides": {"implementation": {"auto_escalate_stuck": False}},
+            },
         ).json()["id"]
         item = _wait_for_status(client, wid, "needs_human")
         assert item["current_node_id"] == "implementation"

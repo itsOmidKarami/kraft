@@ -153,3 +153,132 @@ def test_dispatch_records_the_message_as_an_event(tmp_path, monkeypatch):
     import asyncio
 
     asyncio.run(scenario())
+
+
+def test_dispatch_auto_uses_the_synthesized_message_and_auto_opening(tmp_path, monkeypatch):
+    seen = {}
+
+    async def fake_run_agent_task(db, run_dirs, *, session_id, task_instruction, **kw):
+        seen["task_instruction"] = task_instruction
+        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("")
+        return "done"
+
+    monkeypatch.setattr("kraft.escalate._agent.run_agent_task", fake_run_agent_task)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await Database.open(rd.db)
+        try:
+            wid = "w1"
+            await _seed_needs_human(database, rd, wid)
+            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+            await escalate.dispatch(
+                database,
+                rd,
+                work_item_id=wid,
+                message="(Auto-escalated: no one has looked at this yet.)",
+                launch=launch,
+                auto=True,
+            )
+        finally:
+            await database.close()
+
+    import asyncio
+
+    asyncio.run(scenario())
+    assert "This is an automatic escalation" in seen["task_instruction"]
+    assert "Kraft itself is asking you" in seen["task_instruction"]
+
+
+def test_dispatch_manual_is_unchanged_by_the_auto_param(tmp_path, monkeypatch):
+    seen = {}
+
+    async def fake_run_agent_task(db, run_dirs, *, session_id, task_instruction, **kw):
+        seen["task_instruction"] = task_instruction
+        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("")
+        return "done"
+
+    monkeypatch.setattr("kraft.escalate._agent.run_agent_task", fake_run_agent_task)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await Database.open(rd.db)
+        try:
+            wid = "w1"
+            await _seed_needs_human(database, rd, wid)
+            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+            await escalate.dispatch(
+                database, rd, work_item_id=wid, message="please look", launch=launch
+            )
+        finally:
+            await database.close()
+
+    import asyncio
+
+    asyncio.run(scenario())
+    assert "This is an escalation: a human is asking" in seen["task_instruction"]
+    assert "automatic escalation" not in seen["task_instruction"]
+
+
+def test_dispatch_auto_tags_the_event(tmp_path, monkeypatch):
+    async def fake_run_agent_task(db, run_dirs, *, session_id, **kw):
+        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("")
+        return "done"
+
+    monkeypatch.setattr("kraft.escalate._agent.run_agent_task", fake_run_agent_task)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await Database.open(rd.db)
+        try:
+            wid = "w1"
+            await _seed_needs_human(database, rd, wid)
+            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+            await escalate.dispatch(
+                database, rd, work_item_id=wid, message="msg", launch=launch, auto=True
+            )
+            from kraft import events as events_mod
+
+            evs = database.read(lambda c: events_mod.read_after(c, 0, wid))
+            msg_events = [e for e in evs if e["type"] == "escalation_message"]
+            assert msg_events[0]["payload"]["auto"] is True
+        finally:
+            await database.close()
+
+    import asyncio
+
+    asyncio.run(scenario())
+
+
+def test_escalation_running_reports_a_pending_or_running_session(tmp_path):
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await Database.open(rd.db)
+        try:
+            wid = "w1"
+            await _seed_needs_human(database, rd, wid)
+            assert escalate.escalation_running(database, wid) is None
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id=wid,
+                    node_id="implementation",
+                    hook_point="escalation",
+                    log_path=str(rd.logs / "s1.log"),
+                    result_path=str(rd.logs / "s1.json"),
+                )
+            )
+            assert escalate.escalation_running(database, wid) == "s1"
+        finally:
+            await database.close()
+
+    import asyncio
+
+    asyncio.run(scenario())
