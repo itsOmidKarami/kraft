@@ -168,6 +168,17 @@ def fake_templates_dir(
     d.mkdir(parents=True, exist_ok=True)
     shutil.copy(_REPO_ROOT / "templates" / "quick-task.yaml", d / "quick-task.yaml")
     shutil.copy(_REPO_ROOT / "templates" / "default.yaml", d / "default.yaml")
+    # Only the file the shipped registry's `steering:` keys actually name, not
+    # the whole real steering/ dir (its README.md is documentation, not a
+    # steering file, and copying it in shows up as a phantom entry in every
+    # steering-listing test). `exist_ok=True` on both: a caller that spins up
+    # more than one `_client()` against the same `tmp_path` calls this twice.
+    steering_dir = d / "steering"
+    steering_dir.mkdir(exist_ok=True)
+    shutil.copy(
+        _REPO_ROOT / "templates" / "steering" / "never-signal-processes-you-didnt-start.md",
+        steering_dir / "never-signal-processes-you-didnt-start.md",
+    )
 
     def noop() -> dict:
         # A fresh dict per call, not one shared object: `yaml.safe_dump` aliases

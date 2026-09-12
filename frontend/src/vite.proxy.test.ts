@@ -24,4 +24,9 @@ describe("the dev vite proxy", () => {
     expect(wsTs).toMatch(/\/api\/ws\/events/);
     expect(viteConfig).toMatch(/["']\/api["']/);
   });
+
+  it("the proxy target reads KRAFT_PORT so it cannot drift from the dev backend's own port", () => {
+    const viteConfig = readFileSync(join(here, "..", "vite.config.ts"), "utf-8");
+    expect(viteConfig).toMatch(/process\.env\.KRAFT_PORT/);
+  });
 });

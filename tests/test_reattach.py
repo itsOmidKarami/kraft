@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import signal
 import subprocess
 import sys
 
@@ -520,6 +522,60 @@ def test_an_adopted_session_records_its_usage(tmp_path):
             assert row["cost_usd"] == 1.25
         finally:
             proc.wait()
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_adopting_a_session_leaves_its_backgrounded_child_alone(tmp_path):
+    """The one exception in §5: a session Kraft adopted after a restart is
+    meant to outlive the process that launched it. Killing its group on
+    adoption would undo the reattach feature outright."""
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        pidfile = tmp_path / "grandchild.pid"
+        proc = subprocess.Popen(
+            ["bash", "-c", f"sleep 30 & echo $! > {pidfile}; sleep 2"],
+            start_new_session=True,
+        )
+        grandchild = None
+        try:
+            import psutil
+
+            pst = psutil.Process(proc.pid).create_time()
+            await _seed_item(database)
+            (rd.results / "s1.json").write_text('{"status": "done"}')
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="implementation",
+                    hook_point="on.implementation.start",
+                    log_path=str(rd.logs / "s1.log"),
+                    result_path=str(rd.results / "s1.json"),
+                )
+            )
+            await database.write(lambda c: store.session_running(c, "s1", proc.pid, pst))
+            for _ in range(50):
+                if pidfile.exists():
+                    break
+                await asyncio.sleep(0.1)
+            grandchild = int(pidfile.read_text().strip())
+            summary, adopted = await reattach.reattach(database, rd, _REG)
+            assert summary.adopted == ["s1"]
+            await adopted["s1"]
+            proc.wait()
+            os.kill(grandchild, 0)  # still alive: no ProcessLookupError
+        finally:
+            proc.wait()
+            if grandchild:
+                try:
+                    os.kill(grandchild, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
             await database.close()
 
     asyncio.run(scenario())

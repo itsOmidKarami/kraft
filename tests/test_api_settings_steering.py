@@ -37,11 +37,21 @@ def _steering_dir(templates_dir):
     return d
 
 
+def _files_excluding_fixture(body: dict) -> list[dict]:
+    """`fake_templates_dir` seeds `never-signal-processes-you-didnt-start.md`
+    itself -- `on.chain.review_ready`'s shipped binding names it, so a config
+    load would 422 without it. It is not this test's concern, so drop it
+    before asserting on what the test itself wrote."""
+    return [f for f in body["files"] if f["name"] != "never-signal-processes-you-didnt-start"]
+
+
 def test_steering_list_reports_sizes_against_the_injection_budget(client, templates_dir):
     (_steering_dir(templates_dir) / "house-style.md").write_text("prefer stdlib\n")
     body = client.get("/api/steering").json()
     assert body["max_bytes"] == steering_mod.MAX_BYTES
-    assert body["files"] == [{"name": "house-style", "bytes": len(b"prefer stdlib\n")}]
+    assert _files_excluding_fixture(body) == [
+        {"name": "house-style", "bytes": len(b"prefer stdlib\n")}
+    ]
 
 
 def test_steering_round_trips_a_body(client, templates_dir):
@@ -96,7 +106,7 @@ def test_deleting_a_steering_file_nothing_names_succeeds(client, templates_dir):
     (_steering_dir(templates_dir) / "orphan.md").write_text("unused\n")
     assert client.delete("/api/steering/orphan").status_code == 200
     assert not (templates_dir / "steering" / "orphan.md").exists()
-    assert client.get("/api/steering").json()["files"] == []
+    assert _files_excluding_fixture(client.get("/api/steering").json()) == []
 
 
 def test_two_overlapping_intake_saves_leave_exactly_one_live_poller(client):

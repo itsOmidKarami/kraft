@@ -130,6 +130,12 @@ def _serve() -> None:
         print(f"kraft: already running (pid {running}) - kraft admin stop", file=sys.stderr)
         raise SystemExit(1)
     pid_path.write_text(str(os.getpid()))
+    # Every worker Kraft launches inherits this environment (adapters/
+    # subprocess.py's `full_env` starts from `os.environ`): a leftover
+    # process found on a port can be checked against the daemon it actually
+    # is, rather than assumed stale and killed (Kraft-f8u3).
+    os.environ["KRAFT_DAEMON_PID"] = str(os.getpid())
+    os.environ["KRAFT_DAEMON_PORT"] = str(port)
     _update_notice()
     print(f"kraft: http://{host}:{port}")
     try:

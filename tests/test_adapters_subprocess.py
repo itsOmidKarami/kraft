@@ -885,3 +885,103 @@ def test_run_task_aborts_before_popen_if_the_row_was_stopped_first(tmp_path, mon
     status = asyncio.run(scenario())
     assert status == "paused"
     assert not (rd.logs / "s1.log").exists()  # aborted before the log was even opened
+
+
+def test_run_task_kills_a_backgrounded_grandchild_when_the_session_ends(tmp_path):
+    """A worker that backgrounds a child (a fixture server, `just dev`) must
+    not outlive the session (Kraft-1nye)."""
+
+    async def scenario():
+        rd = RunDirs(tmp_path).ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database)
+            pidfile = tmp_path / "grandchild.pid"
+            status = await sp.run_task(
+                database,
+                rd,
+                session_id="s-grp",
+                work_item_id="w1",
+                node_id="verify",
+                hook_point="on.test.run",
+                cmd=["bash", "-c", f"sleep 30 & echo $! > {pidfile}"],
+                cwd=tmp_path,
+            )
+            assert status == "done"
+            grandchild = int(pidfile.read_text().strip())
+            alive = True
+            try:
+                os.kill(grandchild, 0)
+            except ProcessLookupError:
+                alive = False
+            assert not alive
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_run_task_escalates_to_sigkill_when_the_group_ignores_sigterm(tmp_path):
+    """SIGTERM first, SIGKILL only for what ignores it — the two-stage kill
+    `serve.py:_terminate` already models."""
+
+    async def scenario():
+        rd = RunDirs(tmp_path).ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database)
+            pidfile = tmp_path / "grandchild.pid"
+            status = await sp.run_task(
+                database,
+                rd,
+                session_id="s-ign",
+                work_item_id="w1",
+                node_id="verify",
+                hook_point="on.test.run",
+                # SIG_IGN on TERM is inherited across fork+exec, so the
+                # backgrounded `sleep` ignores it too.
+                cmd=["bash", "-c", f"trap '' TERM; sleep 30 & echo $! > {pidfile}"],
+                cwd=tmp_path,
+                group_kill_grace=0.3,
+            )
+            assert status == "done"
+            grandchild = int(pidfile.read_text().strip())
+            alive = True
+            try:
+                os.kill(grandchild, 0)
+            except ProcessLookupError:
+                alive = False
+            assert not alive
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_run_task_group_kill_does_not_delay_a_session_with_no_survivors(tmp_path):
+    """The common case (no backgrounded children) must not pay the grace
+    period — `os.killpg` on an already-empty group raises immediately."""
+
+    async def scenario():
+        rd = RunDirs(tmp_path).ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database)
+            start = time.monotonic()
+            status = await sp.run_task(
+                database,
+                rd,
+                session_id="s-none",
+                work_item_id="w1",
+                node_id="verify",
+                hook_point="on.test.run",
+                cmd=["true"],
+                cwd=tmp_path,
+            )
+            elapsed = time.monotonic() - start
+            assert status == "done"
+            assert elapsed < 2.0
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
