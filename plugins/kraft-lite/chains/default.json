@@ -74,7 +74,7 @@
         "on.review.mr.run"
       ],
       "gate_after": null,
-      "fix_loop": null
+      "fix_loop": "ci_fix_loop"
     },
     {
       "id": "human_review",
@@ -102,6 +102,9 @@
     }
   ],
   "loops": {
+    "ci_fix_loop": {
+      "attempts": 3
+    },
     "verify_fix_loop": {
       "attempts": 3
     }

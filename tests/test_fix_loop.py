@@ -6,7 +6,7 @@ from support.harness import fake_registry, isolated_bd, make_repo
 
 from kraft import db, events, executor, policy, store
 from kraft.paths import RunDirs
-from kraft.templates import Template
+from kraft.templates import Registry, Template
 
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
 
@@ -330,3 +330,154 @@ def test_retry_after_cap_clears_the_budget_and_steers_cycle_one(tmp_path, monkey
     assert len(steered) == 1
     assert steered[0].startswith("A human has steered this run:")
     assert "Fix the code so they pass" in steered[0]
+
+
+def _repair_fixloop_template() -> Template:
+    """A node with both `fix_loop` and `on_failure` (Kraft-cbr's Task 6/7
+    shape): `n1` measures via a subprocess script whose behaviour a marker
+    file in the worktree controls, so a test can script "repair fixes it",
+    "repair doesn't", and "the error text changes" without a real forge or
+    agent."""
+    return Template(
+        id="repair-fixloop",
+        nodes=[
+            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None, "fix_loop": None},
+            {
+                "id": "n1",
+                "tasks": ["on.check"],
+                "gate_after": None,
+                "fix_loop": "n1_fix",
+                "on_failure": ["on.repair"],
+            },
+        ],
+    )
+
+
+_CHECK_SCRIPT = (
+    "import json, os, sys\n"
+    "marker = 'marker.txt'\n"
+    "count_path = 'count.txt'\n"
+    "count = int(open(count_path).read()) if os.path.exists(count_path) else 0\n"
+    "count += 1\n"
+    "open(count_path, 'w').write(str(count))\n"
+    "result_path = os.environ.get('KRAFT_RESULT_PATH')\n"
+    "if os.path.exists(marker):\n"
+    "    if result_path:\n"
+    "        open(result_path, 'w').write(json.dumps({'status': 'done'}))\n"
+    "    sys.exit(0)\n"
+    "message = 'job test: failed\\n  AssertionError: expected 3, got 4'\n"
+    "if count > 1:\n"
+    "    message = 'job test: failed\\n  AssertionError: expected 3, got 5'\n"
+    "if result_path:\n"
+    "    open(result_path, 'w').write(json.dumps({'status': 'failed', 'findings': ["
+    "{'severity': 'important', 'message': message, 'source_plugin': 'on.ci.poll'}]}))\n"
+    "sys.exit(1)\n"
+)
+
+_REPAIR_SCRIPT_FIXES = "open('marker.txt', 'w').write('x')\n"
+_REPAIR_SCRIPT_NOOP = "pass\n"
+
+
+def _repair_fixloop_registry(repair_script: str) -> Registry:
+    fake = f"{sys.executable} {_FAKE_AGENT}"
+    return Registry(
+        hooks={
+            "on.env.prepare": {"kind": "builtin", "handler": "env_setup"},
+            "on.check": {"kind": "subprocess", "command": [sys.executable, "-c", _CHECK_SCRIPT]},
+            "on.repair": {"kind": "subprocess", "command": [sys.executable, "-c", repair_script]},
+            # The fallthrough's ordinary paid fix cycle dispatches this --
+            # "noop" so it never actually fixes anything, matching this
+            # test's low attempts cap and letting the fix loop cap out.
+            "on.implementation.start": {"kind": "agent", "command": fake},
+        }
+    )
+
+
+def _run_repair_fixloop(tmp_path, repair_script: str, *, attempts=3, monkeypatch=None):
+    if monkeypatch is not None:
+        monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = _repair_fixloop_registry(repair_script)
+            pol_path = tmp_path / "policy.yaml"
+            pol_path.write_text(
+                f"loops:\n  n1_fix: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
+                f"default: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
+            )
+            pol = policy.load_policy(pol_path)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="repair before paid cycle",
+                repo=str(repo),
+                template=_repair_fixloop_template(),
+                bd_cwd=str(tracker),
+            )
+            result = await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+            )
+            return result, database.read(lambda c: events.read_after(c, 0, wid))
+        finally:
+            await database.close()
+
+    return asyncio.run(scenario())
+
+
+def test_ci_fix_loop_runs_on_failure_repair_before_the_first_paid_fix_cycle(tmp_path):
+    """A node with both fix_loop and on_failure: the first failure gets one
+    repair attempt, and if that repair's re-measure goes clean the node
+    completes with zero fix_cycle_started events -- no agent turn spent."""
+    result, evts = _run_repair_fixloop(tmp_path, _REPAIR_SCRIPT_FIXES)
+    types = [e["type"] for e in evts]
+
+    assert result == "completed"
+    assert types.count("fix_cycle_started") == 0
+    assert types.count("node_recovery_started") == 1
+
+
+def test_ci_fix_loop_falls_through_to_a_paid_cycle_when_repair_does_not_take(tmp_path, monkeypatch):
+    """Repair runs, re-measure still fails -- the ordinary fix cycle takes
+    over from there. The paid fix cycle here is a no-op fake agent (nothing
+    about who ultimately resolves it matters for this assertion), so the
+    node caps out after its one allowed cycle."""
+    result, evts = _run_repair_fixloop(
+        tmp_path, _REPAIR_SCRIPT_NOOP, attempts=1, monkeypatch=monkeypatch
+    )
+    types = [e["type"] for e in evts]
+
+    assert result == "needs_human"
+    assert types.count("node_recovery_started") == 1
+    # The repair's own re-measure ran (round=_REPAIR_ROUND) but is not counted
+    # by store.bump_counter -- only the fallthrough's ordinary cap check is.
+    assert len([e for e in evts if e["type"] == "work_item_needs_human"]) == 1
+
+
+def test_ci_fix_loop_reads_the_repair_s_re_measure_not_the_stale_pre_repair_findings(
+    tmp_path, monkeypatch
+):
+    """The regression this task exists to prevent: measuring task fails with
+    finding A, on_failure's repair does not resolve it but the re-measure
+    reports a *different* finding B (the repair partially edited something,
+    or here just runs a second time and the script's own state moved on) --
+    the `findings_measured` event recorded right after the fall-through must
+    carry finding B, not the stale finding A from before the repair ran."""
+    result, evts = _run_repair_fixloop(
+        tmp_path, _REPAIR_SCRIPT_NOOP, attempts=1, monkeypatch=monkeypatch
+    )
+
+    measured = [e for e in evts if e["type"] == "findings_measured"]
+    assert measured, "no findings_measured event was recorded"
+    last = measured[-1]
+    messages = [f["message"] for f in last["payload"]["findings"]]
+    assert any("expected 3, got 5" in m for m in messages), messages
+    assert not any("expected 3, got 4" in m for m in messages), messages

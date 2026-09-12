@@ -172,3 +172,40 @@ def test_gh_set_labels_edits_the_pull_request(tmp_path, monkeypatch):
     assert argv[:2] == ["pr", "edit"]
     assert "--add-label" in argv
     assert "release::patch,bug" in argv
+
+
+GH_PR_VIEW_TIMED_OUT = (
+    '{"number":7,"url":"https://github.com/o/r/pull/7","headRefOid":"abc123",'
+    '"statusCheckRollup":[{"name":"build","conclusion":"TIMED_OUT",'
+    '"detailsUrl":"https://github.com/o/r/actions/runs/123456/job/9"}]}'
+)
+
+
+def test_gh_ci_status_maps_timed_out_to_the_infra_reason(tmp_path, monkeypatch):
+    _stub(tmp_path, monkeypatch, "gh", GH_PR_VIEW_TIMED_OUT)
+
+    status = asyncio.run(forge.GhCli().ci_status(repo=tmp_path, mr=forge.MR(7, "http://x/7")))
+
+    assert status.sha == "abc123"
+    assert status.failed_jobs[0].failure_reason == "job_execution_timeout"
+
+
+def test_gh_retry_jobs_reruns_the_actions_run_behind_the_failed_check(tmp_path, monkeypatch):
+    _stub(tmp_path, monkeypatch, "gh", "")
+
+    ci = forge.CIStatus(
+        state="failed",
+        url="u",
+        failed_jobs=(
+            forge.FailedJob(
+                "build",
+                "failed",
+                "job_execution_timeout",
+                "https://github.com/o/r/actions/runs/123456/job/9",
+            ),
+        ),
+    )
+    asyncio.run(forge.GhCli().retry_jobs(repo=tmp_path, ci=ci))
+
+    argv = _argv(tmp_path, "gh")
+    assert argv == ["run", "rerun", "123456", "--failed"]

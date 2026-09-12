@@ -39,7 +39,11 @@ _DEFAULT_CAP = policy_mod.Cap(attempts=1000, wall_clock_s=int(_forge.DEFAULT_POL
 def _key(node_id: str) -> str:
     """Per-node, not per-item: mirrors `rate_limit_retry._key` for the same
     reason -- a node that waits, resolves, and later waits again on a
-    *different* node must not spend the same budget the first node used."""
+    *different* node must not spend the same budget the first node used.
+
+    Duplicated in `store.counters.retry_after_cap`, which clears this same
+    key on `/retry` (Kraft-cs4s) -- edit both together.
+    """
     return f"ci_wait:{node_id}"
 
 
@@ -67,9 +71,16 @@ async def _re_enter_one(app, row) -> bool:
     wid = row["id"]
     node_id = row["current_node_id"]
     cap = policy_mod.resolve_cap(st.policy, "ci_wait") if st.policy is not None else _DEFAULT_CAP
-    count, started_at, cap = await st.db.write(
-        lambda c: store.bump_counter(c, wid, _key(node_id), cap)
-    )
+
+    def _bump_and_reenter(c):
+        # One transaction: the counter bump and the status flip back to
+        # 'active' must land together, or a tick between them could re-select
+        # this same row (Kraft-ppk9).
+        result = store.bump_counter(c, wid, _key(node_id), cap)
+        store.mark_reentered(c, wid)
+        return result
+
+    count, started_at, cap = await st.db.write(_bump_and_reenter)
     if policy_mod.check(count=count, started_at=started_at, cap=cap, now=_now()) == "breached":
         await st.db.write(
             lambda c: store.mark_needs_human(
