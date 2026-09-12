@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -6,6 +9,8 @@ import * as api from "../../api";
 import { useStore } from "../../store";
 import type { ChainNode, WorkItem, WorkerSession } from "../../types";
 import { WorkItemDetail } from ".";
+
+const here = dirname(fileURLToPath(import.meta.url));
 
 /** Forces `usePhone()` to `true` for the life of a test, the same
  *  `matchMedia` stub `theme.test.ts` uses. */
@@ -128,5 +133,14 @@ describe("WorkItemDetail on a phone (m04)", () => {
     const page = await screen.findByTestId("phone-node-page");
     await userEvent.click(within(page).getByRole("tab", { name: /config/i }));
     expect(within(page).getByTestId("inspector-config")).toBeInTheDocument();
+  });
+
+  it("gives the phone action bar its own row for the hint", () => {
+    // jsdom has no viewport to render a `@media` rule from; pin the source
+    // instead, the way styles.order.test.ts does.
+    const css = readFileSync(join(here, "work_item.css"), "utf-8");
+    const phone = css.slice(css.indexOf("@media (max-width: 767px)"));
+    expect(phone).toMatch(/\.control-row\s*\{[^}]*flex-wrap:\s*wrap/);
+    expect(phone).toMatch(/\.control-row\s*>\s*\.btn\s*\{[^}]*flex:\s*1/);
   });
 });

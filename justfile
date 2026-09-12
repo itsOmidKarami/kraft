@@ -114,7 +114,13 @@ lite-build:
 # Frontend typecheck + unit tests. `npm test` is vitest, which does NOT typecheck;
 # CI's `npm run build` runs `tsc -b` and will fail on errors vitest sails past. Keep
 # the two in step here, or the only way to find a type error is to spend a pipeline.
+#
+# node_modules is gitignored, so a fresh worktree (every Kraft worker gets one)
+# has none, and `npx tsc` would silently fetch an unrelated `tsc` package from
+# the registry instead of failing. Install first; the cost is only on the first
+# run in a worktree.
 test-ui:
+    cd frontend && [ -d node_modules ] || npm ci
     cd frontend && npx tsc -b
     cd frontend && npm test
 

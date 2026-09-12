@@ -159,6 +159,11 @@ describe("Tabs", () => {
     await userEvent.click(screen.getByRole("tab", { name: "Timeline" }));
     expect(onChange).toHaveBeenCalledWith("timeline");
   });
+
+  it("separates a tab's count from its label with a middle dot", () => {
+    render(<Tabs tabs={[{ id: "a", label: "Tasks", count: 3 }]} value="a" onChange={() => {}} />);
+    expect(screen.getByRole("tab").textContent).toBe("Tasks · 3");
+  });
 });
 
 describe("Switch", () => {
