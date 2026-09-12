@@ -4,9 +4,11 @@ repos.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
-from kraft import events
+from kraft import builtins as _builtins
+from kraft import events, store
 from kraft.adapters.forge import ci, git
 from kraft.adapters.forge import mr as mr_ops
 from kraft.adapters.forge.ci import (
@@ -17,7 +19,7 @@ from kraft.adapters.forge.ci import (
 )
 from kraft.adapters.forge.gh import GhCli
 from kraft.adapters.forge.glab import GlabCli
-from kraft.adapters.forge.models import MR, FakeForge, Forge, ForgeError
+from kraft.adapters.forge.models import MR, FailedJob, FakeForge, Forge, ForgeError
 
 
 def resolve(name: str) -> Forge:
@@ -75,21 +77,28 @@ async def _run_one(
     db,
     *,
     repo: Path,
+    orig_repo: Path,
     branch: str,
     title: str,
     work_item_id: str,
+    node_id: str,
     handler: str,
     hook_point: str,
     poll_timeout: float,
     poll_interval: float,
     merge_timeout: float,
     merge_interval: float,
-) -> tuple[str, str]:
+) -> tuple[str, str, list[dict] | None]:
     """One forge handler against one repo. Extracted from `run_task` so the
     multi-repo loop there can call it once per `work_item_repos` row; a
     single-repo item's behaviour is unchanged -- one call, same log and status
     strings as before this split.
+
+    The third element is None for every handler but a code-red `ci_poll`: one
+    finding per failed job, for the fix-loop plumbing `on.ci.poll` now feeds
+    (Kraft-cbr §3).
     """
+    findings: list[dict] | None = None
     body = mr_ops.mr_body(work_item_id, branch, await git.commits_on(repo, branch))
     match handler:
         case "open_mr":
@@ -135,8 +144,106 @@ async def _run_one(
             # coroutine that used to sit here for up to poll_timeout held an
             # intake slot and could not be cancelled. `merge`'s own gate still
             # calls `wait_for_ci` -- that one is Kraft-7jja.
+            head_sha = await git._head_sha(repo)
             ci_status = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
-            log, status = ci.render_ci(ci_status)
+            log, status = await ci.render_ci(
+                ci_status, forge=forge, repo=repo, branch=branch, head_sha=head_sha
+            )
+            if status == "infra":
+                # `forge.retry_jobs` only *starts* the job again; the pipeline
+                # is not settled the instant it returns. See `ci.retry_infra_
+                # once`'s docstring for why the retry budget is a persisted
+                # counter, bumped once per `ci_poll` entry, rather than a loop
+                # inside this one call.
+                from kraft import policy as _policy
+                from kraft.store import _now as _now
+
+                count, started_at, cap = await db.write(
+                    lambda c: store.bump_counter(
+                        c,
+                        work_item_id,
+                        f"ci_infra:{node_id}",
+                        _policy.Cap(
+                            attempts=ci._INFRA_RETRY_CAP, wall_clock_s=ci._INFRA_WALL_CLOCK_S
+                        ),
+                    )
+                )
+                if (
+                    _policy.check(count=count, started_at=started_at, cap=cap, now=_now())
+                    == "breached"
+                ):
+                    await db.write(
+                        lambda c, log=log: events.append(
+                            c,
+                            work_item_id,
+                            "ci_infra_exhausted",
+                            {"node_id": node_id, "reason": log},
+                        )
+                    )
+                    # A plain literal, matching `executor.context.INFRA_STOP`
+                    # ("infra_stop") without importing that package here --
+                    # `kraft.executor` imports `kraft.adapters.forge` (through
+                    # `dispatch.py`), so the reverse import would cycle.
+                    status = "infra_stop"
+                else:
+                    log, status = await ci.retry_infra_once(
+                        forge, repo=repo, branch=branch, head_sha=head_sha, first=ci_status
+                    )
+                    # `retry_infra_once`'s re-read is almost always "waiting"
+                    # (a kick only starts the job, it does not settle it), but
+                    # an instantly-red re-read is not impossible -- "infra" is
+                    # not a sentinel `dispatch.measure_node` recognises, and
+                    # would otherwise fall through neither "failed" nor "ok"
+                    # and silently read as a clean node. The counter above
+                    # already recorded this attempt; the next separate
+                    # ci_poll entry re-checks it against the cap, so parking
+                    # as "waiting" here costs nothing.
+                    if status == "infra":
+                        status = "waiting"
+            if status == "conflict":
+                default = await git.default_branch(orig_repo)
+                try:
+                    new_head = await _builtins.mr_rebase_forced(repo, orig_repo, default)
+                except RuntimeError as exc:
+                    # A real conflict: `mr_rebase_forced` already ran `git
+                    # rebase --abort`. Fail the node with the conflict detail
+                    # a human needs, same shape `mr_rebase`'s own docstring
+                    # already promises for this exception. `status` stays
+                    # "conflict" -- the repair/fix-loop machinery this node
+                    # now has (Task 6/7) routes a real conflict through the
+                    # ordinary on_failure/fix-cycle path, which cannot fix a
+                    # git conflict either, so Task 11's stuck detector (or the
+                    # loop's own cap) is what eventually stops this for a
+                    # human.
+                    log += f"rebase onto {default} failed: {exc}\n"
+                else:
+                    if new_head:
+                        await db.write(lambda c, h=new_head: store.set_base_ref(c, work_item_id, h))
+                        await forge.push(repo=repo, branch=branch)
+                        log += f"rebased {branch} onto {new_head} and re-pushed\n"
+                        # A successful forced rebase has done this node's
+                        # whole job (the branch now lands cleanly): reporting
+                        # "done" here -- not "conflict" -- is what lets
+                        # `run_once`'s existing `rebase_bounce_to` machinery
+                        # see the moved base_ref and bounce back to `verify`
+                        # in this same walk_node call, rather than parking on
+                        # a WAITING re-measure (the freshly-pushed head almost
+                        # certainly has no pipeline yet) that returns out of
+                        # `run_once` above the bounce comparison, so the move
+                        # would never be compared against and the bounce
+                        # would silently never fire.
+                        status = "done"
+            if status == "failed" and ci_status.failed_jobs:
+                findings = [
+                    {
+                        "severity": "important",
+                        "message": _job_finding_message(ci_status.jobs, j),
+                        "file": _trace_file(log),
+                        "line": _trace_line(log),
+                        "source_plugin": "on.ci.poll",
+                    }
+                    for j in ci_status.failed_jobs
+                ]
         case "sync_mr":
             # Push first: every commit after `open_mr` -- verify's fixes,
             # mr_checks' findings -- is local only until this runs, and
@@ -217,7 +324,53 @@ async def _run_one(
                 )
         case _:
             log, status = f"unknown forge handler {handler!r}\n", "failed"
-    return log, status
+    return log, status, findings
+
+
+def _job_finding_message(jobs: tuple[str, ...], job: FailedJob) -> str:
+    """The finding message for one failed job: its own trace tail when the
+    backend attached one to `ci_status.jobs` (glab's `_failure_detail`
+    interleaves each failed job's header line -- `"job {name}: failed
+    (...)"` -- with that job's own indented trace lines, in job order), the
+    bare name-and-reason otherwise (gh's one-liner `"{name}: {conclusion}"`
+    has no trace to give).
+
+    Carrying whatever per-failure content is available, rather than just the
+    job name, is what lets two successive code-reds on the same job carry
+    different `findings.Finding.fingerprint`s when the underlying failure
+    actually changed, and the identical fingerprint when it did not --
+    fingerprint hashes the normalised message (`findings.py`), so the message
+    is the only thing that can tell those two cases apart.
+    """
+    prefix = f"job {job.name}:"
+    block: list[str] = []
+    capturing = False
+    for line in jobs:
+        if line.startswith(prefix):
+            capturing = True
+            block.append(line)
+            continue
+        if capturing:
+            if line.startswith("  "):
+                block.append(line)
+                continue
+            break
+    if block:
+        return "\n".join(block)
+    return f"job {job.name} failed" + (f": {job.failure_reason}" if job.failure_reason else "")
+
+
+_TRACE_LOC = re.compile(r"([^\s:]+\.\w+):(\d+)")
+
+
+def _trace_file(log: str) -> str | None:
+    m = _TRACE_LOC.search(log)
+    return m.group(1) if m else None
+
+
+def _trace_line(log: str) -> int | None:
+    m = _TRACE_LOC.search(log)
+    return int(m.group(2)) if m else None
 
 
 async def run_task(
@@ -234,6 +387,13 @@ async def run_task(
     #: nothing recorded, which `backend_for` turns into a failed node.
     repo_forge: str | None = None,
     repo: Path,
+    #: The original repo, not the worktree -- `ci_poll`'s confirmed-conflict
+    #: rebase (Kraft-9h7v) needs origin's current default branch tip, which
+    #: `refresh_worktree_base` fetches from here. None (every test call site
+    #: that predates this, and any future one that never exercises the
+    #: conflict path) falls back to `repo` -- harmless, since that path is
+    #: the only reader.
+    orig_repo: Path | None = None,
     branch: str,
     title: str,
     round: int = 0,
@@ -259,9 +419,6 @@ async def run_task(
     off `worker_sessions`. Recording nothing until the node finished silently
     broke all three for the length of that wait (Kraft-41b, Kraft-7xt).
     """
-    from kraft import builtins as _builtins
-    from kraft import store
-
     log_path, result_path = await _builtins.start_session(
         db,
         run_dirs,
@@ -302,6 +459,10 @@ async def run_task(
             targets = [t for t in targets if t[2] != "root"]
 
     log, status = "", "done"
+    # Findings only ever reach `finish_session` for a single-target run: a
+    # submodule's own CI is not this item's `mr_checks` node, and findings
+    # from it would double-count against the wrong job (Kraft-cbr §3).
+    findings: list[dict] | None = None
     try:
         # Inside the try: `backend_for` can raise, and an exception escaping
         # here would skip `finish_session` and strand the session row started
@@ -310,13 +471,15 @@ async def run_task(
         for row_id, target_repo, role in targets:
             if handler == "open_mr" and role == "root" and multi:
                 await git._assert_submodules_covered(target_repo, {t for _, t, _ in targets})
-            one_log, one_status = await _run_one(
+            one_log, one_status, one_findings = await _run_one(
                 live_forge,
                 db,
                 repo=target_repo,
+                orig_repo=orig_repo or target_repo,
                 branch=branch,
                 title=title,
                 work_item_id=work_item_id,
+                node_id=node_id,
                 handler=handler,
                 hook_point=hook_point,
                 poll_timeout=poll_timeout,
@@ -324,6 +487,8 @@ async def run_task(
                 merge_timeout=merge_timeout,
                 merge_interval=merge_interval,
             )
+            if not multi:
+                findings = one_findings
             log += (f"[{target_repo.name}] " if multi else "") + one_log
             if row_id is not None:
                 new_state = {
@@ -381,8 +546,8 @@ async def run_task(
                     "no root merge request\n"
                 )
     except ForgeError as exc:
-        log, status = f"{hook_point} failed: {exc}\n", "failed"
+        log, status, findings = f"{hook_point} failed: {exc}\n", "failed", None
 
     return await _builtins.finish_session(
-        db, log_path, result_path, session_id=session_id, status=status, log=log
+        db, log_path, result_path, session_id=session_id, status=status, log=log, findings=findings
     )

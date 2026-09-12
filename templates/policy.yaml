@@ -2,6 +2,7 @@
 # (docs/consolidated/02_orchestrator_core.md §13) — tune against real runs.
 loops:
   verify_fix_loop:   { attempts: 3, wall_clock_s: 3600 }
+  ci_fix_loop:       { attempts: 3, wall_clock_s: 3600 }
   # Replaces ci_poll's old poll_timeout (30 minutes, Kraft-ru98): a pipeline
   # that has not settled after this many re-entries or this long, whichever
   # comes first, stops the item for a human instead of waiting forever.

@@ -36,6 +36,23 @@ class MRRef:
 
 
 @dataclass(frozen=True)
+class FailedJob:
+    """One failed job/check, as structured triage data rather than a log
+    line (Kraft-cbr §1). `failure_reason` is the forge's own vocabulary
+    (GitLab: `script_failure`, `runner_system_failure`, ...; gh: a
+    conclusion coarsened the same way) — None when the backend has nothing
+    finer than "it failed"."""
+
+    name: str
+    status: str
+    failure_reason: str | None = None
+    #: gh only: the check's `detailsUrl`, so `GhCli.retry_jobs` can recover
+    #: the Actions run id without a second API call. None on GitLab, and on
+    #: gh whenever the forge didn't say.
+    detail_url: str | None = None
+
+
+@dataclass(frozen=True)
 class CIStatus:
     state: CIState
     url: str
@@ -50,6 +67,16 @@ class CIStatus:
     mergeable: bool | None = None
     #: The raw state the forge gave, for the log line a human reads.
     merge_detail: str = ""
+    #: The commit this pipeline/check-run answered for. "" means the backend
+    #: could not tell — an old FakeForge literal, or a call this field
+    #: predates — so `ci_poll`'s sha guard (Kraft-bjjm) has nothing to
+    #: compare and falls back to trusting the read, exactly today's behaviour.
+    sha: str = ""
+    #: One entry per failed job, empty for a green or still-pending pipeline.
+    failed_jobs: tuple[FailedJob, ...] = ()
+    #: GitLab's numeric pipeline id, opaque outside `GlabCli.retry_jobs`. ""
+    #: on gh, whose `retry_jobs` works from `failed_jobs[*].detail_url` instead.
+    pipeline_ref: str = ""
 
 
 class Forge(Protocol):
@@ -60,6 +87,7 @@ class Forge(Protocol):
     async def merge(self, *, repo: Path, branch: str, mr: MR) -> None: ...
     async def set_labels(self, *, repo: Path, mr: MR, labels: tuple[str, ...]) -> None: ...
     async def find_mr(self, *, repo: Path, branch: str) -> MRRef | None: ...
+    async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None: ...
 
 
 @dataclass
@@ -72,6 +100,19 @@ class FakeForge:
     """
 
     ci_states: list[CIState] = field(default_factory=lambda: ["success"])
+    #: Parallel to `ci_states`: the `sha` each successive `ci_status` call
+    #: reports. Consumed the same one-at-a-time way; repeats its last entry.
+    #: Defaults to "" — "the backend didn't say" — so a test that never sets
+    #: this is unaffected by the sha guard (Kraft-bjjm).
+    ci_shas: list[str] = field(default_factory=lambda: [""])
+    #: Parallel to `ci_states`, for a settled red pipeline. Defaults to no
+    #: failed jobs, which `ci.is_infra_red` reads as infra-shaped (a red
+    #: pipeline with nothing to blame is exactly the zero-job case) — a test
+    #: that wants a code-red must set this explicitly.
+    ci_failed_jobs: list[tuple[FailedJob, ...]] = field(default_factory=lambda: [()])
+    #: Times `retry_jobs` was called, for a test to assert the self-retry
+    #: fired (Kraft-h81i) without a real forge to observe.
+    retried: list[str] = field(default_factory=list)
     opened: dict[int, str] = field(default_factory=dict)
     merged: list[int] = field(default_factory=list)
     #: Last description written per branch, so a test can see the sync land.
@@ -106,13 +147,22 @@ class FakeForge:
 
     async def ci_status(self, *, repo: Path, mr: MR, branch: str = "") -> CIStatus:
         state = self.ci_states.pop(0) if len(self.ci_states) > 1 else self.ci_states[0]
+        sha = self.ci_shas.pop(0) if len(self.ci_shas) > 1 else self.ci_shas[0]
+        failed_jobs = (
+            self.ci_failed_jobs.pop(0) if len(self.ci_failed_jobs) > 1 else self.ci_failed_jobs[0]
+        )
         return CIStatus(
             state=state,
             url=f"{mr.url}/pipelines",
             jobs=(f"fake-job: {state}",),
             mergeable=self.mergeable,
             merge_detail=self.merge_detail,
+            sha=sha,
+            failed_jobs=failed_jobs,
         )
+
+    async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None:
+        self.retried.append(ci.url)
 
     async def set_labels(self, *, repo: Path, mr: MR, labels: tuple[str, ...]) -> None:
         self.labels.extend(labels)

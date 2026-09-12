@@ -6,7 +6,7 @@ from pathlib import Path
 
 from kraft.adapters.forge import git
 from kraft.adapters.forge import mr as mr_ops
-from kraft.adapters.forge.models import MR, CIState, CIStatus, ForgeError, MRRef
+from kraft.adapters.forge.models import MR, CIState, CIStatus, FailedJob, ForgeError, MRRef
 
 #: glab's pipeline vocabulary, from `glab ci list --help` (glab 1.116.0).
 #: 'skipped' is deliberately not success: nothing proved the branch green, and
@@ -38,6 +38,17 @@ _GLAB_MR_STATES: dict[str, str] = {
     "merged": "merged",
     "closed": "closed",
 }
+
+
+#: `_failure_detail` returns this in place of an empty tuple whenever the
+#: read itself failed (caught on review of this plan, the real form of
+#: Kraft-h81i's exposure) -- `ForgeError` from `glab ci get`, a non-dict JSON
+#: body, or no pipeline id to ask about at all. `failure_reason=None` is not
+#: a member of `ci._INFRA_REASONS`, so `ci.is_infra_red` reads this as
+#: code-red by default rather than as the forge's own zero-jobs case: a
+#: settled `script_failure` we simply couldn't fetch detail for must not read
+#: as infra just because the detail fetch itself came back empty.
+_UNREADABLE_JOBS = (FailedJob("(unreadable)", "failed", None),)
 
 
 class GlabCli:
@@ -139,7 +150,8 @@ class GlabCli:
         rows = mr_ops.parse_json(raw, "glab ci list")
         # No pipeline yet is not a green one.
         state: CIState = "pending"
-        url, jobs = "", ("no pipeline yet",)
+        url, jobs, sha, pipeline_ref = "", ("no pipeline yet",), "", ""
+        failed_jobs: tuple[FailedJob, ...] = ()
         if rows:
             top = rows[0]
             # For a few seconds after a push, this list still answers with the
@@ -155,51 +167,107 @@ class GlabCli:
                 raw_state = str(top.get("status", ""))
                 state = _GLAB_STATES.get(raw_state, "failed")
                 url = str(top.get("web_url", ""))
+                pipeline_ref = str(top.get("id", ""))
                 jobs = (f"pipeline {top.get('id')}: {raw_state}",)
                 if state == "failed":
-                    jobs += await self._failure_detail(repo, top.get("id"))
-        return CIStatus(state=state, url=url, jobs=jobs, mergeable=mergeable, merge_detail=detail)
+                    detail_lines, failed_jobs = await self._failure_detail(repo, pipeline_ref)
+                    jobs += detail_lines
+        return CIStatus(
+            state=state,
+            url=url,
+            jobs=jobs,
+            mergeable=mergeable,
+            merge_detail=detail,
+            sha=sha,
+            failed_jobs=failed_jobs,
+            pipeline_ref=pipeline_ref,
+        )
 
-    async def _failure_detail(self, repo: Path, pipeline_id) -> tuple[str, ...]:
-        """The failed jobs of a red pipeline, and the tail of what each printed.
+    async def _failure_detail(
+        self, repo: Path, pipeline_id: str
+    ) -> tuple[tuple[str, ...], tuple[FailedJob, ...]]:
+        """The failed jobs of a red pipeline, each job's own `failure_reason`
+        (Kraft-ddxn), and the trace tail for each -- MR !89 was red because a
+        job wanted a `release::` label, and that sentence existed only in the
+        job's trace (Kraft-xh0q). A pipeline with no jobs at all reports the
+        pipeline's own `yaml_errors` instead (Kraft-h81i, Kraft-s8ul,
+        Kraft-ddxn): a config error stops anything from being created, so
+        there is no job to ask.
 
-        "pipeline 2832908143: failed" is the whole of what this node used to
-        report, which is not enough for a human to act on and not enough for
-        anything to remediate: MR !89 was red because a job wanted a
-        `release::` label, and that sentence existed only in the job's trace
-        (Kraft-xh0q).
-
-        Best effort throughout. A diagnosis that cannot be fetched must not
-        turn a pipeline result that *was* read into a node failure -- the
-        pipeline is red either way, and that is the answer the caller needs.
+        Best effort throughout: a diagnosis that cannot be fetched must not
+        turn a pipeline result that *was* read into a node failure. But
+        "could not fetch the diagnosis" and "the forge confirmed there is no
+        diagnosis to fetch" are not the same fact, and returning the same
+        `((), ())` for both was a real bug caught on review of this plan: a
+        genuine `script_failure` whose `glab ci get` call happens to fail (a
+        transient CLI error, a malformed response) was indistinguishable from
+        a pipeline the forge itself reports as having zero jobs, and
+        `ci.is_infra_red` reads an empty `failed_jobs` tuple as infra-shaped
+        either way -- so an ordinary code failure would self-retry twice and
+        stop at `needs_human` with no fix loop ever run, the exact outcome
+        this spec exists to remove. The three "could not read" branches below
+        (`pipeline_id` missing, `ForgeError`, unparseable JSON) return
+        `_UNREADABLE_JOBS` instead of `()`; only a *successful* read that
+        confirms no job actually ran (empty `jobs`, no `yaml_errors`) returns
+        the real empty tuple `is_infra_red` treats as infra.
         """
         if not pipeline_id:
-            return ()
-        pid = str(pipeline_id)
+            return (), _UNREADABLE_JOBS
         try:
-            raw = await git.run_git(repo, ["glab", "ci", "get", "--pipeline-id", pid, "-F", "json"])
+            raw = await git.run_git(
+                repo, ["glab", "ci", "get", "--pipeline-id", pipeline_id, "-F", "json"]
+            )
             data = mr_ops.parse_json(raw, "glab ci get")
         except ForgeError:
-            return ()
+            return (), _UNREADABLE_JOBS
         if not isinstance(data, dict):
-            return ()
-        failed = [
-            str(j.get("name", ""))
-            for j in (data.get("jobs") or [])
-            if isinstance(j, dict) and str(j.get("status", "")) == "failed"
-        ]
+            return (), _UNREADABLE_JOBS
+        jobs_raw = [j for j in (data.get("jobs") or []) if isinstance(j, dict)]
+        failed_raw = [j for j in jobs_raw if str(j.get("status", "")) == "failed"]
+        if not failed_raw:
+            yaml_errors = data.get("yaml_errors")
+            if yaml_errors:
+                return (f"pipeline config error: {yaml_errors}",), (
+                    FailedJob("(pipeline)", "failed", "config_error"),
+                )
+            return (), ()
         detail: tuple[str, ...] = ()
-        # ponytail: first two failed jobs, last 15 lines each. A pipeline where
-        # everything failed is one story, told twice over; the cap keeps this
-        # out of the review brief's way. Widen it if a real pipeline needs it.
-        for name in failed[:2]:
-            detail += (f"job {name}: failed",)
+        failed_jobs: list[FailedJob] = []
+        # ponytail: first two failed jobs, last 15 trace lines each -- widen
+        # if a real pipeline needs it (unchanged cap from before this task).
+        for j in failed_raw[:2]:
+            name = str(j.get("name", ""))
+            reason = j.get("failure_reason")
+            failed_jobs.append(FailedJob(name, "failed", str(reason) if reason else None))
+            detail += (f"job {name}: failed" + (f" ({reason})" if reason else ""),)
             try:
-                trace = await git.run_git(repo, ["glab", "ci", "trace", name, "--pipeline-id", pid])
+                trace = await git.run_git(
+                    repo, ["glab", "ci", "trace", name, "--pipeline-id", pipeline_id]
+                )
             except ForgeError:
                 continue
             detail += tuple(f"  {line}" for line in trace.strip().splitlines()[-15:])
-        return detail
+        # Any failed job past the first two still counts for classification,
+        # even though its trace is not fetched.
+        failed_jobs += [
+            FailedJob(
+                str(j.get("name", "")),
+                "failed",
+                (str(j["failure_reason"]) if j.get("failure_reason") else None),
+            )
+            for j in failed_raw[2:]
+        ]
+        return detail, tuple(failed_jobs)
+
+    async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None:
+        """Retries every failed/canceled job in the pipeline `ci` read.
+        A no-op on GitLab's side if none are (docs), so calling this
+        speculatively ahead of a re-poll (Kraft-h81i) is safe."""
+        if not ci.pipeline_ref:
+            return
+        await git.run_git(
+            repo, ["glab", "api", "-X", "POST", f"projects/:id/pipelines/{ci.pipeline_ref}/retry"]
+        )
 
     async def set_labels(self, *, repo: Path, mr: MR, labels: tuple[str, ...]) -> None:
         """Label the merge request, then start a pipeline that can see it.

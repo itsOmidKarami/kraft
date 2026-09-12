@@ -630,9 +630,10 @@ def test_an_unknown_hook_in_on_failure_quarantines_template(tmp_path):
     assert "on.bogus" in ts.invalid["ghost"]
 
 
-def test_a_node_may_not_have_both_fix_loop_and_on_failure(tmp_path):
-    """A fix_loop already re-measures its node after its fix task runs. Two
-    remediations would race for the same failure."""
+def test_a_node_may_have_both_fix_loop_and_on_failure(tmp_path):
+    """Kraft-cbr: `mr_checks` now needs both -- the repair runs once, ahead of
+    the first paid fix cycle, inside the same fix loop (walk.py), so the two
+    no longer race for the same failure the way the old check assumed."""
     d = _dir(
         tmp_path,
         **{
@@ -646,8 +647,23 @@ def test_a_node_may_not_have_both_fix_loop_and_on_failure(tmp_path):
     )
     reg = templates.load_registry(d / "registry.yaml")
     ts = templates.load_templates(d, reg)
-    assert "both" in ts.invalid
-    assert "fix_loop" in ts.invalid["both"] and "on_failure" in ts.invalid["both"]
+    assert "both" in ts.valid
+    assert "both" not in ts.invalid
+
+
+def test_default_templates_mr_checks_has_the_ci_fix_loop_shape(tmp_path):
+    """The real `templates/default.yaml`/`registry.yaml` pair: `mr_checks`
+    carries `fix_loop`, `rebase_bounce_to`, and `on_failure` together."""
+    from pathlib import Path
+
+    real_dir = Path(__file__).resolve().parents[1] / "templates"
+    reg = templates.load_registry(real_dir / "registry.yaml")
+    ts = templates.load_templates(real_dir, reg)
+    assert "default" in ts.valid, ts.invalid.get("default")
+    node = next(n for n in ts.valid["default"].nodes if n["id"] == "mr_checks")
+    assert node["fix_loop"] == "ci_fix_loop"
+    assert node["rebase_bounce_to"] == "verify"
+    assert node["on_failure"] == ["on.mr_checks.repair"]
 
 
 def test_config_files_in_the_templates_dir_are_not_read_as_templates(tmp_path):

@@ -147,3 +147,25 @@ def test_tick_ignores_an_item_that_was_paused_while_waiting(tmp_path, monkeypatc
         assert _status(app) == "paused"
 
     _run(lambda: _stub(tmp_path), body)
+
+
+def test_tick_does_not_re_enter_a_row_its_own_previous_tick_already_claimed(tmp_path, monkeypatch):
+    """Kraft-ppk9: a repair that takes longer than one 30s poller interval
+    must not spawn a second one for the same wait. Deliberately does NOT
+    await the first tick's spawned task before calling tick() again -- that
+    gap is exactly the race that used to fire twice."""
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def body(app):
+        await _seed_waiting(app, retry_at="2000-01-01T00:00:00+00:00", repo=str(repo))
+        first = await ci_wait.tick(app)
+        assert first == ["w1"]
+        # The spawned run hasn't been awaited yet -- if status were still
+        # 'waiting', this second tick would re-select the same row.
+        second = await ci_wait.tick(app)
+        assert second == []
+        assert _status(app) != "waiting"
+
+    _run(lambda: _stub(tmp_path), body)
