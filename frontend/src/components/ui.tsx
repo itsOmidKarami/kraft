@@ -373,7 +373,7 @@ export function Tabs({
           onClick={() => onChange(t.id)}
         >
           {t.label}
-          {t.count != null && <span className="tab-count">{t.count}</span>}
+          {t.count != null && <span className="tab-count">{" "}· {t.count}</span>}
         </button>
       ))}
     </div>

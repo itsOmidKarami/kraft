@@ -4,6 +4,8 @@ import type { ReactNode } from "react";
  *  answer, escalate/reply, budget) shares (README shared primitives:
  *  "textarea 76px min, 13.5px; primary submit + Cancel; 11px footnote"). */
 export function Composer({
+  title,
+  explanation,
   value,
   onChange,
   placeholder,
@@ -16,6 +18,10 @@ export function Composer({
   disabled,
   error,
 }: {
+  /** `Steer verify` (spec §3) — every composer opens under a header line. */
+  title?: ReactNode;
+  /** `· the note leads attempt 2's system prompt`, appended to the header. */
+  explanation?: ReactNode;
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
@@ -31,6 +37,12 @@ export function Composer({
 }) {
   return (
     <div className="composer">
+      {title && (
+        <p className="composer-head">
+          {title}
+          {explanation && <span className="composer-explain"> · {explanation}</span>}
+        </p>
+      )}
       {quoted && <p className="composer-quoted">{quoted}</p>}
       <textarea
         className="input composer-input"

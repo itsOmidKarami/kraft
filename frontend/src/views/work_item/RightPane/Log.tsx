@@ -25,6 +25,10 @@ const CHIPS: { id: string; label: string }[] = [
   { id: "sys", label: "sys" },
 ];
 
+/** A `task_progress` sys line is a task boundary among hundreds of tool
+ *  calls — worth tinting so it reads as one, not just another log line. */
+const TASK_PROGRESS = /^task_progress\s+task=(\d+)\s+"(.*)"$/;
+
 function merge(prev: LogLine[], incoming: LogLine[]): LogLine[] {
   const byLine = new Map(prev.map((l) => [l.n, l]));
   let changed = false;
@@ -44,11 +48,15 @@ export function Log({
   /** Mobile m04: the current-node log caps at 8 lines with a "Show all"
    *  below it, instead of the full scrolling pane desktop gets. */
   capLines,
+  /** `item.progress.total`, for "task N of {taskTotal}" on a task_progress
+   *  line. Omitted (just "task N") when the item carries no progress. */
+  taskTotal,
 }: {
   sessionId: string;
   maximized?: boolean;
   onToggleMaximize?: () => void;
   capLines?: number;
+  taskTotal?: number;
 }) {
   const [expanded, setExpanded] = useState(!capLines);
   const [lines, setLines] = useState<LogLine[]>([]);
@@ -159,18 +167,30 @@ export function Log({
 
   return (
     <div className="pane log-pane" data-testid="right-pane-log">
+      {/* One row (12 · 38): Log · session id · hook · attempt · lines ·
+          source chips · following · Copy · maximize. The Tasks row already
+          says which session this is, so the title block that used to sit
+          above the chips was saying it twice. */}
       <header className="log-head">
         <StatusGlyph status={session?.status ?? "unknown"} />
-        <div className="log-title">
-          <span className="log-hook">{session?.hook_point ?? sessionId}</span>
-          <div className="log-meta">
-            {meta.map((m) => (
-              <span key={m}>{m}</span>
-            ))}
-            <span className="log-sid">{sessionId}</span>
-            {!live && <span className="log-not-following">stopped · not following</span>}
-          </div>
-        </div>
+        <span className="log-static-title">Log</span>
+        <span className="log-sid">{sessionId}</span>
+        <span className="log-hook">{session?.hook_point ?? sessionId}</span>
+        {meta.map((m) => (
+          <span key={m} className="log-meta-part">{m}</span>
+        ))}
+        {!live && <span className="log-not-following">stopped · not following</span>}
+        {CHIPS.map((c) => (
+          <button
+            key={c.id}
+            className="log-chip"
+            aria-pressed={filter === c.id}
+            onClick={() => setFilter(c.id)}
+          >
+            {c.label}
+          </button>
+        ))}
+        <span className="log-count">{shown.length} lines</span>
         <div className="log-actions">
           <button
             className="btn btn-secondary log-follow"
@@ -196,20 +216,6 @@ export function Log({
         </div>
       </header>
 
-      <div className="log-filters">
-        {CHIPS.map((c) => (
-          <button
-            key={c.id}
-            className="log-chip"
-            aria-pressed={filter === c.id}
-            onClick={() => setFilter(c.id)}
-          >
-            {c.label}
-          </button>
-        ))}
-        <span className="log-count">{shown.length} lines</span>
-      </div>
-
       <div className="log-body" ref={bodyRef}>
         {error && <p className="form-error">{error}</p>}
         {lines.length === 0 && !error && (
@@ -220,13 +226,20 @@ export function Log({
         {lines.length > 0 && shown.length === 0 && !error && (
           <p className="empty">no {filter} lines — this session logged {lines.length}</p>
         )}
-        {(capLines && !expanded ? shown.slice(-capLines) : shown).map((l) => (
-          <div key={l.n} className="log-line" data-src={l.src}>
-            <span className="log-t">{l.t ? clock(l.t) : ""}</span>
-            <span className="log-src">{l.src}</span>
-            <span className="log-text">{l.summary ?? l.text}</span>
-          </div>
-        ))}
+        {(capLines && !expanded ? shown.slice(-capLines) : shown).map((l) => {
+          const m = TASK_PROGRESS.exec(l.text);
+          return (
+            <div key={l.n} className="log-line" data-src={l.src} data-task-progress={m ? "true" : undefined}>
+              <span className="log-t">{l.t ? clock(l.t) : ""}</span>
+              <span className="log-src">{l.src}</span>
+              <span className="log-text">
+                {m
+                  ? `task_progress · task ${m[1]}${taskTotal ? ` of ${taskTotal}` : ""} · "${m[2]}"`
+                  : l.summary ?? l.text}
+              </span>
+            </div>
+          );
+        })}
         {capLines && !expanded && shown.length > capLines && (
           <button className="btn btn-ghost log-show-all" onClick={() => setExpanded(true)}>
             Show all {shown.length} lines

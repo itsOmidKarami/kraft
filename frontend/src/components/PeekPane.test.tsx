@@ -142,4 +142,58 @@ describe("PeekPane", () => {
     expect(await screen.findByText("b")).toBeInTheDocument();
     expect(screen.queryByText("a")).toBeNull();
   });
+
+  // The scrim is display:none above 1280 (the pane sits beside clickable
+  // rows), so on a wide screen clicking away had no target at all and only
+  // Esc closed the peek.
+  it("closes when the click lands outside the pane", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    setOneItem();
+    const outside = document.createElement("button");
+    outside.textContent = "elsewhere";
+    document.body.appendChild(outside);
+    render(
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <PeekPane id="w1" onClose={onClose} />
+      </MemoryRouter>,
+    );
+    await user.click(outside);
+    expect(onClose).toHaveBeenCalled();
+    outside.remove();
+  });
+
+  it("does not close when the click lands on the pane itself", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    setOneItem();
+    render(
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <PeekPane id="w1" onClose={onClose} />
+      </MemoryRouter>,
+    );
+    await user.click(screen.getByRole("heading", { level: 2 }));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  // Another row switches the peek to that item (Board's own onSelect); if
+  // this listener treated a row as "outside", the peek would close on the
+  // pointerdown and reopen on the click.
+  it("does not close when the click lands on a board row", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    setOneItem();
+    const row = document.createElement("div");
+    row.className = "board-row";
+    row.textContent = "another item";
+    document.body.appendChild(row);
+    render(
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <PeekPane id="w1" onClose={onClose} />
+      </MemoryRouter>,
+    );
+    await user.click(row);
+    expect(onClose).not.toHaveBeenCalled();
+    row.remove();
+  });
 });
