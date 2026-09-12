@@ -54,6 +54,12 @@ def _isolated_kraft_home(tmp_path, monkeypatch):
     # (make_repo, _bd_template), so bd's `--actor` default never needs the real
     # `$HOME`'s global one.
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    # `_serve()` dup2s real fds 1/2 to server.log unless told not to -- fine for
+    # a real process, but it would stomp pytest's own fd-level capture (and
+    # every test after it, in-process) if a `_serve()` call reached that far.
+    # Tests that specifically exercise the redirect delenv this and wrap the
+    # call in `capfd.disabled()`.
+    monkeypatch.setenv("KRAFT_LOG_REDIRECTED", "1")
 
 
 @pytest.fixture
