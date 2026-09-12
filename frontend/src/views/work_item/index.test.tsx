@@ -7,7 +7,7 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-rou
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import { useStore } from "../../store";
-import type { ChainNode, WorkItem, WorkerSession } from "../../types";
+import type { ChainNode, KraftEvent, WorkItem, WorkerSession } from "../../types";
 import { WorkItemDetail } from ".";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -103,7 +103,100 @@ const renderDetailWithProgress = (hash = "") => {
   return renderDetail(hash);
 };
 
+const renderDetailWithEvents = (events: KraftEvent[]) => {
+  setup();
+  useStore.setState({ eventsByItem: { w1: events } } as never);
+  return renderDetail();
+};
+
+const renderDetailAtGate = (over: Partial<WorkItem> = {}) => {
+  setup({
+    status: "needs_human",
+    pending_gate: "spec_approval",
+    gate_artifact: "docs/spec.md",
+    current_node_id: "spec",
+    ...over,
+  });
+  return renderDetail();
+};
+
 describe("WorkItemDetail (item page)", () => {
+  it("Review spec selects the gate document and Approve repeats in the pane", async () => {
+    vi.spyOn(api, "getWorkItemDocuments").mockResolvedValue({
+      work_item_id: "w1",
+      documents: [
+        {
+          document_id: "d1", repo: "/r", title: "Spec", kind: "specs", source_kind: "file",
+          path: "docs/spec.md", node_id: "spec", hook_point: null, worker_session_id: null,
+          attachment_kind: null, indexed_at: "t",
+        },
+      ],
+    } as never);
+    vi.spyOn(api, "getDocument").mockResolvedValue({
+      document_id: "d1", repo: "/r", title: "Spec", kind: "specs", source_kind: "file",
+      path: "docs/spec.md", content: "# Spec", origin: "file",
+      source_updated_at: "t", indexed_at: "t",
+    } as never);
+    const user = userEvent.setup();
+    renderDetailAtGate();
+    await user.click(screen.getByRole("link", { name: /Review spec/ }));
+    // A plain `<a href="#...">` isn't a `<Link>` — `MemoryRouter` never sees
+    // it, but jsdom still updates the real `window.location.hash`, same as
+    // `BrowserRouter` (App.tsx) would in production.
+    expect(window.location.hash).toContain("tab=documents");
+    expect(window.location.hash).toContain("node=spec");
+  });
+
+  it("Approve repeats in the pane when the open document is the gate's own artifact", async () => {
+    vi.spyOn(api, "getWorkItemDocuments").mockResolvedValue({
+      work_item_id: "w1",
+      documents: [
+        {
+          document_id: "d1", repo: "/r", title: "Spec", kind: "specs", source_kind: "file",
+          path: "docs/spec.md", node_id: "spec", hook_point: null, worker_session_id: null,
+          attachment_kind: null, indexed_at: "t",
+        },
+      ],
+    } as never);
+    vi.spyOn(api, "getDocument").mockResolvedValue({
+      document_id: "d1", repo: "/r", title: "Spec", kind: "specs", source_kind: "file",
+      path: "docs/spec.md", content: "# Spec", origin: "file",
+      source_updated_at: "t", indexed_at: "t",
+    } as never);
+    renderDetailAtGate();
+    // Documents.tsx auto-selects the gate's artifact by path once the list
+    // lands (Kraft-esc) — no click needed beyond opening the tab.
+    await userEvent.click(screen.getByRole("tab", { name: /documents/i }));
+    const pane = await screen.findByTestId("right-pane-doc");
+    expect(within(pane).getByRole("button", { name: /^Approve$/ })).toBeInTheDocument();
+  });
+
+  it("renders a task_progress event as a task row and filters to it", async () => {
+    const user = userEvent.setup();
+    renderDetailWithEvents([
+      {
+        seq: 2, work_item_id: "w1", type: "task_progress", created_at: "2026-01-01T00:01:00Z",
+        payload: { node_id: "verify", task: 3, total: 6, title: "open_mr refuses a dirty worktree" },
+      },
+      {
+        seq: 1, work_item_id: "w1", type: "worker_session_started", created_at: "2026-01-01T00:00:00Z",
+        payload: { node_id: "verify", session_id: "s1" },
+      },
+    ] as never);
+    await user.click(screen.getByRole("tab", { name: /timeline/i }));
+    expect(screen.getByText("Started task 3 — open_mr refuses a dirty worktree")).toBeInTheDocument();
+    expect(screen.getByText("3 of 6")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "tasks" }));
+    expect(screen.queryByText("worker_session_started")).toBeNull();
+  });
+
+  it("disables Review spec with 'not written yet' when the artifact is absent", () => {
+    renderDetailAtGate({ gate_artifact: null });
+    const btn = screen.getByText(/Review spec/);
+    expect(btn).toHaveAttribute("aria-disabled", "true");
+    expect(btn.getAttribute("title")).toMatch(/not written yet/);
+  });
+
   it("hydrates on mount and leads with the current node in the hero", () => {
     renderDetail();
     expect(useStore.getState().hydrateItem).toHaveBeenCalledWith("w1");
@@ -161,6 +254,49 @@ describe("WorkItemDetail (item page)", () => {
     expect(await screen.findByTestId("right-pane-log")).toBeInTheDocument();
   });
 
+  it("Changes tab groups files into a folder tree and selecting one names it in the hash", async () => {
+    vi.spyOn(api, "getWorkItemDiff").mockResolvedValue({
+      base_ref: "abc123",
+      diff: "",
+      files: [
+        { path: "frontend/src/App.tsx", insertions: 2, deletions: 0 },
+        { path: "frontend/src/api.ts", insertions: 11, deletions: 0 },
+      ],
+      untracked: [],
+      truncated: false,
+      landed: null,
+    } as never);
+    renderDetail();
+    await userEvent.click(screen.getByRole("tab", { name: /changes/i }));
+    const tree = await screen.findByTestId("inspector-changes");
+    expect(within(tree).getByText("frontend")).toBeInTheDocument();
+    await userEvent.click(within(tree).getByText("api.ts"));
+    expect(screen.getByTestId("hash-probe").textContent).toContain("file=frontend%2Fsrc%2Fapi.ts");
+  });
+
+  it("renders a second section for what already landed on the branch, when the server sends it", async () => {
+    vi.spyOn(api, "getWorkItemDiff").mockResolvedValue({
+      base_ref: "abc123",
+      diff: "",
+      files: [],
+      untracked: [],
+      truncated: false,
+      landed: { commits: ["c1"], files: [{ path: "README.md", insertions: 1, deletions: 0 }], diff: "", truncated: false },
+    } as never);
+    renderDetail();
+    await userEvent.click(screen.getByRole("tab", { name: /changes/i }));
+    const tree = await screen.findByTestId("inspector-changes");
+    expect(within(tree).getByText(/On this branch · 1 commit/)).toBeInTheDocument();
+  });
+
+  it("fetches the diff once for the tree and the pane", async () => {
+    const spy = vi.spyOn(api, "getWorkItemDiff");
+    renderDetail();
+    await userEvent.click(screen.getByRole("tab", { name: /changes/i }));
+    await screen.findByTestId("inspector-changes");
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
   it("Config tab shows the lock notice on a started node and none on an unstarted one", async () => {
     renderDetail();
     await userEvent.click(screen.getByRole("tab", { name: /config/i }));
@@ -183,8 +319,18 @@ describe("WorkItemDetail (item page)", () => {
     });
     renderDetail();
     await userEvent.click(screen.getByRole("tab", { name: /config/i }));
-    expect(screen.getByText(/default \+ 1 override/)).toBeInTheDocument();
-    expect(screen.getByTestId("inspector-config").textContent).toMatch(/# override/);
+    expect(screen.getByText(/1 override/)).toBeInTheDocument();
+    expect(screen.getByTestId("config-pane").textContent).toMatch(/# override/);
+  });
+
+  it("splits Config into a node block left and the work item + chain right", async () => {
+    renderDetail();
+    await userEvent.click(screen.getByRole("tab", { name: /config/i }));
+    const insp = document.querySelector(".inspector") as HTMLElement;
+    const pane = document.querySelector(".item-right-pane") as HTMLElement;
+    expect(within(insp).getByText(/Node ·/)).toBeTruthy();
+    expect(within(pane).getByText("Work item")).toBeTruthy();
+    expect(within(pane).getByText(/Effective chain/)).toBeTruthy();
   });
 
   it("shows the not_started bar (21) for an unstarted item", () => {
@@ -208,24 +354,43 @@ describe("WorkItemDetail (item page)", () => {
     expect(css).toMatch(/\.detail-status\s*\{[^}]*margin-left:\s*0/);
   });
 
+  it("makes the inspector and the right pane the only scrollers", () => {
+    // jsdom has no cascade either, and this suite's vitest config does not
+    // process CSS imports -- pin the source, the way the test above does.
+    const detail = readFileSync(join(here, "../../styles.css"), "utf-8");
+    const workItem = readFileSync(join(here, "work_item.css"), "utf-8");
+    expect(detail).toMatch(/\.detail\.item-page\s*\{[^}]*height:\s*100%;\s*min-height:\s*0;\s*overflow:\s*hidden/);
+    expect(workItem).toMatch(/\.inspector,\s*\.item-right-pane\s*\{\s*overflow-y:\s*auto;\s*min-height:\s*0;\s*\}/);
+  });
+
   it("maximizing hides the inspector and the graph and lands in the URL", async () => {
     const user = userEvent.setup();
     setup({}, [session({ id: "s1", node_id: "verify" })]);
     renderDetail();
     await screen.findByTestId("right-pane-log");
     await user.click(screen.getByRole("button", { name: /maximi/i }));
-    expect(screen.getByTestId("hash-probe").textContent).toContain("log=max");
+    expect(screen.getByTestId("hash-probe").textContent).toContain("max=1");
     expect(document.querySelector(".inspector")).toBeNull();
     expect(document.querySelector(".stage-graph")).toBeNull();
+    expect(document.querySelector(".item-max-strip")).toBeTruthy();
+  });
+
+  it("maximizes a diff the same way it maximizes a log", async () => {
+    const user = userEvent.setup();
+    renderDetail("#node=verify&tab=changes&file=src/a.ts");
+    await screen.findByTestId("right-pane-diff");
+    await user.click(screen.getByRole("button", { name: /maximi/i }));
+    expect(screen.getByTestId("hash-probe").textContent).toContain("max=1");
+    expect(document.querySelector(".inspector")).toBeNull();
     expect(document.querySelector(".item-max-strip")).toBeTruthy();
   });
 
   it("Escape restores the split", async () => {
     const user = userEvent.setup();
     setup({}, [session({ id: "s1", node_id: "verify" })]);
-    renderDetail("#node=verify&log=max");
+    renderDetail("#node=verify&max=1");
     await user.keyboard("{Escape}");
-    expect(screen.getByTestId("hash-probe").textContent).not.toContain("log=max");
+    expect(screen.getByTestId("hash-probe").textContent).not.toContain("max=1");
     expect(document.querySelector(".inspector")).toBeTruthy();
   });
 

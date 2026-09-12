@@ -1,14 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowSquareOut, CaretDown, Copy, Eye, FileText, ListChecks, Notebook } from "@phosphor-icons/react";
+import { ArrowSquareOut, ArrowsOutSimple, CaretDown, Check, Copy, Eye, FileText, ListChecks, Notebook } from "@phosphor-icons/react";
 import * as api from "../../../api";
 import { ago } from "../../../format";
-import type { DocumentDetail } from "../../../types";
+import type { DocumentDetail, WorkItem } from "../../../types";
+import { Composer } from "../ActionBar/Composer";
+import { rejectTarget } from "../ActionBar/GateCard";
+import { useActionBar } from "../ActionBar/useActionBar";
 
 /**
  * Right pane · Documents (UI v2 · 05, 14): `DocumentModal`'s fetch and
- * open-in-editor logic, without the dialog framing.
+ * open-in-editor logic, without the dialog framing. When the open document
+ * is the pending gate's own artifact, the header also carries that gate's
+ * Approve/Reject — the reader ends where the decision is (G5-04), reusing
+ * `useActionBar` rather than a second approve path.
  */
 
 const KIND_ICONS: Record<string, typeof FileText> = {
@@ -36,13 +42,32 @@ function readPreferred(): string | null {
   }
 }
 
-export function Doc({ id }: { id: string }) {
+export function Doc({
+  id,
+  item,
+  maximized,
+  onToggleMaximize,
+}: {
+  id: string;
+  /** The gate's Approve/Reject show in this pane's header when the open
+   *  document is `item.pending_gate`'s own artifact — omitted where there
+   *  is no item to check against (the phone page's own `Doc` usage). */
+  item?: WorkItem;
+  maximized?: boolean;
+  onToggleMaximize?: () => void;
+}) {
   const [doc, setDoc] = useState<DocumentDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [menu, setMenu] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [preferred, setPreferred] = useState<string | null>(readPreferred);
+  const [rejecting, setRejecting] = useState(false);
+  const [rejectNote, setRejectNote] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
+  const gate = item?.pending_gate ?? null;
+  const isGateDoc = !!gate && !!item?.gate_artifact && doc?.path === item.gate_artifact;
+  const { busy: gateBusy, err: gateErr, run: runGate } = useActionBar(item?.id ?? "");
+  const target = gate && item ? rejectTarget(item, gate) : null;
 
   useEffect(() => {
     let live = true;
@@ -147,8 +172,59 @@ export function Doc({ id }: { id: string }) {
               <Copy size={14} />
             </button>
           )}
+          {onToggleMaximize && (
+            <button
+              className="btn btn-icon btn-ghost"
+              title={maximized ? "Collapse" : "Maximize"}
+              aria-pressed={maximized}
+              onClick={onToggleMaximize}
+            >
+              <ArrowsOutSimple size={14} />
+            </button>
+          )}
+          {isGateDoc && item && (
+            <>
+              <button
+                className="btn btn-primary"
+                disabled={gateBusy}
+                onClick={() => runGate(() => api.approveGate(item.id, gate!), "Approved — chain continues")}
+              >
+                <Check size={14} /> Approve
+              </button>
+              <button className="btn btn-secondary" disabled={gateBusy} onClick={() => setRejecting(true)}>
+                Reject…
+              </button>
+            </>
+          )}
         </div>
       </header>
+
+      {isGateDoc && rejecting && item && (
+        <Composer
+          title={`Reject ${gate}`}
+          value={rejectNote}
+          onChange={setRejectNote}
+          busy={gateBusy}
+          error={gateErr}
+          placeholder="What should change?"
+          footnote={
+            target ? (
+              <>
+                re-enters at <code>{target}</code> with this note as its steer
+              </>
+            ) : undefined
+          }
+          submitLabel={target ? "Reject and send back" : "Reject and re-plan"}
+          disabled={rejectNote.trim() === ""}
+          onSubmit={() =>
+            runGate(
+              () => api.rejectGate(item.id, gate!, rejectNote),
+              `Rejected — re-running from ${target ?? gate}`,
+            )
+          }
+          onCancel={() => setRejecting(false)}
+        />
+      )}
 
       <div className="doc-modal-body">
         {error && <p className="form-error">{error}</p>}

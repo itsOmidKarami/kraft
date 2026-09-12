@@ -25,7 +25,7 @@ function renderBar(
         sessions={sessions}
         events={events}
         onReviewChanges={() => {}}
-        onReadDoc={() => {}}
+        reviewHref={() => "#"}
         onEditChain={() => {}}
       />
     </MemoryRouter>,

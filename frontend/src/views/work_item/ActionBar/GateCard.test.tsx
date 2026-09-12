@@ -15,8 +15,7 @@ describe("GateCard", () => {
         open={false}
         onOpen={() => {}}
         onCancel={() => {}}
-        onReadDoc={() => {}}
-        onReviewChanges={() => {}}
+        reviewHref={() => "#"}
       />,
     );
     await userEvent.click(screen.getByRole("button", { name: /^approve$/i }));
@@ -31,8 +30,7 @@ describe("GateCard", () => {
         open
         onOpen={() => {}}
         onCancel={() => {}}
-        onReadDoc={() => {}}
-        onReviewChanges={() => {}}
+        reviewHref={() => "#"}
       />,
     );
     const submit = screen.getByRole("button", { name: /reject and/i });
@@ -58,8 +56,7 @@ describe("GateCard", () => {
         open
         onOpen={() => {}}
         onCancel={() => {}}
-        onReadDoc={() => {}}
-        onReviewChanges={() => {}}
+        reviewHref={() => "#"}
       />,
     );
     expect(screen.getByText(/re-enters at/)).toHaveTextContent("spec");
@@ -74,8 +71,7 @@ describe("GateCard", () => {
         open={false}
         onOpen={() => {}}
         onCancel={() => {}}
-        onReadDoc={() => {}}
-        onReviewChanges={() => {}}
+        reviewHref={() => "#"}
       />,
     );
   const deferred = [
@@ -107,7 +103,7 @@ describe("GateCard", () => {
     expect(await screen.findByText(/409 gate already resolved/)).toBeInTheDocument();
   });
 
-  it("offers Read document only when the gate has an artifact", () => {
+  it("offers Read document as a link to the gate document when the gate has an artifact", () => {
     render(
       <GateCard
         item={item({ gate_artifact: "docs/plan.md" })}
@@ -115,10 +111,40 @@ describe("GateCard", () => {
         open={false}
         onOpen={() => {}}
         onCancel={() => {}}
-        onReadDoc={() => {}}
-        onReviewChanges={() => {}}
+        reviewHref={() => "#"}
       />,
     );
-    expect(screen.getByRole("button", { name: /review plan/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /review plan/i })).toBeInTheDocument();
+  });
+
+  it("Review spec navigates to the gate document in the Documents tab", () => {
+    render(
+      <GateCard
+        item={item({ gate_artifact: "docs/spec.md" })}
+        gate="spec_approval"
+        open={false}
+        onOpen={() => {}}
+        onCancel={() => {}}
+        reviewHref={(node, tab) => `#node=${node}&tab=${tab}`}
+      />,
+    );
+    const link = screen.getByRole("link", { name: /review spec/i });
+    expect(link).toHaveAttribute("href", expect.stringContaining("tab=documents"));
+  });
+
+  it("disables Review spec with 'not written yet' when the artifact is absent", () => {
+    render(
+      <GateCard
+        item={item({ gate_artifact: null })}
+        gate="spec_approval"
+        open={false}
+        onOpen={() => {}}
+        onCancel={() => {}}
+        reviewHref={() => "#"}
+      />,
+    );
+    const btn = screen.getByText(/Review spec/);
+    expect(btn).toHaveAttribute("aria-disabled", "true");
+    expect(btn.getAttribute("title")).toMatch(/not written yet/);
   });
 });

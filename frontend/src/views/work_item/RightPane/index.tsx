@@ -1,6 +1,8 @@
-import type { KraftEvent, WorkerSession, WorkItem } from "../../../types";
+import { useCallback } from "react";
+import type { KraftEvent, WorkerSession, WorkItem, WorkItemDiff } from "../../../types";
 import type { InspectorTab, Selection } from "../selection";
 import { usePhone } from "../usePhone";
+import { ConfigPane } from "./ConfigPane";
 import { Diff } from "./Diff";
 import { Doc } from "./Doc";
 import { Events } from "./Events";
@@ -18,6 +20,9 @@ export function RightPane({
   nodeId,
   tab,
   selection,
+  diff,
+  diffError,
+  onSelect,
   onViewLog,
   maximized,
   onToggleMaximize,
@@ -28,12 +33,24 @@ export function RightPane({
   nodeId: string | null;
   tab: InspectorTab;
   selection: Selection;
+  diff: WorkItemDiff | null;
+  diffError: string | null;
+  onSelect: (s: Selection, opts?: { replace?: boolean }) => void;
   onViewLog: (sessionId: string) => void;
   maximized: boolean;
   onToggleMaximize: () => void;
 }) {
   const phone = usePhone();
-  if (tab === "config") return null; // Config's own right column is inline
+  // Stable identity: an inline arrow here would give Diff's effect a new
+  // `onVisibleFile` every render, tearing down and re-observing the
+  // IntersectionObserver each time (see Diff.tsx). `replace: true` because
+  // scroll fires per file crossed — pushing each would leave Back unable
+  // to exit the page.
+  const onVisibleFile = useCallback(
+    (path: string) => onSelect({ kind: "file", id: path }, { replace: true }),
+    [onSelect],
+  );
+  if (tab === "config") return <ConfigPane item={item} nodeId={nodeId} />;
 
   if (tab === "tasks") {
     if (selection.kind !== "session" || !selection.id) {
@@ -51,14 +68,23 @@ export function RightPane({
   }
 
   if (tab === "changes") {
-    return <Diff workItemId={item.id} selectedFile={selection.kind === "file" ? selection.id : null} />;
+    return (
+      <Diff
+        diff={diff}
+        diffError={diffError}
+        selectedFile={selection.kind === "file" ? selection.id : null}
+        onVisibleFile={onVisibleFile}
+        maximized={maximized}
+        onToggleMaximize={onToggleMaximize}
+      />
+    );
   }
 
   if (tab === "documents") {
     if (selection.kind !== "document" || !selection.id) {
       return <p className="empty pane">select a document to view it</p>;
     }
-    return <Doc id={selection.id} />;
+    return <Doc id={selection.id} item={item} maximized={maximized} onToggleMaximize={onToggleMaximize} />;
   }
 
   // timeline
