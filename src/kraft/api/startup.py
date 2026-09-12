@@ -31,6 +31,11 @@ DEFAULT_FRONTEND_DIST = BUNDLED / "web"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.tasks = {}
+    # deps.skip_lock() lazily stashes a per-work-item Lock here; reset it with
+    # everything else per-lifespan so it neither grows forever in a live
+    # daemon nor outlives its event loop into the next lifespan (fatal under
+    # `pytest`, where `api.app` is a shared module singleton -- Kraft-2um8).
+    app.state._skip_locks = {}
     # Resolved, so /health's run_dir matches the client's own
     # str(Path(...).resolve()) (kraft.client.reads.health) even when
     # KRAFT_RUN_DIR is relative or symlinked -- otherwise the honest server

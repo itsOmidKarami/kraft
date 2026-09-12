@@ -116,10 +116,22 @@ INVALID SQL STATEMENT;
         # Verify recovery: restore schema and migrate succeeds
         db.SCHEMA_SQL = original_schema
         db.migrate(conn)
-        tables = conn.execute(
-            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
-        ).fetchone()[0]
-        assert tables == 6
+        tables = {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+        }
+        # Named, not a bare count: a bare number breaks silently (with no clue
+        # which table changed) the next time a migration adds or renames one.
+        assert tables == {
+            "work_items",
+            "events",
+            "worker_sessions",
+            "auth_sessions",
+            "retry_counters",
+            "work_item_repos",
+        }
         user_version = conn.execute("PRAGMA user_version").fetchone()[0]
         assert user_version == db.SCHEMA_VERSION
     finally:
