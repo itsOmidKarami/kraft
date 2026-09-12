@@ -9,6 +9,7 @@ from pathlib import Path
 
 import yaml
 
+from kraft.executor import dispatch
 from kraft.templates import Registry, load_registry
 
 _SUPPORT = Path(__file__).parent
@@ -119,6 +120,7 @@ def fake_registry(python_exe: str, fake_agent_path: Path) -> Registry:
     hooks = dict(base.hooks)
     fake = f"{python_exe} {fake_agent_path}"
     hooks["on.implementation.start"] = {"kind": "agent", "command": fake}
+    hooks[dispatch.JUDGE_HOOK] = {"kind": "agent", "command": fake}
     # The shipped registry binds these to `claude`. A test that drives the
     # default chain must not shell out to the operator's real agent, and a
     # missing binary would land the item in needs_human rather than at a gate.

@@ -346,6 +346,64 @@ def test_no_progress_stop_attaches_a_diagnosis_bundle(tmp_path, monkeypatch):
     assert "recent_log" in payload["bundle"]
 
 
+def test_diagnosis_bundle_skips_the_judges_own_concerns(tmp_path, monkeypatch):
+    """`_diagnosis_bundle`'s `last_session_concerns` documents the measuring
+    session, not the judge that reasons about it -- JUDGE_PROMPT/SKILL.md
+    require the judge to write concerns on every verdict too, and its
+    worker_session_exited always lands after the measuring session's in the
+    same walk_node iteration. worker_session_exited carries no hook_point of
+    its own, so the fix has to join back to worker_sessions to tell the two
+    apart."""
+    from kraft.executor import dispatch, walk
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        repo = make_repo(tmp_path)
+        database = await db.Database.open(rd.db)
+        try:
+            wid = "w1"
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id=wid,
+                    bead_id=None,
+                    title="t",
+                    repo=str(repo),
+                    chain_template="default",
+                    chain_definition="{}",
+                )
+            )
+
+            async def exit_session(hook_point, session_id, concerns):
+                await database.write(
+                    lambda c: store.create_session(
+                        c,
+                        id=session_id,
+                        work_item_id=wid,
+                        node_id="verify",
+                        hook_point=hook_point,
+                        log_path=str(tmp_path / f"{session_id}.log"),
+                        result_path=str(tmp_path / f"{session_id}.json"),
+                    )
+                )
+                await database.write(
+                    lambda c: store.session_exited(c, session_id, "done", concerns=concerns)
+                )
+
+            # The measuring session exits first, with its own concerns...
+            await exit_session("on.check", "measure-1", "flaky under load")
+            # ...then the judge, told to write concerns on every verdict,
+            # exits after it in the same iteration.
+            await exit_session(dispatch.JUDGE_HOOK, "judge-1", "judge's own reasoning")
+
+            return await walk._diagnosis_bundle(database, wid, {"id": "verify"}, repo)
+        finally:
+            await database.close()
+
+    bundle = asyncio.run(scenario())
+    assert bundle["last_session_concerns"] == "flaky under load"
+
+
 def test_line_movement_alone_is_not_progress(tmp_path, monkeypatch):
     """The fix edited the file and the finding shifted down. Still no progress."""
     out = _run(
@@ -452,7 +510,15 @@ def test_the_fix_prompt_names_findings_and_marks_repeats(tmp_path, monkeypatch):
             {"status": "done", "findings": []},
         ],
     )
-    prompts = [p for p in log.read_text().split("\n\x00\n") if p.strip()]
+    # The fix-loop judge shares this same prompt log (it's dispatched through
+    # the same fake agent) and is asked once between these two fix cycles --
+    # filtered out here since this test is about the *fix* agent's prompt,
+    # not the judge's.
+    prompts = [
+        p
+        for p in log.read_text().split("\n\x00\n")
+        if p.strip() and "is about to spend another cycle" not in p
+    ]
     assert "sticky thing" in prompts[0]
     assert "a.py:3" in prompts[0]
     assert "REPEAT" not in prompts[0]

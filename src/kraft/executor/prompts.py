@@ -219,3 +219,49 @@ def named_with_kind(hook: str, registry: Registry) -> str:
     here to steer" without a human having to open registry.yaml to check."""
     kind = registry.hooks.get(hook, {}).get("kind")
     return f"{hook} [{kind}]" if kind else hook
+
+
+#: The fix-loop judge's task instruction (2026-09-12-verify-fix-loop-judge-
+#: design). The full verdict-reporting contract lives here, the same way
+#: `gate_review._PROMPT` carries its own -- the hook's `skill:` binding
+#: (`fix-loop-judge`, Task 4) supplies only the judgment *method*, appended
+#: separately under "## Method" by `adapters.agent.run_agent_task`.
+JUDGE_PROMPT = (
+    "The fix loop on node {node_id} is about to spend another cycle. Before "
+    "it does, judge whether that is still worth it, from the trend across "
+    "the rounds already run.\n\n"
+    "Rounds so far, oldest first (a finding's short hex tag is its stable "
+    "identity across rounds -- the same tag reappearing is the same "
+    "finding, not a new one):\n{history}\n\n"
+    "Budget so far: {attempts_used} of {cap_attempts} attempts used, "
+    "{elapsed_s}s of {cap_wall_clock_s}s wall-clock used.\n\n"
+    "Report your decision by writing `verdict` into your result file, with "
+    "your reasoning in `concerns`:\n\n"
+    '  "verdict": "continue"          -- another cycle is worth spending: '
+    "findings are shrinking, or this looks like real progress.\n"
+    '  "verdict": "stop_needs_human"  -- the loop is not converging (the '
+    "same findings recur, or new ones keep appearing as fast as old ones "
+    "are fixed); stop and hand this to a person.\n"
+    '  "verdict": "stop_downgrade"    -- the remaining findings are real '
+    "but not worth the cost of another cycle; let the chain proceed with "
+    "them unresolved. `concerns` becomes the note a human sees at the "
+    "review gate later -- write it for them, not for the next fix cycle.\n\n"
+    "`concerns` is required either way: it is the only record of why."
+)
+
+
+def format_judge_history(history: list[dict]) -> str:
+    if not history:
+        return "(no rounds measured yet)"
+    lines = []
+    for h in history:
+        found = h["findings"]
+        if found:
+            text = "; ".join(f"[{f.severity}] {f.fingerprint} {f.message}" for f in found)
+        else:
+            text = "clean"
+        fix_note = (
+            f" (that round's fix: {h['fix_result_path']})" if h.get("fix_result_path") else ""
+        )
+        lines.append(f"round {h['round']}: {text}{fix_note}")
+    return "\n".join(lines)
