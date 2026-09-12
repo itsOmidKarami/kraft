@@ -95,6 +95,10 @@ def retry_after_cap(
     auto-escalation caused must not reset the very cap meant to bound it, or
     an unfixable stop (e.g. a budget breach a retry cannot clear) escalates
     forever.
+
+    The status flip back to 'active' is the caller's `claim_for_run`'s now,
+    not this function's -- called before the awaited worktree rebase
+    (Kraft-11e0), so this only clears counters and narrates the retry.
     """
     counters = (key, gate_key, f"ci_wait:{node_id}", f"ci_infra:{node_id}")
     for counter in counters:
@@ -103,10 +107,6 @@ def retry_after_cap(
                 "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?",
                 (work_item_id, counter),
             )
-    conn.execute(
-        "UPDATE work_items SET status = 'active', retry_at = NULL, updated_at = ? WHERE id = ?",
-        (_now(), work_item_id),
-    )
     events.append(
         conn,
         work_item_id,

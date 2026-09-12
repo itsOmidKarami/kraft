@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from pathlib import Path
 
+import httpx
 import pytest
 from support.api import (
     _FAKE_CLAUDE,
+    _approve_gate,
     _await_gate,
     _client,
     _poll_events,
@@ -99,7 +102,7 @@ def test_chain_review_splice_runs_the_revised_tail(tmp_path, monkeypatch):
         wid = _post_default(client, repo)
         for gate in ("spec_approval", "plan_approval"):
             _await_gate(client, wid, gate)
-            assert client.post(f"/api/work-items/{wid}/gates/{gate}/approve").status_code == 200
+            assert _approve_gate(client, wid, gate).status_code == 200
         _await_gate(client, wid, "chain_finalized")
 
         tail = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
@@ -114,7 +117,7 @@ def test_chain_review_splice_runs_the_revised_tail(tmp_path, monkeypatch):
             {"status": "ready_for_approval", "revised_chain_nodes": revised, "rationale": "t"},
         )
 
-        r = client.post(f"/api/work-items/{wid}/gates/chain_finalized/approve")
+        r = _approve_gate(client, wid, "chain_finalized")
         assert r.status_code == 200, r.text
         _await_gate(client, wid, "human_review_approval")
         started = [
@@ -137,13 +140,13 @@ def test_chain_review_unchanged_tail_round_trips(tmp_path, monkeypatch):
         wid = _post_default(client, repo)
         for gate in ("spec_approval", "plan_approval"):
             _await_gate(client, wid, gate)
-            assert client.post(f"/api/work-items/{wid}/gates/{gate}/approve").status_code == 200
+            assert _approve_gate(client, wid, gate).status_code == 200
         _await_gate(client, wid, "chain_finalized")
         before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
 
         # fake-claude.sh's default answer for on.chain.review_ready is the
         # unchanged tail — no override needed here.
-        r = client.post(f"/api/work-items/{wid}/gates/chain_finalized/approve")
+        r = _approve_gate(client, wid, "chain_finalized")
         assert r.status_code == 200, r.text
         after = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
         assert after == before
@@ -161,7 +164,7 @@ def test_chain_review_splice_keeps_on_failure_from_schema_only_nodes(tmp_path, m
         wid = _post_default(client, repo)
         for gate in ("spec_approval", "plan_approval"):
             _await_gate(client, wid, gate)
-            assert client.post(f"/api/work-items/{wid}/gates/{gate}/approve").status_code == 200
+            assert _approve_gate(client, wid, gate).status_code == 200
         _await_gate(client, wid, "chain_finalized")
 
         before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
@@ -191,7 +194,7 @@ def test_chain_review_splice_keeps_on_failure_from_schema_only_nodes(tmp_path, m
             },
         )
 
-        r = client.post(f"/api/work-items/{wid}/gates/chain_finalized/approve")
+        r = _approve_gate(client, wid, "chain_finalized")
         assert r.status_code == 200, r.text
         after = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
         mr_checks_after = next(n for n in after if n["id"] == "mr_checks")
@@ -227,12 +230,12 @@ def test_chain_review_error_or_invalid_tail_stops_at_needs_human(
         wid = _post_default(client, repo)
         for gate in ("spec_approval", "plan_approval"):
             _await_gate(client, wid, gate)
-            assert client.post(f"/api/work-items/{wid}/gates/{gate}/approve").status_code == 200
+            assert _approve_gate(client, wid, gate).status_code == 200
         _await_gate(client, wid, "chain_finalized")
         before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
 
         _write_chain_review(client, wid, envelope)
-        r = client.post(f"/api/work-items/{wid}/gates/chain_finalized/approve")
+        r = _approve_gate(client, wid, "chain_finalized")
         assert r.status_code == 422, r.text
         assert reason_has in r.json()["detail"]
         assert "kraft item retry" in r.json()["detail"]
@@ -254,11 +257,11 @@ def test_chain_review_missing_artifact_stops_at_needs_human(tmp_path, monkeypatc
         wid = _post_default(client, repo)
         for gate in ("spec_approval", "plan_approval"):
             _await_gate(client, wid, gate)
-            assert client.post(f"/api/work-items/{wid}/gates/{gate}/approve").status_code == 200
+            assert _approve_gate(client, wid, gate).status_code == 200
         _await_gate(client, wid, "chain_finalized")
         _chain_review_path(client, wid).unlink()
 
-        r = client.post(f"/api/work-items/{wid}/gates/chain_finalized/approve")
+        r = _approve_gate(client, wid, "chain_finalized")
         assert r.status_code == 422, r.text
         assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
 
@@ -275,11 +278,11 @@ def test_chain_review_repeated_approve_keeps_erroring(tmp_path, monkeypatch):
         wid = _post_default(client, repo)
         for gate in ("spec_approval", "plan_approval"):
             _await_gate(client, wid, gate)
-            assert client.post(f"/api/work-items/{wid}/gates/{gate}/approve").status_code == 200
+            assert _approve_gate(client, wid, gate).status_code == 200
         _await_gate(client, wid, "chain_finalized")
         _chain_review_path(client, wid).unlink()
 
-        first = client.post(f"/api/work-items/{wid}/gates/chain_finalized/approve")
+        first = _approve_gate(client, wid, "chain_finalized")
         second = client.post(f"/api/work-items/{wid}/gates/chain_finalized/approve")
         assert first.status_code == second.status_code == 422
         assert client.get(f"/api/work-items/{wid}").json()["pending_gate"] == "chain_finalized"
@@ -292,6 +295,29 @@ def test_gate_approve_wrong_gate_409(tmp_path, monkeypatch):
         _poll_events(client, wid, "gate_requested")
         r = client.post(f"/api/work-items/{wid}/gates/plan_approval/approve")
         assert r.status_code == 409
+
+
+def test_two_concurrent_approves_produce_one_walk_and_one_409(tmp_path, monkeypatch):
+    """spec §2: a pending gate has no status to claim, so `spawn`'s own
+    refusal is the only thing standing between two concurrent approves and
+    two walks from the same node index."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+        app = client.app
+
+        async def scenario():
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://kraft") as ac:
+                return await asyncio.gather(
+                    ac.post(f"/api/work-items/{wid}/gates/spec_approval/approve"),
+                    ac.post(f"/api/work-items/{wid}/gates/spec_approval/approve"),
+                )
+
+        a, b = client.portal.call(scenario)
+        assert sorted([a.status_code, b.status_code]) == [200, 409]
 
 
 def test_gate_unknown_name_404(tmp_path, monkeypatch):
@@ -386,7 +412,7 @@ def test_rejecting_the_final_gate_re_enters_at_implementation(tmp_path, monkeypa
         wid = _post_default(client, repo)
         for gate in ("spec_approval", "plan_approval", "chain_finalized"):
             _await_gate(client, wid, gate)
-            assert client.post(f"/api/work-items/{wid}/gates/{gate}/approve").status_code == 200
+            assert _approve_gate(client, wid, gate).status_code == 200
         _await_gate(client, wid, "human_review_approval")
 
         r = client.post(
@@ -520,3 +546,62 @@ def test_retry_clears_the_gate_reject_counter(tmp_path, monkeypatch):
 def test_gate_approve_unknown_work_item_404(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
         assert client.post("/api/work-items/nope/gates/spec_approval/approve").status_code == 404
+
+
+def test_reject_with_invalid_policy_503s_without_stopping_the_live_review(tmp_path, monkeypatch):
+    """The 503 bail-out changes nothing, so it must not be reached having
+    already paused the item and killed its auto_escalate review agent."""
+    from kraft.api import deps
+
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+
+        async def _never_returning():
+            await asyncio.Event().wait()
+
+        async def inject():
+            deps.spawn(client.app, wid, _never_returning())
+
+        client.portal.call(inject)
+        before = client.get(f"/api/work-items/{wid}").json()
+        client.app.state.invalid_policy = ["boom: not a number"]
+
+        r = client.post(f"/api/work-items/{wid}/gates/spec_approval/reject", json={"note": "no"})
+        assert r.status_code == 503, r.text
+        after = client.get(f"/api/work-items/{wid}").json()
+        assert after["status"] == before["status"]
+        assert after["pending_gate"] == before["pending_gate"]
+        assert client.portal.call(lambda: deps.cancel(client.app, wid)) is None
+
+
+def test_reject_with_bad_node_400s_without_stopping_the_live_review(tmp_path, monkeypatch):
+    """A typo'd `node` raises ValueError in `apply_rejection`; that must be
+    caught before the live auto_escalate review is stopped, same as the
+    invalid_policy 503 above -- a bad target changes nothing."""
+    from kraft.api import deps
+
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+
+        async def _never_returning():
+            await asyncio.Event().wait()
+
+        async def inject():
+            deps.spawn(client.app, wid, _never_returning())
+
+        client.portal.call(inject)
+        before = client.get(f"/api/work-items/{wid}").json()
+
+        r = client.post(
+            f"/api/work-items/{wid}/gates/spec_approval/reject",
+            json={"note": "no", "node": "not_a_real_node"},
+        )
+        assert r.status_code == 400, r.text
+        after = client.get(f"/api/work-items/{wid}").json()
+        assert after["status"] == before["status"]
+        assert after["pending_gate"] == before["pending_gate"]
+        assert client.portal.call(lambda: deps.cancel(client.app, wid)) is None

@@ -13,6 +13,7 @@ import sys
 import time
 from pathlib import Path
 
+import httpx
 from fastapi.testclient import TestClient
 from support.harness import fake_registry, fake_templates_dir, isolated_bd, make_repo
 
@@ -168,6 +169,9 @@ def test_needs_context_from_a_measuring_task_does_not_consume_a_cycle(tmp_path, 
             # proceed — a second cycle, and the cap must still be untouched.
             await database.write(lambda c: store.set_steer(c, wid, "still can't tell"))
             steer = await database.write(lambda c: store.take_steer(c, wid))
+            await database.write(
+                lambda c: store.claim_for_run(c, wid, from_statuses=["needs_human"])
+            )
             await database.write(lambda c: store.resume_work_item(c, wid, steer))
             result2 = await executor.run(
                 database,
@@ -234,6 +238,9 @@ def test_needs_context_ignores_a_stale_row_from_an_earlier_pass(tmp_path, monkey
             monkeypatch.setenv("KRAFT_FAKE_AGENT_STATUS", "failed")
             await database.write(lambda c: store.set_steer(c, wid, "use main"))
             steer = await database.write(lambda c: store.take_steer(c, wid))
+            await database.write(
+                lambda c: store.claim_for_run(c, wid, from_statuses=["needs_human"])
+            )
             await database.write(lambda c: store.resume_work_item(c, wid, steer))
             result2 = await executor.run(
                 database,
@@ -295,6 +302,9 @@ def test_the_answer_reaches_the_next_launch(tmp_path, monkeypatch):
             monkeypatch.setenv("KRAFT_FAKE_AGENT_STATUS", "done")
             await database.write(lambda c: store.set_steer(c, wid, answer))
             steer = await database.write(lambda c: store.take_steer(c, wid))
+            await database.write(
+                lambda c: store.claim_for_run(c, wid, from_statuses=["needs_human"])
+            )
             await database.write(lambda c: store.resume_work_item(c, wid, steer))
             result2 = await executor.run(
                 database,
@@ -352,6 +362,23 @@ def _wait_for_status(client, wid, status, timeout=30):
         f"status == {status!r}",
         timeout=timeout,
     )
+
+
+def _approve_retrying(client, wid, gate, timeout=30):
+    """Approve a gate, retrying past a 409.
+
+    An auto_escalate node's walk may still be inside its own auto-review agent
+    call (spawn's AlreadyRunning refusal, Kraft-11e0) at the moment this gate's
+    `pending_gate` first appears -- same idiom as test_api_gates.py's fix-loop
+    test, which already retries `.../approve` past exactly this race.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        r = client.post(f"/api/work-items/{wid}/gates/{gate}/approve")
+        if r.status_code == 200:
+            return r
+        time.sleep(0.15)
+    raise AssertionError(f"timed out approving {gate!r}: last status {r.status_code}")
 
 
 def test_steer_accepts_a_needs_context_stop(tmp_path, monkeypatch):
@@ -482,7 +509,7 @@ def test_a_gate_after_an_answered_needs_context_is_not_a_needs_context_stop(tmp_
         ).json()["id"]
         for gate in ("spec_approval", "plan_approval", "chain_finalized"):
             _await_gate(client, wid, gate)
-            assert client.post(f"/api/work-items/{wid}/gates/{gate}/approve").status_code == 200
+            _approve_retrying(client, wid, gate)
 
         # implementation asks its question and stops.
         _wait(
@@ -508,7 +535,33 @@ def test_a_gate_after_an_answered_needs_context_is_not_a_needs_context_stop(tmp_
         assert item["needs_context_question"] is None
         assert client.post(f"/api/work-items/{wid}/steer", json={"text": "x"}).status_code == 409
         assert client.post(f"/api/work-items/{wid}/resume", json={}).status_code == 409
-        assert (
-            client.post(f"/api/work-items/{wid}/gates/human_review_approval/approve").status_code
-            == 200
-        )
+        _approve_retrying(client, wid, "human_review_approval")
+
+
+def test_retry_racing_resume_on_a_needs_context_stop_produces_one_winner(tmp_path, monkeypatch):
+    """Kraft-11e0. A needs_context stop is `needs_human` and admits both
+    `/retry` (always) and `/resume` (via `_needs_context_stop`) -- the one
+    item state where the two doors' claimable statuses overlap."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_STATUS", "needs_context")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_QUESTION", "which repo does this target?")
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={"repo": str(repo), "title": "needs a decision", "chain_template": "quick-task"},
+        ).json()["id"]
+        _wait_for_status(client, wid, "needs_human")
+        app = client.app
+
+        async def scenario():
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://kraft") as ac:
+                return await asyncio.gather(
+                    ac.post(f"/api/work-items/{wid}/resume", json={"steer": "use the fork"}),
+                    ac.post(f"/api/work-items/{wid}/retry", json={}),
+                )
+
+        a, b = client.portal.call(scenario)
+        assert sorted([a.status_code, b.status_code]) == [200, 409]
+        types = [e["type"] for e in client.get(f"/api/work-items/{wid}/events").json()]
+        assert types.count("work_item_resumed") + types.count("work_item_retried") == 1
