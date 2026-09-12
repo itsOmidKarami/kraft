@@ -156,7 +156,12 @@ export function PeekPane({ id, onClose }: { id: string; onClose: () => void }) {
               MR !{item.mr_ref.number}
             </a>
           )}
-          <Link to={`/work-items/${item.id}`} className="peek-open">
+          {/* Kraft-3e16 (spec §2.2): `onClose` (Board's `setPeek(null)`,
+              written with `replace: true`) clears the board's own ?peek
+              before Link's push runs — Link fires this handler first, then
+              navigates unless it was prevented. So the entry Back returns
+              to is a clean board, not one with the peek still open. */}
+          <Link to={`/work-items/${item.id}`} className="peek-open" onClick={onClose}>
             Open →
           </Link>
           <button className="btn btn-ghost" title="Close (Esc)" aria-label="Close" onClick={onClose}>
@@ -226,7 +231,7 @@ export function PeekPane({ id, onClose }: { id: string; onClose: () => void }) {
         ) : state.needsYou ? (
           <div className="card attention-card">
             <p>Needs a decision this pane cannot make yet.</p>
-            <Link className="btn btn-secondary" to={`/work-items/${item.id}`}>
+            <Link className="btn btn-secondary" to={`/work-items/${item.id}`} onClick={onClose}>
               Open →
             </Link>
           </div>

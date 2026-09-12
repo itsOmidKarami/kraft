@@ -15,21 +15,3 @@ if (typeof window.matchMedia !== "function") {
     dispatchEvent: () => false,
   }) as MediaQueryList;
 }
-
-// jsdom has no IntersectionObserver either (RightPane/Diff.tsx's pane-scroll
-// → tree-highlight sync, G4-05). A no-op stub is enough: tests that care
-// about the wiring call the callback directly rather than scrolling jsdom.
-if (typeof window.IntersectionObserver !== "function") {
-  class NoopIntersectionObserver implements IntersectionObserver {
-    readonly root = null;
-    readonly rootMargin = "";
-    readonly thresholds: ReadonlyArray<number> = [];
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-    takeRecords(): IntersectionObserverEntry[] {
-      return [];
-    }
-  }
-  window.IntersectionObserver = NoopIntersectionObserver;
-}

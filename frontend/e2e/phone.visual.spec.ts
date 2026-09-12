@@ -113,9 +113,9 @@ test("the diff viewer wraps a real diff instead of scrolling sideways", async ({
   const nodePage = page.getByTestId("phone-node-page");
   await expect(nodePage).toBeVisible();
   // A quick-task's edit is already committed by the time the chain reaches a
-  // gate, so it renders under "Landed" — collapsed by default (Kraft-nceo).
-  // Open the first file the same way a reader would.
-  await nodePage.locator(".diff-files summary").first().click();
+  // gate, so it renders under "Landed". Select the first file the same way
+  // a reader would — the tree is flat rows now, not a details/summary list.
+  await nodePage.locator('.tree-row[data-kind="file"]').first().click();
   const lines = nodePage.locator(".diff-body > div");
   await expect(lines.first()).toBeVisible({ timeout: scaledTimeout(15_000) });
   await page.screenshot({ path: `${SHOTS}/phone-04-diff.png`, fullPage: true });
@@ -129,7 +129,7 @@ test("the diff viewer wraps a real diff instead of scrolling sideways", async ({
   // The untracked-file list carries session paths far longer than 390px. The
   // page clips them, so nothing "overflows" by scrollWidth — the path is just
   // silently cut in half. Measure the text against its own box instead.
-  const clipped = await nodePage.locator(".diff-untracked li").evaluateAll((els) =>
+  const clipped = await nodePage.locator(".change-row .doc-title").evaluateAll((els) =>
     els.filter((el) => el.scrollWidth > el.clientWidth + 1).map((el) => el.textContent),
   );
   expect(clipped).toEqual([]);

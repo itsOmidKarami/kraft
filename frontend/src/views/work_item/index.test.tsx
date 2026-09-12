@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
 import * as api from "../../api";
 import { useStore } from "../../store";
 import type { ChainNode, DocumentDetail, KraftEvent, WorkItem, WorkerSession, WorkItemDocument } from "../../types";
@@ -56,6 +56,23 @@ beforeEach(() => {
   } as never);
 });
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+/** Forces `usePhone()` to `true` for the life of a test — same stub
+ *  `Phone.test.tsx` uses. Needed here for spec §2.1a: node selection is a
+ *  page transition only on the phone, so it must push there, not replace. */
+function mockPhone() {
+  const mql: Partial<MediaQueryList> = {
+    matches: true,
+    media: "(max-width: 767px)",
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  };
+  vi.stubGlobal("matchMedia", vi.fn().mockReturnValue(mql));
+}
+
 /** A back button, so a `MemoryRouter` test (which has no `window.history` to
  *  press) can still exercise `useNodeSelection`'s back/forward claim. */
 function GoBack() {
@@ -82,6 +99,24 @@ const renderDetail = (hash = "") =>
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
       <Routes>
+        <Route path="/work-items/:id" element={<><GoBack /><HashProbe /><WorkItemDetail /></>} />
+      </Routes>
+    </MemoryRouter>,
+  );
+
+/** Two history entries — a board stub, then the item page — so a single
+ *  Back press has somewhere real to land. `renderDetail`'s one-entry stack
+ *  can't tell "replaced the current entry" from "pushed a new one": Back has
+ *  nowhere to go either way, so it can't distinguish the two behaviours. */
+const renderDetailFromBoard = (hash = "") =>
+  render(
+    <MemoryRouter
+      initialEntries={["/", `/work-items/w1${hash}`]}
+      initialIndex={1}
+      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+    >
+      <Routes>
+        <Route path="/" element={<span data-testid="board-stub">board</span>} />
         <Route path="/work-items/:id" element={<><GoBack /><HashProbe /><WorkItemDetail /></>} />
       </Routes>
     </MemoryRouter>,
@@ -229,15 +264,30 @@ describe("WorkItemDetail (item page)", () => {
     expect(pill).toHaveAttribute("data-selected", "true");
   });
 
-  it("back/forward moves between selected nodes", async () => {
-    renderDetail();
+  // spec 2026-09-12 §2: desktop node clicks replace, so switching between
+  // nodes never grows the history — one Back press leaves the item page.
+  it("desktop: node clicks replace, so one Back press leaves the item page", async () => {
+    renderDetailFromBoard();
     await userEvent.click(screen.getByRole("button", { name: /^plan$/ }));
     await userEvent.click(screen.getByRole("button", { name: /^spec$/ }));
     expect(screen.getByRole("button", { name: /^spec$/ })).toHaveAttribute("data-selected", "true");
+
     await userEvent.click(screen.getByRole("button", { name: "test-go-back" }));
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: /^plan$/ })).toHaveAttribute("data-selected", "true"),
-    );
+    expect(await screen.findByTestId("board-stub")).toBeInTheDocument();
+  });
+
+  // spec §2.1a: on the phone, opening a node is a page transition (m05),
+  // not a same-page selection — it must still push, or Back breaks.
+  it("phone: selecting a node still pushes, so Back returns to the stage list", async () => {
+    mockPhone();
+    renderDetailFromBoard();
+    expect(await screen.findByTestId("phone-stage-list")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("phone-stage-plan"));
+    expect(await screen.findByTestId("phone-node-page")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "test-go-back" }));
+    expect(await screen.findByTestId("phone-stage-list")).toBeInTheDocument();
   });
 
   it("switching tabs keeps each tab's own selection", async () => {
