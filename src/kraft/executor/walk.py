@@ -625,6 +625,17 @@ async def run_once(
 
     i = start_index
     while i < len(nodes):
+        # Kraft-e7pm: a session verdict of "paused" is not the only way a walk
+        # has to stop. Pausing between two nodes' dispatches leaves no live
+        # session to signal at all -- the SIGTERM path in `pause_work_item`
+        # never fires -- so without this read the loop would march straight
+        # into the next node reading a row that already says paused. One read
+        # per node; every non-active status (paused, needs_human by any other
+        # door, abandoned) gets the same "paused" verdict every caller of
+        # `run_once`/`run` already knows how to handle -- there is nothing a
+        # second string would let a caller do that this doesn't.
+        if gates.status_of(db, work_item_id) != "active":
+            return "paused"
         node = nodes[i]
         bounce_to = node.get("rebase_bounce_to")
         pre_base = _current_base_ref(db, work_item_id) if bounce_to else None

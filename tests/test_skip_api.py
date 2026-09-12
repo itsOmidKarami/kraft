@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 
+import httpx
 from support.harness import fake_templates_dir, isolated_bd, make_repo
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -158,3 +160,117 @@ def test_skip_while_active_kills_the_running_session_and_still_advances(tmp_path
         assert next(s for s in killed if s["id"] == running_id)["status"] == "paused"
         evts = _poll_events(client, wid, "node_skipped")
         assert any(e["type"] == "node_skipped" for e in evts)
+
+
+def test_two_concurrent_skips_produce_one_advance_and_one_409(tmp_path, monkeypatch):
+    """Kraft-qx1q / one-walk-per-item: two callers racing `/skip` on the same
+    item must produce exactly one advance and one 409."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={"title": "t", "repo": str(repo), "chain_template": "default"},
+        ).json()["id"]
+        _poll_events(client, wid, "gate_requested")
+        item = client.get(f"/api/work-items/{wid}").json()
+        assert item["pending_gate"] == "spec_approval"
+        app = client.app
+
+        async def scenario():
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://kraft") as ac:
+                return await asyncio.gather(
+                    ac.post(f"/api/work-items/{wid}/skip", json={}),
+                    ac.post(f"/api/work-items/{wid}/skip", json={}),
+                )
+
+        a, b = client.portal.call(scenario)
+        assert sorted([a.status_code, b.status_code]) == [200, 409]
+        evts = _poll_events(client, wid, "node_skipped")
+        assert sum(e["type"] == "node_skipped" for e in evts) == 1
+
+
+def test_skip_refuses_and_writes_nothing_when_a_walk_is_still_live_at_a_stop(tmp_path, monkeypatch):
+    """`needs_human` (a pending gate under auto_escalate review, or the brief
+    window while the walk that just called request_gate/mark_needs_human is
+    still unwinding) can still have a live walk task behind it. `/skip` must
+    refuse before it claims and writes `skip_node` -- not claim to `active`,
+    record the node skipped, and only then discover the live walk (leaving
+    the item `active` with the node skipped and no walk behind it)."""
+    from kraft.api import deps
+
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={"title": "t", "repo": str(repo), "chain_template": "default"},
+        ).json()["id"]
+        _poll_events(client, wid, "gate_requested")
+        item = client.get(f"/api/work-items/{wid}").json()
+        assert item["pending_gate"] == "spec_approval"
+
+        async def _never_returning():
+            await asyncio.Event().wait()
+
+        async def inject():
+            deps.spawn(client.app, wid, _never_returning())
+
+        client.portal.call(inject)
+
+        r = client.post(f"/api/work-items/{wid}/skip", json={})
+
+        assert r.status_code == 409, r.text
+        item = client.get(f"/api/work-items/{wid}").json()
+        assert item["status"] == "needs_human"
+        assert item["pending_gate"] == "spec_approval"
+        evts = client.get(f"/api/work-items/{wid}/events").json()
+        assert not any(e["type"] == "node_skipped" for e in evts)
+
+        async def cleanup():
+            task = client.app.state.tasks.pop(wid)
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+        client.portal.call(cleanup)
+
+
+def test_skip_cancels_the_live_walk_before_it_writes(tmp_path, monkeypatch):
+    """The old walk has to be dead *before* `/skip` claims the item and
+    records the node skipped. Cancelling afterwards left every await in
+    between as a chance for the event loop to resume that walk, which then
+    dispatches the next node and orphans its agent in the worktree."""
+    from kraft import store
+    from kraft.api import deps
+
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
+    repo = make_repo(tmp_path)
+    live_at_write = []
+    real_skip_node = store.skip_node
+
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={"title": "KRAFT_SLOW go", "repo": str(repo), "chain_template": "quick-task"},
+        ).json()["id"]
+
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            item = client.get(f"/api/work-items/{wid}").json()
+            if item["status"] == "active" and any(
+                s["status"] == "running" for s in item.get("worker_sessions", [])
+            ):
+                break
+            time.sleep(0.1)
+        assert item["status"] == "active", "the slow node never started running"
+
+        def spy(conn, work_item_id, *a, **kw):
+            live_at_write.append(deps.task_is_live(client.app, work_item_id))
+            return real_skip_node(conn, work_item_id, *a, **kw)
+
+        monkeypatch.setattr(store, "skip_node", spy)
+        r = client.post(f"/api/work-items/{wid}/skip", json={})
+        assert r.status_code == 200, r.text
+
+    assert live_at_write == [False], "skip wrote skip_node with the old walk still live"

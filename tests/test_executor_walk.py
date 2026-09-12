@@ -1072,3 +1072,76 @@ def test_a_node_dict_lacking_on_failure_never_triggers_recovery(tmp_path):
     assert not [e for e in evts if e["type"] == "node_recovery_started"], (
         "recover_node ran even though the stored node dict has no on_failure"
     )
+
+
+def test_pausing_between_nodes_stops_the_walk_before_the_next_one_starts(tmp_path, monkeypatch):
+    """Kraft-e7pm. The original bug: pause landed between env_setup's session
+    exit and the next node, so there was no session to signal and the walk
+    kept going -- resume then started a second one. This pins the fix at the
+    layer that actually stops it: the loop's own per-node status read."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="make the failing test pass",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            from kraft.executor import walk as walk_mod
+
+            calls = []
+            original_walk_node = walk_mod.walk_node
+
+            async def spy(db_, run_dirs_, wid_, node, row_, registry_, worktree_, **kw):
+                calls.append(node["id"])
+                result = await original_walk_node(
+                    db_, run_dirs_, wid_, node, row_, registry_, worktree_, **kw
+                )
+                if node["id"] == "env_setup":
+                    # the exact original bug: pause lands between two nodes,
+                    # with no running session for `pause_work_item` to signal
+                    await database.write(lambda c: store.pause_work_item(c, wid, []))
+                return result
+
+            monkeypatch.setattr(walk_mod, "walk_node", spy)
+            result = await executor.run_once(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+            assert result == "paused"
+            assert calls == ["env_setup"], "implementation must never have been dispatched"
+            row = database.read(
+                lambda c: c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+            assert row["status"] == "paused"
+
+            # resume: exactly one walk runs the rest of the chain to completion
+            monkeypatch.setattr(walk_mod, "walk_node", original_walk_node)
+            claimed = await database.write(
+                lambda c: store.claim_for_run(c, wid, from_statuses=["paused"])
+            )
+            assert claimed
+            await database.write(lambda c: store.resume_work_item(c, wid, None))
+            result2 = await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                start_index=1,  # implementation: the node right after env_setup
+            )
+            assert result2 == "completed"
+            types = _events(database, wid)
+            assert types.count("work_item_completed") == 1
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())

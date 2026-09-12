@@ -435,13 +435,45 @@ def take_steer(conn: sqlite3.Connection, work_item_id: str) -> str | None:
     return text
 
 
-def resume_work_item(conn: sqlite3.Connection, work_item_id: str, steer: str | None) -> None:
-    """Back to active. Deliberately does NOT touch retry_counters (02 §10.2): a
-    human-initiated interruption is not a plugin failure."""
-    conn.execute(
-        "UPDATE work_items SET status = 'active', updated_at = ? WHERE id = ?",
-        (_now(), work_item_id),
+def claim_for_run(
+    conn: sqlite3.Connection,
+    work_item_id: str,
+    *,
+    from_statuses: list[str],
+    to_status: str = "active",
+) -> bool:
+    """Conditionally flip `work_item_id` to `to_status`. True when this caller
+    won the claim.
+
+    `UPDATE ... WHERE status IN (...)` is one statement on Kraft's single
+    writer connection: of two callers racing to claim the same item, exactly
+    one sees `rowcount == 1` and the other sees 0 -- the item can never be
+    claimed twice, whatever runs between the check and the write.
+
+    `retry_at` is cleared unconditionally, the same convention every other
+    flip-to-active function in this module already follows (`mark_reentered`,
+    `pause_work_item`, `chain.skip_node`) -- a claim out of `waiting` or
+    `rate_limited` must not leave a stale due-timestamp behind it.
+
+    The caller still owns its own event for the transition (`work_item_resumed`,
+    `work_item_retried`, `node_skipped`, ...); this owns only the status
+    column, so a caller that loses the race can 409 before writing anything
+    else.
+    """
+    placeholders = ",".join("?" for _ in from_statuses)
+    cur = conn.execute(
+        f"UPDATE work_items SET status = ?, retry_at = NULL, updated_at = ? "
+        f"WHERE id = ? AND status IN ({placeholders})",
+        (to_status, _now(), work_item_id, *from_statuses),
     )
+    return cur.rowcount == 1
+
+
+def resume_work_item(conn: sqlite3.Connection, work_item_id: str, steer: str | None) -> None:
+    """Record the resume. The status flip is `claim_for_run`'s now, called by
+    the route before the worktree rebase (Kraft-11e0) -- this only narrates it.
+    Deliberately does NOT touch retry_counters: a human-initiated interruption
+    is not a plugin failure."""
     events.append(conn, work_item_id, "work_item_resumed", {"steer": steer})
 
 

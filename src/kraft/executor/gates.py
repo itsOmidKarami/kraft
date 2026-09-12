@@ -236,7 +236,7 @@ async def review_gates(
                     {"gate": gate, "verdict": verdict, "reason": "gate no longer pending"},
                 )
             )
-            return _status_of(db, work_item_id)
+            return status_of(db, work_item_id)
 
         if verdict == "undecided":
             return status
@@ -295,7 +295,7 @@ async def review_gates(
     return status
 
 
-def _status_of(db, work_item_id: str) -> str:
+def status_of(db, work_item_id: str) -> str:
     row = db.read(
         lambda c: c.execute(
             "SELECT status FROM work_items WHERE id = ?", (work_item_id,)
@@ -558,7 +558,7 @@ async def resume_after_escalation(
     new_evts = db.read(lambda c: events.read_after(c, cursor, work_item_id))
     request_evt = next((e for e in new_evts if e["type"] == "work_item_self_retry_requested"), None)
     if request_evt is None:
-        return _status_of(db, work_item_id)
+        return status_of(db, work_item_id)
     payload = request_evt["payload"]
     node_id, key, gate_key, steer = (
         payload["node_id"],
@@ -575,16 +575,25 @@ async def resume_after_escalation(
     # request would resurrect it (worktree possibly already gone). The
     # deferred request is dropped: the item is no longer on the stop it was
     # filed against.
-    if row["status"] != "needs_human":
+    # Claims the status here, before the awaited rebase, for the same reason
+    # `/retry` does (Kraft-11e0) -- and `retry_after_cap` no longer flips it.
+    # A failed claim means a human abandoned, paused or otherwise moved the
+    # item during the minutes the escalation turn ran: the deferred request
+    # is dropped rather than resurrecting a stop it is no longer on.
+    claimed = await db.write(
+        lambda c: store.claim_for_run(c, work_item_id, from_statuses=["needs_human"])
+    )
+    if not claimed:
+        status = status_of(db, work_item_id)
         await db.write(
             lambda c: events.append(
                 c,
                 work_item_id,
                 "work_item_self_retry_dropped",
-                {"node_id": node_id, "status": row["status"]},
+                {"node_id": node_id, "status": status},
             )
         )
-        return row["status"]
+        return status
     worktree = run_dirs.worktrees / work_item_id
     try:
         new_base = await _builtins.refresh_worktree_base(
@@ -593,7 +602,7 @@ async def resume_after_escalation(
     except RuntimeError as exc:
         reason = str(exc)
         await db.write(lambda c: store.mark_needs_human(c, work_item_id, node_id, reason))
-        return _status_of(db, work_item_id)
+        return status_of(db, work_item_id)
     if new_base:
         await db.write(lambda c: store.set_base_ref(c, work_item_id, new_base))
     await db.write(

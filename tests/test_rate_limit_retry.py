@@ -145,3 +145,34 @@ def test_tick_falls_back_to_needs_human_once_the_cap_breaches(tmp_path, monkeypa
         assert app.state.tasks == {}  # nothing was relaunched
 
     _run(lambda: _stub(tmp_path, rate_limit_retries=1), body)
+
+
+def test_tick_does_not_reclaim_an_item_abandoned_before_relaunch(tmp_path, monkeypatch):
+    """The status flip is now `claim_for_run`'s, not `retry_after_cap`'s --
+    without the poller's own claim, this would blindly write the item back to
+    'active' and spawn into a worktree that may already be gone."""
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    repo = make_repo(tmp_path)
+
+    async def body(app):
+        await _seed_rate_limited(app, retry_at="2000-01-01T00:00:00+00:00", repo=str(repo))
+        original_bump_counter = store.bump_counter
+
+        def bump_then_abandon(c, *a, **kw):
+            result = original_bump_counter(c, *a, **kw)
+            # the row is still 'rate_limited' here -- simulate a human's
+            # abandon landing in the window between bump_counter and the
+            # poller's own claim
+            store.abandon_work_item(c, "w1")
+            return result
+
+        monkeypatch.setattr(store, "bump_counter", bump_then_abandon)
+        got = await rate_limit_retry.tick(app)
+        assert got == []
+        row = app.state.db.read(
+            lambda c: c.execute("SELECT status FROM work_items WHERE id='w1'").fetchone()
+        )
+        assert row["status"] == "abandoned"
+        assert app.state.tasks == {}
+
+    _run(lambda: _stub(tmp_path), body)

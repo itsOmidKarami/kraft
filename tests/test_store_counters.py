@@ -134,6 +134,9 @@ def test_retry_after_cap_clears_retry_at(tmp_path):
                 lambda c: store.mark_rate_limited(c, "w1", "implementation", "2026-09-10T00:00:00Z")
             )
             await database.write(
+                lambda c: store.claim_for_run(c, "w1", from_statuses=["rate_limited"])
+            )
+            await database.write(
                 lambda c: store.retry_after_cap(c, "w1", "implementation", None, "go")
             )
             row = database.read(
