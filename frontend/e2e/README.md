@@ -51,31 +51,33 @@ Env it sets for the child `python -m kraft`:
 
 | var | value |
 | --- | --- |
-| `KRAFT_PORT` | `8765` (override via `KRAFT_PORT`) |
+| `KRAFT_PORT` | ephemeral by default; pin one explicitly via `KRAFT_PORT` |
 | `KRAFT_RUN_DIR` | `<tmp>/run` |
 | `KRAFT_TEMPLATES_DIR` | fake templates dir (quick-task + default + registry + policy) |
 | `KRAFT_BD_CWD` | isolated `bd` tracker repo |
 | `KRAFT_FRONTEND_DIST` | `frontend/dist` |
 | `KRAFT_FAKE_CLAUDE` | `fix` |
 
-It polls `http://127.0.0.1:8765/api/health` until `200`, then prints:
+It polls the port it picked (or the one you pinned) until `/api/health` answers 200, then prints:
 
 ```
-  server up on http://127.0.0.1:8765  (temp: /tmp/kraft-e2e-XXXX)
+  server up on http://127.0.0.1:54321  (temp: /tmp/kraft-e2e-XXXX)
   KRAFT_E2E_REPO=/tmp/kraft-e2e-XXXX/sample
+  KRAFT_E2E_BASE=http://127.0.0.1:54321
 ```
 
 Leave it running. Ctrl-C tears it down.
 
 ### 3. Run the spec
 
-In a second terminal, with the repo path printed above:
+In a second terminal, with the values printed above:
 
 ```bash
-cd frontend && KRAFT_E2E_REPO=/tmp/kraft-e2e-XXXX/sample npx playwright test
+cd frontend && KRAFT_E2E_REPO=/tmp/kraft-e2e-XXXX/sample KRAFT_E2E_BASE=http://127.0.0.1:54321 npx playwright test
 ```
 
-Optional: `KRAFT_E2E_BASE=http://127.0.0.1:<port>` if you changed `KRAFT_PORT`.
+`KRAFT_E2E_BASE` is required — the config throws rather than default to the
+installed daemon's `8765` (Kraft-m1e8).
 
 Expected: 1 passed — the work item reaches `work_item_completed` in the
 timeline and the Board card status badge reads `completed`.

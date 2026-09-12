@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import signal
 import subprocess
 import threading
 import time
@@ -225,6 +226,35 @@ def _rate_limit_rejection(log_path: Path) -> dict | None:
     return None
 
 
+async def _kill_group(pgid: int, grace: float) -> None:
+    """SIGTERM `pgid`, then SIGKILL whatever is still there after `grace`
+    seconds. `serve.py`'s `_terminate` is the model this copies.
+
+    The session's own child is already gone by the time this runs — this is
+    for what it backgrounded into the same group and never waited on itself
+    (a fixture server, `just dev`), which `start_new_session=True` put in the
+    same process group as the child but this coroutine never touched
+    (Kraft-1nye). `os.killpg` raises `ProcessLookupError` the moment the group
+    has no members left, so the common case (nothing backgrounded) returns
+    almost immediately rather than paying `grace`.
+    """
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError, PermissionError:
+        return
+    deadline = time.monotonic() + grace
+    while time.monotonic() < deadline:
+        await asyncio.sleep(0.2)
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except ProcessLookupError, PermissionError:
+        pass
+
+
 async def run_task(
     db,
     run_dirs,
@@ -242,6 +272,10 @@ async def run_task(
     #: process poll runs 20x a second; parsing the log that often would cost
     #: more than the worker does. A test that cannot wait passes its own.
     progress_s: float = 5.0,
+    #: How long a lingering group member (something the session backgrounded
+    #: and never waited on) gets after SIGTERM before SIGKILL. serve.py's own
+    #: `_terminate` uses the same 10s.
+    group_kill_grace: float = 10.0,
     round: int = 0,
     head_sha: str | None = None,
     #: Every agent hook is told by `_CTX` to write $KRAFT_RESULT_PATH,
@@ -296,6 +330,9 @@ async def run_task(
                 env=full_env,
                 stdin=subprocess.DEVNULL,
             )
+            # `start_new_session=True` makes this the group's pgid for life,
+            # captured now rather than re-derived after the leader exits.
+            pgid = proc.pid
         except FileNotFoundError as exc:
             # Popen raises this for a missing cwd as well as a missing
             # executable, and the two are fixed in different places. Say which:
@@ -371,6 +408,7 @@ async def run_task(
         # this function leaves the loop.
         stop.set()
         watcher.join(timeout=2)
+    await _kill_group(pgid, group_kill_grace)
     returncode = proc.returncode
     status = _resolve(result_path, returncode)
     # A session that exits clean with no result file at all never reached the

@@ -225,7 +225,9 @@ frontend-e2e:
     - uv run python frontend/e2e/serve.py > e2e-server.log 2>&1 &
     - for i in $(seq 1 60); do grep -q KRAFT_E2E_REPO e2e-server.log && break; sleep 1; done
     - export KRAFT_E2E_REPO=$(sed -n 's/.*KRAFT_E2E_REPO=//p' e2e-server.log)
+    - export KRAFT_E2E_BASE=$(sed -n 's/.*KRAFT_E2E_BASE=//p' e2e-server.log)
     - test -n "$KRAFT_E2E_REPO" || { cat e2e-server.log; exit 1; }
+    - test -n "$KRAFT_E2E_BASE" || { cat e2e-server.log; exit 1; }
     - cd frontend && npm run e2e
   after_script:
     - cat e2e-server.log || true

@@ -32,12 +32,14 @@ def test_shipped_yaml_parses_and_matches_spec():
         "command": "claude",
         "skill": "spec",
         "artifact": "spec",
+        "steering": ["never-signal-processes-you-didnt-start"],
     }
     assert registry["hooks"]["on.plan.requested"] == {
         "kind": "agent",
         "command": "claude",
         "skill": "plan",
         "artifact": "plan",
+        "steering": ["never-signal-processes-you-didnt-start"],
     }
     # The back half is no longer noop (Kraft-33j). `auto` and not a CLI name:
     # the registry is per install, the forge is a property of the repo, and
@@ -63,9 +65,14 @@ def test_shipped_yaml_parses_and_matches_spec():
         "command": "claude",
         "skill": "review-brief",
         "artifact": "review_brief",
+        "steering": ["never-signal-processes-you-didnt-start"],
     }
     assert registry["hooks"]["on.env.prepare"] == {"kind": "builtin", "handler": "env_setup"}
-    assert registry["hooks"]["on.implementation.start"] == {"kind": "agent", "command": "claude"}
+    assert registry["hooks"]["on.implementation.start"] == {
+        "kind": "agent",
+        "command": "claude",
+        "steering": ["never-signal-processes-you-didnt-start"],
+    }
     assert registry["hooks"]["on.test.run"] == {
         "kind": "subprocess",
         "command": ["uv", "run", "pytest", "-q"],
