@@ -287,6 +287,64 @@ def test_resume_rebases_the_worktree_onto_a_moved_head(tmp_path, monkeypatch):
         assert (worktree / "moved.txt").is_file()
 
 
+def test_resume_records_a_mismatch_if_the_worktree_moved_after_rebase(tmp_path, monkeypatch):
+    """Kraft-vd8d: a rebase Kraft recorded that the worktree did not have,
+    moments later. Simulate the race directly rather than chasing the
+    one-off -- wrap refresh_worktree_base so that, after it does the real
+    rebase and picks the sha to report, something else moves the worktree off
+    that commit before the caller reads it back. The event resume writes must
+    show the mismatch, not silently agree with the sha it was handed.
+    """
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "30")
+    repo = make_repo(tmp_path)
+
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={"repo": str(repo), "title": "raced rebase", "chain_template": "quick-task"},
+        ).json()["id"]
+        _running_agent(client, wid)
+        assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 200
+        _wait(
+            lambda: (lambda b: b if b["status"] == "paused" else None)(
+                client.get(f"/api/work-items/{wid}").json()
+            ),
+            "the item to read paused",
+        )
+
+        (repo / "moved.txt").write_text("moved on\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-m", "moved on")
+
+        import kraft.builtins as builtins_mod
+
+        real_refresh = builtins_mod.refresh_worktree_base
+
+        async def racy_refresh(worktree_arg, repo_arg, branch_arg, **kw):
+            new_head = await real_refresh(worktree_arg, repo_arg, branch_arg, **kw)
+            if new_head:
+                # something else (a later chain node, a concurrent walk)
+                # moves the worktree off the commit refresh_worktree_base
+                # just produced, before resume's caller reads HEAD back.
+                _git(worktree_arg, "checkout", "-q", "--detach", "HEAD~1")
+            return new_head
+
+        monkeypatch.setattr(builtins_mod, "refresh_worktree_base", racy_refresh)
+
+        monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+        r = client.post(f"/api/work-items/{wid}/resume", json={})
+        assert r.status_code == 200
+
+        events = client.get(f"/api/work-items/{wid}/events").json()
+        verified = [e for e in events if e["type"] == "worktree_rebase_verified"]
+        assert verified, "no worktree_rebase_verified event was written"
+        payload = verified[-1]["payload"]
+        assert payload["reported_head"] != payload["worktree_head"], (
+            "the event must show the mismatch, not hide it"
+        )
+
+
 def test_resume_skips_rebase_when_worktree_is_dirty(tmp_path, monkeypatch):
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "30")

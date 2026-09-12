@@ -1,4 +1,5 @@
 import { connectRepo, expect, test } from "./fixtures";
+import { scaledTimeout } from "../e2e-timing";
 
 // Assumes an orchestrator is already running at baseURL with:
 //   - KRAFT_FRONTEND_DIST pointed at ../dist
@@ -34,7 +35,7 @@ test("create a work item and watch it complete", async ({ page }) => {
   // tab on the redesigned detail screen.
   await page.getByRole("tab", { name: /Timeline/ }).click();
   await expect(page.locator('[data-type="work_item_completed"]')).toBeVisible({
-    timeout: 100_000,
+    timeout: scaledTimeout(100_000),
   });
 
   // 4B/4B-UI: the agent's session summary is ingested and linked to this item,
@@ -44,7 +45,7 @@ test("create a work item and watch it complete", async ({ page }) => {
   // opening a dialog from a row click.
   await page.getByRole("tab", { name: /Documents/ }).click();
   const docs = page.locator(".linked-docs");
-  await expect(docs.getByText(/\.engineering\/sessions\//)).toBeVisible({ timeout: 30_000 });
+  await expect(docs.getByText(/\.engineering\/sessions\//)).toBeVisible({ timeout: scaledTimeout(30_000) });
   await docs.getByRole("button").first().click();
   const viewer = page.getByTestId("right-pane-doc");
   await expect(viewer).toBeVisible();

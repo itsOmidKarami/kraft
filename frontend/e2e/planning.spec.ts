@@ -1,4 +1,5 @@
 import { connectRepo, expect, test } from "./fixtures";
+import { scaledTimeout } from "../e2e-timing";
 
 // The planning hooks: on.spec.requested and on.plan.requested write and commit
 // a document (fixtures/fake-claude.sh honours the `artifact:` contract), and
@@ -51,7 +52,7 @@ test("spec gate: review, reject and re-plan, then approve into the plan gate", a
   page,
 }) => {
   await createItem(page, "planning gate walk", "default");
-  await expect(page.getByText(/approve the spec to continue/i)).toBeVisible({ timeout: 100_000 });
+  await expect(page.getByText(/approve the spec to continue/i)).toBeVisible({ timeout: scaledTimeout(100_000) });
 
   const reviewSpec = page.getByRole("link", { name: "Review spec" });
   await expect(reviewSpec).toBeVisible();
@@ -65,14 +66,14 @@ test("spec gate: review, reject and re-plan, then approve into the plan gate", a
   await page.getByLabel("composer message").fill("the spec misses the error path");
   await page.getByRole("button", { name: /Reject and re-plan/ }).click();
   await expect(page.locator(".attention-title")).toContainText(/approve the spec/i, {
-    timeout: 100_000,
+    timeout: scaledTimeout(100_000),
   });
   await expect(page.getByRole("link", { name: "Review spec" })).toBeVisible();
 
   // Approve: advance to the plan gate, which offers its own review button.
   await page.getByRole("button", { name: "Approve" }).first().click();
   await expect(page.locator(".attention-title")).toContainText(/approve the plan/i, {
-    timeout: 100_000,
+    timeout: scaledTimeout(100_000),
   });
 
   const reviewPlan = page.getByRole("link", { name: "Review plan" });

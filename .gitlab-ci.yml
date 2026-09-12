@@ -200,7 +200,9 @@ frontend-e2e:
         - frontend/src/**/*
         - frontend/e2e/**/*
         - frontend/package.json
-        - src/kraft/api.py
+        - frontend/e2e-timing.ts
+        - frontend/playwright.config.ts
+        - src/kraft/api/**/*
         - templates/**/*
         - .gitlab-ci.yml
       when: on_success
