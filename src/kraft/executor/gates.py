@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 from kraft import builtins as _builtins
@@ -17,15 +18,22 @@ def pending_gate(db, work_item_id: str, evts: list | None = None) -> str | None:
     """The gate name this item is currently stopped on, or None (Kraft-zr3s).
 
     Moved out of `kraft.api` unchanged, so both a human's approve/reject door and
-    an agent's gate review read the same reverse scan of the same three event
+    an agent's gate review read the same reverse scan of the same event
     types -- a second reader of one timeline is how two readers start
     disagreeing. `evts`, when given, is a timeline the caller already fetched
     (`gates.auto_escalate_stuck`'s single read) -- every other call site
     still passes nothing and gets a fresh read, unchanged.
+
+    `node_skipped` closes a pending gate the same way `gate_approved`/
+    `gate_rejected` do: `store.skip_node` (a `kraft item skip`) advances the
+    item past the gate's node without ever writing one of those two events,
+    so without this a gate bypassed by skip reads as pending forever --
+    the delay poller (`auto_escalate_delay.tick`) would then auto-review a
+    dead gate and rewind the chain back to it (code review finding).
     """
     evts = evts if evts is not None else db.read(lambda c: events.read_after(c, 0, work_item_id))
     for e in reversed(evts):
-        if e["type"] in ("gate_requested", "gate_approved", "gate_rejected"):
+        if e["type"] in ("gate_requested", "gate_approved", "gate_rejected", "node_skipped"):
             return e["payload"]["gate"] if e["type"] == "gate_requested" else None
     return None
 
@@ -182,7 +190,8 @@ async def review_gates(
     from kraft.executor import walk
 
     while status == "awaiting_gate":
-        gate = pending_gate(db, work_item_id)
+        evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
+        gate = pending_gate(db, work_item_id, evts=evts)
         row = db.read(
             lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
         )
@@ -196,7 +205,11 @@ async def review_gates(
         )
         gate_index = gate_node_index(chain, gate)
         node = chain["nodes"][gate_index]
-        if not node.get("auto_escalate"):
+        # Armed, past its delay-before-fire, and not already reviewed this
+        # round (Kraft-vyk8) -- see `auto_check_due`. At the default delay of
+        # 0 the elapsed half is always true, so this stays a no-op for
+        # anyone who hasn't opted in.
+        if not auto_check_due(row, gate, evts, policy):
             return status
         budget = store.effective_budget(row, policy.budget if policy else _policy.NO_BUDGET)
 
@@ -239,6 +252,17 @@ async def review_gates(
             return status_of(db, work_item_id)
 
         if verdict == "undecided":
+            # Marks this `gate_requested` as reviewed so `_gate_already_reviewed`
+            # stops the poller from spawning another session against it next
+            # tick -- see the comment at that guard's call site.
+            await db.write(
+                lambda c, gate=gate: events.append(
+                    c,
+                    work_item_id,
+                    "gate_auto_review_skipped",
+                    {"gate": gate, "reason": "undecided"},
+                )
+            )
             return status
         if verdict == "approve":
             # An approval is not just a status change: `chain_finalized` splices
@@ -302,6 +326,111 @@ def status_of(db, work_item_id: str) -> str:
         ).fetchone()
     )
     return row["status"]
+
+
+def auto_check_due(row, gate: str | None, evts: list, policy) -> bool:
+    """Whether a delayed auto-check could do anything at all for this row
+    right now: armed, past its `auto_escalate_delay_s`, and not already
+    handled this round.
+
+    The preconditions `review_gates` (when `gate` is not None) and
+    `auto_escalate_stuck` (when it is) each check for themselves before
+    dispatching -- factored out so `auto_escalate_delay.tick` can apply the
+    same ones *before* it spends a `max_concurrent` slot and a task slot on
+    a call that can only return its status unchanged (code review finding).
+    A parked row with `auto_escalate_stuck: false`, or a human-only gate,
+    would otherwise be re-dispatched every tick forever, crowding out the
+    rows that are genuinely due and 409-ing a human's `retry` whenever its
+    no-op task happened to be installed.
+
+    Deliberately not the *whole* precondition set: the reason check, the
+    running-escalation check, budget and cap all stay where they are, since
+    each needs work this pre-filter has no business doing twice. This is the
+    cheap "is anything armed and due" half.
+    """
+    delay = store.effective_auto_escalate_delay_s(
+        row, policy.auto_escalate_delay_s if policy else 0
+    )
+    if gate is not None:
+        if not row["auto_gate"]:
+            return False
+        chain = store.effective_chain(
+            json.loads(row["chain_definition"]), store.node_overrides_of(row)
+        )
+        node = chain["nodes"][gate_node_index(chain, gate)]
+        if not node.get("auto_escalate"):
+            return False
+        if _gate_already_reviewed(evts, gate):
+            return False
+        elapsed = _seconds_since(
+            evts,
+            lambda e, gate=gate: e["type"] == "gate_requested" and e["payload"].get("gate") == gate,
+        )
+    else:
+        # A conservative False, not `policy.auto_escalate_stuck`'s own True
+        # default, when policy failed to load entirely -- same fallback
+        # `auto_escalate_stuck` itself applies.
+        if not store.effective_auto_escalate_stuck(
+            row, policy.auto_escalate_stuck if policy else False
+        ):
+            return False
+        if _auto_escalate_already_handled(evts):
+            return False
+        elapsed = _seconds_since(evts, lambda e: e["type"] == "work_item_needs_human")
+    return elapsed is not None and elapsed >= delay
+
+
+def _gate_already_reviewed(evts: list, gate: str) -> bool:
+    """True iff the current `gate_requested <gate>` already had a review
+    *attempt* -- a `gate_auto_review_started`, or any
+    `gate_auto_review_skipped` for this gate regardless of `reason`
+    (`"undecided"`, `"budget"`) -- since it was requested. One review
+    attempt per `gate_requested` is the contract: every non-terminating
+    outcome (an undecided verdict, a budget-breach skip, or a crash
+    mid-review that `deps.guard` turns into `mark_needs_human`) must
+    suppress the next tick's re-attempt the same
+    way, not just `undecided` (code review finding).
+
+    Scans newest-first and stops at the `gate_requested` that armed this
+    round: an older `gate_auto_review_skipped` for the same gate name from a
+    *previous* request (e.g. after a rejection re-requested it) must not
+    suppress a fresh review of the new request. It stops at `_RUN_BOUNDARY`
+    for the same reason `_auto_escalate_already_handled` does (code review
+    finding): a review that crashed mid-flight leaves its
+    `gate_auto_review_started` on the timeline with no verdict after it, and
+    without this reset the gate would be silently demoted to human-only for
+    good -- a human's resume/retry gives it one more attempt, exactly like
+    the `auto_escalate_stuck` side.
+
+    `gate_auto_review_started` counts as the attempt (`gate_review.review`
+    writes it before it launches anything), so nothing has to stamp a
+    separate marker for the crash case.
+    """
+    for e in reversed(evts):
+        if e["type"] == "gate_requested" and e["payload"].get("gate") == gate:
+            return False
+        if e["type"] in _RUN_BOUNDARY:
+            return False
+        if (
+            e["type"] in ("gate_auto_review_skipped", "gate_auto_review_started")
+            and e["payload"].get("gate") == gate
+        ):
+            return True
+    return False
+
+
+def _seconds_since(evts: list, predicate) -> float | None:
+    """Seconds between now and the most recent event in `evts` (a timeline
+    the caller already fetched) matching `predicate`, scanning from the
+    newest event backwards -- or None if nothing matches. Shared by
+    `review_gates`'s delay-before-fire check (`gate_requested`) and
+    `auto_escalate_stuck`'s (`work_item_needs_human`) (Kraft-vyk8).
+    """
+    for e in reversed(evts):
+        if predicate(e):
+            now = datetime.fromisoformat(_now())
+            return (now - datetime.fromisoformat(e["created_at"])).total_seconds()
+    return None
 
 
 _AUTO_ESCALATE_MESSAGE = (
@@ -422,6 +551,25 @@ def _auto_dispatch_count(evts) -> int:
     return count
 
 
+def _auto_escalate_already_handled(evts: list) -> bool:
+    """True iff this run of `needs_human` stuckness already got a
+    non-dispatching outcome -- a budget-breach skip
+    (`work_item_auto_escalate_skipped`) or a cap-breach
+    (`work_item_auto_escalate_capped`) -- that the poller must not repeat
+    every tick. The `auto_escalate_stuck` sibling of `_gate_already_reviewed`,
+    scoped like `_auto_dispatch_count` rather than by a single
+    `work_item_needs_human` event: bounded by `_RUN_BOUNDARY`, so a self-retry
+    re-stopping on the same problem stays the same run, not a new one that
+    would get a fresh attempt.
+    """
+    for e in reversed(evts):
+        if e["type"] in _RUN_BOUNDARY:
+            return False
+        if e["type"] in ("work_item_auto_escalate_skipped", "work_item_auto_escalate_capped"):
+            return True
+    return False
+
+
 async def auto_escalate_stuck(
     status: str,
     db,
@@ -470,8 +618,10 @@ async def auto_escalate_stuck(
     # per-item or per-node override still wins inside
     # `effective_auto_escalate_stuck`; only the "nobody said anything"
     # fallback gets more conservative when there's no policy to trust.
-    default = policy.auto_escalate_stuck if policy else False
-    if not store.effective_auto_escalate_stuck(row, default):
+    # Armed (a conservative False when policy failed to load entirely), past
+    # its delay-before-fire, and without a non-dispatching outcome already
+    # recorded for this run -- see `auto_check_due`.
+    if not auto_check_due(row, None, evts, policy):
         return status
     # Checked before the dispatch, the same posture as `review_gates`'s own
     # auto-review launch and `walk.walk_node`'s BUDGET rung: an item that

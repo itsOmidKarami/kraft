@@ -91,6 +91,12 @@ class Policy:
     #: `Cap.attempts` but counted over `escalation_message` events tagged
     #: `{"auto": true}` rather than a `retry_counters` row.
     auto_escalate_stuck_cap: int = DEFAULT_AUTO_ESCALATE_STUCK_CAP
+    #: Seconds to wait after the triggering event (`gate_requested` for
+    #: `auto_escalate`, `work_item_needs_human` for `auto_escalate_stuck`)
+    #: before either mechanism fires, so a human about to look at the item
+    #: anyway isn't preempted by the agent (Kraft-vyk8). 0, the default, is
+    #: today's immediate-fire behaviour, unchanged.
+    auto_escalate_delay_s: int = 0
 
 
 def _cap(name: str, raw: object) -> Cap:
@@ -262,6 +268,9 @@ def load_policy(path: str | Path) -> Policy:
     raw_aes_cap = data.get("auto_escalate_stuck_cap", DEFAULT_AUTO_ESCALATE_STUCK_CAP)
     if not isinstance(raw_aes_cap, int) or isinstance(raw_aes_cap, bool) or raw_aes_cap < 1:
         raise PolicyError(f"{path.name}: 'auto_escalate_stuck_cap' must be a positive int")
+    raw_delay = data.get("auto_escalate_delay_s", 0)
+    if not isinstance(raw_delay, int) or isinstance(raw_delay, bool) or raw_delay < 0:
+        raise PolicyError(f"{path.name}: 'auto_escalate_delay_s' must be a non-negative int")
     return Policy(
         loops=loops,
         default=_cap("default", data["default"]),
@@ -273,6 +282,7 @@ def load_policy(path: str | Path) -> Policy:
         max_concurrent=raw_mc,
         auto_escalate_stuck=raw_aes,
         auto_escalate_stuck_cap=raw_aes_cap,
+        auto_escalate_delay_s=raw_delay,
     )
 
 
