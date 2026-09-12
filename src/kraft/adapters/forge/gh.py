@@ -45,9 +45,14 @@ class GhCli:
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None:
         await git.run_git(repo, ["gh", "pr", "edit", "--body", body])
 
-    async def ci_status(self, *, repo: Path, mr: MR, branch: str = "") -> CIStatus:
+    async def ci_status(
+        self, *, repo: Path, mr: MR, branch: str = "", pipeline_id: str = ""
+    ) -> CIStatus:
         # `gh pr view` with no argument already resolves from the current
         # branch, so `branch` is accepted for one Forge shape and unused here.
+        # `pipeline_id` is a GitLab-only concept (Kraft-ivh1): GitHub's checks
+        # are per-PR-head, not per-pipeline, so there is nothing to pin to and
+        # this is accepted only for signature symmetry.
         # `mergeable,mergeStateStatus` ride along on the call the node already
         # makes: the check node has to know whether the PR can land, and one
         # round trip already carries it (Kraft-ejj9).

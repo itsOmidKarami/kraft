@@ -194,6 +194,12 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
             "-- abandoned. 'you' | 'auto', enforced in kraft.store, not by a CHECK:",
             "-- the two writers are archive_work_item's only two callers.",
         )
+    if version < 28:
+        drop_lines = (
+            *drop_lines,
+            "ci_pipeline_ref  TEXT,",
+            "-- GitLab pipeline pinned by the last `on.ci.poll` read",
+        )
     schema = "\n".join(
         rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
     )
@@ -480,6 +486,18 @@ def test_migrate_v25_to_v26_adds_archive_columns(tmp_path):
 
     cols = {r[1] for r in conn.execute("PRAGMA table_info(work_items)").fetchall()}
     assert {"archived_at", "archived_by"} <= cols
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+
+
+def test_migrate_v27_to_v28_adds_ci_pipeline_ref(tmp_path):
+    """A v27 database migrates forward and gains work_items.ci_pipeline_ref."""
+    conn = db._connect(tmp_path / "orchestrator.db")
+    _build_old_db(conn, 27)
+
+    db.migrate(conn)
+
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(work_items)").fetchall()}
+    assert "ci_pipeline_ref" in cols
     assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
 
 

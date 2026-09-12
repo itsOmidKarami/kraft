@@ -51,6 +51,43 @@ def test_mark_sessions_capped_out_scoped_to_measuring_hook_points(tmp_path):
     asyncio.run(scenario())
 
 
+def test_mark_sessions_capped_out_leaves_a_waiting_session_alone(tmp_path):
+    """A ci_fix_loop cap breach must not steal a live on.ci.poll wait episode
+    out from under the separate ci_wait cap that already governs it."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="poll",
+                    work_item_id="w1",
+                    node_id="mr_checks",
+                    hook_point="on.ci.poll",
+                    log_path="/l",
+                    result_path="/r",
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "poll", "waiting"))
+
+            await database.write(
+                lambda c: store.mark_sessions_capped_out(c, "w1", "mr_checks", ["on.ci.poll"])
+            )
+
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT status FROM worker_sessions WHERE id = 'poll'"
+                ).fetchone()
+            )
+            assert row["status"] == "waiting"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 def test_done_with_concerns_is_not_capped_out_by_a_sibling_breach(tmp_path):
     """A `done_with_concerns` session on a capping node keeps its status and text;
     only the still-pending sibling that actually breached becomes capped_out."""
@@ -119,6 +156,25 @@ def test_retry_after_cap_clears_the_gate_reject_counter_too(tmp_path):
                 database.read(lambda c: store.read_counter(c, "w1", "spec_approval_reject_loop"))
                 is None
             )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_retry_after_cap_clears_ci_pipeline_ref(tmp_path):
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            await database.write(lambda c: store.set_ci_pipeline_ref(c, "w1", "abc123:456"))
+            await database.write(lambda c: store.retry_after_cap(c, "w1", "mr_checks", None, None))
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT ci_pipeline_ref FROM work_items WHERE id = 'w1'"
+                ).fetchone()
+            )
+            assert row["ci_pipeline_ref"] is None
         finally:
             await database.close()
 

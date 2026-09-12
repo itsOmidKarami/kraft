@@ -83,7 +83,9 @@ class Forge(Protocol):
     async def open_mr(self, *, repo: Path, branch: str, title: str, body: str) -> MR: ...
     async def push(self, *, repo: Path, branch: str) -> None: ...
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None: ...
-    async def ci_status(self, *, repo: Path, mr: MR, branch: str) -> CIStatus: ...
+    async def ci_status(
+        self, *, repo: Path, mr: MR, branch: str, pipeline_id: str = ""
+    ) -> CIStatus: ...
     async def merge(self, *, repo: Path, branch: str, mr: MR) -> None: ...
     async def set_labels(self, *, repo: Path, mr: MR, labels: tuple[str, ...]) -> None: ...
     async def find_mr(self, *, repo: Path, branch: str) -> MRRef | None: ...
@@ -113,6 +115,16 @@ class FakeForge:
     #: Times `retry_jobs` was called, for a test to assert the self-retry
     #: fired (Kraft-h81i) without a real forge to observe.
     retried: list[str] = field(default_factory=list)
+    #: Every `pipeline_id` a caller passed to `ci_status`, in call order
+    #: ("" for an unpinned call), so a test can see it threaded through
+    #: without a real GitLab (Kraft-ivh1).
+    pipeline_ids_requested: list[str] = field(default_factory=list)
+    #: Parallel to `ci_states`: the pipeline id each successive `ci_status`
+    #: call reports back (Kraft-ivh1). Defaults to "" -- a test that never
+    #: sets this exercises no pinning, same as `ci_shas`' default. Task 4
+    #: needs this to make on.ci.poll's persisted `ci_pipeline_ref` non-empty
+    #: against a fake forge.
+    ci_pipeline_refs: list[str] = field(default_factory=lambda: [""])
     opened: dict[int, str] = field(default_factory=dict)
     merged: list[int] = field(default_factory=list)
     #: Last description written per branch, so a test can see the sync land.
@@ -145,11 +157,19 @@ class FakeForge:
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None:
         self.bodies[branch] = body
 
-    async def ci_status(self, *, repo: Path, mr: MR, branch: str = "") -> CIStatus:
+    async def ci_status(
+        self, *, repo: Path, mr: MR, branch: str = "", pipeline_id: str = ""
+    ) -> CIStatus:
+        self.pipeline_ids_requested.append(pipeline_id)
         state = self.ci_states.pop(0) if len(self.ci_states) > 1 else self.ci_states[0]
         sha = self.ci_shas.pop(0) if len(self.ci_shas) > 1 else self.ci_shas[0]
         failed_jobs = (
             self.ci_failed_jobs.pop(0) if len(self.ci_failed_jobs) > 1 else self.ci_failed_jobs[0]
+        )
+        pipeline_ref = (
+            self.ci_pipeline_refs.pop(0)
+            if len(self.ci_pipeline_refs) > 1
+            else self.ci_pipeline_refs[0]
         )
         return CIStatus(
             state=state,
@@ -159,6 +179,7 @@ class FakeForge:
             merge_detail=self.merge_detail,
             sha=sha,
             failed_jobs=failed_jobs,
+            pipeline_ref=pipeline_ref,
         )
 
     async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None:

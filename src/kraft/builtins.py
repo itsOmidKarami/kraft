@@ -638,7 +638,7 @@ async def scan_submodules(
     would reject three nodes later -- this is what would have rescued work
     item 9d0ab38ff3c9439b90506df0f6966660, which declared nothing.
     """
-    log_path, result_path = await start_session(
+    _, log_path, result_path = await start_session(
         db,
         run_dirs,
         session_id=session_id,
@@ -730,7 +730,8 @@ async def start_session(
     hook_point: str,
     round: int,
     head_sha: str | None = None,
-) -> tuple[Path, Path]:
+    reuse_if_waiting: bool = False,
+) -> tuple[str, Path, Path]:
     """Create the session row before the in-process work starts, not after.
 
     `forge.run_task` can now sit in `_poll_ci` for up to `poll_timeout`
@@ -740,10 +741,16 @@ async def start_session(
     mid-poll left nothing to reattach (Kraft-7xt). Splitting the row's
     creation from its exit is what `adapters.subprocess.run_task` already
     does for a spawned child; this gives an in-process task the same shape.
+
+    Returns `(id, log_path, result_path)`. Normally `id == session_id`; with
+    `reuse_if_waiting=True` (Kraft-ivh1) a still-`'waiting'` row for this
+    exact (item, node, hook point, round) is reused instead, and the
+    returned id/paths are that row's, not `session_id`'s -- the caller must
+    use the returned id, not `session_id`, for the rest of its work.
     """
     log_path = run_dirs.logs / f"{session_id}.log"
     result_path = run_dirs.results / f"{session_id}.json"
-    await db.write(
+    actual_id, log_str, result_str = await db.write(
         lambda c: store.create_session(
             c,
             id=session_id,
@@ -754,9 +761,10 @@ async def start_session(
             result_path=str(result_path),
             round=round,
             head_sha=head_sha,
+            reuse_if_waiting=reuse_if_waiting,
         )
     )
-    return log_path, result_path
+    return actual_id, Path(log_str), Path(result_str)
 
 
 async def finish_session(
@@ -768,6 +776,7 @@ async def finish_session(
     status: str,
     log: str,
     findings: list[dict] | None = None,
+    reused: bool = False,
 ) -> str:
     """Write the log and close out a session `start_session` already created.
 
@@ -776,8 +785,17 @@ async def finish_session(
     has nothing to report) -- writing `result_path` only when it is given
     keeps `_findings.parse`'s "missing file -> no findings" behaviour for
     every one of them.
+
+    `reused` (Kraft-ivh1): a session `create_session(reuse_if_waiting=True)`
+    handed back instead of inserting fresh already has a log on disk from an
+    earlier poll of the same wait episode -- appended to here, not
+    overwritten, so on.ci.poll's repeated "pipeline pending" reads land in
+    one running log instead of replacing each other. The `.times` sidecar
+    is extended the same way: only the newly-added lines get a fresh
+    timestamp; ones already on disk keep theirs.
     """
-    log_path.write_text(log)
+    previous = log_path.read_text() if reused and log_path.exists() else ""
+    log_path.write_text(previous + log if previous else log)
     if findings is not None:
         result_path.write_text(json.dumps({"findings": findings}))
     # A subprocess session gets its per-line timestamps from the adapter's drain
@@ -788,11 +806,17 @@ async def finish_session(
     # subprocess adapter.
     now = datetime.now(UTC).isoformat()
     try:
-        logs.times_path(log_path).write_text(
-            "".join(
-                json.dumps({"n": n, "t": now}) + "\n" for n in range(len(logs.split_lines(log)))
-            )
-        )
+        times_path = logs.times_path(log_path)
+        previous_line_count = len(logs.split_lines(previous)) if previous else 0
+        new_entries = [
+            json.dumps({"n": previous_line_count + n, "t": now}) + "\n"
+            for n in range(len(logs.split_lines(log)))
+        ]
+        if reused and times_path.exists():
+            with times_path.open("a") as fh:
+                fh.writelines(new_entries)
+        else:
+            times_path.write_text("".join(new_entries))
     except OSError:
         # Best-effort, the same call `_watch_log` makes about its own sidecar: a
         # missing time column is cosmetic, not a reason to fail the node.
@@ -822,7 +846,7 @@ async def _record_done(
     construction. A forge task can genuinely fail — a red pipeline — and
     recording that as done would let the chain walk into the merge node.
     """
-    log_path, result_path = await start_session(
+    _, log_path, result_path = await start_session(
         db,
         run_dirs,
         session_id=session_id,
