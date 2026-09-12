@@ -256,6 +256,24 @@ def session_status(conn: sqlite3.Connection, session_id: str) -> str | None:
     return row["status"] if row else None
 
 
+def session_summaries_for_item(conn: sqlite3.Connection, work_item_id: str) -> list[str]:
+    """Every session summary this work item's agents wrote, oldest first.
+
+    NULL `session_summary_ref`s excluded -- non-agent nodes (`chain_review`,
+    `env_setup`, `merge`) never write one, and that is the ordinary case, not
+    a gap to report. Ordered by `created_at`, not by round or attempt: the
+    same trap `executor.walk._previous_fix_session` documents applies here --
+    a caller's local counter can collide with an abandoned attempt, so the
+    table's own creation order is the only one that is always right.
+    """
+    rows = conn.execute(
+        "SELECT session_summary_ref FROM worker_sessions WHERE work_item_id = ? "
+        "AND session_summary_ref IS NOT NULL ORDER BY created_at",
+        (work_item_id,),
+    ).fetchall()
+    return [r["session_summary_ref"] for r in rows]
+
+
 def recent_sessions_for_hook(
     conn: sqlite3.Connection, hook_point: str, limit: int = 5
 ) -> list[dict]:
