@@ -184,6 +184,17 @@ describe("ActionBar", () => {
     expect(screen.getByText(/turn 1/)).toBeInTheDocument();
   });
 
+  it("a failed Stop agent surfaces the error in the pill's hint", async () => {
+    vi.spyOn(api, "stopEscalation").mockRejectedValue(new Error("stop failed"));
+    renderBar(
+      item({ status: "needs_human", cappedOut: { cycles: 3, attempts: 3 } }),
+      [escSession()],
+      [NEEDS_HUMAN_EVENT],
+    );
+    await userEvent.click(screen.getByRole("button", { name: /stop agent/i }));
+    expect(await screen.findByText("stop failed")).toBeInTheDocument();
+  });
+
   it("a running escalation turn tagged auto:true shows the Auto-escalated pill", () => {
     const autoMsg = {
       seq: 2,

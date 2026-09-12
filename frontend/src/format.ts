@@ -1,3 +1,28 @@
+import type { LogLine } from "./types/work_item";
+
+/** A log line's one-line text. `summary` is a server-rendered stream-json
+ *  line; but the server's own summariser (logs.py summary()) falls back to
+ *  the raw line for any object shape it does not recognise (e.g.
+ *  `{"type":"tool_progress",...}`), so a `summary` equal to the raw text is
+ *  not actually a summary. Treat that case the same as no summary at all: an
+ *  agent/tool line's raw text is JSON and must not render as
+ *  `{"type":"tool_progress",...}` -- fall back to just its `type`. Plain
+ *  stdout/sys lines are never JSON, so they pass through untouched. */
+export function logLineText(l: LogLine): string {
+  if (l.summary && l.summary !== l.text) return l.summary;
+  if (l.src === "agent" || l.src === "tool") {
+    try {
+      const parsed = JSON.parse(l.text);
+      if (parsed && typeof parsed === "object" && typeof parsed.type === "string") {
+        return parsed.type;
+      }
+    } catch {
+      /* not JSON -- fall through to the raw text */
+    }
+  }
+  return l.text;
+}
+
 /** Relative age, compact ("just now", "12m ago", "3h ago", "4d ago"). */
 export function ago(iso: string | null | undefined, now = Date.now()): string {
   if (!iso) return "";
