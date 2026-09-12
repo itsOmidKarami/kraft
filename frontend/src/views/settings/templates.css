@@ -16,6 +16,12 @@
 
 .chain-editor .template-list { height: 100%; }
 
+/* Kraft-xhro: screen 27 puts the node graph full width across the top, above
+   both lower panes, in ~2 rows -- built put it inside the ~700px middle
+   column of the three-column grid below, wrapping 12 pills into 8 rows. */
+.chain-page { display: flex; flex-direction: column; gap: var(--space-4); min-height: 0; }
+.chain-graph-row { display: flex; flex-direction: column; gap: 8px; }
+
 /* Template row: left-aligned name + node count on one line, meta line under
    it -- a bare button with no CSS at all used to centre "default12 nodes ·
    4 gates ·" as one run of text (Task 2 finding, G10-02). Two classes, not

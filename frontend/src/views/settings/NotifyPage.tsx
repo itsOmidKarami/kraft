@@ -73,7 +73,7 @@ export function NotifyPage() {
         <>
           <section className="settings-section">
             <h6>Channel</h6>
-            <div className="save-row">
+            <div className="save-row field-row">
               <Switch
                 checked={notify.enabled}
                 onChange={(v) => put({ enabled: v }, "channel")}
@@ -183,7 +183,7 @@ export function NotifyPage() {
                 `.switch` pattern is already here and already means on/off
                 (PluginsPage.tsx). */}
             {NOTIFY_EVENTS.map((e) => (
-              <div key={e.id} className="save-row">
+              <div key={e.id} className="save-row field-row">
                 <Switch
                   checked={notify.events.includes(e.id)}
                   onChange={() =>

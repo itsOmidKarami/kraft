@@ -189,11 +189,11 @@ export function SteeringPage() {
       {list.files.map((f) => (
         <button
           key={f.name}
-          className="facet-opt"
+          className="facet-opt steering-row"
           aria-pressed={f.name === selected}
           onClick={() => setParams({ file: f.name })}
         >
-          {f.name}
+          <span className="steering-row-name">{f.name}</span>
           <span className="facet-count">
             {whoUses(f.name)} · {f.bytes === null ? "unreadable" : `${f.bytes} B`}
           </span>
