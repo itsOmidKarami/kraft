@@ -37,19 +37,22 @@ const COMPOSER_TITLES: Record<ComposerKind, string> = {
   budget: "Raise budget",
 };
 
-function usageLine(item: WorkItem, taskCount: number): string {
-  const parts = [`${taskCount} task${taskCount === 1 ? "" : "s"}`];
+/** Tasks/tokens are the detail, dropped first under 1279 (50); the `$`
+ *  figure is what a glance at a narrow bar still needs, so it stays. */
+function usageParts(item: WorkItem, taskCount: number): { detail: string; figure: string; full: string } {
+  const detailParts = [`${taskCount} task${taskCount === 1 ? "" : "s"}`];
   const u = item.usage;
+  let figure = "";
   if (u) {
     const node = u.by_node.find((n) => n.node === item.current_node_id);
     const sum = (r?: { tokens_in: number; tokens_out: number }) =>
       r ? r.tokens_in + r.tokens_out : 0;
-    if (node) parts.push(`${tokens(sum(node))} tokens this node`);
-    parts.push(`${tokens(sum(u.total))} total`);
-    if (u.total.cost_usd > 0)
-      parts.push(usd(u.total.cost_usd, u.total.cost_complete));
+    if (node) detailParts.push(`${tokens(sum(node))} tokens this node`);
+    detailParts.push(`${tokens(sum(u.total))} total`);
+    if (u.total.cost_usd > 0) figure = usd(u.total.cost_usd, u.total.cost_complete);
   }
-  return parts.join(" · ");
+  const full = figure ? [...detailParts, figure].join(" · ") : detailParts.join(" · ");
+  return { detail: detailParts.join(" · "), figure, full };
 }
 
 function onServerMachine(): boolean {
@@ -111,6 +114,7 @@ export function ActionBar({
   const nodeSessions = sessions.filter(
     (s) => s.node_id === item.current_node_id,
   );
+  const usage = usageParts(item, nodeSessions.length);
   const gate = item.pending_gate;
 
   const cancel = async () => {
@@ -253,12 +257,14 @@ export function ActionBar({
       if (open === "steer") {
         left = (
           <Composer
+            title={`Steer ${item.current_node_id}`}
+            explanation="the note leads attempt 2's system prompt"
             value={text}
             onChange={setText}
             busy={busy}
             error={err}
             placeholder="What should the next attempt know?"
-            footnote="goes into the next attempt's system prompt"
+            footnote="attempt 2 restarts the node's tasks · fix-loop progress is kept"
             submitLabel="Resume with this steer"
             onSubmit={() =>
               run(
@@ -322,6 +328,8 @@ export function ActionBar({
       if (open === "steerRetry") {
         left = (
           <Composer
+            title={`Steer & retry ${item.current_node_id}`}
+            explanation="the note carries into the retry's system prompt"
             value={text}
             onChange={setText}
             busy={busy}
@@ -378,6 +386,8 @@ export function ActionBar({
       if (open === "steerRetry") {
         left = (
           <Composer
+            title={`Steer & retry ${item.current_node_id}`}
+            explanation="the note carries into the retry's system prompt"
             value={text}
             onChange={setText}
             busy={busy}
@@ -402,6 +412,7 @@ export function ActionBar({
           <BudgetComposer
             itemId={item.id}
             capUsd={capUsd}
+            spentUsd={item.budget?.spent_usd}
             busy={busy}
             err={err}
             run={run}
@@ -438,12 +449,14 @@ export function ActionBar({
       if (open === "answer") {
         left = (
           <Composer
+            title="The agent asks"
+            footnote="the question and answer are kept in the timeline"
             value={text}
             onChange={setText}
             busy={busy}
             error={err}
             quoted={item.needs_context_question ?? undefined}
-            submitLabel="Answer"
+            submitLabel="Answer and resume"
             disabled={text.trim() === ""}
             onSubmit={() =>
               run(
@@ -524,6 +537,7 @@ export function ActionBar({
           </div>
         )}
         <Composer
+          title={`Escalation · turn ${escalationTurns.length + 1}`}
           value={text}
           onChange={setText}
           busy={busy}
@@ -629,8 +643,9 @@ export function ActionBar({
                 Worktree
               </button>
             )}
-            <span className="action-bar-usage">
-              {usageLine(item, nodeSessions.length)}
+            <span className="action-bar-usage" title={usage.full}>
+              <span className="control-usage-detail">{usage.detail}</span>
+              {usage.figure && <> · {usage.figure}</>}
             </span>
             {item.status !== "completed" &&
               item.status !== "abandoned" &&

@@ -6,6 +6,7 @@ import * as api from "../../../api";
 export function BudgetComposer({
   itemId,
   capUsd,
+  spentUsd,
   busy,
   err,
   run,
@@ -13,6 +14,8 @@ export function BudgetComposer({
 }: {
   itemId: string;
   capUsd: number;
+  /** `item.budget.spent_usd` — "spent so far $10.38 of $15" (spec §3). */
+  spentUsd?: number;
   busy: boolean;
   err: string | null;
   run: (fn: () => Promise<unknown>, toast?: string) => Promise<void>;
@@ -26,6 +29,15 @@ export function BudgetComposer({
   ];
   return (
     <div className="composer">
+      <p className="composer-head">
+        Raise the budget for this item
+        {spentUsd != null && (
+          <span className="composer-explain">
+            {" "}
+            · spent so far ${spentUsd.toFixed(2)} of ${capUsd}
+          </span>
+        )}
+      </p>
       <div className="gate-actions">
         {pills.map((p) => (
           <button

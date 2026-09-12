@@ -36,14 +36,16 @@ export function StageGraph({
   const nodes = (item.effective_chain ?? item.chain_definition).nodes;
   return (
     <nav className="stage-graph" aria-label="chain stages">
-      {nodes.map((n, i) => (
+      {nodes.map((n, i) => {
+        const isCurrent = n.id === item.current_node_id;
+        return (
         <span className="stage-link-wrap" key={n.id}>
           <button
             type="button"
             className="stage-pill"
             data-state={nodeState(n, item)}
             data-selected={n.id === selected}
-            aria-current={n.id === item.current_node_id ? "step" : undefined}
+            aria-current={isCurrent ? "step" : undefined}
             aria-pressed={n.id === selected}
             onClick={() => onSelect(n.id)}
           >
@@ -51,6 +53,11 @@ export function StageGraph({
               <ShieldCheck size={12} weight="fill" className="stage-pill-escalate" />
             )}
             {n.id}
+            {isCurrent && item.progress && (
+              <span className="stage-pill-progress">
+                {item.progress.current}/{item.progress.total}
+              </span>
+            )}
           </button>
           {i < nodes.length - 1 && (
             <span className="stage-link">
@@ -58,7 +65,8 @@ export function StageGraph({
             </span>
           )}
         </span>
-      ))}
+        );
+      })}
     </nav>
   );
 }

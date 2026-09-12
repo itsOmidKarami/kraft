@@ -123,6 +123,7 @@ export function GateCard({
         </div>
       ) : (
         <Composer
+          title={`Reject ${gate}`}
           value={note}
           onChange={setNote}
           busy={busy}

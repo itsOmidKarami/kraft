@@ -1,11 +1,16 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import { useStore } from "../../store";
 import type { ChainNode, WorkItem, WorkerSession } from "../../types";
 import { WorkItemDetail } from ".";
+
+const here = dirname(fileURLToPath(import.meta.url));
 
 const NODES: ChainNode[] = [
   { id: "spec", tasks: ["on.spec.requested"], gate_after: "spec_approval" },
@@ -62,6 +67,14 @@ function GoBack() {
   );
 }
 
+/** `MemoryRouter` keeps its own history, not `window.location` — read the
+ *  hash back through the router the same way `useMaximized`/`useNodeSelection`
+ *  do, rather than a browser API this test double has no reason to touch. */
+function HashProbe() {
+  const location = useLocation();
+  return <span data-testid="hash-probe">{location.hash}</span>;
+}
+
 const renderDetail = (hash = "") =>
   render(
     <MemoryRouter
@@ -69,10 +82,26 @@ const renderDetail = (hash = "") =>
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
       <Routes>
-        <Route path="/work-items/:id" element={<><GoBack /><WorkItemDetail /></>} />
+        <Route path="/work-items/:id" element={<><GoBack /><HashProbe /><WorkItemDetail /></>} />
       </Routes>
     </MemoryRouter>,
   );
+
+const renderDetailWithProgress = (hash = "") => {
+  setup({
+    progress: {
+      current: 3,
+      total: 6,
+      title: "wire the thing",
+      tasks: [1, 2, 3, 4, 5, 6].map((n) => ({
+        n,
+        title: `task ${n}`,
+        state: n < 3 ? "done" : n === 3 ? "current" : "pending",
+      })),
+    },
+  });
+  return renderDetail(hash);
+};
 
 describe("WorkItemDetail (item page)", () => {
   it("hydrates on mount and leads with the current node in the hero", () => {
@@ -165,20 +194,60 @@ describe("WorkItemDetail (item page)", () => {
   });
 
   it("shows the hero task bar and the Tasks-tab plan list from item.progress", async () => {
-    setup({
-      progress: {
-        current: 3,
-        total: 6,
-        title: "wire the thing",
-        tasks: [1, 2, 3, 4, 5, 6].map((n) => ({
-          n,
-          title: `task ${n}`,
-          state: n < 3 ? "done" : n === 3 ? "current" : "pending",
-        })),
-      },
-    });
-    renderDetail();
-    expect(screen.getByTestId("hero-task-bar")).toHaveTextContent("Task 3 of 6 — wire the thing");
+    renderDetailWithProgress();
+    expect(screen.getByTestId("task-bar")).toBeInTheDocument();
+    expect(screen.getByText("wire the thing")).toBeInTheDocument();
     expect(await screen.findByTestId("plan-list")).toBeInTheDocument();
+  });
+
+  it("puts the hero in the header's right column and the state tag inline in the meta line", () => {
+    // jsdom has no cascade to compute a grid layout from; pin the source
+    // instead, the way styles.order.test.ts does.
+    const css = readFileSync(join(here, "../../styles.css"), "utf-8");
+    expect(css).toMatch(/\.detail-head\s*\{[^}]*display:\s*grid/);
+    expect(css).toMatch(/\.detail-status\s*\{[^}]*margin-left:\s*0/);
+  });
+
+  it("maximizing hides the inspector and the graph and lands in the URL", async () => {
+    const user = userEvent.setup();
+    setup({}, [session({ id: "s1", node_id: "verify" })]);
+    renderDetail();
+    await screen.findByTestId("right-pane-log");
+    await user.click(screen.getByRole("button", { name: /maximi/i }));
+    expect(screen.getByTestId("hash-probe").textContent).toContain("log=max");
+    expect(document.querySelector(".inspector")).toBeNull();
+    expect(document.querySelector(".stage-graph")).toBeNull();
+    expect(document.querySelector(".item-max-strip")).toBeTruthy();
+  });
+
+  it("Escape restores the split", async () => {
+    const user = userEvent.setup();
+    setup({}, [session({ id: "s1", node_id: "verify" })]);
+    renderDetail("#node=verify&log=max");
+    await user.keyboard("{Escape}");
+    expect(screen.getByTestId("hash-probe").textContent).not.toContain("log=max");
+    expect(document.querySelector(".inspector")).toBeTruthy();
+  });
+
+  it("renders the hero task line through the shared primitive, not a bespoke bar", async () => {
+    renderDetailWithProgress();
+    expect(document.querySelector(".hero-task-seg")).toBeNull();
+    expect(await screen.findByTestId("task-bar")).toBeTruthy();
+    expect(screen.getByText("Task 3 of 6")).toBeTruthy();
+  });
+
+  it("puts the task fraction on the current stage pill", () => {
+    renderDetailWithProgress();
+    const pill = document.querySelector(".stage-pill[data-state='current']") as HTMLElement;
+    expect(pill.textContent).toContain("3/6");
+  });
+
+  it("edits the title from the ⋯ menu rather than an inline Edit button", async () => {
+    const user = userEvent.setup();
+    renderDetail();
+    expect(screen.queryByRole("button", { name: /^Edit$/ })).toBeNull();
+    await user.click(screen.getByRole("button", { name: /more/i }));
+    await user.click(screen.getByRole("button", { name: /edit title/i }));
+    expect(screen.getByLabelText("title")).toBeTruthy();
   });
 });

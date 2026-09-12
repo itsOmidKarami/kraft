@@ -226,7 +226,7 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
   color: var(--color-text);
   box-shadow: inset 0 -1px 0 var(--color-accent);
 }
-.tab-count { margin-left: 6px; font-size: 11px; color: var(--color-text-muted); }
+.tab-count { margin-left: 4px; font-size: 11px; color: var(--color-text-muted); }
 
 .kbd { opacity: 0.5; font-size: 11px; margin-left: 4px; }
 
@@ -701,33 +701,70 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 .detail {
   padding: 28px 40px 32px;
   display: flex; flex-direction: column; gap: 24px;
-  max-width: 900px;
+  /* was max-width: 900px -- screen 11 runs the header the full content width,
+     with the hero as its own right column. WI-1's breakpoint block already
+     centres and caps the content at >= 1440. */
 }
-.detail-head { display: flex; flex-direction: column; gap: 8px; }
+/* Meta + title + description left, hero right (11 · 38). */
+.detail-head {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "meta hero" "title hero" "desc hero";
+  column-gap: 24px; row-gap: 8px; align-items: start;
+}
 .detail-meta {
+  grid-area: meta;
   display: flex; align-items: center; gap: 10px;
   font-size: 12px; color: var(--color-neutral-500); white-space: nowrap;
 }
 .detail-meta code { font-family: ui-monospace, Menlo, monospace; }
 .mr-link { color: var(--color-accent-300); text-decoration: none; }
 .mr-link:hover { text-decoration: underline; }
-.detail-status { margin-left: auto; }
+/* Inline at the end of the meta parts, not floated to the far right (G7-04). */
+.detail-status { margin-left: 0; }
+.detail-meta .overflow { margin-left: auto; }
+.detail-head > [data-testid="item-title"] { grid-area: title; min-width: 0; }
+.detail-title-row { display: flex; align-items: center; gap: 8px; }
+.detail-title-pencil { opacity: 0; transition: opacity 120ms; }
+[data-testid="item-title"]:hover .detail-title-pencil { opacity: 1; }
+.detail-description { grid-area: desc; }
 /* The item's own title is the headline: it is the words the person wrote and
    the only thing that tells two open items apart. The node is where that work
    has got to — strong, but subordinate to what the work is. */
 .detail-title {
-  font-size: 28px; line-height: 1.15; margin: 0; font-weight: 500;
+  font-size: 26px; line-height: 1.15; margin: 0; font-weight: 500;
   letter-spacing: -0.02em; color: var(--color-text);
 }
-.detail-hero { display: flex; align-items: baseline; gap: 14px; margin-top: 6px; flex-wrap: wrap; }
-.hero-node { font-size: 19px; line-height: 1.2; font-weight: 500; color: var(--color-neutral-300); }
+.detail-hero {
+  grid-area: hero; display: flex; flex-direction: column; align-items: flex-end;
+  gap: 4px; margin-top: 0; text-align: right;
+}
+.hero-node { font-size: 22px; line-height: 1.2; font-weight: 500; color: var(--color-neutral-300); }
 .hero-sub { font-size: 12px; color: var(--color-neutral-500); }
+.detail-hero .task-line { justify-content: flex-end; }
+.detail-hero .task-bar { width: 300px; }
 
-.control-row { display: flex; gap: 10px; align-items: center; }
-.control-row .btn { font-size: 13px; }
-.control-hint { font-size: 11px; color: var(--color-text-muted); }
+@media (max-width: 1023px) {
+  /* No room for two columns: the hero stacks under the description. */
+  .detail-head { grid-template-columns: minmax(0, 1fr); grid-template-areas: "meta" "title" "desc" "hero"; }
+  .detail-hero { align-items: flex-start; text-align: left; }
+  .detail-hero .task-bar { width: 100%; }
+}
+
+.control-row {
+  display: flex; gap: 10px; align-items: center;
+  flex-wrap: nowrap; min-width: 0;
+}
+.control-row .btn { font-size: 13px; flex: none; }
+/* The hint is the only thing allowed to give way: one line, ellipsized, and
+   the first thing hidden when the bar runs out of room (50). */
+.control-hint {
+  flex: 1 1 auto; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: 11px; color: var(--color-text-muted);
+}
 .capped-hint { margin: 6px 0 0; }
-.control-usage { font-size: 12px; color: var(--color-text-muted); margin-left: auto; }
+.control-actions-right { display: flex; align-items: center; gap: 10px; flex: none; margin-left: auto; }
+.control-usage { font-size: 12px; color: var(--color-text-muted); margin-left: 0; white-space: nowrap; }
 
 .tab-body { display: flex; flex-direction: column; gap: 2px; }
 .row-action { font-size: 12px; }
@@ -900,39 +937,56 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
   width: 880px; max-width: 100%; padding: 0; gap: 0;
   max-height: calc(100vh - 88px); overflow: hidden;
 }
-/* Same anatomy as .doc-modal-head — icon, name, meta, copy/close — so it takes
-   the same padding. The two had drifted 2px apart. */
+/* One 41px row (12 · 38): Log · session id · hook · attempt · lines · source
+   chips · following · Copy · maximize. The Tasks row already says which
+   session this is, so the title block above it was saying it twice. */
 .log-head {
-  display: flex; align-items: flex-start; gap: 14px;
-  padding: 18px 22px 14px; border-bottom: 1px solid var(--color-divider);
+  display: flex; align-items: center; gap: 10px;
+  height: 41px; box-sizing: border-box; padding: 0 14px;
+  border-bottom: 1px solid var(--color-divider);
+  min-width: 0; flex-wrap: nowrap; overflow-x: auto;
 }
-.log-head .glyph { margin-top: 2px; }
-.log-title { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1; }
-.log-hook { font-size: 16px; font-weight: 500; }
-.log-meta {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  font-size: 11px; color: var(--color-neutral-500);
-}
-.log-sid { font-family: ui-monospace, Menlo, monospace; color: var(--color-text-muted); }
-.log-actions { display: flex; gap: 6px; align-items: center; }
+.log-static-title { font-size: 12.5px; font-weight: 500; flex: none; }
+.log-hook, .log-sid { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--color-text-muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.log-meta-part { font-size: 11px; color: var(--color-neutral-500); white-space: nowrap; flex: none; }
+.log-not-following { font-size: 11px; color: var(--color-neutral-500); white-space: nowrap; flex: none; }
+.log-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; flex: none; }
 .log-follow { font-size: 12px; padding: 4px 10px; white-space: nowrap; }
 .log-follow[aria-pressed="true"] { color: var(--color-accent); border-color: var(--color-accent); }
 
-.log-filters {
-  display: flex; gap: 6px; align-items: center;
-  padding: 8px 22px; border-bottom: 1px solid var(--color-divider);
-}
 .log-chip {
   padding: 2px 8px; border-radius: 999px; font: inherit; font-size: 11px; cursor: pointer;
   border: 1px solid var(--color-divider); background: transparent;
-  color: var(--color-neutral-500);
+  color: var(--color-neutral-500); flex: none;
 }
 .log-chip:hover { color: var(--color-text); }
 .log-chip[aria-pressed="true"] {
   border-color: var(--color-accent); color: var(--color-accent-300);
   background: color-mix(in srgb, var(--color-accent) 12%, transparent);
 }
-.log-count { margin-left: auto; font-size: 11px; color: var(--color-text-muted); }
+.log-count { font-size: 11px; color: var(--color-text-muted); white-space: nowrap; flex: none; }
+
+/* LogModal and Events (RightPane/Events.tsx) predate the one-row pane header
+ * above and still render the old two-row anatomy — title block over a
+ * filters row. Their shared classes were deleted with that rewrite even
+ * though these two callers still mount them, so restore them scoped to
+ * `.log-modal` (and unscoped for `.log-filters`, which only they use). */
+.log-title { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1; }
+.log-meta {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  font-size: 11px; color: var(--color-neutral-500);
+}
+.log-filters {
+  display: flex; gap: 6px; align-items: center;
+  padding: 8px 22px; border-bottom: 1px solid var(--color-divider);
+}
+.log-modal .log-head {
+  align-items: flex-start; gap: 14px;
+  height: auto; padding: 18px 22px 14px; overflow-x: visible;
+}
+.log-modal .log-head .glyph { margin-top: 2px; }
+.log-modal .log-hook { font-family: inherit; font-size: 16px; font-weight: 500; color: var(--color-text); }
+.log-modal .log-count { margin-left: auto; }
 
 .log-body {
   padding: 12px 22px 16px; overflow: auto; flex: 1;
@@ -944,6 +998,12 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 }
 .log-line[data-src="agent"] { color: var(--color-neutral-300); }
 .log-line[data-src="sys"] { color: var(--color-neutral-500); }
+/* A task_progress sys line is a task boundary among hundreds of tool calls —
+   tint it so it reads as one. */
+.log-line[data-task-progress="true"] {
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  color: var(--color-accent-200);
+}
 .log-t { color: var(--color-neutral-700); }
 .log-src { color: var(--color-text-muted); }
 .log-line[data-src="agent"] .log-src { color: var(--color-accent-300); }
@@ -1222,6 +1282,9 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; }
   }
   /* Hints, footnotes and usage strings go before anything else (45). */
   .control-hint, .group-head-note { display: none; }
+  /* WI-1 already hides .control-hint here; fold the usage string into its
+     $ figure, with the rest on the title attribute. */
+  .control-usage-detail { display: none; }
 }
 
 @media (max-width: 1023px) {
