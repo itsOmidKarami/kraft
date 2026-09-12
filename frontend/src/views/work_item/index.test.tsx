@@ -1,13 +1,13 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import { useStore } from "../../store";
-import type { ChainNode, KraftEvent, WorkItem, WorkerSession } from "../../types";
+import type { ChainNode, DocumentDetail, KraftEvent, WorkItem, WorkerSession, WorkItemDocument } from "../../types";
 import { WorkItemDetail } from ".";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -423,5 +423,103 @@ describe("WorkItemDetail (item page)", () => {
     await user.click(screen.getByRole("button", { name: /more/i }));
     await user.click(screen.getByRole("button", { name: /edit title/i }));
     expect(screen.getByLabelText("title")).toBeTruthy();
+  });
+
+  it("renders the gate artifact when the index has not ingested it yet", async () => {
+    vi.spyOn(api, "getWorkItemDocuments").mockResolvedValue({ work_item_id: "w1", documents: [] });
+    vi.spyOn(api, "getWorkItemArtifact").mockResolvedValue({
+      work_item_id: "w1",
+      path: "docs/spec.md",
+      title: "The spec",
+      content: "# The plan\n\nTask 1: do the thing.",
+      truncated: false,
+      artifact_max_bytes: 1_000_000,
+    });
+
+    renderDetailAtGate();
+    await userEvent.click(await screen.findByRole("tab", { name: /documents/i }));
+
+    expect(await screen.findByText(/Task 1: do the thing/)).toBeInTheDocument();
+    expect(screen.queryByText(/select a document to view it/i)).not.toBeInTheDocument();
+  });
+
+  it("says 'not written yet' only when the gate has no artifact", async () => {
+    vi.spyOn(api, "getWorkItemDocuments").mockResolvedValue({ work_item_id: "w1", documents: [] });
+    renderDetailAtGate({ gate_artifact: null });
+    await userEvent.click(await screen.findByRole("tab", { name: /documents/i }));
+    expect(await screen.findByText("not written yet")).toBeInTheDocument();
+  });
+
+  it("says 'not indexed yet' when the artifact exists but the index has not caught up", async () => {
+    vi.spyOn(api, "getWorkItemDocuments").mockResolvedValue({ work_item_id: "w1", documents: [] });
+    vi.spyOn(api, "getWorkItemArtifact").mockResolvedValue({
+      work_item_id: "w1", path: "docs/spec.md", title: "The spec",
+      content: "body", truncated: false, artifact_max_bytes: 1_000_000,
+    });
+    renderDetailAtGate();
+    await userEvent.click(await screen.findByRole("tab", { name: /documents/i }));
+    expect(await screen.findByText("not indexed yet")).toBeInTheDocument();
+    expect(screen.queryByText("not written yet")).not.toBeInTheDocument();
+  });
+
+  it("approves the gate from the artifact pane", async () => {
+    vi.spyOn(api, "getWorkItemDocuments").mockResolvedValue({ work_item_id: "w1", documents: [] });
+    vi.spyOn(api, "getWorkItemArtifact").mockResolvedValue({
+      work_item_id: "w1", path: "docs/spec.md", title: "The spec",
+      content: "body", truncated: false, artifact_max_bytes: 1_000_000,
+    });
+    const approve = vi.spyOn(api, "approveGate").mockResolvedValue(undefined as never);
+
+    renderDetailAtGate();
+    await userEvent.click(await screen.findByRole("tab", { name: /documents/i }));
+    const pane = await screen.findByTestId("right-pane-doc");
+    await userEvent.click(within(pane).getByRole("button", { name: /^Approve$/ }));
+
+    expect(approve).toHaveBeenCalledTimes(1);
+    expect(approve).toHaveBeenCalledWith("w1", "spec_approval");
+  });
+
+  it("upgrades from the artifact to the indexed document once it lands", async () => {
+    const docs = vi.spyOn(api, "getWorkItemDocuments")
+      .mockResolvedValueOnce({ work_item_id: "w1", documents: [] })
+      .mockResolvedValue({
+        work_item_id: "w1",
+        documents: [{ document_id: "dc_1", path: "docs/spec.md", title: "The spec", kind: "plans" } as WorkItemDocument],
+      });
+    vi.spyOn(api, "getWorkItemArtifact").mockResolvedValue({
+      work_item_id: "w1", path: "docs/spec.md", title: "The spec",
+      content: "body", truncated: false, artifact_max_bytes: 1_000_000,
+    });
+    vi.spyOn(api, "getDocument").mockResolvedValue({
+      id: "dc_1", path: "docs/spec.md", title: "The spec",
+      content: "indexed body", kind: "plans", repo: "/repo",
+      indexed_at: new Date().toISOString(), source_updated_at: new Date().toISOString(),
+    } as DocumentDetail);
+
+    renderDetailAtGate();
+    await userEvent.click(await screen.findByRole("tab", { name: /documents/i }));
+    expect(await screen.findByText("not indexed yet")).toBeInTheDocument();
+
+    // `Documents`' fetch effect keys on `eventCount`, so pushing an event into
+    // the store is what makes it refetch — the same path a live `gate_approved`
+    // takes through `store.applyEvent`.
+    act(() => {
+      useStore.setState({
+        eventsByItem: { w1: [{ seq: 1, work_item_id: "w1", type: "gate_approved", created_at: "t", payload: {} }] },
+      } as never);
+    });
+
+    expect(await screen.findByText("indexed body")).toBeInTheDocument();
+    expect(docs).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows an error and no document when the artifact cannot be read", async () => {
+    vi.spyOn(api, "getWorkItemDocuments").mockResolvedValue({ work_item_id: "w1", documents: [] });
+    vi.spyOn(api, "getWorkItemArtifact").mockRejectedValue(new Error("404"));
+
+    renderDetailAtGate();
+    await userEvent.click(await screen.findByRole("tab", { name: /documents/i }));
+
+    expect(await screen.findByText(/the gate's document could not be read/)).toBeInTheDocument();
   });
 });

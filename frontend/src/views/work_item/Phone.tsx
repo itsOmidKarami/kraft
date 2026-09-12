@@ -14,6 +14,7 @@ import { Tasks } from "./Inspector/Tasks";
 import { Diff } from "./RightPane/Diff";
 import { Doc } from "./RightPane/Doc";
 import { Log } from "./RightPane/Log";
+import { GATE_DOC_ID } from "./selection";
 import type { InspectorTab, Selection } from "./selection";
 import { nodeState } from "./StageGraph";
 
@@ -274,9 +275,18 @@ export function PhoneNode({
               selected={selection.kind === "document" ? selection.id : null}
               onSelect={(id) => onSelect({ kind: "document", id })}
               preselectPath={item.gate_artifact}
+              gatePending={!!item.pending_gate}
+              gateArtifactPending={!!item.pending_gate && !!item.gate_artifact}
             />
             {selection.kind === "document" && selection.id ? (
-              <Doc id={selection.id} />
+              <Doc
+                source={
+                  selection.id === GATE_DOC_ID
+                    ? { kind: "artifact", workItemId: item.id }
+                    : { kind: "document", id: selection.id }
+                }
+                item={item}
+              />
             ) : (
               <p className="empty pane">select a document to view it</p>
             )}

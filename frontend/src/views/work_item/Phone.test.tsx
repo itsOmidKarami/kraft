@@ -135,6 +135,21 @@ describe("WorkItemDetail on a phone (m04)", () => {
     expect(within(page).getByTestId("inspector-config")).toBeInTheDocument();
   });
 
+  it("shows Approve in the document pane at a gate", async () => {
+    vi.spyOn(api, "getWorkItemArtifact").mockResolvedValue({
+      work_item_id: "wi_01HX3K9", path: "docs/spec.md", title: "The spec",
+      content: "body", truncated: false, artifact_max_bytes: 1_000_000,
+    });
+
+    setup({ status: "needs_human", pending_gate: "spec_approval", gate_artifact: "docs/spec.md", current_node_id: "spec" });
+    renderDetail("#node=spec");
+    const page = await screen.findByTestId("phone-node-page");
+    await userEvent.click(within(page).getByRole("tab", { name: /documents/i }));
+
+    expect(await screen.findByText("body")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Approve$/ })).toBeInTheDocument();
+  });
+
   it("gives the phone action bar its own row for the hint", () => {
     // jsdom has no viewport to render a `@media` rule from; pin the source
     // instead, the way styles.order.test.ts does.

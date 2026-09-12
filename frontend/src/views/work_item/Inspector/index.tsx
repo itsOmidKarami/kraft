@@ -103,6 +103,8 @@ export function Inspector({
             selected={selection.kind === "document" ? selection.id : null}
             onSelect={(id) => onSelect({ kind: "document", id })}
             preselectPath={item.gate_artifact}
+            gatePending={!!item.pending_gate}
+            gateArtifactPending={!!item.pending_gate && !!item.gate_artifact}
           />
         )}
         {tab === "timeline" && (
