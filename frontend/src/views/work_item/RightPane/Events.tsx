@@ -22,22 +22,29 @@ export function Events({
   nodeId: string | null;
   onViewLog: (sessionId: string) => void;
 }) {
-  const [filter, setFilter] = useState<"all" | "gates">("all");
+  const [filter, setFilter] = useState<"all" | "gates" | "tasks">("all");
   const hooks = new Map(sessions.map((s) => [s.id, s.hook_point]));
   const group = groupByNode(events).find((g) => g.node === nodeId);
-  const rows = (group?.events ?? []).filter((e) => filter === "all" || GATE_TYPES.has(e.type));
+  const rows = (group?.events ?? []).filter(
+    (e) => filter === "all" || (filter === "gates" ? GATE_TYPES.has(e.type) : e.type === "task_progress"),
+  );
 
   return (
     <div className="pane events-pane" data-testid="right-pane-events">
       <header className="diff-modal-head">
         <span className="mono">{nodeId ?? "—"}</span>
-        <span className="diff-totals">{group?.events.length ?? 0} events</span>
+        <span className="diff-totals">
+          {group?.events.length ?? 0} events{group && ` · ${group.span}`}
+        </span>
         <div className="log-filters">
           <button className="log-chip" aria-pressed={filter === "all"} onClick={() => setFilter("all")}>
             all
           </button>
           <button className="log-chip" aria-pressed={filter === "gates"} onClick={() => setFilter("gates")}>
             gates
+          </button>
+          <button className="log-chip" aria-pressed={filter === "tasks"} onClick={() => setFilter("tasks")}>
+            tasks
           </button>
         </div>
       </header>

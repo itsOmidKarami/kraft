@@ -29,7 +29,9 @@ export function Documents({
   onSelect: (documentId: string) => void;
   /** The gate card's "Read <doc>" (06) names a specific artifact by repo
    *  path (`item.gate_artifact`) — preferred over "just pick the first
-   *  document" once the list lands with a matching row. */
+   *  document" once the list lands with a matching row, and sections the
+   *  list (G5-05): a "Gate document" row above everything else, "not
+   *  written yet" in its own right column when the gate has none. */
   preselectPath?: string | null;
 }) {
   const [docs, setDocs] = useState<WorkItemDocument[] | null>(null);
@@ -81,32 +83,54 @@ export function Documents({
     onSelect(pick);
   }, [docs, selected, onSelect, preselectPath]);
 
+  const gateDoc = preselectPath ? (docs?.find((d) => d.path === preselectPath) ?? null) : null;
+  const rest = docs?.filter((d) => d !== gateDoc) ?? [];
+
+  const row = (d: WorkItemDocument) => {
+    const Icon = KIND_ICONS[d.kind ?? ""] ?? FileText;
+    return (
+      <button
+        key={d.document_id}
+        className="doc-row"
+        data-selected={d.document_id === selected}
+        onClick={() => onSelect(d.document_id)}
+      >
+        <Icon size={16} className="doc-icon" />
+        <span className="doc-text">
+          <span className="doc-title">{d.title}</span>
+          <span className="doc-path">{d.path}</span>
+        </span>
+        <span className="tag tag-neutral doc-kind">{d.kind ?? d.source_kind}</span>
+        {d.attachment_kind && <span className="tag tag-outline doc-attached">attached at intake</span>}
+      </button>
+    );
+  };
+
   return (
     <div className="inspector-list linked-docs" data-testid="inspector-documents">
       {error && <p className="form-error" role="alert">{error}</p>}
       {!error && docs?.length === 0 && <p className="empty">no linked documents yet</p>}
-      {!error && preselectMissing && (
-        <p className="empty">the gate's document isn't available yet</p>
+
+      {!!preselectPath && (
+        <>
+          <p className="section-label">Gate document</p>
+          {gateDoc ? (
+            row(gateDoc)
+          ) : (
+            <div className="doc-row" data-kind="placeholder">
+              <FileText size={16} className="doc-icon" />
+              <span className="doc-text">
+                <span className="doc-title">{preselectPath}</span>
+              </span>
+              <span className="row-sub">{preselectMissing ? "not written yet" : ""}</span>
+            </div>
+          )}
+        </>
       )}
-      {docs?.map((d) => {
-        const Icon = KIND_ICONS[d.kind ?? ""] ?? FileText;
-        return (
-          <button
-            key={d.document_id}
-            className="doc-row"
-            data-selected={d.document_id === selected}
-            onClick={() => onSelect(d.document_id)}
-          >
-            <Icon size={16} className="doc-icon" />
-            <span className="doc-text">
-              <span className="doc-title">{d.title}</span>
-              <span className="doc-path">{d.path}</span>
-            </span>
-            <span className="tag tag-neutral doc-kind">{d.kind ?? d.source_kind}</span>
-            {d.attachment_kind && <span className="tag tag-outline doc-attached">attached at intake</span>}
-          </button>
-        );
-      })}
+
+      {!!rest.length && <p className="section-label">Written by this node</p>}
+      {rest.map(row)}
+
       {!!docs?.length && (
         <p className="inspector-foot">
           Written by agents into <code>.engineering/</code>; the index lags a scan behind git.

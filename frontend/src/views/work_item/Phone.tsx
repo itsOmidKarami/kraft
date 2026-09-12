@@ -1,11 +1,12 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { CaretRight, Flag, ShieldCheck } from "@phosphor-icons/react";
+import * as api from "../../api";
 import { Row, RowText, StatusGlyph, Tabs } from "../../components/ui";
 import { deriveState } from "../../deriveState";
 import { elapsed } from "../../format";
 import { useStore } from "../../store";
-import type { KraftEvent, WorkerSession, WorkItem } from "../../types";
+import type { KraftEvent, WorkerSession, WorkItem, WorkItemDiff } from "../../types";
 import { Changes } from "./Inspector/Changes";
 import { Config } from "./Inspector/Config";
 import { Documents } from "./Inspector/Documents";
@@ -193,6 +194,22 @@ export function PhoneNode({
   const running = nodeSessions.find((s) => s.status === "running");
   const runtime = running?.started_at ? elapsed(Date.now() - Date.parse(running.started_at)) : null;
 
+  // The phone page (m05) is its own render path, separate from the desktop
+  // split index.tsx fetches the diff for — fetch its own copy the way the
+  // desktop tree and pane used to before Task 4 lifted theirs.
+  const [diff, setDiff] = useState<WorkItemDiff | null>(null);
+  const [diffError, setDiffError] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    api
+      .getWorkItemDiff(item.id)
+      .then((d) => alive && setDiff(d))
+      .catch((e) => alive && setDiffError(e instanceof Error ? e.message : String(e)));
+    return () => {
+      alive = false;
+    };
+  }, [item.id]);
+
   return (
     <div className="phone-node" data-testid="phone-node-page">
       <button className="phone-back" onClick={() => navigate(`/work-items/${item.id}`)}>
@@ -241,11 +258,12 @@ export function PhoneNode({
         {tab === "changes" && (
           <>
             <Changes
-              workItemId={item.id}
+              diff={diff}
+              diffError={diffError}
               selected={selection.kind === "file" ? selection.id : null}
               onSelect={(id) => onSelect({ kind: "file", id })}
             />
-            <Diff workItemId={item.id} selectedFile={selection.kind === "file" ? selection.id : null} />
+            <Diff diff={diff} diffError={diffError} selectedFile={selection.kind === "file" ? selection.id : null} />
           </>
         )}
         {tab === "documents" && (
