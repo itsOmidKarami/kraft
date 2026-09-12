@@ -1,4 +1,5 @@
 import { connectRepo, expect, test } from "./fixtures";
+import { scaledTimeout } from "../e2e-timing";
 
 /**
  * Sub-project B, spec §4 and §6: everything a notification links to has to work
@@ -42,14 +43,14 @@ async function createItem(page: any, title: string, template: string) {
 test("the board fits a phone", async ({ page }) => {
   await createItem(page, "phone board", "default");
   await page.goto("/");
-  await expect(page.locator(".board-row").first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(".board-row").first()).toBeVisible({ timeout: scaledTimeout(30_000) });
   await page.screenshot({ path: `${SHOTS}/phone-01-board.png`, fullPage: true });
   expect(await overflowsX(page.locator("body"))).toBe(false);
 });
 
 test("the gate, its reject textarea and the diff viewer all fit a phone", async ({ page }) => {
   await createItem(page, "phone gate", "default");
-  await expect(page.getByText(/approve the spec to continue/i)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/approve the spec to continue/i)).toBeVisible({ timeout: scaledTimeout(30_000) });
   await page.screenshot({ path: `${SHOTS}/phone-02-gate.png`, fullPage: true });
 
   // §4: the reject textarea is the one place a phone user types.
@@ -81,9 +82,9 @@ test("a paused item's needs-you state (m07) and its full-screen steer composer (
   // lifecycle.spec.ts's desktop pause/steer/resume test.
   await createItem(page, "phone pause KRAFT_SLOW", "quick-task");
   const pause = page.getByRole("button", { name: /^Pause$/ });
-  await expect(pause).toBeEnabled({ timeout: 30_000 });
+  await expect(pause).toBeEnabled({ timeout: scaledTimeout(30_000) });
   await pause.click();
-  await expect(page.getByRole("button", { name: /^Resume$/ })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("button", { name: /^Resume$/ })).toBeVisible({ timeout: scaledTimeout(30_000) });
   await page.screenshot({ path: `${SHOTS}/phone-10-needs-you-paused.png`, fullPage: true });
   expect(await overflowsX(page.locator("body"))).toBe(false);
 
@@ -105,7 +106,7 @@ test("the diff viewer wraps a real diff instead of scrolling sideways", async ({
   // Asserting against an empty diff viewer is how this check passes while the
   // thing it is meant to catch is still broken.
   await createItem(page, "phone diff", "quick-task");
-  await expect(page.getByText(/completed|needs you/i).first()).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText(/completed|needs you/i).first()).toBeVisible({ timeout: scaledTimeout(60_000) });
   await page.getByRole("button", { name: /review changes/i }).click();
   // DiffModal is gone — "Review changes" on a phone opens the m05 node page
   // on the Changes tab instead of a dialog.
@@ -116,7 +117,7 @@ test("the diff viewer wraps a real diff instead of scrolling sideways", async ({
   // Open the first file the same way a reader would.
   await nodePage.locator(".diff-files summary").first().click();
   const lines = nodePage.locator(".diff-body > div");
-  await expect(lines.first()).toBeVisible({ timeout: 15_000 });
+  await expect(lines.first()).toBeVisible({ timeout: scaledTimeout(15_000) });
   await page.screenshot({ path: `${SHOTS}/phone-04-diff.png`, fullPage: true });
 
   // The whole point of the phone rules: `white-space: pre` sent a long hunk off
@@ -141,7 +142,7 @@ test("the chain bar's node labels do not collide on a phone", async ({ page }) =
   // they overlap into an unreadable smear. The gate screen is one of the two
   // screens a notification links to, so this is on the phone contract.
   await createItem(page, "phone chain", "default");
-  await expect(page.getByText(/approve the spec to continue/i)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/approve the spec to continue/i)).toBeVisible({ timeout: scaledTimeout(30_000) });
   await page.screenshot({ path: `${SHOTS}/phone-06-chain.png`, fullPage: true });
 
   // Measure text overflow, not box positions. The labels are `nowrap` flex
@@ -161,7 +162,7 @@ test("the chain bar's node labels do not collide on a phone", async ({ page }) =
 
 test("the document viewer hides what a phone cannot do", async ({ page }) => {
   await createItem(page, "phone documents", "default");
-  await expect(page.getByText(/approve the spec to continue/i)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/approve the spec to continue/i)).toBeVisible({ timeout: scaledTimeout(30_000) });
   // DocumentModal is gone — Documents lives behind a tab on the m05 node
   // page, opened by tapping a stage on the phone list (m04).
   await page.locator('[data-testid^="phone-stage-"]').first().click();
@@ -219,7 +220,7 @@ test("Search opens as a full screen from the bottom nav, not a modal", async ({ 
 
 test("Analytics stacks by-node and by-repo into cards with no horizontal overflow", async ({ page }) => {
   await createItem(page, "phone analytics", "quick-task");
-  await expect(page.getByText(/completed|needs you/i).first()).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText(/completed|needs you/i).first()).toBeVisible({ timeout: scaledTimeout(60_000) });
   await page.goto("/analytics");
   // `.node-row` also matches the `.node-head` header row, which this phone
   // layout hides (asserted below) — `[data-node]` picks a real data row.
@@ -239,17 +240,17 @@ test("m11: Access and Notifications fit a phone in one column, allowed-hosts tag
   page,
 }) => {
   await page.goto("/settings/access");
-  await expect(page.locator(".settings-section").first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(".settings-section").first()).toBeVisible({ timeout: scaledTimeout(30_000) });
   await page.getByPlaceholder(/add a host or ip/i).fill("m11.kraft.local");
   await page.getByPlaceholder(/add a host or ip/i).press("Enter");
   await expect(page.locator(".chip", { hasText: "m11.kraft.local" })).toBeVisible({
-    timeout: 15_000,
+    timeout: scaledTimeout(15_000),
   });
   expect(await overflowsX(page.locator(".host-tags"))).toBe(false);
   await page.screenshot({ path: `${SHOTS}/phone-10-access.png`, fullPage: true });
 
   await page.goto("/settings/notify");
-  await expect(page.locator(".settings-section").first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(".settings-section").first()).toBeVisible({ timeout: scaledTimeout(15_000) });
   expect(await overflowsX(page.locator(".settings-body"))).toBe(false);
   await page.screenshot({ path: `${SHOTS}/phone-11-notify.png`, fullPage: true });
 });
@@ -257,7 +258,7 @@ test("m11: Access and Notifications fit a phone in one column, allowed-hosts tag
 test("m15: Analytics, Auto-intake and Appearance stack with the KPIs 2-up", async ({ page }) => {
   await createItem(page, "phone m15", "quick-task");
   await page.goto("/analytics");
-  await expect(page.locator(".kpi").first()).toBeVisible({ timeout: 60_000 });
+  await expect(page.locator(".kpi").first()).toBeVisible({ timeout: scaledTimeout(60_000) });
   const kpiBox = await page.locator(".kpis").boundingBox();
   const firstKpi = await page.locator(".kpi").first().boundingBox();
   const secondKpi = await page.locator(".kpi").nth(1).boundingBox();
@@ -268,11 +269,11 @@ test("m15: Analytics, Auto-intake and Appearance stack with the KPIs 2-up", asyn
   }
 
   await page.goto("/settings/intake");
-  await expect(page.locator(".settings-section").first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(".settings-section").first()).toBeVisible({ timeout: scaledTimeout(15_000) });
   expect(await overflowsX(page.locator(".settings-body"))).toBe(false);
 
   await page.goto("/settings/appearance");
-  await expect(page.getByText("Palette", { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("Palette", { exact: true })).toBeVisible({ timeout: scaledTimeout(15_000) });
   expect(await overflowsX(page.locator(".settings-body"))).toBe(false);
   await page.screenshot({ path: `${SHOTS}/phone-12-appearance.png`, fullPage: true });
 });
@@ -293,11 +294,11 @@ test("m16: Login renders on a phone and the error state fits without horizontal 
     }),
   );
   await page.goto("/");
-  await expect(page.locator(".login-form")).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(".login-form")).toBeVisible({ timeout: scaledTimeout(15_000) });
   expect(await overflowsX(page.locator(".login-form"))).toBe(false);
   await page.getByLabel("Password").fill("wrong");
   await page.getByRole("button", { name: /sign in/i }).click();
-  await expect(page.getByText("Wrong password.")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("Wrong password.")).toBeVisible({ timeout: scaledTimeout(15_000) });
   expect(await overflowsX(page.locator(".login-form"))).toBe(false);
   await page.screenshot({ path: `${SHOTS}/phone-13-login.png`, fullPage: true });
 });

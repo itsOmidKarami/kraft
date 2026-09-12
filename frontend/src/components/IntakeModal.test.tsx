@@ -34,11 +34,17 @@ function renderModal(onClose: () => void = () => {}) {
   );
 }
 
+// The repo <select> renders before getRepos resolves, so selecting straight
+// after findByLabelText races the fetch and flakes on a loaded CI box.
+async function selectRepo(repoName = "repo-a") {
+  const select = await screen.findByLabelText("repo");
+  await screen.findByRole("option", { name: new RegExp(`^${repoName}`) });
+  await userEvent.selectOptions(select, repoName);
+  return select as HTMLSelectElement;
+}
+
 async function fillBasics(repoName = "repo-a", title = "t") {
-  await userEvent.selectOptions(
-    await screen.findByLabelText("repo"),
-    repoName,
-  );
+  await selectRepo(repoName);
   await userEvent.type(screen.getByLabelText("title"), title);
 }
 
@@ -78,6 +84,7 @@ describe("IntakeModal", () => {
     });
     renderModal();
     const select = (await screen.findByLabelText("repo")) as HTMLSelectElement;
+    await screen.findByRole("option", { name: /repo-c.*disabled/i });
     const opt = within(select).getByText(/repo-c.*disabled/i)
       .closest("option") as HTMLOptionElement;
     expect(opt.disabled).toBe(true);
@@ -100,7 +107,7 @@ describe("IntakeModal", () => {
       repos: [{ ...REPO_A, default_chain_template: "quick-task" }],
     });
     renderModal();
-    await userEvent.selectOptions(await screen.findByLabelText("repo"), "repo-a");
+    await selectRepo();
     expect(screen.getByRole("radio", { name: /quick-task/i })).toBeChecked();
   });
 
@@ -324,7 +331,7 @@ describe("IntakeModal", () => {
       project: null,
     });
     renderModal();
-    await userEvent.selectOptions(await screen.findByLabelText("repo"), "repo-a");
+    await selectRepo();
     await waitFor(() => expect(probe).toHaveBeenCalled());
     expect(screen.queryByRole("button", { name: /cross-repo/ })).toBeNull();
   });

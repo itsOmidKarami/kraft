@@ -385,12 +385,15 @@ def test_kraft_9oab_sigterm_stops_the_real_server(tmp_path):
             f"kraft admin start did not exit within 14s of SIGTERM (Kraft-9oab): "
             f"{proc.stdout.read()}"
         )
-        # A clean exit is near-instant. Anything past ~8s means uvicorn's own
-        # 10s timeout_graceful_shutdown backstop is what actually ended it,
-        # not a graceful return -- the bead's literal complaint (stop reports
-        # failure) is fixed either way, but a backstop-triggered exit means
-        # the underlying stall is still real and undiagnosed.
-        print(f"kraft-9oab: exited {elapsed:.1f}s after SIGTERM")
+        # A clean exit is near-instant (measured 1.2s on 2026-09-12); anything
+        # past ~8s means uvicorn's own 10s timeout_graceful_shutdown backstop
+        # ended the process instead of a graceful return. Assert the bound
+        # instead of printing it, so a regression back to the backstop path
+        # fails the test instead of a number nobody reads (Kraft-o8vs).
+        assert elapsed < 5.0, (
+            f"kraft-9oab: exited {elapsed:.1f}s after SIGTERM -- past the "
+            "graceful shutdown path, into uvicorn's backstop"
+        )
     finally:
         if proc.poll() is None:
             proc.kill()
