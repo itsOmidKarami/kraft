@@ -329,8 +329,12 @@ def test_serve_exports_its_identity_for_workers(tmp_path, monkeypatch):
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
     monkeypatch.setenv("KRAFT_PORT", "9321")
-    monkeypatch.delenv("KRAFT_DAEMON_PID", raising=False)
-    monkeypatch.delenv("KRAFT_DAEMON_PORT", raising=False)
+    # setenv, not delenv(raising=False): monkeypatch only records an undo for a
+    # key that existed before the call, so delenv on an already-absent var
+    # leaves `_serve`'s os.environ writes below to leak into every later test
+    # in the process (Kraft-6um8). setenv always has something to restore.
+    monkeypatch.setenv("KRAFT_DAEMON_PID", "unset")
+    monkeypatch.setenv("KRAFT_DAEMON_PORT", "unset")
     # `_serve` runs a `_SignalLoggingServer`, not `uvicorn.run` -- patching the
     # module function would let this test start a real server and never return.
     monkeypatch.setattr(cli.admin._SignalLoggingServer, "run", lambda self, *a, **k: None)

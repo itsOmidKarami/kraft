@@ -133,14 +133,23 @@ def test_work_item_documents_endpoint(tmp_path, monkeypatch):
 
 
 def test_search_modes_without_embeddings(tmp_path, monkeypatch):
-    """4C: hybrid is the default and degrades to fts; explicit vector 422s."""
+    """4C: hybrid is the default and degrades to fts; explicit vector 422s.
+
+    Forces `Embedder.available()` False rather than relying on `fastembed`
+    being absent from the venv: the old version branched on that at runtime,
+    so it asserted a different contract (and skipped the vector-422 checks
+    entirely) on a machine with the `vector` extra installed (Kraft-k6sm).
+    """
+    monkeypatch.setattr("kraft.index.embed.Embedder.available", lambda self: False)
     repo = make_repo_with_engineering(
         tmp_path, {".engineering/specs/ws.md": "# WS\nreconnect backoff schedule\n"}
     )
     with _client(tmp_path, monkeypatch, index_repos=str(repo)) as client:
-        # no mode -> hybrid requested, fts served on an instance without the extra
+        assert client.get("/api/health").json()["index"]["embeddings"]["available"] is False
+
+        # no mode -> hybrid requested, degrades to fts without an embedder
         body = client.get("/api/search", params={"q": "reconnect"}).json()
-        assert body["mode"] in ("fts", "hybrid")
+        assert body["mode"] == "fts"
         assert [h["path"] for h in body["results"]] == [".engineering/specs/ws.md"]
 
         r = client.get("/api/search", params={"q": "reconnect", "mode": "hybrid"})
@@ -149,13 +158,9 @@ def test_search_modes_without_embeddings(tmp_path, monkeypatch):
         r = client.get("/api/search", params={"q": "reconnect", "mode": "nonsense"})
         assert r.status_code == 422
 
-        available = client.get("/api/health").json()["index"]["embeddings"]["available"]
         r = client.get("/api/search", params={"q": "reconnect", "mode": "vector"})
-        if available:
-            assert r.status_code == 200
-        else:
-            assert r.status_code == 422
-            assert "vector" in r.json()["detail"]
+        assert r.status_code == 422
+        assert "vector" in r.json()["detail"]
 
 
 def test_connecting_a_repo_indexes_it_immediately(tmp_path, monkeypatch):
