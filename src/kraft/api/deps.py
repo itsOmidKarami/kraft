@@ -95,7 +95,18 @@ def spawn(app: FastAPI, wid: str, coro) -> asyncio.Task:
         raise AlreadyRunning(wid)
     task = asyncio.ensure_future(coro)
     app.state.tasks[wid] = task
-    task.add_done_callback(lambda _t, wid=wid: app.state.tasks.pop(wid, None))
+
+    def _done(t, wid=wid):
+        # Preemption paths (approve/reject/retry) SIGTERM the old task and
+        # immediately spawn a new one under the same wid before the old
+        # task's callback fires. Popping unconditionally would let the old
+        # task's callback evict the new, still-live task -- dropping the
+        # tick loop's only concurrency guard and orphaning the new run.
+        # Only pop the slot if it still holds *this* task.
+        if app.state.tasks.get(wid) is t:
+            app.state.tasks.pop(wid, None)
+
+    task.add_done_callback(_done)
     return task
 
 

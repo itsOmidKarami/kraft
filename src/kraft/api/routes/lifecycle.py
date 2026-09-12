@@ -108,6 +108,38 @@ def _kill_orphans_under(worktree: Path) -> list[int]:
     return killed
 
 
+async def _stop_live_sessions(st, wid: str, *, pause_item: bool = True) -> list[str]:
+    """Pause and SIGTERM every session running on the item's current node.
+
+    The one thing that can be live on an `awaiting_gate`/`needs_human` item a
+    human is about to act on: a gate's own `auto_escalate` review
+    (`approve_gate`/`reject_gate`, below) or a `needs_human` stop's own
+    `auto_escalate_stuck` escalation turn (`retry_work_item`'s
+    non-self-retry branch) (Kraft-vyk8). Same ordering as `pause_work_item`:
+    the sessions are marked `paused` in the DB *before* they are signalled,
+    so the dying subprocess's exit handler reads the already-updated row
+    instead of resolving as a crash. A no-op, returning `[]`, when nothing is
+    running on this node -- the common case at both call sites, since most
+    gates and stops have nothing auto-dispatched onto them at all.
+    """
+    sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
+    ids = [s["id"] for s in sessions]
+    if ids:
+        if pause_item:
+            await st.db.write(lambda c: store.pause_work_item(c, wid, ids))
+        else:
+            # `retry` stops the turn without moving the item: it goes on to
+            # claim the item out of `needs_human` itself, and a status left
+            # at `paused` fails that claim ("work item is not stopped").
+            # `stop_escalation_session` is exactly that, per-session half of
+            # `pause_work_item` minus the work_items UPDATE.
+            for sid in ids:
+                await st.db.write(lambda c, sid=sid: store.stop_escalation_session(c, wid, sid))
+        for s in sessions:
+            _terminate(s["pid"])
+    return ids
+
+
 async def _remove_worktree(repo: Path, worktree: Path, branch: str) -> bool:
     """Reclaim the worktree and its branch.
 
@@ -480,7 +512,47 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     caller_session_id = request.headers.get("x-kraft-session-id")
     running = escalate.escalation_running(st.db, wid)
     if running is not None and running != caller_session_id:
-        raise HTTPException(409, f"an escalation turn ({running}) is already running")
+        # Not the escalation calling on itself -- a stranger's retry (a human,
+        # via the UI/API) outranks a still-running escalation turn the same
+        # way a human's gate decision outranks a live auto_escalate review
+        # (`_stop_live_sessions`, gates.py): kill it and let this retry
+        # proceed, instead of refusing the human outright (Kraft-vyk8).
+        #
+        # Both checks below still refuse this same retry further down --
+        # run them *before* the kill, not after: `_stop_live_sessions`
+        # SIGTERMs the escalation turn and moves the item needs_human ->
+        # paused, and neither of those undoes itself just because the
+        # request goes on to 409. A human who gets an error must find the
+        # item exactly as it was (code-review finding).
+        limit = st.policy.max_concurrent if st.policy else 1
+        if st.db.read(store.active_count) >= limit:
+            raise HTTPException(
+                409, f"all {limit} slots are busy; pause something or raise max_concurrent"
+            )
+        precheck_steer = (body.steer or "").strip() or None
+        if precheck_steer is not None and not _steer_reachable(
+            chain["nodes"], node_id, st.registry
+        ):
+            raise HTTPException(
+                409,
+                f"node {node_id!r} has no agent task downstream to steer; "
+                "this text would be dropped",
+            )
+        # `running_sessions_for_node` matches an escalation session by
+        # hook_point, not node, so the session `escalation_running` just
+        # found above is always among the ones killed here -- including a
+        # stale row whose node_id drifted from current_node_id (code review
+        # finding). Clearing `running` unconditionally is sound because of
+        # that, not in spite of it.
+        await _stop_live_sessions(st, wid, pause_item=False)
+        # The escalation turn also holds this item's task slot, and the
+        # `task_is_live` 409 further down would otherwise refuse this very
+        # retry *after* the kill above already changed the item. Unbounded,
+        # for the reason `skip` gives at its own `deps.cancel`: this request
+        # spawns the replacement walk itself, so the old task has to be gone
+        # rather than merely cancelled-and-unwinding, or `spawn` refuses it.
+        await deps.cancel(request.app, wid)
+        running = None
     if running is not None:
         # The escalation agent calling `kraft item retry` on itself: its own
         # session is still `running`/`pending` in the DB, mid-tool-call, and

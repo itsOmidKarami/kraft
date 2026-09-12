@@ -326,6 +326,39 @@ def test_auto_escalate_stuck_must_be_a_bool(tmp_path):
     assert "auto_escalate_stuck" in ts.invalid["badtype"]
 
 
+_AUTO_DELAY_TEMPLATE = (
+    "id: autodelay\n"
+    "nodes:\n"
+    "  - { id: n1, tasks: [on.test.run], gate_after: null, auto_escalate_delay_s: 60 }\n"
+    "  - { id: n2, tasks: [on.test.run], gate_after: null }\n"
+)
+
+
+def test_materialize_carries_auto_escalate_delay_s(tmp_path):
+    d = _dir(tmp_path, **{"registry.yaml": REGISTRY_YAML, "autodelay.yaml": _AUTO_DELAY_TEMPLATE})
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    nodes = materialize(ts.valid["autodelay"])["nodes"]
+    assert nodes[0]["auto_escalate_delay_s"] == 60
+    assert nodes[1]["auto_escalate_delay_s"] is None
+
+
+def test_auto_escalate_delay_s_must_be_a_non_negative_int(tmp_path):
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "badtype.yaml": (
+                "id: badtype\n"
+                "nodes:\n"
+                "  - { id: n1, tasks: [on.test.run], gate_after: null, "
+                "auto_escalate_delay_s: -5 }\n"
+            ),
+        },
+    )
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert "auto_escalate_delay_s" in ts.invalid["badtype"]
+
+
 def _dir(tmp_path, **files):
     for name, body in files.items():
         (tmp_path / name).write_text(body)
@@ -536,6 +569,7 @@ def test_materialize_quick_task_from_shipped_templates():
                 "rebase_bounce_to": None,
                 "auto_escalate": None,
                 "auto_escalate_stuck": None,
+                "auto_escalate_delay_s": None,
             },
             {
                 "id": "implementation",
@@ -547,6 +581,7 @@ def test_materialize_quick_task_from_shipped_templates():
                 "rebase_bounce_to": None,
                 "auto_escalate": None,
                 "auto_escalate_stuck": None,
+                "auto_escalate_delay_s": None,
             },
             {
                 "id": "verify",
@@ -558,6 +593,7 @@ def test_materialize_quick_task_from_shipped_templates():
                 "rebase_bounce_to": None,
                 "auto_escalate": None,
                 "auto_escalate_stuck": None,
+                "auto_escalate_delay_s": None,
             },
         ],
     }

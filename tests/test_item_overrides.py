@@ -160,6 +160,42 @@ def test_patch_rejects_non_bool_auto_escalate_stuck(tmp_path, monkeypatch):
         assert r.status_code == 422
 
 
+def test_patch_sets_an_auto_escalate_delay_s_node_override(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        repo = make_repo(tmp_path)
+        wid = client.post(
+            "/api/work-items",
+            json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
+        ).json()["id"]
+
+        r = client.patch(
+            f"/api/work-items/{wid}",
+            json={"node_overrides": {"implementation": {"auto_escalate_delay_s": 120}}},
+        )
+        assert r.status_code == 200, r.text
+
+        detail = client.get(f"/api/work-items/{wid}").json()
+        node = next(n for n in detail["effective_chain"]["nodes"] if n["id"] == "implementation")
+        assert node["auto_escalate_delay_s"] == 120
+
+
+def test_patch_rejects_negative_auto_escalate_delay_s(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        repo = make_repo(tmp_path)
+        wid = client.post(
+            "/api/work-items",
+            json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
+        ).json()["id"]
+
+        r = client.patch(
+            f"/api/work-items/{wid}",
+            json={"node_overrides": {"implementation": {"auto_escalate_delay_s": -1}}},
+        )
+        assert r.status_code == 422
+
+
 def test_patch_node_overrides_409s_on_a_node_that_has_started(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     with client:

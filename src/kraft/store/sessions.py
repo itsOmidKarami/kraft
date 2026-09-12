@@ -272,13 +272,22 @@ def recent_sessions_for_hook(
 
 def running_sessions_for_node(conn: sqlite3.Connection, work_item_id: str) -> list[sqlite3.Row]:
     """Every running session on the item's current node — all of them on a
-    concurrent node like `verify`."""
+    concurrent node like `verify` — plus any running escalation session
+    whatever node it was dispatched on."""
     # 'pending' too: a row is inserted before Popen returns, and a pause landing in
     # that window would otherwise neither signal the child nor mark the row — the
     # task would run to completion under an item that reads paused.
+    #
+    # Escalation sessions are matched by hook_point rather than node because
+    # `escalate.escalation_running` — what `retry`/`resume`/`skip` consult to
+    # decide whether a turn is live — is not node-scoped. A row whose node_id
+    # has drifted from current_node_id (a stale running row after a server
+    # restart) is live to that check and would be missed by this one, so the
+    # caller would kill nothing and then rebase and spawn into a worktree an
+    # agent is still writing in (code review finding).
     return conn.execute(
         "SELECT s.id, s.pid FROM worker_sessions s JOIN work_items w ON w.id = s.work_item_id "
-        "WHERE s.work_item_id = ? AND s.node_id = w.current_node_id "
-        "AND s.status IN ('running', 'pending')",
+        "WHERE s.work_item_id = ? AND s.status IN ('running', 'pending') "
+        "AND (s.node_id = w.current_node_id OR s.hook_point = 'escalation')",
         (work_item_id,),
     ).fetchall()

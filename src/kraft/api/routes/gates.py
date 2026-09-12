@@ -9,7 +9,7 @@ from kraft import executor, store
 from kraft.adapters import agent as agent_mod
 from kraft.api import api_router, deps
 from kraft.api.routes import artifacts, board
-from kraft.api.routes.lifecycle import _terminate
+from kraft.api.routes.lifecycle import _stop_live_sessions
 from kraft.templates import GATE_NAMES, carry_forward_node_fields, validate_nodes
 
 
@@ -73,24 +73,6 @@ def _splice_chain_review(st, row) -> tuple[dict | None, str | None]:
     return chain, None
 
 
-async def _stop_live_review(st, wid: str) -> None:
-    """Stop a gate's own in-flight auto_escalate review before cancelling it.
-
-    Same ordering as pause_work_item: mark the node's running sessions paused
-    and SIGTERM them before `deps.cancel` tears down the task. `deps.cancel`
-    alone never kills the review agent's process (`run_task` only stops the
-    log watcher on CancelledError), so without this the agent survives as an
-    orphan in the item's worktree -- right where the approved walk's next
-    node is about to launch its own agent -- and the session's row is left
-    'running' forever, unreachable once current_node_id moves on.
-    """
-    sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
-    ids = [s["id"] for s in sessions]
-    await st.db.write(lambda c: store.pause_work_item(c, wid, ids))
-    for s in sessions:
-        _terminate(s["pid"])
-
-
 class GateReject(BaseModel):
     note: str
     #: Where the chain re-enters. Defaults to the gate node's `reject_to`, and
@@ -132,16 +114,21 @@ async def approve_gate(wid: str, gate: str, request: Request):
         raise HTTPException(404, f"unknown gate {gate!r}")
     if board._pending_gate(st, wid) != gate:
         raise HTTPException(409, f"gate {gate!r} is not pending")
+    # A pending gate's status is already needs_human (never active), so the
+    # only thing running here can be this gate's own in-flight auto_escalate
+    # review -- and a human decision is exactly what outranks a verdict
+    # computed against stale state (executor/gates.py's
+    # gate_auto_review_discarded branch). Stop it and proceed, the same way
+    # pause/skip already stop a live walk before continuing, rather than 409
+    # a human out for the review's whole duration.
+    #
+    # The session kill is not conditional on `task_is_live`: a running
+    # session row can outlive the in-process task that spawned it (a server
+    # restart leaves the row, not the task), and that agent is still writing
+    # in the worktree the approved walk is about to launch into. A no-op
+    # returning [] when nothing is running, which is most of the time.
+    await _stop_live_sessions(st, wid)
     if deps.task_is_live(request.app, wid):
-        # A pending gate's status is already needs_human (never active), so
-        # the only thing a live task can be here is this gate's own
-        # in-flight auto_escalate review -- and a human decision is exactly
-        # what outranks a verdict computed against stale state
-        # (executor/gates.py's gate_auto_review_discarded branch). Stop it
-        # and proceed, the same way pause/skip already stop a live walk
-        # before continuing, rather than 409 a human out for the review's
-        # whole duration.
-        await _stop_live_review(st, wid)
         await deps.cancel(request.app, wid, timeout=deps.CANCEL_TIMEOUT)
 
     chain, reason = await apply_approval(st, row, gate)
@@ -201,7 +188,7 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
         raise HTTPException(409, f"gate {gate!r} is not pending")
     if st.invalid_policy:
         # Same posture as intake (§9): a re-run we cannot bound is not started.
-        # Before _stop_live_review, not after: this bail-out changes nothing,
+        # Before the kill below, not after: this bail-out changes nothing,
         # so it must not be reached having already paused the item and killed
         # its review agent.
         raise HTTPException(
@@ -216,12 +203,11 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
         # its review agent.
         raise HTTPException(400, str(exc)) from exc
 
+    # Same reasoning, and same ordering, as approve_gate above: the review
+    # this decision outranks is stopped instead of locking the human out for
+    # its duration, and both refusals above run before any of it.
+    await _stop_live_sessions(st, wid)
     if deps.task_is_live(request.app, wid):
-        # Same reasoning as approve_gate: a live task here can only be this
-        # gate's own in-flight auto_escalate review, and a human's decision
-        # is meant to outrank it -- stop the review instead of locking the
-        # human out for its duration.
-        await _stop_live_review(st, wid)
         await deps.cancel(request.app, wid, timeout=deps.CANCEL_TIMEOUT)
 
     try:

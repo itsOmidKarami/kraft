@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import sqlite3
 from pathlib import Path
 
 import httpx
@@ -30,6 +32,23 @@ def _write_chain_review(client, wid, envelope):
     path.parent.mkdir(parents=True, exist_ok=True)
     front_matter = f"---\nwork_item_ids: [{wid}]\nkind: chain_reviews\ntitle: t\n---\n\n"
     path.write_text(front_matter + json.dumps(envelope) + "\n")
+
+
+def _create_running_session(wid: str, session_id: str, node_id: str, *, pid: int) -> None:
+    """A live `worker_sessions` row on `node_id`, `hook_point='gate_review'`
+    -- the shape a gate's in-flight `auto_escalate` review leaves, without
+    actually dispatching an agent."""
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    try:
+        conn.execute(
+            "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, pid, "
+            "log_path, result_path, status, created_at) VALUES (?, ?, ?, 'gate_review', ?, "
+            "'x', 'x', 'running', datetime('now'))",
+            (session_id, wid, node_id, pid),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def test_default_chain_fix_loop_breach_over_http(tmp_path, monkeypatch):
@@ -598,3 +617,74 @@ def test_reject_with_bad_node_400s_without_stopping_the_live_review(tmp_path, mo
         assert after["status"] == before["status"]
         assert after["pending_gate"] == before["pending_gate"]
         assert client.portal.call(lambda: deps.cancel(client.app, wid)) is None
+
+
+def test_approve_gate_stops_a_live_auto_review_session_first(tmp_path, monkeypatch):
+    """A gate's own in-flight auto_escalate review must not survive into the
+    next node's worktree once a human approves: its session is paused and
+    SIGTERM'd before the approval's own executor.run spawns."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    terminated = []
+    monkeypatch.setattr("kraft.api.routes.lifecycle._terminate", lambda pid: terminated.append(pid))
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+        _create_running_session(wid, "r1", "spec", pid=4242)
+
+        r = client.post(f"/api/work-items/{wid}/gates/spec_approval/approve")
+
+        assert r.status_code == 200, r.text
+        assert terminated == [4242]
+        types = [e["type"] for e in client.get(f"/api/work-items/{wid}/events").json()]
+        assert types.index("pause_requested") < types.index("gate_approved")
+
+
+def test_reject_gate_stops_a_live_auto_review_session_first(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    terminated = []
+    monkeypatch.setattr("kraft.api.routes.lifecycle._terminate", lambda pid: terminated.append(pid))
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+        _create_running_session(wid, "r1", "spec", pid=4242)
+
+        r = client.post(
+            f"/api/work-items/{wid}/gates/spec_approval/reject",
+            json={"note": "not yet"},
+        )
+
+        assert r.status_code == 200, r.text
+        assert terminated == [4242]
+        types = [e["type"] for e in client.get(f"/api/work-items/{wid}/events").json()]
+        assert "pause_requested" in types
+
+
+def test_reject_with_a_bad_node_leaves_a_live_auto_review_running(tmp_path, monkeypatch):
+    """The refusing check runs before the kill (code review finding): a human
+    who gets a 400 must find the item exactly as it was -- gate still
+    pending, review session still live -- the same ordering retry applies to
+    its own refusals."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    terminated = []
+    monkeypatch.setattr("kraft.api.routes.lifecycle._terminate", lambda pid: terminated.append(pid))
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+        _create_running_session(wid, "r1", "spec", pid=4242)
+
+        r = client.post(
+            f"/api/work-items/{wid}/gates/spec_approval/reject",
+            json={"note": "wrong", "node": "no_such_node"},
+        )
+
+        assert r.status_code == 400, r.text
+        assert terminated == []
+        item = client.get(f"/api/work-items/{wid}").json()
+        assert item["status"] == "needs_human"
+        assert item["pending_gate"] == "spec_approval"
+        assert "pause_requested" not in [
+            e["type"] for e in client.get(f"/api/work-items/{wid}/events").json()
+        ]

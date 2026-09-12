@@ -491,10 +491,20 @@ export function ActionBar({
     case "escalating": {
       // The turn is live -- Steer & retry / Escalate are visibly disabled
       // ("one escalation turn at a time"), and the only live control is
-      // Stop agent (06 "Stop agent").
+      // Stop agent (06 "Stop agent"). `auto` tells an unattended fire
+      // (Kraft-vyk8) apart from a human's own Escalate click -- the pill
+      // reads its own `escalation_message` event the same way the thread
+      // below does.
+      const sentForLatest = latestTurn
+        ? events.find(
+            (e) =>
+              e.type === "escalation_message" && e.payload.session_id === latestTurn.id,
+          )
+        : undefined;
       left = latestTurn ? (
         <EscalatingPill
           turn={latestTurn.attempt}
+          auto={Boolean(sentForLatest?.payload.auto)}
           busy={busy}
           onStop={() => run(() => api.stopEscalation(item.id), "Agent stopped")}
         />
@@ -529,9 +539,11 @@ export function ActionBar({
                   e.type === "escalation_message" &&
                   e.payload.session_id === s.id,
               );
+              const auto = Boolean(sent?.payload.auto);
               return (
                 <p key={s.id} className="field-hint">
-                  turn {s.attempt}: {String(sent?.payload.message ?? "")}
+                  turn {s.attempt}
+                  {auto ? " (auto-escalated)" : ""}: {String(sent?.payload.message ?? "")}
                 </p>
               );
             })}

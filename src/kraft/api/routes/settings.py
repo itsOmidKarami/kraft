@@ -196,6 +196,7 @@ class PolicyBody(BaseModel):
     archive: dict | None = None
     auto_escalate_stuck: bool | None = None
     auto_escalate_stuck_cap: int | None = None
+    auto_escalate_delay_s: int | None = None
 
 
 @api_router.get("/policy")
@@ -226,6 +227,8 @@ async def put_policy(body: PolicyBody, request: Request):
         data["auto_escalate_stuck"] = body.auto_escalate_stuck
     if body.auto_escalate_stuck_cap is not None:
         data["auto_escalate_stuck_cap"] = body.auto_escalate_stuck_cap
+    if body.auto_escalate_delay_s is not None:
+        data["auto_escalate_delay_s"] = body.auto_escalate_delay_s
     with tempfile.TemporaryDirectory() as tmp:
         candidate = Path(tmp) / "policy.yaml"
         candidate.write_text(yaml.safe_dump(data))

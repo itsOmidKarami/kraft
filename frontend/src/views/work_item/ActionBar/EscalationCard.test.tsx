@@ -28,6 +28,18 @@ describe("EscalationCard", () => {
     expect(spy).toHaveBeenCalledWith("w1");
   });
 
+  it("auto: true renders the Auto-escalated pill and its hint", () => {
+    render(<EscalatingPill turn={1} auto onStop={() => {}} busy={false} />);
+    expect(screen.getByText(/auto-escalated · turn 1/i)).toBeInTheDocument();
+    expect(screen.getByText(/fired automatically/i)).toBeInTheDocument();
+  });
+
+  it("auto: false renders today's 'Agent is on it' copy unchanged", () => {
+    render(<EscalatingPill turn={1} auto={false} onStop={() => {}} busy={false} />);
+    expect(screen.getByText(/agent is on it · turn 1/i)).toBeInTheDocument();
+    expect(screen.getByText(/one escalation turn at a time/i)).toBeInTheDocument();
+  });
+
   it("escalated card shows the exit event's concerns text and applies it as a steer on retry", async () => {
     const spy = vi
       .spyOn(api, "retryWorkItem")
