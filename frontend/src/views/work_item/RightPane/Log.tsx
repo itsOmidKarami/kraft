@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLineDown, ArrowsOutSimple, Copy } from "@phosphor-icons/react";
 import * as api from "../../../api";
-import { clock, elapsed, tokens, usd } from "../../../format";
+import { clock, elapsed, logLineText, tokens, usd } from "../../../format";
 import { findSession, useStore } from "../../../store";
 import type { LogLine } from "../../../types";
 import { StatusGlyph } from "../../../components/ui";
@@ -235,7 +235,7 @@ export function Log({
               <span className="log-text">
                 {m
                   ? `task_progress · task ${m[1]}${taskTotal ? ` of ${taskTotal}` : ""} · "${m[2]}"`
-                  : l.summary ?? l.text}
+                  : logLineText(l)}
               </span>
             </div>
           );

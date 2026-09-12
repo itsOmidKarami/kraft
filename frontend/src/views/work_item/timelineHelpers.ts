@@ -1,5 +1,5 @@
 import { clock, elapsed } from "../../format";
-import type { KraftEvent } from "../../types";
+import type { Finding, KraftEvent } from "../../types";
 
 /**
  * Shared by `Inspector/Timeline.tsx` (one row per node that has run) and
@@ -30,7 +30,11 @@ export function detailOf(e: KraftEvent): string | null {
   }
   if (e.type === "findings_measured" && Array.isArray(p.findings)) {
     const n = (p.findings as unknown[]).length;
-    const base = n > 0 ? `${n} findings` : "no findings";
+    // "measured", not "findings" bare: this is every finding this one run
+    // produced, at any severity -- a different count from the gate card's
+    // "N findings deferred" (loop-severity ones excluded, deduped across
+    // every run), and the two must read as different things, not a mismatch.
+    const base = n > 0 ? `${n} findings measured` : "no findings";
     const noop = Array.isArray(p.noop_hooks) ? (p.noop_hooks as string[]) : [];
     return noop.length > 0 ? `${base} · not reviewed (noop): ${noop.join(", ")}` : base;
   }
@@ -59,6 +63,23 @@ export function detailOf(e: KraftEvent): string | null {
     return p.budget_usd == null ? "no cap" : `$${Number(p.budget_usd).toFixed(2)}`;
   }
   return null;
+}
+
+/** The findings a `findings_measured` event carries, for the Events pane to
+ *  list -- `detailOf` above only ever gives a count, and GateCard's own
+ *  one-liner (Kraft-a4js) deliberately does the same, so this is the only
+ *  place the messages/files/severities themselves become reachable. */
+export function findingsOf(e: KraftEvent): Finding[] {
+  if (e.type !== "findings_measured") return [];
+  const p = e.payload as Record<string, unknown>;
+  if (!Array.isArray(p.findings)) return [];
+  return (p.findings as Record<string, unknown>[]).map((f) => ({
+    severity: typeof f.severity === "string" ? f.severity : "",
+    message: typeof f.message === "string" ? f.message : "",
+    file: typeof f.file === "string" ? f.file : null,
+    line: typeof f.line === "number" ? f.line : null,
+    source_plugin: typeof f.source_plugin === "string" ? f.source_plugin : "",
+  }));
 }
 
 const VERBS: Record<string, string> = {

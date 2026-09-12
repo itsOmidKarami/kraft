@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import * as api from "../../../api";
+import type { KraftEvent } from "../../../types";
 import { GateCard } from "./GateCard";
 import { item } from "./testFixtures";
 
@@ -71,27 +72,102 @@ describe("GateCard", () => {
         open={false}
         onOpen={() => {}}
         onCancel={() => {}}
-        reviewHref={() => "#"}
+        reviewHref={(node, tab) => `#node=${node}&tab=${tab}`}
       />,
     );
-  const deferred = [
-    { severity: "minor", message: "naming nit", file: "a.py", line: 3, source_plugin: "fake" },
-  ];
+  // Ten findings, matching the live item's scale (5.4k characters of prose)
+  // that pushed the graph and both panes off the viewport (Kraft-a4js).
+  const tenFindings = Array.from({ length: 10 }, (_, i) => ({
+    severity: "minor",
+    message: `finding number ${i} with a fair bit of prose explaining why it matters and where`,
+    file: "a.py",
+    line: i,
+    source_plugin: "fake",
+  }));
 
-  it("lists deferred minor findings at the gate", () => {
-    card({ deferred_findings: [...deferred] });
-    expect(screen.getByText(/naming nit/)).toBeInTheDocument();
-    expect(screen.getByText(/a\.py:3/)).toBeInTheDocument();
-  });
-
-  it("shows concerns in the same panel as deferred findings", () => {
-    card({ deferred_findings: [...deferred], concerns: ["the retry path is untested"] });
-    expect(screen.getByText(/the retry path is untested/)).toBeInTheDocument();
-    expect(screen.getByText(/naming nit/)).toBeInTheDocument();
+  it("counts deferred findings in one line instead of listing them", () => {
+    card({ deferred_findings: tenFindings });
+    expect(screen.getByText(/10 findings deferred/)).toBeInTheDocument();
+    expect(screen.queryByText(/finding number 0/)).toBeNull();
     expect(document.querySelectorAll(".gate-deferred")).toHaveLength(1);
+    expect(document.querySelectorAll(".gate-deferred li")).toHaveLength(0);
   });
 
-  it("renders no list when there are no findings and no concerns", () => {
+  it("links the one-liner to the Timeline tab", () => {
+    card({ deferred_findings: tenFindings });
+    const link = screen.getByRole("link", { name: /see timeline/i });
+    expect(link).toHaveAttribute("href", expect.stringContaining("tab=timeline"));
+  });
+
+  // human_review never emits findings_measured (those come from verify/mr_checks)
+  // -- the link must select the node that actually carries them, not the gate
+  // node, or the deferred findings the card counts are unreachable.
+  it("targets the node whose findings_measured event holds the findings, not the gate node", () => {
+    const events: KraftEvent[] = [
+      {
+        seq: 1,
+        work_item_id: "w1",
+        type: "findings_measured",
+        payload: { node_id: "verify", findings: tenFindings },
+        created_at: "t",
+      },
+    ];
+    render(
+      <GateCard
+        item={item({ deferred_findings: tenFindings, current_node_id: "human_review" })}
+        gate="human_review_approval"
+        open={false}
+        onOpen={() => {}}
+        onCancel={() => {}}
+        reviewHref={(node, tab, id) => `#node=${node}&tab=${tab}&tnode=${id}`}
+        events={events}
+      />,
+    );
+    const link = screen.getByRole("link", { name: /see timeline/i });
+    expect(link).toHaveAttribute("href", expect.stringContaining("tnode=verify"));
+  });
+
+  // the default chain measures at both verify and mr_checks -- mr_checks is
+  // commonly clean, and a newer *empty* findings_measured there must not
+  // shadow the earlier verify event that actually carries the findings.
+  it("skips a later findings_measured event that carries no findings", () => {
+    const events: KraftEvent[] = [
+      {
+        seq: 1,
+        work_item_id: "w1",
+        type: "findings_measured",
+        payload: { node_id: "verify", findings: tenFindings },
+        created_at: "t1",
+      },
+      {
+        seq: 2,
+        work_item_id: "w1",
+        type: "findings_measured",
+        payload: { node_id: "mr_checks", findings: [] },
+        created_at: "t2",
+      },
+    ];
+    render(
+      <GateCard
+        item={item({ deferred_findings: tenFindings, current_node_id: "human_review" })}
+        gate="human_review_approval"
+        open={false}
+        onOpen={() => {}}
+        onCancel={() => {}}
+        reviewHref={(node, tab, id) => `#node=${node}&tab=${tab}&tnode=${id}`}
+        events={events}
+      />,
+    );
+    const link = screen.getByRole("link", { name: /see timeline/i });
+    expect(link).toHaveAttribute("href", expect.stringContaining("tnode=verify"));
+  });
+
+  it("counts concerns alongside deferred findings in the same one-liner", () => {
+    card({ deferred_findings: tenFindings, concerns: ["the retry path is untested"] });
+    expect(screen.getByText(/10 findings deferred · 1 concern/)).toBeInTheDocument();
+  });
+
+  it("renders no summary line when there are no findings and no concerns", () => {
     const { container } = card({ deferred_findings: [], concerns: [] });
     expect(container.querySelector(".gate-deferred")).toBeNull();
   });

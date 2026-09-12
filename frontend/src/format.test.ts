@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { ago, elapsed, statusWord, tokens, until, usd } from "./format";
+import { ago, elapsed, logLineText, statusWord, tokens, until, usd } from "./format";
+import type { LogLine } from "./types/work_item";
+
+const logLine = (over: Partial<LogLine>): LogLine => ({
+  n: 0,
+  t: null,
+  src: "agent",
+  text: "",
+  ...over,
+});
 
 const now = Date.parse("2026-09-04T12:00:00Z");
 const at = (ms: number) => new Date(now - ms).toISOString();
@@ -46,6 +55,32 @@ describe("until", () => {
     expect(until(inMs(30_000), now)).toBe("in 1m");
     expect(until(inMs(-1000), now)).toBe("expired");
     expect(until(null, now)).toBe("");
+  });
+});
+
+describe("logLineText", () => {
+  it("uses a real server summary", () => {
+    const l = logLine({ text: '{"type":"result"}', summary: "result: success" });
+    expect(logLineText(l)).toBe("result: success");
+  });
+
+  it("falls back to the parsed type when the server's summary is just the raw line", () => {
+    // logs.py summary() returns _shorten(line) for a shape it doesn't
+    // recognise (e.g. tool_progress), so `summary` equals `text` -- that is
+    // not a real summary and must not render as raw JSON (Kraft-av3t).
+    const raw = '{"type":"tool_progress","tokens":12}';
+    const l = logLine({ text: raw, summary: raw });
+    expect(logLineText(l)).toBe("tool_progress");
+  });
+
+  it("falls back to the parsed type with no summary at all", () => {
+    const l = logLine({ text: '{"type":"tool_progress"}' });
+    expect(logLineText(l)).toBe("tool_progress");
+  });
+
+  it("passes plain stdout/sys text through untouched", () => {
+    const l = logLine({ src: "stdout", text: "collected 12 items" });
+    expect(logLineText(l)).toBe("collected 12 items");
   });
 });
 

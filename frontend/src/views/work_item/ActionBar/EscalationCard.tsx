@@ -16,11 +16,13 @@ export function EscalatingPill({
   auto,
   onStop,
   busy,
+  err,
 }: {
   turn: number;
   auto?: boolean;
   onStop: () => void;
   busy: boolean;
+  err?: string | null;
 }) {
   return (
     <div className="control-row escalating-pill" data-testid="escalating-pill">
@@ -37,9 +39,10 @@ export function EscalatingPill({
         Escalate
       </button>
       <span className="control-hint">
-        {auto
-          ? "fired automatically — nobody had acted on it yet"
-          : "one escalation turn at a time"}
+        {err ??
+          (auto
+            ? "fired automatically — nobody had acted on it yet"
+            : "one escalation turn at a time")}
       </span>
     </div>
   );

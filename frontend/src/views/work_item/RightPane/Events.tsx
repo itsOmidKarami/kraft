@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { clock } from "../../../format";
 import type { KraftEvent, WorkerSession } from "../../../types";
-import { detailOf, groupByNode, titleOf } from "../timelineHelpers";
+import { detailOf, findingsOf, groupByNode, titleOf } from "../timelineHelpers";
 
 /**
  * Right pane · Timeline (UI v2 · 05, 15): the event list for the node
@@ -66,6 +66,21 @@ export function Events({
                 );
               })()}
               {detailOf(e) && <span className="event-detail">{detailOf(e)}</span>}
+              {/* Kraft-a4js: the card that links here only ever gives a count
+                  ("3 findings deferred"). This is where the messages, files
+                  and severities themselves become readable -- the Events
+                  pane already scrolls (screen 48), unlike the gate card. */}
+              {findingsOf(e).length > 0 && (
+                <ul className="event-findings">
+                  {findingsOf(e).map((f, i) => (
+                    <li key={`${f.source_plugin}:${f.file}:${i}`}>
+                      <span className="field-hint">{f.severity}</span>{" "}
+                      <span className="mono">{f.file ? `${f.file}:${f.line ?? "?"}` : "—"}</span>{" "}
+                      {f.message}
+                    </li>
+                  ))}
+                </ul>
+              )}
               {typeof e.payload.session_id === "string" && (
                 <button className="btn btn-ghost event-log" onClick={() => onViewLog(e.payload.session_id as string)}>
                   view log
