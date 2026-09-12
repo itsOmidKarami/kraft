@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures";
+import { scaledTimeout } from "../e2e-timing";
 
 // Manual regression round: drives every operational surface of the SPA against
 // a real orchestrator (see e2e/serve.py). Assumes the same fixture server as
@@ -23,7 +24,7 @@ test("settings: connect a repo", async ({ page }) => {
   const dlg = page.getByRole("dialog", { name: "Add repo" });
   await dlg.getByRole("textbox").first().fill(REPO);
   // probe is debounced; the submit button unlocks once it lands
-  await expect(dlg.getByRole("button", { name: /add|connect/i })).toBeEnabled({ timeout: 15_000 });
+  await expect(dlg.getByRole("button", { name: /add|connect/i })).toBeEnabled({ timeout: scaledTimeout(15_000) });
   await dlg.getByRole("button", { name: /add|connect/i }).click();
   await expect(dlg).toBeHidden();
   // the row navigates into the detail pane, not just the list. By data-repo,
@@ -35,7 +36,7 @@ test("settings: connect a repo", async ({ page }) => {
 
 test("settings: chain templates page loads and validates", async ({ page }) => {
   await page.goto("/settings/chains");
-  await expect(page.getByText("default").first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("default").first()).toBeVisible({ timeout: scaledTimeout(15_000) });
   // the graph node, not the live YAML pane, which also says "verify"
   await page.getByRole("button", { name: /^verify\b/ }).click();
   await expect(page.getByLabel("fix_loop")).toBeVisible();
@@ -43,7 +44,7 @@ test("settings: chain templates page loads and validates", async ({ page }) => {
 
 test("settings: plugins page lists hooks", async ({ page }) => {
   await page.goto("/settings/plugins");
-  await expect(page.getByRole("switch").first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("switch").first()).toBeVisible({ timeout: scaledTimeout(15_000) });
   await page.getByText("on.test.run").click();
   await expect(page.getByText(/used by/)).toBeVisible();
 });
@@ -51,7 +52,7 @@ test("settings: plugins page lists hooks", async ({ page }) => {
 test("settings: policy edit saves", async ({ page }) => {
   await page.goto("/settings/policy");
   const attempts = page.getByLabel(/attempts/).first();
-  await expect(attempts).toBeVisible({ timeout: 15_000 });
+  await expect(attempts).toBeVisible({ timeout: scaledTimeout(15_000) });
   await attempts.fill("4");
   const maxConcurrent = page.getByLabel(/max concurrent/i);
   await maxConcurrent.fill("4");
@@ -65,7 +66,7 @@ test("settings: steering is editable and diffable", async ({ page }) => {
   await page.goto("/settings/steering");
   // the fixture instance ships no steering files, so make one
   page.once("dialog", (d) => d.accept("e2e-steering"));
-  await page.getByRole("button", { name: "New", exact: true }).click({ timeout: 15_000 });
+  await page.getByRole("button", { name: "New", exact: true }).click({ timeout: scaledTimeout(15_000) });
   const body = page.getByLabel("steering body");
   await expect(body).toBeVisible();
   await body.fill("edited by e2e\n");
@@ -80,20 +81,20 @@ test("settings: steering is editable and diffable", async ({ page }) => {
 
 test("settings: access page shows bind", async ({ page }) => {
   await page.goto("/settings/access");
-  await expect(page.getByText("127.0.0.1").first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("127.0.0.1").first()).toBeVisible({ timeout: scaledTimeout(15_000) });
 });
 
 test("settings: access allowed-hosts tag add/remove round-trips", async ({ page }) => {
   await page.goto("/settings/access");
   const input = page.getByPlaceholder(/add a host or ip/i);
-  await expect(input).toBeVisible({ timeout: 15_000 });
+  await expect(input).toBeVisible({ timeout: scaledTimeout(15_000) });
   await input.fill("e2e.kraft.local");
   await input.press("Enter");
   const chip = page.locator(".chip", { hasText: "e2e.kraft.local" });
-  await expect(chip).toBeVisible({ timeout: 15_000 });
+  await expect(chip).toBeVisible({ timeout: scaledTimeout(15_000) });
   await page.reload();
   await expect(page.locator(".chip", { hasText: "e2e.kraft.local" })).toBeVisible({
-    timeout: 15_000,
+    timeout: scaledTimeout(15_000),
   });
   await page.locator(".chip", { hasText: "e2e.kraft.local" }).click();
   await expect(page.locator(".chip", { hasText: "e2e.kraft.local" })).toBeHidden();
@@ -104,11 +105,11 @@ test("settings: notify send a test reports a result", async ({ page }) => {
   await page.getByLabel(/webhook url/i).fill("https://ntfy.sh/kraft-e2e-test");
   await page.getByRole("button", { name: "Save" }).first().click();
   const send = page.getByRole("button", { name: /send a test/i });
-  await expect(send).toBeEnabled({ timeout: 15_000 });
+  await expect(send).toBeEnabled({ timeout: scaledTimeout(15_000) });
   await send.click();
   // The receiver may not exist, but the row must report *something* --
   // status/latency or a clear failure -- never stay on "never sent".
-  await expect(page.getByText(/never sent/i)).toBeHidden({ timeout: 15_000 });
+  await expect(page.getByText(/never sent/i)).toBeHidden({ timeout: scaledTimeout(15_000) });
 });
 
 test("settings: appearance density and board prefs persist after reload", async ({ page }) => {
@@ -126,7 +127,7 @@ test("settings: appearance density and board prefs persist after reload", async 
 test("analytics renders and repo/template selects change the numbers", async ({ page }) => {
   await page.goto("/analytics");
   await expect(page.locator("body")).not.toContainText("Failed to fetch");
-  await expect(page.getByText("Completed").first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("Completed").first()).toBeVisible({ timeout: scaledTimeout(15_000) });
   const before = await page.locator(".kpi-value").first().textContent();
   await page.getByLabel(/repo:/i).selectOption({ index: 1 }).catch(() => {});
   await page.waitForTimeout(500);
@@ -152,11 +153,11 @@ test("login: shows a plain error on a wrong password", async ({ page }) => {
   );
   await page.goto("/");
   await expect(page.getByRole("switch", { name: /stay signed in/i })).toBeVisible({
-    timeout: 15_000,
+    timeout: scaledTimeout(15_000),
   });
   await page.getByLabel("Password").fill("wrong-password");
   await page.getByRole("button", { name: /sign in/i }).click();
-  await expect(page.getByText("Wrong password.")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("Wrong password.")).toBeVisible({ timeout: scaledTimeout(15_000) });
 });
 
 test("search overlay finds an indexed document", async ({ page }) => {
@@ -171,7 +172,7 @@ test("search overlay finds an indexed document", async ({ page }) => {
   if (!(await dlg.isVisible().catch(() => false))) {
     await page.keyboard.press("Control+k");
   }
-  await expect(dlg).toBeVisible({ timeout: 10_000 });
+  await expect(dlg).toBeVisible({ timeout: scaledTimeout(10_000) });
   await dlg.getByLabel("search").fill("backoff");
-  await expect(dlg.locator(".search-result").first()).toBeVisible({ timeout: 15_000 });
+  await expect(dlg.locator(".search-result").first()).toBeVisible({ timeout: scaledTimeout(15_000) });
 });
