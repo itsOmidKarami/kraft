@@ -184,6 +184,22 @@ describe("ActionBar", () => {
     expect(screen.getByText(/turn 1/)).toBeInTheDocument();
   });
 
+  it("a running escalation turn tagged auto:true shows the Auto-escalated pill", () => {
+    const autoMsg = {
+      seq: 2,
+      work_item_id: "w1",
+      type: "escalation_message",
+      payload: { session_id: "e1", message: "diagnose and fix", auto: true },
+      created_at: "2026-01-01T00:05:00Z",
+    } as KraftEvent;
+    renderBar(
+      item({ status: "needs_human", cappedOut: { cycles: 3, attempts: 3 } }),
+      [escSession()],
+      [NEEDS_HUMAN_EVENT, autoMsg],
+    );
+    expect(screen.getByText(/auto-escalated · turn 1/i)).toBeInTheDocument();
+  });
+
   it("a finished escalation turn shows the escalated proposal card", () => {
     const done = escSession({ status: "done_with_concerns", exited_at: "t" });
     renderBar(
@@ -254,6 +270,48 @@ describe("ActionBar", () => {
     expect(screen.getByTestId("escalation-thread")).toHaveTextContent(
       "look at the widget",
     );
+  });
+
+  it("a mixed escalation thread marks the auto turn and leaves the manual one alone", async () => {
+    const manualMsg = {
+      seq: 1,
+      work_item_id: "w1",
+      type: "escalation_message",
+      payload: { session_id: "e2", message: "look at the widget", auto: false },
+      created_at: "2026-01-01T00:00:00Z",
+    } as KraftEvent;
+    const autoMsg = {
+      seq: 2,
+      work_item_id: "w1",
+      type: "escalation_message",
+      payload: { session_id: "e3", message: "diagnose and fix", auto: true },
+      created_at: "2026-01-01T00:05:00Z",
+    } as KraftEvent;
+    const priorSession = escSession({
+      id: "e2",
+      status: "done",
+      attempt: 1,
+      created_at: "2026-01-01T00:00:00Z",
+    });
+    const autoSession = escSession({
+      id: "e3",
+      status: "done",
+      attempt: 2,
+      created_at: "2026-01-01T00:05:00Z",
+    });
+    const laterStop: KraftEvent = {
+      ...NEEDS_HUMAN_EVENT,
+      created_at: "2026-01-01T00:10:00Z",
+    };
+    renderBar(
+      item({ status: "needs_human", cappedOut: { cycles: 3, attempts: 3 } }),
+      [priorSession, autoSession],
+      [manualMsg, autoMsg, laterStop],
+    );
+    await userEvent.click(screen.getByRole("button", { name: /^escalate/i }));
+    const thread = screen.getByTestId("escalation-thread");
+    expect(thread).toHaveTextContent("turn 1: look at the widget");
+    expect(thread).toHaveTextContent("turn 2 (auto-escalated): diagnose and fix");
   });
 
   it("opens the steer composer inside the action bar, not as a sibling card", async () => {

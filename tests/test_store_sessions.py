@@ -534,3 +534,37 @@ def test_create_session_does_not_reuse_a_settled_session(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_running_sessions_for_node_includes_an_escalation_on_another_node(tmp_path):
+    """`escalate.escalation_running` is not node-scoped, so a live escalation
+    row whose node_id has drifted from current_node_id (a stale row after a
+    restart) is live to the caller's check and must not be missed by the kill
+    (code review finding)."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            await database.write(lambda c: store.enter_node(c, "w1", "implementation"))
+            for sid, node, hook in (
+                ("s_stale", "verify", "escalation"),
+                ("s_other", "verify", "on.implementation.start"),
+            ):
+                await database.write(
+                    lambda c, sid=sid, node=node, hook=hook: store.create_session(
+                        c,
+                        id=sid,
+                        work_item_id="w1",
+                        node_id=node,
+                        hook_point=hook,
+                        log_path="/l",
+                        result_path="/r",
+                    )
+                )
+            found = database.read(lambda c: store.running_sessions_for_node(c, "w1"))
+            assert [r["id"] for r in found] == ["s_stale"]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())

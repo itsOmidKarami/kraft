@@ -189,17 +189,19 @@ def test_retry_works_when_a_slot_is_free(tmp_path, monkeypatch):
         assert r.status_code == 200, r.text
 
 
-def _create_escalation_session(wid: str, session_id: str, node_id: str) -> None:
+def _create_escalation_session(
+    wid: str, session_id: str, node_id: str, *, pid: int | None = None
+) -> None:
     """A live `worker_sessions` row for `wid` (`hook_point='escalation'`,
     `status='running'`) -- the shape `retry`'s self-retry check reads,
     without actually dispatching an agent."""
     conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
     try:
         conn.execute(
-            "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, log_path, "
-            "result_path, status, created_at) VALUES (?, ?, ?, 'escalation', 'x', 'x', "
-            "'running', datetime('now'))",
-            (session_id, wid, node_id),
+            "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, pid, "
+            "log_path, result_path, status, created_at) VALUES (?, ?, ?, 'escalation', ?, "
+            "'x', 'x', 'running', datetime('now'))",
+            (session_id, wid, node_id, pid),
         )
         conn.commit()
     finally:
@@ -237,21 +239,32 @@ def test_retry_defers_instead_of_racing_its_own_still_running_escalation_session
         assert "work_item_retried" not in types
 
 
-def test_retry_still_refuses_a_stranger_while_an_escalation_is_running(tmp_path, monkeypatch):
+def test_retry_kills_a_strangers_running_escalation_and_proceeds(tmp_path, monkeypatch):
     """A caller that is *not* the live escalation session (no header, or a
-    different one) must still be refused -- only the exact session calling
-    on itself gets the deferral."""
+    different one) now gets through: that session is killed first, then the
+    retry proceeds the same way it would against a plain needs_human stop --
+    distinct from the self-retry deferral path above, which stays a defer,
+    not a kill."""
     repo = make_repo(tmp_path)
+    terminated = []
+    monkeypatch.setattr("kraft.api.routes.lifecycle._terminate", lambda pid: terminated.append(pid))
     with _client(tmp_path, monkeypatch) as client:
         wid = _post_default(client, repo)
         _poll_events(client, wid, "gate_requested")
         _force_node(wid, "verify", "needs_human")
-        _create_escalation_session(wid, "s1", "verify")
+        _create_escalation_session(wid, "s1", "verify", pid=4242)
 
         r = client.post(f"/api/work-items/{wid}/retry", json={})
 
-        assert r.status_code == 409, r.text
-        assert "s1" in r.json()["detail"]
+        assert r.status_code == 200, r.text
+        assert terminated == [4242]
+        types = [e["type"] for e in client.get(f"/api/work-items/{wid}/events").json()]
+        assert "work_item_retried" in types
+        # The turn is stopped, not the item: `retry` claims the item out of
+        # `needs_human` itself a few lines later, which a `pause_requested`
+        # (status -> paused) would have made impossible.
+        assert "worker_session_paused" in types
+        assert "pause_requested" not in types
 
 
 def test_retry_refuses_and_writes_nothing_when_a_walk_is_still_live(tmp_path, monkeypatch):
