@@ -231,7 +231,11 @@ async def pause_work_item(wid: str, request: Request):
     await st.db.write(lambda c: store.pause_work_item(c, wid, ids))
     for s in sessions:
         _terminate(s["pid"])
-    await deps.cancel(request.app, wid)
+    # Bounded (Kraft-c5ui): pause spawns nothing, so it would rather return
+    # late than block the whole request on a git/forge call the old task
+    # happens to be parked in -- the sessions above are already SIGTERM'd
+    # either way.
+    await deps.cancel(request.app, wid, timeout=deps.CANCEL_TIMEOUT)
     return {"id": wid, "paused_sessions": ids}
 
 

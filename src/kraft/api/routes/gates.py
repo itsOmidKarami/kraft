@@ -142,7 +142,7 @@ async def approve_gate(wid: str, gate: str, request: Request):
         # before continuing, rather than 409 a human out for the review's
         # whole duration.
         await _stop_live_review(st, wid)
-        await deps.cancel(request.app, wid)
+        await deps.cancel(request.app, wid, timeout=deps.CANCEL_TIMEOUT)
 
     chain, reason = await apply_approval(st, row, gate)
     if chain is None:
@@ -222,7 +222,7 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
         # is meant to outrank it -- stop the review instead of locking the
         # human out for its duration.
         await _stop_live_review(st, wid)
-        await deps.cancel(request.app, wid)
+        await deps.cancel(request.app, wid, timeout=deps.CANCEL_TIMEOUT)
 
     try:
         target = await executor.apply_rejection(
