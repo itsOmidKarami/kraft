@@ -357,6 +357,30 @@ function NodeForm({
           <span className="switch-knob" />
         </button>
       </div>
+      <div className="field">
+        <label htmlFor="chain-auto-escalate-stuck">auto_escalate_stuck</label>
+        <button
+          id="chain-auto-escalate-stuck"
+          type="button"
+          role="switch"
+          aria-checked={node.auto_escalate_stuck ?? true}
+          className="switch"
+          onClick={() => onChange({ auto_escalate_stuck: !(node.auto_escalate_stuck ?? true) })}
+        >
+          <span className="switch-knob" />
+        </button>
+      </div>
+      <div className="field">
+        <label htmlFor="chain-auto-escalate-delay">auto_escalate_delay_s</label>
+        <input
+          id="chain-auto-escalate-delay"
+          className="input"
+          type="number"
+          min={0}
+          value={node.auto_escalate_delay_s ?? 0}
+          onChange={(e) => onChange({ auto_escalate_delay_s: Number(e.target.value) })}
+        />
+      </div>
     </div>
   );
 }

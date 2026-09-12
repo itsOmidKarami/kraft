@@ -101,6 +101,23 @@ def _cmd_set_overrides(ns: argparse.Namespace) -> None:
     )
 
 
+def _cmd_set_node_override(ns: argparse.Namespace) -> None:
+    common.emit(
+        asyncio.run(
+            client.set_node_overrides(
+                ns.node,
+                ns.auto_escalate,
+                ns.auto_escalate_stuck,
+                ns.auto_escalate_delay_s,
+                clear=ns.clear,
+                work_item_id=ns.id,
+            )
+        ),
+        common._render_action,
+        ns.json,
+    )
+
+
 def _add_item(subs, common: argparse.ArgumentParser) -> None:
     """The verbs that change a work item."""
     create = subs.add_parser("create", parents=[common], help="file a work item (starts paused)")
@@ -202,6 +219,33 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
         "--clear", action="store_true", help="reset every field to the template's own binding"
     )
     set_overrides.set_defaults(func=_cmd_set_overrides)
+
+    set_node_override = subs.add_parser(
+        "set-node-override",
+        parents=[common],
+        help="per-item auto-escalate override for one node, without touching the template",
+    )
+    set_node_override.add_argument("id", nargs="?")
+    set_node_override.add_argument("--node", required=True, help="a node id in the item's chain")
+    set_node_override.add_argument(
+        "--auto-escalate",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="arm/disarm agent review of this node's auto-escalate gates",
+    )
+    set_node_override.add_argument(
+        "--auto-escalate-stuck",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="arm/disarm auto-escalate-on-stuck for this node",
+    )
+    set_node_override.add_argument(
+        "--auto-escalate-delay-s", type=int, help="delay before this node's auto-escalate fires"
+    )
+    set_node_override.add_argument(
+        "--clear", action="store_true", help="reset this node to the template's own binding"
+    )
+    set_node_override.set_defaults(func=_cmd_set_node_override)
 
     mr_label = subs.add_parser(
         "mr-label",

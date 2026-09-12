@@ -39,6 +39,7 @@ def test_the_tools_are_registered():
         "set_mr_labels",
         "set_chain_template",
         "set_agent_overrides",
+        "set_node_overrides",
         "permission_request",
     }
 
