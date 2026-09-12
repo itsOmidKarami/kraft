@@ -25,6 +25,15 @@ from kraft.templates import load_registry, load_templates
 
 logger = logging.getLogger(__name__)
 
+#: Kraft-c5ui: the `cancel(..., timeout=...)` a caller passes when it has
+#: nothing riding on the old task actually being gone by the time it returns
+#: -- gate approve/reject already SIGTERM'd the review process themselves,
+#: and pause spawns no replacement -- so all three would rather return late
+#: than hang the request on a git/forge call the old task is parked in.
+#: `skip` does not use this: it spawns a replacement off the assumption the
+#: old task is gone, so it still waits unbounded.
+CANCEL_TIMEOUT = 5.0
+
 
 class AlreadyRunning(RuntimeError):
     """A live executor task already holds this key. Not `HTTPException`:
@@ -90,7 +99,7 @@ def spawn(app: FastAPI, wid: str, coro) -> asyncio.Task:
     return task
 
 
-async def cancel(app: FastAPI, wid: str) -> None:
+async def cancel(app: FastAPI, wid: str, timeout: float | None = None) -> None:
     """Cancel `wid`'s live walk task, if any, and wait for it to actually
     finish before returning.
 
@@ -106,15 +115,35 @@ async def cancel(app: FastAPI, wid: str) -> None:
     `deps.guard` re-raises `CancelledError` and swallows every other
     exception itself, so `CancelledError` is the only thing `await task` can
     raise here.
+
+    `timeout`, when given, bounds the wait (Kraft-c5ui): a task parked in
+    `asyncio.to_thread` (a git/forge call) does not see the cancellation
+    until that call returns, so an unbounded wait here can block the whole
+    request for as long as that call takes. Past the deadline this returns
+    anyway, with the task still cancelling in the background -- its own
+    done-callback still pops `app.state.tasks[wid]` whenever it actually
+    exits. Only safe for a caller with nothing that depends on the task
+    being gone by the time this returns: `skip` still needs the unbounded
+    wait, because it spawns a replacement off exactly that assumption.
+    `asyncio.shield` keeps the timeout from cancelling anything itself --
+    the task already got its `.cancel()` above and is left to finish that on
+    its own.
     """
     task = app.state.tasks.get(wid)
     if task is None or task.done():
         return
     task.cancel()
     try:
-        await task
+        if timeout is None:
+            await task
+        else:
+            await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
     except asyncio.CancelledError:
         pass
+    except TimeoutError:
+        logger.warning(
+            "cancel: task for %s did not unwind within %.1fs; proceeding anyway", wid, timeout
+        )
 
 
 def skip_lock(app: FastAPI, wid: str) -> asyncio.Lock:
