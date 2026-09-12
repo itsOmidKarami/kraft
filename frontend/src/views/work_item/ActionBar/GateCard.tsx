@@ -5,6 +5,7 @@ import type { WorkItem } from "../../../types";
 import type { InspectorTab } from "../selection";
 import { Composer } from "./Composer";
 import { useActionBar } from "./useActionBar";
+import { SkipControl } from "../../../components/SkipControl";
 
 const PROMPTS: Record<string, string> = {
   spec_approval: "approve the spec to continue",
@@ -136,6 +137,7 @@ export function GateCard({
           <button className="btn btn-secondary" disabled={busy} onClick={onOpen}>
             Reject
           </button>
+          <SkipControl itemId={item.id} />
           {err && <p className="form-error">{err}</p>}
         </div>
       ) : (
