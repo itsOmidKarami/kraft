@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Check } from "@phosphor-icons/react";
 import * as api from "../../api";
-import { SectionLabel } from "../../components/ui";
+import { SectionLabel, Switch } from "../../components/ui";
 import { useStore } from "../../store";
 import type { Policy } from "../../types";
 import { PageHead, PhoneHeader, SaveRow, usePhone, useResource } from "./shared";
@@ -48,6 +48,21 @@ export function PolicyPage() {
     const current = policy.findings?.loop_severities ?? ["critical", "important"];
     const next = current.includes(sev) ? current.filter((s) => s !== sev) : [...current, sev];
     setDraft({ ...policy, findings: { ...policy.findings, loop_severities: next } });
+  };
+
+  const setAutoEscalateStuck = (next: boolean) => {
+    if (!policy) return;
+    setDraft({ ...policy, auto_escalate_stuck: next });
+  };
+
+  const setAutoEscalateStuckCap = (n: number) => {
+    if (!policy) return;
+    setDraft({ ...policy, auto_escalate_stuck_cap: n });
+  };
+
+  const setAutoEscalateDelay = (n: number) => {
+    if (!policy) return;
+    setDraft({ ...policy, auto_escalate_delay_s: n });
   };
 
   const save = async () => {
@@ -185,6 +200,44 @@ export function PolicyPage() {
           onChange={(e) =>
             policy && setDraft({ ...policy, rate_limit_retries: Number(e.target.value) })
           }
+        />
+      </div>
+
+      <SectionLabel>Auto-escalate on stuck</SectionLabel>
+      <p className="settings-note">
+        Org-wide default for a work item that reports no progress: whether it escalates
+        to a human on its own, how many times before giving up, and how long it waits
+        first. A chain template or per-item override can still turn this off or retune it
+        for one node.
+      </p>
+      <div className="cap-row budget-row" data-cap="auto_escalate_stuck">
+        <span className="hook-name">Escalate a stuck item automatically</span>
+        <Switch
+          checked={policy?.auto_escalate_stuck ?? true}
+          onChange={setAutoEscalateStuck}
+          label="auto-escalate on stuck"
+        />
+      </div>
+      <div className="cap-row budget-row" data-cap="auto_escalate_stuck_cap">
+        <span className="hook-name">Max auto-escalations per item</span>
+        <input
+          className="input"
+          type="number"
+          min={1}
+          aria-label="auto-escalate stuck cap"
+          value={policy?.auto_escalate_stuck_cap ?? 3}
+          onChange={(e) => setAutoEscalateStuckCap(Number(e.target.value))}
+        />
+      </div>
+      <div className="cap-row budget-row" data-cap="auto_escalate_delay_s">
+        <span className="hook-name">Delay before escalating (s)</span>
+        <input
+          className="input"
+          type="number"
+          min={0}
+          aria-label="auto-escalate delay"
+          value={policy?.auto_escalate_delay_s ?? 0}
+          onChange={(e) => setAutoEscalateDelay(Number(e.target.value))}
         />
       </div>
     </>

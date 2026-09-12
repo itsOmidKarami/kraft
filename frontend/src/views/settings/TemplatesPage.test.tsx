@@ -118,6 +118,18 @@ describe("Settings · chains editor (task 8)", () => {
     expect(yaml.value).toContain("gate_after: human_review_approval");
   });
 
+  it("toggling auto_escalate_stuck and setting a delay updates the YAML pane", async () => {
+    renderAt("/settings/chains");
+    await userEvent.click(await screen.findByText("verify"));
+    await userEvent.click(screen.getByLabelText("auto_escalate_stuck"));
+    const delay = screen.getByLabelText("auto_escalate_delay_s");
+    await userEvent.clear(delay);
+    await userEvent.type(delay, "30");
+    const yaml = screen.getByLabelText("chain yaml") as HTMLTextAreaElement;
+    expect(yaml.value).toContain("auto_escalate_stuck: false");
+    expect(yaml.value).toContain("auto_escalate_delay_s: 30");
+  });
+
   it("a YAML parse error shows inline and leaves the form untouched", async () => {
     vi.spyOn(api, "parseTemplateYaml").mockResolvedValue({ nodes: null, error: "bad indent" });
     renderAt("/settings/chains");
