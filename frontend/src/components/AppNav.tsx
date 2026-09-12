@@ -18,8 +18,13 @@ import type { Health } from "../types";
 
 const COLLAPSE_KEY = "kraft.sidebar_collapsed";
 
+/** Under 1280 the sidebar is a rail by default (UI v3 · 45). An explicit
+ *  choice still wins: only an absent localStorage key falls through to the
+ *  width. */
 function readCollapsed(): boolean {
-  return localStorage.getItem(COLLAPSE_KEY) === "true";
+  const stored = localStorage.getItem(COLLAPSE_KEY);
+  if (stored !== null) return stored === "true";
+  return Boolean(window.matchMedia?.("(max-width: 1279px)")?.matches);
 }
 
 /** The item's repo initial on an item page ("a" for repo-a, design 11); "K"
