@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../api";
 import { useStore } from "../store";
@@ -60,6 +60,30 @@ const renderBoard = () =>
     </MemoryRouter>,
   );
 
+/** So the peek-clear test (Kraft-3e16 §2.2) can read the URL of whichever
+ *  history entry is current, and press Back to move between entries —
+ *  properties `renderBoard()`'s plain MemoryRouter has no sibling to expose. */
+function LocationProbe() {
+  const location = useLocation();
+  return <span data-testid="location-probe">{location.pathname}{location.search}</span>;
+}
+function GoBack() {
+  const navigate = useNavigate();
+  return (
+    <button onClick={() => navigate(-1)} aria-label="test-go-back">
+      back
+    </button>
+  );
+}
+const renderBoardWithProbe = () =>
+  render(
+    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <GoBack />
+      <LocationProbe />
+      <Board />
+    </MemoryRouter>,
+  );
+
 // selector pins this to the group heading, not the same-named Status facet button
 const group = (label: string) =>
   screen.getByText(label, { selector: ".group-label" }).closest("section") as HTMLElement;
@@ -99,6 +123,24 @@ describe("Board", () => {
     expect(title.tagName).toBe("SPAN");
     await userEvent.click(title);
     expect(screen.getByTestId("board-card")).toHaveAttribute("data-selected", "true");
+  });
+
+  it("Open → clears ?peek before navigating, so Back lands on a clean board (Kraft-3e16 §2.2)", async () => {
+    setItems(wi({ id: "w1" }));
+    renderBoardWithProbe();
+    const title = screen.getByTestId("board-card").querySelector(
+      ".board-row-title",
+    ) as HTMLElement;
+    await userEvent.click(title);
+    expect(screen.getByTestId("location-probe").textContent).toContain("peek=w1");
+
+    await userEvent.click(screen.getByRole("link", { name: /Open/ }));
+    expect(screen.getByTestId("location-probe").textContent).toBe("/work-items/w1");
+
+    await userEvent.click(screen.getByRole("button", { name: "test-go-back" }));
+    // Not just "doesn't contain peek=w1" — the entry we return to is
+    // exactly the pre-peek board: pathname "/", no search at all.
+    expect(screen.getByTestId("location-probe").textContent).toBe("/");
   });
 
   it("filters on the repo facet and clears it when the same facet is clicked again", async () => {

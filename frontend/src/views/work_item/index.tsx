@@ -183,7 +183,6 @@ export function WorkItemDetail() {
             selection={selection}
             diff={diff}
             diffError={diffError}
-            onSelect={select}
             onViewLog={goToLog}
             maximized
             onToggleMaximize={() => setMaximized(false)}
@@ -277,7 +276,6 @@ export function WorkItemDetail() {
                   selection={selection}
                   diff={diff}
                   diffError={diffError}
-                  onSelect={select}
                   onViewLog={goToLog}
                   maximized={false}
                   onToggleMaximize={() => setMaximized(true)}
