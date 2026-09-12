@@ -216,3 +216,81 @@ def test_skip_node_marks_a_running_session_paused_before_it_can_be_read_as_faile
     assert status == "paused"
     assert "worker_session_exited" not in types
     assert "worker_session_paused" in types
+
+
+def _seeded(tmp_path, wid, chain, node_id, node_overrides=None):
+    import json
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        await database.write(
+            lambda c: store.create_work_item(
+                c,
+                id=wid,
+                bead_id=None,
+                title="t",
+                repo="/r",
+                chain_template="default",
+                chain_definition=json.dumps(chain),
+            )
+        )
+        await database.write(lambda c: store.enter_node(c, wid, node_id))
+        if node_overrides is not None:
+            await database.write(lambda c: store.set_node_overrides(c, wid, node_overrides))
+        return database
+
+    return asyncio.run(scenario())
+
+
+def test_effective_auto_escalate_stuck_falls_back_to_the_default(tmp_path):
+    chain = {"nodes": [{"id": "implementation", "tasks": []}]}
+    database = _seeded(tmp_path, "w1", chain, "implementation")
+    row = database.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", ("w1",)).fetchone()
+    )
+    assert store.effective_auto_escalate_stuck(row, True) is True
+    assert store.effective_auto_escalate_stuck(row, False) is False
+
+
+def test_effective_auto_escalate_stuck_the_node_value_beats_the_default(tmp_path):
+    chain = {"nodes": [{"id": "implementation", "tasks": [], "auto_escalate_stuck": False}]}
+    database = _seeded(tmp_path, "w1", chain, "implementation")
+    row = database.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", ("w1",)).fetchone()
+    )
+    assert store.effective_auto_escalate_stuck(row, True) is False
+
+
+def test_effective_auto_escalate_stuck_the_override_beats_the_node_value(tmp_path):
+    chain = {"nodes": [{"id": "implementation", "tasks": [], "auto_escalate_stuck": False}]}
+    database = _seeded(
+        tmp_path,
+        "w1",
+        chain,
+        "implementation",
+        node_overrides={"implementation": {"auto_escalate_stuck": True}},
+    )
+    row = database.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", ("w1",)).fetchone()
+    )
+    assert store.effective_auto_escalate_stuck(row, False) is True
+
+
+def test_effective_auto_escalate_stuck_survives_a_bare_chain_definition_with_an_override(tmp_path):
+    database = _seeded(
+        tmp_path,
+        "w1",
+        {},
+        "implementation",
+        node_overrides={"implementation": {"auto_escalate_stuck": True}},
+    )
+    row = database.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", ("w1",)).fetchone()
+    )
+    # Regression: `effective_chain` indexes `chain_definition["nodes"]`
+    # directly once `node_overrides` is non-empty, so a bare `{}`
+    # chain_definition plus any override used to raise KeyError before this
+    # function's own guard ever ran. No node in the chain to apply the
+    # override to -> the caller's default, not a crash.
+    assert store.effective_auto_escalate_stuck(row, True) is True
+    assert store.effective_auto_escalate_stuck(row, False) is False

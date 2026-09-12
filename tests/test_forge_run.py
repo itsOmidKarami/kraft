@@ -1339,6 +1339,10 @@ def test_ci_poll_rebases_and_bounces_on_a_confirmed_conflict(tmp_path, monkeypat
     pol_path.write_text(
         "loops:\n  rebase_bounce: { attempts: 2, wall_clock_s: 3600 }\n"
         "default: { attempts: 3, wall_clock_s: 3600 }\n"
+        # Kraft-lpdd: this suite is about the rebase bounce's own stop, not
+        # the unrelated auto-escalate trigger that `needs_human` would
+        # otherwise also fire.
+        "auto_escalate_stuck: false\n"
     )
     pol = policy.load_policy(pol_path)
 
@@ -1429,6 +1433,10 @@ def test_ci_poll_stops_for_a_human_on_a_real_rebase_conflict(tmp_path, monkeypat
     pol_path.write_text(
         "loops:\n  rebase_bounce: { attempts: 2, wall_clock_s: 3600 }\n"
         "default: { attempts: 3, wall_clock_s: 3600 }\n"
+        # Kraft-lpdd: this suite is about the rebase bounce's own stop, not
+        # the unrelated auto-escalate trigger that `needs_human` would
+        # otherwise also fire.
+        "auto_escalate_stuck: false\n"
     )
     pol = policy.load_policy(pol_path)
 

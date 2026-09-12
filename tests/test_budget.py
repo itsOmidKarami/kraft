@@ -63,6 +63,10 @@ def _policy(*, work_item_usd=None, daily_usd=None) -> policy.Policy:
         loops={},
         default=policy.Cap(attempts=3, wall_clock_s=3600),
         budget=policy.Budget(work_item_usd=work_item_usd, daily_usd=daily_usd),
+        # This suite is about budget refusal, not the unrelated auto-escalate
+        # trigger -- an item stopped by a budget breach is a needs_human stop
+        # this feature would otherwise also try to auto-dispatch onto.
+        auto_escalate_stuck=False,
     )
 
 

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
-from kraft import events, gate_review, store
+from kraft import builtins as _builtins
+from kraft import escalate, events, gate_review, store
 from kraft import policy as _policy
 from kraft.adapters import agent as _agent
 from kraft.executor import stops
@@ -11,15 +13,17 @@ from kraft.store import _now as _now
 from kraft.templates import Registry
 
 
-def pending_gate(db, work_item_id: str) -> str | None:
+def pending_gate(db, work_item_id: str, evts: list | None = None) -> str | None:
     """The gate name this item is currently stopped on, or None (Kraft-zr3s).
 
     Moved out of `kraft.api` unchanged, so both a human's approve/reject door and
     an agent's gate review read the same reverse scan of the same three event
     types -- a second reader of one timeline is how two readers start
-    disagreeing.
+    disagreeing. `evts`, when given, is a timeline the caller already fetched
+    (`gates.auto_escalate_stuck`'s single read) -- every other call site
+    still passes nothing and gets a fresh read, unchanged.
     """
-    evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
+    evts = evts if evts is not None else db.read(lambda c: events.read_after(c, 0, work_item_id))
     for e in reversed(evts):
         if e["type"] in ("gate_requested", "gate_approved", "gate_rejected"):
             return e["payload"]["gate"] if e["type"] == "gate_requested" else None
@@ -298,3 +302,316 @@ def _status_of(db, work_item_id: str) -> str:
         ).fetchone()
     )
     return row["status"]
+
+
+_AUTO_ESCALATE_MESSAGE = (
+    "(Auto-escalated: no one has looked at this yet. Diagnose why it "
+    "stopped and fix it if you can; if you're not confident, stop and say "
+    "so instead of guessing.)"
+)
+
+#: Event types that close out the current run of needs_human/escalation
+#: activity for `_auto_dispatch_count`'s cap counter. Newest-wins reverse
+#: scan, the same shape `kraft.api.routes.board._STOP_BOUNDARY` already
+#: uses for a sibling question ("what stop is the item currently sitting
+#: on"): each of these means a *human* acted since the last
+#: `work_item_needs_human`, so any escalation attempt dispatched before it
+#: belongs to a run that is already over and must not keep counting
+#: against today's cap.
+#:
+#: Only human-attributable events are boundaries. Chain movement --
+#: `node_started`, `gate_requested`, `work_item_rate_limited` -- is
+#: deliberately *not* a boundary: an escalated self-retry moves the chain
+#: by design, and a stop re-reached after that movement is the same run of
+#: unattended stuckness, not a new one. Counting it as a boundary reads
+#: the count as 0 on every cycle and the escalate -> self-retry -> re-stop
+#: loop never hits the cap (Kraft code-review finding 2). The same reason
+#: the scan skips a `work_item_retried` tagged `{"escalated": true}` and a
+#: `gate_approved`/`gate_rejected` decided `by: "agent"`: those are the
+#: machinery unblocking itself, not a person looking at the item.
+#:
+#: The boundaries themselves:
+#:
+#:   - work_item_retried / work_item_resumed -- a human answered
+#:     `kraft item retry` / `kraft item resume` (an `{"escalated": true}`
+#:     retry is skipped, see above).
+#:   - work_item_created -- defensive: a freshly created item has no prior
+#:     run to inherit a count from.
+#:   - pause_requested -- a human paused the item.
+#:   - gate_approved / gate_rejected -- a human decided a gate (an agent's
+#:     own gate-review decision is skipped, see above).
+#:   - work_item_completed -- the chain finished.
+#:   - work_item_abandoned / work_item_restored -- a human abandoned or
+#:     restored the item.
+#:
+#: Everything NOT in this tuple -- including `work_item_needs_human`
+#: itself, every `escalation_message` (counted, not boundary-checked,
+#: below), and every session-lifecycle/progress event
+#: (`worker_session_created`/`_started`/`_exited`/`_paused`,
+#: `session_unknown`, `session_reattached`, `task_progress`,
+#: `budget_changed`, ...) -- is ignored by the scan rather than treated as
+#: a boundary. That distinction is load-bearing: `store.create_session`
+#: appends `worker_session_created` unconditionally for *every* dispatched
+#: session, including the escalation session this very function just
+#: spawned, and the run then appends `worker_session_started` and
+#: `worker_session_exited` around it too. A scan that broke on "any event
+#: type other than needs_human/escalation_message" (the shape this
+#: replaces) hit one of those three on the very next call and read the
+#: count as 0 forever -- the cap never engaged, and every later
+#: `run()`/`resume()` landing on the same stop dispatched another
+#: escalation turn indefinitely.
+_RUN_BOUNDARY = (
+    "work_item_retried",
+    "work_item_resumed",
+    "work_item_created",
+    "pause_requested",
+    "gate_approved",
+    "gate_rejected",
+    "work_item_completed",
+    "work_item_abandoned",
+    "work_item_restored",
+)
+
+
+def _latest_needs_human_reason(evts) -> str | None:
+    """The most recent `work_item_needs_human` event's reason in `evts`, or
+    None if the item has never stopped that way. Same reverse-scan idiom as
+    `kraft.escalate._reason`, kept separate: that one always hands back a
+    display string ("(no reason recorded)"), and this one needs a real
+    `None` to tell "never stopped this way" apart from "stopped with an
+    empty reason".
+
+    Takes the timeline itself rather than `(db, work_item_id)` --
+    `auto_escalate_stuck` fetches it once and shares the same list across
+    this, `_auto_dispatch_count`, `pending_gate`, and `escalate.dispatch`.
+    """
+    for e in reversed(evts):
+        if e["type"] == "work_item_needs_human":
+            return e["payload"].get("reason")
+    return None
+
+
+def _auto_dispatch_count(evts) -> int:
+    """How many auto-dispatched escalation turns (`escalation_message`
+    events tagged `{"auto": true}`) have fired since the item's current
+    run of `needs_human` stops began, scanning `evts` (the already-fetched
+    timeline -- see `_latest_needs_human_reason`) from the newest event
+    backwards.
+
+    Stops at the first event whose type is in `_RUN_BOUNDARY`. Every
+    other event type -- including `work_item_needs_human` itself, all
+    chain movement, and any non-auto `escalation_message` -- is ignored
+    and the scan continues past it; only an `escalation_message` tagged
+    `{"auto": true}` increments the count. Two `_RUN_BOUNDARY` types are
+    skipped rather than treated as a boundary -- see the tuple's docstring
+    -- because they are the machinery acting, not a human: a
+    `work_item_retried` tagged `{"escalated": true}` (the escalated agent
+    retrying itself) and a `gate_approved`/`gate_rejected` decided
+    `by: "agent"` (gate auto-review).
+    """
+    count = 0
+    for e in reversed(evts):
+        if e["type"] == "work_item_retried" and e["payload"].get("escalated"):
+            continue
+        if e["type"] in ("gate_approved", "gate_rejected") and e["payload"].get("by") == "agent":
+            continue
+        if e["type"] in _RUN_BOUNDARY:
+            break
+        if e["type"] == "escalation_message" and e["payload"].get("auto"):
+            count += 1
+    return count
+
+
+async def auto_escalate_stuck(
+    status: str,
+    db,
+    run_dirs,
+    *,
+    work_item_id: str,
+    registry: Registry,
+    policy: _policy.Policy | None = None,
+    launch: LaunchContext | None = None,
+    bd_cwd: str | None = None,
+    on_approve: OnApprove | None = None,
+) -> str:
+    """Dispatch an agent onto a `needs_human` stop nobody has looked at yet
+    (docs/superpowers/specs/2026-09-12-auto-escalate-non-gate-needs-human-design.md).
+
+    A sibling to `review_gates`, called right after it in `walk.run` and
+    `resuming.resume`: same "status in, status out unchanged unless it
+    acts" shape, but a single conditional call rather than a loop -- except
+    for the one continuation below, which mirrors `review_gates`'s own
+    `walk.run_once` call rather than adding a second loop shape to this
+    module.
+
+    Reads the item's event timeline once (`evts` below) and shares it
+    across `pending_gate`, `_latest_needs_human_reason`,
+    `_auto_dispatch_count`, and `escalate.dispatch`'s own `_reason`
+    lookup -- four separate full `events.read_after` reads on every single
+    `run()`/`resume()` call otherwise, for one function.
+    """
+    if status != "needs_human":
+        return status
+    evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
+    if pending_gate(db, work_item_id, evts=evts) is not None:
+        return status  # the gate flow owns this stop, unrelated to this feature
+    reason = _latest_needs_human_reason(evts)
+    if reason is not None and reason.startswith("needs_context:"):
+        # A worker asked a direct question. Dispatching an agent back onto
+        # it only asks again; a human has to actually answer.
+        return status
+    if escalate.escalation_running(db, work_item_id) is not None:
+        return status
+    row = db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+    )
+    # A conservative False, not `policy.auto_escalate_stuck`'s own True
+    # default, when policy failed to load entirely -- an explicit
+    # per-item or per-node override still wins inside
+    # `effective_auto_escalate_stuck`; only the "nobody said anything"
+    # fallback gets more conservative when there's no policy to trust.
+    default = policy.auto_escalate_stuck if policy else False
+    if not store.effective_auto_escalate_stuck(row, default):
+        return status
+    # Checked before the dispatch, the same posture as `review_gates`'s own
+    # auto-review launch and `walk.walk_node`'s BUDGET rung: an item that
+    # stopped *because* its spend cap was breached must not spend another
+    # `auto_escalate_stuck_cap` agent turns on top of it (the spec's
+    # "budget/attempt-capped"). Logged rather than silent, like
+    # `gate_auto_review_skipped`.
+    budget = store.effective_budget(row, policy.budget if policy else _policy.NO_BUDGET)
+    if stops.budget_breach(db, work_item_id, budget) is not None:
+        await db.write(
+            lambda c: events.append(
+                c, work_item_id, "work_item_auto_escalate_skipped", {"reason": "budget"}
+            )
+        )
+        return status
+    cap = policy.auto_escalate_stuck_cap if policy else _policy.DEFAULT_AUTO_ESCALATE_STUCK_CAP
+    count = _auto_dispatch_count(evts)
+    if count >= cap:
+        await db.write(
+            lambda c: events.append(
+                c, work_item_id, "work_item_auto_escalate_capped", {"cap": cap, "count": count}
+            )
+        )
+        return status
+    cursor = evts[-1]["seq"] if evts else 0
+    await escalate.dispatch(
+        db,
+        run_dirs,
+        work_item_id=work_item_id,
+        message=_AUTO_ESCALATE_MESSAGE,
+        launch=launch,
+        auto=True,
+        evts=evts,
+    )
+    return await resume_after_escalation(
+        db,
+        run_dirs,
+        work_item_id=work_item_id,
+        cursor=cursor,
+        registry=registry,
+        policy=policy,
+        launch=launch,
+        bd_cwd=bd_cwd,
+        on_approve=on_approve,
+    )
+
+
+async def resume_after_escalation(
+    db,
+    run_dirs,
+    *,
+    work_item_id: str,
+    cursor: int,
+    registry: Registry,
+    policy: _policy.Policy | None = None,
+    launch: LaunchContext | None = None,
+    bd_cwd: str | None = None,
+    on_approve: OnApprove | None = None,
+) -> str:
+    """Act on a deferred self-retry request left on the timeline by an
+    escalation turn that just finished -- shared by `auto_escalate_stuck`
+    and the manual `/escalate` route (`kraft.api.routes.lifecycle`), since
+    an agent calling `kraft item retry` on itself defers the same way
+    (lifecycle.py's `work_item_self_retry_requested` branch) whether the
+    turn was auto-dispatched or a human started it. Without this consumer
+    on the manual path, a human-escalated agent that fixes the problem and
+    retries gets an HTTP 200 and the item silently stays `needs_human`
+    forever (Kraft code-review finding).
+
+    `escalate.dispatch` only returns once its `run_agent_task` does, which
+    only returns once the escalation session's terminal `worker_sessions`
+    row is already written -- so the deferred request is safe to act on
+    now: the session that would have raced a live rebase/spawn against is
+    no longer live.
+
+    `cursor` is the event seq the caller read before dispatching, so this
+    only sees events the escalation turn itself produced.
+
+    Returns the item's current status unchanged when there is nothing to
+    consume.
+    """
+    from kraft.executor import walk  # local: walk imports this module
+
+    new_evts = db.read(lambda c: events.read_after(c, cursor, work_item_id))
+    request_evt = next((e for e in new_evts if e["type"] == "work_item_self_retry_requested"), None)
+    if request_evt is None:
+        return _status_of(db, work_item_id)
+    payload = request_evt["payload"]
+    node_id, key, gate_key, steer = (
+        payload["node_id"],
+        payload["key"],
+        payload["gate_key"],
+        payload["steer"],
+    )
+    row = db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+    )
+    # The escalation turn ran for minutes; a human may have abandoned, paused
+    # or otherwise moved the item in the meantime -- and `retry_after_cap` /
+    # `mark_needs_human` both UPDATE unconditionally, so acting on a stale
+    # request would resurrect it (worktree possibly already gone). The
+    # deferred request is dropped: the item is no longer on the stop it was
+    # filed against.
+    if row["status"] != "needs_human":
+        await db.write(
+            lambda c: events.append(
+                c,
+                work_item_id,
+                "work_item_self_retry_dropped",
+                {"node_id": node_id, "status": row["status"]},
+            )
+        )
+        return row["status"]
+    worktree = run_dirs.worktrees / work_item_id
+    try:
+        new_base = await _builtins.refresh_worktree_base(
+            worktree, Path(row["repo"]), store.branch_for(row)
+        )
+    except RuntimeError as exc:
+        reason = str(exc)
+        await db.write(lambda c: store.mark_needs_human(c, work_item_id, node_id, reason))
+        return _status_of(db, work_item_id)
+    if new_base:
+        await db.write(lambda c: store.set_base_ref(c, work_item_id, new_base))
+    await db.write(
+        lambda c: store.retry_after_cap(
+            c, work_item_id, node_id, key, steer, gate_key=gate_key, escalated=True
+        )
+    )
+    chain = json.loads(row["chain_definition"])
+    start = next(i for i, n in enumerate(chain["nodes"]) if n["id"] == node_id)
+    return await walk.run(
+        db,
+        run_dirs,
+        work_item_id=work_item_id,
+        registry=registry,
+        bd_cwd=bd_cwd,
+        start_index=start,
+        policy=policy,
+        steer=steer,
+        launch=launch,
+        on_approve=on_approve,
+    )

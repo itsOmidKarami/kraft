@@ -299,25 +299,6 @@ def _steer_reachable(nodes: list[dict], start_id: str, registry: Registry) -> bo
     return False
 
 
-def _escalation_running(st, wid: str) -> str | None:
-    """The id of a `pending`/`running` escalation session, or None.
-
-    `retry`, `resume`, and `escalate` all dispatch a fresh agent into the same
-    worktree (`run_dirs.worktrees / wid`) an escalation turn may already be
-    live in -- each has to check this before spawning, not just `escalate`
-    itself, or a retry/resume from a second tab, the CLI, or an MCP call
-    races the escalation agent in the same checkout.
-    """
-    row = st.db.read(
-        lambda c: c.execute(
-            "SELECT id FROM worker_sessions WHERE work_item_id = ? AND hook_point = 'escalation' "
-            "AND status IN ('pending', 'running') LIMIT 1",
-            (wid,),
-        ).fetchone()
-    )
-    return row["id"] if row else None
-
-
 @api_router.post("/work-items/{wid}/steer")
 async def steer_work_item(wid: str, body: Steer, request: Request):
     st = request.app.state
@@ -342,7 +323,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         row["status"] == "needs_human" and board._needs_context_stop(st, wid)
     ):
         raise HTTPException(409, "work item is not paused")
-    running = _escalation_running(st, wid)
+    running = escalate.escalation_running(st.db, wid)
     if running is not None:
         raise HTTPException(409, f"an escalation turn ({running}) is already running")
     # The one door that starts new work. Deliberately not on `approve` or
@@ -430,6 +411,11 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     wants `running`, and approve/reject want a pending gate, so refusing here
     stranded the item with no route at all (Kraft-bzwi). A missing fix loop now
     just means there is no counter to clear.
+
+    An escalated agent calling this on itself (its own `X-Kraft-Session-Id`
+    matches the escalation session still live for this item) is deferred
+    rather than run inline -- see the `work_item_self_retry_requested`
+    branch below.
     """
     st = request.app.state
     row = deps._work_item_row(st, wid)
@@ -443,9 +429,44 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     gate_key = f"{gate}_reject_loop" if gate else None
     if row["status"] != "needs_human":
         raise HTTPException(409, "work item is not stopped")
-    running = _escalation_running(st, wid)
-    if running is not None:
+    caller_session_id = request.headers.get("x-kraft-session-id")
+    running = escalate.escalation_running(st.db, wid)
+    if running is not None and running != caller_session_id:
         raise HTTPException(409, f"an escalation turn ({running}) is already running")
+    if running is not None:
+        # The escalation agent calling `kraft item retry` on itself: its own
+        # session is still `running`/`pending` in the DB, mid-tool-call, and
+        # will not exit until this very response returns -- so the rebase and
+        # spawn below cannot run yet without racing a live agent in the same
+        # worktree, the exact collision `escalation_running` exists to
+        # prevent everywhere else. Record the request instead and let
+        # `gates.auto_escalate_stuck` perform it once its `await` on this
+        # session's run actually returns (Kraft code-review finding).
+        steer = (body.steer or "").strip() or None
+        if steer is not None and not _steer_reachable(chain["nodes"], node_id, st.registry):
+            raise HTTPException(
+                409,
+                f"node {node_id!r} has no agent task downstream to steer; "
+                "this text would be dropped",
+            )
+        if steer is None:
+            last = st.db.read(lambda c: store.last_rejection(c, wid))
+            steer = (last or {}).get("note") or None
+        await st.db.write(
+            lambda c: events.append(
+                c,
+                wid,
+                "work_item_self_retry_requested",
+                {
+                    "session_id": caller_session_id,
+                    "node_id": node_id,
+                    "key": key,
+                    "gate_key": gate_key,
+                    "steer": steer,
+                },
+            )
+        )
+        return {"id": wid, "node_id": node_id, "loop": key, "steer": steer}
 
     limit = st.policy.max_concurrent if st.policy else 1
     if st.db.read(store.active_count) >= limit:
@@ -544,7 +565,7 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
     row = deps._work_item_row(st, wid)
     if row["status"] not in ("active", "waiting", "paused", "needs_human"):
         raise HTTPException(409, f"work item is {row['status']}, cannot skip")
-    running = _escalation_running(st, wid)
+    running = escalate.escalation_running(st.db, wid)
     if running is not None:
         raise HTTPException(409, f"an escalation turn ({running}) is already running")
 
@@ -610,23 +631,41 @@ async def escalate_work_item(wid: str, body: Escalate, request: Request):
     message = body.message.strip()
     if not message:
         raise HTTPException(400, "message is required")
-    running = _escalation_running(st, wid)
+    running = escalate.escalation_running(st.db, wid)
     if running is not None:
         raise HTTPException(409, f"an escalation turn ({running}) is already running")
+
+    async def _run_escalation() -> None:
+        cursor_evts = st.db.read(lambda c: events.read_after(c, 0, wid))
+        cursor = cursor_evts[-1]["seq"] if cursor_evts else 0
+        await escalate.dispatch(
+            st.db,
+            st.run_dirs,
+            work_item_id=wid,
+            message=message,
+            launch=deps.launch(st, row["repo"]),
+        )
+        # The agent may have called `kraft item retry` on itself mid-turn
+        # (lifecycle.py's `work_item_self_retry_requested` deferral above) --
+        # consume it the same way `gates.auto_escalate_stuck` does, or a
+        # human-escalated agent that fixes the problem and retries silently
+        # stays `needs_human` forever (Kraft code-review finding).
+        await executor.resume_after_escalation(
+            st.db,
+            st.run_dirs,
+            work_item_id=wid,
+            cursor=cursor,
+            registry=st.registry,
+            policy=st.policy,
+            launch=deps.launch(st, row["repo"]),
+            bd_cwd=deps.bd_cwd(),
+            on_approve=deps._on_approve(st),
+        )
+
     deps.spawn(
         request.app,
         f"{wid}:escalate",
-        deps.guard(
-            st.db,
-            wid,
-            escalate.dispatch(
-                st.db,
-                st.run_dirs,
-                work_item_id=wid,
-                message=message,
-                launch=deps.launch(st, row["repo"]),
-            ),
-        ),
+        deps.guard(st.db, wid, _run_escalation()),
     )
     return {"id": wid, "status": "escalating"}
 
@@ -637,7 +676,7 @@ async def stop_escalation(wid: str, request: Request):
     needs_human at whatever it was stopped for -- only the turn ends."""
     st = request.app.state
     deps._work_item_row(st, wid)
-    running = _escalation_running(st, wid)
+    running = escalate.escalation_running(st.db, wid)
     if running is None:
         raise HTTPException(409, "no escalation turn is running")
     row = st.db.read(
