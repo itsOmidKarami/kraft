@@ -6,7 +6,7 @@ import { DraftDiff } from "../../components/DraftDiff";
 import { Row, RowText, SectionLabel, StatusGlyph, Tabs } from "../../components/ui";
 import { adapterOf } from "../../format";
 import { useStore } from "../../store";
-import type { TemplateNode, TemplateSummary } from "../../types";
+import type { TemplateNode, TemplateSummary, TemplateValidation } from "../../types";
 import "./templates.css";
 import { PageHead, PhoneHeader, usePhone, useResource } from "./shared";
 
@@ -185,6 +185,16 @@ function NodeForm({
   const [registry] = useResourceValue(() => api.getRegistry());
   const hooks = registry?.hooks ?? {};
   const tasks = node.tasks ?? [];
+  const [addingTask, setAddingTask] = useState(false);
+  const [pickedTask, setPickedTask] = useState("");
+  const taskOptions = Object.keys(hooks).filter((h) => !tasks.includes(h));
+
+  const addTask = () => {
+    if (!pickedTask) return;
+    onChange({ tasks: [...tasks, pickedTask] });
+    setAddingTask(false);
+    setPickedTask("");
+  };
 
   return (
     <div className="chain-node-form">
@@ -220,17 +230,46 @@ function NodeForm({
           </button>
         </div>
       ))}
-      <button
-        type="button"
-        className="btn btn-secondary"
-        onClick={() => {
-          const options = Object.keys(hooks).filter((h) => !tasks.includes(h));
-          const pick = window.prompt(`Add task (one of: ${options.join(", ")})`);
-          if (pick && options.includes(pick)) onChange({ tasks: [...tasks, pick] });
-        }}
-      >
-        + Add task
-      </button>
+      {addingTask ? (
+        <div className="chain-task-row">
+          <select
+            className="input"
+            aria-label="hook to add"
+            autoFocus
+            value={pickedTask}
+            onChange={(e) => setPickedTask(e.target.value)}
+          >
+            <option value="">choose a hook…</option>
+            {taskOptions.map((h) => (
+              <option key={h} value={h}>
+                {h}
+              </option>
+            ))}
+          </select>
+          <button type="button" className="btn btn-primary" disabled={!pickedTask} onClick={addTask}>
+            Add
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => {
+              setAddingTask(false);
+              setPickedTask("");
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="btn btn-secondary"
+          disabled={taskOptions.length === 0}
+          onClick={() => setAddingTask(true)}
+        >
+          + Add task
+        </button>
+      )}
 
       <div className="field">
         <label htmlFor="chain-gate-after">gate_after</label>
@@ -366,9 +405,7 @@ export function TemplatesPage() {
   const [tab, setTab] = useState<"yaml" | "diff">("yaml");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [validation, setValidation] = useState<{ valid: boolean; error: string | null } | null>(
-    null,
-  );
+  const [validation, setValidation] = useState<TemplateValidation | null>(null);
 
   // Reset the draft when the selected template changes underneath it.
   useEffect(() => {
@@ -394,7 +431,7 @@ export function TemplatesPage() {
     const t = setTimeout(() => {
       api
         .validateTemplate(current.id, nodes)
-        .then((r) => setValidation({ valid: r.valid, error: r.error }))
+        .then((r) => setValidation(r))
         .catch(() => {});
     }, 400);
     return () => clearTimeout(t);
@@ -613,6 +650,7 @@ export function TemplatesPage() {
             }
           />
           <NodeForm
+            key={selectedNode.id}
             node={selectedNode}
             index={selectedIndex}
             total={nodes.length}
@@ -652,36 +690,11 @@ export function TemplatesPage() {
           </div>
         }
       />
-      <div className="template-editor chain-editor">
-        <div className="template-list">
-          <SectionLabel>Templates</SectionLabel>
-          {templates.map((t) => (
-            <button
-              key={t.id}
-              className="facet-opt template-row"
-              aria-pressed={t.id === current.id}
-              onClick={() => setParams({ tpl: t.id })}
-            >
-              <span className="template-row-top">
-                <span className="template-row-name">{t.id}</span>
-                <span className="template-row-count">{t.nodes.length} nodes</span>
-              </span>
-              <span className="template-row-meta">
-                {gatesOf(t.nodes)} gates · used by {usedBy[t.id] ?? 0} items
-              </span>
-            </button>
-          ))}
-          <button className="btn btn-secondary" onClick={createTemplate}>
-            New
-          </button>
-          {validation && (
-            <div className="validation" data-valid={validation.valid}>
-              <span>{validation.valid ? "valid" : validation.error}</span>
-            </div>
-          )}
-        </div>
-
-        <div className="chain-middle">
+      <div className="chain-page">
+        {/* Full width, above both lower panes (screen 27): 12 node pills
+            wrapped into 8 rows when the graph lived inside the ~700px
+            middle column of the three-column grid below. */}
+        <div className="chain-graph-row">
           <NodeGraph
             nodes={nodes}
             selected={nodeId}
@@ -693,48 +706,95 @@ export function TemplatesPage() {
             <Flag size={11} weight="fill" /> gate after · <ArrowsClockwise size={11} /> fix loop ·{" "}
             <Shield size={11} /> auto-escalate · drag to reorder · ⊕ inserts
           </p>
-          {selectedNode ? (
-            <NodeForm
-              node={selectedNode}
-              index={selectedIndex}
-              total={nodes.length}
-              loopNames={loopNames}
-              earlierIds={earlierIds}
-              onChange={patchNode}
-              onRemove={removeNode}
-            />
-          ) : (
-            <p className="empty">select a node</p>
-          )}
         </div>
 
-        <div className="chain-yaml-pane">
-          <div className="field-hint">{current.id}.yaml live · edits either side</div>
-          <Tabs
-            tabs={[
-              { id: "yaml", label: "yaml" },
-              { id: "diff", label: "diff vs saved" },
-            ]}
-            value={tab}
-            onChange={(id) => setTab(id as "yaml" | "diff")}
-          />
-          {tab === "yaml" ? (
-            <>
-              <textarea
-                ref={textareaRef}
-                aria-label="chain yaml"
-                className="input mono template-yaml"
-                value={yamlText}
-                onChange={(e) => onYamlChange(e.target.value)}
+        <div className="template-editor chain-editor">
+          <div className="template-list">
+            <SectionLabel>Templates</SectionLabel>
+            {templates.map((t) => (
+              <button
+                key={t.id}
+                className="facet-opt template-row"
+                aria-pressed={t.id === current.id}
+                onClick={() => setParams({ tpl: t.id })}
+              >
+                <span className="template-row-top">
+                  <span className="template-row-name">{t.id}</span>
+                  <span className="template-row-count">{t.nodes.length} nodes</span>
+                </span>
+                <span className="template-row-meta">
+                  {gatesOf(t.nodes)} gates · used by {usedBy[t.id] ?? 0} items
+                </span>
+              </button>
+            ))}
+            <button className="btn btn-secondary" onClick={createTemplate}>
+              New
+            </button>
+            {validation && (
+              <div className="validation" data-valid={validation.valid}>
+                {validation.valid ? (
+                  <span>valid</span>
+                ) : validation.unresolved?.length ? (
+                  // Per node and per task, not per repo (settings.py's own
+                  // comment on why: a repo-level "unresolvable" bit told the
+                  // operator nothing the node id doesn't already say better).
+                  validation.unresolved.map((u) => (
+                    <span key={`${u.node}-${u.task}`}>
+                      {u.node}: {u.task} has no plugin bound
+                    </span>
+                  ))
+                ) : (
+                  <span>{validation.error}</span>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="chain-middle">
+            {selectedNode ? (
+              <NodeForm
+                key={selectedNode.id}
+                node={selectedNode}
+                index={selectedIndex}
+                total={nodes.length}
+                loopNames={loopNames}
+                earlierIds={earlierIds}
+                onChange={patchNode}
+                onRemove={removeNode}
               />
-              {yamlError && <p className="form-error">{yamlError}</p>}
-            </>
-          ) : (
-            <DraftDiff
-              before={serializeNodes(current.id, current.nodes)}
-              after={serializeNodes(current.id, nodes)}
+            ) : (
+              <p className="empty">select a node</p>
+            )}
+          </div>
+
+          <div className="chain-yaml-pane">
+            <div className="field-hint">{current.id}.yaml live · edits either side</div>
+            <Tabs
+              tabs={[
+                { id: "yaml", label: "yaml" },
+                { id: "diff", label: "diff vs saved" },
+              ]}
+              value={tab}
+              onChange={(id) => setTab(id as "yaml" | "diff")}
             />
-          )}
+            {tab === "yaml" ? (
+              <>
+                <textarea
+                  ref={textareaRef}
+                  aria-label="chain yaml"
+                  className="input mono template-yaml"
+                  value={yamlText}
+                  onChange={(e) => onYamlChange(e.target.value)}
+                />
+                {yamlError && <p className="form-error">{yamlError}</p>}
+              </>
+            ) : (
+              <DraftDiff
+                before={serializeNodes(current.id, current.nodes)}
+                after={serializeNodes(current.id, nodes)}
+              />
+            )}
+          </div>
         </div>
       </div>
     </>

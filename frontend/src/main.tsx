@@ -1,12 +1,17 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { App } from "./App";
 import { useStore } from "./store";
 import * as api from "./api";
 import { applyDensity, applyTheme } from "./theme";
 import "./nocturne.css";
 import "./palettes.css";
+// styles.css must be imported before App: ES imports execute depth-first in
+// source order, and App's import graph pulls in every views/**/*.css page
+// stylesheet. Importing styles.css after App made it the last stylesheet
+// bundled, so it won a tie against any page rule of equal specificity —
+// 209 page rules were silently inert. Kraft-9fj8.
 import "./styles.css";
+import { App } from "./App";
 import { connectEvents } from "./ws";
 
 async function boot() {

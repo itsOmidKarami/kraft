@@ -858,6 +858,14 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 .doc-icon { color: var(--color-accent); }
 .doc-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .doc-title { font-size: 14px; }
+/* Ellipsize one-line, Documents pane only. Kraft-l9lj: overflow-wrap and
+   white-space are different properties -- a bare `.doc-title { white-space:
+   nowrap }` would also catch Changes' `.change-row .doc-title`, which sets
+   `overflow-wrap: anywhere` to deliberately wrap long file paths. Scoping to
+   `.linked-docs` (the Documents pane's root) leaves that alone. */
+.linked-docs .doc-title {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .doc-path {
   font-size: 11px; color: var(--color-text-muted);
   font-family: ui-monospace, Menlo, monospace;
@@ -1025,8 +1033,18 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 .log-modal .log-hook { font-family: inherit; font-size: 16px; font-weight: 500; color: var(--color-text); }
 .log-modal .log-count { margin-left: auto; }
 
+/* Kraft-061w: there is no `.pane` rule anywhere, so `.log-body`'s `flex: 1`
+   below has no flex parent and no bounded height -- it never becomes a
+   scroller, follow's `scrollTop = scrollHeight` is a no-op because
+   `.log-body` has nothing to scroll, and `.log-head`'s `position: sticky`
+   (above) has nothing to stick within. Give the pane a height and a column
+   flex layout so its one designated scroll region can actually bound and
+   scroll. Scoped to `.log-pane`, not the bare `.pane`, since `.doc-pane` and
+   `.diff-pane` reuse the old modal markup (`.doc-modal-body`/`.diff-body`)
+   and haven't been checked against this -- out of scope for this bead. */
+.pane.log-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .log-body {
-  padding: 12px 22px 16px; overflow: auto; flex: 1;
+  padding: 12px 22px 16px; overflow: auto; flex: 1; min-height: 0;
   font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.55;
 }
 .log-line {
@@ -1201,6 +1219,12 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 .save-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .save-row .btn { font-size: 13px; }
 .save-hint { font-size: 11px; color: var(--color-text-muted); margin-left: auto; }
+/* .save-row is right for a hint trailing a Save button -- wrong when the
+   "hint" is actually the label of the control beside it: margin-left: auto
+   shoves the toggle to one edge and its own description to the other, ~700px
+   of nothing between them. .field-row is the same row, minus that push, for
+   every .save-row that wraps a Switch instead of Save/Discard. Kraft-wnr2. */
+.save-row.field-row .save-hint { margin-left: 0; }
 
 .readout { color: var(--color-neutral-500); display: flex; align-items: center; }
 .probe {
@@ -1228,6 +1252,24 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
   border-color: var(--color-accent-700); background: var(--color-accent-900); color: var(--color-accent-300);
 }
 .facet-count { margin-left: auto; font-size: 11px; color: var(--color-text-muted); white-space: nowrap; }
+/* Steering row: name ellipsized on one line, meta beneath it. Kraft-yumr --
+   same shape as templates.css's `.facet-opt.template-row`, and the same
+   reason for two classes rather than overriding `.facet-opt` itself (Chains'
+   phone template list still needs its flex-row layout). Without this, the
+   bare `{f.name}` text node is an anonymous flex item with no min-width: 0
+   to shrink against, so a long name wraps one hyphen-segment per line, and
+   `.facet-count`'s `white-space: nowrap` sets an enormous min-content width
+   that the row (and `.template-list`, which has no min-width: 0 either)
+   can't clip -- the excess paints across the editor pane. */
+.facet-opt.steering-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  text-align: left;
+}
+.steering-row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.steering-row .facet-count { margin-left: 0; white-space: normal; }
 .template-draft { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 /* `textarea.` is load-bearing: nocturne.css's `textarea.input { min-height: 90px }`
    is one element + one class and outranks a bare class selector regardless of
@@ -1442,7 +1484,7 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; w
   .detail { padding: 16px 12px 24px; }
   .detail-title { font-size: 22px; }
 
-  .row, .doc-row, .event-row, .hook-row, .cap-row, .node-row, .repo-row {
+  .row, .doc-row, .event-row, .hook-row, .cap-row, .node-row.node-row, .repo-row.repo-row {
     background: var(--hairline-24);
   }
   .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1450,8 +1492,17 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; w
      wrapped. Stack each row into a card; `data-label` (added on the JSX
      spans) supplies the per-field caption via ::before, so this is a CSS-only
      reflow of markup that already carries every value it needs. */
-  .node-head, .repo-head { display: none; }
-  .node-row, .repo-row { grid-template-columns: 1fr; gap: 4px; padding: 12px 0; }
+  /* Doubled too: the head is `.node-row .node-head`, and analytics.css's
+     `.node-row { display: grid }` now wins the tie against a single-class
+     `display: none` here. */
+  .node-head.node-head, .repo-head.repo-head { display: none; }
+  /* Doubled classes: analytics.css declares `background`, `gap`, `padding` and
+     `grid-template-columns` on `.node-row, .repo-row` at equal specificity, and
+     since Kraft-9fj8 it is bundled after styles.css it now wins the tie -- the
+     phone cards stayed a fixed-px 6-column desktop grid and overflowed. Give
+     the media query the specificity it was relying on bundle order for, per
+     the spec's §1 trap; do not revert the import order. */
+  .node-row.node-row, .repo-row.repo-row { grid-template-columns: 1fr; gap: 4px; padding: 12px 0; }
   .node-row > span, .repo-row > span {
     display: flex; justify-content: space-between; align-items: center; text-align: left;
   }
