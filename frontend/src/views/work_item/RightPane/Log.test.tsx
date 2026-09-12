@@ -16,10 +16,58 @@ const session = (over: Partial<WorkerSession> = {}): WorkerSession =>
 
 const line = (n: number): LogLine => ({ n, t: null, src: "stdout", text: `line ${n}` });
 
+/** Kraft-061w: jsdom lays nothing out, so `.log-body`'s real scrollHeight is
+ *  always 0 -- that alone can't tell a fixed bounded scroller from a plain
+ *  block that grows forever. Stubbing scrollHeight to grow with each line
+ *  pins the actual behaviour this bug was about: follow drives scrollTop to
+ *  scrollHeight on every new line, not just once at mount. */
+class FakeES {
+  static instances: FakeES[] = [];
+  url: string;
+  readyState = 1;
+  onmessage: ((e: { data: string }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  listeners: Record<string, (() => void)[]> = {};
+  close = vi.fn();
+  constructor(url: string) {
+    this.url = url;
+    FakeES.instances.push(this);
+  }
+  addEventListener(type: string, fn: () => void) {
+    (this.listeners[type] ??= []).push(fn);
+  }
+}
+
 beforeEach(() => {
   useStore.setState({ sessionsByItem: { w1: [session()] }, connection: "open" } as never);
+  FakeES.instances = [];
+  vi.stubGlobal("EventSource", FakeES as unknown as typeof EventSource);
 });
 afterEach(() => vi.restoreAllMocks());
+
+describe("RightPane · Log · follow", () => {
+  it("pins scrollTop to scrollHeight as lines stream in while following", async () => {
+    // "running" makes `live`, and therefore the default `follow` state,
+    // true -- this is the case the bug report described: "logs follow but
+    // the view doesn't auto-scroll".
+    useStore.setState({ sessionsByItem: { w1: [session({ status: "running" })] } } as never);
+    vi.spyOn(api, "getLogLines").mockResolvedValue({ session_id: "s1", status: "running", lines: [] });
+    render(<Log sessionId="s1" />);
+
+    const body = document.querySelector(".log-body") as HTMLElement;
+    Object.defineProperty(body, "scrollHeight", { configurable: true, get: () => 1000 });
+
+    const es = FakeES.instances[0];
+    act(() => es.onmessage?.({ data: JSON.stringify(line(0)) }));
+    await screen.findByText("line 0");
+    expect(body.scrollTop).toBe(1000);
+
+    Object.defineProperty(body, "scrollHeight", { configurable: true, get: () => 2000 });
+    act(() => es.onmessage?.({ data: JSON.stringify(line(1)) }));
+    await screen.findByText("line 1");
+    expect(body.scrollTop).toBe(2000);
+  });
+});
 
 describe("RightPane · Log", () => {
   it("shows every line with no cap", async () => {

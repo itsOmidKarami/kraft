@@ -49,6 +49,26 @@ describe("styles.css specificity", () => {
   });
 });
 
+// Kraft-9fj8: ES imports execute depth-first in source order, so App's whole
+// import graph (every views/**/*.css page stylesheet) runs before whatever
+// main.tsx imports after App. styles.css used to be one of those "after"
+// imports, making it the last stylesheet bundled -- it won every equal-
+// specificity tie against a page rule, silently. jsdom can't exercise the
+// cascade itself (no layout engine), so this pins the one thing that can
+// regress it back: the source order of the two import lines.
+describe("main.tsx import order", () => {
+  it("imports styles.css before App, so App's page stylesheets are bundled first", () => {
+    const main = readFileSync(join(here, "main.tsx"), "utf-8");
+
+    const stylesPos = main.indexOf('import "./styles.css"');
+    const appPos = main.indexOf('import { App } from "./App"');
+
+    expect(stylesPos).toBeGreaterThan(-1);
+    expect(appPos).toBeGreaterThan(-1);
+    expect(stylesPos).toBeLessThan(appPos);
+  });
+});
+
 describe("page stylesheet overrides", () => {
   it("gives the chains and plugins grids a specificity that beats .template-editor", () => {
     const chains = readFileSync(join(here, "views/settings/templates.css"), "utf-8");
