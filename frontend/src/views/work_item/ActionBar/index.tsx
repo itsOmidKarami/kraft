@@ -15,6 +15,7 @@ import {
 import { GateCard, rejectTarget } from "./GateCard";
 import { PhoneComposer } from "../PhoneComposer";
 import { RateLimitRow } from "./RateLimitRow";
+import type { InspectorTab } from "../selection";
 import { useActionBar } from "./useActionBar";
 import { usePhone } from "../usePhone";
 
@@ -66,15 +67,15 @@ export function ActionBar({
   sessions,
   events,
   onReviewChanges,
-  onReadDoc,
   onEditChain,
+  reviewHref,
 }: {
   item: WorkItem;
   sessions: WorkerSession[];
   events: KraftEvent[];
   onReviewChanges: () => void;
-  onReadDoc: () => void;
   onEditChain: () => void;
+  reviewHref: (nodeId: string, tab: InspectorTab, id: string) => string;
 }) {
   const { state: rawState } = deriveState(item, sessions, events);
   const escalationTurns = sessions
@@ -581,8 +582,7 @@ export function ActionBar({
           open={open === "reject"}
           onOpen={() => setOpen("reject")}
           onCancel={() => setOpen(null)}
-          onReadDoc={onReadDoc}
-          onReviewChanges={onReviewChanges}
+          reviewHref={reviewHref}
         />
       )}
       {state === "escalated" && latestTurn && (

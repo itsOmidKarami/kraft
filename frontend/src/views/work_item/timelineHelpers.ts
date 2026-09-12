@@ -9,6 +9,10 @@ import type { KraftEvent } from "../../types";
 
 export function detailOf(e: KraftEvent): string | null {
   const p = e.payload as Record<string, unknown>;
+  // Kraft-qqz8: "3 of 6" beside the "Started task 3 — <title>" titleOf gives it.
+  if (e.type === "task_progress" && typeof p.task === "number" && typeof p.total === "number") {
+    return `${p.task} of ${p.total}`;
+  }
   if (e.type === "gate_rejected" && typeof p.note === "string") return p.note;
   if (e.type === "work_item_needs_human" && typeof p.reason === "string") return p.reason;
   if (e.type === "work_item_rate_limited" && typeof p.retry_at === "string") {

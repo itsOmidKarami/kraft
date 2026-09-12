@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ArrowSquareOut, Check, Flag } from "@phosphor-icons/react";
 import * as api from "../../../api";
 import type { WorkItem } from "../../../types";
+import type { InspectorTab } from "../selection";
 import { Composer } from "./Composer";
 import { useActionBar } from "./useActionBar";
 
@@ -26,6 +27,14 @@ export function rejectTarget(item: WorkItem, gate: string): string | null {
   return to && nodes.slice(0, at).some((n) => n.id === to) ? to : null;
 }
 
+/** The node whose `gate_after` is this gate — where "Review spec"/"Review
+ *  changes" should land, which is not necessarily the item's *current* node
+ *  (a later node may already be running while this gate waits). */
+function gateNodeId(item: WorkItem, gate: string): string | null {
+  const nodes = item.chain_definition?.nodes ?? [];
+  return nodes.find((n) => n.gate_after === gate)?.id ?? null;
+}
+
 /** The gate card (screen 19, "under the header, above the bar"). Replaces
  *  `Gate.tsx` + `ArtifactModal` for the item page's own gate state; reuses
  *  `.attention-card`/`.attention-head`/`-title`/`-sub`/`.gate-actions` from
@@ -37,20 +46,19 @@ export function GateCard({
   open,
   onOpen,
   onCancel,
-  onReadDoc,
-  onReviewChanges,
+  reviewHref,
 }: {
   item: WorkItem;
   gate: string;
   open: boolean;
   onOpen: () => void;
   onCancel: () => void;
-  onReadDoc: () => void;
-  onReviewChanges: () => void;
+  reviewHref: (nodeId: string, tab: InspectorTab, id: string) => string;
 }) {
   const { busy, err, run } = useActionBar(item.id);
   const [note, setNote] = useState("");
   const target = rejectTarget(item, gate);
+  const node = gateNodeId(item, gate) ?? item.current_node_id ?? "";
 
   return (
     <div className="card attention-card gate-card" data-gate={gate} data-testid="gate-card">
@@ -63,17 +71,27 @@ export function GateCard({
           </span>
         </div>
       </div>
-      {(item.gate_artifact || gate === "human_review_approval") && (
-        <div className="gate-artifacts">
-          {item.gate_artifact && (
-            <button className="btn btn-secondary" onClick={onReadDoc}>
-              {ARTIFACT_LABELS[gate] ?? "Read document"}
-            </button>
-          )}
+      {/* Always shown, not just when an artifact exists: an absent one is
+          rendered disabled with "not written yet" rather than hidden (G5-05
+          — a gap the punch list flagged as a loose sentence instead). */}
+      <div className="gate-artifacts">
+          {gate !== "human_review_approval" &&
+            (item.gate_artifact ? (
+              // No document id to hand `reviewHref` — `Documents.tsx` already
+              // matches `item.gate_artifact` by repo path and selects it
+              // itself once the list lands (Kraft-esc); don't rebuild that.
+              <a className="btn btn-secondary" href={reviewHref(node, "documents", "")}>
+                {ARTIFACT_LABELS[gate] ?? "Read document"}
+              </a>
+            ) : (
+              <span className="btn btn-secondary" aria-disabled="true" title="not written yet">
+                {ARTIFACT_LABELS[gate] ?? "Read document"}
+              </span>
+            ))}
           {gate === "human_review_approval" && (
-            <button className="btn btn-secondary" onClick={onReviewChanges}>
+            <a className="btn btn-secondary" href={reviewHref(node, "changes", "")}>
               Review changes
-            </button>
+            </a>
           )}
           {item.mr_ref && (
             <a
@@ -86,7 +104,6 @@ export function GateCard({
             </a>
           )}
         </div>
-      )}
       {/* Deferred minor findings and done_with_concerns notes, one panel --
           what the reviewer let through, shown where the merge is decided. */}
       {((item.deferred_findings?.length ?? 0) > 0 || (item.concerns?.length ?? 0) > 0) && (

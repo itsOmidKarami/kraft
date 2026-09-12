@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
+import * as api from "../../api";
 import { Row, RowState, RowText, StatusGlyph } from "../../components/ui";
 import { until } from "../../format";
 import { useStore } from "../../store";
-import type { SessionStatus } from "../../types";
+import type { SessionStatus, WorkItemDiff } from "../../types";
 import { ActionBar } from "./ActionBar";
 import { GraphSplit } from "./GraphSplit";
 import { Header } from "./Header";
@@ -12,7 +13,7 @@ import { PhoneNode, PhoneStageList, PhoneTopBar } from "./Phone";
 import { Log } from "./RightPane/Log";
 import { RightPane } from "./RightPane";
 import { StageGraph } from "./StageGraph";
-import { EMPTY_SELECTION, type InspectorTab, type Selection } from "./selection";
+import { useItemUrlState } from "./useItemUrlState";
 import { usePhone } from "./usePhone";
 import "./work_item.css";
 
@@ -31,37 +32,6 @@ function repoGlyphStatus(state: string): SessionStatus {
   return "pending";
 }
 
-/** The selected node id, backed by the URL hash `#node=<id>` (common rules:
- *  "the selected node is the URL hash"). `useLocation`/`useNavigate` keep
- *  this a normal history entry, so back/forward moves between selections.
- *  The third element is whether the hash itself named a node, as opposed to
- *  `defaultNodeId` filling in for an empty hash — the phone page (m05) only
- *  opens full-screen once a stage was actually tapped, not just because the
- *  item has a current node. */
-function useNodeSelection(defaultNodeId: string | null): [string | null, (id: string) => void, boolean] {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const match = /(?:^|#)node=([^&]+)/.exec(location.hash);
-  const fromHash = match ? decodeURIComponent(match[1]) : null;
-  const select = (id: string) => navigate({ hash: `node=${encodeURIComponent(id)}` });
-  return [fromHash ?? defaultNodeId, select, fromHash != null];
-}
-
-/** Maximize is a layout state of the page, not of the pane (43), and it is
- *  kept in the URL so a reload lands back in it. Same hash as the selected
- *  node: `#node=implementation&log=max`. */
-function useMaximized(): [boolean, (on: boolean) => void] {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const params = new URLSearchParams(location.hash.replace(/^#/, ""));
-  const set = (on: boolean) => {
-    const next = new URLSearchParams(location.hash.replace(/^#/, ""));
-    on ? next.set("log", "max") : next.delete("log");
-    navigate({ hash: next.toString() });
-  };
-  return [params.get("log") === "max", set];
-}
-
 export function WorkItemDetail() {
   const { id = "" } = useParams();
   const item = useStore((s) => s.workItems[id]);
@@ -69,12 +39,13 @@ export function WorkItemDetail() {
   const events = useStore((s) => s.eventsByItem[id] ?? []);
   const hydrateItem = useStore((s) => s.hydrateItem);
   const [loadErr, setLoadErr] = useState<string | null>(null);
-  const [tab, setTab] = useState<InspectorTab>("tasks");
-  const [selectionByTab, setSelectionByTab] = useState<Record<InspectorTab, Selection>>(EMPTY_SELECTION);
-  const [maximized, setMaximized] = useMaximized();
+  const [diff, setDiff] = useState<WorkItemDiff | null>(null);
+  const [diffError, setDiffError] = useState<string | null>(null);
   const phone = usePhone();
 
-  const [nodeId, selectNode, nodeExplicit] = useNodeSelection(item?.current_node_id ?? null);
+  const { nodeId, nodeExplicit, tab, selection, maximized, selectNode, setTab, select, setMaximized, goTo, goToNode, reviewHref } =
+    useItemUrlState(item?.current_node_id ?? null);
+  const location = useLocation();
 
   useEffect(() => {
     if (!maximized) return;
@@ -97,51 +68,45 @@ export function WorkItemDetail() {
     return () => clearInterval(t);
   }, [id, hydrateItem]);
 
-  // Defaulting the Tasks selection to the selected node's newest session, so
-  // the log pane is never blank the moment a tab opens.
+  // One fetch for the whole page: `Inspector/Changes.tsx`'s tree and
+  // `RightPane/Diff.tsx` used to each call `getWorkItemDiff` on their own —
+  // two-way sync between them needs both sides looking at the same list.
   useEffect(() => {
-    if (selectionByTab.tasks.id) return;
+    let alive = true;
+    api
+      .getWorkItemDiff(id)
+      .then((d) => alive && setDiff(d))
+      .catch((e) => alive && setDiffError(e instanceof Error ? e.message : String(e)));
+    return () => {
+      alive = false;
+    };
+  }, [id]);
+
+  // Defaulting the Tasks selection to the selected node's newest session, so
+  // the log pane is never blank the moment a tab opens. Only while the Tasks
+  // tab is the one actually showing: `select` writes whichever key the
+  // *current* tab owns, so firing this from another tab would clobber that
+  // tab's own selection.
+  useEffect(() => {
+    if (tab !== "tasks" || selection.id) return;
     const latest = [...sessions]
       .filter((s) => s.node_id === nodeId)
       .sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
-    if (latest) setSelectionByTab((prev) => ({ ...prev, tasks: { kind: "session", id: latest.id } }));
+    if (latest) select({ kind: "session", id: latest.id });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodeId, sessions.length]);
+  }, [tab, nodeId, sessions.length]);
 
-  const setSelection = (s: Selection) => setSelectionByTab((prev) => ({ ...prev, [tab]: s }));
-  const goToLog = (sessionId: string) => {
-    setTab("tasks");
-    setSelectionByTab((prev) => ({ ...prev, tasks: { kind: "session", id: sessionId } }));
-  };
+  const goToLog = (sessionId: string) => goTo("tasks", sessionId);
   // On the phone list (m04) "Review changes" has no split to switch a tab
   // in — it has to open the node page (m05) on the Changes tab instead.
   const goToChanges = () => {
-    setTab("changes");
-    if (phone && item?.current_node_id) {
-      selectNode(item.current_node_id);
-      setSelectionByTab(EMPTY_SELECTION);
-    }
-  };
-  // The gate card's "Read <doc>" — same tab-switch shape as goToChanges,
-  // for the document the gate is a decision about. Clears the Documents
-  // selection every time, not just on phone: a stale selection from an
-  // earlier gate's artifact would otherwise survive the tab switch and
-  // Documents.tsx's own "select the first once nothing is selected" only
-  // fires when `selected` is null (Kraft-esc's own idiom for a fresh stop).
-  const goToDocuments = () => {
-    setTab("documents");
-    setSelectionByTab((prev) => ({ ...prev, documents: EMPTY_SELECTION.documents }));
-    if (phone && item?.current_node_id) {
-      selectNode(item.current_node_id);
-    }
+    if (phone && item?.current_node_id) goToNode("changes", item.current_node_id);
+    else setTab("changes");
   };
   // The not_started bar's "Edit chain" (06): opens the Config tab.
   const goToConfig = () => {
-    setTab("config");
-    if (phone && item?.current_node_id) {
-      selectNode(item.current_node_id);
-      setSelectionByTab(EMPTY_SELECTION);
-    }
+    if (phone && item?.current_node_id) goToNode("config", item.current_node_id);
+    else setTab("config");
   };
 
   if (loadErr && !item) {
@@ -155,7 +120,7 @@ export function WorkItemDetail() {
 
   // m05: tapping a stage on the phone list opens this full-screen instead
   // of the desktop split — a real hash-selected node, not just the item's
-  // current one (`nodeExplicit`, `useNodeSelection` above).
+  // current one (`nodeExplicit`, from `useItemUrlState` above).
   if (phone && nodeExplicit && nodeId) {
     return (
       <div className="detail item-page">
@@ -166,14 +131,18 @@ export function WorkItemDetail() {
           nodeId={nodeId}
           tab={tab}
           onTabChange={setTab}
-          selection={selectionByTab[tab]}
-          onSelect={setSelection}
+          selection={selection}
+          onSelect={select}
         />
       </div>
     );
   }
 
-  const currentLogSessionId = selectionByTab.tasks.kind === "session" ? selectionByTab.tasks.id : null;
+  // The phone list's own log summary is always the Tasks tab's session,
+  // regardless of which tab the hash currently names — read that key
+  // directly rather than through `selection`, which only ever reflects the
+  // active tab.
+  const currentLogSessionId = new URLSearchParams(location.hash.replace(/^#/, "")).get("session");
 
   // Maximize is a page layout, not the pane's own state (43): the header,
   // repos panel, action bar, graph and inspector all give way to a 36px
@@ -201,7 +170,10 @@ export function WorkItemDetail() {
             sessions={sessions}
             nodeId={nodeId}
             tab={tab}
-            selection={selectionByTab[tab]}
+            selection={selection}
+            diff={diff}
+            diffError={diffError}
+            onSelect={select}
             onViewLog={goToLog}
             maximized
             onToggleMaximize={() => setMaximized(false)}
@@ -248,20 +220,13 @@ export function WorkItemDetail() {
         sessions={sessions}
         events={events}
         onReviewChanges={goToChanges}
-        onReadDoc={goToDocuments}
         onEditChain={goToConfig}
+        reviewHref={reviewHref}
       />
 
       {phone ? (
         <>
-          <PhoneStageList
-            item={item}
-            events={events}
-            onSelect={(id) => {
-              selectNode(id);
-              setSelectionByTab(EMPTY_SELECTION);
-            }}
-          />
+          <PhoneStageList item={item} events={events} onSelect={selectNode} />
           {currentLogSessionId && (
             <div className="phone-node-log">
               <p className="section-label">Log · {item.current_node_id}</p>
@@ -271,16 +236,7 @@ export function WorkItemDetail() {
         </>
       ) : (
         <GraphSplit
-          graph={
-            <StageGraph
-              item={item}
-              selected={nodeId}
-              onSelect={(id) => {
-                selectNode(id);
-                setSelectionByTab(EMPTY_SELECTION);
-              }}
-            />
-          }
+          graph={<StageGraph item={item} selected={nodeId} onSelect={selectNode} />}
           lower={
             <div className="item-split">
               <Inspector
@@ -290,8 +246,10 @@ export function WorkItemDetail() {
                 nodeId={nodeId}
                 tab={tab}
                 onTabChange={setTab}
-                selection={selectionByTab[tab]}
-                onSelect={setSelection}
+                selection={selection}
+                onSelect={select}
+                diff={diff}
+                diffError={diffError}
               />
               <div className="item-right-pane">
                 <RightPane
@@ -300,7 +258,10 @@ export function WorkItemDetail() {
                   sessions={sessions}
                   nodeId={nodeId}
                   tab={tab}
-                  selection={selectionByTab[tab]}
+                  selection={selection}
+                  diff={diff}
+                  diffError={diffError}
+                  onSelect={select}
                   onViewLog={goToLog}
                   maximized={false}
                   onToggleMaximize={() => setMaximized(true)}

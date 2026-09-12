@@ -705,6 +705,17 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
      with the hero as its own right column. WI-1's breakpoint block already
      centres and caps the content at >= 1440. */
 }
+/* The item page is exactly its container (48): `main` scrolls every other
+   view, and gets nothing to scroll here, so the header and action bar stay
+   put and the two panes below do the scrolling. Desktop-only (§1's scope) —
+   below 768 the phone item page has no inner scroller and needs `main` to
+   scroll it, so this must not clip it there. */
+@media (min-width: 768px) {
+  .detail.item-page {
+    height: 100%; min-height: 0; overflow: hidden;
+    padding-bottom: 0;
+  }
+}
 /* Meta + title + description left, hero right (11 · 38). */
 .detail-head {
   display: grid; grid-template-columns: minmax(0, 1fr) auto;
@@ -1267,10 +1278,12 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; }
 
 @media (max-width: 1439px) {
   .board-row { grid-template-columns: 22px minmax(0, 1fr) 200px 150px; }
+  .item-split { grid-template-columns: 360px minmax(0, 1fr); }
 }
 
 @media (max-width: 1279px) {
   .board-row { grid-template-columns: 22px minmax(0, 1fr) 160px 130px; }
+  .item-split { grid-template-columns: 320px minmax(0, 1fr); }
   .peek-pane { width: 380px; }
   /* The pane floats over the rows: dim what it covers (46). */
   .peek-scrim {
@@ -1315,6 +1328,9 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; }
      last. So child 4 keeps the 120px track and the chain is dropped. */
   .board-row { grid-template-columns: 22px minmax(0, 1fr) 120px; }
   .board-row > .chain-bar.sm { display: none; }
+  /* Stacked (47): inspector tabs on top, pane below, one scroller each. */
+  .item-split { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .inspector { border-right: 0; border-bottom: 1px solid var(--color-neutral-800); padding-right: 0; max-height: 40vh; }
   /* Only the node text goes -- the Archive button, Copy-id overflow menu
      and fix/capped/retry tags are siblings in this column, not the node
      text, and stay put (§1: buttons hide last). */
@@ -1338,6 +1354,7 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; }
 
 @media (max-height: 719px) {
   .app-sidebar-foot { display: none; }
+  .detail-title { font-size: 20px; }
 }
 
 /* ══ phone (design 1n) ════════════════════════════════════════════════════

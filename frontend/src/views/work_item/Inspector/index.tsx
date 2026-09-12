@@ -1,6 +1,6 @@
 import { Tabs } from "../../../components/ui";
 import { elapsed } from "../../../format";
-import type { KraftEvent, WorkerSession, WorkItem } from "../../../types";
+import type { KraftEvent, WorkerSession, WorkItem, WorkItemDiff } from "../../../types";
 import { Changes } from "./Changes";
 import { Config } from "./Config";
 import { Documents } from "./Documents";
@@ -29,6 +29,8 @@ export function Inspector({
   onTabChange,
   selection,
   onSelect,
+  diff,
+  diffError,
 }: {
   item: WorkItem;
   sessions: WorkerSession[];
@@ -38,6 +40,8 @@ export function Inspector({
   onTabChange: (t: InspectorTab) => void;
   selection: Selection;
   onSelect: (s: Selection) => void;
+  diff: WorkItemDiff | null;
+  diffError: string | null;
 }) {
   const nodeSessions = sessions.filter((s) => s.node_id === nodeId);
   const running = nodeSessions.find((s) => s.status === "running");
@@ -73,7 +77,8 @@ export function Inspector({
         )}
         {tab === "changes" && (
           <Changes
-            workItemId={item.id}
+            diff={diff}
+            diffError={diffError}
             selected={selection.kind === "file" ? selection.id : null}
             onSelect={(id) => onSelect({ kind: "file", id })}
           />
