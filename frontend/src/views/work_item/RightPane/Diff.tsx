@@ -1,11 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
-import * as api from "../../../api";
+import { useEffect, useMemo, useRef } from "react";
+import { ArrowsOutSimple } from "@phosphor-icons/react";
 import type { DiffFile, WorkItemDiff } from "../../../types";
+import { fileKey, filePath, fileSection } from "../selection";
 
 /**
  * Right pane · Changes (UI v2 · 05, 13): `DiffModal`'s file-chunking and
  * truncation logic, without the dialog framing. `selectedFile` (set by
- * `Inspector/Changes.tsx`) opens and scrolls to that file's `<details>`.
+ * `Inspector/Changes.tsx`) opens and scrolls to that file's `<details>`. The
+ * diff is fetched once, in `index.tsx`, and passed down here and to the
+ * tree — this pane used to fetch its own copy.
  */
 
 const lineClass = (line: string) =>
@@ -101,32 +104,82 @@ function rowsOf(
 }
 
 export function Diff({
-  workItemId,
+  diff,
+  diffError,
   selectedFile,
+  onVisibleFile,
+  maximized,
+  onToggleMaximize,
 }: {
-  workItemId: string;
+  diff: WorkItemDiff | null;
+  diffError: string | null;
   selectedFile?: string | null;
+  /** Two-way sync (G4-05): the pane's own scroll moves the tree's
+   *  highlight. Called with a section-qualified key (`selection.ts`'s
+   *  `fileKey`), not a bare path. Omitted on the phone page, which has no
+   *  tree beside it. */
+  onVisibleFile?: (key: string) => void;
+  maximized?: boolean;
+  onToggleMaximize?: () => void;
 }) {
-  const [diff, setDiff] = useState<WorkItemDiff | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    api
-      .getWorkItemDiff(workItemId)
-      .then((d) => alive && setDiff(d))
-      .catch((e) => alive && setErr(e instanceof Error ? e.message : String(e)));
-    return () => {
-      alive = false;
-    };
-  }, [workItemId]);
+  const rootRef = useRef<HTMLDivElement>(null);
+  // Scrolling the pane moves the tree highlight (48). The guard stops the
+  // loop: a selection-driven scrollIntoView must not re-drive the selection.
+  const scrolling = useRef(false);
+  // The other direction: a selection caused by the observer (user scrolled
+  // past a file boundary) must not then scrollIntoView and snap the pane.
+  const observerSelected = useRef<string | null>(null);
 
   useEffect(() => {
     if (!selectedFile) return;
-    document
-      .querySelector(`[data-diff-file="${CSS.escape(selectedFile)}"]`)
-      ?.scrollIntoView({ block: "nearest" });
+    if (observerSelected.current === selectedFile) {
+      observerSelected.current = null;
+      return;
+    }
+    scrolling.current = true;
+    // Scoped to the selection's own section: the same path can appear both
+    // in-flight and landed, and an unscoped query always found the first.
+    rootRef.current
+      ?.querySelector(
+        `[data-section="${fileSection(selectedFile)}"] [data-file-header][data-file-path="${CSS.escape(filePath(selectedFile))}"]`,
+      )
+      ?.scrollIntoView({ block: "start" });
+    const t = setTimeout(() => {
+      scrolling.current = false;
+    }, 400);
+    return () => clearTimeout(t);
   }, [selectedFile, diff]);
+
+  // `onVisibleFile` is a fresh function every render (it closes over
+  // `select`, which `useItemUrlState` recreates each render). Reading it
+  // through a ref keeps the observer effect's deps to [diff], so a re-render
+  // doesn't tear down and re-observe mid-scroll and drop the click that
+  // triggered it.
+  const onVisibleFileRef = useRef(onVisibleFile);
+  onVisibleFileRef.current = onVisibleFile;
+
+  useEffect(() => {
+    if (!onVisibleFileRef.current) return;
+    const root = rootRef.current?.closest<HTMLElement>(".item-right-pane") ?? null;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (scrolling.current) return;
+        const top = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+        if (top) {
+          const el = top.target as HTMLElement;
+          const section = el.closest<HTMLElement>("[data-section]")?.dataset.section;
+          const key = fileKey(section === "landed" ? "landed" : "in-flight", el.dataset.filePath!);
+          observerSelected.current = key;
+          onVisibleFileRef.current?.(key);
+        }
+      },
+      { root, rootMargin: "0px 0px -80% 0px" },
+    );
+    rootRef.current?.querySelectorAll("[data-file-header]").forEach((el) => io.observe(el));
+    return () => io.disconnect();
+  }, [diff]);
 
   const totals = diff?.files.reduce(
     (a, f) => ({ ins: a.ins + f.insertions, del: a.del + f.deletions }),
@@ -135,11 +188,15 @@ export function Diff({
 
   const sections = useMemo(() => {
     if (!diff) return [];
+    // `selectedFile` carries its section (see `selection.ts`); only the
+    // section that owns the selection force-opens a row for it.
+    const openIn = (section: "in-flight" | "landed") =>
+      selectedFile && fileSection(selectedFile) === section ? filePath(selectedFile) : null;
     const out = [
       {
         key: "in-flight",
         label: null as string | null,
-        rows: rowsOf(diff.diff, diff.files, diff.untracked, diff.truncated, false, selectedFile ?? null),
+        rows: rowsOf(diff.diff, diff.files, diff.untracked, diff.truncated, false, openIn("in-flight")),
       },
     ];
     const l = diff.landed;
@@ -147,14 +204,14 @@ export function Diff({
       out.push({
         key: "landed",
         label: `${l.commits.length} commit${l.commits.length === 1 ? "" : "s"} already on this branch`,
-        rows: rowsOf(l.diff, l.files, [], l.truncated, true, selectedFile ?? null),
+        rows: rowsOf(l.diff, l.files, [], l.truncated, true, openIn("landed")),
       });
     }
     return out;
   }, [diff, selectedFile]);
 
   return (
-    <div className="pane diff-pane" data-testid="right-pane-diff">
+    <div className="pane diff-pane" data-testid="right-pane-diff" ref={rootRef}>
       <header className="diff-modal-head">
         <span className="mono">{diff?.base_ref?.slice(0, 10) ?? "—"}</span>
         {totals && diff && (
@@ -166,9 +223,31 @@ export function Diff({
         {diff?.landed && diff.landed.files.length > 0 && (
           <span className="diff-landed-totals">landed {diff.landed.files.length} files</span>
         )}
+        {/* ponytail: unified/split chips and "Open in editor" (spec §4's pane
+         *  header) are skipped — Copy is the one action every diff needs;
+         *  add the rest if a real review session asks for a split view. */}
+        {diff?.diff && (
+          <button
+            className="btn btn-ghost btn-icon"
+            title="Copy diff"
+            onClick={() => navigator.clipboard.writeText(diff.diff)}
+          >
+            Copy
+          </button>
+        )}
+        {onToggleMaximize && (
+          <button
+            className="btn btn-icon btn-ghost"
+            title={maximized ? "Collapse" : "Maximize"}
+            aria-pressed={maximized}
+            onClick={onToggleMaximize}
+          >
+            <ArrowsOutSimple size={14} />
+          </button>
+        )}
       </header>
 
-      {err && <p className="form-error">{err}</p>}
+      {diffError && <p className="form-error">{diffError}</p>}
 
       {diff && diff.diff === "" && diff.untracked.length === 0 && !diff.landed?.diff && (
         <p className="empty">
@@ -189,7 +268,7 @@ export function Diff({
                     {r.body ? (
                       <details open={r.open}>
                         <summary>
-                          <span className="diff-file-head">
+                          <span className="diff-file-head" data-file-header data-file-path={r.path}>
                             <span className="mono">{r.path}</span>
                             <span className="diff-add">+{r.ins}</span>
                             <span className="diff-del">−{r.del}</span>
@@ -204,7 +283,7 @@ export function Diff({
                         </pre>
                       </details>
                     ) : (
-                      <span className="diff-file-head">
+                      <span className="diff-file-head" data-file-header data-file-path={r.path}>
                         <span className="mono">{r.path}</span>
                         {r.ins != null && <span className="diff-add">+{r.ins}</span>}
                         {r.del != null && <span className="diff-del">−{r.del}</span>}

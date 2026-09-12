@@ -10,6 +10,9 @@ export interface ChainNode {
   /** Whether an agent may review this node's gate before a human sees it
    *  (Kraft-zr3s). Only meaningful beside `gate_after`. */
   auto_escalate?: boolean | null;
+  /** Hook points run to repair a red measurement before the fix loop retries
+   *  (templates.py `NODE_CARRYOVER_FIELDS`). */
+  on_failure?: string[] | null;
 }
 
 /** A node id's overridden fields, from the item's own `node_overrides`

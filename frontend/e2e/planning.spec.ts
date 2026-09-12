@@ -42,7 +42,7 @@ async function expectGateDocOrPending(page: any) {
   await expect(
     page
       .getByTestId("right-pane-doc")
-      .or(page.getByText(/the gate's document isn't available yet/i))
+      .or(page.getByText(/not written yet/i))
       .first(),
   ).toBeVisible();
 }
@@ -53,7 +53,7 @@ test("spec gate: review, reject and re-plan, then approve into the plan gate", a
   await createItem(page, "planning gate walk", "default");
   await expect(page.getByText(/approve the spec to continue/i)).toBeVisible({ timeout: 100_000 });
 
-  const reviewSpec = page.getByRole("button", { name: "Review spec" });
+  const reviewSpec = page.getByRole("link", { name: "Review spec" });
   await expect(reviewSpec).toBeVisible();
   await reviewSpec.click();
   await expect(page.getByRole("tab", { name: /Documents/, selected: true })).toBeVisible();
@@ -67,7 +67,7 @@ test("spec gate: review, reject and re-plan, then approve into the plan gate", a
   await expect(page.locator(".attention-title")).toContainText(/approve the spec/i, {
     timeout: 100_000,
   });
-  await expect(page.getByRole("button", { name: "Review spec" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Review spec" })).toBeVisible();
 
   // Approve: advance to the plan gate, which offers its own review button.
   await page.getByRole("button", { name: "Approve" }).first().click();
@@ -75,7 +75,7 @@ test("spec gate: review, reject and re-plan, then approve into the plan gate", a
     timeout: 100_000,
   });
 
-  const reviewPlan = page.getByRole("button", { name: "Review plan" });
+  const reviewPlan = page.getByRole("link", { name: "Review plan" });
   await expect(reviewPlan).toBeVisible();
   await reviewPlan.click();
   await expect(page.getByRole("tab", { name: /Documents/, selected: true })).toBeVisible();

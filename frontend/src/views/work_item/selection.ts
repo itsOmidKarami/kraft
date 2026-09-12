@@ -9,10 +9,18 @@ export type Selection =
   | { kind: "document"; id: string | null }
   | { kind: "timeline-node"; id: string | null };
 
-export const EMPTY_SELECTION: Record<InspectorTab, Selection> = {
-  tasks: { kind: "session", id: null },
-  changes: { kind: "file", id: null },
-  documents: { kind: "document", id: null },
-  timeline: { kind: "timeline-node", id: null },
-  config: { kind: "session", id: null }, // unused — Config has no right pane
-};
+/** A Changes selection is a file path, but the same path can appear in both
+ *  the "This node" and "On this branch" sections. Qualify the landed one so
+ *  only the row the user clicked lights up, and so `RightPane/Diff.tsx`
+ *  scrolls to that section's occurrence rather than always the in-flight one.
+ *  In-flight stays a bare path, which keeps existing `#file=…` links working. */
+export type DiffSection = "in-flight" | "landed";
+
+export const fileKey = (section: DiffSection, path: string) =>
+  section === "landed" ? `landed:${path}` : path;
+
+export const fileSection = (key: string): DiffSection =>
+  key.startsWith("landed:") ? "landed" : "in-flight";
+
+export const filePath = (key: string) =>
+  key.startsWith("landed:") ? key.slice("landed:".length) : key;
