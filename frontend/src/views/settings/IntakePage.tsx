@@ -68,7 +68,7 @@ export function IntakePage() {
         <>
           <section className="settings-section">
             <h6>Poller</h6>
-            <div className="save-row">
+            <div className="save-row field-row">
               <Switch
                 checked={intake.enabled}
                 onChange={(v) => set("enabled", v)}
@@ -121,13 +121,13 @@ export function IntakePage() {
                 should be looking at
               </span>
             </div>
-            <div className="save-row">
+            <div className="save-row field-row">
               <Switch checked disabled onChange={() => {}} label="only chains with a gate" />
               <span className="save-hint">
                 an unattended start must still stop for a person somewhere
               </span>
             </div>
-            <div className="save-row">
+            <div className="save-row field-row">
               <Switch checked disabled onChange={() => {}} label="never past the daily budget" />
               <span className="save-hint">
                 {dailyBudget != null ? `$${dailyBudget} · Policy → Spend caps` : "Policy → Spend caps"}

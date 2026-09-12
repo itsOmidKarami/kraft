@@ -127,6 +127,28 @@ describe("Settings · chains editor (task 8)", () => {
     expect(screen.getByLabelText("fix_loop")).toHaveValue("verify_fix_loop"); // unchanged
   });
 
+  it("Kraft-xhro: names the node and task an unresolved hook belongs to, not just a repo bit", async () => {
+    vi.spyOn(api, "validateTemplate").mockResolvedValue({
+      id: "default",
+      valid: false,
+      error: "unresolved hooks",
+      unresolved: [{ node: "verify", task: "on.made.up" }],
+    });
+    renderAt("/settings/chains");
+    expect(await screen.findByText(/verify: on\.made\.up has no plugin bound/)).toBeInTheDocument();
+  });
+
+  it("Kraft-xhro: + Add task opens an inline row instead of window.prompt", async () => {
+    const prompt = vi.spyOn(window, "prompt");
+    renderAt("/settings/chains");
+    await userEvent.click(await screen.findByText("spec"));
+    await userEvent.click(await screen.findByRole("button", { name: "+ Add task" }));
+    expect(prompt).not.toHaveBeenCalled();
+    await userEvent.selectOptions(screen.getByLabelText("hook to add"), "on.env.prepare");
+    await userEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(screen.getByText("on.env.prepare")).toBeInTheDocument();
+  });
+
   it("insert, remove, and reorder nodes mark the template dirty", async () => {
     renderAt("/settings/chains");
     await userEvent.click((await screen.findAllByRole("button", { name: /insert node/i }))[0]);
