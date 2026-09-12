@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -34,6 +34,13 @@ const setOneItem = (over: Partial<WorkItem> = {}) =>
 const setSessions = (id: string, sessions: WorkerSession[]) =>
   useStore.setState((s) => ({ sessionsByItem: { ...s.sessionsByItem, [id]: sessions } }) as never);
 
+const renderPeek = () =>
+  render(
+    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <PeekPane id="w1" onClose={vi.fn()} />
+    </MemoryRouter>,
+  );
+
 beforeEach(() => {
   useStore.setState({
     workItems: {},
@@ -65,6 +72,50 @@ describe("PeekPane", () => {
     );
     await userEvent.keyboard("{Escape}");
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("renders a scrim that closes the peek when clicked", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    setOneItem();
+    render(
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <PeekPane id="w1" onClose={onClose} />
+      </MemoryRouter>,
+    );
+    await user.click(document.querySelector(".peek-scrim") as HTMLElement);
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("renders the id row with Open → and a close button, and no full-width Open button", () => {
+    setOneItem();
+    renderPeek();
+    expect(screen.getByRole("link", { name: /Open/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /close/i })).toBeTruthy();
+    expect(screen.getAllByRole("link", { name: /Open/ })).toHaveLength(1);
+    expect(screen.queryByText(/updated .* ago/)).toBeNull();
+  });
+
+  it("renders the hero card with the current node and its task line when progress is set", () => {
+    setOneItem({
+      current_node_id: "verify",
+      progress: { current: 3, total: 6, title: "open_mr refuses a dirty worktree" },
+    });
+    renderPeek();
+    const hero = document.querySelector(".peek-hero") as HTMLElement;
+    expect(within(hero).getByText("verify")).toBeTruthy();
+    expect(within(hero).getByText("Task 3 of 6")).toBeTruthy();
+    expect(within(hero).getByTestId("task-bar")).toBeTruthy();
+  });
+
+  it("compresses the stage list to done / current / remaining", () => {
+    setOneItem({ current_node_id: "verify", completedNodes: ["plan"] });
+    renderPeek();
+    const rows = document.querySelectorAll(".peek-stage");
+    expect(rows).toHaveLength(2); // plan done, verify current, nothing remaining
+    expect(rows[0].textContent).toContain("plan");
+    expect(rows[0].textContent).toContain("done");
+    expect(rows[1].textContent).toContain("verify");
   });
 
   it("shows the last 4 log lines of the current node's session", async () => {

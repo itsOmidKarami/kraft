@@ -31,7 +31,31 @@
    The old pre-Nocturne rules — cards, chips, chain strip, ad-hoc modals — are
    gone with the views that used them; what follows is the redesign only. */
 
-main { min-height: calc(100vh - 48px); }
+/* The document never scrolls (UI v3 · 48): `main` is the scroller, so the
+   sidebar and header stay put and every page's own sticky headers work. */
+main { flex: 1; min-height: 0; overflow-y: auto; }
+
+/* ══ stacking order ══════════════════════════════════════════════════════
+   ONE ladder. Every z-index in this file is a rung of it, and no rule may
+   invent a value outside it -- this layout broke five times in a row because
+   a single number got bumped in isolation.
+
+     60  .toast-stack
+     40  .dialog-backdrop and everything a dialog contains
+     30  app chrome: .app-header, .bottom-nav (always clickable, never dimmed)
+     25  .peek-pane      -- over the list, under the chrome it starts below
+                            (top: 48px, so it never needs to beat the header)
+     24  .peek-scrim     -- over EVERY sticky thing in the list it dims
+     20  .overflow-menu  -- popovers anchored in a row, under the scrim
+      5  .board-sort-menu (nested in .board-filter-row's own context)
+      3  .board-filter-row (sticky)
+      2  .group-head       (sticky, under the filter row)
+      1  row-level decoration
+
+   A positioned element with a z-index opens its own stacking context, so
+   z-indexes *inside* .peek-pane, .dialog-backdrop or .board-filter-row are
+   local to that box and are not on this ladder. */
+
 
 .empty { font-size: 12px; color: var(--color-text-muted); padding: 10px 0; }
 .form-error { font-size: 12px; color: var(--color-neutral-200); margin-top: 6px; }
@@ -152,6 +176,10 @@ main { min-height: calc(100vh - 48px); }
 .chain-seg[data-state="done"]    .chain-label { color: var(--color-neutral-400); }
 .chain-seg[data-state="current"] .chain-label,
 .chain-seg[data-state="paused"]  .chain-label { color: var(--color-accent-300); }
+/* Only first · current · last carry a label, spaced apart (UI v3 · 46) --
+   eleven labels on a 440px pane ran into each other. */
+.chain-bar.lg { justify-content: space-between; }
+.chain-bar.lg .chain-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* — section label — */
 .section-label {
@@ -205,7 +233,7 @@ main { min-height: calc(100vh - 48px); }
 /* ══ bottom nav (mobile app shell) ═══════════════════════════════════════ */
 .bottom-nav {
   display: none; /* the phone block below turns this on */
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; /* ladder: chrome */
   justify-content: space-around;
   background: var(--color-bg); border-top: 1px solid var(--color-divider);
   padding-bottom: env(safe-area-inset-bottom);
@@ -225,7 +253,7 @@ main { min-height: calc(100vh - 48px); }
 }
 
 /* ══ app shell: sidebar + rail (designs 01/02/03) ══════════════════════ */
-.app-shell { display: flex; min-height: 100vh; }
+.app-shell { display: flex; height: 100vh; overflow: hidden; }
 .app-sidebar, .app-rail {
   position: sticky; top: 0; align-self: flex-start;
   height: 100vh; overflow-y: auto; flex: none;
@@ -319,12 +347,12 @@ main { min-height: calc(100vh - 48px); }
   color: var(--color-neutral-500); cursor: pointer; font-size: 16px;
 }
 
-.app-content { flex: 1; min-width: 0; }
+.app-content { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 .app-header {
   display: flex; align-items: center; gap: 12px;
   padding: 10px 20px; height: 48px; box-sizing: border-box;
   border-bottom: 1px solid var(--color-divider);
-  position: sticky; top: 0; z-index: 30; background: var(--color-bg);
+  position: sticky; top: 0; z-index: 30; background: var(--color-bg); /* ladder: chrome */
 }
 /* min-width: 0 down the chain so the item id ellipsizes instead of pushing
    the header (and the page) past a 390px phone */
@@ -343,8 +371,9 @@ main { min-height: calc(100vh - 48px); }
 .app-header .btn { font-size: 13px; padding: 5px 10px; }
 
 /* ══ board (design 04) ════════════════════════════════════════════════════ */
-.board { display: grid; grid-template-columns: 1fr; min-height: 560px; }
-.board.has-peek { grid-template-columns: 1fr 440px; align-items: start; }
+.board { display: block; position: relative; min-height: 560px; }
+/* .board.has-peek's grid-template-columns is GONE: the peek is a layer over
+   the list (UI v3 · G1-02), not a column beside it. Rows never move. */
 
 .repo-pill {
   display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
@@ -385,11 +414,11 @@ main { min-height: calc(100vh - 48px); }
 }
 .archived-table { display: flex; flex-direction: column; }
 .archived-head {
-  display: grid; grid-template-columns: 1fr 140px 180px 100px;
+  display: grid; grid-template-columns: minmax(0, 1fr) 140px 180px 100px;
   padding: 6px 10px; font-size: 11px; color: var(--color-text-muted); letter-spacing: 0.04em;
 }
 .archived-row {
-  display: grid; grid-template-columns: 1fr 140px 180px 100px; align-items: center;
+  display: grid; grid-template-columns: minmax(0, 1fr) 140px 180px 100px; align-items: center;
   gap: 10px; padding: 10px; border-radius: 8px; text-decoration: none; color: inherit;
   background: linear-gradient(to right,
     transparent, var(--color-divider) 48px,
@@ -398,10 +427,19 @@ main { min-height: calc(100vh - 48px); }
 .archived-row:hover { background-color: color-mix(in srgb, var(--color-text) 4%, transparent); }
 .archived-row-item { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .archived-row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.archived-row-title { font-size: 14px; font-weight: 500; color: var(--color-text); }
+.archived-row-title {
+  font-size: 14px; font-weight: 500; color: var(--color-text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .archived-row-meta { display: flex; gap: 8px; font-size: 11px; color: var(--color-neutral-500); }
 .archived-row-meta code { font-family: ui-monospace, Menlo, monospace; }
 .archived-row-actions { display: flex; justify-content: flex-end; }
+
+@media (max-width: 1023px) {
+  /* Drop the "archived" column rather than let the row overflow (45). */
+  .archived-head > :nth-child(3), .archived-row > :nth-child(3) { display: none; }
+  .archived-head, .archived-row { grid-template-columns: minmax(0, 1fr) 140px 100px; }
+}
 
 /* ══ fresh install (design 08) ═══════════════════════════════════════════ */
 .board-empty { max-width: 620px; padding: 40px 20px; display: flex; flex-direction: column; gap: 16px; }
@@ -435,21 +473,42 @@ main { min-height: calc(100vh - 48px); }
 .board-groups { padding: 16px 20px 24px; display: flex; flex-direction: column; gap: 22px; min-width: 0; }
 .board-filter-row {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  position: sticky; top: 0; z-index: 3; /* ladder: sticky list chrome */
+  background: var(--color-bg);
+  padding-top: 4px; padding-bottom: 4px;
 }
+/* display: contents below 1024, so the chips scroll as their own box and
+   .board-sort (a sibling, margin-left: auto) stays outside it -- an
+   overflow-x: auto container forces overflow-y to auto too, which would
+   clip the sort disclosure if it lived inside the scroller. */
+.board-filter-chips { display: contents; }
 .board-facet { display: flex; align-items: center; gap: 6px; }
 .board-filter-divider {
   width: 1px; align-self: stretch; background: var(--color-divider);
 }
-.board-sort {
-  display: flex; align-items: center; gap: 8px; margin-left: auto;
-  font-size: 12px; color: var(--color-text-muted);
+.board-sort { margin-left: auto; font-size: 12px; color: var(--color-text-muted); position: relative; }
+.board-sort > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; }
+.board-sort > summary::-webkit-details-marker { display: none; }
+.board-sort-menu {
+  position: absolute; right: 0; top: 100%; z-index: 5; min-width: 180px;
+  display: flex; flex-direction: column;
+  padding: 4px; border-radius: var(--radius-md);
+  background: var(--color-surface); box-shadow: var(--shadow-md);
 }
+.board-sort-menu button {
+  text-align: left; padding: 6px 10px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--color-text); font: inherit; font-size: 12px;
+}
+.board-sort-menu button:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
 .group-head {
   display: flex; align-items: baseline; gap: 10px;
   margin-bottom: 8px; padding-bottom: 6px;
-  background: linear-gradient(to right,
+  position: sticky; top: 40px; z-index: 2; /* ladder: under the filter row */
+  background-color: var(--color-bg);
+  background-image: linear-gradient(to right,
     transparent, var(--color-divider) 48px,
-    var(--color-divider) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
+    var(--color-divider) calc(100% - 48px), transparent);
+  background-repeat: no-repeat; background-position: bottom; background-size: 100% 1px;
 }
 .group-label { font-size: 13px; font-weight: 500; }
 .group-label[data-tone="accent"] { color: var(--color-accent-300); }
@@ -469,8 +528,8 @@ main { min-height: calc(100vh - 48px); }
 }
 
 .board-row {
-  display: grid; grid-template-columns: 22px 1fr 280px 170px;
-  gap: 20px; align-items: center;
+  display: grid; grid-template-columns: 22px minmax(0, 1fr) 280px 170px;
+  gap: 16px; align-items: center;
   padding: var(--density-row-pad); border-radius: 8px; cursor: pointer;
   /* The same fading hairline every other list row in the interface carries
      (spec §2). Without it a row's own gate actions sit as close to the next
@@ -495,53 +554,108 @@ main { min-height: calc(100vh - 48px); }
   background-color: color-mix(in srgb, var(--color-accent) 10%, transparent);
   box-shadow: inset 0 0 0 1px var(--color-accent-700);
 }
-.board-row-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+/* 14px, first grid column, centred on a one-line row (UI v3 · G1-06). */
+.board-row > input[type="checkbox"] { width: 14px; height: 14px; margin: 0; align-self: center; }
+.board-row-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .board-row-title {
   font-size: 14px; font-weight: 500; color: var(--color-text); text-decoration: none;
-  display: inline-flex; align-items: center; min-height: 24px;
+  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .board-row-title:hover { color: var(--color-accent-300); }
 .board-row-meta {
-  display: flex; align-items: center; gap: 10px;
-  font-size: 11px; color: var(--color-neutral-500); white-space: nowrap;
+  display: flex; align-items: center; gap: 10px; min-width: 0;
+  font-size: 11.5px; color: var(--color-neutral-500);
+  white-space: nowrap; overflow: hidden;
 }
 .board-row-meta code { font-family: ui-monospace, Menlo, monospace; }
+.board-row-meta-current { display: none; }
 .board-row-current {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 12px; color: var(--color-accent-300); white-space: nowrap;
+  display: flex; flex-direction: column; gap: 2px; min-width: 0;
+  font-size: 12.5px; color: var(--color-accent-300);
+  white-space: nowrap; overflow: hidden;
 }
 .tag-tight { padding: 0 5px; font-size: 10px; gap: 4px; }
 
+/* ══ task progress (UI v3 · §2) ═════════════════════════════════════════ */
+.task-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 12.5px; }
+.task-count { color: var(--color-accent-300); white-space: nowrap; }
+.task-title {
+  color: var(--color-neutral-400);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.task-bar { display: flex; gap: 3px; height: 3px; }
+.task-seg { flex: 1; border-radius: 2px; background: var(--color-neutral-800); }
+.task-seg[data-state="done"] { background: var(--color-accent); }
+.task-seg[data-state="current"] {
+  background: var(--color-accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-accent) 60%, transparent);
+  animation: kpulse 1.8s infinite;
+}
+
 /* ══ peek pane (design 05) ═══════════════════════════════════════════════
-   440px, slides in beside the list -- narrows it, is not an overlay. */
+   440px, an overlay above the list (UI v3 · G1-02) -- it never narrows the
+   rows underneath it. */
 .peek-pane {
-  position: sticky; top: 48px; align-self: start;
-  width: 440px; max-height: calc(100vh - 48px); overflow-y: auto;
-  padding: 18px; margin: 16px 20px 24px 0;
+  position: fixed; top: 48px; right: 0; bottom: 0; width: 440px; z-index: 25; /* ladder: over the list */
+  overflow-y: auto;
+  padding: 16px 20px 20px;
+  background: var(--color-surface);
   border-left: 1px solid var(--color-divider);
-  display: flex; flex-direction: column; gap: 12px;
+  box-shadow: -24px 0 48px rgba(0, 0, 0, 0.35);
+  display: flex; flex-direction: column; gap: 14px;
   animation: peek-in 200ms ease-out;
 }
+.peek-scrim { display: none; }
 @keyframes peek-in {
   from { transform: translateX(24px); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
 }
-.peek-head { display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
-.peek-head code { font-family: ui-monospace, Menlo, monospace; color: var(--color-neutral-400); }
-.peek-meta {
+.peek-head {
   display: flex; align-items: center; gap: 8px;
-  font-size: 11px; color: var(--color-neutral-500);
+  font-size: 11.5px; color: var(--color-neutral-500);
+  position: sticky; top: 0; z-index: 1;
+  background: var(--color-surface);
 }
-.peek-title { font-size: 18px; font-weight: 500; margin: 0; }
+.peek-head code { font-family: ui-monospace, Menlo, monospace; color: var(--color-neutral-400); }
+.peek-open { margin-left: auto; font-size: 12px; text-decoration: none; color: var(--color-accent-300); }
+.peek-title {
+  font-size: 18px; font-weight: 500; line-height: 1.25; letter-spacing: -0.01em; margin: 0;
+  position: sticky; top: 22px; z-index: 1; background: var(--color-surface);
+}
+.peek-hero {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 12px 14px; border-radius: 8px;
+  border: 1px solid var(--color-divider);
+  background: color-mix(in srgb, var(--color-surface) 60%, transparent);
+}
+.peek-hero-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.peek-hero-node { font-size: 15px; font-weight: 500; }
+.peek-hero-meta { font-size: 11px; color: var(--color-neutral-500); white-space: nowrap; }
+.peek-stages { display: flex; flex-direction: column; gap: 1px; font-size: 12px; }
+.peek-stage {
+  display: grid; grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 10px; align-items: center; padding: 5px 6px;
+  color: var(--color-neutral-500);
+}
+.peek-stage[data-kind="current"] {
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  color: var(--color-text);
+}
+.peek-stage-ids { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.peek-stage-right { font-size: 11px; }
+.peek-stage[data-kind="current"] .peek-stage-right {
+  font-family: ui-monospace, Menlo, monospace; color: var(--color-accent-300);
+}
 .peek-log {
   display: flex; flex-direction: column; gap: 2px;
   font-family: ui-monospace, Menlo, monospace; font-size: 11px;
   color: var(--color-neutral-400);
   background: var(--hairline-24); border-radius: 8px; padding: 8px 10px;
 }
-.peek-log-line { white-space: pre-wrap; word-break: break-word; }
+/* One line each, ellipsized (UI v3 · 37) -- the pane is a glance, not a read. */
+.peek-log-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .peek-log-time { color: var(--color-neutral-600); margin-right: 6px; }
-.peek-updated { font-size: 11px; color: var(--color-text-muted); margin: 0; }
 
 /* ══ gate (design 2a inline · 4a card) ════════════════════════════════════ */
 .gate-inline {
@@ -1083,6 +1197,86 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; }
 .access-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .session-current { font-size: 11px; color: var(--color-accent-300); }
 
+/* ══ breakpoints (UI v3 · 45) ════════════════════════════════════════════
+   The table on screen 45, top down. Phone (< 768) is the separate block
+   below; these four ranges are the desktop ladder. */
+
+@media (min-width: 1440px) {
+  .board-groups { max-width: 1280px; margin: 0 auto; }
+}
+
+@media (max-width: 1439px) {
+  .board-row { grid-template-columns: 22px minmax(0, 1fr) 200px 150px; }
+}
+
+@media (max-width: 1279px) {
+  .board-row { grid-template-columns: 22px minmax(0, 1fr) 160px 130px; }
+  .peek-pane { width: 380px; }
+  /* The pane floats over the rows: dim what it covers (46). */
+  .peek-scrim {
+    /* fixed, not absolute: `main` is the scroller, so an absolutely
+       positioned scrim slides out from under the fixed pane as the list
+       moves. z 24 is the rung above every sticky list element (ladder). */
+    display: block; position: fixed; inset: 0; z-index: 24;
+    background: rgba(0, 0, 0, 0.4);
+  }
+  /* Hints, footnotes and usage strings go before anything else (45). */
+  .control-hint, .group-head-note { display: none; }
+}
+
+@media (max-width: 1023px) {
+  /* ONE grid contract for .board-row, both sides stated together, because
+     the tracks here and the children BoardRow renders are a single fact:
+
+       BoardRow always renders four children, in this order --
+         1 StatusGlyph (or the Done group's checkbox)
+         2 .board-row-main   (title + meta line)
+         3 .chain-bar.sm
+         4 .board-row-current (node text, tags, Archive + overflow)
+
+       >= 1440   22 · 1fr · 280 · 170   all four
+       1280-1439 22 · 1fr · 200 · 150   all four
+       1024-1279 22 · 1fr · 160 · 130   all four
+       768-1023  22 · 1fr · 120         child 3 hidden below
+       <= 767    (inherits)             child 3 hidden
+       <= 640    22 · 1fr               child 3 hidden, child 4 placed in
+                                        column 2 on its own row
+
+     Never change a track count without changing what is hidden in the same
+     rule: a fourth in-flow child against three tracks auto-places into an
+     implicit second row in the 22px glyph track and squashes itself there.
+
+     At 768-1023 the chain bar is what goes, not .board-row-current: the
+     current node moves into the meta line (50, §4), but the Archive button
+     and the Copy-id overflow menu live in child 4 and §1 says buttons hide
+     last. So child 4 keeps the 120px track and the chain is dropped. */
+  .board-row { grid-template-columns: 22px minmax(0, 1fr) 120px; }
+  .board-row > .chain-bar.sm { display: none; }
+  /* Only the node text goes -- the Archive button, Copy-id overflow menu
+     and fix/capped/retry tags are siblings in this column, not the node
+     text, and stay put (§1: buttons hide last). */
+  .board-row-current-node { display: none; }
+  .board-row-meta-current { display: inline; color: var(--color-accent-300); font-weight: 500; }
+  .board-groups { padding-left: 16px; padding-right: 16px; }
+  /* Chips may only wrap at >= 1024; below that they scroll (50). Rows with a
+     .board-sort disclosure (Board) scroll via the .board-filter-chips child
+     instead of the row itself, so board-sort stays outside the scroll box --
+     an overflow-x: auto container forces overflow-y to clip too, which would
+     trap the dropdown. Rows without one (Archived's native <select>, immune
+     to that clipping) keep scrolling as a whole row. */
+  .board-filter-row { flex-wrap: nowrap; }
+  .board-filter-row:not(:has(.board-sort)) { overflow-x: auto; }
+  .board-filter-chips {
+    display: flex; align-items: center; gap: 10px; flex-wrap: nowrap;
+    overflow-x: auto; min-width: 0;
+  }
+  .chip { white-space: nowrap; flex: none; }
+}
+
+@media (max-height: 719px) {
+  .app-sidebar-foot { display: none; }
+}
+
 /* ══ phone (design 1n) ════════════════════════════════════════════════════
    Same grouped rows at touch size. Needs-you rows stay actionable; the rest is
    a status view, and the detail screen says so. */
@@ -1090,14 +1284,16 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; }
   .chain-gate { display: none; }
 
   .board, .settings, .analytics { grid-template-columns: 1fr; }
-  .board-filter-row { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 2px; }
+  .board-filter-row:not(:has(.board-sort)) { padding-bottom: 2px; }
+  .board-filter-chips { padding-bottom: 2px; }
   .board-foot { margin-top: 0; }
 
   .board-groups, .settings-body, .analytics-body { padding: 12px; }
-  /* the chain bar and current-node column stack under the title; the leading
-     glyph column collapses too -- StatusGlyph moves inline with the title on
-     phone (m01) rather than eating a grid column that has nowhere to go. */
-  .board-row { grid-template-columns: 1fr; gap: 10px; padding: 12px 8px; }
+  /* the chain bar is already hidden by the <= 1023 rule; the current-node
+     column stacks under the title (grid-column: 2), and the glyph keeps its
+     own 22px column beside the title -- see the grid contract above. */
+  .board-row { grid-template-columns: 22px minmax(0, 1fr); gap: 10px; padding: 12px 8px; }
+  .board-row > .board-row-current { grid-column: 2; }
   .board-row-meta { flex-wrap: wrap; white-space: normal; }
   .gate-inline .btn, .board-row .btn { min-height: 44px; }
 
@@ -1196,6 +1392,13 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; }
 
   .bottom-nav { display: flex; }
   main { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
+  /* "full width and full height below 768" (spec §2). The pane sits under
+     the header and over the list, but the tab bar is chrome (ladder: 30 over
+     the pane's 25), so keep the pane's own last lines clear of it. */
+  .peek-pane {
+    width: 100%; border-left: 0;
+    padding-bottom: calc(76px + env(safe-area-inset-bottom));
+  }
   .app-sidebar, .app-rail { display: none; }
 
   .phone-only { display: block; }

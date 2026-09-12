@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -75,6 +76,29 @@ describe("Board", () => {
     expect(within(group("Done")).getAllByTestId("board-card")).toHaveLength(1);
     expect(within(group("Needs you")).queryAllByTestId("board-card")).toHaveLength(0);
     expect(within(group("Needs you")).getByText(/nothing here/)).toBeInTheDocument();
+  });
+
+  // jsdom does not load styles.css into the CSSOM (doing so via vitest's
+  // `css: true` broke pointer-events assertions in unrelated suites), so
+  // this pins the class names the no-wrap rules hang off rather than the
+  // computed styles themselves; the Playwright spec in Task 9 covers the
+  // rendered box.
+  it("gives the title and meta line the classes that stop them wrapping", () => {
+    renderBoard();
+    const row = screen.getAllByTestId("board-card")[0];
+    expect(row.querySelector(".board-row-title")).toBeInTheDocument();
+    expect(row.querySelector(".board-row-main")).toBeInTheDocument();
+  });
+
+  it("clicking the title toggles the peek instead of navigating", async () => {
+    setItems(wi({ id: "w1" }));
+    renderBoard();
+    const title = screen.getByTestId("board-card").querySelector(
+      ".board-row-title",
+    ) as HTMLElement;
+    expect(title.tagName).toBe("SPAN");
+    await userEvent.click(title);
+    expect(screen.getByTestId("board-card")).toHaveAttribute("data-selected", "true");
   });
 
   it("filters on the repo facet and clears it when the same facet is clicked again", async () => {
@@ -213,10 +237,28 @@ describe("Board", () => {
     let rows = within(group("Running")).getAllByTestId("board-card");
     expect(within(rows[0]).getByText("Alfa")).toBeInTheDocument();
 
-    await userEvent.selectOptions(screen.getByLabelText(/sort/i), "title");
+    await userEvent.click(document.querySelector(".board-sort summary") as HTMLElement);
+    await userEvent.click(screen.getByRole("button", { name: "title" }));
     rows = within(group("Running")).getAllByTestId("board-card");
     expect(within(rows[0]).getByText("Alfa")).toBeInTheDocument();
     expect(within(rows[1]).getByText("Bravo")).toBeInTheDocument();
+  });
+
+  it("offers the four spec sort options and no native select", async () => {
+    renderBoard();
+    expect(document.querySelector(".board-sort select")).toBeNull();
+    await userEvent.click(document.querySelector(".board-sort summary") as HTMLElement);
+    for (const label of ["recently updated", "created", "needs attention", "title"]) {
+      expect(screen.getByRole("button", { name: label })).toBeTruthy();
+    }
+  });
+
+  it("falls back to recently updated when localStorage holds a removed sort key", () => {
+    localStorage.setItem("kraft.board_filters", JSON.stringify({ sort: "repo" }));
+    renderBoard();
+    expect(document.querySelector(".board-sort summary")?.textContent).toContain(
+      "recently updated",
+    );
   });
 
   it("marks an item that started from existing documents", () => {
@@ -265,7 +307,8 @@ describe("Board", () => {
       wi({ id: "w1", status: "active", progress: { current: 3, total: 6, title: "wire the store" } }),
     );
     renderBoard();
-    expect(screen.getByText("Task 3/6 · wire the store")).toBeInTheDocument();
+    expect(screen.getByText("Task 3/6")).toBeInTheDocument();
+    expect(screen.getByText("wire the store")).toBeInTheDocument();
   });
 
   it("plain click toggles the peek param; ⌘-click navigates instead", async () => {
@@ -437,5 +480,77 @@ describe("Board", () => {
     const rows = await screen.findAllByTestId("board-card");
     fireEvent.click(rows[0]);
     expect(screen.getByText("item page")).toBeInTheDocument();
+  });
+});
+
+/* The board row's grid contract is two facts in two files -- the tracks in
+   styles.css and the children BoardRow renders -- and five review cycles in a
+   row broke it by moving one without the other. This is the check that fails
+   when that happens again: for every breakpoint, tracks must equal in-flow
+   children, and any child that has nowhere to auto-place must be placed by
+   hand. */
+describe("the .board-row grid contract", () => {
+  const css = readFileSync("src/styles.css", "utf8") /* vitest root is frontend/ */;
+
+  /** Every `@media (max-width: N)` block, plus the unconditional rules under
+   *  `Infinity`, in source order. */
+  const blocks: { at: number; body: string }[] = [{ at: Infinity, body: "" }];
+  for (let i = 0; i < css.length; ) {
+    const open = css.indexOf("@media", i);
+    if (open === -1) {
+      blocks[0].body += css.slice(i);
+      break;
+    }
+    blocks[0].body += css.slice(i, open);
+    let depth = 0;
+    let j = css.indexOf("{", open);
+    const head = css.slice(open, j);
+    for (; j < css.length; j++) {
+      if (css[j] === "{") depth++;
+      else if (css[j] === "}" && --depth === 0) break;
+    }
+    const max = head.match(/max-width:\s*(\d+)px/);
+    const min = head.match(/min-width:\s*(\d+)px/);
+    // min-width blocks never subtract a child or a track from the ladder, and
+    // a height query is not a width: only max-width blocks are modelled.
+    if (max && !min) blocks.push({ at: Number(max[1]), body: css.slice(open, j) });
+    i = j + 1;
+  }
+
+  const appliesAt = (w: number) => blocks.filter((b) => w <= b.at);
+  const lastMatch = (w: number, re: RegExp) =>
+    appliesAt(w).reduce<string | null>((acc, b) => {
+      const hits = [...b.body.matchAll(re)];
+      return hits.length ? hits[hits.length - 1][1] : acc;
+    }, null);
+
+  it("renders exactly the four children the tracks are counted against", () => {
+    setItems(wi({ id: "w1", status: "active" }));
+    renderBoard();
+    const row = screen.getAllByTestId("board-card")[0];
+    expect(row.children).toHaveLength(4);
+    expect(row.children[1].className).toBe("board-row-main");
+    expect(row.children[2].className).toContain("chain-bar");
+    expect(row.children[3].className).toBe("board-row-current");
+  });
+
+  it.each([1500, 1300, 1100, 900, 800, 700, 600])("has one track per in-flow child at %ipx", (w) => {
+    const tracks = lastMatch(w, /\.board-row\s*\{[^}]*grid-template-columns:([^;}]+)/g);
+    expect(tracks).not.toBeNull();
+    const trackCount = tracks!.trim().split(/\s+(?![^(]*\))/).length;
+
+    const chainHidden = lastMatch(w, /\.board-row\s*>\s*\.chain-bar\.sm\s*\{([^}]*)\}/g);
+    const inFlow = 4 - (chainHidden?.includes("display: none") ? 1 : 0);
+
+    // Fewer tracks than children is only safe when the overflow child is
+    // placed explicitly; otherwise it auto-places into the 22px glyph track.
+    if (trackCount < inFlow) {
+      expect(lastMatch(w, /\.board-row\s*>\s*\.board-row-current\s*\{([^}]*)\}/g)).toMatch(
+        /grid-column:/,
+      );
+      expect(inFlow - trackCount).toBe(1);
+    } else {
+      expect(trackCount).toBe(inFlow);
+    }
   });
 });

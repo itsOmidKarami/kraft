@@ -59,5 +59,7 @@ test("create a work item and watch it complete", async ({ page }) => {
   const done = page.locator("section", {
     has: page.locator('.group-label:text-is("Done")'),
   });
-  await expect(done.locator(`.board-row a[href="/work-items/${wid}"]`)).toBeVisible();
+  // The row is not a link (UI v3 · G1-03): the whole row toggles the peek, so
+  // it carries its work item id in `data-id` instead of an href.
+  await expect(done.locator(`.board-row[data-id="${wid}"]`)).toBeVisible();
 });
