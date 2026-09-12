@@ -9,12 +9,13 @@ reads the linkage fields back out of the prompt, writes
 .engineering/sessions/<session>.md, and reports session_summary_ref.
 
 The reported `status` defaults to "done". KRAFT_FAKE_AGENT_STATUS overrides it
-for every invocation; KRAFT_FAKE_AGENT_CONCERNS / KRAFT_FAKE_AGENT_QUESTION set
-the field that goes with `done_with_concerns` / `needs_context`. For per-cycle
-scripting, KRAFT_FAKE_AGENT_PLAN points at a JSON file the same shape as
+for every invocation; KRAFT_FAKE_AGENT_CONCERNS / KRAFT_FAKE_AGENT_QUESTION /
+KRAFT_FAKE_AGENT_VERDICT set the field that goes with `done_with_concerns` /
+`needs_context` / the fix-loop judge's verdict. For per-cycle scripting,
+KRAFT_FAKE_AGENT_PLAN points at a JSON file the same shape as
 tests/support/fake_reviewer.py's plan: a list of per-invocation
-`{"status": ..., "concerns": ..., "question": ...}` entries (a plan entry wins
-over the single-shot env vars when both are set).
+`{"status": ..., "concerns": ..., "question": ..., "verdict": ...}` entries (a
+plan entry wins over the single-shot env vars when both are set).
 """
 
 import json
@@ -158,6 +159,9 @@ def main() -> int:
         question = entry.get("question") or os.environ.get("KRAFT_FAKE_AGENT_QUESTION")
         if question:
             result["question"] = question
+        verdict = entry.get("verdict") or os.environ.get("KRAFT_FAKE_AGENT_VERDICT")
+        if verdict:
+            result["verdict"] = verdict
         if ref:
             result["session_summary_ref"] = ref
         # Lets a test pin that the fix task's own result never leaks into the

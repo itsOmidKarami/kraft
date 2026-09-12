@@ -1144,3 +1144,16 @@ def test_load_registry_rejects_repo_override_missing_enabled(tmp_path):
     )
     with pytest.raises(templates.RegistryError):
         templates.load_registry(reg)
+
+
+def test_load_registry_accepts_the_judge_hook_id():
+    reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
+    assert reg.hooks["on.fix_loop.judge"]["kind"] == "agent"
+    assert reg.hooks["on.fix_loop.judge"]["skill"] == "fix-loop-judge"
+
+
+def test_default_template_still_loads_with_the_judge_hook_present():
+    reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
+    ts = templates.load_templates(TEMPLATES_DIR, reg)
+    assert "default" in ts.valid
+    assert ts.invalid == {}

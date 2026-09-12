@@ -125,3 +125,11 @@ export function adapterOf(b: { kind: string; handler?: string; command?: string 
       ? b.command.join(" ")
       : (b.command ?? b.kind);
 }
+
+/** `item.stop_reason`'s reasoning when the stop was a fix-loop judge
+ *  (`kraft.executor.walk`'s `f"judge: {reasoning}"`, mirroring the existing
+ *  `"executor crashed: ..."` prefix `CappedCard` already keys off of) --
+ *  undefined for any other stop reason. */
+export function judgeReasoning(stopReason: string | null | undefined): string | undefined {
+  return stopReason?.startsWith("judge:") ? stopReason.slice("judge:".length).trim() : undefined;
+}
