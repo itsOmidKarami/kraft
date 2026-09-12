@@ -60,6 +60,7 @@ def test_the_hook_is_bound_to_this_skill():
         "kind": "agent",
         "command": "claude",
         "skill": "code-review",
+        "steering": ["never-signal-processes-you-didnt-start"],
     }
 
 

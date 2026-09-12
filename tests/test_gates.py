@@ -43,6 +43,15 @@ def _gate_index(chain_json, gate):
     return next(i for i, n in enumerate(nodes) if n.get("gate_after") == gate)
 
 
+def _launch():
+    # `fake_registry` spreads the shipped `on.spec.requested`/etc bindings, so
+    # they carry the real `steering:` key -- a dispatch that reaches them needs
+    # a real steering_dir to resolve against, same as production.
+    return executor.LaunchContext(
+        repo_entry=None, steering_dir=_REPO_ROOT / "templates" / "steering"
+    )
+
+
 def test_walk_stops_at_first_gate(tmp_path):
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
@@ -61,7 +70,12 @@ def test_walk_stops_at_first_gate(tmp_path):
                 bd_cwd=str(tracker),
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=_launch(),
             )
             assert result == "awaiting_gate"
             row = database.read(
@@ -106,7 +120,13 @@ def test_approving_all_four_gates_completes_chain(tmp_path):
             )["chain_definition"]
 
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+                launch=_launch(),
             )
             for gate in (
                 "spec_approval",
@@ -126,6 +146,7 @@ def test_approving_all_four_gates_completes_chain(tmp_path):
                     bd_cwd=str(tracker),
                     start_index=start,
                     policy=pol,
+                    launch=_launch(),
                 )
             assert result == "completed"
             row = database.read(

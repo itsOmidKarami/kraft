@@ -136,7 +136,7 @@ def test_put_registry_validates_steering_against_the_real_templates_dir(client, 
     """Regression guard: `put_registry` validates the candidate against
     `st.templates_dir / "steering"`, not the empty scratch dir it writes the
     candidate registry into — that would 422 every save naming a real file."""
-    (templates_dir / "steering").mkdir()
+    (templates_dir / "steering").mkdir(exist_ok=True)
     (templates_dir / "steering" / "house-style.md").write_text("# House style\nBe direct.\n")
     hooks = client.get("/api/registry").json()["hooks"]
     hooks["on.implementation.start"]["steering"] = ["house-style"]

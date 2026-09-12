@@ -28,6 +28,15 @@ def _types(database, wid):
     return [e["type"] for e in database.read(lambda c: events.read_after(c, 0, wid))]
 
 
+def _launch() -> executor.LaunchContext:
+    # `fake_registry` spreads the shipped `on.spec.requested`/etc bindings, so
+    # they carry the real `steering:` key -- a dispatch that reaches them needs
+    # a real steering_dir to resolve against, same as production.
+    return executor.LaunchContext(
+        repo_entry=None, steering_dir=_REPO_ROOT / "templates" / "steering"
+    )
+
+
 def test_resume_from_verify_with_env_and_impl_done(tmp_path, monkeypatch):
     """Chain crashed after `implementation` completed; resume runs only `verify`."""
     monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
@@ -374,6 +383,7 @@ def test_resume_after_gate_approval_does_not_re_request_gate(tmp_path, monkeypat
                 work_item_id=wid,
                 registry=registry,
                 bd_cwd=str(tracker),
+                launch=_launch(),
             )
             assert r == "awaiting_gate"
             # approve it, then simulate a crash BEFORE the approve endpoint's run() spawns
@@ -393,6 +403,7 @@ def test_resume_after_gate_approval_does_not_re_request_gate(tmp_path, monkeypat
                 registry=registry,
                 adopted={},
                 bd_cwd=str(tracker),
+                launch=_launch(),
             )
             after = _types(database, wid)
             new_events = after[len(before) :]
@@ -442,6 +453,7 @@ def test_resume_before_gate_approval_still_re_requests_gate(tmp_path, monkeypatc
                 work_item_id=wid,
                 registry=registry,
                 bd_cwd=str(tracker),
+                launch=_launch(),
             )
             # NOT approved. Force status back to active as a crash-mid-await would look?
             # No — a genuine await leaves status=needs_human, which reattach does not
@@ -457,6 +469,7 @@ def test_resume_before_gate_approval_still_re_requests_gate(tmp_path, monkeypatc
                 registry=registry,
                 adopted={},
                 bd_cwd=str(tracker),
+                launch=_launch(),
             )
             assert r == "awaiting_gate"
             last_gate = [
