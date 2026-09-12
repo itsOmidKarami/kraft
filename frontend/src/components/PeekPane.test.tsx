@@ -187,6 +187,108 @@ describe("PeekPane", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  // Kraft-absw: the merge request is one click from the board.
+  it("links the MR beside Open → once mr_ref is set", () => {
+    setOneItem({ mr_ref: { number: 142, url: "https://example.test/mr/142" } });
+    renderPeek();
+    const link = screen.getByRole("link", { name: /MR !142/ });
+    expect(link).toHaveAttribute("href", "https://example.test/mr/142");
+    expect(link).toHaveAttribute("target", "_blank");
+  });
+
+  it("shows no MR link when mr_ref is absent", () => {
+    setOneItem();
+    renderPeek();
+    expect(screen.queryByRole("link", { name: /MR/ })).toBeNull();
+  });
+
+  // Kraft-av3t: the card is selected from the same `deriveState` the header
+  // tag reads, so a stranded needs_human stop (no cappedOut, no pending_gate)
+  // can't show "capped" in the header with a card that refuses to act.
+  it("renders PausedCard's Start button for a created-but-never-started item", () => {
+    // paused with no current_node_id derives to "not_started" (Kraft-av3t);
+    // it must still get PausedCard's neverStarted branch, not a blank pane.
+    setOneItem({ status: "paused", current_node_id: null });
+    renderPeek();
+    expect(screen.getByRole("button", { name: /start/i })).toBeInTheDocument();
+  });
+
+  it("renders CappedCard, not the generic refusal, for a stranded needs_human stop", () => {
+    setOneItem({ status: "needs_human" });
+    renderPeek();
+    expect(document.querySelector(".tag-outline")?.textContent).toBe("capped");
+    expect(screen.queryByText(/cannot make yet/i)).toBeNull();
+  });
+
+  it("renders the escalated card, not the generic refusal, once a turn has reported", () => {
+    setOneItem({ status: "needs_human", cappedOut: { cycles: 3, attempts: 3 } });
+    useStore.setState((s) => ({
+      eventsByItem: {
+        ...s.eventsByItem,
+        w1: [
+          { seq: 1, work_item_id: "w1", type: "work_item_needs_human", payload: {}, created_at: "2026-01-01T00:00:00Z" },
+        ],
+      },
+    }) as never);
+    setSessions("w1", [
+      {
+        id: "e1",
+        node_id: "verify",
+        hook_point: "escalation",
+        status: "done",
+        attempt: 1,
+        created_at: "2026-01-01T00:05:00Z",
+      } as never,
+    ]);
+    renderPeek();
+    expect(document.querySelector(".tag-outline")?.textContent).toBe("escalated");
+    expect(screen.getByTestId("escalated-card")).toBeInTheDocument();
+    expect(screen.queryByText(/cannot make yet/i)).toBeNull();
+  });
+
+  it("renders the escalating pill, not a demand, while a turn is running", () => {
+    setOneItem({ status: "needs_human", cappedOut: { cycles: 3, attempts: 3 } });
+    useStore.setState((s) => ({
+      eventsByItem: {
+        ...s.eventsByItem,
+        w1: [
+          { seq: 1, work_item_id: "w1", type: "work_item_needs_human", payload: {}, created_at: "2026-01-01T00:00:00Z" },
+        ],
+      },
+    }) as never);
+    setSessions("w1", [
+      {
+        id: "e1",
+        node_id: "verify",
+        hook_point: "escalation",
+        status: "running",
+        attempt: 1,
+        created_at: "2026-01-01T00:05:00Z",
+      } as never,
+    ]);
+    renderPeek();
+    expect(document.querySelector(".tag-outline")?.textContent).toBe("escalating");
+    expect(screen.getByTestId("escalating-pill")).toBeInTheDocument();
+    expect(screen.queryByText(/cannot make yet/i)).toBeNull();
+  });
+
+  it("never renders raw agent-event JSON in the log, falling back to its type", async () => {
+    vi.spyOn(api, "getLogLines").mockResolvedValue({
+      session_id: "s1",
+      status: "running",
+      lines: [
+        { n: 1, t: null, src: "agent", text: '{"type":"tool_progress","tool_use_id":"toolu_01"}' },
+      ],
+    });
+    setOneItem({ current_node_id: "verify" });
+    setSessions("w1", [
+      { id: "s1", node_id: "verify", hook_point: "on.test.run", status: "running" } as never,
+    ]);
+    renderPeek();
+    expect(await screen.findByText("tool_progress")).toBeInTheDocument();
+    expect(screen.queryByText(/toolu_01/)).toBeNull();
+  });
+
   // Another row switches the peek to that item (Board's own onSelect); if
   // this listener treated a row as "outside", the peek would close on the
   // pointerdown and reopen on the click.

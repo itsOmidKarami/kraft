@@ -506,6 +506,7 @@ export function ActionBar({
           turn={latestTurn.attempt}
           auto={Boolean(sentForLatest?.payload.auto)}
           busy={busy}
+          err={err}
           onStop={() => run(() => api.stopEscalation(item.id), "Agent stopped")}
         />
       ) : null;
@@ -595,6 +596,7 @@ export function ActionBar({
           onOpen={() => setOpen("reject")}
           onCancel={() => setOpen(null)}
           reviewHref={reviewHref}
+          events={events}
         />
       )}
       {state === "escalated" && latestTurn && (

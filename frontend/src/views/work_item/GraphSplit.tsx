@@ -61,7 +61,13 @@ export function GraphSplit({ graph, lower }: { graph: ReactNode; lower: ReactNod
 
   return (
     <div className="graph-split">
-      <div className="graph-split-graph" style={{ height }}>
+      {/* `maxHeight`, not `height` (Kraft-6d40): the stored/dragged value is
+          a ceiling on the graph's own content, not a fixed reservation. A
+          one-row chain sizes to its one row and gives the rest to
+          `.graph-split-lower`; only a chain that wraps past the drag's
+          height scrolls inside it (unchanged, `.graph-split-graph`'s own
+          `overflow-y: auto`). */}
+      <div className="graph-split-graph" style={{ maxHeight: height }}>
         {graph}
       </div>
       <div

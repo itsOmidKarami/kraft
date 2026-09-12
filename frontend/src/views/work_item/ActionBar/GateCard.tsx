@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ArrowSquareOut, Check, Flag } from "@phosphor-icons/react";
 import * as api from "../../../api";
-import type { WorkItem } from "../../../types";
+import type { KraftEvent, WorkItem } from "../../../types";
 import type { InspectorTab } from "../selection";
 import { Composer } from "./Composer";
 import { useActionBar } from "./useActionBar";
@@ -28,12 +28,44 @@ export function rejectTarget(item: WorkItem, gate: string): string | null {
   return to && nodes.slice(0, at).some((n) => n.id === to) ? to : null;
 }
 
+/** "3 findings deferred · 1 concern" -- counted, never the messages
+ *  themselves (Kraft-a4js: those are one click away, on the Timeline). */
+function deferredSummary(item: WorkItem): string {
+  const n = item.deferred_findings?.length ?? 0;
+  const c = item.concerns?.length ?? 0;
+  const parts: string[] = [];
+  if (n > 0) parts.push(`${n} finding${n === 1 ? "" : "s"} deferred`);
+  if (c > 0) parts.push(`${c} concern${c === 1 ? "" : "s"}`);
+  return parts.join(" · ");
+}
+
 /** The node whose `gate_after` is this gate — where "Review spec"/"Review
  *  changes" should land, which is not necessarily the item's *current* node
  *  (a later node may already be running while this gate waits). */
 function gateNodeId(item: WorkItem, gate: string): string | null {
   const nodes = item.chain_definition?.nodes ?? [];
   return nodes.find((n) => n.gate_after === gate)?.id ?? null;
+}
+
+/** The node whose `findings_measured` event the deferred-findings count came
+ *  from — for `human_review_approval` that's `verify`/`mr_checks`, never the
+ *  `human_review` gate node itself, which emits no such event. The default
+ *  chain measures at both `verify` and `mr_checks`, so the newest such event
+ *  is not necessarily the one that actually carries a finding (`mr_checks` is
+ *  commonly empty) -- skip empty ones so the link lands where the count came
+ *  from. Falls back to `fallback` (the gate node) so the link still goes
+ *  somewhere on an item with a nonzero count but no matching event yet. */
+function findingsNodeId(events: KraftEvent[], fallback: string): string {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e.type !== "findings_measured") continue;
+    const payload = e.payload as Record<string, unknown>;
+    const findings = payload.findings;
+    if (!Array.isArray(findings) || findings.length === 0) continue;
+    const id = payload.node_id;
+    if (typeof id === "string") return id;
+  }
+  return fallback;
 }
 
 /** The gate card (screen 19, "under the header, above the bar"). Replaces
@@ -48,6 +80,7 @@ export function GateCard({
   onOpen,
   onCancel,
   reviewHref,
+  events = [],
 }: {
   item: WorkItem;
   gate: string;
@@ -55,6 +88,7 @@ export function GateCard({
   onOpen: () => void;
   onCancel: () => void;
   reviewHref: (nodeId: string, tab: InspectorTab, id: string) => string;
+  events?: KraftEvent[];
 }) {
   const { busy, err, run } = useActionBar(item.id);
   const [note, setNote] = useState("");
@@ -105,23 +139,19 @@ export function GateCard({
             </a>
           )}
         </div>
-      {/* Deferred minor findings and done_with_concerns notes, one panel --
-          what the reviewer let through, shown where the merge is decided. */}
+      {/* Kraft-a4js: an unbounded list here (10 findings, 5.4k characters on
+          the live item) pushed the graph/inspector/right pane off the
+          viewport on a page that deliberately cannot scroll (screen 48 —
+          the only two scrollers are inside the split, below this card). A
+          `max-height` here would just stack a third scroller on top of
+          those two, which screen 48 forbids. `findings_measured` events are
+          already on the Timeline, which already has one -- so the card
+          stays a counted one-liner, never a roll-up nobody reads. */}
       {((item.deferred_findings?.length ?? 0) > 0 || (item.concerns?.length ?? 0) > 0) && (
-        <ul className="gate-deferred">
-          {item.concerns?.map((c, i) => (
-            <li key={`concern:${i}`}>
-              <span className="field-hint">concern</span> {c}
-            </li>
-          ))}
-          {item.deferred_findings?.map((f) => (
-            <li key={`${f.source_plugin}:${f.file}:${f.message}`}>
-              <span className="field-hint">{f.severity}</span>{" "}
-              <span className="mono">{f.file ? `${f.file}:${f.line ?? "?"}` : "—"}</span>{" "}
-              {f.message}
-            </li>
-          ))}
-        </ul>
+        <p className="gate-deferred">
+          {deferredSummary(item)} ·{" "}
+          <a href={reviewHref(node, "timeline", findingsNodeId(events, node))}>see Timeline</a>
+        </p>
       )}
       {!open ? (
         <div className="gate-actions">
