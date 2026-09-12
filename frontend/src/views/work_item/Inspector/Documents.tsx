@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Eye, FileText, ListChecks, Notebook } from "@phosphor-icons/react";
 import * as api from "../../../api";
 import type { WorkItemDocument } from "../../../types";
+import { GATE_DOC_ID } from "../selection";
 
 /**
  * Inspector · Documents (UI v2 · 05, 14): `LinkedDocuments`'s fetch, as a
@@ -22,6 +23,8 @@ export function Documents({
   selected,
   onSelect,
   preselectPath,
+  gatePending,
+  gateArtifactPending,
 }: {
   workItemId: string;
   eventCount: number;
@@ -33,6 +36,17 @@ export function Documents({
    *  list (G5-05): a "Gate document" row above everything else, "not
    *  written yet" in its own right column when the gate has none. */
   preselectPath?: string | null;
+  /** Whether a gate is pending at all. `item.gate_artifact` is null both when
+   *  there is no gate and when the gate's artifact is not yet written to disk
+   *  (board.py's `gate_artifact`), so the "Gate document" section can't guard
+   *  on `preselectPath` being present — it must guard on the gate itself. */
+  gatePending: boolean;
+  /** Whether a gate is pending and its artifact exists on disk. NOT derivable
+   *  from the document list: the index does not ingest a gate's artifact until
+   *  approval (`artifacts._ingest_approved_gate_artifact`), so "absent from
+   *  `docs`" is the normal state of a written artifact, and the old
+   *  `preselectMissing` read it as "not written yet" (G5-05). */
+  gateArtifactPending: boolean;
 }) {
   const [docs, setDocs] = useState<WorkItemDocument[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -64,24 +78,37 @@ export function Documents({
   // gate's artifact isn't ingested until approval
   // (artifacts._ingest_approved_gate_artifact), so "no match yet" is the
   // normal pre-approval state, not a reason to show some unrelated document.
+  // It is a reason to show the artifact itself: on a miss we select
+  // GATE_DOC_ID, and the right pane reads it out of the worktree via
+  // `api.getWorkItemArtifact` (Kraft-8ic7). The selection upgrades to the
+  // real document id once the index catches up.
   const autoPickRef = useRef<string | null>(null);
-  const preselectMissing = !!preselectPath && !!docs && !docs.some((d) => d.path === preselectPath);
   useEffect(() => {
-    if (!docs || docs.length === 0) return;
+    if (!docs) return; // still loading
     if (selected && selected !== autoPickRef.current) return; // a real row click
     if (preselectPath) {
       const match = docs.find((d) => d.path === preselectPath);
-      if (!match) return; // don't auto-pick an unrelated document
+      if (!match) {
+        // Not a fallback to "some document" — this IS the right document,
+        // just not in the index yet (docs may still be an empty list, since
+        // the index hasn't ingested it). `RightPane` reads it off disk.
+        if (gateArtifactPending && selected !== GATE_DOC_ID) {
+          autoPickRef.current = GATE_DOC_ID;
+          onSelect(GATE_DOC_ID);
+        }
+        return;
+      }
       if (match.document_id === selected) return;
       autoPickRef.current = match.document_id;
       onSelect(match.document_id);
       return;
     }
+    if (docs.length === 0) return;
     const pick = docs[0].document_id;
     if (pick === selected) return;
     autoPickRef.current = pick;
     onSelect(pick);
-  }, [docs, selected, onSelect, preselectPath]);
+  }, [docs, selected, onSelect, preselectPath, gateArtifactPending]);
 
   const gateDoc = preselectPath ? (docs?.find((d) => d.path === preselectPath) ?? null) : null;
   const rest = docs?.filter((d) => d !== gateDoc) ?? [];
@@ -111,19 +138,24 @@ export function Documents({
       {error && <p className="form-error" role="alert">{error}</p>}
       {!error && docs?.length === 0 && <p className="empty">no linked documents yet</p>}
 
-      {!!preselectPath && (
+      {gatePending && (
         <>
           <p className="section-label">Gate document</p>
           {gateDoc ? (
             row(gateDoc)
           ) : (
-            <div className="doc-row" data-kind="placeholder">
+            <button
+              className="doc-row"
+              data-selected={selected === GATE_DOC_ID}
+              disabled={!gateArtifactPending}
+              onClick={() => onSelect(GATE_DOC_ID)}
+            >
               <FileText size={16} className="doc-icon" />
               <span className="doc-text">
                 <span className="doc-title">{preselectPath}</span>
               </span>
-              <span className="row-sub">{preselectMissing ? "not written yet" : ""}</span>
-            </div>
+              <span className="row-sub">{gateArtifactPending ? "not indexed yet" : "not written yet"}</span>
+            </button>
           )}
         </>
       )}

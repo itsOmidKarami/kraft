@@ -24,3 +24,9 @@ export const fileSection = (key: string): DiffSection =>
 
 export const filePath = (key: string) =>
   key.startsWith("landed:") ? key.slice("landed:".length) : key;
+
+/** `#doc=gate` — the pending gate's own artifact, read off disk by
+ *  `api.getWorkItemArtifact` rather than out of the document index, which
+ *  does not ingest it until approval. Cannot collide with a real document
+ *  id: those are `dc_`-prefixed index keys, never the bare word. */
+export const GATE_DOC_ID = "gate";
