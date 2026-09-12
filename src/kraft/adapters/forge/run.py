@@ -145,7 +145,31 @@ async def _run_one(
             # intake slot and could not be cancelled. `merge`'s own gate still
             # calls `wait_for_ci` -- that one is Kraft-7jja.
             head_sha = await git._head_sha(repo)
-            ci_status = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
+            # Pin to the pipeline the last poll of this same head already
+            # saw, instead of re-resolving "latest on branch" every re-entry
+            # (Kraft-ivh1). A rebase or a repair's push moves head_sha, which
+            # invalidates the stored ref on its own -- no separate signal
+            # for "something changed the branch" needed.
+            stored = db.read(
+                lambda c: c.execute(
+                    "SELECT ci_pipeline_ref FROM work_items WHERE id = ?", (work_item_id,)
+                ).fetchone()
+            )
+            stored_ref = stored["ci_pipeline_ref"] if stored else None
+            pipeline_id = ""
+            if stored_ref and ":" in stored_ref:
+                stored_sha, stored_pipeline_id = stored_ref.split(":", 1)
+                if stored_sha == head_sha:
+                    pipeline_id = stored_pipeline_id
+            ci_status = await forge.ci_status(
+                repo=repo, mr=MR(number=0, url=""), branch=branch, pipeline_id=pipeline_id
+            )
+            if ci_status.pipeline_ref:
+                await db.write(
+                    lambda c, ref=f"{head_sha}:{ci_status.pipeline_ref}": store.set_ci_pipeline_ref(
+                        c, work_item_id, ref
+                    )
+                )
             log, status = await ci.render_ci(
                 ci_status, forge=forge, repo=repo, branch=branch, head_sha=head_sha
             )
@@ -419,7 +443,7 @@ async def run_task(
     off `worker_sessions`. Recording nothing until the node finished silently
     broke all three for the length of that wait (Kraft-41b, Kraft-7xt).
     """
-    log_path, result_path = await _builtins.start_session(
+    actual_session_id, log_path, result_path = await _builtins.start_session(
         db,
         run_dirs,
         session_id=session_id,
@@ -428,7 +452,13 @@ async def run_task(
         hook_point=hook_point,
         round=round,
         head_sha=head_sha,
+        # A pipeline still pending is the same wait episode, not a new
+        # attempt (Kraft-ivh1) -- every other handler keeps minting a fresh
+        # row every dispatch.
+        reuse_if_waiting=(handler == "ci_poll"),
     )
+    reused = actual_session_id != session_id
+    session_id = actual_session_id
     rows = db.read(
         lambda c: c.execute(
             "SELECT * FROM work_item_repos WHERE work_item_id = ? ORDER BY merge_rank",
@@ -549,5 +579,12 @@ async def run_task(
         log, status, findings = f"{hook_point} failed: {exc}\n", "failed", None
 
     return await _builtins.finish_session(
-        db, log_path, result_path, session_id=session_id, status=status, log=log, findings=findings
+        db,
+        log_path,
+        result_path,
+        session_id=session_id,
+        status=status,
+        log=log,
+        findings=findings,
+        reused=reused,
     )

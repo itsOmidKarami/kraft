@@ -19,13 +19,31 @@ def create_session(
     result_path,
     round: int = 0,
     head_sha: str | None = None,
-) -> None:
+    reuse_if_waiting: bool = False,
+) -> tuple[str, str, str]:
     """`round` is the fix-cycle index this session was dispatched in (0 = first pass).
 
     `head_sha` is the worktree HEAD this session was dispatched against
     (Kraft-lu2) — None for a builtin/agent task that has no meaningful sha of
     its own to report.
+
+    Returns `(id, log_path, result_path)` -- normally the caller's own `id`
+    and paths, echoed back. `reuse_if_waiting` (Kraft-ivh1) changes that: a
+    session already sitting at `status='waiting'` for this exact (work item,
+    node, hook point, round) is the same wait episode, not a new attempt --
+    its id/log_path/result_path are returned instead, and no row is
+    inserted. `on.ci.poll` is the only caller that sets this; every other
+    hook keeps minting a fresh row every dispatch, unchanged.
     """
+    if reuse_if_waiting:
+        existing = conn.execute(
+            "SELECT id, log_path, result_path FROM worker_sessions WHERE work_item_id = ? "
+            "AND node_id = ? AND hook_point = ? AND round = ? AND status = 'waiting' "
+            "ORDER BY created_at DESC LIMIT 1",
+            (work_item_id, node_id, hook_point, round),
+        ).fetchone()
+        if existing is not None:
+            return existing["id"], existing["log_path"], existing["result_path"]
     # The attempt is the count of this (work item, node, hook point)'s sessions,
     # computed in the INSERT rather than passed in: no caller knows better than the
     # table does, and two callers would each re-implement the same query
@@ -72,6 +90,7 @@ def create_session(
             "attempt": attempt,
         },
     )
+    return id, log_path, result_path
 
 
 def sessions_for_round(

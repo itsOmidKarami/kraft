@@ -213,6 +213,97 @@ def test_ci_poll_reports_waiting_on_a_pending_pipeline(tmp_path, monkeypatch):
     assert "pipeline pending" in _session_log(tmp_path, "s4")
 
 
+def test_ci_poll_reuses_the_session_across_a_still_pending_wait(tmp_path, monkeypatch):
+    """Two re-entries of on.ci.poll while the pipeline is still pending must
+    leave exactly one worker_sessions row, with both polls' log text in it,
+    and no attempt-number climb."""
+    fake = forge.FakeForge(ci_states=["pending", "pending"])
+    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at) VALUES "
+                    "('w1','t','/r','default','{}','active','now','now')"
+                )
+            )
+            for sid in ("s1", "s2"):
+                await forge.run_task(
+                    database,
+                    rd,
+                    session_id=sid,
+                    work_item_id="w1",
+                    node_id="mr_checks",
+                    hook_point="on.ci.poll",
+                    handler="ci_poll",
+                    backend="fake",
+                    repo=tmp_path,
+                    branch="kraft/w1",
+                    title="t",
+                )
+            rows = database.read(
+                lambda c: c.execute(
+                    "SELECT id, attempt, status FROM worker_sessions WHERE work_item_id='w1'"
+                ).fetchall()
+            )
+            return rows
+        finally:
+            await database.close()
+
+    rows = asyncio.run(scenario())
+    assert len(rows) == 1
+    assert rows[0]["id"] == "s1"
+    assert rows[0]["attempt"] == 1
+    assert rows[0]["status"] == "waiting"
+    log = (tmp_path / "run" / "logs" / "s1.log").read_text()
+    assert log.count("pipeline pending") == 2
+
+
+def test_ci_poll_pins_to_the_pipeline_it_last_saw(tmp_path, monkeypatch):
+    """A second poll of the same head sha reads the pinned pipeline id back,
+    not "" (unpinned) again."""
+    fake = forge.FakeForge(ci_states=["pending", "pending"], ci_pipeline_refs=["555"])
+    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at) VALUES "
+                    "('w1','t','/r','default','{}','active','now','now')"
+                )
+            )
+            for sid in ("s1", "s2"):
+                await forge.run_task(
+                    database,
+                    rd,
+                    session_id=sid,
+                    work_item_id="w1",
+                    node_id="mr_checks",
+                    hook_point="on.ci.poll",
+                    handler="ci_poll",
+                    backend="fake",
+                    repo=tmp_path,
+                    branch="kraft/w1",
+                    title="t",
+                )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    # git._head_sha(tmp_path) fails (not a real repo) and returns "" both
+    # times -- "" == "" -- so the stored ref's sha always matches and the
+    # second call is the pinned one.
+    assert fake.pipeline_ids_requested == ["", "555"]
+
+
 def test_ci_poll_still_resolves_a_settled_pipeline(tmp_path, monkeypatch):
     """The path that already worked must not change: success -> done,
     failure -> failed, unmergeable -> conflict (once a re-fetch confirms it,
@@ -272,7 +363,7 @@ def test_a_forge_error_mid_poll_fails_the_node_rather_than_escaping(tmp_path, mo
     the whole timeout; it still has to land as a failed node."""
 
     class Exploding(forge.FakeForge):
-        async def ci_status(self, *, repo, mr, branch=""):
+        async def ci_status(self, *, repo, mr, branch="", pipeline_id=""):
             raise forge.ForgeError("glab fell over")
 
     returned, recorded = _forge_session(
@@ -648,9 +739,9 @@ def test_ci_poll_pushes_before_it_polls(tmp_path, monkeypatch):
             order.append("push")
             await super().push(repo=repo, branch=branch)
 
-        async def ci_status(self, *, repo, mr, branch=""):
+        async def ci_status(self, *, repo, mr, branch="", pipeline_id=""):
             order.append("ci")
-            return await super().ci_status(repo=repo, mr=mr, branch=branch)
+            return await super().ci_status(repo=repo, mr=mr, branch=branch, pipeline_id=pipeline_id)
 
     fake = Recording(ci_states=["success"])
     returned, recorded = _forge_session(
