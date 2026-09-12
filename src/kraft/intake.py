@@ -149,23 +149,30 @@ async def _start(app, repo: dict, row: dict) -> str | None:
         logger.exception("auto-intake: could not file %s", row["id"])
         return None
     logger.info("auto-intake: started %s from %s", wid, row["id"])
-    deps.spawn(
-        app,
-        wid,
-        deps.guard(
-            st.db,
+    try:
+        deps.spawn(
+            app,
             wid,
-            executor.run(
+            deps.guard(
                 st.db,
-                st.run_dirs,
-                work_item_id=wid,
-                registry=st.registry,
-                bd_cwd=deps.bd_cwd(),
-                policy=st.policy,
-                launch=deps.launch(st, repo["path"]),
+                wid,
+                executor.run(
+                    st.db,
+                    st.run_dirs,
+                    work_item_id=wid,
+                    registry=st.registry,
+                    bd_cwd=deps.bd_cwd(),
+                    policy=st.policy,
+                    launch=deps.launch(st, repo["path"]),
+                ),
             ),
-        ),
-    )
+        )
+    except deps.AlreadyRunning:
+        # Structurally unreachable today (every `_start` call is a freshly
+        # intaken id), kept for the same reason ci_wait/rate_limit_retry are:
+        # a poller finding its own target already running must log and move
+        # on, never crash the tick.
+        logger.warning("auto-intake: %s already has a live walk, not double-starting", wid)
     return wid
 
 

@@ -26,6 +26,14 @@ from kraft.templates import load_registry, load_templates
 logger = logging.getLogger(__name__)
 
 
+class AlreadyRunning(RuntimeError):
+    """A live executor task already holds this key. Not `HTTPException`:
+    three of `spawn`'s callers are pollers, not routes, and making `ci_wait`
+    import FastAPI to catch its own race is backwards. Routes translate this
+    into a 409; pollers catch it and log-and-skip, because a poller finding
+    an item already running is a normal race, not a poller crash."""
+
+
 async def guard(db, wid: str, coro) -> None:
     try:
         await coro
@@ -56,11 +64,77 @@ def _bead_warning(st, wid: str) -> str | None:
     return json.loads(row["payload"])["reason"] if row else None
 
 
+def task_is_live(app: FastAPI, wid: str) -> bool:
+    """True if `wid` already has an undone task -- the same test `spawn` makes
+    internally, exposed so a gate route can check it *before* a mutating store
+    write. A gate has no status column to claim (§1 doesn't cover it): calling
+    `store.approve_gate`/`apply_rejection` and only then discovering `spawn`
+    refuses would leave the gate cleared and the item `active` with no walk
+    behind it -- the exact stranding `claim_for_run`'s ordering exists to
+    prevent everywhere else. Checking first, with no `await` before the write
+    that follows, shrinks that race to the width of the write itself."""
+    existing = app.state.tasks.get(wid)
+    return existing is not None and not existing.done()
+
+
 def spawn(app: FastAPI, wid: str, coro) -> asyncio.Task:
+    if task_is_live(app, wid):
+        # A refused coroutine that is never awaited raises "coroutine was
+        # never awaited" at garbage-collection time and leaks whatever it
+        # closed over (the `guard` wrapper, the executor.run frame, ...).
+        coro.close()
+        raise AlreadyRunning(wid)
     task = asyncio.ensure_future(coro)
     app.state.tasks[wid] = task
     task.add_done_callback(lambda _t, wid=wid: app.state.tasks.pop(wid, None))
     return task
+
+
+async def cancel(app: FastAPI, wid: str) -> None:
+    """Cancel `wid`'s live walk task, if any, and wait for it to actually
+    finish before returning.
+
+    A bare `.cancel()` only *schedules* a `CancelledError` at the task's next
+    await point -- `task.done()` stays False until the event loop resumes it.
+    `skip` cancels the current walk and spawns its replacement in the same
+    request, with no `await` in between; without waiting here, `spawn`'s
+    `AlreadyRunning` check would see the old task as still live and refuse the
+    new one every time. Awaiting the task makes cancellation synchronous from
+    the caller's point of view: by the time this returns, `spawn`'s own
+    done-callback has already popped `app.state.tasks[wid]`.
+
+    `deps.guard` re-raises `CancelledError` and swallows every other
+    exception itself, so `CancelledError` is the only thing `await task` can
+    raise here.
+    """
+    task = app.state.tasks.get(wid)
+    if task is None or task.done():
+        return
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
+def skip_lock(app: FastAPI, wid: str) -> asyncio.Lock:
+    """A per-`wid` lock serializing `/skip` end to end.
+
+    `/skip` can start from `paused`/`needs_human`, where there is no live task
+    yet for `spawn`'s own check to catch, and `claim_for_run`'s `to_status`
+    (`"active"`) is also one of `/skip`'s own `from_statuses` -- so two
+    concurrent skips both win that claim too and both write `skip_node`
+    before either reaches `spawn`. The caller checks `.locked()` before
+    entering, refusing a second caller outright rather than queuing it behind
+    the first -- a queued second caller would wake up to a state the first
+    already advanced, and would then skip the *next* node too instead of
+    getting the 409 two callers racing the same node are supposed to get.
+    """
+    locks = getattr(app.state, "_skip_locks", None)
+    if locks is None:
+        locks = {}
+        app.state._skip_locks = locks
+    return locks.setdefault(wid, asyncio.Lock())
 
 
 def _work_item_row(st, wid):

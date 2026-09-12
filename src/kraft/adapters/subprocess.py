@@ -269,6 +269,17 @@ async def run_task(
     )
 
     full_env = {**os.environ, **(env or {}), "KRAFT_RESULT_PATH": str(result_path)}
+    # Kraft-qx1q: `create_session` above inserts this row 'pending' with no
+    # pid yet. `pause_work_item`, `chain.skip_node`, and
+    # `stop_escalation_session` can all mark a row stopped in the window
+    # between that insert and here -- SIGTERM has nothing to signal without a
+    # pid, so without this check Popen launches an untracked agent into a
+    # worktree the caller believes is idle. One read, right before the one
+    # place that can actually refuse the launch, covers every caller that
+    # marks a row stopped: no log file is opened and no process is started.
+    current_status = await db.write(lambda c: store.session_status(c, session_id))
+    if current_status != "pending":
+        return current_status
     log = open(log_path, "w")
     try:
         try:
@@ -317,42 +328,49 @@ async def run_task(
     watcher.start()
 
     try:
-        pid_start_time = psutil.Process(proc.pid).create_time()
-    except psutil.Error:
-        pid_start_time = None
-    await db.write(lambda c: store.session_running(c, session_id, proc.pid, pid_start_time))
-
-    # Poll instead of `await asyncio.to_thread(proc.wait)`: a blocked thread is
-    # uncancellable, so on SIGTERM the executor task's cancel() could not
-    # interrupt it and uvicorn fell back to a hard exit (same fix as
-    # reattach._adopt).
-    #
-    # The same loop, with a second job: read the log forward from our own byte
-    # offset every `progress_s` and write the running usage onto the session
-    # row. Before this the row held NULL tokens and a NULL model for the whole
-    # run, so `usage_rollup` reported 0 for exactly the node a human was
-    # watching (Kraft-54dk, Kraft-2r8s).
-    seen_usage: dict[str, _usage.Usage] = {}
-    log_offset = 0
-    next_progress = time.monotonic() + progress_s
-    while proc.poll() is None:
-        await asyncio.sleep(poll_s)
-        if time.monotonic() < next_progress:
-            continue
-        next_progress = time.monotonic() + progress_s
-        # A bad line or a write hiccup here must not kill this task: the child
-        # keeps running and writing its own log fd regardless, so losing this
-        # loop silently freezes tokens_in/out for the rest of the session with
-        # nothing to show it happened (Kraft-41f7).
         try:
-            log_offset, live = _progress_usage(log_path, log_offset, seen_usage)
-            if live is not None:
-                await db.write(lambda c, u=live: store.session_progress(c, session_id, u))
-        except Exception:
-            logger.exception("usage progress tick failed for session %s", session_id)
-    # the child is gone; let the watcher record whatever it wrote on the way out
-    stop.set()
-    watcher.join(timeout=2)
+            pid_start_time = psutil.Process(proc.pid).create_time()
+        except psutil.Error:
+            pid_start_time = None
+        await db.write(lambda c: store.session_running(c, session_id, proc.pid, pid_start_time))
+
+        # Poll instead of `await asyncio.to_thread(proc.wait)`: a blocked thread is
+        # uncancellable, so on SIGTERM the executor task's cancel() could not
+        # interrupt it and uvicorn fell back to a hard exit (same fix as
+        # reattach._adopt).
+        #
+        # The same loop, with a second job: read the log forward from our own byte
+        # offset every `progress_s` and write the running usage onto the session
+        # row. Before this the row held NULL tokens and a NULL model for the whole
+        # run, so `usage_rollup` reported 0 for exactly the node a human was
+        # watching (Kraft-54dk, Kraft-2r8s).
+        seen_usage: dict[str, _usage.Usage] = {}
+        log_offset = 0
+        next_progress = time.monotonic() + progress_s
+        while proc.poll() is None:
+            await asyncio.sleep(poll_s)
+            if time.monotonic() < next_progress:
+                continue
+            next_progress = time.monotonic() + progress_s
+            # A bad line or a write hiccup here must not kill this task: the child
+            # keeps running and writing its own log fd regardless, so losing this
+            # loop silently freezes tokens_in/out for the rest of the session with
+            # nothing to show it happened (Kraft-41f7).
+            try:
+                log_offset, live = _progress_usage(log_path, log_offset, seen_usage)
+                if live is not None:
+                    await db.write(lambda c, u=live: store.session_progress(c, session_id, u))
+            except Exception:
+                logger.exception("usage progress tick failed for session %s", session_id)
+    finally:
+        # A pause or skip cancels this task from inside the poll loop above
+        # (deps.cancel -> CancelledError), which used to skip straight past
+        # the stop/join pair that only ever sat after the loop -- leaking the
+        # watcher thread, and its two open fds, for the rest of the server's
+        # life. `finally` runs on that path too, so the watcher stops however
+        # this function leaves the loop.
+        stop.set()
+        watcher.join(timeout=2)
     returncode = proc.returncode
     status = _resolve(result_path, returncode)
     # A session that exits clean with no result file at all never reached the

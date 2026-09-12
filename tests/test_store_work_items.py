@@ -639,3 +639,50 @@ def test_last_auto_pickup_at_only_tracks_auto_intake_repos(tmp_path):
     last = store.last_auto_pickup_at(conn)
     assert "/a" in last
     assert "/b" not in last
+
+
+def test_claim_for_run_is_atomic_between_two_callers(tmp_path):
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            await database.write(lambda c: store.pause_work_item(c, "w1", []))
+            first = await database.write(
+                lambda c: store.claim_for_run(c, "w1", from_statuses=["paused"])
+            )
+            second = await database.write(
+                lambda c: store.claim_for_run(c, "w1", from_statuses=["paused"])
+            )
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT status, retry_at FROM work_items WHERE id='w1'"
+                ).fetchone()
+            )
+            return first, second, row["status"], row["retry_at"]
+        finally:
+            await database.close()
+
+    first, second, status, retry_at = asyncio.run(scenario())
+    assert (first, second) == (True, False)
+    assert status == "active"
+    assert retry_at is None
+
+
+def test_claim_for_run_refuses_a_status_outside_the_set(tmp_path):
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)  # created 'active'
+            claimed = await database.write(
+                lambda c: store.claim_for_run(c, "w1", from_statuses=["paused"])
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT status FROM work_items WHERE id='w1'").fetchone()
+            )
+            return claimed, row["status"]
+        finally:
+            await database.close()
+
+    claimed, status = asyncio.run(scenario())
+    assert claimed is False
+    assert status == "active"  # untouched

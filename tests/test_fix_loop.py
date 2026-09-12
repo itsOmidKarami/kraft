@@ -304,6 +304,9 @@ def test_retry_after_cap_clears_the_budget_and_steers_cycle_one(tmp_path, monkey
             # a human retries with a note, and this time the agent fixes the code
             monkeypatch.setenv("KRAFT_FAKE_AGENT", "fix")
             await database.write(
+                lambda c: store.claim_for_run(c, wid, from_statuses=["needs_human"])
+            )
+            await database.write(
                 lambda c: store.retry_after_cap(
                     c, wid, "verify", "verify_fix_loop", "the sign is flipped"
                 )

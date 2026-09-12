@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import os
 import sqlite3
@@ -93,6 +94,7 @@ def test_retry_refuses_explicit_steer_on_a_node_with_no_agent_task(tmp_path, mon
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
         _force_node(wid, "merge", "needs_human")
 
         r = client.post(f"/api/work-items/{wid}/retry", json={"steer": "commit the leftover file"})
@@ -110,6 +112,7 @@ def test_retry_without_explicit_steer_still_works_on_a_node_with_no_agent_task(
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
         _force_node(wid, "merge", "needs_human")
 
         r = client.post(f"/api/work-items/{wid}/retry", json={})
@@ -249,6 +252,75 @@ def test_retry_still_refuses_a_stranger_while_an_escalation_is_running(tmp_path,
 
         assert r.status_code == 409, r.text
         assert "s1" in r.json()["detail"]
+
+
+def test_retry_refuses_and_writes_nothing_when_a_walk_is_still_live(tmp_path, monkeypatch):
+    """A `needs_human` item can still have a live walk task behind it -- a
+    pending gate under auto_escalate review, or the brief window while the
+    walk that just called request_gate/mark_needs_human is still unwinding.
+    `/retry` must refuse before it claims and rebases, not claim, rebase, and
+    clear the fix-loop cap only for `spawn` to 409 on top of those writes."""
+    from kraft.api import deps
+
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+        _force_node(wid, "verify", "needs_human")
+
+        async def _never_returning():
+            await asyncio.Event().wait()
+
+        async def inject():
+            deps.spawn(client.app, wid, _never_returning())
+
+        client.portal.call(inject)
+
+        r = client.post(f"/api/work-items/{wid}/retry", json={})
+
+        assert r.status_code == 409, r.text
+        item = client.get(f"/api/work-items/{wid}").json()
+        assert item["status"] == "needs_human"
+
+        async def cleanup():
+            task = client.app.state.tasks.pop(wid)
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+        client.portal.call(cleanup)
+
+
+def test_resume_refuses_and_writes_nothing_when_a_walk_is_still_live(tmp_path, monkeypatch):
+    """Same race as retry, from `paused`: `/resume` must not claim, rebase,
+    and `resume_work_item` an item that still has a live walk task behind it."""
+    from kraft.api import deps
+
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+        _set_status(wid, "paused")
+
+        async def _never_returning():
+            await asyncio.Event().wait()
+
+        async def inject():
+            deps.spawn(client.app, wid, _never_returning())
+
+        client.portal.call(inject)
+
+        r = client.post(f"/api/work-items/{wid}/resume", json={})
+
+        assert r.status_code == 409, r.text
+        item = client.get(f"/api/work-items/{wid}").json()
+        assert item["status"] == "paused"
+
+        async def cleanup():
+            task = client.app.state.tasks.pop(wid)
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+        client.portal.call(cleanup)
 
 
 def test_abandon_sets_terminal_status_and_removes_the_worktree(tmp_path, monkeypatch):

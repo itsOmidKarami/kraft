@@ -69,6 +69,26 @@ def _wait_for_status(client, wid, status, timeout=30):
     raise AssertionError(f"status never became {status!r}; last body={body}")
 
 
+def _approve_gate(client, wid, gate, timeout=30):
+    """Approve a gate, retrying past a 409.
+
+    An `auto_escalate` node's own walk (chain_review, in the shipped `default`
+    template) can still be inside its own auto-review agent call when this
+    gate first becomes pending -- `deps.spawn`'s `AlreadyRunning` refusal
+    (Kraft-11e0) then 409s a manual approve that lands in that window. Retry
+    until the in-flight review finishes and frees the task slot, rather than
+    every caller re-deriving this.
+    """
+    deadline = time.monotonic() + timeout
+    r = None
+    while time.monotonic() < deadline:
+        r = client.post(f"/api/work-items/{wid}/gates/{gate}/approve")
+        if r.status_code != 409:
+            return r
+        time.sleep(0.2)
+    raise AssertionError(f"{gate} still 409 after {timeout}s: {r.text if r else '(no attempt)'}")
+
+
 def _post_default(client, repo):
     return client.post(
         "/api/work-items",

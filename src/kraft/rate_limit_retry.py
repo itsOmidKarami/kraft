@@ -84,30 +84,46 @@ async def _retry_one(app, row) -> bool:
         )
         return False
 
+    claimed = await st.db.write(
+        lambda c: store.claim_for_run(c, wid, from_statuses=["rate_limited"])
+    )
+    if not claimed:
+        # Something else (a human abandoning it, most plausibly) already moved
+        # this item off `rate_limited` between the `due` SELECT and here.
+        # `retry_after_cap` no longer flips status itself -- without this
+        # check the poller would blindly claw an abandoned item back to
+        # 'active' and spawn a walk into a worktree that may already be gone.
+        logger.info("rate-limit retry: %s is no longer rate_limited, skipping", wid)
+        return False
+
     await st.db.write(lambda c: store.retry_after_cap(c, wid, node_id, None, RESUME_PROMPT))
     chain = json.loads(row["chain_definition"])
     start = next(i for i, n in enumerate(chain["nodes"]) if n["id"] == node_id)
     from kraft import executor  # deferred: avoids a kraft.api <-> kraft.executor import cycle
 
-    deps.spawn(
-        app,
-        wid,
-        deps.guard(
-            st.db,
+    try:
+        deps.spawn(
+            app,
             wid,
-            executor.run(
+            deps.guard(
                 st.db,
-                st.run_dirs,
-                work_item_id=wid,
-                registry=st.registry,
-                bd_cwd=deps.bd_cwd(),
-                start_index=start,
-                policy=st.policy,
-                steer=RESUME_PROMPT,
-                launch=deps.launch(st, row["repo"]),
+                wid,
+                executor.run(
+                    st.db,
+                    st.run_dirs,
+                    work_item_id=wid,
+                    registry=st.registry,
+                    bd_cwd=deps.bd_cwd(),
+                    start_index=start,
+                    policy=st.policy,
+                    steer=RESUME_PROMPT,
+                    launch=deps.launch(st, row["repo"]),
+                ),
             ),
-        ),
-    )
+        )
+    except deps.AlreadyRunning:
+        logger.warning("rate-limit retry: %s already has a live walk, skipping", wid)
+        return False
     return True
 
 
