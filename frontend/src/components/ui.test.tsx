@@ -1,13 +1,35 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { Chip, MiniChain, OverflowMenu, RowState, StatusGlyph, Switch, Tabs } from "./ui";
+import { Chip, MiniChain, OverflowMenu, RowState, StatusGlyph, Switch, Tabs, TaskBar, TaskLine } from "./ui";
 
 const NODES = [
   { id: "env_setup", tasks: ["a"], gate_after: null },
   { id: "verify", tasks: ["a", "b"], gate_after: null, fix_loop: "verify_fix_loop" },
   { id: "merge", tasks: ["c"], gate_after: "human_review_approval" },
 ];
+
+describe("TaskLine", () => {
+  it("renders the long form by default and the short form on request", () => {
+    const p = { current: 3, total: 6, title: "open_mr refuses a dirty worktree" };
+    const { rerender } = render(<TaskLine progress={p} />);
+    expect(screen.getByText("Task 3 of 6")).toBeTruthy();
+    expect(screen.getByText(p.title)).toBeTruthy();
+    rerender(<TaskLine progress={p} form="short" />);
+    expect(screen.getByText("Task 3/6")).toBeTruthy();
+  });
+});
+
+describe("TaskBar", () => {
+  it("renders one segment per task, marking done, current and pending", () => {
+    render(<TaskBar progress={{ current: 3, total: 6, title: "t" }} />);
+    const segs = document.querySelectorAll(".task-seg");
+    expect(segs).toHaveLength(6);
+    expect(segs[0].getAttribute("data-state")).toBe("done");
+    expect(segs[2].getAttribute("data-state")).toBe("current");
+    expect(segs[5].getAttribute("data-state")).toBe("pending");
+  });
+});
 
 describe("MiniChain", () => {
   it("marks done, current and todo segments and ticks gated nodes", () => {
@@ -25,6 +47,14 @@ describe("MiniChain", () => {
     render(<MiniChain nodes={NODES} currentNodeId="verify" size="sm" />);
     expect(screen.queryByText("verify")).not.toBeInTheDocument();
     expect(screen.getByTitle("verify")).toBeInTheDocument();
+  });
+
+  it("labels only the first, current and last segment of a large chain", () => {
+    const nodes = ["spec", "plan", "env", "impl", "verify", "merge"].map((id) => ({
+      id, tasks: [], gate_after: null,
+    }));
+    render(<MiniChain nodes={nodes} currentNodeId="impl" size="lg" />);
+    expect(document.querySelectorAll(".chain-label")).toHaveLength(3);
   });
 
   it("drops the current segment to paused when the item is paused", () => {

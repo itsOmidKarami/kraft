@@ -28,7 +28,7 @@ import {
 } from "@phosphor-icons/react";
 import { statusWord } from "../format";
 import type { ItemDisplayState } from "../deriveState";
-import type { ChainNode, SessionStatus } from "../types";
+import type { ChainNode, SessionStatus, TaskProgress } from "../types";
 
 /* — rows ————————————————————————————————————————————————————————————— */
 
@@ -157,7 +157,7 @@ export function MiniChain({
   const invalidIds = new Set(invalid);
   return (
     <div className={`chain-bar ${size}`} data-testid="chain-bar">
-      {nodes.map((n) => {
+      {nodes.map((n, i) => {
         const state = invalidIds.has(n.id)
           ? "invalid"
           : n.id === currentNodeId
@@ -180,11 +180,55 @@ export function MiniChain({
                 </span>
               )}
             </span>
-            {size === "lg" && <span className="chain-label">{n.id}</span>}
+            {size === "lg" && (i === 0 || i === nodes.length - 1 || n.id === currentNodeId) && (
+              <span className="chain-label">{n.id}</span>
+            )}
           </span>
         );
       })}
     </div>
+  );
+}
+
+/* — task progress (spec §7) —————————————————————————————————————————— */
+
+/** One vocabulary for "where the implementer is in its plan" (UI v3 · §2):
+ *  the count in accent, the title in neutral and ellipsized. `short` is the
+ *  board row's meta line, where "Task 3/6" is all that fits. */
+export function TaskLine({
+  progress,
+  form = "long",
+}: {
+  progress: TaskProgress;
+  form?: "long" | "short";
+}) {
+  return (
+    <span className="task-line">
+      <span className="task-count">
+        {form === "short"
+          ? `Task ${progress.current}/${progress.total}`
+          : `Task ${progress.current} of ${progress.total}`}
+      </span>
+      <span className="task-title">{progress.title}</span>
+    </span>
+  );
+}
+
+/** One 3px segment per task, gap 3 (UI v3 · §2). The current segment glows
+ *  and pulses; everything after it is neutral-800. */
+export function TaskBar({ progress }: { progress: TaskProgress }) {
+  return (
+    <span className="task-bar" data-testid="task-bar">
+      {Array.from({ length: progress.total }, (_, i) => (
+        <span
+          key={i}
+          className="task-seg"
+          data-state={
+            i + 1 < progress.current ? "done" : i + 1 === progress.current ? "current" : "pending"
+          }
+        />
+      ))}
+    </span>
   );
 }
 
