@@ -172,6 +172,30 @@ describe("GateCard", () => {
     expect(container.querySelector(".gate-deferred")).toBeNull();
   });
 
+  const judgeNote = [
+    {
+      node_id: "verify",
+      reasoning: "real but not worth chasing further",
+      findings: [
+        { severity: "important", message: "still broken", file: "a.py", line: 4, source_plugin: "on.check" },
+      ],
+    },
+  ];
+
+  it("renders a judge-stop note distinct from deferred findings, counted rather than listed", () => {
+    card({ deferred_findings: [...tenFindings], judge_stop_note: judgeNote });
+    expect(screen.getByText(/real but not worth chasing further/)).toBeInTheDocument();
+    expect(screen.getByText(/1 finding not chased/)).toBeInTheDocument();
+    expect(screen.queryByText(/still broken/)).not.toBeInTheDocument();
+    expect(document.querySelectorAll(".gate-deferred")).toHaveLength(1);
+    expect(document.querySelectorAll(".gate-judge-note")).toHaveLength(1);
+  });
+
+  it("renders no judge block when there is no judge-stop note", () => {
+    const { container } = card({ judge_stop_note: [] });
+    expect(container.querySelector(".gate-judge-note")).toBeNull();
+  });
+
   it("shows a failed Approve", async () => {
     vi.spyOn(api, "approveGate").mockRejectedValue(new Error("409 gate already resolved"));
     card();

@@ -62,6 +62,9 @@ export function detailOf(e: KraftEvent): string | null {
   if (e.type === "budget_changed" || e.type === "budget_raised") {
     return p.budget_usd == null ? "no cap" : `$${Number(p.budget_usd).toFixed(2)}`;
   }
+  if (e.type === "judge_verdict" && typeof p.reasoning === "string") {
+    return p.reasoning || null;
+  }
   return null;
 }
 
@@ -92,6 +95,9 @@ export function titleOf(e: KraftEvent, hooks: Map<string, string>): string | nul
   // Kraft-qqz8: "Started task 3 — <title>", not the generic session verbs below.
   if (e.type === "task_progress" && typeof e.payload.task === "number") {
     return `Started task ${e.payload.task} — ${e.payload.title as string}`;
+  }
+  if (e.type === "judge_verdict" && typeof e.payload.verdict === "string") {
+    return e.payload.verdict === "continue" ? "judge: continuing" : "judge: stopped early";
   }
   const verb = VERBS[e.type];
   if (!verb) return null;

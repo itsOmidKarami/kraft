@@ -325,6 +325,20 @@ describe("ActionBar", () => {
     expect(thread).toHaveTextContent("turn 2 (auto-escalated): diagnose and fix");
   });
 
+  it("shows the judge's reasoning for a judge stop, not the cap copy", () => {
+    renderBar(
+      item({
+        status: "needs_human",
+        cappedOut: undefined,
+        stop_reason: "judge: recurring findings",
+      }),
+      [],
+      [NEEDS_HUMAN_EVENT],
+    );
+    expect(screen.getByText(/stopped early \(judge\) · recurring findings/)).toBeInTheDocument();
+    expect(screen.queryByText(/hit its cap/)).toBeNull();
+  });
+
   it("opens the steer composer inside the action bar, not as a sibling card", async () => {
     const user = userEvent.setup();
     renderBar(item({ status: "paused" }));

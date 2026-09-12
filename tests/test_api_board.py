@@ -178,6 +178,27 @@ def _seed_repo(client, wid, **kwargs):
         conn.close()
 
 
+def _seed_session(client, wid, *, session_id, hook_point):
+    """Write a `worker_sessions` row directly — same reasoning as `_seed_repo`:
+    a judge session normally comes from `dispatch.launch_hook`, which a
+    detail-payload test needs no more than it needs `ensure_worktree`."""
+    db_path = Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        store.create_session(
+            conn,
+            id=session_id,
+            work_item_id=wid,
+            node_id="verify",
+            hook_point=hook_point,
+            log_path=f"/tmp/{session_id}.log",
+            result_path=f"/tmp/{session_id}.json",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _seed_events(client, wid, payloads, event_type="findings_measured"):
     """Write events directly — no orchestration needed to test a read path.
     `Database` exposes only an async `write`, so this opens its own sqlite3
@@ -368,6 +389,45 @@ def test_concerns_stop_at_the_gate_that_answered_them(tmp_path, monkeypatch):
         assert client.get(f"/api/work-items/{wid}").json()["concerns"] == ["new worry"]
 
 
+def test_concerns_excludes_the_judges_own_reasoning(tmp_path, monkeypatch):
+    """JUDGE_PROMPT/SKILL.md require the judge to write `concerns` on every
+    verdict, including a plain `continue`. Without the same `worker_sessions`
+    join `walk._diagnosis_bundle` uses to skip the judge's own sessions, that
+    routine reasoning would show up here as a concern the human owes an
+    answer for."""
+    from kraft.executor import dispatch
+
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+        ).json()["id"]
+        _seed_session(client, wid, session_id="measure-1", hook_point="on.check")
+        _seed_session(client, wid, session_id="judge-1", hook_point=dispatch.JUDGE_HOOK)
+        _seed_events(
+            client,
+            wid,
+            [
+                {
+                    "session_id": "measure-1",
+                    "status": "done_with_concerns",
+                    "concerns": "flaky under load",
+                }
+            ],
+            event_type="worker_session_exited",
+        )
+        _seed_events(
+            client,
+            wid,
+            [{"session_id": "judge-1", "status": "continue", "concerns": "judge's own reasoning"}],
+            event_type="worker_session_exited",
+        )
+
+        body = client.get(f"/api/work-items/{wid}").json()
+        assert body["concerns"] == ["flaky under load"]
+
+
 def test_needs_context_question_reaches_the_detail_payload(tmp_path, monkeypatch):
     """The agent's question, end to end: fake-claude writes it to the result
     file, the executor folds it into the `needs_context: <question>` reason
@@ -458,3 +518,76 @@ def test_work_item_usage_rollup_is_captured_from_the_agent_envelope(tmp_path, mo
         assert usage["total"]["tokens_in"] == impl["tokens_in"]
         assert usage["total"]["cost_usd"] == pytest.approx(0.035)
         assert usage["total"]["cost_complete"] is True
+
+
+def test_judge_stop_note_reaches_the_detail_payload(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+        ).json()["id"]
+        finding = {
+            "severity": "important",
+            "message": "still broken",
+            "file": "a.py",
+            "line": 4,
+            "source_plugin": "on.check",
+        }
+        continued = {
+            "node_id": "verify",
+            "cycle": 1,
+            "verdict": "continue",
+            "reasoning": "shrinking, worth another cycle",
+            "findings": [finding],
+        }
+        downgraded = {
+            "node_id": "verify",
+            "cycle": 2,
+            "verdict": "stop_downgrade",
+            "reasoning": "real but not worth chasing further",
+            "findings": [finding],
+        }
+        _seed_events(client, wid, [continued, downgraded], event_type="judge_verdict")
+
+        body = client.get(f"/api/work-items/{wid}").json()
+        assert len(body["judge_stop_note"]) == 1  # only the stop_downgrade verdict
+        note = body["judge_stop_note"][0]
+        assert note["node_id"] == "verify"
+        assert note["reasoning"] == "real but not worth chasing further"
+        assert [f["message"] for f in note["findings"]] == ["still broken"]
+
+
+def test_judge_stop_note_stops_at_the_last_resolved_gate(tmp_path, monkeypatch):
+    """A note the human already saw at the gate they approved must not be
+    re-posed at every later gate — the same Kraft-ub2 boundary `_concerns`
+    keeps."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+        ).json()["id"]
+        finding = {
+            "severity": "important",
+            "message": "still broken",
+            "file": "a.py",
+            "line": 4,
+            "source_plugin": "on.check",
+        }
+        answered = {
+            "node_id": "verify",
+            "cycle": 2,
+            "verdict": "stop_downgrade",
+            "reasoning": "the human already approved this one",
+            "findings": [finding],
+        }
+        _seed_events(client, wid, [answered], event_type="judge_verdict")
+        _seed_events(client, wid, [{"gate": "human_review_approval"}], event_type="gate_approved")
+
+        assert client.get(f"/api/work-items/{wid}").json()["judge_stop_note"] == []
+
+        later = dict(answered, node_id="mr_checks", reasoning="new, after the gate")
+        _seed_events(client, wid, [later], event_type="judge_verdict")
+        notes = client.get(f"/api/work-items/{wid}").json()["judge_stop_note"]
+        assert [n["reasoning"] for n in notes] == ["new, after the gate"]

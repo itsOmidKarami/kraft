@@ -148,6 +148,37 @@ def _deferred_findings(st, wid: str) -> list[dict]:
     return list(seen.values())
 
 
+def _judge_stop_notes(st, wid: str) -> list[dict]:
+    """Findings a judge chose to stop chasing (`stop_downgrade`), for the
+    human at review.
+
+    Distinct from `_deferred_findings`: these are `critical`/`important`
+    findings a judge decided not to keep looping on, not the genuinely
+    `minor` ones that never entered the loop at all -- conflating the two
+    would make a judge-skipped real bug look like routine minor-finding
+    triage.
+
+    Bounded at the last resolved gate, the same way `_concerns` below is and
+    for the same reason (Kraft-ub2): once a human approves the gate that
+    showed this note, re-posing it at every later gate the item reaches asks
+    them to answer for it again.
+    """
+    out: list[dict] = []
+    for e in reversed(st.db.read(lambda c: events.read_after(c, 0, wid))):
+        if e["type"] in ("gate_approved", "gate_rejected"):
+            break
+        if e["type"] == "judge_verdict" and e["payload"].get("verdict") == "stop_downgrade":
+            out.append(
+                {
+                    "node_id": e["payload"].get("node_id"),
+                    "reasoning": e["payload"].get("reasoning", ""),
+                    "findings": e["payload"].get("findings", []),
+                }
+            )
+    out.reverse()  # oldest first
+    return out
+
+
 def _concerns(st, wid: str) -> list[str]:
     """`done_with_concerns` text from every session that reported one, oldest
     first — the same shape of thing as `_deferred_findings` (something a
@@ -160,12 +191,31 @@ def _concerns(st, wid: str) -> list[str]:
     every gate rather than only `human_review_approval`. Without a boundary one
     concern would be re-posed at every later gate the item reaches, long after
     the human who approved that gate already answered for it (Kraft-ub2).
+
+    Excludes judge sessions the same way `walk._diagnosis_bundle` does: a judge
+    is told `concerns` is required on every verdict (JUDGE_PROMPT/SKILL.md), so
+    a plain `continue` verdict's reasoning would otherwise show up here as a
+    concern the human owes an answer for, rather than the judge's own routine
+    chatter.
     """
+    judge_session_ids = st.db.read(
+        lambda c: {
+            r["id"]
+            for r in c.execute(
+                "SELECT id FROM worker_sessions WHERE work_item_id = ? AND hook_point = ?",
+                (wid, executor.JUDGE_HOOK),
+            ).fetchall()
+        }
+    )
     out: list[str] = []
     for e in reversed(st.db.read(lambda c: events.read_after(c, 0, wid))):
         if e["type"] in ("gate_approved", "gate_rejected"):
             break
-        if e["type"] == "worker_session_exited" and e["payload"].get("concerns"):
+        if (
+            e["type"] == "worker_session_exited"
+            and e["payload"].get("concerns")
+            and e["payload"].get("session_id") not in judge_session_ids
+        ):
             out.append(e["payload"]["concerns"])
     out.reverse()  # oldest first
     return out
@@ -293,6 +343,7 @@ async def get_work_item(wid: str, request: Request):
         # loop escalation from an unrelated crash on the same node (Kraft-esc).
         "stop_reason": _stop_reason(st, wid),
         "deferred_findings": _deferred_findings(st, wid),
+        "judge_stop_note": _judge_stop_notes(st, wid),
         "concerns": _concerns(st, wid),
         "needs_context_question": _needs_context_question(st, wid),
         # The root repo's merge request, once `open_mr` has run -- the detail

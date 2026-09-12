@@ -705,6 +705,18 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
    <ul> -- it lives in a pane that scrolls, so it keeps the list. Markers off,
    rows spaced. */
 ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.gate-judge-note {
+  margin: 10px 0 0; padding: 10px 12px;
+  border: 1px solid var(--color-accent-700);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  display: flex; flex-direction: column; gap: 8px;
+  font-size: 12px; color: var(--color-neutral-300);
+}
+.gate-judge-entry ul {
+  list-style: none; margin: 4px 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: 4px;
+}
 
 .attention-card {
   padding: 16px 18px; gap: 12px;

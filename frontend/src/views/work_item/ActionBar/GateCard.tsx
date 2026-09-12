@@ -153,6 +153,25 @@ export function GateCard({
           <a href={reviewHref(node, "timeline", findingsNodeId(events, node))}>see Timeline</a>
         </p>
       )}
+      {/* stop_downgrade findings: real (critical/important) findings a judge
+          decided were not worth chasing further -- a second, visually
+          distinct block from .gate-deferred so a human at the gate can tell
+          "these were never blocking" from "a judge decided not to keep
+          chasing these". Kraft-a4js: same clipped-container failure as
+          .gate-deferred above, so this stays a counted one-liner per node
+          too, rather than the findings themselves -- those are on the
+          Timeline already. */}
+      {item.judge_stop_note && item.judge_stop_note.length > 0 && (
+        <div className="gate-judge-note">
+          {item.judge_stop_note.map((note, i) => (
+            <p key={`${note.node_id}:${i}`} className="gate-judge-entry">
+              <span className="field-hint">judge stopped {note.node_id} early</span> {note.reasoning} ·{" "}
+              {note.findings.length} finding{note.findings.length === 1 ? "" : "s"} not chased ·{" "}
+              <a href={reviewHref(note.node_id, "timeline", note.node_id)}>see Timeline</a>
+            </p>
+          ))}
+        </div>
+      )}
       {!open ? (
         <div className="gate-actions">
           <button

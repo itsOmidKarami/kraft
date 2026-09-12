@@ -100,7 +100,15 @@ def _run(tmp_path, monkeypatch, prompts_path):
 
 
 def _sent_prompts(prompts_path):
-    return [p for p in prompts_path.read_text().split("\n\x00\n") if p.strip()]
+    """Fix-agent prompts only. The fix-loop judge shares this same prompt
+    log (`fake_registry()` binds it to the same fake agent) and is asked
+    before every fix cycle past the first -- filtered out here since this
+    suite is about the *fix* agent's own handoff, not the judge's."""
+    return [
+        p
+        for p in prompts_path.read_text().split("\n\x00\n")
+        if p.strip() and "is about to spend another cycle" not in p
+    ]
 
 
 def test_fix_cycle_two_names_the_previous_result_file(tmp_path, monkeypatch):
@@ -424,6 +432,12 @@ def test_a_fix_cycle_past_escalate_after_launches_with_escalate_model(tmp_path, 
     models = []
     for line in argv_log.read_text().splitlines():
         argv = json.loads(line)
+        # The fix-loop judge shares this same fake agent and has no
+        # `model`/`escalate_model` of its own configured on its hook binding
+        # -- filtered out here since this test is about the *fix* cycle's
+        # escalation, not the judge's.
+        if "is about to spend another cycle" in " ".join(argv):
+            continue
         models.append(argv[argv.index("--model") + 1] if "--model" in argv else None)
     # cycles 1 and 2 are at or below the threshold, cycle 3 is past it
     assert models[:3] == ["sonnet", "sonnet", "opus"]

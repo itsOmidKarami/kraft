@@ -67,11 +67,29 @@ async def _diagnosis_bundle(db, work_item_id: str, node: dict, worktree) -> dict
     status = git_read(Path(worktree), "status", "--porcelain", expected_failure=True) or ""
     recent = git_read(Path(worktree), "log", "--oneline", "-5", expected_failure=True) or ""
     evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
+    # worker_session_exited carries no hook_point of its own, so a judge verdict
+    # (JUDGE_HOOK, told by JUDGE_PROMPT/SKILL.md that concerns is required on
+    # every verdict) and the measuring session it judged both write concerns
+    # events, and the judge's always lands last in the same walk_node
+    # iteration. Joined against worker_sessions here to skip the judge's own
+    # sessions, so this stays the measuring session's concerns, not the
+    # judge's reasoning about them.
+    judge_session_ids = db.read(
+        lambda c: {
+            r["id"]
+            for r in c.execute(
+                "SELECT id FROM worker_sessions WHERE work_item_id = ? AND hook_point = ?",
+                (work_item_id, dispatch.JUDGE_HOOK),
+            ).fetchall()
+        }
+    )
     concerns = next(
         (
             e["payload"].get("concerns")
             for e in reversed(evts)
-            if e["type"] == "worker_session_exited" and e["payload"].get("concerns")
+            if e["type"] == "worker_session_exited"
+            and e["payload"].get("concerns")
+            and e["payload"].get("session_id") not in judge_session_ids
         ),
         None,
     )
@@ -395,6 +413,23 @@ async def walk_node(
             verdict, failed, round = r_verdict, r_failed, _REPAIR_ROUND
 
         previous_prints, fix_ran = dispatch.last_measurement(db, work_item_id, node["id"])
+        # `_previous_fix_session` is history-wide, not scoped to this
+        # `walk_node` entry -- a `/retry` or an auto-escalation retry clears
+        # the loop counter (`retry_counters` row deleted) but leaves the old
+        # `worker_sessions` rows in place, so it alone can't tell "round 1 of
+        # this entry" from "round 5 of the item's whole history". Round 1 of
+        # *this* entry always fixes freely, no judge call (spec decision 2):
+        # gated on the loop counter itself having no row yet (the same signal
+        # `bump_counter` below uses to tell a fresh fire from a repeat one),
+        # not on whether a fix session ever ran for this node before. A
+        # carried-in steer gets the same free pass regardless of the counter:
+        # it is the human's answer to exactly the trend the judge might stop
+        # on, and a `stop_needs_human` here would discard it before the
+        # steered cycle it was meant for ever dispatches, re-stranding the
+        # item on the trend `/retry` was supposed to escape.
+        previous_fix = _previous_fix_session(db, work_item_id, node["id"])
+        counter_row = db.read(lambda c: store.read_counter(c, work_item_id, key))
+        judge_due = previous_fix is not None and counter_row is not None and not steer
         found, reported = dispatch.collect_findings(db, work_item_id, node, round)
         eligible = [f for f in found if f.severity in policy.loop_severities]
         prints = sorted({f.fingerprint for f in eligible})
@@ -459,6 +494,59 @@ async def walk_node(
         if stops.budget_breach(db, work_item_id, budget) is not None:
             return await stops.stop_for_budget(db, work_item_id, node, budget)
 
+        # Fix-loop judge (2026-09-12-verify-fix-loop-judge-design): a brake on
+        # top of the existing cap, never a second way to get stuck. Anything
+        # the judge itself cannot be trusted on already fell open to
+        # "continue" inside `dispatch.judge_verdict`; the cap/stuck checks
+        # below run exactly as they do today regardless of what runs here.
+        if judge_due:
+            verdict, reasoning = await dispatch.judge_verdict(
+                db,
+                run_dirs,
+                work_item_id,
+                node,
+                row,
+                registry,
+                worktree,
+                round=round,
+                key=key,
+                eligible=eligible,
+                policy=policy,
+                launch=launch,
+                budget=budget,
+            )
+            if verdict == "paused":
+                return "paused"
+            judge_payload = {
+                "node_id": node["id"],
+                "cycle": round,
+                "verdict": verdict,
+                "reasoning": reasoning,
+                "findings": [asdict(f) for f in eligible],
+            }
+            await db.write(
+                lambda c, payload=judge_payload: events.append(
+                    c, work_item_id, "judge_verdict", payload
+                )
+            )
+            if verdict == "stop_needs_human":
+                reason = f"judge: {reasoning}"
+                await db.write(
+                    lambda c, reason=reason: store.mark_needs_human(
+                        c, work_item_id, node["id"], reason
+                    )
+                )
+                return "needs_human"
+            # "as if there were no eligible findings" (spec) -- a task that
+            # failed outright (blind or not: on.ci.poll on a red pipeline
+            # reports findings *and* fails) would still be in the loop once
+            # its eligible findings are downgraded, so gate on `failed`
+            # itself rather than on the blind subset. Only a task with no
+            # failure at all can be treated as clean here.
+            if verdict == "stop_downgrade" and not failed:
+                await db.write(lambda c: store.complete_node(c, work_item_id, node["id"]))
+                return "ok"
+
         # bump_counter returns the cap snapshotted on the row (spec §2.C: written
         # once at first fire, not re-resolved per attempt). Across a restart with
         # an edited policy.yaml, `cap` here is the freshly-resolved one; the row's
@@ -514,9 +602,7 @@ async def walk_node(
             # fix_cycle_started.
             if fix_ran and repeats & set(prints):
                 instruction += prompts.FIX_REPEAT_NOTE
-        instruction += prompts.previous_attempt_note(
-            _previous_fix_session(db, work_item_id, node["id"])
-        )
+        instruction += prompts.previous_attempt_note(previous_fix)
         fix = await dispatch.dispatch_node(
             db,
             run_dirs,

@@ -218,6 +218,15 @@ def test_the_fix_after_a_steered_retry_still_marks_the_finding_repeat(tmp_path, 
 
 
 def _prompts(log):
+    """Fix-agent prompts only. The fix-loop judge shares this same prompt log
+    (dispatched through the same fake agent) and is asked before every fix
+    cycle past the first, whether that first cycle was in this walk_node
+    call or an earlier one a retry resumed from -- filtered out here since
+    these tests are about the *fix* agent's own prompt."""
     if not log.is_file():
         return []
-    return [p for p in log.read_text().split("\n\x00\n") if p.strip()]
+    return [
+        p
+        for p in log.read_text().split("\n\x00\n")
+        if p.strip() and "is about to spend another cycle" not in p
+    ]
