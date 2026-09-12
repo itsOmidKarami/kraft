@@ -52,6 +52,8 @@ export interface TemplateNode {
   on_failure?: string[];
   reject_to?: string | null;
   auto_escalate?: boolean;
+  auto_escalate_stuck?: boolean;
+  auto_escalate_delay_s?: number;
   /** Any node key the form doesn't render (e.g. `rebase_bounce_to` on
    *  `pre_mr_rebase` in `default.yaml`) still round-trips: the serializer
    *  writes every own-key of a node object, known or not, so editing one
@@ -136,6 +138,9 @@ export interface Policy {
   budget?: { work_item_usd: number | null; daily_usd: number | null };
   max_concurrent: number;
   rate_limit_retries?: number;
+  auto_escalate_stuck?: boolean;
+  auto_escalate_stuck_cap?: number;
+  auto_escalate_delay_s?: number;
 }
 
 export type PaletteId = "nocturne" | "rose" | "forest" | "amber" | "slate";
