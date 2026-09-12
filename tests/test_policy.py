@@ -36,6 +36,18 @@ def test_resolve_cap_falls_back_to_default(tmp_path):
         "default: { attempts: 3 }\n",  # missing wall_clock_s
         "default: not-a-mapping\n",
         "just a string\n",
+        # loop_severities must be a list, not a bare scalar
+        "default: {attempts: 3, wall_clock_s: 60}\nfindings: {loop_severities: critical}\n",
+        # rate_limit_retries must be >= 1
+        "default: { attempts: 2, wall_clock_s: 20 }\nrate_limit_retries: 0\n",
+        # archive.after_days must be non-negative
+        "default: { attempts: 3, wall_clock_s: 600 }\narchive: { after_days: -1 }\n",
+        # max_concurrent must be >= 1
+        "default: { attempts: 1, wall_clock_s: 1 }\nmax_concurrent: 0\n",
+        # auto_escalate_stuck must be a bool
+        "default: { attempts: 1, wall_clock_s: 1 }\nauto_escalate_stuck: maybe\n",
+        # auto_escalate_stuck_cap must be >= 1
+        "default: { attempts: 1, wall_clock_s: 1 }\nauto_escalate_stuck_cap: 0\n",
     ],
 )
 def test_load_policy_rejects_malformed(tmp_path, doc):
@@ -95,15 +107,6 @@ def test_unknown_severity_is_rejected(tmp_path):
         policy.load_policy(p)
 
 
-def test_loop_severities_must_be_a_list(tmp_path):
-    p = tmp_path / "policy.yaml"
-    p.write_text(
-        "default: {attempts: 3, wall_clock_s: 60}\nfindings: {loop_severities: critical}\n"
-    )
-    with pytest.raises(policy.PolicyError):
-        policy.load_policy(p)
-
-
 def test_budget_defaults_to_disabled_when_absent(tmp_path):
     p = tmp_path / "policy.yaml"
     p.write_text("loops: {}\ndefault: { attempts: 3, wall_clock_s: 3600 }\n")
@@ -134,30 +137,20 @@ def test_explicit_null_is_disabled_not_zero(tmp_path):
     assert policy.load_policy(p).budget == policy.Budget()
 
 
-def test_negative_budget_is_rejected_at_load(tmp_path):
+@pytest.mark.parametrize(
+    ("budget_line", "match"),
+    [
+        ("work_item_usd: -1", "work_item_usd"),  # negative
+        ('daily_usd: "lots"', "daily_usd"),  # non-numeric
+        ("daily_usd: true", "daily_usd"),  # bool is an int in YAML, still rejected
+    ],
+)
+def test_bad_budget_is_rejected_at_load(tmp_path, budget_line, match):
     p = tmp_path / "policy.yaml"
     p.write_text(
-        "loops: {}\ndefault: { attempts: 3, wall_clock_s: 3600 }\nbudget:\n  work_item_usd: -1\n"
+        f"loops: {{}}\ndefault: {{ attempts: 3, wall_clock_s: 3600 }}\nbudget:\n  {budget_line}\n"
     )
-    with pytest.raises(policy.PolicyError, match="work_item_usd"):
-        policy.load_policy(p)
-
-
-def test_non_numeric_budget_is_rejected_at_load(tmp_path):
-    p = tmp_path / "policy.yaml"
-    p.write_text(
-        'loops: {}\ndefault: { attempts: 3, wall_clock_s: 3600 }\nbudget:\n  daily_usd: "lots"\n'
-    )
-    with pytest.raises(policy.PolicyError, match="daily_usd"):
-        policy.load_policy(p)
-
-
-def test_budget_true_is_rejected_because_bool_is_an_int(tmp_path):
-    p = tmp_path / "policy.yaml"
-    p.write_text(
-        "loops: {}\ndefault: { attempts: 3, wall_clock_s: 3600 }\nbudget:\n  daily_usd: true\n"
-    )
-    with pytest.raises(policy.PolicyError, match="daily_usd"):
+    with pytest.raises(policy.PolicyError, match=match):
         policy.load_policy(p)
 
 
@@ -216,13 +209,6 @@ def test_load_policy_defaults_rate_limit_retries_when_absent(tmp_path):
     assert p.rate_limit_retries == 5
 
 
-def test_load_policy_rejects_bad_rate_limit_retries(tmp_path):
-    d = tmp_path / "policy.yaml"
-    d.write_text("default: { attempts: 2, wall_clock_s: 20 }\nrate_limit_retries: 0\n")
-    with pytest.raises(policy.PolicyError):
-        policy.load_policy(d)
-
-
 def test_load_shipped_policy_has_rate_limit_retries():
     p = policy.load_policy(_SHIPPED)
     assert isinstance(p.rate_limit_retries, int) and p.rate_limit_retries >= 1
@@ -240,13 +226,6 @@ def test_load_policy_defaults_archive_after_days_to_none(tmp_path):
     d.write_text("default: { attempts: 3, wall_clock_s: 600 }\n")
     p = policy.load_policy(d)
     assert p.archive_after_days is None
-
-
-def test_load_policy_rejects_a_negative_after_days(tmp_path):
-    d = tmp_path / "policy.yaml"
-    d.write_text("default: { attempts: 3, wall_clock_s: 600 }\narchive: { after_days: -1 }\n")
-    with pytest.raises(policy.PolicyError):
-        policy.load_policy(d)
 
 
 def test_load_policy_parses_triggers(tmp_path):
@@ -334,13 +313,6 @@ def test_load_policy_falls_back_to_legacy_intake_max_concurrent(tmp_path):
     assert policy.load_policy(d).max_concurrent == 9
 
 
-def test_load_policy_rejects_bad_max_concurrent(tmp_path):
-    d = tmp_path / "policy.yaml"
-    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\nmax_concurrent: 0\n")
-    with pytest.raises(policy.PolicyError):
-        policy.load_policy(d)
-
-
 def test_load_policy_defaults_auto_escalate_stuck_on(tmp_path):
     d = tmp_path / "policy.yaml"
     d.write_text("default: { attempts: 1, wall_clock_s: 1 }\n")
@@ -359,17 +331,3 @@ def test_load_policy_reads_auto_escalate_stuck(tmp_path):
     p = policy.load_policy(d)
     assert p.auto_escalate_stuck is False
     assert p.auto_escalate_stuck_cap == 5
-
-
-def test_load_policy_rejects_non_bool_auto_escalate_stuck(tmp_path):
-    d = tmp_path / "policy.yaml"
-    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\nauto_escalate_stuck: maybe\n")
-    with pytest.raises(policy.PolicyError):
-        policy.load_policy(d)
-
-
-def test_load_policy_rejects_bad_auto_escalate_stuck_cap(tmp_path):
-    d = tmp_path / "policy.yaml"
-    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\nauto_escalate_stuck_cap: 0\n")
-    with pytest.raises(policy.PolicyError):
-        policy.load_policy(d)
