@@ -115,6 +115,7 @@ def _config_checks() -> list[dict]:
                 "templates", False, f"{templates} does not exist — start `kraft` once to seed it"
             ),
             _hooks_check(),
+            _chain_templates_check(),
             _token_check(),
         ]
     checks = [_check("templates", True, str(templates))]
@@ -124,6 +125,7 @@ def _config_checks() -> list[dict]:
     except config.ConfigError as exc:
         checks.append(_check("access.yaml", False, str(exc)))
     checks.append(_hooks_check())
+    checks.append(_chain_templates_check())
     checks.append(_token_check())
     return checks
 
@@ -203,6 +205,72 @@ def _hooks_check() -> dict:
         True,
         f"{'; '.join(parts)} in {live_path}, but bound in this version's "
         "defaults — Settings → Hooks, or edit that file",
+    )
+
+
+def _chain_template_files(directory: Path) -> dict[str, set[str]]:
+    """Every YAML file in `directory` that is a chain template — has a
+    top-level `nodes` list — mapped to the ids of its nodes.
+
+    Distinguishes chain templates (`default.yaml`, `quick-task.yaml`) from
+    the registry and from config with no chain shape at all (`intake.yaml`,
+    `policy.yaml`, `repos.yaml`) by structure, not by filename, so a
+    template added in a later version is picked up without a code change
+    here.
+    """
+    found: dict[str, set[str]] = {}
+    if not directory.is_dir():
+        return found
+    for path in sorted(directory.glob("*.yaml")):
+        try:
+            data = yaml.safe_load(path.read_text())
+        except OSError, ValueError, yaml.YAMLError:
+            continue
+        if not isinstance(data, dict) or not isinstance(data.get("nodes"), list):
+            continue
+        found[path.name] = {
+            node["id"] for node in data["nodes"] if isinstance(node, dict) and "id" in node
+        }
+    return found
+
+
+def _chain_templates_check() -> dict:
+    """Nodes this version's chain templates ship, missing from the live
+    installed copy — the same drift `_hooks_check` catches for hooks,
+    generalized to node lists. `templates/` is seeded once and never
+    overwritten (`cli.seed_home`), so a template shipped or changed after an
+    operator's copy was seeded keeps missing the new node forever with
+    nothing to say so.
+
+    Always `ok`, like `_hooks_check`: which nodes a repo's chain actually
+    runs is an operator's own edit, not a fault.
+    """
+    shipped_dir = BUNDLED / "templates"
+    if not shipped_dir.is_dir():
+        return _check("chain_templates", True, "skipped: not an installed Kraft", skipped=True)
+    shipped = _chain_template_files(shipped_dir)
+    if not shipped:
+        return _check(
+            "chain_templates", True, "skipped: no chain templates in this version", skipped=True
+        )
+    live_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    live = _chain_template_files(live_dir)
+    parts = []
+    for name, shipped_ids in shipped.items():
+        live_ids = live.get(name)
+        if live_ids is None:
+            parts.append(f"{name} missing entirely")
+            continue
+        absent = sorted(shipped_ids - live_ids)
+        if absent:
+            parts.append(f"{name}: {', '.join(absent)} missing")
+    if not parts:
+        return _check("chain_templates", True, f"{len(shipped)} template(s), no missing nodes")
+    return _check(
+        "chain_templates",
+        True,
+        f"{'; '.join(parts)} in {live_dir}, but shipped in this version's defaults — "
+        "Settings → Chains, or edit those files",
     )
 
 
