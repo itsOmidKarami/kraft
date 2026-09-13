@@ -141,6 +141,9 @@ export interface Policy {
   auto_escalate_stuck?: boolean;
   auto_escalate_stuck_cap?: number;
   auto_escalate_delay_s?: number;
+  /** Days after completion/abandonment before `archive_poller` archives an
+   *  item automatically; `after_days: null`/absent disables it. */
+  archive?: { after_days: number | null } | null;
 }
 
 export type PaletteId = "nocturne" | "rose" | "forest" | "amber" | "slate";

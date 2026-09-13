@@ -3,15 +3,29 @@ import { Check } from "@phosphor-icons/react";
 import * as api from "../../api";
 import { SectionLabel, Switch } from "../../components/ui";
 import { useStore } from "../../store";
-import type { Policy } from "../../types";
+import type { Policy, TemplateSummary } from "../../types";
 import { PageHead, PhoneHeader, SaveRow, usePhone, useResource } from "./shared";
 
 /* ── 5d policy (design 29, phone m10 right) ──────────────────────────────── */
 
 const SEVERITIES = ["critical", "important", "minor", "info"] as const;
 
+/** Template ids with a node keyed to this loop cap — `fix_loop` for a
+ *  regular loop, `<gate>_reject_loop` for a gate's reject loop
+ *  (`executor.gates.reject_target`) — same "used by" idiom PluginsPage's
+ *  `templatesUsingHook` reads for hooks. */
+function templatesUsingLoop(templates: TemplateSummary[], key: string) {
+  return templates
+    .filter((t) =>
+      t.nodes.some((n) => n.fix_loop === key || (n.gate_after && `${n.gate_after}_reject_loop` === key)),
+    )
+    .map((t) => t.id);
+}
+
 export function PolicyPage() {
   const { value, error, reload } = useResource(() => api.getPolicy());
+  const { value: templatesValue } = useResource(() => api.getTemplates());
+  const templates = templatesValue ?? [];
   const [draft, setDraft] = useState<Policy | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -41,6 +55,21 @@ export function PolicyPage() {
       ...policy,
       budget: { work_item_usd: null, daily_usd: null, ...policy.budget, [field]: n },
     });
+  };
+
+  const setArchiveAfterDays = (raw: string) => {
+    if (!policy) return;
+    // "" clears the cap -- null, same as a budget field, not 0 (which would
+    // archive every item on its next poll).
+    const n = raw.trim() === "" ? null : Number(raw);
+    setDraft({ ...policy, archive: { after_days: n } });
+  };
+
+  const addLoop = () => {
+    if (!policy) return;
+    const name = window.prompt("Loop key (the node's own `fix_loop`, e.g. `verify_fix_loop`)");
+    if (!name || policy.loops[name]) return;
+    setDraft({ ...policy, loops: { ...policy.loops, [name]: { ...policy.default } } });
   };
 
   const toggleSeverity = (sev: string) => {
@@ -93,11 +122,17 @@ export function PolicyPage() {
       <div className="cap-row cap-head">
         <span>Counter</span>
         <span>Attempts</span>
-        <span>Wall-clock (s)</span>
+        <span>Wall-clock (min)</span>
+        <span>Used by</span>
       </div>
       {rows.map(([key, cap]) => (
         <div key={key} className="cap-row" data-loop={key}>
-          <span className="hook-name">{key}</span>
+          <span className="hook-name">
+            {key}
+            {key === "default" && (
+              <span className="field-hint"> · any loop not listed above</span>
+            )}
+          </span>
           <input
             className="input"
             type="number"
@@ -110,12 +145,21 @@ export function PolicyPage() {
             className="input"
             type="number"
             min={1}
+            step="0.1"
             aria-label={`${key} wall clock`}
-            value={cap.wall_clock_s}
-            onChange={(e) => setCap(key, "wall_clock_s", Number(e.target.value))}
+            value={Math.round((cap.wall_clock_s / 60) * 10) / 10}
+            onChange={(e) => setCap(key, "wall_clock_s", Math.round(Number(e.target.value) * 60))}
           />
+          <span className="row-sub">
+            {key === "default" ? "—" : templatesUsingLoop(templates, key).join(", ") || "no template"}
+          </span>
         </div>
       ))}
+      <div className="save-row">
+        <button type="button" className="btn btn-ghost" onClick={addLoop}>
+          + Add loop
+        </button>
+      </div>
 
       <SectionLabel>Concurrency</SectionLabel>
       <p className="settings-note">
@@ -168,6 +212,23 @@ export function PolicyPage() {
         Blank is no cap. A cap refuses to start the next agent task; it cannot stop
         one already running, because an agent only reports its cost when its session
         ends. Expect to overshoot by up to the cost of one task.
+      </p>
+
+      <SectionLabel>Archive</SectionLabel>
+      <div className="cap-row budget-row" data-cap="archive_after_days">
+        <span className="hook-name">Auto-archive completed/abandoned items after (days)</span>
+        <input
+          className="input"
+          type="number"
+          min={0}
+          aria-label="archive after days"
+          value={policy?.archive?.after_days ?? ""}
+          onChange={(e) => setArchiveAfterDays(e.target.value)}
+        />
+      </div>
+      <p className="settings-note">
+        Blank never auto-archives. `archive_poller` only ever archives a completed or abandoned
+        item — a running one is untouched regardless of age.
       </p>
 
       <SectionLabel>Findings that burn a fix cycle</SectionLabel>

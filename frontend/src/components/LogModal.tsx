@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLineDown, Copy, X } from "@phosphor-icons/react";
 import * as api from "../api";
-import { clock, elapsed, tokens, usd } from "../format";
+import { clock, elapsed, logLineText, tokens, usd } from "../format";
 import { findSession, useStore } from "../store";
 import type { LogLine } from "../types";
 import { backdropProps, useModal } from "../useModal";
@@ -211,7 +211,7 @@ export function LogModal({ sessionId, onClose }: { sessionId: string; onClose: (
             <div key={l.n} className="log-line" data-src={l.src}>
               <span className="log-t">{l.t ? clock(l.t) : ""}</span>
               <span className="log-src">{l.src}</span>
-              <span className="log-text">{l.summary ?? l.text}</span>
+              <span className="log-text">{logLineText(l)}</span>
             </div>
           ))}
           {follow && (

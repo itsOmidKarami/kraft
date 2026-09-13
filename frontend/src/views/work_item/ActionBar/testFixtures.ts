@@ -74,3 +74,16 @@ export const NEEDS_HUMAN_EVENT: KraftEvent = {
   payload: { reason: "loop capped" },
   created_at: "2026-01-01T00:00:00Z",
 };
+
+/** The `escalation_message` event that ties an `escSession()` to its
+ *  episode (Kraft-bffrk) — deriveState scopes a turn by this, not by
+ *  comparing `created_at` against the boundary event. */
+export const escMessage = (over: Partial<KraftEvent> = {}): KraftEvent =>
+  ({
+    seq: 2,
+    work_item_id: "w1",
+    type: "escalation_message",
+    payload: { session_id: "e1", message: "go" },
+    created_at: "2026-01-01T00:05:00Z",
+    ...over,
+  }) as KraftEvent;

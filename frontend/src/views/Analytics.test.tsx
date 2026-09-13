@@ -173,6 +173,20 @@ describe("AnalyticsView", () => {
     );
   });
 
+  it("places stop-reasons in the right column, under By repo, not full-width at the bottom", async () => {
+    const { container } = renderView();
+    await screen.findByText("Why items stopped for a person");
+    const col = container.querySelector(".table-col")!;
+    expect(col.querySelector(".by-repo")).not.toBeNull();
+    expect(col.querySelector(".stop-reasons")).not.toBeNull();
+  });
+
+  it("puts the repo/template filters in the page head, not a separate bar", async () => {
+    const { container } = renderView();
+    await screen.findByText("Analytics");
+    expect(container.querySelector(".analytics-head .analytics-filters")).not.toBeNull();
+  });
+
   it("surfaces a failed fetch instead of an empty page", async () => {
     vi.spyOn(api, "getAnalytics").mockRejectedValue(new Error("unknown range"));
     renderView();

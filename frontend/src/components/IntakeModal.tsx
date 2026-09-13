@@ -536,33 +536,48 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
           <div className="intake-side">
             <SectionLabel>Overrides for this item</SectionLabel>
             <label className="control-row">
+              <span>auto-escalate every gate</span>
               <Switch
                 checked={autoEscalate}
                 onChange={setAutoEscalate}
                 label="auto-escalate every gate"
               />
-              auto-escalate every gate
             </label>
             <label className="control-row">
+              <span>let an agent review those escalations first</span>
               <Switch
                 checked={autoGate}
                 onChange={setAutoGate}
                 label="auto-review those escalations"
               />
-              auto_gate — let an agent review before a human sees it
             </label>
             <div className="control-row">
-              <span>budget $</span>
+              <span>budget</span>
               <input
                 className="input"
                 inputMode="decimal"
                 aria-label="budget"
-                placeholder={`${policy?.budget?.work_item_usd ?? "no cap"} (policy default)`}
+                placeholder={`$${policy?.budget?.work_item_usd ?? "no cap"} (policy default)`}
                 value={budgetDraft}
                 onChange={(e) => setBudgetDraft(e.target.value)}
               />
             </div>
             <p className="field-hint">Blank uses the Policy default.</p>
+            <div className="control-row">
+              <span>fix attempts</span>
+              <div className="input readout" aria-label="fix attempts, policy default">
+                {policy?.default.attempts ?? "—"}
+              </div>
+            </div>
+            <div className="control-row">
+              <span>wall clock</span>
+              <div className="input readout" aria-label="wall clock, policy default">
+                {policy ? `${Math.round(policy.default.wall_clock_s / 60)} min` : "—"}
+              </div>
+            </div>
+            <p className="field-hint">
+              Per-loop caps — set in Settings → Policy, not per item yet.
+            </p>
 
             <SectionLabel>Will happen on start</SectionLabel>
             <p className="field-hint">

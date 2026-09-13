@@ -693,6 +693,16 @@ export function ReposPage() {
                 <CaretRight size={14} />
               </Row>
             ))}
+          {!phone && repos.length > 0 && (
+            <Row columns="1fr 110px 160px 160px 110px auto" className="repo-row-head">
+              <span>Repo</span>
+              <span>Template</span>
+              <span>Remote</span>
+              <span>Test command</span>
+              <span>State</span>
+              <span />
+            </Row>
+          )}
           {!phone && repos.map((r: Repo) => (
             <Row
               key={r.path}
@@ -715,7 +725,7 @@ export function ReposPage() {
               <span className="row-sub">{r.default_chain_template}</span>
               <span className="row-sub">{r.forge ? `${r.forge} · ${r.project ?? ""}` : "—"}</span>
               <span className="row-sub mono">{r.test_command ?? "not detected"}</span>
-              <span onClick={(e) => e.stopPropagation()}>
+              <span className="repo-row-state" onClick={(e) => e.stopPropagation()}>
                 <Switch
                   checked={r.enabled}
                   onChange={(next) =>
@@ -726,6 +736,7 @@ export function ReposPage() {
                   }
                   label={`${r.enabled ? "disable" : "enable"} ${r.name}`}
                 />
+                <span className="row-sub">{r.enabled ? "enabled" : "disabled"}</span>
               </span>
               <span onClick={(e) => e.stopPropagation()}>
                 <OverflowMenu
