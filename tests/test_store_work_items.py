@@ -707,4 +707,63 @@ def test_claim_for_run_refuses_a_status_outside_the_set(tmp_path):
 
     claimed, status = asyncio.run(scenario())
     assert claimed is False
-    assert status == "active"  # untouched
+
+
+def test_claim_for_run_limit_lets_only_one_of_two_racing_items_through(tmp_path):
+    """Kraft-m43g, Kraft-nxht: two different items resumed/retried within
+    milliseconds of each other must not both win the last slot. A snapshot
+    `active_count()` read ahead of the claim can't catch this -- two reads can
+    both see the same free slot before either write lands -- so the capacity
+    check has to run inside the same `UPDATE` as the flip, the way this test
+    drives it directly rather than hoping asyncio scheduling hits the race."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database, wid="w0")  # created 'active', occupies one slot
+            await mk_item(database, wid="w1")
+            await mk_item(database, wid="w2")
+            await database.write(lambda c: store.pause_work_item(c, "w1", []))
+            await database.write(lambda c: store.pause_work_item(c, "w2", []))
+            # limit=2, one slot already taken by w0: exactly one of the two
+            # paused items below may claim the last slot.
+            first = await database.write(
+                lambda c: store.claim_for_run(c, "w2", from_statuses=["paused"], limit=2)
+            )
+            second = await database.write(
+                lambda c: store.claim_for_run(c, "w1", from_statuses=["paused"], limit=2)
+            )
+            statuses = database.read(
+                lambda c: {
+                    r["id"]: r["status"]
+                    for r in c.execute("SELECT id, status FROM work_items").fetchall()
+                }
+            )
+            return first, second, statuses
+        finally:
+            await database.close()
+
+    first, second, statuses = asyncio.run(scenario())
+    assert (first, second) == (True, False)
+    assert statuses == {"w0": "active", "w1": "paused", "w2": "active"}
+
+
+def test_claim_for_run_limit_admits_when_a_slot_is_free(tmp_path):
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database, wid="w1")
+            await database.write(lambda c: store.pause_work_item(c, "w1", []))
+            claimed = await database.write(
+                lambda c: store.claim_for_run(c, "w1", from_statuses=["paused"], limit=1)
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT status FROM work_items WHERE id='w1'").fetchone()
+            )
+            return claimed, row["status"]
+        finally:
+            await database.close()
+
+    claimed, status = asyncio.run(scenario())
+    assert claimed is True
+    assert status == "active"

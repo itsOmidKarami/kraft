@@ -4,12 +4,13 @@ worktree-head fields on GET."""
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import sqlite3
 import subprocess
 from pathlib import Path
 
-from support.api import _FAKE_CLAUDE, _await_gate, _client, _poll_events
+from support.api import _FAKE_CLAUDE, _await_gate, _client, _poll_events, _post_default, _set_status
 from support.harness import fake_templates_dir, make_repo, make_repo_with_engineering
 
 from kraft.adapters import beads
@@ -21,6 +22,31 @@ def test_post_invalid_template_422(tmp_path, monkeypatch):
             "/api/work-items", json={"title": "x", "repo": "/tmp", "chain_template": "nope"}
         )
         assert r.status_code == 422
+
+
+def test_autostart_create_lands_paused_when_all_slots_are_busy(tmp_path, monkeypatch):
+    """Kraft-m43g, Kraft-nxht: `create_work_item`'s autostart path used to hand
+    `status="active"` straight to `intake`'s `INSERT` with no capacity check at
+    all -- an autostart create always won a slot. It now loses this race the
+    same non-error way an explicit `autostart: False` already does: paused,
+    not rejected."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        busy = _post_default(client, repo)
+        _poll_events(client, busy, "gate_requested")
+        _set_status(busy, "active")
+        client.app.state.policy = dataclasses.replace(client.app.state.policy, max_concurrent=1)
+
+        r = client.post(
+            "/api/work-items",
+            json={"title": "t", "repo": str(repo), "chain_template": "default"},
+        )
+
+        assert r.status_code == 201, r.text
+        assert r.json()["status"] == "paused"
+        wid = r.json()["id"]
+        assert client.get(f"/api/work-items/{wid}").json()["status"] == "paused"
+        assert client.get(f"/api/work-items/{busy}").json()["status"] == "active"
 
 
 def test_post_missing_repo_422(tmp_path, monkeypatch):
