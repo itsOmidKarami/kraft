@@ -641,7 +641,7 @@ async def judge_verdict(
     """
     if JUDGE_HOOK not in registry.hooks:
         return "continue", ""
-    cap = _policy.resolve_cap(policy, key)
+    cap = _policy.resolve_cap(policy, key, store.node_overrides_of(row).get(node["id"]))
     counter = db.read(lambda c: store.read_counter(c, work_item_id, key))
     attempts_used = counter["count"] if counter else 0
     started_at = counter["started_at"] if counter else _now()

@@ -16,8 +16,17 @@ export interface ChainNode {
 }
 
 /** A node id's overridden fields, from the item's own `node_overrides`
- *  (UI v2 · 04 point 1). Today only `auto_escalate` is supported. */
-export type NodeOverrides = Record<string, { auto_escalate?: boolean }>;
+ *  (UI v2 · 04 point 1; `attempts`/`wall_clock_s` added Kraft-439u.2). */
+export type NodeOverrides = Record<
+  string,
+  {
+    auto_escalate?: boolean;
+    auto_escalate_stuck?: boolean;
+    auto_escalate_delay_s?: number;
+    attempts?: number;
+    wall_clock_s?: number;
+  }
+>;
 
 /** Where the implementer is in its plan (Kraft-qqz8): "Task 3 of 6", derived
  *  server-side from the plan's `## Task N` headings, the latest
