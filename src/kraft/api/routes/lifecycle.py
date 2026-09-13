@@ -376,10 +376,6 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
     # non-empty) — fall back to the same "1" resume already used rather than
     # crash a path that used to degrade gracefully.
     limit = st.policy.max_concurrent if st.policy else 1
-    if st.db.read(store.active_count) >= limit:
-        raise HTTPException(
-            409, f"all {limit} slots are busy; pause something or raise max_concurrent"
-        )
     chain = json.loads(row["chain_definition"])
     steer_text = None
     if body.steer and body.steer.strip():
@@ -399,8 +395,14 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         # and catching spawn's own refusal only after those writes would
         # strand the item claimed 'active' with no walk behind it.
         raise HTTPException(409, "a walk is already running for this work item")
-    claimed = await st.db.write(lambda c: store.claim_for_run(c, wid, from_statuses=from_statuses))
+    claimed = await st.db.write(
+        lambda c: store.claim_for_run(c, wid, from_statuses=from_statuses, limit=limit)
+    )
     if not claimed:
+        if st.db.read(store.active_count) >= limit:
+            raise HTTPException(
+                409, f"all {limit} slots are busy; pause something or raise max_concurrent"
+            )
         raise HTTPException(409, "work item is not paused")
 
     # The claim moves before this awaited rebase deliberately (Kraft-11e0):
@@ -541,12 +543,17 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         # (`_stop_live_sessions`, gates.py): kill it and let this retry
         # proceed, instead of refusing the human outright (Kraft-vyk8).
         #
-        # Both checks below still refuse this same retry further down --
-        # run them *before* the kill, not after: `_stop_live_sessions`
-        # SIGTERMs the escalation turn and moves the item needs_human ->
-        # paused, and neither of those undoes itself just because the
-        # request goes on to 409. A human who gets an error must find the
-        # item exactly as it was (code-review finding).
+        # The steer check below still refuses this same retry further down --
+        # run it *before* the kill, not after: `_stop_live_sessions` SIGTERMs
+        # the escalation turn and moves the item needs_human -> paused, and
+        # that doesn't undo itself just because the request goes on to 409. A
+        # human who gets an error must find the item exactly as it was
+        # (code-review finding). The atomic claim below is still the only
+        # place that authoritatively decides capacity (Kraft-m43g,
+        # Kraft-nxht), but a cheap advisory check here, ahead of the kill,
+        # keeps a full board from paying for a live turn's death (SIGTERM
+        # plus a cancelled walk task) only to 409 on the claim afterwards
+        # anyway (code-review finding).
         limit = st.policy.max_concurrent if st.policy else 1
         if st.db.read(store.active_count) >= limit:
             raise HTTPException(
@@ -612,10 +619,6 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         return {"id": wid, "node_id": node_id, "loop": key, "steer": steer}
 
     limit = st.policy.max_concurrent if st.policy else 1
-    if st.db.read(store.active_count) >= limit:
-        raise HTTPException(
-            409, f"all {limit} slots are busy; pause something or raise max_concurrent"
-        )
 
     steer = (body.steer or "").strip() or None
     if steer is not None and not _steer_reachable(chain["nodes"], node_id, st.registry):
@@ -642,9 +645,13 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         # cleared and no walk behind it.
         raise HTTPException(409, "a walk is already running for this work item")
     claimed = await st.db.write(
-        lambda c: store.claim_for_run(c, wid, from_statuses=["needs_human"])
+        lambda c: store.claim_for_run(c, wid, from_statuses=["needs_human"], limit=limit)
     )
     if not claimed:
+        if st.db.read(store.active_count) >= limit:
+            raise HTTPException(
+                409, f"all {limit} slots are busy; pause something or raise max_concurrent"
+            )
         raise HTTPException(409, "work item is not stopped")
 
     worktree = st.run_dirs.worktrees / wid
