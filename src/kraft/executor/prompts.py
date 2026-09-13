@@ -49,6 +49,17 @@ def format_findings(found: list[_findings.Finding], repeats: set[str]) -> str:
     return "\n".join(lines)
 
 
+#: What a retry with no explicit steer and no rejection to fall back on leads
+#: with (Kraft-7sec, second half): the same per-finding bullets a fix cycle's
+#: own FIX_FINDINGS already uses -- not a second findings format to keep in
+#: sync with, just a different lead-in sentence, because no human wrote this one.
+_SEEDED_FINDINGS_STEER = "Findings the last review of this node left unresolved:\n{findings}"
+
+
+def seeded_findings_note(found: list[_findings.Finding]) -> str:
+    return _SEEDED_FINDINGS_STEER.format(findings=format_findings(found, repeats=set()))
+
+
 # A human's note — from the capped card's retry (4b) or a resume after pause (4c) —
 # prepended to the next agent launch. It leads because it is the reason this task is
 # running again.
@@ -94,12 +105,29 @@ _REVISE_PROMPT = (
 )
 
 
-def steer_prefix(binding: dict, work_item_row, worktree, note: str) -> str:
+#: A note Kraft carried forward for itself -- the seeded recap of the last
+#: review's unresolved findings (`_SEEDED_FINDINGS_STEER`, Kraft-7sec second
+#: half). Deliberately not `_STEER_PROMPT`/`_REVISE_PROMPT`, for the same
+#: reason `_REBASE_PROMPT` is not: both of those name a human as the author,
+#: and telling an agent a human typed Kraft's own recap is the misattribution
+#: `Steer.human` exists to keep out of the prompt as well as out of the judge.
+_SEEDED_PROMPT = (
+    "Kraft carried this forward from the last review of this node; no human typed it:\n\n{note}\n\n"
+)
+
+
+def steer_prefix(binding: dict, work_item_row, worktree, note: str, *, human: bool = True) -> str:
     """What a steered agent launch leads with.
 
     Keys on the artifact being on disk rather than on which gate was rejected,
     so it covers the spec gate and any future `artifact:` binding for free.
+
+    `human=False` is Kraft's own seeded note: it gets neither template that
+    claims an author, and no revision framing either -- the note is about
+    findings in the code, not about a document a human read.
     """
+    if not human:
+        return _SEEDED_PROMPT.format(note=note)
     artifact_kind = binding.get("artifact")
     rel = _agent.artifact_path(artifact_kind, work_item_row["id"]) if artifact_kind else None
     if rel and (Path(worktree) / rel).is_file():

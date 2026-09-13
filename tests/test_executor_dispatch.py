@@ -713,3 +713,318 @@ def test_a_failed_straggler_sweep_does_not_fail_a_good_agent_run(tmp_path, monke
     swept = [e for e in evts if e["type"] == "sweep_failed"]
     assert swept, "no sweep_failed event survived the swallowed ForgeError"
     assert "index.lock" in swept[0]["payload"]["error"]
+
+
+def test_measure_node_reuses_a_done_session_at_the_current_head(tmp_path, monkeypatch):
+    """Kraft-gl9d: a task whose session for this (node, round) already exited
+    'done' against the worktree's current HEAD is not redispatched; a task
+    with no matching 'done' session is."""
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            worktree = make_repo(tmp_path)
+            head = git_read(worktree, "rev-parse", "HEAD")
+
+            wid = "w1"
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id=wid,
+                    bead_id="B",
+                    title="t",
+                    repo=str(worktree),
+                    chain_template="x",
+                    chain_definition="{}",
+                )
+            )
+            node = {"id": "verify", "tasks": ["on.test.run", "on.review.local.run"]}
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s-done",
+                    work_item_id=wid,
+                    node_id="verify",
+                    hook_point="on.review.local.run",
+                    log_path="/l",
+                    result_path="/r",
+                    round=0,
+                    head_sha=head,
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "s-done", "done"))
+
+            dispatched = []
+
+            async def fake_dispatch_node(db_, run_dirs_, task_hook, *a, **kw):
+                dispatched.append(task_hook)
+                return "failed"
+
+            monkeypatch.setattr(dispatch, "dispatch_node", fake_dispatch_node)
+
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+            verdict, failed, excs = await dispatch.measure_node(
+                database, rd, wid, node, row, Registry(hooks={}), worktree, round=0
+            )
+            # the reused hook never dispatches; the other one does
+            assert dispatched == ["on.test.run"]
+            assert verdict == "failed"
+            assert failed == ["on.test.run"]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_unresolved_findings_steer_uses_the_latest_measurements_findings(tmp_path):
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = "w1"
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id=wid,
+                    bead_id="B",
+                    title="t",
+                    repo="/r",
+                    chain_template="x",
+                    chain_definition="{}",
+                )
+            )
+            await database.write(
+                lambda c: events.append(
+                    c,
+                    wid,
+                    "findings_measured",
+                    {
+                        "node_id": "verify",
+                        "cycle": 0,
+                        "findings": [
+                            {
+                                "severity": "important",
+                                "message": "missing null check",
+                                "file": "a.py",
+                                "line": 10,
+                                "source_plugin": "reviewer",
+                            }
+                        ],
+                        "fingerprints": ["x"],
+                        "noop_hooks": [],
+                    },
+                )
+            )
+            note = dispatch.unresolved_findings_steer(database, wid, "verify", None)
+            assert note is not None
+            assert "missing null check" in note
+            assert "a.py:10" in note
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_unresolved_findings_steer_is_none_with_no_measurement_yet(tmp_path):
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = "w1"
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id=wid,
+                    bead_id="B",
+                    title="t",
+                    repo="/r",
+                    chain_template="x",
+                    chain_definition="{}",
+                )
+            )
+            assert dispatch.unresolved_findings_steer(database, wid, "verify", None) is None
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_unresolved_findings_steer_is_none_when_the_last_measurement_has_no_eligible_finding(
+    tmp_path,
+):
+    """A blind task failure with nothing structured reported must fall through
+    to the caller's own `last_rejection`, not seed an empty note."""
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = "w1"
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id=wid,
+                    bead_id="B",
+                    title="t",
+                    repo="/r",
+                    chain_template="x",
+                    chain_definition="{}",
+                )
+            )
+            await database.write(
+                lambda c: events.append(
+                    c,
+                    wid,
+                    "findings_measured",
+                    {
+                        "node_id": "verify",
+                        "cycle": 0,
+                        "findings": [],
+                        "fingerprints": [],
+                        "noop_hooks": [],
+                    },
+                )
+            )
+            assert dispatch.unresolved_findings_steer(database, wid, "verify", None) is None
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_unresolved_findings_steer_drops_a_finding_resolved_in_a_later_cycle(tmp_path):
+    """Only the most recent measurement counts -- a finding present in an
+    earlier cycle but gone from the latest one must not be re-seeded."""
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = "w1"
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id=wid,
+                    bead_id="B",
+                    title="t",
+                    repo="/r",
+                    chain_template="x",
+                    chain_definition="{}",
+                )
+            )
+            old = {
+                "node_id": "verify",
+                "cycle": 0,
+                "findings": [
+                    {
+                        "severity": "important",
+                        "message": "old bug",
+                        "file": "a.py",
+                        "line": 1,
+                        "source_plugin": "reviewer",
+                    }
+                ],
+                "fingerprints": ["old"],
+                "noop_hooks": [],
+            }
+            new = {
+                "node_id": "verify",
+                "cycle": 1,
+                "findings": [
+                    {
+                        "severity": "important",
+                        "message": "new bug",
+                        "file": "b.py",
+                        "line": 2,
+                        "source_plugin": "reviewer",
+                    }
+                ],
+                "fingerprints": ["new"],
+                "noop_hooks": [],
+            }
+            await database.write(lambda c: events.append(c, wid, "findings_measured", old))
+            await database.write(lambda c: events.append(c, wid, "findings_measured", new))
+            note = dispatch.unresolved_findings_steer(database, wid, "verify", None)
+            assert "new bug" in note
+            assert "old bug" not in note
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_a_seeded_note_is_not_attributed_to_a_human(tmp_path):
+    """Kraft's own recap of the last review's unresolved findings (Kraft-7sec
+    second half) travels as a `Steer` with `human=False`. Both human templates
+    name an author it does not have -- `_STEER_PROMPT` says "A human has
+    steered this run", and over an existing artifact `_REVISE_PROMPT` says "A
+    human read ... and sent it back with this note"."""
+    (tmp_path / ".engineering" / "plans").mkdir(parents=True)
+    (tmp_path / ".engineering" / "plans" / "w1.md").write_text("# the plan\n")
+    binding = {"kind": "agent", "command": "claude", "skill": "plan", "artifact": "plan"}
+    note = "Findings the last review of this node left unresolved:\n- [important] a.py:1 — x (cr)"
+
+    seeded = executor.steer_prefix(binding, {"id": "w1"}, tmp_path, note, human=False)
+
+    assert note in seeded
+    assert "no human" in seeded
+    assert "A human has steered" not in seeded
+    assert "A human read" not in seeded
+    # the default is unchanged: every existing caller still means a human.
+    assert executor.steer_prefix(binding, {"id": "w1"}, tmp_path, note).startswith("A human read")
+
+
+def test_dispatch_carries_the_notes_authorship_into_the_prompt(tmp_path, monkeypatch):
+    """The wiring behind the test above: `dispatch_node` reads `Steer.human`
+    off the note it takes, so a seeded steer reaches the agent framed as
+    Kraft's. Without it the flag exists but never reaches the prompt."""
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    seen = {}
+
+    async def fake_run_agent_task(db_, run_dirs_, **kw):
+        seen["instruction"] = kw["task_instruction"]
+        return "done"
+
+    monkeypatch.setattr("kraft.executor.dispatch._agent.run_agent_task", fake_run_agent_task)
+
+    async def scenario(human):
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+            registry = Registry(hooks={"on.test.run": {"kind": "agent", "command": "claude"}})
+            await dispatch.dispatch_node(
+                database,
+                rd,
+                "on.test.run",
+                {"id": "verify"},
+                row,
+                registry,
+                repo,
+                steer=executor.Steer("findings left unresolved: x", human=human),
+            )
+        finally:
+            await database.close()
+        return seen["instruction"]
+
+    seeded = asyncio.run(scenario(False))
+    assert "no human" in seeded
+    assert "A human has steered" not in seeded
+
+    typed = asyncio.run(scenario(True))
+    assert typed.startswith("A human has steered this run:")

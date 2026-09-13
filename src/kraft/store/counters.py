@@ -55,6 +55,7 @@ def retry_after_cap(
     *,
     gate_key: str | None = None,
     escalated: bool = False,
+    seeded: bool = False,
 ):
     """Clear a breached loop cap so the node can run again (handoff spec §8, 4b).
 
@@ -96,6 +97,12 @@ def retry_after_cap(
     an unfixable stop (e.g. a budget breach a retry cannot clear) escalates
     forever.
 
+    `seeded` is True when `steer` is Kraft's own recap of the last
+    measurement's unresolved findings (Kraft-7sec, second half), not
+    something a human typed or a stored rejection note -- tagged on the
+    `work_item_retried` event so the timeline never reads as though a human
+    wrote text they never saw.
+
     The status flip back to 'active' is the caller's `claim_for_run`'s now,
     not this function's -- called before the awaited worktree rebase
     (Kraft-11e0), so this only clears counters and narrates the retry.
@@ -114,7 +121,13 @@ def retry_after_cap(
         conn,
         work_item_id,
         "work_item_retried",
-        {"node_id": node_id, "loop": key, "steer": steer, "escalated": escalated},
+        {
+            "node_id": node_id,
+            "loop": key,
+            "steer": steer,
+            "escalated": escalated,
+            "seeded": seeded,
+        },
     )
 
 

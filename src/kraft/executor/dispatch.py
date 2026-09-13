@@ -138,6 +138,14 @@ async def dispatch_node(
         # `on.test.run` for a budget would strand the item mid-node for no saving.
         if stops.budget_breach(db, work_item_row["id"], budget) is not None:
             return BUDGET
+        # Authorship travels with the note, not with the caller: a seeded
+        # steer is Kraft's own recap of the last review's unresolved findings,
+        # and the human templates in `steer_prefix` would tell the agent a
+        # person wrote it (the same misattribution `Steer.human` keeps out of
+        # the fix-loop judge). Read before `take()`, and on `is not None`, not
+        # truthiness: `Steer.__bool__` is about having text left, and `take()`
+        # has just emptied it.
+        note_by_human = steer.human if steer is not None else True
         note = steer.take() if steer else None
         attachment_note = prompts.attachment_note(entry.attachments_of(work_item_row))
         instruction = (
@@ -179,7 +187,9 @@ async def dispatch_node(
             method_text=inv.method_text,
             title=work_item_row["title"],
             task_instruction=(
-                prompts.steer_prefix(binding, work_item_row, worktree, note) if note else ""
+                prompts.steer_prefix(binding, work_item_row, worktree, note, human=note_by_human)
+                if note
+                else ""
             )
             + instruction,
             repo_path=work_item_row["repo"],
@@ -328,25 +338,43 @@ async def measure_node(
 ) -> tuple[str, list[str], list[BaseException]]:
     await db.write(lambda c, node=node: store.enter_node(c, work_item_id, node["id"]))
     tasks = node["tasks"]
-    results = await asyncio.gather(
-        *(
-            dispatch_node(
-                db,
-                run_dirs,
-                t,
-                node,
-                row,
-                registry,
-                worktree,
-                round=round,
-                steer=steer,
-                launch=launch,
-                budget=budget,
+    # Kraft-gl9d: a crash/resume re-entry into this same (node, round) must not
+    # re-spend an agent session on a task whose session already reached 'done'
+    # against the worktree as it stands right now. Read once, ahead of the
+    # per-task loop below -- the worktree's HEAD does not move while this
+    # node's own tasks are still being measured. `worktree` is None only in a
+    # unit test that stubs `dispatch_node` out entirely (no git to read); a
+    # null head_sha just means "never reusable", same as any other.
+    head_sha = _config.git_read(Path(worktree), "rev-parse", "HEAD") if worktree else None
+
+    async def _measure(t: str) -> str:
+        # A null head_sha is never reusable (`reusable_session` itself would
+        # say so) -- skip the read entirely rather than asking a test double
+        # that has no worktree, and thus no HEAD, to answer it.
+        reused = (
+            db.read(
+                lambda c: store.reusable_session(c, work_item_id, node["id"], t, round, head_sha)
             )
-            for t in tasks
-        ),
-        return_exceptions=True,
-    )
+            if head_sha is not None
+            else None
+        )
+        if reused is not None:
+            return reused["status"]
+        return await dispatch_node(
+            db,
+            run_dirs,
+            t,
+            node,
+            row,
+            registry,
+            worktree,
+            round=round,
+            steer=steer,
+            launch=launch,
+            budget=budget,
+        )
+
+    results = await asyncio.gather(*(_measure(t) for t in tasks), return_exceptions=True)
     # A pause stops the walk where it stands: the node is neither done nor failed,
     # and resume relaunches it. It outranks a co-task's failure, which was almost
     # certainly the same SIGTERM arriving on a different row.
@@ -553,6 +581,35 @@ def judge_history(
         {"round": i, "findings": found, "fix_result_path": fix_by_round.get(cycle)}
         for i, (cycle, found) in enumerate(measured)
     ]
+
+
+def unresolved_findings_steer(
+    db, work_item_id: str, node_id: str, policy: _policy.Policy | None
+) -> str | None:
+    """A retry's steer when the caller gave none and there is no rejection to
+    fall back on (Kraft-7sec, second half): the node's most recent
+    measurement, formatted the same way a fix cycle already receives it.
+
+    `judge_history`'s last entry already is the unresolved set -- reused
+    rather than a third reader of `findings_measured` (spec section 2
+    forbids one, and `last_measurement` is already the second): a measurement
+    re-reports what is still there every round, so the most recent one needs
+    no `findings_resolved` counterpart to subtract, and a finding fixed in an
+    earlier cycle is already absent from it.
+
+    None when there is nothing to seed -- no measurement recorded yet for
+    this node, or the last one had no eligible finding at all (a blind task
+    failure with nothing structured to report) -- so the caller's own
+    `last_rejection` fallback still applies.
+    """
+    severities = policy.loop_severities if policy else _policy.DEFAULT_LOOP_SEVERITIES
+    history = judge_history(db, work_item_id, node_id, severities)
+    if not history:
+        return None
+    found = history[-1]["findings"]
+    if not found:
+        return None
+    return prompts.seeded_findings_note(found)
 
 
 async def judge_verdict(

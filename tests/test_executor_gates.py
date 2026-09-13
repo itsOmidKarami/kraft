@@ -770,3 +770,107 @@ def test_gate_already_reviewed_ignores_a_previous_requests_attempt():
         _evt("gate_requested", gate="g"),
     ]
     assert gates_module._gate_already_reviewed(evts, "g") is False
+
+
+def test_resume_after_escalation_threads_the_seeded_flag_onto_retry_after_cap(
+    tmp_path, monkeypatch
+):
+    """The deferred self-retry (lifecycle.py's `work_item_self_retry_requested`)
+    marks whether its steer was Kraft's own seeded recap of the last
+    measurement or a human's; consuming it must not lose that mark."""
+    from kraft.paths import RunDirs
+
+    async def fake_refresh(worktree, repo, branch):
+        return None
+
+    async def fake_walk_run(database, run_dirs, **kw):
+        return "completed"
+
+    monkeypatch.setattr(gates_module._builtins, "refresh_worktree_base", fake_refresh)
+    monkeypatch.setattr("kraft.executor.walk.run", fake_walk_run)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = "w1"
+            chain = {"nodes": [{"id": "implementation", "tasks": [], "fix_loop": "implementation"}]}
+            await _seed_stuck(database, wid, reason="stuck", chain=chain)
+            cursor = database.read(lambda c: events.read_after(c, 0, wid))[-1]["seq"]
+            await database.write(
+                lambda c: events.append(
+                    c,
+                    wid,
+                    "work_item_self_retry_requested",
+                    {
+                        "node_id": "implementation",
+                        "key": "implementation",
+                        "gate_key": None,
+                        "steer": "- [important] a.py:1 — missing null check (reviewer)",
+                        "seeded": True,
+                    },
+                )
+            )
+            status = await gates_module.resume_after_escalation(
+                database, rd, work_item_id=wid, cursor=cursor, registry=None
+            )
+            evs = database.read(lambda c: events.read_after(c, 0, wid))
+            retried = next(e for e in evs if e["type"] == "work_item_retried")
+            return status, retried["payload"]["seeded"]
+        finally:
+            await database.close()
+
+    status, seeded = asyncio.run(scenario())
+    assert status == "completed"
+    assert seeded is True
+
+
+def test_resume_after_escalation_defaults_seeded_to_false_for_an_older_event_shape(
+    tmp_path, monkeypatch
+):
+    """A `work_item_self_retry_requested` written before this field existed has
+    no `seeded` key at all; reading it back must default False, not KeyError."""
+    from kraft.paths import RunDirs
+
+    async def fake_refresh(worktree, repo, branch):
+        return None
+
+    async def fake_walk_run(database, run_dirs, **kw):
+        return "completed"
+
+    monkeypatch.setattr(gates_module._builtins, "refresh_worktree_base", fake_refresh)
+    monkeypatch.setattr("kraft.executor.walk.run", fake_walk_run)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = "w1"
+            chain = {"nodes": [{"id": "implementation", "tasks": [], "fix_loop": "implementation"}]}
+            await _seed_stuck(database, wid, reason="stuck", chain=chain)
+            cursor = database.read(lambda c: events.read_after(c, 0, wid))[-1]["seq"]
+            await database.write(
+                lambda c: events.append(
+                    c,
+                    wid,
+                    "work_item_self_retry_requested",
+                    {
+                        "node_id": "implementation",
+                        "key": "implementation",
+                        "gate_key": None,
+                        "steer": "go",
+                    },
+                )
+            )
+            status = await gates_module.resume_after_escalation(
+                database, rd, work_item_id=wid, cursor=cursor, registry=None
+            )
+            evs = database.read(lambda c: events.read_after(c, 0, wid))
+            retried = next(e for e in evs if e["type"] == "work_item_retried")
+            return status, retried["payload"]["seeded"]
+        finally:
+            await database.close()
+
+    status, seeded = asyncio.run(scenario())
+    assert status == "completed"
+    assert seeded is False
