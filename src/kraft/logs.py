@@ -144,6 +144,10 @@ def summary(obj: dict | None, line: str) -> str:
             if isinstance(thinking, str) and thinking.strip():
                 return _shorten("thinking: " + thinking.strip().splitlines()[0], 200)
             return "thinking"
+    # A shape this function doesn't know yet (a new stream-json event kind).
+    # Its bare `type` is still a real word, unlike the raw JSON -- Kraft-5x45w.
+    if isinstance(kind, str) and kind:
+        return _shorten(kind)
     return _shorten(line)
 
 
