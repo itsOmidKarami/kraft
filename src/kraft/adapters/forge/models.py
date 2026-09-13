@@ -6,7 +6,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
+
+if TYPE_CHECKING:
+    # `mr.py` imports `ForgeError`/`MRRef` from here -- a real-time import
+    # the other way would be circular. `from __future__ import annotations`
+    # already makes every annotation below lazy, so this is type-checking
+    # only.
+    from kraft.adapters.forge.mr import MRMeta
 
 CIState = Literal["pending", "success", "failed"]
 
@@ -80,7 +87,9 @@ class CIStatus:
 
 
 class Forge(Protocol):
-    async def open_mr(self, *, repo: Path, branch: str, title: str, body: str) -> MR: ...
+    async def open_mr(
+        self, *, repo: Path, branch: str, title: str, body: str, meta: MRMeta | None = None
+    ) -> MR: ...
     async def push(self, *, repo: Path, branch: str) -> None: ...
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None: ...
     async def ci_status(
@@ -144,11 +153,28 @@ class FakeForge:
     #: keyed on branch alone would let a submodule's `find_mr` "discover" the
     #: root's merge request just because both are on `kraft/<item>`.
     _opened_repo: dict[int, str] = field(default_factory=dict)
+    #: Title each `open_mr` call was given, keyed by the number returned --
+    #: so a test can assert the authored title reached the forge without a
+    #: network.
+    opened_titles: dict[int, str] = field(default_factory=dict)
+    #: `meta` each `open_mr` call was given, same keying as `opened_titles` --
+    #: so a test can assert labels/assignees/reviewers reached the forge.
+    opened_meta: dict[int, MRMeta] = field(default_factory=dict)
+    #: Body each `open_mr` call was given, alongside `bodies` (which only
+    #: `update_mr`/`sync_mr` write to).
+    opened_bodies: dict[int, str] = field(default_factory=dict)
 
-    async def open_mr(self, *, repo: Path, branch: str, title: str, body: str) -> MR:
+    async def open_mr(
+        self, *, repo: Path, branch: str, title: str, body: str, meta: MRMeta | None = None
+    ) -> MR:
+        from kraft.adapters.forge.mr import MRMeta
+
         number = len(self.opened) + 1
         self.opened[number] = branch
         self._opened_repo[number] = str(repo)
+        self.opened_titles[number] = title
+        self.opened_meta[number] = meta or MRMeta()
+        self.opened_bodies[number] = body
         return MR(number=number, url=f"http://fake.forge/{number}")
 
     async def push(self, *, repo: Path, branch: str) -> None:

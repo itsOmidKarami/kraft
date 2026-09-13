@@ -9,6 +9,7 @@ import os
 import pytest
 
 from kraft.adapters import forge
+from kraft.adapters.forge.mr import MRMeta
 
 GH_PR_VIEW = (
     '{"number":7,"url":"https://github.com/o/r/pull/7",'
@@ -31,6 +32,31 @@ def test_gh_open_mr_parses_the_number_and_url(tmp_path, monkeypatch):
 
     assert mr.number == 7
     assert mr.url == "https://github.com/o/r/pull/7"
+
+
+def test_open_mr_passes_the_authored_metadata(tmp_path, monkeypatch):
+    _stub(tmp_path, monkeypatch, "gh", GH_PR_VIEW)
+    _stub(tmp_path, monkeypatch, "git", "")
+
+    meta = MRMeta(labels=("release::minor",), assignees=("omid",), reviewers=("ada", "grace"))
+    asyncio.run(
+        forge.GhCli().open_mr(repo=tmp_path, branch="kraft/abc", title="T", body="B", meta=meta)
+    )
+
+    argv = _argv(tmp_path, "gh")
+    assert argv[argv.index("--label") + 1] == "release::minor"
+    assert argv[argv.index("--assignee") + 1] == "omid"
+    assert argv[argv.index("--reviewer") + 1] == "ada,grace"
+
+
+def test_open_mr_omits_the_flags_it_has_no_values_for(tmp_path, monkeypatch):
+    _stub(tmp_path, monkeypatch, "gh", GH_PR_VIEW)
+    _stub(tmp_path, monkeypatch, "git", "")
+
+    asyncio.run(forge.GhCli().open_mr(repo=tmp_path, branch="kraft/abc", title="T", body="B"))
+
+    argv = _argv(tmp_path, "gh")
+    assert "--label" not in argv and "--assignee" not in argv and "--reviewer" not in argv
 
 
 def test_open_mr_refuses_an_untracked_only_worktree(tmp_path, monkeypatch):

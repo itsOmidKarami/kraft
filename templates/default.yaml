@@ -32,6 +32,12 @@ nodes:
     tasks: [on.mr.rebase]
     gate_after: null
     rebase_bounce_to: verify
+  # Authors the merge request's metadata from the rebased diff, before
+  # `open_mr` creates it -- see the spec's "Where it runs" for why this has
+  # to happen before create rather than at the human_review gate.
+  - id: mr_meta
+    tasks: [on.mr.describe]
+    gate_after: null
   - id: open_mr
     tasks: [on.mr.open]
     gate_after: null
