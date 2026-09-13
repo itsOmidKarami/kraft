@@ -531,9 +531,11 @@ def test_forge_nodes_run_in_the_worktree_not_the_repo(tmp_path, monkeypatch):
     seen: list = []
 
     class RecordingForge(forge.FakeForge):
-        async def open_mr(self, *, repo, branch, title, body):
+        async def open_mr(self, *, repo, branch, title, body, meta=None):
             seen.append(repo)
-            return await super().open_mr(repo=repo, branch=branch, title=title, body=body)
+            return await super().open_mr(
+                repo=repo, branch=branch, title=title, body=body, meta=meta
+            )
 
     fake = RecordingForge(ci_states=["success"])
     _run_back_half(tmp_path, monkeypatch, fake)
@@ -587,45 +589,18 @@ def test_the_body_survives_a_branch_with_no_commits_yet():
     assert "af0fb78e" in body
 
 
-def test_with_no_summaries_the_body_is_exactly_todays(tmp_path):
-    """Spec §5's 'done when': every summary missing must produce today's body,
+def test_with_no_meta_the_body_is_exactly_todays(tmp_path):
+    """Spec §5's 'done when': a missing artifact must produce today's body,
     unchanged down to the byte — the one path `open_mr` must never fail on."""
-    with_none = forge.mr_body("af0fb78e", "kraft/af0fb78e", ("the work",), ())
+    with_default = forge.mr_body("af0fb78e", "kraft/af0fb78e", ("the work",), forge.MRMeta())
     without_the_arg = forge.mr_body("af0fb78e", "kraft/af0fb78e", ("the work",))
-    assert with_none == without_the_arg
+    assert with_default == without_the_arg
 
 
-def test_summaries_lead_the_body_oldest_first():
+def test_the_commit_list_is_demoted_below_the_description():
     body = forge.mr_body(
-        "af0fb78e",
-        "kraft/af0fb78e",
-        ("the work",),
-        ("implemented the thing first", "then fixed the review comment"),
+        "af0fb78e", "kraft/af0fb78e", ("the work",), forge.MRMeta(description="did the thing")
     )
-    assert body.index("implemented the thing first") < body.index("then fixed the review comment")
-    assert body.index("implemented the thing first") < body.index("the work")
-
-
-def test_front_matter_is_stripped_from_each_summary():
-    summary = "---\nwork_item_ids: [w1]\nnode_id: implementation\n---\nDid the actual work.\n"
-    body = forge.mr_body("af0fb78e", "kraft/af0fb78e", (), (summary,))
-    assert "Did the actual work." in body
-    assert "work_item_ids" not in body
-    assert "node_id" not in body
-
-
-def test_a_summary_that_is_only_front_matter_falls_back_to_todays_body():
-    """Stripping can leave nothing — an agent that wrote the contract and no
-    prose. That is the same degradation as no summary at all, not a body with
-    a gap where the lead paragraph should be."""
-    only_front_matter = "---\nwork_item_ids: [w1]\n---\n"
-    with_it = forge.mr_body("af0fb78e", "kraft/af0fb78e", ("the work",), (only_front_matter,))
-    without_it = forge.mr_body("af0fb78e", "kraft/af0fb78e", ("the work",), ())
-    assert with_it == without_it
-
-
-def test_the_commit_list_is_demoted_below_the_summary():
-    body = forge.mr_body("af0fb78e", "kraft/af0fb78e", ("the work",), ("did the thing",))
     assert body.index("did the thing") < body.index("<details>")
     assert "- the work" in body
     assert "Branch `kraft/af0fb78e`" in body
@@ -633,7 +608,7 @@ def test_the_commit_list_is_demoted_below_the_summary():
 
 def test_a_body_over_the_cap_is_truncated_with_a_visible_marker():
     huge = "x" * (forge.MR_BODY_MAX_CHARS + 5_000)
-    body = forge.mr_body("af0fb78e", "kraft/af0fb78e", (), (huge,))
+    body = forge.mr_body("af0fb78e", "kraft/af0fb78e", (), forge.MRMeta(description=huge))
     assert len(body) <= forge.MR_BODY_MAX_CHARS
     assert "truncated" in body
 
@@ -794,12 +769,11 @@ def test_open_mr_still_creates_one_when_the_branch_has_none(tmp_path, monkeypatc
     assert "opened http://fake.forge/1" in _session_log(tmp_path, "x6")
 
 
-def test_open_mr_leads_the_body_with_the_session_summary(tmp_path, monkeypatch):
-    """Task 4: `open_mr` reads every readable session summary for the item out
-    of its own worktree, oldest first, and hands them to `mr_body` -- a
-    reviewer sees what the agent said it did, not just a commit list."""
+def test_open_mr_uses_the_authored_title_labels_and_description(tmp_path, monkeypatch):
+    """`open_mr` reads `.engineering/mr_metas/<wid>.md` out of the item's own
+    worktree and hands its title, labels and description through to the
+    forge -- a reviewer sees what the agent decided, not a stitched diary."""
     fake = forge.FakeForge()
-    asyncio.run(fake.open_mr(repo=tmp_path, branch="kraft/w1", title="t", body="b"))
     monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
 
     async def scenario():
@@ -813,24 +787,11 @@ def test_open_mr_leads_the_body_with_the_session_summary(tmp_path, monkeypatch):
                     "('w1','t','/r','default','{}','active','now','now')"
                 )
             )
-            sessions_dir = tmp_path / ".engineering" / "sessions"
-            sessions_dir.mkdir(parents=True)
-            (sessions_dir / "impl.md").write_text(
-                "---\nwork_item_ids: [w1]\n---\nImplemented the feature end to end.\n"
-            )
-            await database.write(
-                lambda c: store.create_session(
-                    c,
-                    id="prior",
-                    work_item_id="w1",
-                    node_id="implementation",
-                    hook_point="on.implementation.start",
-                    log_path="/l",
-                    result_path="/r",
-                )
-            )
-            await database.write(
-                lambda c: store.session_exited(c, "prior", "done", ".engineering/sessions/impl.md")
+            meta_dir = tmp_path / ".engineering" / "mr_metas"
+            meta_dir.mkdir(parents=True)
+            (meta_dir / "w1.md").write_text(
+                "---\nwork_item_ids: [w1]\ntitle: Authored title\n"
+                "labels: [release::minor]\n---\n## What this introduces\n\nA door.\n"
             )
             await forge.run_task(
                 database,
@@ -850,17 +811,17 @@ def test_open_mr_leads_the_body_with_the_session_summary(tmp_path, monkeypatch):
 
     asyncio.run(scenario())
 
-    body = fake.bodies["kraft/w1"]
-    assert "Implemented the feature end to end." in body
-    assert "work_item_ids" not in body
-    assert body.index("Implemented the feature end to end.") < body.index("Branch `kraft/w1`")
+    (number,) = fake.opened
+    assert fake.opened_titles[number] == "Authored title"
+    assert fake.opened_meta[number].labels == ("release::minor",)
+    assert fake.opened_bodies[number].startswith("## What this introduces")
 
 
-def test_open_mr_falls_back_to_todays_body_when_the_summary_file_is_gone(tmp_path, monkeypatch):
-    """Spec §5: the row has a ref but the worktree never got the file (or it
-    was reclaimed) -- ordinary, not exceptional, and must not fail the node."""
+def test_open_mr_without_the_artifact_opens_the_default_body(tmp_path, monkeypatch):
+    """Spec §5: no artifact at all -- an install that never ran `on.mr.describe`,
+    or one that failed to write it -- must open exactly today's MR, not fail
+    the node."""
     fake = forge.FakeForge()
-    asyncio.run(fake.open_mr(repo=tmp_path, branch="kraft/w1", title="t", body="b"))
     monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
 
     async def scenario():
@@ -873,20 +834,6 @@ def test_open_mr_falls_back_to_todays_body_when_the_summary_file_is_gone(tmp_pat
                     "chain_definition, status, created_at, updated_at) VALUES "
                     "('w1','t','/r','default','{}','active','now','now')"
                 )
-            )
-            await database.write(
-                lambda c: store.create_session(
-                    c,
-                    id="prior",
-                    work_item_id="w1",
-                    node_id="implementation",
-                    hook_point="on.implementation.start",
-                    log_path="/l",
-                    result_path="/r",
-                )
-            )
-            await database.write(
-                lambda c: store.session_exited(c, "prior", "done", ".engineering/sessions/gone.md")
             )
             returned = await forge.run_task(
                 database,
@@ -899,7 +846,7 @@ def test_open_mr_falls_back_to_todays_body_when_the_summary_file_is_gone(tmp_pat
                 backend="fake",
                 repo=tmp_path,
                 branch="kraft/w1",
-                title="t",
+                title="the work item title",
             )
             return returned
         finally:
@@ -908,18 +855,16 @@ def test_open_mr_falls_back_to_todays_body_when_the_summary_file_is_gone(tmp_pat
     returned = asyncio.run(scenario())
 
     assert returned == "done"
-    body = fake.bodies["kraft/w1"]
-    assert body == forge.mr_body("w1", "kraft/w1", ())
+    (number,) = fake.opened
+    assert fake.opened_titles[number] == "the work item title"
+    assert fake.opened_meta[number] == forge.MRMeta()
+    assert fake.opened_bodies[number] == forge.mr_body("w1", "kraft/w1", ())
 
 
-def test_open_mr_refuses_a_session_summary_ref_that_escapes_the_worktree(tmp_path, monkeypatch):
-    """Spec §4.2: an agent-supplied ref that walks out of its own worktree
-    must not be read, let alone published in a merge request description."""
+def test_sync_mr_republishes_the_authored_description(tmp_path, monkeypatch):
     fake = forge.FakeForge()
     asyncio.run(fake.open_mr(repo=tmp_path, branch="kraft/w1", title="t", body="b"))
     monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
-    outside = tmp_path.parent / "outside_secret.md"
-    outside.write_text("not yours")
 
     async def scenario():
         rd = RunDirs(tmp_path / "run").ensure()
@@ -932,19 +877,10 @@ def test_open_mr_refuses_a_session_summary_ref_that_escapes_the_worktree(tmp_pat
                     "('w1','t','/r','default','{}','active','now','now')"
                 )
             )
-            await database.write(
-                lambda c: store.create_session(
-                    c,
-                    id="prior",
-                    work_item_id="w1",
-                    node_id="implementation",
-                    hook_point="on.implementation.start",
-                    log_path="/l",
-                    result_path="/r",
-                )
-            )
-            await database.write(
-                lambda c: store.session_exited(c, "prior", "done", "../outside_secret.md")
+            meta_dir = tmp_path / ".engineering" / "mr_metas"
+            meta_dir.mkdir(parents=True)
+            (meta_dir / "w1.md").write_text(
+                "---\nwork_item_ids: [w1]\n---\n## What this introduces\n\nA door.\n"
             )
             await forge.run_task(
                 database,
@@ -953,7 +889,7 @@ def test_open_mr_refuses_a_session_summary_ref_that_escapes_the_worktree(tmp_pat
                 work_item_id="w1",
                 node_id="mr_checks",
                 hook_point="on.ci.poll",
-                handler="open_mr",
+                handler="sync_mr",
                 backend="fake",
                 repo=tmp_path,
                 branch="kraft/w1",
@@ -964,7 +900,7 @@ def test_open_mr_refuses_a_session_summary_ref_that_escapes_the_worktree(tmp_pat
 
     asyncio.run(scenario())
 
-    assert "not yours" not in fake.bodies["kraft/w1"]
+    assert fake.bodies["kraft/w1"].startswith("## What this introduces")
 
 
 def test_ci_poll_pushes_before_it_polls(tmp_path, monkeypatch):

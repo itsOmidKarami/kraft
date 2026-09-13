@@ -28,12 +28,30 @@ _RUN_ID_RE = re.compile(r"/actions/runs/(\d+)")
 class GhCli:
     """GitHub through `gh`. For the public repo after the v0.1.0 split."""
 
-    async def open_mr(self, *, repo: Path, branch: str, title: str, body: str) -> MR:
+    async def open_mr(
+        self,
+        *,
+        repo: Path,
+        branch: str,
+        title: str,
+        body: str,
+        meta: mr_ops.MRMeta | None = None,
+    ) -> MR:
         await git.assert_clean(repo)
         await self.push(repo=repo, branch=branch)
         # `--fill` titles the PR from the commits; see GlabCli.open_mr.
         await git.run_git(
-            repo, ["gh", "pr", "create", "--title", mr_ops.mr_title(title), "--body", body]
+            repo,
+            [
+                "gh",
+                "pr",
+                "create",
+                "--title",
+                mr_ops.mr_title(title),
+                "--body",
+                body,
+                *mr_ops.meta_flags(meta or mr_ops.MRMeta()),
+            ],
         )
         raw = await git.run_git(repo, ["gh", "pr", "view", "--json", "number,url"])
         data = mr_ops.parse_json(raw, "gh pr view")

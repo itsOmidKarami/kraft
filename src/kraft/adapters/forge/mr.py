@@ -5,16 +5,133 @@ land -- vocabulary both CLI backends share.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
+from pathlib import Path
 
 from kraft.adapters.forge.models import ForgeError, MRRef
 from kraft.index.ingest import split_front_matter
+from kraft.worktree_read import read_worktree_file
 
 #: GitHub rejects a PR/MR body over 65 536 characters; GitLab's own limit is
 #: far higher. The same body is built for both backends, so the cap is picked
 #: from the smaller one, not from whichever forge this item happens to use.
 MR_BODY_MAX_CHARS = 65_536
 
-_TRUNCATION_MARKER = "\n\n*(truncated -- see the branch's own session summaries for the rest)*"
+_TRUNCATION_MARKER = "\n\n*(truncated -- read the diff, this description did not fit)*"
+
+#: One agent-authored scalar's ceiling. A label or a username is short; 200
+#: chars is generous for both and still refuses a file pasted into a field.
+_META_SCALAR_MAX = 200
+#: How many labels/assignees/reviewers are plausible. Past this the agent is
+#: not labelling, it is looping.
+_META_LIST_MAX = 10
+#: The metadata is one page of prose plus a few short fields.
+_META_READ_MAX_BYTES = 200_000
+
+
+@dataclass(frozen=True)
+class MRMeta:
+    """What an agent decided this merge request should say and carry.
+
+    Every field is optional and independently droppable: this is
+    agent-authored, so a value that does not survive validation must cost its
+    own field only -- never the description, and never the merge request.
+    """
+
+    title: str | None = None
+    labels: tuple[str, ...] = ()
+    assignees: tuple[str, ...] = ()
+    reviewers: tuple[str, ...] = ()
+    description: str = ""
+
+
+#: The empty metadata every fallback path returns -- one shared instance so
+#: mutable-default lint rules have a module-level singleton to point at.
+_EMPTY_META = MRMeta()
+
+
+def _clean_scalar(value) -> str | None:
+    """One agent-authored value, or None if it must not reach argv.
+
+    `git.run_git` passes a list, so there is no shell here -- but `glab` and
+    `gh` read an argument beginning with `-` as a flag, which is the one way a
+    label can become an option.
+    """
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text or text.startswith("-") or len(text) > _META_SCALAR_MAX:
+        return None
+    if any(ch < " " or ch == "\x7f" for ch in text):
+        return None
+    return text
+
+
+def _clean_list(value) -> tuple[str, ...]:
+    """A front-matter list, cleaned entry by entry. A scalar where a list
+    belongs is dropped whole rather than read as one entry: `labels: release`
+    is a mistake about the contract, not a one-label MR."""
+    if not isinstance(value, list):
+        return ()
+    cleaned = [c for v in value if (c := _clean_scalar(v))]
+    return tuple(cleaned[:_META_LIST_MAX])
+
+
+def read_mr_meta(worktree: Path, work_item_id: str) -> MRMeta:
+    """The `mr_meta` artifact this item's `on.mr.describe` session wrote.
+
+    Never raises and never partially fails: absent, outside the worktree,
+    unreadable, malformed front matter, or a field of the wrong shape each
+    cost exactly themselves. An MR must still open when the metadata is gone
+    (the rule session-summary stitching followed, before it was deleted).
+    """
+    from kraft.adapters.agent import artifact_path
+
+    result, _reason = read_worktree_file(
+        worktree, artifact_path("mr_meta", work_item_id), _META_READ_MAX_BYTES
+    )
+    if result is None:
+        return MRMeta()
+    front, body = split_front_matter(result.text)
+    raw_title = front.get("title")
+    # `mr_title` clips first, the way a work item's own title already is
+    # (multi-line -> first line, cut to 72 chars) -- only then does the clip's
+    # *result* go through the same leading-dash/control-char/length gate every
+    # other scalar does.
+    title = (
+        _clean_scalar(mr_title(raw_title))
+        if isinstance(raw_title, str) and raw_title.strip()
+        else None
+    )
+    return MRMeta(
+        title=title,
+        labels=_clean_list(front.get("labels")),
+        assignees=_clean_list(front.get("assignees")),
+        reviewers=_clean_list(front.get("reviewers")),
+        description=body.strip(),
+    )
+
+
+def mr_title_for(work_item_title: str, meta: MRMeta) -> str:
+    """The authored title if there is one, else the work item's own -- both
+    through `mr_title`'s clip, so a title built straight from `MRMeta` (as a
+    test does, bypassing `read_mr_meta`'s own clip) still gets it."""
+    return mr_title(meta.title or work_item_title)
+
+
+def meta_flags(meta: MRMeta) -> list[str]:
+    """The `--label/--assignee/--reviewer` arguments both CLIs spell the same
+    way. Omitted entirely when empty: `--label ""` is a real, empty value to
+    both, not an absence."""
+    flags: list[str] = []
+    for flag, values in (
+        ("--label", meta.labels),
+        ("--assignee", meta.assignees),
+        ("--reviewer", meta.reviewers),
+    ):
+        if values:
+            flags += [flag, ",".join(values)]
+    return flags
 
 
 def _default_body(work_item_id: str, branch: str, commits: tuple[str, ...]) -> str:
@@ -35,33 +152,25 @@ def mr_body(
     work_item_id: str,
     branch: str,
     commits: tuple[str, ...],
-    summaries: tuple[str, ...] = (),
+    meta: MRMeta = _EMPTY_META,
 ) -> str:
     """The merge request description, rebuilt from the branch as it stands.
 
     Rebuilt and not appended: `open_mr` runs before verify and mr_checks add
     their commits, so a description written once describes a branch that no
-    longer exists (Kraft-c09h). A summary-based body goes stale the same way,
-    for the same reason -- every call rebuilds from scratch.
+    longer exists (Kraft-c09h). An authored body goes stale the same way, for
+    the same reason -- every call rebuilds from scratch.
 
-    `summaries` are raw session-summary file contents, oldest session first
-    (the implementation session's own narrative belongs at the top; a later
-    fix-loop session's one-liner should not replace it). Front matter is
-    stripped from each -- it is the storage contract's plumbing, not
-    something a reviewer should read -- and an entry that turns out to be
-    front matter only (or blank) is dropped rather than leaving a gap.
-
-    Falls back to today's fixed body when there is nothing left to lead with:
-    this is the one path with no filesystem or database of its own, so a
-    caller that could not resolve a single readable summary (spec §5 --
-    missing rows, missing files, a path that failed containment) hands in an
-    empty tuple and gets exactly what `open_mr` has always produced.
+    Falls back to today's fixed body when there is no authored description to
+    lead with: this is the one path with no filesystem or database of its
+    own, so a caller that could not resolve the artifact (missing node,
+    missing file, a path that failed containment) hands in an empty `MRMeta`
+    and gets exactly what `open_mr` has always produced.
     """
-    paragraphs = [p for text in summaries if (p := split_front_matter(text)[1].strip())]
-    if not paragraphs:
+    if not meta.description:
         return _default_body(work_item_id, branch, commits)
 
-    parts = ["\n\n---\n\n".join(paragraphs)]
+    parts = [meta.description]
     if commits:
         commit_list = "\n".join(f"- {c}" for c in commits)
         parts.append(

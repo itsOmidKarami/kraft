@@ -477,6 +477,18 @@ def test_the_artifact_contract_does_not_claim_the_gate_cannot_see_uncommitted_fi
     assert prompt.count("Commit everything you change before you exit") == 1
 
 
+def test_mr_meta_artifact_prompt_asks_for_the_structured_fields(monkeypatch):
+    """`on.mr.describe`'s `mr_meta` artifact carries structured fields Kraft
+    reads straight into `glab`/`gh` create arguments (spec §2) -- the prompt
+    has to ask for them by name, not just for a one-line title."""
+    seen = _capture_cmd(monkeypatch)
+    _run(artifact="mr_meta")
+    prompt = _system_prompt(seen["cmd"])
+    assert ".engineering/mr_metas/" in prompt
+    for key in ("title:", "labels:", "assignees:", "reviewers:"):
+        assert key in prompt
+
+
 def test_default_profile_reproduces_todays_command_line(monkeypatch):
     """The whole argv for a binding that sets none of the optional keys.
 
