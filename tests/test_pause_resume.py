@@ -437,8 +437,12 @@ def test_resume_marks_needs_human_on_a_rebase_conflict(tmp_path, monkeypatch):
         # builtins.py's own literal, version-independent of git's message.
         assert needs_human and "rebase failed for" in needs_human[-1]["payload"]["reason"].lower()
 
+        # auto_escalate_stuck now fires here too, spawning one escalation
+        # session (Kraft-h48r's fix for this call site) -- not the zero
+        # this asserted before that fix existed.
         after = client.get(f"/api/work-items/{wid}").json()
-        assert len(after["worker_sessions"]) == before_sessions
+        assert len(after["worker_sessions"]) == before_sessions + 1
+        assert after["worker_sessions"][-1]["hook_point"] == "escalation"
         assert git_read(worktree, "status", "--porcelain") == ""
 
 
