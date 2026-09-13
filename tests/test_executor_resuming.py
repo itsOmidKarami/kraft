@@ -297,3 +297,74 @@ def test_reconcile_reproduces_kraft_s15p0s_discarded_plan_session(tmp_path):
     result, status = asyncio.run(scenario())
     assert result == "completed"
     assert status == "completed"
+
+
+def test_reconcile_still_needs_human_when_latest_attempt_failed(tmp_path):
+    """Only the latest attempt's status is authoritative — an earlier done
+    attempt does not rescue a task whose most recent attempt failed."""
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = Registry(
+                hooks={
+                    "on.env.prepare": {"kind": "builtin", "handler": "env_setup"},
+                    "on.implementation.start": {"kind": "agent", "command": "unused"},
+                    "on.test.run": {"kind": "subprocess", "command": ["true"]},
+                }
+            )
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            (rd.worktrees / wid).mkdir(parents=True, exist_ok=True)
+            await database.write(lambda c: store.load_chain(c, wid, "implementation"))
+            await database.write(lambda c: store.enter_node(c, wid, "implementation"))
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s-impl-1",
+                    work_item_id=wid,
+                    node_id="implementation",
+                    hook_point="on.implementation.start",
+                    log_path="/l1",
+                    result_path="/r1",
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "s-impl-1", "done"))
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s-impl-2",
+                    work_item_id=wid,
+                    node_id="implementation",
+                    hook_point="on.implementation.start",
+                    log_path="/l2",
+                    result_path="/r2",
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "s-impl-2", "failed"))
+            result = await executor.resume(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                adopted={},
+                bd_cwd=str(tracker),
+            )
+            assert result == "needs_human"
+            row = database.read(
+                lambda c: c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+            assert row["status"] == "needs_human"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
