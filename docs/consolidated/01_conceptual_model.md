@@ -352,10 +352,13 @@ invocation time only, never written to a repo file.
     `{ note }` body; the coordinator re-invokes that node's own producing hook with
     the note injected, bounded by a per-gate reject-loop counter. On cap breach →
     `needs_human`.
-  - `human_review_approval` — reject requires a `{ note }`, sets `needs_human`, no
-    counter, no auto-re-invocation. A rejected final review means redoing
-    implementation and replaying `verify` → `open_mr` → `mr_checks` forward — real
-    chain re-entry, and precisely the moment a human should stay in control.
+  - `human_review_approval` — reject requires a `{ note }`; takes the same bounded
+    re-entry as the other three: it bumps `human_review_approval_reject_loop` and
+    walks the chain back to its `reject_to` node (`implementation`, in the default
+    template), the note carried in as the implementer's steer. On cap breach →
+    `needs_human`. A rejected final review means redoing implementation and
+    replaying `verify` → `open_mr` → `mr_checks` forward — real chain re-entry, and
+    still the moment a human stays in control (Kraft-ko7j).
 - Everything between "plan approved" and "ready for final review" runs unattended
   (subject to pause/steer), bounded by the retry policy in §9.
 
