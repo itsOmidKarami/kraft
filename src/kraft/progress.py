@@ -23,11 +23,25 @@ _TASK_HEADING = re.compile(
     r"^#{2,3}[ \t]+Task[ \t]+\d+\b[ \t]*[—:.\-]?[ \t]*(.*)$", re.MULTILINE | re.IGNORECASE
 )
 _COMMIT_TASK = re.compile(r"\btask\s+(\d+(?:\s*[+,&]\s*\d+)*)", re.IGNORECASE)
+_FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})")
 
 
 def parse_tasks(text: str) -> list[str]:
-    """The titles of a plan's `## Task N` / `### Task N` headings, in order."""
-    return [m[1].strip() for m in _TASK_HEADING.finditer(text)]
+    """The titles of a plan's `## Task N` / `### Task N` headings, in order.
+
+    Lines inside a fenced ```/~~~ code block are blanked out first -- a plan
+    that quotes a `## Task N` heading in an example or test fixture (Kraft-szad)
+    would otherwise count as a real one.
+    """
+    in_fence = False
+    lines = []
+    for line in text.split("\n"):
+        if _FENCE.match(line):
+            in_fence = not in_fence
+            lines.append("")
+        else:
+            lines.append("" if in_fence else line)
+    return [m[1].strip() for m in _TASK_HEADING.finditer("\n".join(lines))]
 
 
 def committed_task(subjects: list[str]) -> int:

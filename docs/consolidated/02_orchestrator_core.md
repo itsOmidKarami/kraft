@@ -407,16 +407,21 @@ a **required** `{ note: string }` body. For the three producer gates:
 exactly as the first time.
 
 **`human_review_approval` reject** — emits `gate_rejected` with the required `note`,
-sets `needs_human`. No counter, no auto-re-invocation. A rejected final review means
-real forward chain re-entry (redo implementation, replay `verify` → `open_mr` →
-`mr_checks`) — the human drives it via ad hoc pause/steer or a manual re-trigger.
+then takes the same steps 2–3 above: increments `human_review_approval_reject_loop`,
+breach → `needs_human`. Not breached re-enters the chain at the gate node's
+`reject_to` target (`implementation`, in the default template) rather than
+re-invoking its own producing hook — real backward chain re-entry, the rejection
+note carried in as the implementer's steer. Redoing implementation replays
+`verify` → `open_mr` → `mr_checks` forward before the gate fires again (Kraft-ko7j).
 
 ### 7.3 Reconciliation with the chain non-goals
 
-`current_node_id` never decrements. The fix task launches *inside* the current node,
-alongside the measuring tasks. Gate reject re-invokes the *current* node's producing
-hook. Still strictly sequential, still no DAG. The only new fact: a node may execute
-more than one cycle of its own tasks, capped by the core.
+`current_node_id` does not decrement for the three producer gates' reject path — the
+fix task launches *inside* the current node, alongside the measuring tasks, and gate
+reject re-invokes the *current* node's producing hook. `human_review_approval`
+reject is the one exception: its `reject_to` (`implementation`, in the default
+template) walks `current_node_id` backward to an earlier node (Kraft-ko7j). Still
+strictly sequential, still no DAG — one node live at a time, chain order unchanged.
 
 ---
 
