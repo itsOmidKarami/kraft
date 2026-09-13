@@ -264,7 +264,7 @@ describe("IntakeModal", () => {
     );
   });
 
-  it("shows fix attempts and wall clock read from the Policy default, not a raw auto_gate identifier", async () => {
+  it("placeholders fix attempts and wall clock with the Policy default, not a raw auto_gate identifier", async () => {
     vi.spyOn(api, "getPolicy").mockResolvedValue({
       loops: {},
       default: { attempts: 4, wall_clock_s: 1800 },
@@ -272,10 +272,61 @@ describe("IntakeModal", () => {
     });
     renderModal();
     await fillBasics();
-    expect(await screen.findByLabelText(/fix attempts, policy default/i)).toHaveTextContent("4");
-    expect(screen.getByLabelText(/wall clock, policy default/i)).toHaveTextContent("30 min");
+    expect(await screen.findByLabelText(/^fix attempts$/i)).toHaveAttribute(
+      "placeholder",
+      "4 (policy default)",
+    );
+    expect(screen.getByLabelText(/wall clock, minutes/i)).toHaveAttribute(
+      "placeholder",
+      "30 (policy default)",
+    );
     expect(screen.queryByText("auto_gate", { exact: true })).toBeNull();
     expect(screen.getByText(/let an agent review those escalations first/i)).toBeInTheDocument();
+  });
+
+  it("sends fix attempts and wall clock overrides for every fix_loop node on submit", async () => {
+    vi.spyOn(api, "getTemplates").mockResolvedValue([
+      {
+        id: "default",
+        nodes: [
+          { id: "spec", tasks: [], gate_after: "spec_approval" },
+          { id: "implementation", tasks: [], gate_after: null, fix_loop: "verify_fix_loop" },
+        ],
+        gates: 1,
+      },
+    ]);
+    const create = vi.spyOn(api, "createWorkItem").mockResolvedValue({ id: "w1" });
+    renderModal();
+    await fillBasics();
+    await userEvent.type(await screen.findByLabelText(/^fix attempts$/i), "2");
+    await userEvent.type(screen.getByLabelText(/wall clock, minutes/i), "10");
+    await userEvent.click(
+      screen.getByRole("button", { name: /create and start/i }),
+    );
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          node_overrides: expect.objectContaining({
+            implementation: expect.objectContaining({
+              attempts: 2,
+              wall_clock_s: 600,
+            }),
+          }),
+        }),
+      ),
+    );
+  });
+
+  it("rejects a non-numeric fix attempts value loudly instead of sending NaN", async () => {
+    const create = vi.spyOn(api, "createWorkItem");
+    renderModal();
+    await fillBasics();
+    await userEvent.type(await screen.findByLabelText(/^fix attempts$/i), "lots");
+    await userEvent.click(
+      screen.getByRole("button", { name: /create and start/i }),
+    );
+    expect(await screen.findByText(/fix attempts must be a plain number/i)).toBeInTheDocument();
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("puts the $ in the budget placeholder, not the label (never-wrap rule)", async () => {

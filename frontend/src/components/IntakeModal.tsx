@@ -75,6 +75,8 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
   const [autoEscalate, setAutoEscalate] = useState(false);
   const [autoGate, setAutoGate] = useState(true);
   const [budgetDraft, setBudgetDraft] = useState("");
+  const [attemptsDraft, setAttemptsDraft] = useState("");
+  const [wallClockDraft, setWallClockDraft] = useState("");
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
   const ref = useModal<HTMLFormElement>(onClose);
   // Kraft-avvz: anything the user typed makes the backdrop click a no-op.
@@ -162,13 +164,42 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
   );
   const selectedNodes =
     templateSummaries.find((t) => t.id === tpl)?.nodes ?? [];
-  const nodeOverrides: NodeOverrides = autoEscalate
+  const autoEscalateOverrides: NodeOverrides = autoEscalate
     ? Object.fromEntries(
         selectedNodes
           .filter((n) => n.gate_after)
           .map((n) => [n.id, { auto_escalate: true }]),
       )
     : {};
+  // Fix attempts/wall clock apply to every fix_loop node, not just gated ones
+  // -- a node can end up with both an auto-escalate and a cap override, so
+  // this merges per node rather than overwriting `autoEscalateOverrides`.
+  const capOverrides: NodeOverrides =
+    attemptsDraft.trim() || wallClockDraft.trim()
+      ? Object.fromEntries(
+          selectedNodes
+            .filter((n) => n.fix_loop)
+            .map((n) => [
+              n.id,
+              {
+                ...(attemptsDraft.trim()
+                  ? { attempts: Number(attemptsDraft) }
+                  : {}),
+                ...(wallClockDraft.trim()
+                  ? { wall_clock_s: Number(wallClockDraft) * 60 }
+                  : {}),
+              },
+            ]),
+        )
+      : {};
+  const nodeOverrides: NodeOverrides = Object.fromEntries(
+    [...new Set([...Object.keys(autoEscalateOverrides), ...Object.keys(capOverrides)])].map(
+      (id) => [
+        id,
+        { ...autoEscalateOverrides[id], ...capOverrides[id] },
+      ],
+    ),
+  );
 
   const submit = async (autostart: boolean, e?: React.FormEvent) => {
     e?.preventDefault();
@@ -179,6 +210,14 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
     const budgetUsd = budgetDraft.trim() ? Number(budgetDraft) : undefined;
     if (budgetUsd !== undefined && !Number.isFinite(budgetUsd)) {
       setError(`budget must be a plain number, not "${budgetDraft}"`);
+      return;
+    }
+    if (attemptsDraft.trim() && !Number.isFinite(Number(attemptsDraft))) {
+      setError(`fix attempts must be a plain number, not "${attemptsDraft}"`);
+      return;
+    }
+    if (wallClockDraft.trim() && !Number.isFinite(Number(wallClockDraft))) {
+      setError(`wall clock must be a plain number, not "${wallClockDraft}"`);
       return;
     }
     setBusy(true);
@@ -567,18 +606,32 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
             <p className="field-hint">Blank uses the Policy default.</p>
             <div className="control-row">
               <span>fix attempts</span>
-              <div className="input readout" aria-label="fix attempts, policy default">
-                {policy?.default.attempts ?? "—"}
-              </div>
+              <input
+                className="input"
+                inputMode="numeric"
+                aria-label="fix attempts"
+                placeholder={`${policy?.default.attempts ?? "—"} (policy default)`}
+                value={attemptsDraft}
+                onChange={(e) => setAttemptsDraft(e.target.value)}
+              />
             </div>
             <div className="control-row">
-              <span>wall clock</span>
-              <div className="input readout" aria-label="wall clock, policy default">
-                {policy ? `${Math.round(policy.default.wall_clock_s / 60)} min` : "—"}
-              </div>
+              <span>wall clock (min)</span>
+              <input
+                className="input"
+                inputMode="numeric"
+                aria-label="wall clock, minutes"
+                placeholder={
+                  policy
+                    ? `${Math.round(policy.default.wall_clock_s / 60)} (policy default)`
+                    : "—"
+                }
+                value={wallClockDraft}
+                onChange={(e) => setWallClockDraft(e.target.value)}
+              />
             </div>
             <p className="field-hint">
-              Per-loop caps — set in Settings → Policy, not per item yet.
+              Blank uses the Policy default. Applies to every fix-loop node in this chain.
             </p>
 
             <SectionLabel>Will happen on start</SectionLabel>

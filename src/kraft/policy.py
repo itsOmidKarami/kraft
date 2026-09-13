@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -286,8 +287,15 @@ def load_policy(path: str | Path) -> Policy:
     )
 
 
-def resolve_cap(policy: Policy, key: str) -> Cap:
-    return policy.loops.get(key, policy.default)
+def resolve_cap(policy: Policy, key: str, override: dict | None = None) -> Cap:
+    cap = policy.loops.get(key, policy.default)
+    if not override:
+        return cap
+    return dataclasses.replace(
+        cap,
+        attempts=override.get("attempts", cap.attempts),
+        wall_clock_s=override.get("wall_clock_s", cap.wall_clock_s),
+    )
 
 
 def check(*, count: int, started_at: str, cap: Cap, now: str) -> str:

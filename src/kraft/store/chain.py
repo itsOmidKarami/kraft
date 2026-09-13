@@ -11,7 +11,7 @@ from kraft.store import _now as _now  # test seam for wall-clock checks
 #: here -- keep this list and `templates.validate_agent_overrides`-style
 #: validation in the route in sync.
 OVERRIDABLE_NODE_FIELDS = frozenset(
-    {"auto_escalate", "auto_escalate_stuck", "auto_escalate_delay_s"}
+    {"auto_escalate", "auto_escalate_stuck", "auto_escalate_delay_s", "attempts", "wall_clock_s"}
 )
 
 
