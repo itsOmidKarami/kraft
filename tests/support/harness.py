@@ -144,6 +144,7 @@ def fake_registry(python_exe: str, fake_agent_path: Path) -> Registry:
         "on.mr.sync",
         "on.ci.poll",
         "on.merge",
+        "on.merge.watch",
         "on.human_review.requested",
     ):
         hooks[hook] = {"kind": "builtin", "handler": "noop"}
@@ -233,6 +234,7 @@ def fake_templates_dir(
                     "on.mr.sync": noop(),
                     "on.human_review.requested": noop(),
                     "on.merge": noop(),
+                    "on.merge.watch": noop(),
                 }
             }
         )

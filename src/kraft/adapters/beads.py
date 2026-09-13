@@ -137,3 +137,54 @@ async def ready(*, cwd: str | None = None) -> list[dict]:
         for r in rows
         if isinstance(r, dict) and r.get("id") and r.get("title")
     ]
+
+
+async def blocked_by(bead_ids: list[str], *, cwd: str | None = None) -> list[str]:
+    """The union of unmet blockers across every id in `bead_ids` -- a thin
+    `bd blocked --json` passthrough, one call for the whole set.
+
+    Best-effort, the same contract as `ready`/`search`: no `bd`, a bad `cwd`,
+    a non-zero exit, or output that is not JSON all answer `[]`, never raise.
+    Scans `bd blocked`'s own list once and collects `blocked_by` from every
+    row whose `id` is in `bead_ids` -- `[]` when none of them appear (none
+    blocked) just as much as when bd could not be asked at all. The caller
+    cannot tell "no bd" from "not blocked" apart from this return value, and
+    does not need to: either way, nothing here should stop a dispatch.
+
+    `bead_ids` empty short-circuits to `[]` without shelling out -- an item
+    with no bead at all (bd was down at intake) and no `implements_beads`
+    passes nothing here to ask about.
+    """
+    if not bead_ids:
+        return []
+    try:
+        proc = await asyncio.to_thread(
+            subprocess.run,
+            ["bd", "blocked", "--json"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+        )
+    except OSError, ValueError:
+        # OSError: bd is not installed / cwd does not exist. ValueError:
+        # text=True decodes stdout as UTF-8, which raises UnicodeDecodeError
+        # (a ValueError subclass) on a bd that emits invalid bytes. Same
+        # unparenthesised PEP 758 form beads.py's own existing `except`
+        # clauses already use (plan-review finding 6) -- not `except
+        # (OSError, ValueError):`.
+        return []
+    if proc.returncode != 0 or "[" not in proc.stdout:
+        return []
+    try:
+        rows = json.loads(proc.stdout[proc.stdout.index("[") :])
+    except json.JSONDecodeError:
+        return []
+    wanted = set(bead_ids)
+    seen: list[str] = []
+    for r in rows:
+        if not isinstance(r, dict) or r.get("id") not in wanted:
+            continue
+        for blocker in r.get("blocked_by") or []:
+            if blocker not in seen:
+                seen.append(blocker)
+    return seen

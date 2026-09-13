@@ -69,3 +69,10 @@ nodes:
   - id: merge
     tasks: [on.merge]
     gate_after: null
+  # Kraft-43kw: a plain read-and-react step, not a fix_loop -- nothing here
+  # is this item's own defect to iterate on. mark_completed/close_beads now
+  # fire after this node, not after `merge`, so the item's tracking bead does
+  # not close until the branch it landed on is actually healthy.
+  - id: post_merge_watch
+    tasks: [on.merge.watch]
+    gate_after: null

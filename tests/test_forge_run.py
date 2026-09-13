@@ -356,6 +356,635 @@ def test_ci_poll_red_pipeline_is_not_reported_as_a_timeout(tmp_path, monkeypatch
     assert "pipeline failed" in log
 
 
+class _NoMrForge(forge.FakeForge):
+    """A fake that behaves like a real backend once the merge request is gone.
+
+    `FakeForge` answers the MR-based `ci_status` happily whether or not an MR
+    exists, so every `merge_watch` test passed while the handler still read
+    the pipeline through `gh pr view` / `glab mr view` on a just-merged branch
+    -- where both real backends raise `ForgeError` and fail the terminal node.
+    This double raises there, so a test can hold the branch-based read down.
+
+    `branch_ci_status` deliberately calls `FakeForge.ci_status` unbound rather
+    than `self.ci_status`: the base class implements it in terms of the method
+    this class overrides, and going through `self` would make the branch read
+    raise too.
+    """
+
+    async def ci_status(self, *, repo, mr, branch, pipeline_id=""):
+        raise forge.ForgeError(f"no open merge request for {branch!r}")
+
+    async def branch_ci_status(self, *, repo, branch, head_sha="", pipeline_id=""):
+        return await forge.FakeForge.ci_status(
+            self,
+            repo=repo,
+            mr=forge.MR(number=0, url="http://fake.forge/branch"),
+            branch=branch,
+            pipeline_id=pipeline_id,
+        )
+
+
+def _merge_watch_row(database_write, work_item_id, *, base_ref=None, status="active"):
+    """Insert or update a `work_items` row with the columns `merge_watch`
+    reads: `base_ref` (for the broken-base pause query) and `status`."""
+    return database_write(
+        lambda c: c.execute(
+            "UPDATE work_items SET base_ref = ?, status = ? WHERE id = ?",
+            (base_ref, status, work_item_id),
+        )
+    )
+
+
+def test_merge_watch_reports_done_on_a_green_target_branch(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    fake = forge.FakeForge(ci_states=["success"])
+    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at) VALUES "
+                    "('w1','t',?,'default','{}','active','now','now')",
+                    (str(repo),),
+                )
+            )
+            returned = await forge.run_task(
+                database,
+                rd,
+                session_id="s1",
+                work_item_id="w1",
+                node_id="post_merge_watch",
+                hook_point="on.merge.watch",
+                handler="merge_watch",
+                backend="fake",
+                repo=repo,
+                orig_repo=repo,
+                branch="kraft/w1",
+                title="t",
+            )
+            return returned
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario()) == "done"
+    # A green read never reaches the follow-up-bead/pause-other-items branch
+    # at all -- nothing to assert beyond the returned status.
+
+
+def test_merge_watch_waits_instead_of_crashing_when_upstream_head_is_unknown(tmp_path, monkeypatch):
+    """`upstream_head` returns `None` whenever `git rev-parse HEAD` fails or
+    hits `config.git_read`'s timeout (same as the other two callers,
+    `ensure_worktree` and `refresh_worktree_base`). `merge_watch` must treat
+    that the same way they do -- "nothing to report yet" -- rather than hand
+    `None` on to `branch_ci_status`, where `GhCli` crashes formatting
+    `head_sha[:7]` and `GlabCli` silently reports the previous commit's
+    pipeline as this merge's result (code-review)."""
+    repo = make_repo(tmp_path)
+    fake = forge.FakeForge(ci_states=["success"])
+    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+
+    async def _none(repo):
+        return None
+
+    monkeypatch.setattr(_builtins, "upstream_head", _none)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at) VALUES "
+                    "('w1','t',?,'default','{}','active','now','now')",
+                    (str(repo),),
+                )
+            )
+            return await forge.run_task(
+                database,
+                rd,
+                session_id="s1",
+                work_item_id="w1",
+                node_id="post_merge_watch",
+                hook_point="on.merge.watch",
+                handler="merge_watch",
+                backend="fake",
+                repo=repo,
+                orig_repo=repo,
+                branch="kraft/w1",
+                title="t",
+            )
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario()) == "waiting"
+
+
+def test_merge_watch_retries_infra_red_once_then_reports_done_on_green(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    fake = forge.FakeForge(
+        ci_states=["failed", "success"],
+        ci_failed_jobs=[(), ()],  # empty failed_jobs -> is_infra_red is True
+    )
+    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at) VALUES "
+                    "('w1','t',?,'default','{}','active','now','now')",
+                    (str(repo),),
+                )
+            )
+            return await forge.run_task(
+                database,
+                rd,
+                session_id="s1",
+                work_item_id="w1",
+                node_id="post_merge_watch",
+                hook_point="on.merge.watch",
+                handler="merge_watch",
+                backend="fake",
+                repo=repo,
+                orig_repo=repo,
+                branch="kraft/w1",
+                title="t",
+            )
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario()) == "done"
+    assert fake.retried  # retry_jobs was called exactly once
+
+
+def test_merge_watch_infra_retry_never_reads_through_the_merged_away_mr(tmp_path, monkeypatch):
+    """Judge finding (rounds 0/2/3): the infra kick's own re-read went through
+    the MR-based `ci_status`, which on a branch whose MR is already merged
+    raises `ForgeError` on both real backends and fails this terminal node.
+    `_NoMrForge` raises there the way they do, so this fails unless the re-read
+    goes through `branch_ci_status`."""
+    repo = make_repo(tmp_path)
+    fake = _NoMrForge(
+        ci_states=["failed", "success"],
+        ci_failed_jobs=[(), ()],  # empty failed_jobs -> is_infra_red is True
+    )
+    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at) VALUES "
+                    "('w1','t',?,'default','{}','active','now','now')",
+                    (str(repo),),
+                )
+            )
+            return await forge.run_task(
+                database,
+                rd,
+                session_id="s1",
+                work_item_id="w1",
+                node_id="post_merge_watch",
+                hook_point="on.merge.watch",
+                handler="merge_watch",
+                backend="fake",
+                repo=repo,
+                orig_repo=repo,
+                branch="kraft/w1",
+                title="t",
+            )
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario()) == "done"
+    assert fake.retried
+
+
+def test_merge_watch_green_path_never_reads_through_the_merged_away_mr(tmp_path, monkeypatch):
+    """The same guard on the ordinary settle: no call in this node's happy
+    path may resolve a merge request either."""
+    repo = make_repo(tmp_path)
+    fake = _NoMrForge(ci_states=["success"])
+    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at) VALUES "
+                    "('w1','t',?,'default','{}','active','now','now')",
+                    (str(repo),),
+                )
+            )
+            return await forge.run_task(
+                database,
+                rd,
+                session_id="s1",
+                work_item_id="w1",
+                node_id="post_merge_watch",
+                hook_point="on.merge.watch",
+                handler="merge_watch",
+                backend="fake",
+                repo=repo,
+                orig_repo=repo,
+                branch="kraft/w1",
+                title="t",
+            )
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario()) == "done"
+
+
+def test_merge_watch_files_a_follow_up_bead_and_pauses_items_on_the_broken_sha(
+    tmp_path, monkeypatch
+):
+    repo = make_repo(tmp_path)
+    tracker = isolated_bd(tmp_path, name="tracker")
+    fake = forge.FakeForge(
+        ci_states=["failed"],
+        ci_failed_jobs=[(forge.FailedJob("build", "failed", "script_failure"),)],
+    )
+    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+    head_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, bead_cwd, created_at, updated_at) VALUES "
+                    "('w1','t',?,'default','{}','active',?,'now','now')",
+                    (str(repo), str(tracker)),
+                )
+            )
+            # w2 rebased onto exactly the commit that just broke -- must pause.
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, base_ref, created_at, updated_at) VALUES "
+                    "('w2','t',?,'default','{}','active',?,'now','now')",
+                    (str(repo), head_sha),
+                )
+            )
+            # w3 is active but on a different base -- must not be touched.
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, base_ref, created_at, updated_at) VALUES "
+                    "('w3','t',?,'default','{}','active','some-other-sha','now','now')",
+                    (str(repo),),
+                )
+            )
+            # w4 is parked on its own pipeline (`waiting`) on the broken
+            # commit -- the item most likely to re-discover this break in its
+            # own fix loop, so it must be warned too (gate review).
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, base_ref, created_at, updated_at) VALUES "
+                    "('w4','t',?,'default','{}','waiting',?,'now','now')",
+                    (str(repo), head_sha),
+                )
+            )
+            returned = await forge.run_task(
+                database,
+                rd,
+                session_id="s1",
+                work_item_id="w1",
+                node_id="post_merge_watch",
+                hook_point="on.merge.watch",
+                handler="merge_watch",
+                backend="fake",
+                repo=repo,
+                orig_repo=repo,
+                branch="kraft/w1",
+                title="t",
+            )
+            w2 = database.read(
+                lambda c: c.execute("SELECT status FROM work_items WHERE id = 'w2'").fetchone()
+            )
+            w3 = database.read(
+                lambda c: c.execute("SELECT status FROM work_items WHERE id = 'w3'").fetchone()
+            )
+            w4 = database.read(
+                lambda c: c.execute("SELECT status FROM work_items WHERE id = 'w4'").fetchone()
+            )
+            w2_events = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, "w2"))]
+            return returned, w2["status"], w3["status"], w4["status"], w2_events
+        finally:
+            await database.close()
+
+    returned, w2_status, w3_status, w4_status, w2_events = asyncio.run(scenario())
+    assert returned == "done"
+    assert w4_status == "paused"
+    assert w2_status == "paused"
+    assert "paused_by_broken_base" in w2_events
+    assert w3_status == "active"
+
+    bd_show = subprocess.run(
+        ["bd", "search", "post-merge", "--json", "--status", "all"],
+        cwd=tracker,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "post-merge pipeline broke" in bd_show
+
+
+def test_merge_watch_pins_to_the_pipeline_it_last_saw(tmp_path, monkeypatch):
+    """Same pin `ci_poll` already relies on (Kraft-ivh1), against the target
+    branch instead of this item's own: survives a second item merging before
+    this one's own pipeline settles."""
+    repo = make_repo(tmp_path)
+    fake = forge.FakeForge(ci_states=["pending", "pending"], ci_pipeline_refs=["777"])
+    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at) VALUES "
+                    "('w1','t',?,'default','{}','active','now','now')",
+                    (str(repo),),
+                )
+            )
+            for sid in ("s1", "s2"):
+                await forge.run_task(
+                    database,
+                    rd,
+                    session_id=sid,
+                    work_item_id="w1",
+                    node_id="post_merge_watch",
+                    hook_point="on.merge.watch",
+                    handler="merge_watch",
+                    backend="fake",
+                    repo=repo,
+                    orig_repo=repo,
+                    branch="kraft/w1",
+                    title="t",
+                )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    assert fake.pipeline_ids_requested == ["", "777"]
+
+
+def test_merge_watch_does_not_pin_a_pipeline_read_for_a_different_commit(tmp_path, monkeypatch):
+    """Plan-review finding 2: right after a merge, the target branch's
+    "latest pipeline" is usually still a previous, unrelated commit's, until
+    this head's own pipeline exists. Pinning that wrong id to head_sha would
+    have every later re-entry poll it forever -- it never moves, and
+    `render_ci` never gets a chance to see the real one."""
+    repo = make_repo(tmp_path)
+    head_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    fake = forge.FakeForge(
+        ci_states=["success", "success"],
+        # First read: settled green, but for a different commit entirely --
+        # the shape "latest on branch" takes right after a merge, before this
+        # head's own pipeline exists yet. Second read: this head's own,
+        # matching pipeline.
+        ci_shas=["deadbeefdeadbeef", head_sha],
+        ci_pipeline_refs=["111", "222"],
+    )
+    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at) VALUES "
+                    "('w1','t',?,'default','{}','active','now','now')",
+                    (str(repo),),
+                )
+            )
+            results = []
+            for sid in ("s1", "s2"):
+                results.append(
+                    await forge.run_task(
+                        database,
+                        rd,
+                        session_id=sid,
+                        work_item_id="w1",
+                        node_id="post_merge_watch",
+                        hook_point="on.merge.watch",
+                        handler="merge_watch",
+                        backend="fake",
+                        repo=repo,
+                        orig_repo=repo,
+                        branch="kraft/w1",
+                        title="t",
+                    )
+                )
+            stored = database.read(
+                lambda c: c.execute(
+                    "SELECT ci_pipeline_ref FROM work_items WHERE id = 'w1'"
+                ).fetchone()
+            )
+            return results, stored["ci_pipeline_ref"]
+        finally:
+            await database.close()
+
+    results, stored_ref = asyncio.run(scenario())
+    # The wrong-sha read (state "success", but not this head) is caught by
+    # `render_ci`'s own sha guard -- neither entry sees a false "done" -- but
+    # only the first entry's read is wrong-sha; that one must never be pinned.
+    assert results == ["waiting", "done"]
+    assert stored_ref == f"{head_sha}:222"
+
+
+def test_merge_watch_caps_infra_retries_across_separate_entries_then_stops(tmp_path, monkeypatch):
+    """Plan-review finding 3, first half: `retry_infra_once` only starts the
+    job again, so a persistently infra-red target-branch pipeline must not
+    get kicked once per `ci_wait` re-entry forever. Same idiom, same
+    sequence, as `ci_poll`'s own
+    `test_ci_poll_retries_infra_red_across_separate_entries_then_stops_with_the_reason`
+    (`tests/test_forge_run.py:1333`) -- three separate calls standing in for
+    three real ~30s-apart re-entries; each entry's own post-kick re-read
+    sees "pending" (`"waiting"`), exactly like a real forge would the
+    instant after `retry_jobs` returns."""
+    repo = make_repo(tmp_path)
+    fake = forge.FakeForge(
+        ci_states=["failed", "pending", "failed", "pending", "failed"],
+        ci_failed_jobs=[(forge.FailedJob("build", "failed", "runner_system_failure"),)] * 5,
+    )
+    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at) VALUES "
+                    "('w1','t',?,'default','{}','active','now','now')",
+                    (str(repo),),
+                )
+            )
+            results = []
+            for sid in ("s1", "s2", "s3"):
+                results.append(
+                    await forge.run_task(
+                        database,
+                        rd,
+                        session_id=sid,
+                        work_item_id="w1",
+                        node_id="post_merge_watch",
+                        hook_point="on.merge.watch",
+                        handler="merge_watch",
+                        backend="fake",
+                        repo=repo,
+                        orig_repo=repo,
+                        branch="kraft/w1",
+                        title="t",
+                    )
+                )
+            evts = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, "w1"))]
+            return results, evts
+        finally:
+            await database.close()
+
+    (first, second, third), evts = asyncio.run(scenario())
+    assert first == "waiting"
+    assert second == "waiting"
+    assert third == "infra_stop"
+    # Two kicks (entries one and two); the third entry's count (3) breaches
+    # the cap before a third kick is made -- no follow-up bead, this is a
+    # forge/runner problem, not this item's own code.
+    assert len(fake.retried) == 2
+    assert "ci_infra_exhausted" in evts
+
+
+def test_merge_watch_gives_up_watching_a_pipeline_that_never_settles(tmp_path, monkeypatch):
+    """Plan-review finding 3, second half: `ci_wait.py`'s shared cap
+    (1800s/60 attempts) has no notion of which handler is behind a waiting
+    node, so left alone a merely-slow (never infra, never red) target-branch
+    pipeline would eventually turn into `needs_human` after this item's own
+    work is already merged, and -- since `post_merge_watch` is the chain's
+    terminal node -- its tracking bead would never close either.
+    `_POST_MERGE_WAIT_CAP` bounds this node's own patience first, and reports
+    "done" rather than paging anyone."""
+    repo = make_repo(tmp_path)
+    fake = forge.FakeForge(ci_states=["pending"])
+    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at) VALUES "
+                    "('w1','t',?,'default','{}','active','now','now')",
+                    (str(repo),),
+                )
+            )
+            results = []
+            # One more entry than `_POST_MERGE_WAIT_CAP` (40): the cap
+            # breaches on attempt 41, well before any wall-clock check could.
+            for i in range(41):
+                results.append(
+                    await forge.run_task(
+                        database,
+                        rd,
+                        session_id=f"s{i}",
+                        work_item_id="w1",
+                        node_id="post_merge_watch",
+                        hook_point="on.merge.watch",
+                        handler="merge_watch",
+                        backend="fake",
+                        repo=repo,
+                        orig_repo=repo,
+                        branch="kraft/w1",
+                        title="t",
+                    )
+                )
+            return results
+        finally:
+            await database.close()
+
+    results = asyncio.run(scenario())
+    assert results[:-1] == ["waiting"] * 40
+    assert results[-1] == "done"
+
+
+def test_merge_watch_reuses_the_session_across_a_still_pending_wait(tmp_path, monkeypatch):
+    """Same reuse `ci_poll` already relies on (Kraft-41b/Kraft-7xt): two
+    re-entries while the target branch's pipeline is still pending must
+    leave exactly one `worker_sessions` row, not one per poll."""
+    repo = make_repo(tmp_path)
+    fake = forge.FakeForge(ci_states=["pending", "pending"])
+    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at) VALUES "
+                    "('w1','t',?,'default','{}','active','now','now')",
+                    (str(repo),),
+                )
+            )
+            for sid in ("s1", "s2"):
+                await forge.run_task(
+                    database,
+                    rd,
+                    session_id=sid,
+                    work_item_id="w1",
+                    node_id="post_merge_watch",
+                    hook_point="on.merge.watch",
+                    handler="merge_watch",
+                    backend="fake",
+                    repo=repo,
+                    orig_repo=repo,
+                    branch="kraft/w1",
+                    title="t",
+                )
+            return database.read(
+                lambda c: c.execute(
+                    "SELECT id, attempt, status FROM worker_sessions WHERE work_item_id='w1'"
+                ).fetchall()
+            )
+        finally:
+            await database.close()
+
+    rows = asyncio.run(scenario())
+    assert len(rows) == 1
+    assert rows[0]["id"] == "s1"
+    assert rows[0]["status"] == "waiting"
+
+
 def test_auto_with_no_recorded_forge_fails_the_node_rather_than_escaping(tmp_path, monkeypatch):
     """The one that pins `resolve` moving inside the `try`.
 
@@ -1780,3 +2409,145 @@ def test_ci_poll_stops_for_a_human_on_a_real_rebase_conflict(tmp_path, monkeypat
             await database.close()
 
     asyncio.run(scenario())
+
+
+def _bd_status(repo, bead_id):
+    out = subprocess.run(
+        ["bd", "show", bead_id, "--json"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return json.loads(out)[0]["status"]
+
+
+def test_post_merge_watch_delays_completion_and_bead_close_until_it_runs(tmp_path, monkeypatch):
+    """Kraft-43kw: open_mr -> mr_checks -> merge -> post_merge_watch, driven
+    through a real `executor.run` walk. `work_item_completed` and the bead
+    close must land after `post_merge_watch`'s own `node_completed`, not
+    after `merge`'s."""
+    fake = forge.FakeForge(ci_states=["success"])
+    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    template = Template(
+        id="forge-back-half-watch",
+        nodes=[
+            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None, "fix_loop": None},
+            {"id": "open_mr", "tasks": ["on.mr.open"], "gate_after": None, "fix_loop": None},
+            {"id": "mr_checks", "tasks": ["on.ci.poll"], "gate_after": None, "fix_loop": None},
+            {"id": "merge", "tasks": ["on.merge"], "gate_after": None, "fix_loop": None},
+            {
+                "id": "post_merge_watch",
+                "tasks": ["on.merge.watch"],
+                "gate_after": None,
+                "fix_loop": None,
+            },
+        ],
+    )
+    registry = Registry(
+        hooks={
+            "on.env.prepare": {"kind": "builtin", "handler": "env_setup"},
+            "on.mr.open": {"kind": "forge", "handler": "open_mr", "backend": "fake"},
+            "on.ci.poll": {"kind": "forge", "handler": "ci_poll", "backend": "fake"},
+            "on.merge": {"kind": "forge", "handler": "merge", "backend": "fake"},
+            "on.merge.watch": {"kind": "forge", "handler": "merge_watch", "backend": "fake"},
+        }
+    )
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="watch after merge",
+                repo=str(repo),
+                template=template,
+                bd_cwd=str(tracker),
+            )
+            result = await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT status, bead_id FROM work_items WHERE id = ?", (wid,)
+                ).fetchone()
+            )
+            evts = database.read(lambda c: events.read_after(c, 0, wid))
+            return result, row["status"], row["bead_id"], evts
+        finally:
+            await database.close()
+
+    result, status, bead_id, evts = asyncio.run(scenario())
+    assert result == "completed"
+    assert status == "completed"
+    node_order = [e["payload"]["node_id"] for e in evts if e["type"] == "node_completed"]
+    assert node_order == ["env_setup", "open_mr", "mr_checks", "merge", "post_merge_watch"]
+    assert evts[-1]["type"] == "work_item_completed"
+    assert _bd_status(tracker, bead_id) == "closed"
+
+
+def test_merge_watch_runs_once_for_a_multi_repo_item(tmp_path, monkeypatch):
+    """`merge_watch` ignores the per-target repo -- it reads `orig_repo`'s own
+    default branch. Without collapsing `targets`, a multi-repo item would poll
+    that one branch once per submodule and file that many identical follow-up
+    beads for a single break."""
+    repo = make_repo(tmp_path)
+    fake = forge.FakeForge(ci_states=["success"])
+    reads: list[str] = []
+    original = fake.branch_ci_status
+
+    async def counting(**kwargs):
+        reads.append(kwargs["branch"])
+        return await original(**kwargs)
+
+    monkeypatch.setattr(fake, "branch_ci_status", counting)
+    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at) VALUES "
+                    "('w1','t',?,'default','{}','active','now','now')",
+                    (str(repo),),
+                )
+            )
+            for path, role, rank in (
+                (repo / "a", "submodule", 1),
+                (repo / "b", "submodule", 2),
+                (repo, "root", 3),
+            ):
+                await database.write(
+                    lambda c, p=path, r=role, k=rank: c.execute(
+                        "INSERT INTO work_item_repos (work_item_id, repo_path, role, "
+                        "submodule_path, merge_rank, created_at, updated_at) VALUES "
+                        "('w1', ?, ?, ?, ?, 'now', 'now')",
+                        (str(p), r, p.name if r == "submodule" else None, k),
+                    )
+                )
+            return await forge.run_task(
+                database,
+                rd,
+                session_id="s1",
+                work_item_id="w1",
+                node_id="post_merge_watch",
+                hook_point="on.merge.watch",
+                handler="merge_watch",
+                backend="fake",
+                repo=repo,
+                orig_repo=repo,
+                branch="kraft/w1",
+                title="t",
+            )
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario()) == "done"
+    assert len(reads) == 1, reads

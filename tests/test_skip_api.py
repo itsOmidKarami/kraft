@@ -47,6 +47,23 @@ def _wait_for_status(client, wid, status, timeout=30):
     raise AssertionError(f"status never became {status!r}; last body={body}")
 
 
+def _poll_node_started(client, wid, node_id, timeout=30):
+    """Like `_poll_events(..., "node_started")`, but waits for *this* node's
+    own start, not just any `node_started` -- a plain type check returns
+    instantly once the chain's earlier nodes have already started, which
+    races the walk skip spawns in the background (Kraft-tsfpk added one more
+    `await` -- a `bd blocked` check -- ahead of every dispatch, widening that
+    race enough to make it flake for real)."""
+    deadline = time.monotonic() + timeout
+    seen = []
+    while time.monotonic() < deadline:
+        seen = client.get(f"/api/work-items/{wid}/events").json()
+        if any(e["type"] == "node_started" and e["payload"]["node_id"] == node_id for e in seen):
+            return seen
+        time.sleep(0.2)
+    raise AssertionError(f"node_started for {node_id!r} not seen; got {[e['type'] for e in seen]}")
+
+
 def test_skip_is_refused_on_an_item_that_has_not_started(tmp_path, monkeypatch):
     """`autostart: false` is `create_work_item`'s own "not started" case
     (kraft.api.routes.work_items):
@@ -95,7 +112,7 @@ def test_skip_advances_past_a_stopped_task_node_without_rerunning_it(tmp_path, m
         r = client.post(f"/api/work-items/{wid}/skip", json={"note": "known flake"})
         assert r.status_code == 200, r.text
 
-        evts = _poll_events(client, wid, "node_started")
+        evts = _poll_node_started(client, wid, "verify")
         skipped = [e for e in evts if e["type"] == "node_skipped"]
         assert skipped == [
             {
@@ -126,7 +143,7 @@ def test_skip_bypasses_a_pending_gate_without_approving_it(tmp_path, monkeypatch
         r = client.post(f"/api/work-items/{wid}/skip", json={})
         assert r.status_code == 200, r.text
 
-        evts = _poll_events(client, wid, "node_started")
+        evts = _poll_node_started(client, wid, "plan")
         skipped = [e for e in evts if e["type"] == "node_skipped"]
         assert skipped[0]["payload"] == {"node_id": "spec", "gate": "spec_approval", "note": None}
         assert not any(e["type"] == "gate_approved" for e in evts)

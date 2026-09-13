@@ -188,9 +188,26 @@ _INFRA_RETRY_CAP = 2
 #: side always will be, first.
 _INFRA_WALL_CLOCK_S = 3600
 
+#: Kraft-43kw: merge_watch's own budget for a target-branch pipeline that
+#: never settles at all -- plain module constants, not a policy.yaml key,
+#: same as the pair above (`_run_one` has no `policy` object to resolve one
+#: from). Deliberately smaller than `ci_wait.py`'s shared `ci_wait` cap
+#: (1800s/60 attempts) so this always resolves first: the merged work is
+#: already on the target branch by the time this node runs, so giving up on
+#: watching and finishing is a smaller consequence than paging a human over
+#: a pipeline this item cannot fix either way.
+_POST_MERGE_WAIT_CAP = 40
+_POST_MERGE_WAIT_WALL_CLOCK_S = 900
+
 
 async def retry_infra_once(
-    forge: Forge, *, repo: Path, branch: str, head_sha: str | None, first: CIStatus
+    forge: Forge,
+    *,
+    repo: Path,
+    branch: str,
+    head_sha: str | None,
+    first: CIStatus,
+    branch_only: bool = False,
 ) -> tuple[str, str]:
     """Kick one retry of a settled infra-red pipeline through the forge, then
     read it back once and hand back whatever verdict that read gives.
@@ -207,9 +224,22 @@ async def retry_infra_once(
     `run.py`'s persisted `ci_infra:<node_id>` counter instead, bumped once per
     `ci_poll` entry that is still infra-red -- this function just does the one
     kick-and-read that counter's caller decided was still within budget.
+
+    `branch_only` picks which read the kick is followed by, and exists because
+    `merge_watch` calls this after its own merge request is gone: the default
+    `ci_status` resolves an MR first (`gh pr view` / `glab mr view`), which on
+    a just-merged branch has nothing left to resolve and raises `ForgeError`,
+    failing the terminal node -- the same MR-vs-branch split the caller's
+    first read already makes with `branch_ci_status`. Both real backends
+    raise there; `FakeForge` does not, so the double that holds this down
+    (`tests/test_forge_run.py`) raises on the MR path on purpose.
     """
     await forge.retry_jobs(repo=repo, ci=first)
-    ci_status = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
+    ci_status = (
+        await forge.branch_ci_status(repo=repo, branch=branch, head_sha=head_sha or "")
+        if branch_only
+        else await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
+    )
     return await render_ci(ci_status, forge=forge, repo=repo, branch=branch, head_sha=head_sha)
 
 

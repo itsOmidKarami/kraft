@@ -143,3 +143,72 @@ def test_ready_is_best_effort_when_bd_emits_undecodable_bytes(tmp_path, monkeypa
     bd.chmod(0o755)
     monkeypatch.setenv("PATH", str(stub_dir))
     assert asyncio.run(beads.ready(cwd=str(tmp_path))) == []
+
+
+def test_blocked_by_returns_the_row_s_blockers(tmp_path):
+    repo = isolated_bd(tmp_path)
+
+    async def scenario():
+        a = await beads.intake("A", cwd=str(repo))
+        b = await beads.intake("B", cwd=str(repo))
+        subprocess.run(
+            ["bd", "dep", "add", b, a, "--type", "blocks"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert await beads.blocked_by([b], cwd=str(repo)) == [a]
+        assert await beads.blocked_by([a], cwd=str(repo)) == []
+
+    asyncio.run(scenario())
+
+
+def test_blocked_by_unions_blockers_across_every_id_passed(tmp_path):
+    """The motivating case (plan-review finding 1): a work item's own
+    tracking bead has no edges, but a sub-bead named in `implements_beads`
+    does -- one call must answer for both ids."""
+    repo = isolated_bd(tmp_path)
+
+    async def scenario():
+        tracking = await beads.intake("tracking bead", cwd=str(repo))
+        sub = await beads.intake("sub bead", cwd=str(repo))
+        blocker = await beads.intake("blocker", cwd=str(repo))
+        subprocess.run(
+            ["bd", "dep", "add", sub, blocker, "--type", "blocks"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        # tracking has no edges of its own; sub is blocked. Passing both in
+        # one call must still surface the blocker.
+        return await beads.blocked_by([tracking, sub], cwd=str(repo)), blocker
+
+    result, blocker = asyncio.run(scenario())
+    assert result == [blocker]
+
+
+def test_blocked_by_is_best_effort_when_bd_is_missing(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    assert asyncio.run(beads.blocked_by(["X-1"], cwd=str(tmp_path))) == []
+
+
+def test_blocked_by_tolerates_unparsable_output(monkeypatch):
+    class _Proc:
+        returncode = 0
+        stdout = "not json"
+
+    monkeypatch.setattr(beads.subprocess, "run", lambda *a, **k: _Proc())
+    assert asyncio.run(beads.blocked_by(["X-1"], cwd="/tmp")) == []
+
+
+def test_blocked_by_of_no_ids_is_a_no_op(monkeypatch):
+    """No bead, no implements_beads: nothing to ask bd about, and no
+    subprocess launched to ask it with."""
+
+    def _boom(*a, **k):
+        raise AssertionError("bd should not be invoked with an empty id list")
+
+    monkeypatch.setattr(beads.subprocess, "run", _boom)
+    assert asyncio.run(beads.blocked_by([], cwd="/tmp")) == []
