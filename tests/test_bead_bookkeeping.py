@@ -17,6 +17,7 @@ from pathlib import Path
 from support.harness import fake_registry, make_repo
 
 from kraft import db, executor
+from kraft.executor.entry import _extract_beads
 from kraft.paths import RunDirs
 from kraft.templates import Template, load_registry, load_templates
 
@@ -49,6 +50,26 @@ def _bd_create(repo, title) -> str:
         check=True,
     ).stdout
     return json.loads(out[out.index("{") :])["id"]
+
+
+def test_extract_beads_keeps_dotted_child_id_whole():
+    """Kraft-nen2: `re.findall` used to stop at `Kraft-a5ne`, dropping the
+    `.1` child suffix -- the parent epic got recorded instead of the child
+    that was actually implemented."""
+    assert _extract_beads("done: Kraft-a5ne.1") == ["Kraft-a5ne.1"]
+
+
+def test_extract_beads_treats_bare_and_dotted_id_as_distinct():
+    """A bare epic reference and one of its dotted children are different
+    beads, not duplicates of each other -- both must survive dedup."""
+    assert _extract_beads("- Kraft-a5ne — epic\n- Kraft-a5ne.1 — child") == [
+        "Kraft-a5ne",
+        "Kraft-a5ne.1",
+    ]
+
+
+def test_extract_beads_bare_id_still_matches():
+    assert _extract_beads("- Kraft-p8q1 — task") == ["Kraft-p8q1"]
 
 
 def test_completion_closes_every_sub_bead_the_description_names(tmp_path):
