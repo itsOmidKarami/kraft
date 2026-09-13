@@ -56,8 +56,13 @@ export function useModal<T extends HTMLElement>(onClose: () => void) {
  * press and release, so selecting text inside the dialog and releasing over
  * the backdrop would otherwise close it mid-drag. The target test keeps a
  * click that merely bubbled up from the dialog itself from counting.
+ *
+ * `dirty` (Kraft-avvz): a form holding typed, unsaved input (IntakeModal,
+ * Settings' AddRepo) must not vanish on a stray outside press — skip the
+ * close and leave the explicit Cancel/X as the only way out. Read-only
+ * modals never pass it, so their click-outside-to-close is unchanged.
  */
-export const backdropProps = (onClose: () => void) => ({
+export const backdropProps = (onClose: () => void, dirty = false) => ({
   onMouseDown: (e: MouseEvent) => {
     if (e.target !== e.currentTarget) return;
     // A press on the backdrop's own scrollbar (it is `overflow-y: auto`, so a
@@ -65,6 +70,7 @@ export const backdropProps = (onClose: () => void) => ({
     // any other outside press. `clientWidth` excludes that scrollbar, so an
     // offset past it is the drag that must not close anything.
     if (e.button !== 0 || e.nativeEvent.offsetX > e.currentTarget.clientWidth) return;
+    if (dirty) return;
     onClose();
   },
 });
