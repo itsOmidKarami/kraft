@@ -656,7 +656,9 @@ def test_glab_set_labels_labels_the_mr_and_starts_a_new_pipeline(tmp_path, monke
     CI_MERGE_REQUEST_LABELS is fixed when the pipeline is created, so retrying
     the job re-reads the old value. Labelling without re-creating looks fixed
     and is still red."""
-    _stub_routed(tmp_path, monkeypatch, "glab", {"mr update": "", "api": "{}"})
+    _stub_routed(
+        tmp_path, monkeypatch, "glab", {"mr view": GLAB_MR_VIEW, "mr update": "", "api": "{}"}
+    )
 
     asyncio.run(
         forge.GlabCli().set_labels(
@@ -665,10 +667,42 @@ def test_glab_set_labels_labels_the_mr_and_starts_a_new_pipeline(tmp_path, monke
     )
 
     argv = _argv(tmp_path, "glab")
-    assert argv[:2] == ["mr", "update"]
+    assert argv[:2] == ["mr", "view"], "current labels must be read before they are replaced"
+    assert argv[argv.index("update") - 1] == "mr"
     assert "release::patch" in argv
     assert "POST" in argv, "the pipeline was never re-created"
     assert any("merge_requests/54/pipelines" in a for a in argv)
+
+
+def test_glab_set_labels_replaces_an_existing_same_scope_label(tmp_path, monkeypatch):
+    """GitLab's free tier does not enforce a scoped label's exclusivity
+    server-side (Kraft-zfdu8): `glab mr update --label` only adds, so a second
+    repair pass leaves both `release::minor` and `release::patch` on the MR,
+    and `next_tag.py`'s "first match wins" then depends on GitLab's list
+    order instead of the repair's intent. The existing same-scope label must
+    be dropped in the same call that adds the new one."""
+    mr_view_with_labels = (
+        '{"iid":54,"target_branch":"main","source_branch":"kraft/abc","state":"opened",'
+        '"labels":["release::minor","bug"],'
+        '"web_url":"https://gitlab.com/itsOmidKarami/kraft/-/merge_requests/54"}'
+    )
+    _stub_routed(
+        tmp_path,
+        monkeypatch,
+        "glab",
+        {"mr view": mr_view_with_labels, "mr update": "", "api": "{}"},
+    )
+
+    asyncio.run(
+        forge.GlabCli().set_labels(
+            repo=tmp_path, mr=forge.MR(number=54, url="u"), labels=("release::patch",)
+        )
+    )
+
+    argv = _argv(tmp_path, "glab")
+    assert argv[argv.index("--label") + 1] == "release::patch"
+    assert argv[argv.index("--unlabel") + 1] == "release::minor"
+    assert "bug" not in argv[argv.index("--unlabel") :][:2], "an unscoped label must not be dropped"
 
 
 def test_glab_set_labels_re_creates_the_pipeline_for_the_sentinel_number(tmp_path, monkeypatch):
