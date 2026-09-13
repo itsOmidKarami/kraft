@@ -109,9 +109,44 @@ def test_patch_node_overrides_rejects_an_unsupported_field(tmp_path, monkeypatch
             json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
         ).json()["id"]
         r = client.patch(
-            f"/api/work-items/{wid}", json={"node_overrides": {"plan": {"model": "x"}}}
+            f"/api/work-items/{wid}", json={"node_overrides": {"plan": {"bogus_field": "x"}}}
         )
         assert r.status_code == 422
+
+
+def test_patch_sets_a_node_model_override(tmp_path, monkeypatch):
+    """Kraft-df4tc point 2: model/escalate_model/effort join the per-node
+    override fields, reusing the same field-level checks agent_overrides has."""
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        repo = make_repo(tmp_path)
+        wid = client.post(
+            "/api/work-items",
+            json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
+        ).json()["id"]
+        r = client.patch(
+            f"/api/work-items/{wid}",
+            json={"node_overrides": {"verify": {"model": "opus", "effort": "high"}}},
+        )
+        assert r.status_code == 200, r.text
+        row = client.get(f"/api/work-items/{wid}").json()
+        assert row["node_overrides"]["verify"] == {"model": "opus", "effort": "high"}
+
+
+def test_patch_rejects_a_node_override_with_bad_effort(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        repo = make_repo(tmp_path)
+        wid = client.post(
+            "/api/work-items",
+            json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
+        ).json()["id"]
+        r = client.patch(
+            f"/api/work-items/{wid}",
+            json={"node_overrides": {"verify": {"effort": "turbo"}}},
+        )
+        assert r.status_code == 422
+        assert "effort" in r.json()["detail"]
 
 
 def test_patch_sets_an_auto_escalate_stuck_node_override(tmp_path, monkeypatch):

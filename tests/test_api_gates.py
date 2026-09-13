@@ -212,6 +212,196 @@ def test_chain_review_splice_keeps_on_failure_from_schema_only_nodes(tmp_path, m
         assert mr_checks_after["on_failure"] == ["on.mr_checks.repair"]
 
 
+def test_chain_review_cannot_set_auto_escalate_directly(tmp_path, monkeypatch):
+    """Kraft-df4tc: auto_escalate/auto_escalate_stuck/auto_escalate_delay_s are
+    never the reviewer's to set -- only the human PATCH route's. A node dict
+    that sets one directly must have it stripped before the splice, not
+    spliced straight into chain_definition (where gates._auto_review_due and
+    store.effective_auto_escalate_stuck would read it back)."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        for gate in ("spec_approval", "plan_approval"):
+            _await_gate(client, wid, gate)
+            assert _approve_gate(client, wid, gate).status_code == 200
+        _await_gate(client, wid, "chain_finalized")
+
+        before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
+        tail = [n for n in before if n["id"] not in ("spec", "plan", "chain_review")]
+        revised = [
+            {**n, "auto_escalate": True, "auto_escalate_stuck": True, "auto_escalate_delay_s": 999}
+            if n["id"] == "human_review"
+            else n
+            for n in tail
+        ]
+        _write_chain_review(
+            client,
+            wid,
+            {"status": "ready_for_approval", "revised_chain_nodes": revised, "rationale": "t"},
+        )
+        r = _approve_gate(client, wid, "chain_finalized")
+        assert r.status_code == 200, r.text
+        after = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
+        human_review_after = next(n for n in after if n["id"] == "human_review")
+        human_review_before = next(n for n in before if n["id"] == "human_review")
+        assert human_review_after["auto_escalate"] == human_review_before["auto_escalate"]
+        assert (
+            human_review_after["auto_escalate_stuck"] == human_review_before["auto_escalate_stuck"]
+        )
+        assert (
+            human_review_after["auto_escalate_delay_s"]
+            == human_review_before["auto_escalate_delay_s"]
+        )
+
+
+def test_chain_review_may_set_reject_to_directly(tmp_path, monkeypatch):
+    """Kraft-df4tc point 1: a reviewer's revised node may name reject_to
+    itself -- not just carry it forward -- and it survives the splice."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        for gate in ("spec_approval", "plan_approval"):
+            _await_gate(client, wid, gate)
+            assert _approve_gate(client, wid, gate).status_code == 200
+        _await_gate(client, wid, "chain_finalized")
+
+        before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
+        tail = [n for n in before if n["id"] not in ("spec", "plan", "chain_review")]
+        revised = [{**n, "reject_to": "plan"} if n["id"] == "human_review" else n for n in tail]
+        _write_chain_review(
+            client,
+            wid,
+            {"status": "ready_for_approval", "revised_chain_nodes": revised, "rationale": "t"},
+        )
+        r = _approve_gate(client, wid, "chain_finalized")
+        assert r.status_code == 200, r.text
+        after = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
+        assert next(n for n in after if n["id"] == "human_review")["reject_to"] == "plan"
+
+
+def test_chain_review_forward_reject_to_rejects_the_whole_approval(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        for gate in ("spec_approval", "plan_approval"):
+            _await_gate(client, wid, gate)
+            assert _approve_gate(client, wid, gate).status_code == 200
+        _await_gate(client, wid, "chain_finalized")
+
+        before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
+        tail = [n for n in before if n["id"] not in ("spec", "plan", "chain_review")]
+        revised = [{**n, "reject_to": "merge"} if n["id"] == "verify" else n for n in tail]
+        _write_chain_review(
+            client,
+            wid,
+            {"status": "ready_for_approval", "revised_chain_nodes": revised, "rationale": "t"},
+        )
+        r = _approve_gate(client, wid, "chain_finalized")
+        assert r.status_code == 422
+        after = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
+        assert after == before  # nothing spliced
+
+
+def test_chain_review_proposed_node_overrides_applies_atomically_with_the_splice(
+    tmp_path, monkeypatch
+):
+    """Kraft-df4tc point 2: a reviewer's proposed_node_overrides lands in
+    node_overrides in the same approval as the splice, and reaches the next
+    dispatch for that node."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        for gate in ("spec_approval", "plan_approval"):
+            _await_gate(client, wid, gate)
+            assert _approve_gate(client, wid, gate).status_code == 200
+        _await_gate(client, wid, "chain_finalized")
+
+        before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
+        tail = [n for n in before if n["id"] not in ("spec", "plan", "chain_review")]
+        revised = [
+            {**n, "proposed_node_overrides": {"effort": "high"}} if n["id"] == "verify" else n
+            for n in tail
+        ]
+        _write_chain_review(
+            client,
+            wid,
+            {"status": "ready_for_approval", "revised_chain_nodes": revised, "rationale": "t"},
+        )
+        r = _approve_gate(client, wid, "chain_finalized")
+        assert r.status_code == 200, r.text
+        item = client.get(f"/api/work-items/{wid}").json()
+        assert item["node_overrides"]["verify"] == {"effort": "high"}
+        # the node itself does not carry the key -- it's a separate override layer
+        after = item["chain_definition"]["nodes"]
+        assert "proposed_node_overrides" not in next(n for n in after if n["id"] == "verify")
+
+
+def test_chain_review_bad_proposed_node_overrides_rejects_the_whole_approval(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        for gate in ("spec_approval", "plan_approval"):
+            _await_gate(client, wid, gate)
+            assert _approve_gate(client, wid, gate).status_code == 200
+        _await_gate(client, wid, "chain_finalized")
+
+        before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
+        tail = [n for n in before if n["id"] not in ("spec", "plan", "chain_review")]
+        revised = [
+            {**n, "proposed_node_overrides": {"effort": "turbo"}} if n["id"] == "verify" else n
+            for n in tail
+        ]
+        _write_chain_review(
+            client,
+            wid,
+            {"status": "ready_for_approval", "revised_chain_nodes": revised, "rationale": "t"},
+        )
+        r = _approve_gate(client, wid, "chain_finalized")
+        assert r.status_code == 422
+        item = client.get(f"/api/work-items/{wid}").json()
+        assert item.get("node_overrides", {}) == {}
+        assert item["chain_definition"]["nodes"] == before  # nothing spliced either
+
+
+def test_chain_review_proposed_node_overrides_rejects_unwhitelisted_fields(tmp_path, monkeypatch):
+    """Kraft-df4tc security finding: a reviewer may only propose model/
+    escalate_model/effort -- anything else (auto_escalate, attempts, ...) is
+    the human-facing PATCH route's territory and must 422 here too, not land
+    in node_overrides where effective_chain would fold it onto the node."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        for gate in ("spec_approval", "plan_approval"):
+            _await_gate(client, wid, gate)
+            assert _approve_gate(client, wid, gate).status_code == 200
+        _await_gate(client, wid, "chain_finalized")
+
+        before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
+        tail = [n for n in before if n["id"] not in ("spec", "plan", "chain_review")]
+        revised = [
+            {**n, "proposed_node_overrides": {"auto_escalate": True, "attempts": 9999}}
+            if n["id"] == "human_review"
+            else n
+            for n in tail
+        ]
+        _write_chain_review(
+            client,
+            wid,
+            {"status": "ready_for_approval", "revised_chain_nodes": revised, "rationale": "t"},
+        )
+        r = _approve_gate(client, wid, "chain_finalized")
+        assert r.status_code == 422
+        item = client.get(f"/api/work-items/{wid}").json()
+        assert item.get("node_overrides", {}) == {}
+        assert item["chain_definition"]["nodes"] == before
+
+
 @pytest.mark.parametrize(
     ("envelope", "reason_has"),
     [
@@ -750,3 +940,87 @@ def test_reject_with_a_bad_node_leaves_a_live_auto_review_running(tmp_path, monk
         assert "pause_requested" not in [
             e["type"] for e in client.get(f"/api/work-items/{wid}/events").json()
         ]
+
+
+def test_chain_review_model_override_reaches_the_next_dispatch_of_that_node(tmp_path, monkeypatch):
+    """End to end: a reviewer's proposed_node_overrides on a tail node is
+    spliced in atomically with the chain revision, and the very next
+    dispatch of that node launches with the overridden model -- not just
+    stored, actually read at dispatch time (Task 3's merge). The reported
+    "model" on worker_sessions comes from the agent's own usage payload
+    (fixtures/fake-claude.sh always reports "fake-agent"), so this checks
+    the launch argv via KRAFT_FAKE_CLAUDE_ARGV_LOG instead."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    argv_log = tmp_path / "argv.log"
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_ARGV_LOG", str(argv_log))
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        for gate in ("spec_approval", "plan_approval"):
+            _await_gate(client, wid, gate)
+            assert _approve_gate(client, wid, gate).status_code == 200
+        _await_gate(client, wid, "chain_finalized")
+
+        before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
+        tail = [n for n in before if n["id"] not in ("spec", "plan", "chain_review")]
+        # `implementation` is the only tail node bound to a real agent hook
+        # under this test fixture's registry (`on.implementation.start`) --
+        # `verify`'s tasks are a subprocess and a noop, neither of which ever
+        # reaches `resolve_invocation`, so the override would never surface
+        # in an argv if targeted there.
+        revised = [
+            {**n, "proposed_node_overrides": {"model": "picked-model"}}
+            if n["id"] == "implementation"
+            else n
+            for n in tail
+        ]
+        _write_chain_review(
+            client,
+            wid,
+            {"status": "ready_for_approval", "revised_chain_nodes": revised, "rationale": "t"},
+        )
+        assert _approve_gate(client, wid, "chain_finalized").status_code == 200
+        _await_gate(client, wid, "human_review_approval")
+
+        records = [r.splitlines() for r in argv_log.read_text().split("\x00\n") if r.strip()]
+        # The override only ever applies to implementation's own dispatch --
+        # no other node in this chain carries a node_overrides entry -- so
+        # any recorded argv carrying "picked-model" proves the override
+        # reached that launch, not just node_overrides storage.
+        assert any("picked-model" in r for r in records), records
+
+
+def test_chain_review_carried_forward_bounce_target_must_still_exist(tmp_path, monkeypatch):
+    """Kraft-df4tc: `validate_nodes` runs on the reviewer's own values, before
+    `carry_forward_node_fields`. A reviewer that renames `verify` leaves
+    `pre_mr_rebase`'s carried-forward `rebase_bounce_to: verify` dangling --
+    walk.py's bare `next(...)` would raise StopIteration mid-walk. The merged
+    tail has to be re-validated, and the whole approval rejected."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        for gate in ("spec_approval", "plan_approval"):
+            _await_gate(client, wid, gate)
+            assert _approve_gate(client, wid, gate).status_code == 200
+        _await_gate(client, wid, "chain_finalized")
+
+        before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
+        tail = [n for n in before if n["id"] not in ("spec", "plan", "chain_review")]
+        # rename `verify`; every other node comes back untouched, so
+        # `pre_mr_rebase` says nothing about rebase_bounce_to itself
+        revised = [
+            {k: v for k, v in n.items() if k != "rebase_bounce_to"}
+            | ({"id": "verify_all"} if n["id"] == "verify" else {})
+            for n in tail
+        ]
+        _write_chain_review(
+            client,
+            wid,
+            {"status": "ready_for_approval", "revised_chain_nodes": revised, "rationale": "t"},
+        )
+        r = _approve_gate(client, wid, "chain_finalized")
+        assert r.status_code == 422, r.text
+        assert "rebase_bounce_to" in r.json()["detail"]
+        after = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
+        assert after == before  # nothing spliced

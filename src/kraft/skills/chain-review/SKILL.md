@@ -29,8 +29,16 @@ review" is not such a line. If you cannot name the evidence, leave it alone.
 - The approved **spec** and the approved **plan**.
 - `chain_definition` — the full chain, and `current_node_id`, which is the
   `chain_review` node you are running inside.
-- The **allowed hook set**: every hook point registered and enabled for this
-  repo. It is injected with your prompt.
+- The **allowed hook set** and, for every hook point already in the not-yet-
+  executed tail, its **resolved `registry.yaml` binding** — `model`,
+  `escalate_model`, `effort`, `permission_mode`, `allowed_tools`,
+  `deny_tools`, `command`, `skill`, `backend`, `handler` — read-only context
+  appended after your task instruction under "Resolved hook bindings for the
+  current tail". `model`/`escalate_model`/`effort` are what
+  `proposed_node_overrides` above lets you override, per node. The rest —
+  `permission_mode`, `allowed_tools`, `deny_tools`, `command`, `skill`,
+  `backend`, `handler` — is never yours to change; see "What you may flag"
+  below.
 - The work item's repos, when the item spans more than one.
 
 ## The hard rule: only the tail
@@ -54,8 +62,12 @@ inside `rationale`.
 ```
 { status: "ready_for_approval" | "error",
   revised_chain_nodes: [Node, ...],
+  flags: [{ hook_point: string, field: string, current_value: any, concern: string }, ...],
   rationale: string }
 ```
+
+(`flags` may be an empty list or omitted entirely — that means "nothing to
+flag," not an error.)
 
 `revised_chain_nodes` is the **complete** not-yet-executed tail, not a diff and
 not a patch. The orchestrator splices it in wholesale on approval. If you are
@@ -65,16 +77,41 @@ changing one node, the other tail nodes still appear, unchanged, in your output
 Every node you write is exactly:
 
 ```
-{ id: string, tasks: [hook_point, ...], gate_after: string|null, fix_loop: string|null }
+{ id: string, tasks: [hook_point, ...], gate_after: string|null, fix_loop: string|null,
+  on_failure?: [hook_point, ...] | null,
+  reject_to?: string | null,
+  rebase_bounce_to?: string | null,
+  proposed_node_overrides?: { model?: string, escalate_model?: string, effort?: string } }
 ```
 
-A real node also carries `on_failure`, `reject_to`, `rebase_bounce_to`, and
-`auto_escalate` — fields you never set. For any node id that already existed in
-the tail, the orchestrator carries those fields forward from the node you are
-replacing, so an "unchanged" node keeps its repair hooks and reject targets
-without you naming them. A node id you invented (one you are adding) gets
-`null` for all four — you cannot give a new node a repair task or a reject
+`on_failure`, `reject_to`, and `rebase_bounce_to` are now yours to set
+directly — you are not limited to carrying them forward blind. Set one only
+when the spec or plan gives you a reason to (a repair task the tail is
+missing, a reject target that should route somewhere other than where it
+already does). Omit a field on a node whose id already existed in the tail
+and the orchestrator carries its old value forward unchanged, exactly as it
+always has; a node id you invented (one you are adding) gets `null` for
+whichever of these you omit — you cannot give a brand-new node a reject
 target this way.
+
+`reject_to` and `rebase_bounce_to`, when you do set them, must name a real
+node id at or before the node declaring them — either a node still in your
+own tail, or one from earlier in the chain that "Nodes already run" below
+lists. A forward reference, or a name that resolves to
+nothing, fails validation and the whole approval is rejected — nothing is
+spliced.
+
+`proposed_node_overrides` is the cost/capability dial, per node
+(`model`/`escalate_model`/`effort` — the same three fields a work item's
+own item-wide override already carries, see "Resolved hook bindings"
+below). Propose one only when the plan gives you a reason: a node whose
+task just got heavier (add `effort: high`), or lighter (drop to a cheaper
+`model`). Applied atomically with the rest of your revision on approval, as
+a per-node override — it does not touch the registry binding itself.
+
+`auto_escalate` is still never yours to set: a node id that already existed
+in the tail keeps its old value carried forward unchanged, exactly as
+`on_failure` does when you omit it.
 
 - `tasks` — hook points, and **only names from the allowed hook set**. A name you
   invented is not a task the orchestrator can run; it is a chain that fails
@@ -128,6 +165,27 @@ Never drop:
 - **`merge`**, `open_mr`, or anything that moves the work toward landing.
 - The last remaining verification in a chain that changes executable code.
 
+### What you may flag, never propose
+
+`permission_mode`, `allowed_tools`, `deny_tools`, `command`, `skill`,
+`backend`, and `handler` are shown to you for context only. You cannot
+propose a new value for any of them — there is no field in your schema for
+it, and one you invent is dropped. If one of these looks wrong for what the
+plan is about to do (a node about to touch secrets running with a permission
+mode wider than it needs, a review hook missing a `deny_tools` entry the
+plan's own risk section calls for), name it in a top-level `flags` list instead:
+
+```
+flags: [{ hook_point: string, field: string, current_value: any, concern: string }, ...]
+```
+
+Each entry is one sentence in `concern`, naming what you saw and why it
+matters. This is not a rejection of the chain — a non-empty `flags` list
+still ships with `status: "ready_for_approval"`. It puts the concern in
+front of the human at the `chain_finalized` gate so they can go edit
+`registry.yaml` themselves; you never edit it, propose a value for it, or
+withhold approval over it.
+
 ## When to leave it alone
 
 - The chain differs from what you would have picked, but nothing is wrong with it.
@@ -162,3 +220,6 @@ can decide whether to hold the item.
 - Does every node with a `fix_loop` have tasks?
 - Does `rationale` name real evidence, or is it a description of the diff?
 - If nothing changed, did you emit the tail unchanged rather than an empty list?
+- Does every `reject_to`/`rebase_bounce_to` you set name a real node at or
+  before it? Does every `proposed_node_overrides` you set use only
+  `model`/`escalate_model`/`effort`?

@@ -21,6 +21,11 @@ def _quick_task() -> Template:
     return load_templates(_REPO_ROOT / "templates", reg).valid["quick-task"]
 
 
+def _default_template() -> Template:
+    reg = load_registry(_REPO_ROOT / "templates" / "registry.yaml")
+    return load_templates(_REPO_ROOT / "templates", reg).valid["default"]
+
+
 def _argv_lines(path: Path) -> list[list[str]]:
     return [json.loads(ln) for ln in path.read_text().splitlines() if ln.strip()]
 
@@ -252,6 +257,107 @@ def test_repo_default_model_reaches_the_agent_launch(tmp_path, monkeypatch):
     argvs = _argv_lines(argv_log)
     assert len(argvs) == 1  # quick-task's only agent dispatch is implementation
     assert argvs[0][argvs[0].index("--model") + 1] == "haiku"
+
+
+def test_node_override_model_beats_item_override_beats_binding(tmp_path, monkeypatch):
+    """Precedence (Kraft-df4tc design point 2): node_overrides > item-wide
+    agent_overrides > the registry binding's own model. Exercises all three
+    tiers in one item so a bug that makes any two collapse into one shows up
+    as a wrong --model on the wire, not a passing test."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    argv_log = tmp_path / "argv.jsonl"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_ARGV_LOG", str(argv_log))
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            await database.write(
+                lambda c: store.set_agent_overrides(c, wid, json.dumps({"model": "item-model"}))
+            )
+            await database.write(
+                lambda c: store.set_node_overrides(
+                    c, wid, {"implementation": {"model": "node-model"}}
+                )
+            )
+            result = await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+            assert result == "completed"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+    argvs = _argv_lines(argv_log)
+    assert argvs[0][argvs[0].index("--model") + 1] == "node-model"
+
+
+def test_chain_review_dispatch_prompt_carries_resolved_hook_bindings(tmp_path, monkeypatch):
+    """Kraft-df4tc point 4: the chain-review hook's prompt is appended with
+    the resolved registry.yaml binding for every hook point in its
+    not-yet-executed tail, so a reviewer can name a real flag or override
+    instead of guessing."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    prompt_log = tmp_path / "prompts.txt"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompt_log))
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(repo),
+                template=_default_template(),
+                bd_cwd=str(tracker),
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+            chain = json.loads(row["chain_definition"])
+            node = next(n for n in chain["nodes"] if n["id"] == "chain_review")
+            worktree = repo
+            return await dispatch.dispatch_node(
+                database,
+                rd,
+                "on.chain.review_ready",
+                node,
+                row,
+                registry,
+                worktree,
+                launch=executor.LaunchContext(
+                    repo_entry=None, steering_dir=_REPO_ROOT / "templates" / "steering"
+                ),
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+    prompt = prompt_log.read_text()
+    assert "Resolved hook bindings for the current tail" in prompt
+    assert "on.test.run" in prompt
+    # already-run node ids, so a backward reject_to/rebase_bounce_to can name
+    # one (Kraft-df4tc) -- the bindings above list hook points, never node ids
+    assert "Nodes already run" in prompt
+    assert "spec, plan, chain_review" in prompt
 
 
 def test_run_gathers_multi_task_node(tmp_path):
@@ -1028,3 +1134,117 @@ def test_dispatch_carries_the_notes_authorship_into_the_prompt(tmp_path, monkeyp
 
     typed = asyncio.run(scenario(True))
     assert typed.startswith("A human has steered this run:")
+
+
+def test_chain_review_context_names_a_forge_hook_handler():
+    """Kraft-43kw gave the default chain two forge hooks whose bindings are
+    otherwise identical (`on.merge` and `on.merge.watch` are both `{kind:
+    forge, backend: auto}`). Without `handler` the reviewer cannot tell what
+    a forge node actually runs, the same way `command`/`skill` tell it for an
+    agent hook."""
+    from kraft.executor import prompts
+    from kraft.templates import Registry
+
+    registry = Registry(
+        hooks={
+            "on.merge": {"kind": "forge", "handler": "merge", "backend": "auto"},
+            "on.merge.watch": {"kind": "forge", "handler": "merge_watch", "backend": "auto"},
+        }
+    )
+    text = prompts.chain_review_context(
+        [
+            {"id": "merge", "tasks": ["on.merge"]},
+            {"id": "post_merge_watch", "tasks": ["on.merge.watch"]},
+        ],
+        registry,
+    )
+    assert "'handler': 'merge'" in text
+    assert "'handler': 'merge_watch'" in text
+
+
+def _dispatch_one_agent_node(tmp_path, monkeypatch, *, binding_extra, item, node_ov, escalate):
+    """One `on.implementation.start` dispatch with all three override tiers
+    populated, returning the argv the agent was actually launched with.
+
+    Direct `dispatch_node` rather than a whole `executor.run`: the merge under
+    test lives at that one call site, and the three-tier fixture is the same
+    for every field it merges."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    argv_log = tmp_path / "argv.jsonl"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_ARGV_LOG", str(argv_log))
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            hook = "on.implementation.start"
+            registry.hooks[hook] = {**registry.hooks[hook], **binding_extra}
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            await database.write(lambda c: store.set_agent_overrides(c, wid, json.dumps(item)))
+            await database.write(
+                lambda c: store.set_node_overrides(c, wid, {"implementation": node_ov})
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+            node = next(
+                n
+                for n in json.loads(row["chain_definition"])["nodes"]
+                if n["id"] == "implementation"
+            )
+            await dispatch.dispatch_node(
+                database,
+                rd,
+                hook,
+                node,
+                row,
+                registry,
+                repo,
+                escalate=escalate,
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    return _argv_lines(argv_log)[0]
+
+
+def test_node_override_effort_beats_item_override_beats_binding(tmp_path, monkeypatch):
+    """Spec section 6 asks for the precedence covered per field, not once for
+    the whole dial: `effort` takes a different path out of
+    `resolve_invocation` than `model` does (hook-level only, no repo default),
+    so `model` passing says nothing about this one."""
+    argv = _dispatch_one_agent_node(
+        tmp_path,
+        monkeypatch,
+        binding_extra={"effort": "low"},
+        item={"effort": "medium"},
+        node_ov={"effort": "high"},
+        escalate=False,
+    )
+    assert argv[argv.index("--effort") + 1] == "high"
+
+
+def test_node_override_escalate_model_beats_item_override_beats_binding(tmp_path, monkeypatch):
+    """The fix loop's capability bump is the third field of the dial, and the
+    only one that reaches the wire as `--model` from a *different* branch of
+    `resolve_invocation` (`escalate=True`)."""
+    argv = _dispatch_one_agent_node(
+        tmp_path,
+        monkeypatch,
+        binding_extra={"model": "binding-model", "escalate_model": "binding-escalate"},
+        item={"model": "item-model", "escalate_model": "item-escalate"},
+        node_ov={"model": "node-model", "escalate_model": "node-escalate"},
+        escalate=True,
+    )
+    assert argv[argv.index("--model") + 1] == "node-escalate"

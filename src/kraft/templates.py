@@ -10,6 +10,7 @@ import yaml
 from kraft import skill as _skill
 from kraft import steering as _steering
 from kraft.paths import default_skills_dir
+from kraft.store import OVERRIDABLE_NODE_FIELDS
 
 _VALID_KINDS = {"builtin", "agent", "subprocess", "forge"}
 _FORGE_HANDLERS = {"open_mr", "sync_mr", "ci_poll", "merge", "merge_watch"}
@@ -51,6 +52,29 @@ NODE_CARRYOVER_FIELDS = (
     "auto_escalate_stuck",
     "auto_escalate_delay_s",
 )
+
+
+#: The `NODE_CARRYOVER_FIELDS` a chain-review node dict is never allowed to
+#: set for itself -- `on_failure`/`reject_to`/`rebase_bounce_to` are the
+#: reviewer's to propose (point 1), but `auto_escalate`/`auto_escalate_stuck`/
+#: `auto_escalate_delay_s` are the human PATCH route's alone (SKILL.md: "still
+#: never yours to set"). `strip_non_proposable_carryover_fields` below drops
+#: these off a reviewer node so they can only ever reach `chain_definition`
+#: through the carry-forward path, never an agent-authored value.
+NON_PROPOSABLE_CARRYOVER_FIELDS = ("auto_escalate", "auto_escalate_stuck", "auto_escalate_delay_s")
+
+
+def strip_non_proposable_carryover_fields(nodes: list) -> list:
+    """Drop `NON_PROPOSABLE_CARRYOVER_FIELDS` off every node in `nodes`, in
+    place, before `carry_forward_node_fields` runs. Without this, a reviewer
+    node that sets `auto_escalate` (etc.) directly splices that value straight
+    into `chain_definition` -- `carry_forward_node_fields` only fills fields
+    the node *omits*, so a value the node explicitly set survives untouched
+    (`kraft.api.routes.gates._splice_chain_review`, Kraft-df4tc)."""
+    for n in nodes:
+        for field in NON_PROPOSABLE_CARRYOVER_FIELDS:
+            n.pop(field, None)
+    return nodes
 
 
 def carry_forward_node_fields(old_nodes: list, new_nodes: list) -> list:
@@ -332,7 +356,9 @@ def load_registry(
     return Registry(hooks=data["hooks"])
 
 
-def validate_nodes(nodes: list, registry: Registry) -> list[str]:
+def validate_nodes(
+    nodes: list, registry: Registry, *, preceding_ids: frozenset[str] = frozenset()
+) -> list[str]:
     """The per-node rules a chain's node list is held to: shape, hook set
     membership, `GATE_NAMES` membership, and a `fix_loop` node needing at
     least one task. Takes a bare node list and a registry rather than a whole
@@ -340,8 +366,11 @@ def validate_nodes(nodes: list, registry: Registry) -> list[str]:
     checks over an agent's revised tail before it reaches `chain_definition`
     -- one rule set, two callers, not a second, drifting copy of it
     (Kraft-unk). `load_templates` below calls it once per template at load
-    time; `kraft.api.routes.gates.approve_gate` calls it once per `revised_chain_nodes` payload
-    at gate-approval time.
+    time; `kraft.api.routes.gates._splice_chain_review` calls it once per
+    `revised_chain_nodes` payload at gate-approval time -- that caller only
+    ever hands it the not-yet-run tail, so `preceding_ids` names the ids of
+    already-run nodes (outside `nodes`) that still count as "at or before"
+    for `reject_to`/`rebase_bounce_to` (Kraft-df4tc).
 
     Returns error strings, empty if valid. Stops at the first failing rule
     category rather than collecting every node's every problem -- the same
@@ -371,15 +400,37 @@ def validate_nodes(nodes: list, registry: Registry) -> list[str]:
     if empty_loop is not None:
         return [f"node {empty_loop!r} has 'fix_loop' but no tasks to measure"]
 
+    # on_failure (Kraft-df4tc point 1) is reviewer-settable but only ever
+    # meant as a non-empty list of hook names -- a bare string ("a.b.c")
+    # is iterable too and would otherwise sail through the unknown-hook scan
+    # below (which only looks inside a list) and reach walk.py's
+    # `list(node["on_failure"])`, which yields the string's characters as
+    # hook names.
+    bad_on_failure = next(
+        (
+            n["id"]
+            for n in nodes
+            if "on_failure" in n
+            and n["on_failure"] is not None
+            and (
+                not isinstance(n["on_failure"], list)
+                or not n["on_failure"]
+                or not all(isinstance(t, str) for t in n["on_failure"])
+            )
+        ),
+        None,
+    )
+    if bad_on_failure is not None:
+        return [f"node {bad_on_failure!r} 'on_failure' must be a non-empty list of strings"]
+
     unknown = sorted(
         {
             t
             for n in nodes
-            # A malformed `on_failure` (not a list of strings) is not this
-            # function's rule to enforce -- `load_templates`'s own shape
-            # check catches that, after this one, with a sharper message.
-            # Folding it in here would misread a malformed string as a list
-            # of one-character "hooks".
+            # A malformed `on_failure` already failed the shape check above,
+            # so this `isinstance` guard only matters for `load_templates`'s
+            # own not-yet-validated call: without it, a bare string would be
+            # misread as a list of one-character "hooks".
             for t in [
                 *n["tasks"],
                 *(n["on_failure"] if isinstance(n.get("on_failure"), list) else []),
@@ -390,6 +441,116 @@ def validate_nodes(nodes: list, registry: Registry) -> list[str]:
     if unknown:
         return [f"hook(s) {unknown} are not in the registry"]
 
+    at = {n["id"]: i for i, n in enumerate(nodes)}
+    for field in ("reject_to", "rebase_bounce_to"):
+        bad = next(
+            (
+                n["id"]
+                for i, n in enumerate(nodes)
+                if n.get(field) is not None
+                and (
+                    not isinstance(n[field], str)
+                    or (n[field] not in preceding_ids and at.get(n[field], len(nodes)) > i)
+                )
+            ),
+            None,
+        )
+        if bad is not None:
+            return [f"node {bad!r} {field!r} must name a node at or before it"]
+
+    return []
+
+
+def validate_model_effort_fields(overrides: dict) -> list[str]:
+    """The type/membership rules `model`, `escalate_model`, and `effort` are
+    held to wherever one appears as an override -- a work item's own
+    `agent_overrides` (`validate_agent_overrides` below) and a per-node
+    override (`kraft.api.routes.work_items._validate_node_overrides`,
+    Kraft-df4tc) and a chain-review-proposed `proposed_node_overrides`
+    (`kraft.api.routes.gates._splice_chain_review`, same bead). One field-
+    level check, three callers, so none of them can drift into a different
+    idea of a valid `effort` (Kraft-unk's reasoning, at the field level
+    rather than the whole-object level `validate_agent_overrides` already
+    applies it at).
+
+    Returns error strings with no `agent_overrides`/node-id prefix -- each
+    caller's own message already carries the context a bare "'effort' must
+    be one of..." needs.
+    """
+    for key in ("model", "escalate_model"):
+        if key in overrides and overrides[key] is not None and not isinstance(overrides[key], str):
+            return [f"{key!r} must be a string or null"]
+    if "effort" in overrides and overrides["effort"] not in _EFFORT_LEVELS:
+        return [f"'effort' must be one of {sorted(_EFFORT_LEVELS)}; got {overrides['effort']!r}"]
+    return []
+
+
+#: The only fields a chain-review artifact's `proposed_node_overrides` may
+#: set (Kraft-df4tc point 5) -- a strict subset of `OVERRIDABLE_NODE_FIELDS`.
+#: A human can dial `auto_escalate`/`attempts`/`wall_clock_s` through the
+#: PATCH route; an agent's chain-review proposal never can, no matter what it
+#: invents -- the chain-review skill text promises exactly that.
+PROPOSABLE_NODE_OVERRIDE_FIELDS = frozenset({"model", "escalate_model", "effort"})
+
+
+def validate_proposed_node_overrides(proposed: dict) -> list[str]:
+    """`proposed_node_overrides` on one node of a chain-review artifact
+    (`kraft.api.routes.gates._splice_chain_review`): keys restricted to
+    `PROPOSABLE_NODE_OVERRIDE_FIELDS`, on top of `validate_model_effort_fields`'s
+    type checks. Anything else -- `auto_escalate` included -- is never the
+    reviewer's to set (Kraft-df4tc).
+    """
+    extra = set(proposed) - PROPOSABLE_NODE_OVERRIDE_FIELDS
+    if extra:
+        return [f"cannot propose {sorted(extra)}"]
+    return validate_model_effort_fields(proposed)
+
+
+def validate_node_override_fields(fields: dict) -> list[str]:
+    """Everything a `node_overrides`/`proposed_node_overrides` patch for one
+    node must hold to: keys inside `kraft.store.OVERRIDABLE_NODE_FIELDS` only,
+    each with the right shape. One rule set for the three callers that accept
+    such a patch from outside the chain-definition schema --
+    `kraft.api.routes.work_items.create_work_item` (POST),
+    `_validate_node_overrides` (PATCH), and
+    `kraft.api.routes.gates._splice_chain_review` (a chain-review artifact) --
+    so a field none of them meant to allow (`auto_escalate`, `attempts`, ...)
+    can't reach `store.set_node_overrides` through whichever caller forgets to
+    check it (Kraft-df4tc).
+
+    Returns error strings with no node-id prefix -- each caller's own message
+    already carries that context.
+    """
+    extra = set(fields) - OVERRIDABLE_NODE_FIELDS
+    if extra:
+        return [f"cannot override {sorted(extra)}"]
+    if "auto_escalate" in fields and not isinstance(fields["auto_escalate"], bool):
+        return ["auto_escalate must be a boolean"]
+    if "auto_escalate_stuck" in fields and not isinstance(fields["auto_escalate_stuck"], bool):
+        return ["auto_escalate_stuck must be a boolean"]
+    if "auto_escalate_delay_s" in fields and (
+        not isinstance(fields["auto_escalate_delay_s"], int)
+        or isinstance(fields["auto_escalate_delay_s"], bool)
+        or fields["auto_escalate_delay_s"] < 0
+    ):
+        return ["auto_escalate_delay_s must be a non-negative int"]
+    if "attempts" in fields and (
+        not isinstance(fields["attempts"], int)
+        or isinstance(fields["attempts"], bool)
+        or fields["attempts"] < 1
+    ):
+        return ["attempts must be a positive int"]
+    if "wall_clock_s" in fields and (
+        not isinstance(fields["wall_clock_s"], int)
+        or isinstance(fields["wall_clock_s"], bool)
+        or fields["wall_clock_s"] < 1
+    ):
+        return ["wall_clock_s must be a positive int"]
+    model_effort = {k: v for k, v in fields.items() if k in ("model", "escalate_model", "effort")}
+    if model_effort:
+        errs = validate_model_effort_fields(model_effort)
+        if errs:
+            return errs
     return []
 
 
@@ -415,15 +576,7 @@ def validate_agent_overrides(overrides: dict) -> list[str]:
             f"agent_overrides has unknown key(s) {unknown}; only model, "
             "escalate_model, effort are allowed"
         ]
-    for key in ("model", "escalate_model"):
-        if key in overrides and overrides[key] is not None and not isinstance(overrides[key], str):
-            return [f"agent_overrides {key!r} must be a string or null"]
-    if "effort" in overrides and overrides["effort"] not in _EFFORT_LEVELS:
-        return [
-            f"agent_overrides 'effort' must be one of {sorted(_EFFORT_LEVELS)}; "
-            f"got {overrides['effort']!r}"
-        ]
-    return []
+    return [f"agent_overrides {e}" for e in validate_model_effort_fields(overrides)]
 
 
 def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
@@ -496,50 +649,6 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
             invalid[tid] = (
                 f"template {tid!r}: node {bad_recover!r} 'on_failure' must be a "
                 f"non-empty list of strings or null"
-            )
-            continue
-
-        # Where a rejected gate sends the chain (Kraft-ko7j). At or before the
-        # declaring node, because a rejection is backward motion: a forward
-        # target would let a gate skip the nodes between it and the target
-        # without ever running them.
-        at = {n["id"]: i for i, n in enumerate(nodes)}
-        bad_reject = next(
-            (
-                n["id"]
-                for i, n in enumerate(nodes)
-                if n.get("reject_to") is not None
-                and (not isinstance(n["reject_to"], str) or at.get(n["reject_to"], len(nodes)) > i)
-            ),
-            None,
-        )
-        if bad_reject is not None:
-            invalid[tid] = (
-                f"template {tid!r}: node {bad_reject!r} 'reject_to' must name a node "
-                f"of this template at or before it"
-            )
-            continue
-
-        # Where a rebase that moved the branch right before open_mr sends the
-        # chain back to re-verify (Kraft-4bgg). Same backward-motion
-        # constraint as reject_to, and the same `at` map -- forward would let
-        # a rebase-triggered bounce skip nodes between it and the target.
-        bad_bounce = next(
-            (
-                n["id"]
-                for i, n in enumerate(nodes)
-                if n.get("rebase_bounce_to") is not None
-                and (
-                    not isinstance(n["rebase_bounce_to"], str)
-                    or at.get(n["rebase_bounce_to"], len(nodes)) > i
-                )
-            ),
-            None,
-        )
-        if bad_bounce is not None:
-            invalid[tid] = (
-                f"template {tid!r}: node {bad_bounce!r} 'rebase_bounce_to' must name "
-                f"a node of this template at or before it"
             )
             continue
 
