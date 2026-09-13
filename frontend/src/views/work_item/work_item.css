@@ -83,6 +83,13 @@
   background: var(--color-accent-900);
   color: var(--color-accent-300);
 }
+/* A node an attachment trimmed at intake (21, Kraft-1brd): its gate was
+   already satisfied, so it never ran -- shown, not hidden, but not a button. */
+.stage-pill[data-state="trimmed"] {
+  border-style: dashed;
+  color: var(--color-neutral-700);
+  cursor: default;
+}
 .stage-pill-escalate {
   color: var(--color-accent-300);
 }
