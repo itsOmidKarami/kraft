@@ -212,3 +212,24 @@ def test_health_block_ok_is_short():
     out = render.health_block(payload)
     assert "ok" in out
     assert "invalid" not in out.lower()
+
+
+def test_doctor_block_marks_warn_separately_from_skip_and_ok():
+    rows = [
+        {"name": "spa bundle", "ok": True, "detail": "fine", "skipped": False, "warn": False},
+        {"name": "hooks", "ok": True, "detail": "not zsh", "skipped": True, "warn": False},
+        {"name": "version", "ok": True, "detail": "no feed", "skipped": False, "warn": True},
+    ]
+    out = render.doctor_block(rows)
+    assert "warn" in out
+    assert "skip" in out
+    assert "3 warned" not in out  # only the version row warned
+    assert "all 3 checks passed, 1 warned" in out
+
+
+def test_doctor_block_a_failure_still_wins_the_summary_over_a_warn():
+    rows = [
+        {"name": "version", "ok": True, "detail": "no feed", "skipped": False, "warn": True},
+        {"name": "spa bundle", "ok": False, "detail": "missing", "skipped": False, "warn": False},
+    ]
+    assert "1 of 2 checks failed" in render.doctor_block(rows)

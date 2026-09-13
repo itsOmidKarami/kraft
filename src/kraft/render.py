@@ -395,12 +395,18 @@ def doctor_block(rows: list[dict]) -> str:
     for row in rows:
         if row.get("skipped"):
             mark = paint("skip", DIM)
+        elif row.get("warn"):
+            mark = paint("warn", "\033[33m")
         else:
             mark = paint("ok  ", "\033[32m") if row["ok"] else paint("FAIL", "\033[31m")
         out.append(f"{mark}  {row['name'].ljust(width)}  {row['detail']}".rstrip())
     failed = sum(1 for row in rows if not row["ok"])
+    warned = sum(1 for row in rows if row.get("warn"))
     out.append("")
-    out.append(
-        f"{failed} of {len(rows)} checks failed" if failed else f"all {len(rows)} checks passed"
-    )
+    if failed:
+        out.append(f"{failed} of {len(rows)} checks failed")
+    elif warned:
+        out.append(f"all {len(rows)} checks passed, {warned} warned")
+    else:
+        out.append(f"all {len(rows)} checks passed")
     return "\n".join(out)
