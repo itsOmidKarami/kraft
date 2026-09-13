@@ -65,7 +65,9 @@ export function setupSettingsMocks() {
     {
       id: "quick-task",
       gates: 0,
-      nodes: [{ id: "verify", tasks: ["on.test.run"], gate_after: null }],
+      nodes: [
+        { id: "verify", tasks: ["on.test.run"], gate_after: null, fix_loop: "verify_fix_loop" },
+      ],
     },
   ]);
   vi.spyOn(api, "getRegistry").mockResolvedValue({ hooks });

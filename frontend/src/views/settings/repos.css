@@ -38,6 +38,22 @@
   color: var(--color-neutral-500);
 }
 
+/* Desktop repo list header row (screen 24) — same idiom as .hook-head/
+ * .cap-head/.submodule-head above: small, uppercase, muted, no borders. */
+.repo-row-head {
+  padding: 0 0 6px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.repo-row-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .btn-danger {
   color: var(--color-danger);
   border-color: var(--color-danger);
