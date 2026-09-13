@@ -173,7 +173,7 @@ def attachments_of(work_item_row) -> list[dict]:
 
 
 #: A sub-bead id as it appears in a work item's description, e.g. `Kraft-p8q1`.
-_BEAD_ID_RE = re.compile(r"Kraft-[a-z0-9]+")
+_BEAD_ID_RE = re.compile(r"Kraft-[a-z0-9]+(?:\.[0-9]+)*")
 
 
 def _extract_beads(description: str | None, *, exclude: str | None = None) -> list[str]:
