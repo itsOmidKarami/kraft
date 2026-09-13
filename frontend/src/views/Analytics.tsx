@@ -151,6 +151,16 @@ export function AnalyticsView() {
               sub="of lead time spent at gates"
             />
             <Kpi
+              label="Unplanned touches"
+              value={t.unplanned_touches_per_item.toFixed(2)}
+              sub="per completed item · stops nobody designed the chain to need"
+            />
+            <Kpi
+              label="Open MR → green CI"
+              value={elapsed(t.open_mr_to_green_ci_ms)}
+              sub="median, completed items"
+            />
+            <Kpi
               label="Fix cycles"
               value={t.fix_cycles.toFixed(1)}
               sub={`per verify · ${t.fix_cycles_capped} capped out`}

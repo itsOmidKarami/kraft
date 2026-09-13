@@ -137,6 +137,76 @@ class GhCli:
             failed_jobs=failed_jobs,
         )
 
+    async def branch_ci_status(
+        self, *, repo: Path, branch: str, head_sha: str, pipeline_id: str = ""
+    ) -> CIStatus:
+        """The target branch's own CI, not a pull request's.
+
+        `merge_watch` calls this once the merge has landed: the checkout's
+        current branch normally has no open PR left for `ci_status`'s `gh pr
+        view` to resolve, and it would raise instead of reading the branch's
+        runs at all. `gh run list --branch` reads the branch's own workflow
+        runs directly, no PR involved. `pipeline_id` is unused, same reason
+        as in `ci_status`: gh's checks are per-commit, not per-pipeline.
+        `head_sha` is the caller's own freshly-fetched upstream head, not this
+        checkout's possibly-stale local HEAD, so it is what runs are matched
+        against here.
+        """
+        raw = await git.run_git(
+            repo,
+            [
+                "gh",
+                "run",
+                "list",
+                "--branch",
+                branch,
+                "-L",
+                "20",
+                "--json",
+                "status,conclusion,headSha,url,name",
+            ],
+        )
+        rows = mr_ops.parse_json(raw, "gh run list")
+        runs = [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+        current = [r for r in runs if str(r.get("headSha") or "") == head_sha]
+        if not current:
+            return CIStatus(state="pending", url="", jobs=(f"no run for {head_sha[:7]} yet",))
+        jobs = tuple(
+            f"{r.get('name')}: {r.get('conclusion') or r.get('status') or 'PENDING'}"
+            for r in current
+        )
+        if any(str(r.get("status") or "") != "completed" for r in current):
+            state: CIState = "pending"
+        else:
+            conclusions = [str(r.get("conclusion") or "") for r in current]
+            if any(
+                c in ("failure", "timed_out", "cancelled", "action_required", "startup_failure")
+                for c in conclusions
+            ):
+                state = "failed"
+            elif all(c in ("success", "neutral", "skipped") for c in conclusions):
+                state = "success"
+            else:
+                state = "pending"
+        failed_jobs = tuple(
+            FailedJob(
+                str(r.get("name", "")),
+                "failed",
+                _GH_FAILURE_REASON.get(str(r.get("conclusion") or "").upper()),
+                str(r.get("url") or "") or None,
+            )
+            for r in current
+            if str(r.get("conclusion") or "")
+            in ("failure", "timed_out", "cancelled", "action_required", "startup_failure")
+        )
+        return CIStatus(
+            state=state,
+            url=str(current[0].get("url", "")),
+            jobs=jobs,
+            sha=head_sha,
+            failed_jobs=failed_jobs,
+        )
+
     async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None:
         """`gh run rerun <id> --failed` for every distinct Actions run behind
         `ci`'s failed checks. Best-effort: a check with no `/actions/runs/<id>/`

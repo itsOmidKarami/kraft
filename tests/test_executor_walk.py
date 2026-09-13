@@ -1151,3 +1151,270 @@ def test_pausing_between_nodes_stops_the_walk_before_the_next_one_starts(tmp_pat
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_a_blocked_bead_pauses_the_walk_before_any_worktree_is_made(tmp_path, monkeypatch):
+    """Kraft-tsfpk: a work item whose bead is `blocked_by` something must
+    never create a worktree or start a session."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    blocker_id = asyncio.run(beads.intake("the blocker", cwd=str(tracker)))
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="do the blocked thing",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT bead_id FROM work_items WHERE id = ?", (wid,)
+                ).fetchone()
+            )
+            bead_id = row["bead_id"]
+            assert bead_id
+            subprocess.run(
+                ["bd", "dep", "add", bead_id, blocker_id, "--type", "blocks"],
+                cwd=tracker,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            result = await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+            assert result == "paused"
+            assert not (rd.worktrees / wid).exists()
+            sessions = database.read(
+                lambda c: c.execute(
+                    "SELECT COUNT(*) AS n FROM worker_sessions WHERE work_item_id = ?", (wid,)
+                ).fetchone()
+            )
+            assert sessions["n"] == 0
+            row = database.read(
+                lambda c: c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+            assert row["status"] == "paused"
+            types = _events(database, wid)
+            assert "work_item_blocked_by_dependency" in types
+            # events.read_after already parses `payload` into a dict -- no
+            # json.loads needed on top of it (unlike analytics.py's raw-SQL
+            # event reads in Tasks 8-9, which get the column back as text).
+            payload = next(
+                e["payload"]
+                for e in database.read(lambda c: events.read_after(c, 0, wid))
+                if e["type"] == "work_item_blocked_by_dependency"
+            )
+            assert payload["blocked_by"] == [blocker_id]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_resuming_a_still_blocked_item_re_pauses_cheaply(tmp_path, monkeypatch):
+    """The 'cheap refusal' the bead asks for: a resume of a still-blocked item
+    costs one `bd blocked` call and re-pauses -- no worker_sessions row."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    blocker_id = asyncio.run(beads.intake("the blocker", cwd=str(tracker)))
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="do the blocked thing",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT bead_id FROM work_items WHERE id = ?", (wid,)
+                ).fetchone()
+            )
+            subprocess.run(
+                ["bd", "dep", "add", row["bead_id"], blocker_id, "--type", "blocks"],
+                cwd=tracker,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            first = await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+            assert first == "paused"
+            # A resume re-enters through run_once at the same start_index (0).
+            second = await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+            assert second == "paused"
+            sessions = database.read(
+                lambda c: c.execute(
+                    "SELECT COUNT(*) AS n FROM worker_sessions WHERE work_item_id = ?", (wid,)
+                ).fetchone()
+            )
+            assert sessions["n"] == 0
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_a_blocked_sub_bead_named_in_the_description_pauses_the_walk(tmp_path, monkeypatch):
+    """The motivating case plan-review finding 1 named: a manually created
+    item's own tracking bead is always edge-free (fresh from `entry.intake`),
+    so only a check against `implements_beads` -- the sub-beads the
+    description names -- ever catches a real dependency for this path."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    # `Kraft-` prefix, matching `entry._extract_beads`'s regex -- the same
+    # setup `tests/test_bead_bookkeeping.py`'s own sub-bead test uses, since
+    # `isolated_bd`'s shared template is prefixed `TEST` and would never match.
+    tracker = make_repo(tmp_path, name="tracker")
+    subprocess.run(
+        ["bd", "init", "--prefix", "Kraft"], cwd=tracker, check=True, capture_output=True
+    )
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        sub = await beads.intake("the sub task", cwd=str(tracker))
+        blocker = await beads.intake("the blocker", cwd=str(tracker))
+        subprocess.run(
+            ["bd", "dep", "add", sub, blocker, "--type", "blocks"],
+            cwd=tracker,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="implements a blocked sub-bead",
+                description=f"- {sub} — part one",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT bead_id, implements_beads FROM work_items WHERE id = ?", (wid,)
+                ).fetchone()
+            )
+            # The tracking bead itself has no edges -- confirms the case this
+            # test is pinning actually needs implements_beads to catch it.
+            assert await beads.blocked_by([row["bead_id"]], cwd=str(tracker)) == []
+            assert json.loads(row["implements_beads"]) == [sub]
+            result = await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+            assert result == "paused"
+            assert not (rd.worktrees / wid).exists()
+            payload = next(
+                e["payload"]
+                for e in database.read(lambda c: events.read_after(c, 0, wid))
+                if e["type"] == "work_item_blocked_by_dependency"
+            )
+            assert payload["blocked_by"] == [blocker]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_a_bead_blocked_only_by_its_own_bundlemate_dispatches(tmp_path, monkeypatch):
+    """A work item bundling two beads with a `blocks` edge between them (the
+    Kraft-5fx.2..5fx.12 shape) must not read as blocked by a bead it is
+    itself implementing -- the blocker here is in the item's own bead set,
+    not an outside dependency."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = make_repo(tmp_path, name="tracker")
+    subprocess.run(
+        ["bd", "init", "--prefix", "Kraft"], cwd=tracker, check=True, capture_output=True
+    )
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        sub = await beads.intake("the sub task", cwd=str(tracker))
+        bundlemate = await beads.intake("bundled dependency", cwd=str(tracker))
+        subprocess.run(
+            ["bd", "dep", "add", sub, bundlemate, "--type", "blocks"],
+            cwd=tracker,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="implements two bundled beads",
+                description=f"- {sub} — part one\n- {bundlemate} — part two",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT implements_beads FROM work_items WHERE id = ?", (wid,)
+                ).fetchone()
+            )
+            assert set(json.loads(row["implements_beads"])) == {sub, bundlemate}
+            result = await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+            assert result == "completed"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_an_unblocked_bead_dispatches_exactly_as_before(tmp_path, monkeypatch):
+    """No bead at all (bd was down at intake), or a bead with no open
+    blocker, must not regress the ordinary happy path."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="make the failing test pass",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            result = await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+            assert result == "completed"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())

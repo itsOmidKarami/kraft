@@ -110,6 +110,7 @@ def test_the_readme_describes_the_chain_it_actually_ships():
         "eleven": 11,
         "twelve": 12,
         "thirteen": 13,
+        "fourteen": 14,
     }
     nodes = re.search(r"chain itself is `chains/default\.json`: (\w+) nodes", readme)
     gates = re.search(r"with (\w+) gates", readme)

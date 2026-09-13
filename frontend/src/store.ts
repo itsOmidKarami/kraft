@@ -230,6 +230,11 @@ export const useStore = create<State>((set, get) => ({
         case "gate_rejected":
           return { ...base, ...patchItem(s, id, (w) => ({ ...w, pending_gate: null, rejectNote: p.note })) };
         case "pause_requested":
+        // Both of these flip the row to paused in the same transaction that
+        // appends the event (store/work_items.py), same as pause_requested --
+        // without a case here the board reads "active" until the next hydrate.
+        case "work_item_blocked_by_dependency":
+        case "paused_by_broken_base":
           return { ...base, ...patchItem(s, id, (w) => ({ ...w, status: "paused" })) };
         case "worker_session_paused": {
           const rows = s.sessionsByItem[id] ?? [];

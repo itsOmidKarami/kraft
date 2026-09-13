@@ -13,12 +13,16 @@ Two derivations are worth stating outright, because neither is a stored fact:
   `gate_requested` or `work_item_needs_human` to whatever unblocked it. It is
   reported separately from wall time so a slow reviewer never reads as a slow
   agent.
+* **`median_lead_ms`** (`work_item_created` → `work_item_completed`) now
+  includes post-merge CI time. `post_merge_watch` (Kraft-43kw) is this
+  chain's terminal node, and it can itself sit in `"waiting"` on the target
+  branch's own pipeline -- time this figure did not count before, when
+  `merge` was the last node.
 """
 
 from __future__ import annotations
 
 import json
-import re
 import sqlite3
 import statistics
 from datetime import UTC, datetime, timedelta
@@ -74,33 +78,141 @@ def _completed_count_between(
     return row["n"]
 
 
+#: Duplicated from `kraft.executor.gates._RUN_BOUNDARY` -- edit both
+#: together. See that module's own docstring for the full account of why
+#: each of these, and only these, counts as a human closing out a run of
+#: stuck-ness; not imported here to keep this module free of the
+#: executor/agent import stack for the sake of nine strings.
+_RUN_BOUNDARY = (
+    "work_item_retried",
+    "work_item_resumed",
+    "work_item_created",
+    "pause_requested",
+    "gate_approved",
+    "gate_rejected",
+    "work_item_completed",
+    "work_item_abandoned",
+    "work_item_restored",
+)
+
+#: Kraft-s15p0's own words -- the first (so far only) known orchestrator
+#: defect signature, kept next to the classifier that reads it so a future
+#: fixed defect's signature is added in the same place. `startswith`, not
+#: `==`: a signature is a stable prefix, not a promise the rest of the
+#: reason text never changes.
+_DEFECT_SIGNATURES = ("resume: current-node session did not resolve cleanly",)
+
+#: A `needs_context:` reason naming a blocker another item hasn't
+#: merged/finished yet -- the ordering-conflict class Kraft-tsfpk removes for
+#: the bd-dependency case specifically, still possible for conflicts bd
+#: doesn't model (two items editing the same file). A heuristic on free
+#: text, same idiom as the `capped`/`needs_context:` checks below it --
+#: stated as such, not claimed exact.
+_BLOCKER_PHRASES = ("blocked on", "not merged", "depends on")
+
+#: Buckets that count as an unplanned touch whether or not an escalation
+#: happened to clear them -- the stop itself is the defect (or a spend cap a
+#: human always has to raise), not who noticed it. Every other non-gate
+#: bucket instead asks `_resolved_without_human`.
+#:
+#: Counts per stop *event*, not deduplicated per underlying incident
+#: (plan-review finding 5): the same orchestrator defect auto-escalating
+#: five times with nobody paged reads as five unplanned touches here, not
+#: one. Deliberate for a MINOR-severity ask -- collapsing repeats of "the
+#: same defect" needs a notion of incident identity (a signature match plus
+#: some adjacency window) this event log does not carry today, on top of
+#: the `_DEFECT_SIGNATURES` heuristic already guessing at "same defect" from
+#: free text. Stated here rather than silently undercounted.
+_ALWAYS_UNPLANNED = frozenset({"orchestrator/infra defect", "preventable dispatch", "budget"})
+
+
+def _episode_bucket(e: sqlite3.Row) -> str | None:
+    """Which of the five stop buckets one `gate_requested`/
+    `work_item_needs_human` event belongs to, or None if `e` is not a stop
+    event at all (design 35, widened by Kraft-ishe from three buckets to
+    five).
+
+    `budget` and `capped` are mutually exclusive tags `mark_needs_human`
+    sets itself and are checked ahead of the free-text heuristics below them,
+    so a budget stop never falls through to `task failure`'s catch-all.
+    """
+    payload = json.loads(e["payload"])
+    if e["type"] == "gate_requested":
+        return f"gate · {payload.get('gate', 'unknown')}"
+    if e["type"] != "work_item_needs_human":
+        return None
+    reason = payload.get("reason") or ""
+    if payload.get("budget") is not None:
+        return "budget"
+    if payload.get("capped") is not None:
+        return "cap breach"
+    if any(reason.startswith(sig) for sig in _DEFECT_SIGNATURES):
+        return "orchestrator/infra defect"
+    if reason.startswith("needs_context:") and any(p in reason.lower() for p in _BLOCKER_PHRASES):
+        return "preventable dispatch"
+    return "task failure"
+
+
 def _stop_reasons(events: list[sqlite3.Row]) -> list[dict]:
-    """'Why items stopped for a person' (design 35): a gate wait names the gate;
-    a needs_human stop is bucketed by its payload shape, not by parsing the
-    free-form `reason` prose beyond the two patterns that are still structured
-    data (`capped`'s '<fix_loop> exhausted...' and 'needs_context: ...').
-    Reasons that fit neither bucket are real but not shown here — the design
-    names four buckets, not an open-ended list, and inventing new bucket labels
-    the design never specified would be adding UI the screens don't show."""
+    """'Why items stopped for a person' (design 35, widened by Kraft-ishe):
+    five buckets -- see `_episode_bucket`. Reasons that fit no bucket
+    (nothing does, today) would be dropped; there is no such reason left to
+    drop since `task failure` is now the catch-all."""
     counts: dict[str, int] = {}
     for e in events:
-        payload = json.loads(e["payload"])
-        if e["type"] == "gate_requested":
-            label = f"gate · {payload.get('gate', 'unknown')}"
-        elif e["type"] == "work_item_needs_human":
-            if payload.get("budget") is not None:
-                label = "budget"
-            elif payload.get("capped") is not None:
-                m = re.match(r"^(\S+) exhausted", payload.get("reason") or "")
-                label = f"capped out · {m.group(1)}" if m else "capped out"
-            elif (payload.get("reason") or "").startswith("needs_context:"):
-                label = "agent question · needs_context"
-            else:
-                continue
-        else:
+        label = _episode_bucket(e)
+        if label is None:
             continue
         counts[label] = counts.get(label, 0) + 1
     return sorted(({"label": label, "n": n} for label, n in counts.items()), key=lambda x: -x["n"])
+
+
+def _resolved_without_human(item_events: list[sqlite3.Row], stop_index: int) -> bool:
+    """True iff the stop at `item_events[stop_index]` was cleared by the
+    auto-escalate machinery alone -- nobody paged.
+
+    Forward scan to the first `_RUN_BOUNDARY`-shaped event after the stop:
+    the same idiom `kraft.executor.gates._auto_dispatch_count` walks in
+    reverse from "now" to answer "has this still-open run already been
+    escalated" -- here walked forward once per already-closed historical
+    stop instead of backward from the live edge. The first boundary decides
+    it either way: a self-retry or an agent's own gate decision reads
+    identically to a real one except for the tag on that one event.
+    """
+    for e in item_events[stop_index + 1 :]:
+        t = e["type"]
+        if t not in _RUN_BOUNDARY:
+            continue
+        payload = json.loads(e["payload"])
+        if t == "work_item_retried" and payload.get("escalated"):
+            return True
+        if t in ("gate_approved", "gate_rejected") and payload.get("by") == "agent":
+            return True
+        return False
+    return False
+
+
+def _unplanned_touches(item_events: list[sqlite3.Row]) -> int:
+    """Unplanned human touches in one item's own timeline (Kraft-ishe): a
+    stop nobody designed the chain to need, counted once per stop *event* --
+    not deduplicated across repeats of what is really the same underlying
+    incident (plan-review finding 5; see `_ALWAYS_UNPLANNED`'s own comment
+    for why that dedup is not done here).
+
+    `gate · <name>` never counts -- a gate is the chain's designed
+    checkpoint, not a rescue. `orchestrator/infra defect`, `preventable
+    dispatch` and `budget` count unconditionally (`_ALWAYS_UNPLANNED`).
+    Every other bucket (`cap breach`, `task failure`) counts unless
+    `_resolved_without_human` says nobody was paged.
+    """
+    touches = 0
+    for i, e in enumerate(item_events):
+        bucket = _episode_bucket(e)
+        if bucket is None or bucket.startswith("gate · "):
+            continue
+        if bucket in _ALWAYS_UNPLANNED or not _resolved_without_human(item_events, i):
+            touches += 1
+    return touches
 
 
 def _human_wait_ms(events: list[sqlite3.Row]) -> int:
@@ -173,6 +285,8 @@ def compute(
         "fix_cycles": 0.0,
         "fix_cycles_capped": 0,
         "rejected_gates": 0,
+        "unplanned_touches_per_item": 0.0,
+        "open_mr_to_green_ci_ms": 0,
     }
     totals["completed_prev"] = None
     if days is not None and since is not None:
@@ -342,6 +456,36 @@ def compute(
     total_lead_ms = sum(lead_times_ms)
     if total_lead_ms:
         totals["human_wait_pct"] = round(100 * completed_human_wait_ms / total_lead_ms)
+
+    total_unplanned = sum(_unplanned_touches(per_item.get(cid, [])) for cid in completed_ids)
+    if completed_items:
+        totals["unplanned_touches_per_item"] = round(total_unplanned / len(completed_items), 2)
+
+    open_to_green_ms: list[int] = []
+    for r in completed_items:
+        evts = per_item.get(r["id"], [])
+        start = next(
+            (
+                _parse(e["created_at"])
+                for e in evts
+                if e["type"] == "node_started"
+                and json.loads(e["payload"]).get("node_id") == "open_mr"
+            ),
+            None,
+        )
+        end = next(
+            (
+                _parse(e["created_at"])
+                for e in evts
+                if e["type"] == "node_completed"
+                and json.loads(e["payload"]).get("node_id") == "mr_checks"
+            ),
+            None,
+        )
+        if start and end:
+            open_to_green_ms.append(max(0, int((end - start).total_seconds() * 1000)))
+    if open_to_green_ms:
+        totals["open_mr_to_green_ci_ms"] = int(statistics.median(open_to_green_ms))
 
     rejected_by_gate: dict[str, int] = {}
     for e in events:

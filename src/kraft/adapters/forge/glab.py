@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from kraft.adapters.forge import git
@@ -138,7 +139,9 @@ class GlabCli:
     ) -> CIStatus:
         # The merge request's own state first: a conflict fails the check node
         # whatever colour the pipeline is, and `ci.poll_ci` must not wait out a
-        # pipeline to learn it (Kraft-ejj9).
+        # pipeline to learn it (Kraft-ejj9). Only meaningful pre-merge, on the
+        # checked-out feature branch that actually has an open MR -- see
+        # `branch_ci_status` for the post-merge, no-MR read.
         detail = await self._merge_state(repo, branch)
         # Merged out-of-band is a result, not a conflict and not a pipeline to
         # read: a deleted source branch's pipeline list is not a fact this
@@ -154,6 +157,35 @@ class GlabCli:
                 merge_detail="merged",
             )
         mergeable = mr_ops.mergeable(detail)
+        expected_sha = await git._head_sha(repo)
+        pipeline = await self._pipeline_on_ref(repo, branch, pipeline_id, expected_sha)
+        return replace(pipeline, mergeable=mergeable, merge_detail=detail)
+
+    async def branch_ci_status(
+        self, *, repo: Path, branch: str, head_sha: str, pipeline_id: str = ""
+    ) -> CIStatus:
+        """The target branch's own pipeline, not a merge request's.
+
+        `merge_watch` calls this once the checked-out branch's MR is already
+        merged: `ci_status`'s `_merge_state` resolves from the checked-out
+        branch, which normally has no open MR left to find, and would raise
+        instead of reading the branch's pipeline at all. `mergeable` is a
+        merge-request question with no post-merge meaning, so it stays the
+        default `None` here rather than going through `_merge_state`.
+        `head_sha` is the caller's own freshly-fetched upstream head, not this
+        checkout's local HEAD, which may not be pulled -- see
+        `_pipeline_on_ref`.
+        """
+        return await self._pipeline_on_ref(repo, branch, pipeline_id, head_sha)
+
+    async def _pipeline_on_ref(
+        self, repo: Path, branch: str, pipeline_id: str, expected_sha: str
+    ) -> CIStatus:
+        """Read the branch's pipeline, pinned or latest, with no merge-request
+        involvement at all -- shared by `ci_status` and `branch_ci_status`,
+        which differ only in whether `mergeable`/`merge_detail` get filled in
+        on top of what this returns.
+        """
         if pipeline_id:
             # Pinned to a pipeline the caller already resolved against the
             # current head (Kraft-ivh1): no sha guard needed here, unlike
@@ -181,8 +213,6 @@ class GlabCli:
                     state=state,
                     url=url,
                     jobs=jobs,
-                    mergeable=mergeable,
-                    merge_detail=detail,
                     sha=sha,
                     failed_jobs=failed_jobs,
                     pipeline_ref=pipeline_ref,
@@ -196,20 +226,24 @@ class GlabCli:
         raw = await git.run_git(repo, ["glab", "ci", "list", "-F", "json", "-P", "1", *ref])
         rows = mr_ops.parse_json(raw, "glab ci list")
         # No pipeline yet is not a green one.
-        state: CIState = "pending"
+        state = "pending"
         url, jobs, sha, pipeline_ref = "", ("no pipeline yet",), "", ""
-        failed_jobs: tuple[FailedJob, ...] = ()
+        failed_jobs = ()
         if rows:
             top = rows[0]
             # For a few seconds after a push, this list still answers with the
             # *previous* commit's pipeline — green, for code the branch no
             # longer has. ci_poll pushes now (Kraft-bxj8), so that window is on
             # the hot path, and a pipeline that is not for this head is not a
-            # result. Same answer as no pipeline at all: pending.
+            # result. Same answer as no pipeline at all: pending. Guarded
+            # against `expected_sha`, the caller's own reference commit --
+            # `ci_status` passes this checkout's local HEAD (correct: it is
+            # the branch being checked), `branch_ci_status` passes the
+            # upstream head it fetched, never this checkout's possibly-stale
+            # local HEAD (plan-review finding, second half).
             sha = str(top.get("sha", ""))
-            head = await git._head_sha(repo) if sha else ""
-            if sha and head and sha != head:
-                jobs = (f"no pipeline for {head[:7]} yet",)
+            if sha and expected_sha and sha != expected_sha:
+                jobs = (f"no pipeline for {expected_sha[:7]} yet",)
             else:
                 raw_state = str(top.get("status", ""))
                 state = _GLAB_STATES.get(raw_state, "failed")
@@ -223,8 +257,6 @@ class GlabCli:
             state=state,
             url=url,
             jobs=jobs,
-            mergeable=mergeable,
-            merge_detail=detail,
             sha=sha,
             failed_jobs=failed_jobs,
             pipeline_ref=pipeline_ref,

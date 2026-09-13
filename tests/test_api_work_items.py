@@ -296,6 +296,7 @@ def test_patch_switches_chain_template_before_the_chain_starts(tmp_path, monkeyp
             "human_review",
             "mr_sync",
             "merge",
+            "post_merge_watch",
         ]
 
         evs = client.get(f"/api/work-items/{wid}/events").json()
