@@ -38,6 +38,22 @@ def test_a_bare_task_heading_has_an_empty_title_and_does_not_eat_the_next_line()
     assert progress.parse_tasks("## Task 1\nbody text\n## Task 2 — b\n") == ["", "b"]
 
 
+def test_parse_tasks_skips_headings_inside_a_fenced_code_block():
+    plan = f"""# Land it
+
+## Task 1 — real task
+
+The fixture below is example text for a test, not real plan structure:
+
+```
+{PLAN}
+```
+
+## Task 2 — also real
+"""
+    assert progress.parse_tasks(plan) == ["real task", "also real"]
+
+
 def test_committed_task_takes_the_highest_task_number_named():
     subjects = [
         "Task 7: branch name computed once (Kraft-nhps)",
