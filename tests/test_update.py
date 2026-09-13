@@ -8,6 +8,7 @@ negative: no failure mode raises, and no failure mode reports an update.
 from __future__ import annotations
 
 import json
+import pathlib
 
 import httpx
 import pytest
@@ -127,36 +128,82 @@ def test_is_behind_of_nothing_is_false():
     assert update.is_behind(None) is False
 
 
-def test_perform_installs_the_wheel_from_the_release():
+def test_perform_downloads_the_wheel_and_installs_the_local_copy(monkeypatch):
+    monkeypatch.setattr(update, "_request", lambda _url, _timeout: b"WHEEL BYTES")
     seen = {}
 
     def run(command, **kwargs):
         seen["command"] = command
+        wheel_path = pathlib.Path(command[5])
+        seen["wheel_bytes"] = wheel_path.read_bytes()
         return type("R", (), {"returncode": 0})()
 
     code = update.perform(update.Release(tag="v0.4.0", wheel_url="https://x/w.whl"), run=run)
     assert code == 0
-    assert seen["command"] == [
-        "uv",
-        "tool",
-        "install",
-        "--force",
-        "--from",
-        "https://x/w.whl",
-        "kraft",
-    ]
+    command = seen["command"]
+    assert command[:5] == ["uv", "tool", "install", "--force", "--from"]
+    assert command[6] == "kraft"
+    assert pathlib.Path(command[5]).name == "w.whl"
+    assert seen["wheel_bytes"] == b"WHEEL BYTES"
 
 
-def test_perform_reports_a_failing_installer():
+def test_perform_reports_a_failing_installer(monkeypatch):
+    monkeypatch.setattr(update, "_request", lambda _url, _timeout: b"")
+
     def run(_command, **_kwargs):
         return type("R", (), {"returncode": 2})()
 
-    assert update.perform(update.Release(tag="v0.4.0", wheel_url="u"), run=run) == 2
+    assert update.perform(update.Release(tag="v0.4.0", wheel_url="u/w.whl"), run=run) == 2
 
 
-def test_perform_without_uv_is_a_readable_failure():
+def test_perform_without_uv_is_a_readable_failure(monkeypatch):
+    monkeypatch.setattr(update, "_request", lambda _url, _timeout: b"")
+
     def run(_command, **_kwargs):
         raise FileNotFoundError("uv")
 
     with pytest.raises(SystemExit, match="uv"):
-        update.perform(update.Release(tag="v0.4.0", wheel_url="u"), run=run)
+        update.perform(update.Release(tag="v0.4.0", wheel_url="u/w.whl"), run=run)
+
+
+def test_request_sends_the_token_as_a_private_token_header(monkeypatch):
+    monkeypatch.setenv("GITLAB_TOKEN", "s3cr3t")
+    seen = {}
+
+    def get(url, *, timeout, headers, follow_redirects):
+        seen["headers"] = headers
+        return type("R", (), {"content": b"x", "raise_for_status": lambda self: None})()
+
+    monkeypatch.setattr(httpx, "get", get)
+    assert update._request("https://x/w.whl", 1.0) == b"x"
+    assert seen["headers"] == {"PRIVATE-TOKEN": "s3cr3t"}
+
+
+def test_request_falls_back_to_an_authenticated_glab(monkeypatch):
+    monkeypatch.delenv("GITLAB_TOKEN", raising=False)
+    monkeypatch.setattr(update.shutil, "which", lambda _name: "/usr/bin/glab")
+    monkeypatch.setattr(update, "_glab_authed", lambda _timeout: True)
+    seen = {}
+
+    def run(command, **kwargs):
+        seen["command"] = command
+        return type("R", (), {"stdout": b"from glab"})()
+
+    monkeypatch.setattr(update.subprocess, "run", run)
+    url = update.RELEASES_URL + "/permalink/latest"
+    assert update._request(url, 1.0) == b"from glab"
+    assert seen["command"][:2] == ["glab", "api"]
+
+
+def test_request_is_plain_when_no_token_and_no_glab(monkeypatch):
+    monkeypatch.delenv("GITLAB_TOKEN", raising=False)
+    monkeypatch.setattr(update.shutil, "which", lambda _name: None)
+    seen = {}
+
+    def get(url, *, timeout, follow_redirects):
+        seen["url"] = url
+        return type("R", (), {"content": b"x", "raise_for_status": lambda self: None})()
+
+    monkeypatch.setattr(httpx, "get", get)
+    assert update._request("https://x/w.whl", 1.0) == b"x"
+    assert seen["url"] == "https://x/w.whl"
