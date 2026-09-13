@@ -206,3 +206,43 @@ def test_retry_after_cap_clears_retry_at(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_retry_after_cap_tags_a_seeded_steer_on_the_event(tmp_path):
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            await database.write(
+                lambda c: store.retry_after_cap(
+                    c,
+                    "w1",
+                    "verify",
+                    "verify_fix_loop",
+                    "- [important] a.py:1 — missing null check (reviewer)",
+                    seeded=True,
+                )
+            )
+            ev = database.read(lambda c: events.read_after(c, 0, "w1"))[-1]
+            assert ev["type"] == "work_item_retried"
+            assert ev["payload"]["seeded"] is True
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_retry_after_cap_defaults_seeded_to_false(tmp_path):
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            await database.write(
+                lambda c: store.retry_after_cap(c, "w1", "verify", "verify_fix_loop", "go")
+            )
+            ev = database.read(lambda c: events.read_after(c, 0, "w1"))[-1]
+            assert ev["payload"]["seeded"] is False
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())

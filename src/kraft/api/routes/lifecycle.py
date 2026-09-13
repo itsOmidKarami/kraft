@@ -599,9 +599,14 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                 f"node {node_id!r} has no agent task downstream to steer; "
                 "this text would be dropped",
             )
+        seeded = False
         if steer is None:
-            last = st.db.read(lambda c: store.last_rejection(c, wid))
-            steer = (last or {}).get("note") or None
+            steer = executor.unresolved_findings_steer(st.db, wid, node_id, st.policy)
+            if steer is not None:
+                seeded = True
+            else:
+                last = st.db.read(lambda c: store.last_rejection(c, wid))
+                steer = (last or {}).get("note") or None
         await st.db.write(
             lambda c: events.append(
                 c,
@@ -613,6 +618,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                     "key": key,
                     "gate_key": gate_key,
                     "steer": steer,
+                    "seeded": seeded,
                 },
             )
         )
@@ -622,18 +628,27 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
 
     steer = (body.steer or "").strip() or None
     if steer is not None and not _steer_reachable(chain["nodes"], node_id, st.registry):
-        # Explicit only: the last-rejection fallback below is Kraft's own
-        # carry-forward, not something the caller just typed and needs told.
+        # Explicit only: the seeded-findings and last-rejection fallbacks
+        # below are Kraft's own carry-forward, not something the caller just
+        # typed and needs told.
         raise HTTPException(
             409,
             f"node {node_id!r} has no agent task downstream to steer; this text would be dropped",
         )
+    seeded = False
     if steer is None:
-        # The reason the human already typed at the gate. Without this a
-        # rejection that exhausted its cap makes them type it twice for it to
-        # reach an agent at all (Kraft-ko7j).
-        last = st.db.read(lambda c: store.last_rejection(c, wid))
-        steer = (last or {}).get("note") or None
+        # The last review's unresolved findings (Kraft-7sec, second half) --
+        # ahead of last_rejection, which is a human's own note and covers a
+        # rejection only; a fix-loop cap breach has none.
+        steer = executor.unresolved_findings_steer(st.db, wid, node_id, st.policy)
+        if steer is not None:
+            seeded = True
+        else:
+            # The reason the human already typed at the gate. Without this a
+            # rejection that exhausted its cap makes them type it twice for it
+            # to reach an agent at all (Kraft-ko7j).
+            last = st.db.read(lambda c: store.last_rejection(c, wid))
+            steer = (last or {}).get("note") or None
 
     if deps.task_is_live(request.app, wid):
         # Checked before the claim, the rebase, and retry_after_cap below: a
@@ -698,7 +713,9 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
 
     await st.db.write(
-        lambda c: store.retry_after_cap(c, wid, node_id, key, steer, gate_key=gate_key)
+        lambda c: store.retry_after_cap(
+            c, wid, node_id, key, steer, gate_key=gate_key, seeded=seeded
+        )
     )
     start = next(i for i, n in enumerate(chain["nodes"]) if n["id"] == node_id)
     try:
@@ -717,6 +734,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                     start_index=start,
                     policy=st.policy,
                     steer=steer,
+                    steer_seeded=seeded,
                     launch=deps.launch(st, row["repo"]),
                     on_approve=deps._on_approve(st),
                 ),
