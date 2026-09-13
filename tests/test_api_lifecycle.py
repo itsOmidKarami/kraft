@@ -157,6 +157,100 @@ def test_resume_works_when_a_slot_is_free(tmp_path, monkeypatch):
         assert r.status_code == 200, r.text
 
 
+def _post_past_the_still_finishing_walk(client, path, timeout=10):
+    """Retry a POST past a transient 'a walk is already running' 409.
+
+    `work_item_completed` lands on the timeline a few statements before the
+    task carrying it actually returns (`asyncio.Task.done()`), so a test that
+    polls for that event and then immediately posts to `/resume` or `/retry`
+    can race `deps.task_is_live`'s check. Retry past it rather than add a
+    sleep tuned to how long those last few statements take."""
+    deadline = time.monotonic() + timeout
+    r = None
+    while time.monotonic() < deadline:
+        r = client.post(path, json={})
+        if r.status_code != 409 or "already running" not in r.json().get("detail", ""):
+            return r
+        time.sleep(0.1)
+    return r
+
+
+def test_resume_rebase_failure_auto_escalates_when_armed(tmp_path, monkeypatch):
+    """Kraft-h48r: `resume_work_item`'s rebase-failure branch used to
+    `mark_needs_human` and return without ever giving `auto_escalate_stuck`
+    a chance to fire -- `walk.run`/`resuming.resume` call it after every
+    step, and this route terminates before either of them runs.
+
+    `quick-task` (no gate on any node) rather than the default chain: a
+    `gate_requested` event left open by force-writing status past it reads
+    to `gates.pending_gate` as a still-open gate, which makes
+    `auto_escalate_stuck` no-op regardless of whether it is armed."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    import kraft.builtins as builtins_mod
+
+    calls = []
+
+    async def fail_refresh(*a, **kw):
+        raise RuntimeError("rebase conflict: could not apply")
+
+    async def fake_dispatch(database, run_dirs, *, work_item_id, message, launch, auto, evts=None):
+        calls.append((work_item_id, auto))
+        return "done"
+
+    monkeypatch.setattr(builtins_mod, "refresh_worktree_base", fail_refresh)
+    monkeypatch.setattr("kraft.executor.gates.escalate.dispatch", fake_dispatch)
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={"title": "x", "repo": str(repo), "chain_template": "quick-task"},
+        ).json()["id"]
+        _poll_events(client, wid, "work_item_completed")
+        _set_status(wid, "paused")
+
+        r = _post_past_the_still_finishing_walk(client, f"/api/work-items/{wid}/resume")
+
+        assert r.status_code == 200, r.text
+        assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
+        assert calls == [(wid, True)]
+
+
+def test_resume_rebase_failure_does_not_escalate_when_disarmed(tmp_path, monkeypatch):
+    """Regression guard: `auto_escalate_stuck: false` must still no-op here
+    exactly like it does on the walk-driven path."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    import kraft.builtins as builtins_mod
+
+    calls = []
+
+    async def fail_refresh(*a, **kw):
+        raise RuntimeError("rebase conflict: could not apply")
+
+    async def fake_dispatch(database, run_dirs, *, work_item_id, message, launch, auto, evts=None):
+        calls.append((work_item_id, auto))
+        return "done"
+
+    monkeypatch.setattr(builtins_mod, "refresh_worktree_base", fail_refresh)
+    monkeypatch.setattr("kraft.executor.gates.escalate.dispatch", fake_dispatch)
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={"title": "x", "repo": str(repo), "chain_template": "quick-task"},
+        ).json()["id"]
+        _poll_events(client, wid, "work_item_completed")
+        _set_status(wid, "paused")
+        client.app.state.policy = dataclasses.replace(
+            client.app.state.policy, auto_escalate_stuck=False
+        )
+
+        r = _post_past_the_still_finishing_walk(client, f"/api/work-items/{wid}/resume")
+
+        assert r.status_code == 200, r.text
+        assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
+        assert calls == []
+
+
 def test_retry_refuses_when_all_slots_are_busy(tmp_path, monkeypatch):
     """The same door resume is bounded by (notes 10): a stopped item's
     /retry must not restart it past the cap either."""
@@ -187,6 +281,77 @@ def test_retry_works_when_a_slot_is_free(tmp_path, monkeypatch):
         r = client.post(f"/api/work-items/{wid}/retry", json={})
 
         assert r.status_code == 200, r.text
+
+
+def test_retry_rebase_failure_auto_escalates_when_armed(tmp_path, monkeypatch):
+    """Kraft-h48r: `retry_work_item`'s rebase-failure branch used to
+    `mark_needs_human` and return without ever giving `auto_escalate_stuck`
+    a chance to fire -- `walk.run`/`resuming.resume` call it after every
+    step, and this route terminates before either of them runs."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    import kraft.builtins as builtins_mod
+
+    calls = []
+
+    async def fail_refresh(*a, **kw):
+        raise RuntimeError("rebase conflict: could not apply")
+
+    async def fake_dispatch(database, run_dirs, *, work_item_id, message, launch, auto, evts=None):
+        calls.append((work_item_id, auto))
+        return "done"
+
+    monkeypatch.setattr(builtins_mod, "refresh_worktree_base", fail_refresh)
+    monkeypatch.setattr("kraft.executor.gates.escalate.dispatch", fake_dispatch)
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={"title": "x", "repo": str(repo), "chain_template": "quick-task"},
+        ).json()["id"]
+        _poll_events(client, wid, "work_item_completed")
+        _force_node(wid, "verify", "needs_human")
+
+        r = _post_past_the_still_finishing_walk(client, f"/api/work-items/{wid}/retry")
+
+        assert r.status_code == 200, r.text
+        assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
+        assert calls == [(wid, True)]
+
+
+def test_retry_rebase_failure_does_not_escalate_when_disarmed(tmp_path, monkeypatch):
+    """Regression guard: `auto_escalate_stuck: false` must still no-op here
+    exactly like it does on the walk-driven path."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    import kraft.builtins as builtins_mod
+
+    calls = []
+
+    async def fail_refresh(*a, **kw):
+        raise RuntimeError("rebase conflict: could not apply")
+
+    async def fake_dispatch(database, run_dirs, *, work_item_id, message, launch, auto, evts=None):
+        calls.append((work_item_id, auto))
+        return "done"
+
+    monkeypatch.setattr(builtins_mod, "refresh_worktree_base", fail_refresh)
+    monkeypatch.setattr("kraft.executor.gates.escalate.dispatch", fake_dispatch)
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={"title": "x", "repo": str(repo), "chain_template": "quick-task"},
+        ).json()["id"]
+        _poll_events(client, wid, "work_item_completed")
+        _force_node(wid, "verify", "needs_human")
+        client.app.state.policy = dataclasses.replace(
+            client.app.state.policy, auto_escalate_stuck=False
+        )
+
+        r = _post_past_the_still_finishing_walk(client, f"/api/work-items/{wid}/retry")
+
+        assert r.status_code == 200, r.text
+        assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
+        assert calls == []
 
 
 def _create_escalation_session(
