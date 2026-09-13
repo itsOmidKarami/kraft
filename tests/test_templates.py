@@ -110,7 +110,7 @@ def test_policy_yaml_is_not_scanned_as_a_template():
     assert "policy" not in ts.valid
 
 
-def test_shipped_default_yaml_is_the_twelve_node_chain():
+def test_shipped_default_yaml_is_the_thirteen_node_chain():
     reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
     ts = templates.load_templates(TEMPLATES_DIR, reg)
     assert "default" in ts.valid, ts.invalid
@@ -123,6 +123,7 @@ def test_shipped_default_yaml_is_the_twelve_node_chain():
         "implementation",
         "verify",
         "pre_mr_rebase",
+        "mr_meta",
         "open_mr",
         "mr_checks",
         "human_review",
@@ -158,6 +159,31 @@ def test_the_default_chain_syncs_the_mr_after_the_review_gate():
     assert "on.human_review.requested" in gate["tasks"]
     assert "on.mr.sync" not in gate["tasks"]
     assert at[gate["id"]] < at[sync["id"]] < at["merge"]
+
+
+def test_shipped_default_chain_describes_before_it_opens():
+    reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
+    nodes = templates.load_templates(TEMPLATES_DIR, reg).valid["default"].nodes
+    ids = [n["id"] for n in nodes]
+    assert ids.index("mr_meta") == ids.index("open_mr") - 1
+    assert ids.index("pre_mr_rebase") < ids.index("mr_meta")
+    assert nodes[ids.index("mr_meta")]["tasks"] == ["on.mr.describe"]
+
+
+def test_shipped_registry_binds_the_describe_hook():
+    reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
+    binding = reg.hooks["on.mr.describe"]
+    assert binding["kind"] == "agent"
+    assert binding["skill"] == "mr-metadata"
+    assert binding["artifact"] == "mr_meta"
+
+
+def test_shipped_default_chain_validates():
+    # `templates.validate_nodes` is what the server runs on load; a node the
+    # shipped chain names must survive it.
+    reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
+    nodes = templates.load_templates(TEMPLATES_DIR, reg).valid["default"].nodes
+    templates.validate_nodes(nodes, reg)
 
 
 # ── validate_nodes: the splice-tier validator (Kraft-unk) ──────────────────

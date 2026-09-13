@@ -19,6 +19,11 @@ hooks:
   # (Kraft-4bgg). Real from day one -- unlike the two placeholder bindings
   # below it, this is a plain git operation with nothing to fake out.
   on.mr.rebase:              { kind: builtin, handler: mr_rebase }
+  # Authors the merge request's title, labels, assignees, reviewers and
+  # description from the rebased diff and the repo's own conventions, before
+  # `on.mr.open` creates it -- labels are load-bearing input to CI (Kraft-xh0q),
+  # so they have to exist before the first pipeline, not after.
+  on.mr.describe:            { kind: agent, command: claude, skill: mr-metadata, artifact: mr_meta, model: sonnet, effort: medium }
   on.mr.open:                { kind: forge, handler: open_mr, backend: auto }
   on.ci.poll:                { kind: forge, handler: ci_poll, backend: auto }
   on.review.mr.run:          { kind: builtin, handler: noop }

@@ -12,6 +12,7 @@ import pytest
 from support.harness import make_repo
 
 from kraft.adapters import forge
+from kraft.adapters.forge.mr import MRMeta
 
 # Real output shapes, captured from glab 1.116.0 and gh 2.100.0 against this
 # repo on 2026-09-07. Parsers are written against these, not against recollection.
@@ -141,6 +142,32 @@ def test_glab_open_mr_parses_the_number_and_url(tmp_path, monkeypatch):
 
     assert mr.number == 54
     assert mr.url == "https://gitlab.com/itsOmidKarami/kraft/-/merge_requests/54"
+
+
+def test_open_mr_passes_the_authored_metadata(tmp_path, monkeypatch):
+    _stub(tmp_path, monkeypatch, "glab", GLAB_MR_VIEW)
+    _stub(tmp_path, monkeypatch, "git", "")
+
+    meta = MRMeta(labels=("release::minor",), assignees=("omid",), reviewers=("ada", "grace"))
+    asyncio.run(
+        forge.GlabCli().open_mr(repo=tmp_path, branch="kraft/abc", title="T", body="B", meta=meta)
+    )
+
+    argv = _argv(tmp_path, "glab")
+    assert argv[argv.index("--label") + 1] == "release::minor"
+    assert argv[argv.index("--assignee") + 1] == "omid"
+    assert argv[argv.index("--reviewer") + 1] == "ada,grace"
+
+
+def test_open_mr_omits_the_flags_it_has_no_values_for(tmp_path, monkeypatch):
+    # An empty `--label ""` is a real, empty value to glab, not an absence.
+    _stub(tmp_path, monkeypatch, "glab", GLAB_MR_VIEW)
+    _stub(tmp_path, monkeypatch, "git", "")
+
+    asyncio.run(forge.GlabCli().open_mr(repo=tmp_path, branch="kraft/abc", title="T", body="B"))
+
+    argv = _argv(tmp_path, "glab")
+    assert "--label" not in argv and "--assignee" not in argv and "--reviewer" not in argv
 
 
 def test_glab_ci_status_maps_a_failed_pipeline(tmp_path, monkeypatch):
