@@ -35,6 +35,14 @@ async def intake(
     root_merge_policy: str = "bump",
     attachments: list[dict] | None = None,
     status: str = "active",
+    #: When given, `status="active"` is downgraded to `"paused"` if
+    #: `active_count()` is already at `limit` -- read on the same connection
+    #: the INSERT below runs on, inside the same `db.write` transaction, so
+    #: the check and the flip are one statement's worth of atomicity rather
+    #: than a read a concurrent create/resume/retry can race (Kraft-m43g,
+    #: Kraft-nxht). `None` (the default, and every caller but the `/work-items`
+    #: autostart path) means "no cap enforced here" -- unchanged behaviour.
+    limit: int | None = None,
     bead_id: str | None = None,
     bead_cwd: str | None = None,
     #: The value to store in the row's `chain_template` column. `_UNSET`
@@ -99,6 +107,9 @@ async def intake(
     implements_beads = _extract_beads(description, exclude=bead_id)
 
     def _create(c):
+        effective_status = status
+        if limit is not None and status == "active" and store.active_count(c) >= limit:
+            effective_status = "paused"
         store.create_work_item(
             c,
             id=work_item_id,
@@ -114,7 +125,7 @@ async def intake(
             submodules=submodules,
             root_merge_policy=root_merge_policy,
             attachments=attachments,
-            status=status,
+            status=effective_status,
             implements_beads=implements_beads,
             auto_gate=auto_gate,
             budget_set=budget_set,

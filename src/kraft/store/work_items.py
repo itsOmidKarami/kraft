@@ -456,6 +456,7 @@ def claim_for_run(
     *,
     from_statuses: list[str],
     to_status: str = "active",
+    limit: int | None = None,
 ) -> bool:
     """Conditionally flip `work_item_id` to `to_status`. True when this caller
     won the claim.
@@ -464,6 +465,16 @@ def claim_for_run(
     writer connection: of two callers racing to claim the same item, exactly
     one sees `rowcount == 1` and the other sees 0 -- the item can never be
     claimed twice, whatever runs between the check and the write.
+
+    `limit`, when given, folds the `active_count` capacity check into the
+    same `UPDATE` instead of a separate `st.db.read` taken before it -- a
+    snapshot read isn't serialized against another writer's claim the way
+    two writes are against each other, so two items resumed/retried
+    milliseconds apart could each read a free slot and each independently
+    win (Kraft-m43g, Kraft-nxht). `rowcount == 0` now means either "not in
+    an eligible status" or "no slot free"; callers already can't tell those
+    apart from the return value alone, so they re-read `active_count()`
+    after a failed claim purely to word their own error message.
 
     `retry_at` is cleared unconditionally, the same convention every other
     flip-to-active function in this module already follows (`mark_reentered`,
@@ -476,10 +487,15 @@ def claim_for_run(
     else.
     """
     placeholders = ",".join("?" for _ in from_statuses)
+    capacity_clause = ""
+    params: tuple = (to_status, _now(), work_item_id, *from_statuses)
+    if limit is not None:
+        capacity_clause = " AND (SELECT COUNT(*) FROM work_items WHERE status = 'active') < ?"
+        params = (*params, limit)
     cur = conn.execute(
         f"UPDATE work_items SET status = ?, retry_at = NULL, updated_at = ? "
-        f"WHERE id = ? AND status IN ({placeholders})",
-        (to_status, _now(), work_item_id, *from_statuses),
+        f"WHERE id = ? AND status IN ({placeholders}){capacity_clause}",
+        params,
     )
     return cur.rowcount == 1
 
