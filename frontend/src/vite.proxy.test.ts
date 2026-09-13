@@ -29,4 +29,21 @@ describe("the dev vite proxy", () => {
     const viteConfig = readFileSync(join(here, "..", "vite.config.ts"), "utf-8");
     expect(viteConfig).toMatch(/process\.env\.KRAFT_PORT/);
   });
+
+  // Kraft-y0g2: the justfile owns the dev port (`dev_port`, default 8766) and
+  // exports it as KRAFT_PORT for `just dev` and `just ui`. This fallback is what
+  // a bare `npm run dev` gets, and it used to say 8765 -- an installed daemon's
+  // default -- so dev clicks landed in the operator's real instance. The two
+  // defaults have to stay equal; nothing but this test says so.
+  it("the proxy fallback port matches the justfile's dev_port default", () => {
+    const viteConfig = readFileSync(join(here, "..", "vite.config.ts"), "utf-8");
+    const justfile = readFileSync(join(here, "..", "..", "justfile"), "utf-8");
+
+    const fallback = viteConfig.match(/process\.env\.KRAFT_PORT \?\? "(\d+)"/)?.[1];
+    const devPort = justfile.match(/dev_port := env_var_or_default\("KRAFT_DEV_PORT", "(\d+)"\)/)?.[1];
+
+    expect(fallback).toBeDefined();
+    expect(devPort).toBeDefined();
+    expect(fallback).toBe(devPort);
+  });
 });
