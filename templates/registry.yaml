@@ -10,6 +10,13 @@ hooks:
   # --- placeholder bindings: on.review.mr.run replaced by its plugin effort (see 03_plugin_adapters) ---
   on.chain.review_ready:     { kind: agent, command: claude, skill: chain-review, artifact: chain_review, steering: [never-signal-processes-you-didnt-start] }
   on.review.local.run:       { kind: agent, command: claude, skill: code-review, steering: [never-signal-processes-you-didnt-start] }
+  # Registered but in no default chain: `chain_review` adds it to `verify` when a
+  # plan touches auth, sessions, tokens, secrets or permission checks. Its own
+  # rules already say to do that and to refuse to approximate with another hook
+  # when the right one is missing (skills/chain-review/SKILL.md "When to add"),
+  # so before this entry existed the only possible outcome for such a plan was a
+  # rationale noting the gap and a chain that ran no security review (Kraft-l2cg).
+  on.review.security.run:    { kind: agent, command: claude, skill: security-review, steering: [never-signal-processes-you-didnt-start] }
   # backend: auto resolves per repo, from the `forge` recorded on its
   # repos.yaml entry (Settings → Repos). A CLI name here pins every repo to one
   # forge, which is wrong for any install with repos on both. Never probed —

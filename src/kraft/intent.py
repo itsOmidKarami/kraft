@@ -34,6 +34,9 @@ class Report:
     unpinned: list[Requirement] = field(default_factory=list)
     duplicates: list[Requirement] = field(default_factory=list)
     malformed: list[Requirement] = field(default_factory=list)
+    #: Frontend pins, which this checker counts but cannot resolve (Kraft-fxyz).
+    #: Reported so "not verified here" never reads as "not pinned".
+    unverified: list[tuple[Requirement, str]] = field(default_factory=list)
 
     @property
     def pinned(self) -> int:
@@ -114,6 +117,30 @@ def check(requirements: list[Requirement], node_ids: set[str]) -> Report:
             report.unpinned.append(req)
             continue
         for pin in req.enforced_by:
+            if is_frontend_pin(pin):
+                if "::" not in pin:
+                    # The one thing still checkable about a pin nothing here can
+                    # resolve. A pytest pin's typo surfaces as BROKEN because it
+                    # is matched against real node ids; a frontend pin is matched
+                    # against nothing, so without this `enforced-by: frontend/`
+                    # would read as coverage forever.
+                    report.broken.append((req, pin))
+                    continue
+                # Kraft-fxyz: `collect_node_ids` asks pytest, which knows nothing
+                # about `frontend/src/**/*.test.tsx`, so a capability covered by a
+                # vitest test used to read as UNPINNED — two of eleven `gates`
+                # requirements were false gaps for exactly this reason. Counting
+                # it as pinned and reporting it separately is the honest answer:
+                # a pin this checker cannot resolve is not the same as no pin.
+                #
+                # Deliberately not resolved by shelling out to vitest. CI runs
+                # `uv run python -m kraft.intent` in a Python image with no node
+                # and no `frontend/node_modules` (.gitlab-ci.yml, lint-and-test),
+                # so a vitest call would fail the job for every repo without a
+                # frontend toolchain present. Verifying these pins belongs
+                # wherever vitest already runs — `just test-ui` — not here.
+                report.unverified.append((req, pin))
+                continue
             if pin not in node_ids:
                 report.broken.append((req, pin))
 
@@ -121,6 +148,18 @@ def check(requirements: list[Requirement], node_ids: set[str]) -> Report:
 
 
 DEFAULT_TREE = Path("docs/intent")
+
+
+#: A pin this checker counts but does not resolve: a vitest test, addressed the
+#: same way a pytest node id is (`path::test name`) but rooted in `frontend/`.
+#: Kept as a prefix test rather than a suffix one (`.test.tsx`) so a pin naming a
+#: file that was renamed still reads as a frontend pin rather than silently
+#: becoming a broken pytest pin.
+FRONTEND_PIN_ROOT = "frontend/"
+
+
+def is_frontend_pin(pin: str) -> bool:
+    return pin.startswith(FRONTEND_PIN_ROOT)
 
 
 def parse_collect_output(text: str) -> set[str]:
@@ -157,11 +196,16 @@ def render(report: Report) -> str:
         lines.append(f"BROKEN    {req.path}:{req.line}  REQ {req.id} -> {pin}")
     for req in report.unpinned:
         lines.append(f"UNPINNED  {req.path}:{req.line}  REQ {req.id}")
+    for req, pin in report.unverified:
+        lines.append(f"FRONTEND  {req.path}:{req.line}  REQ {req.id} -> {pin} (not checked here)")
 
-    lines.append(
+    summary = (
         f"intent: {report.total} requirements, {report.pinned} pinned, "
         f"{len(report.unpinned)} unpinned, {len(report.broken)} broken"
     )
+    if report.unverified:
+        summary += f", {len(report.unverified)} frontend pins not checked here"
+    lines.append(summary)
     return "\n".join(lines)
 
 

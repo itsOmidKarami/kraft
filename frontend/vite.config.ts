@@ -2,7 +2,12 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig, type ProxyOptions } from "vite";
 
-const API = `http://127.0.0.1:${process.env.KRAFT_PORT ?? "8765"}`;
+// Kraft-y0g2: the fallback is the *dev* instance's port (justfile's `dev_port`),
+// not 8765. `just ui` and `just dev` both export KRAFT_PORT, so this only applies
+// to a bare `npm run dev` — where 8765 meant proxying to whatever installed
+// daemon happens to be running, writing dev clicks into the operator's real
+// instance. Keep this in step with the justfile's `dev_port` default.
+const API = `http://127.0.0.1:${process.env.KRAFT_PORT ?? "8766"}`;
 // Every backend route lives under /api/ (including /api/ws/events), so one
 // prefix covers all of them — no more per-route entries to keep in sync with
 // api.ts. src/vite.proxy.test.ts still fails if api.ts starts requesting a
