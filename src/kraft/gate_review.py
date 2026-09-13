@@ -105,10 +105,11 @@ async def review(
         launch.repo_entry,
         launch.steering_dir,
         skills_dir=launch.skills_dir,
-        # Uniform with every other dispatch (kraft.executor.dispatch.dispatch_node)
-        # -- an item
-        # marked cheap stays cheap for its gate reviews too (Kraft-ui79: no
-        # per-gate floor).
+        # Item-wide overrides only -- an item marked cheap stays cheap for its
+        # gate reviews too (Kraft-ui79: no per-gate floor). Deliberately *not*
+        # the per-node `node_overrides` model/effort dial that
+        # `dispatch.dispatch_node` also merges (Kraft-df4tc): a node dialed to
+        # a different model does not carry that dial into its own gate review.
         item_override=json.loads(row["agent_overrides"]) if row["agent_overrides"] else None,
     )
     status = await _agent.run_agent_task(

@@ -59,3 +59,19 @@ def test_it_documents_carried_over_fields(text):
     reviewer following the schema to the letter looks like it strips them."""
     for field in ("on_failure", "reject_to", "rebase_bounce_to", "auto_escalate"):
         assert field in text, f"carried-over field {field!r} undocumented"
+
+
+def test_skill_documents_the_escalation_fields_as_settable(text):
+    assert "reject_to" in text.split("Every node you write is exactly")[1][:600]
+    assert "proposed_node_overrides" in text
+    assert "flags" in text
+
+
+def test_skill_documents_the_model_effort_dial_table(text):
+    assert "proposed_node_overrides" in text
+    assert "model" in text and "escalate_model" in text and "effort" in text
+
+
+def test_skill_documents_permission_surface_as_flag_only(text):
+    assert "flags" in text
+    assert "never propose" in text.lower() or "read-only" in text.lower()

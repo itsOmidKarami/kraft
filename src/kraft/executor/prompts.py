@@ -249,6 +249,65 @@ def named_with_kind(hook: str, registry: Registry) -> str:
     return f"{hook} [{kind}]" if kind else hook
 
 
+#: Fields chain-review is shown per hook point in its tail, read-only
+#: (2026-09-13 chain-review design, points 2-3): the cost/capability dial it
+#: may propose through `proposed_node_overrides`, plus the permission-
+#: surface fields it may only flag. `kind` first, always, so a builtin/
+#: subprocess/forge hook's line reads as "nothing here to override" rather
+#: than a confusing empty dict.
+_CHAIN_REVIEW_CONTEXT_FIELDS = (
+    "kind",
+    "model",
+    "escalate_model",
+    "effort",
+    "permission_mode",
+    "allowed_tools",
+    "deny_tools",
+    "command",
+    "skill",
+    "backend",
+    # A forge hook's own "what runs here" (Kraft-43kw added a second one:
+    # `on.merge` and `on.merge.watch` are both `{kind: forge, backend: auto}`
+    # without it). Same read-only class as `command`/`skill` for an agent hook.
+    "handler",
+)
+
+
+def chain_review_context(
+    tail_nodes: list[dict], registry: Registry, preceding_ids: tuple[str, ...] = ()
+) -> str:
+    """The resolved `registry.yaml` binding for every hook point named in
+    `tail_nodes` -- the not-yet-executed nodes chain-review may revise --
+    appended to `on.chain.review_ready`'s own instruction. Read-only context:
+    lets the reviewer name a real `flags` concern or a real
+    `proposed_node_overrides` value instead of guessing, from inside a
+    worktree that carries no copy of `registry.yaml` itself.
+
+    `preceding_ids` names the already-run nodes, listed so a backward
+    escalation target can be spelled correctly.
+
+    "" when the tail names no hooks and nothing has run yet, so an empty tail
+    costs nothing in the prompt.
+    """
+    lines = []
+    hooks = sorted({t for n in tail_nodes for t in n.get("tasks", [])})
+    if hooks:
+        lines.append("\n\nResolved hook bindings for the current tail (context only):")
+        for hook in hooks:
+            binding = registry.hooks.get(hook, {})
+            shown = {k: binding[k] for k in _CHAIN_REVIEW_CONTEXT_FIELDS if k in binding}
+            lines.append(f"- {hook}: {shown}")
+    # The ids themselves, not their bindings: a backward `reject_to`/
+    # `rebase_bounce_to` may name an already-run node, and the reviewer has no
+    # other way to learn what those are called (Kraft-df4tc).
+    if preceding_ids:
+        lines.append(
+            "\n\nNodes already run (valid backward reject_to/rebase_bounce_to "
+            "targets, alongside the nodes of your own tail): " + ", ".join(preceding_ids)
+        )
+    return "\n".join(lines)
+
+
 #: The fix-loop judge's task instruction (2026-09-12-verify-fix-loop-judge-
 #: design). The full verdict-reporting contract lives here, the same way
 #: `gate_review._PROMPT` carries its own -- the hook's `skill:` binding

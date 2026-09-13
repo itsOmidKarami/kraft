@@ -22,6 +22,16 @@ if [ -n "${KRAFT_FAKE_CLAUDE_PROMPT_LOG:-}" ]; then
   done
 fi
 
+# Test seam: record the full argv, one invocation per record (a lone NUL line
+# separates records, same convention as PROMPT_LOG above) -- so a test can
+# assert which --model actually reached the agent, since the reported
+# "model" in worker_sessions comes from the agent's own usage payload below,
+# not from this argv (Kraft-df4tc).
+if [ -n "${KRAFT_FAKE_CLAUDE_ARGV_LOG:-}" ]; then
+  for arg in "$@"; do printf '%s\n' "$arg" >> "$KRAFT_FAKE_CLAUDE_ARGV_LOG"; done
+  printf '\000\n' >> "$KRAFT_FAKE_CLAUDE_ARGV_LOG"
+fi
+
 # Per-invocation failure. KRAFT_FAKE_CLAUDE is per-server, so it cannot make one
 # work item fail while its neighbours succeed; the instruction can. The seed
 # script puts KRAFT_FAIL in a work item title to drive the needs_human path.

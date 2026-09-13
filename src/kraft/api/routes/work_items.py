@@ -14,7 +14,12 @@ from kraft.adapters import beads as beads_mod
 from kraft.api import api_router, deps
 from kraft.api.routes import board
 from kraft.executor import entry
-from kraft.templates import ATTACHMENT_GATES, materialize, validate_agent_overrides
+from kraft.templates import (
+    ATTACHMENT_GATES,
+    materialize,
+    validate_agent_overrides,
+    validate_node_override_fields,
+)
 
 
 class Attachment(BaseModel):
@@ -214,33 +219,9 @@ async def create_work_item(body: NewWorkItem, request: Request):
     for node_id, fields in body.node_overrides.items():
         if node_id not in node_ids:
             raise HTTPException(422, f"unknown node id {node_id!r}")
-        extra = set(fields) - store.OVERRIDABLE_NODE_FIELDS
-        if extra:
-            raise HTTPException(422, f"node {node_id!r}: cannot override {sorted(extra)}")
-        if "auto_escalate" in fields and not isinstance(fields["auto_escalate"], bool):
-            raise HTTPException(422, f"node {node_id!r}: auto_escalate must be a boolean")
-        if "auto_escalate_stuck" in fields and not isinstance(fields["auto_escalate_stuck"], bool):
-            raise HTTPException(422, f"node {node_id!r}: auto_escalate_stuck must be a boolean")
-        if "auto_escalate_delay_s" in fields and (
-            not isinstance(fields["auto_escalate_delay_s"], int)
-            or isinstance(fields["auto_escalate_delay_s"], bool)
-            or fields["auto_escalate_delay_s"] < 0
-        ):
-            raise HTTPException(
-                422, f"node {node_id!r}: auto_escalate_delay_s must be a non-negative int"
-            )
-        if "attempts" in fields and (
-            not isinstance(fields["attempts"], int)
-            or isinstance(fields["attempts"], bool)
-            or fields["attempts"] < 1
-        ):
-            raise HTTPException(422, f"node {node_id!r}: attempts must be a positive int")
-        if "wall_clock_s" in fields and (
-            not isinstance(fields["wall_clock_s"], int)
-            or isinstance(fields["wall_clock_s"], bool)
-            or fields["wall_clock_s"] < 1
-        ):
-            raise HTTPException(422, f"node {node_id!r}: wall_clock_s must be a positive int")
+        field_errs = validate_node_override_fields(fields)
+        if field_errs:
+            raise HTTPException(422, f"node {node_id!r}: {field_errs[0]}")
     try:
         wid = await executor.intake(
             st.db,
@@ -433,35 +414,9 @@ def _validate_node_overrides(st, row, patch: dict[str, dict]) -> None:
         for node_id, fields in patch.items():
             if node_id not in node_ids:
                 raise HTTPException(422, f"unknown node id {node_id!r}")
-            extra = set(fields) - store.OVERRIDABLE_NODE_FIELDS
-            if extra:
-                raise HTTPException(422, f"node {node_id!r}: cannot override {sorted(extra)}")
-            if "auto_escalate" in fields and not isinstance(fields["auto_escalate"], bool):
-                raise HTTPException(422, f"node {node_id!r}: auto_escalate must be a boolean")
-            if "auto_escalate_stuck" in fields and not isinstance(
-                fields["auto_escalate_stuck"], bool
-            ):
-                raise HTTPException(422, f"node {node_id!r}: auto_escalate_stuck must be a boolean")
-            if "auto_escalate_delay_s" in fields and (
-                not isinstance(fields["auto_escalate_delay_s"], int)
-                or isinstance(fields["auto_escalate_delay_s"], bool)
-                or fields["auto_escalate_delay_s"] < 0
-            ):
-                raise HTTPException(
-                    422, f"node {node_id!r}: auto_escalate_delay_s must be a non-negative int"
-                )
-            if "attempts" in fields and (
-                not isinstance(fields["attempts"], int)
-                or isinstance(fields["attempts"], bool)
-                or fields["attempts"] < 1
-            ):
-                raise HTTPException(422, f"node {node_id!r}: attempts must be a positive int")
-            if "wall_clock_s" in fields and (
-                not isinstance(fields["wall_clock_s"], int)
-                or isinstance(fields["wall_clock_s"], bool)
-                or fields["wall_clock_s"] < 1
-            ):
-                raise HTTPException(422, f"node {node_id!r}: wall_clock_s must be a positive int")
+            field_errs = validate_node_override_fields(fields)
+            if field_errs:
+                raise HTTPException(422, f"node {node_id!r}: {field_errs[0]}")
             if store.node_started(c, row["id"], node_id):
                 raise HTTPException(409, f"node {node_id!r} has started; its config is locked")
 
