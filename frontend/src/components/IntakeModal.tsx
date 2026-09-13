@@ -77,6 +77,8 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
   const [budgetDraft, setBudgetDraft] = useState("");
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
   const ref = useModal<HTMLFormElement>(onClose);
+  // Kraft-avvz: anything the user typed makes the backdrop click a no-op.
+  const dirty = Boolean(title.trim() || description.trim() || repo);
 
   useEffect(() => {
     api
@@ -232,7 +234,7 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
       role="dialog"
       aria-modal="true"
       aria-label="New work item"
-      {...backdropProps(onClose)}
+      {...backdropProps(onClose, dirty)}
     >
       <form
         className="dialog intake"

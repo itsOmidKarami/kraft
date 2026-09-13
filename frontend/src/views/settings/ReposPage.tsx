@@ -26,6 +26,8 @@ function AddRepo({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const ref = useModal<HTMLFormElement>(onClose);
+  // Kraft-avvz: a typed path makes the backdrop click a no-op.
+  const dirty = Boolean(path.trim());
 
   // Probing is read-only, so it can run as the path is typed — the dialog shows
   // what Kraft found before anything is written.
@@ -65,7 +67,7 @@ function AddRepo({
   };
 
   return (
-    <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label="Add repo" {...backdropProps(onClose)}>
+    <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label="Add repo" {...backdropProps(onClose, dirty)}>
       <form className="dialog intake" onSubmit={submit} ref={ref}>
         <div className="dialog-title">Add repo</div>
         <div className="field">

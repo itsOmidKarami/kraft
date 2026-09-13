@@ -60,9 +60,9 @@ describe("useModal", () => {
   });
 });
 
-function Backdrop({ onClose }: { onClose: () => void }) {
+function Backdrop({ onClose, dirty }: { onClose: () => void; dirty?: boolean }) {
   return (
-    <div data-testid="backdrop" {...backdropProps(onClose)}>
+    <div data-testid="backdrop" {...backdropProps(onClose, dirty)}>
       <div className="dialog">
         <button>inside</button>
       </div>
@@ -101,6 +101,13 @@ describe("backdropProps", () => {
     // fireEvent cannot pass offsetX: jsdom exposes it as a getter
     Object.defineProperty(press, "offsetX", { value: 8 });
     fireEvent(screen.getByTestId("backdrop"), press);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("ignores a press on the backdrop when the form is dirty (Kraft-avvz)", async () => {
+    const onClose = vi.fn();
+    render(<Backdrop onClose={onClose} dirty />);
+    await userEvent.click(screen.getByTestId("backdrop"));
     expect(onClose).not.toHaveBeenCalled();
   });
 
