@@ -324,13 +324,16 @@ def test_version_check_says_so_when_current(monkeypatch):
     assert "newest" in doctor._version_check()["detail"]
 
 
-def test_version_check_with_no_network_skips(monkeypatch):
+def test_version_check_with_no_network_warns_not_skips(monkeypatch):
+    """A dead release feed is `ok` (must not fail `doctor && deploy`) but not a
+    skip - it ran and could not confirm the answer, which is worth a human
+    noticing rather than folding silently into 'all checks passed'."""
     from kraft import update
 
     monkeypatch.delenv("KRAFT_NO_UPDATE_CHECK", raising=False)
     monkeypatch.setattr(update, "latest", lambda **_: None)
     row = doctor._version_check()
-    assert row["ok"] and row["skipped"]
+    assert row["ok"] and row["warn"] and not row["skipped"]
 
 
 def test_version_check_honours_the_no_check_env_var(monkeypatch):
