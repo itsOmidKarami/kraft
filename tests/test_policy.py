@@ -28,6 +28,19 @@ def test_resolve_cap_falls_back_to_default(tmp_path):
     assert policy.resolve_cap(p, "nonexistent_loop") == policy.Cap(2, 20)
 
 
+def test_resolve_cap_override_replaces_only_named_fields(tmp_path):
+    d = tmp_path / "policy.yaml"
+    d.write_text(
+        "loops:\n  verify_fix_loop: { attempts: 5, wall_clock_s: 10 }\n"
+        "default: { attempts: 2, wall_clock_s: 20 }\n"
+    )
+    p = policy.load_policy(d)
+    assert policy.resolve_cap(p, "verify_fix_loop", {"attempts": 9}) == policy.Cap(9, 10)
+    assert policy.resolve_cap(p, "verify_fix_loop", {"wall_clock_s": 99}) == policy.Cap(5, 99)
+    assert policy.resolve_cap(p, "verify_fix_loop", {}) == policy.Cap(5, 10)
+    assert policy.resolve_cap(p, "verify_fix_loop", None) == policy.Cap(5, 10)
+
+
 @pytest.mark.parametrize(
     "doc",
     [
