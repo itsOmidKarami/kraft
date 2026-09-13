@@ -287,6 +287,68 @@ def test_hooks_check_is_skipped_without_a_bundled_registry(tmp_path, monkeypatch
     assert check["skipped"] is True
 
 
+def test_chain_templates_check_names_a_node_missing_from_the_live_copy(tmp_path, monkeypatch):
+    bundled = tmp_path / "bundled"
+    (bundled / "templates").mkdir(parents=True)
+    (bundled / "templates" / "default.yaml").write_text(
+        "id: default\n"
+        "nodes:\n"
+        "  - id: spec\n"
+        "    tasks: [on.spec.requested]\n"
+        "  - id: chain_review\n"
+        "    tasks: [on.chain.review_ready]\n"
+    )
+    live = tmp_path / "templates"
+    live.mkdir()
+    (live / "default.yaml").write_text(
+        "id: default\nnodes:\n  - id: spec\n    tasks: [on.spec.requested]\n"
+    )
+    monkeypatch.setattr(doctor, "BUNDLED", bundled)
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(live))
+
+    check = _by_name(asyncio.run(doctor.run_checks()), "chain_templates")
+    assert check["ok"] is True  # an operator's own template, not a failure
+    assert "chain_review" in check["detail"]
+    assert "default.yaml" in check["detail"]
+
+
+def test_chain_templates_check_names_a_template_missing_entirely(tmp_path, monkeypatch):
+    bundled = tmp_path / "bundled"
+    (bundled / "templates").mkdir(parents=True)
+    (bundled / "templates" / "quick-task.yaml").write_text(
+        "id: quick-task\nnodes:\n  - id: implementation\n    tasks: [on.implementation.start]\n"
+    )
+    live = tmp_path / "templates"
+    live.mkdir()
+    # live has no quick-task.yaml at all
+    monkeypatch.setattr(doctor, "BUNDLED", bundled)
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(live))
+
+    check = _by_name(asyncio.run(doctor.run_checks()), "chain_templates")
+    assert check["ok"] is True
+    assert "quick-task.yaml missing entirely" in check["detail"]
+
+
+def test_chain_templates_check_ignores_files_with_no_nodes_list(tmp_path, monkeypatch):
+    bundled = tmp_path / "bundled"
+    (bundled / "templates").mkdir(parents=True)
+    (bundled / "templates" / "intake.yaml").write_text("enabled: false\ninterval_s: 300\n")
+    live = tmp_path / "templates"
+    live.mkdir()
+    monkeypatch.setattr(doctor, "BUNDLED", bundled)
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(live))
+
+    check = _by_name(asyncio.run(doctor.run_checks()), "chain_templates")
+    assert check["ok"] is True
+    assert check["skipped"] is True  # no chain templates found at all, nothing to diff
+
+
+def test_chain_templates_check_is_skipped_without_a_bundled_registry(tmp_path, monkeypatch):
+    monkeypatch.setattr(doctor, "BUNDLED", tmp_path / "absent")
+    check = _by_name(asyncio.run(doctor.run_checks()), "chain_templates")
+    assert check["skipped"] is True
+
+
 def test_bundle_check_fails_when_the_spa_is_missing(monkeypatch, tmp_path):
     """A wheel built without `just bundle` serves JSON and no UI. Nothing said so."""
     monkeypatch.setattr(doctor, "BUNDLED", tmp_path / "absent")
