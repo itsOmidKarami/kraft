@@ -10,7 +10,10 @@ here blocks for longer than its timeout. A failure is `None`, which reads as
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
+import subprocess
 import time
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError
@@ -50,13 +53,52 @@ def _cache_path():
     return default_run_dir() / "update-check.json"
 
 
-def _fetch(url: str, timeout: float):
-    """Split out so tests can replace the network without a fake transport."""
+def _api_path(url: str) -> str:
+    """`url` relative to the API root, for `glab api`."""
+    root = RELEASES_URL.split("/projects/", 1)[0]
+    return url[len(root) + 1 :] if url.startswith(root + "/") else url
+
+
+def _request(url: str, timeout: float) -> bytes:
+    """One authenticated GET, shared by the releases list and the wheel
+    download - same auth story install.sh has: the project is private, so an
+    anonymous request 404s. An explicit token first (works anywhere,
+    including a headless machine); an already-authenticated `glab` next (the
+    common case on a dev box); plain last, for the day this project goes
+    public and neither is needed.
+    """
+    token = os.environ.get("GITLAB_TOKEN")
+    if token:
+        import httpx
+
+        response = httpx.get(
+            url, timeout=timeout, headers={"PRIVATE-TOKEN": token}, follow_redirects=True
+        )
+        response.raise_for_status()
+        return response.content
+
+    if shutil.which("glab") and _glab_authed(timeout):
+        return subprocess.run(
+            ["glab", "api", _api_path(url)], capture_output=True, timeout=timeout, check=True
+        ).stdout
+
     import httpx
 
     response = httpx.get(url, timeout=timeout, follow_redirects=True)
     response.raise_for_status()
-    return response.json()
+    return response.content
+
+
+def _glab_authed(timeout: float) -> bool:
+    return (
+        subprocess.run(["glab", "auth", "status"], capture_output=True, timeout=timeout).returncode
+        == 0
+    )
+
+
+def _fetch(url: str, timeout: float):
+    """Split out so tests can replace the network without a fake transport."""
+    return json.loads(_request(url, timeout))
 
 
 def _parse(payload) -> Release | None:
@@ -147,15 +189,23 @@ def perform(release: Release, *, run=None) -> int:
     `uv tool install --force` is the same command `just install` ends with, so
     an updated Kraft is byte-identical to a freshly installed one rather than
     something only this path can produce.
+
+    `release.wheel_url` is unauthenticated from `uv`'s side, so handing it over
+    bare 401s the same way install.sh's did: fetch it here (with the same
+    auth `_fetch` uses) and give `uv` the local file instead.
     """
-    import subprocess
+    import tempfile
+    from pathlib import Path
 
     run = run or subprocess.run
-    command = ["uv", "tool", "install", "--force", "--from", release.wheel_url, "kraft"]
-    try:
-        return run(command).returncode
-    except FileNotFoundError:
-        raise SystemExit(
-            "kraft admin update: `uv` is not on PATH. Install it, or run this yourself:\n"
-            f"  {' '.join(command)}"
-        ) from None
+    with tempfile.TemporaryDirectory() as tmpdir:
+        wheel_path = Path(tmpdir) / release.wheel_url.rsplit("/", 1)[-1]
+        wheel_path.write_bytes(_request(release.wheel_url, TIMEOUT))
+        command = ["uv", "tool", "install", "--force", "--from", str(wheel_path), "kraft"]
+        try:
+            return run(command).returncode
+        except FileNotFoundError:
+            raise SystemExit(
+                "kraft admin update: `uv` is not on PATH. Install it, or run this yourself:\n"
+                f"  {' '.join(command)}"
+            ) from None
