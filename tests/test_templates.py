@@ -117,7 +117,7 @@ def test_policy_yaml_is_not_scanned_as_a_template():
     assert "policy" not in ts.valid
 
 
-def test_shipped_default_yaml_is_the_thirteen_node_chain():
+def test_shipped_default_yaml_is_the_fourteen_node_chain():
     reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
     ts = templates.load_templates(TEMPLATES_DIR, reg)
     assert "default" in ts.valid, ts.invalid
@@ -136,6 +136,7 @@ def test_shipped_default_yaml_is_the_thirteen_node_chain():
         "human_review",
         "mr_sync",
         "merge",
+        "post_merge_watch",
     ]
     gates = {n["id"]: n.get("gate_after") for n in nodes}
     assert gates["spec"] == "spec_approval"
@@ -143,10 +144,13 @@ def test_shipped_default_yaml_is_the_thirteen_node_chain():
     assert gates["chain_review"] == "chain_finalized"
     assert gates["human_review"] == "human_review_approval"
     assert gates["env_setup"] is None and gates["merge"] is None and gates["mr_sync"] is None
+    assert gates["post_merge_watch"] is None
 
     by_id = {n["id"]: n for n in nodes}
     assert by_id["pre_mr_rebase"]["rebase_bounce_to"] == "verify"
     assert by_id["pre_mr_rebase"]["tasks"] == ["on.mr.rebase"]
+    assert by_id["post_merge_watch"]["tasks"] == ["on.merge.watch"]
+    assert "fix_loop" not in by_id["post_merge_watch"]
 
 
 def test_the_default_chain_syncs_the_mr_after_the_review_gate():

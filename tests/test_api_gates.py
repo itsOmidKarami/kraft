@@ -16,6 +16,7 @@ from support.api import (
     _await_gate,
     _client,
     _poll_events,
+    _poll_node_started,
     _post_default,
     _wait_for_status,
 )
@@ -98,10 +99,8 @@ def test_gate_approve_advances_chain(tmp_path, monkeypatch):
         r = client.post(f"/api/work-items/{wid}/gates/spec_approval/approve")
         assert r.status_code == 200, r.text
         _poll_events(client, wid, "gate_approved")
-        assert any(
-            e["type"] == "node_started" and e["payload"]["node_id"] == "plan"
-            for e in client.get(f"/api/work-items/{wid}/events").json()
-        )
+        evts = _poll_node_started(client, wid, "plan")
+        assert any(e["type"] == "node_started" and e["payload"]["node_id"] == "plan" for e in evts)
 
 
 def test_chain_review_splice_runs_the_revised_tail(tmp_path, monkeypatch):

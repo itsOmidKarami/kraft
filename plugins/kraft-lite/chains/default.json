@@ -107,13 +107,21 @@
       ],
       "gate_after": null,
       "fix_loop": null
+    },
+    {
+      "id": "post_merge_watch",
+      "tasks": [
+        "on.merge.watch"
+      ],
+      "gate_after": null,
+      "fix_loop": null
     }
   ],
   "loops": {
-    "ci_fix_loop": {
+    "verify_fix_loop": {
       "attempts": 3
     },
-    "verify_fix_loop": {
+    "ci_fix_loop": {
       "attempts": 3
     }
   }

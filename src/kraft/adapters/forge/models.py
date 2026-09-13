@@ -95,6 +95,9 @@ class Forge(Protocol):
     async def ci_status(
         self, *, repo: Path, mr: MR, branch: str, pipeline_id: str = ""
     ) -> CIStatus: ...
+    async def branch_ci_status(
+        self, *, repo: Path, branch: str, head_sha: str, pipeline_id: str = ""
+    ) -> CIStatus: ...
     async def merge(self, *, repo: Path, branch: str, mr: MR) -> None: ...
     async def set_labels(self, *, repo: Path, mr: MR, labels: tuple[str, ...]) -> None: ...
     async def find_mr(self, *, repo: Path, branch: str) -> MRRef | None: ...
@@ -206,6 +209,21 @@ class FakeForge:
             sha=sha,
             failed_jobs=failed_jobs,
             pipeline_ref=pipeline_ref,
+        )
+
+    async def branch_ci_status(
+        self, *, repo: Path, branch: str, head_sha: str = "", pipeline_id: str = ""
+    ) -> CIStatus:
+        """Same script as `ci_status`, minus the merge request: this is the
+        shape `merge_watch` calls once there is no MR left to resolve from
+        (Kraft-tsfpk). `head_sha` is accepted only so the fake's signature
+        matches the real backends' -- the fake's own sha guard is exercised
+        through `ci_shas` regardless of which method a test calls."""
+        return await self.ci_status(
+            repo=repo,
+            mr=MR(number=0, url="http://fake.forge/branch"),
+            branch=branch,
+            pipeline_id=pipeline_id,
         )
 
     async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None:

@@ -328,8 +328,110 @@ def test_rejected_gates_and_stop_reasons_come_from_events(conn):
     assert a["totals"]["rejected_gates"] >= 1
     assert {"gate": "plan_approval", "n": 1} in a["rejected_gates_by_gate"]
     labels = {s["label"] for s in a["stop_reasons"]}
-    assert "agent question · needs_context" in labels
-    assert any(label.startswith("capped out · verify_fix_loop") for label in labels)
+    assert "task failure" in labels
+    assert "cap breach" in labels
+
+
+def _episode_conn(tmp_path, events_for_item):
+    """A minimal db with one completed work item and exactly the events
+    `events_for_item` gives it, in order. Shared by the four episode tests
+    below -- each supplies the exact event sequence the bead's own comment
+    describes for one real historical episode."""
+    conn = db._connect(tmp_path / "orchestrator.db")
+    db.migrate(conn)
+    _item(conn, "e1", status="completed", created=_at(2))
+    for i, (type_, payload) in enumerate(events_for_item):
+        _event(conn, "e1", type_, payload, _at(2 - i * 0.01))
+    _event(conn, "e1", "work_item_completed", {}, _at(0.5))
+    conn.commit()
+    return conn
+
+
+def test_episode_777c21c4_cap_breach_auto_escalated_is_zero_touches(tmp_path):
+    conn = _episode_conn(
+        tmp_path,
+        [
+            (
+                "work_item_needs_human",
+                {
+                    "node_id": "verify",
+                    "reason": "verify_fix_loop exhausted after 3 fix cycle(s)",
+                    "capped": {"cycles": 3, "attempts": 3},
+                },
+            ),
+            ("work_item_retried", {"escalated": True}),
+        ],
+    )
+    try:
+        t = analytics.compute(conn, range_="all")["totals"]
+    finally:
+        conn.close()
+    assert t["unplanned_touches_per_item"] == 0
+
+
+def test_episode_c7446dca_plan_stop_auto_escalated_is_zero_touches(tmp_path):
+    """Pre-Part-1 shape: a plain task-failure reason, indistinguishable from
+    a real failure without reading the session transcript -- but it
+    auto-resolved, so it still counts zero."""
+    conn = _episode_conn(
+        tmp_path,
+        [
+            (
+                "work_item_needs_human",
+                {"node_id": "plan", "reason": "blocked on Kraft-abc, not merged yet"},
+            ),
+            ("work_item_retried", {"escalated": True}),
+        ],
+    )
+    try:
+        t = analytics.compute(conn, range_="all")["totals"]
+    finally:
+        conn.close()
+    assert t["unplanned_touches_per_item"] == 0
+
+
+def test_episode_resume_defect_always_counts_one_touch(tmp_path):
+    conn = _episode_conn(
+        tmp_path,
+        [
+            (
+                "work_item_needs_human",
+                {
+                    "node_id": "implementation",
+                    "reason": "resume: current-node session did not resolve cleanly",
+                },
+            ),
+            ("work_item_retried", {}),
+        ],
+    )
+    try:
+        report = analytics.compute(conn, range_="all")
+    finally:
+        conn.close()
+    assert report["totals"]["unplanned_touches_per_item"] == 1
+    assert any(s["label"] == "orchestrator/infra defect" for s in report["stop_reasons"])
+
+
+def test_episode_cap_breach_resolved_by_a_human_counts_one_touch(tmp_path):
+    conn = _episode_conn(
+        tmp_path,
+        [
+            (
+                "work_item_needs_human",
+                {
+                    "node_id": "verify",
+                    "reason": "verify_fix_loop exhausted after 2 fix cycle(s)",
+                    "capped": {"cycles": 2, "attempts": 3},
+                },
+            ),
+            ("work_item_retried", {}),
+        ],
+    )
+    try:
+        t = analytics.compute(conn, range_="all")["totals"]
+    finally:
+        conn.close()
+    assert t["unplanned_touches_per_item"] == 1
 
 
 def test_by_repo_done_and_cycles(conn):
@@ -338,3 +440,59 @@ def test_by_repo_done_and_cycles(conn):
     )
     assert repo_a["done"] == 1  # w1 is completed
     assert repo_a["cycles"] == pytest.approx(1.0)  # w1's own max round is 1
+
+
+def test_unplanned_touches_and_open_mr_to_green_are_zero_safe_with_no_completed_items(tmp_path):
+    conn = db._connect(tmp_path / "orchestrator.db")
+    db.migrate(conn)
+    _item(conn, "w1", status="active", created=_at(1))
+    conn.commit()
+    try:
+        t = analytics.compute(conn, range_="7d", now=NOW)["totals"]
+    finally:
+        conn.close()
+    assert t["unplanned_touches_per_item"] == 0
+    assert t["open_mr_to_green_ci_ms"] == 0
+
+
+def test_open_mr_to_green_ci_ms_spans_open_mr_to_settled_mr_checks(tmp_path):
+    conn = db._connect(tmp_path / "orchestrator.db")
+    db.migrate(conn)
+    _item(conn, "w1", status="completed", created=_at(2))
+    _event(conn, "w1", "node_started", {"node_id": "open_mr"}, _at(1.5))
+    _event(conn, "w1", "node_completed", {"node_id": "mr_checks"}, _at(1.0))
+    _event(conn, "w1", "work_item_completed", {}, _at(0.9))
+    conn.commit()
+    try:
+        t = analytics.compute(conn, range_="7d", now=NOW)["totals"]
+    finally:
+        conn.close()
+    assert t["open_mr_to_green_ci_ms"] == pytest.approx(0.5 * 24 * 3600 * 1000, rel=1e-6)
+
+
+def test_unplanned_touches_per_item_breaks_out_by_chain_template(tmp_path):
+    """Same slicing mechanism `repo`/`template` already give every other
+    total -- filtered, not grouped, exactly like `by_repo`'s own filter args."""
+    conn = db._connect(tmp_path / "orchestrator.db")
+    db.migrate(conn)
+    _item(conn, "a1", template="alpha", status="completed", created=_at(2))
+    _event(
+        conn,
+        "a1",
+        "work_item_needs_human",
+        {"node_id": "verify", "reason": "resume: current-node session did not resolve cleanly"},
+        _at(1.5),
+    )
+    _event(conn, "a1", "work_item_retried", {}, _at(1.4))
+    _event(conn, "a1", "work_item_completed", {}, _at(1.0))
+
+    _item(conn, "b1", template="beta", status="completed", created=_at(2))
+    _event(conn, "b1", "work_item_completed", {}, _at(1.0))
+    conn.commit()
+    try:
+        alpha = analytics.compute(conn, range_="all", template="alpha")["totals"]
+        beta = analytics.compute(conn, range_="all", template="beta")["totals"]
+    finally:
+        conn.close()
+    assert alpha["unplanned_touches_per_item"] == 1
+    assert beta["unplanned_touches_per_item"] == 0

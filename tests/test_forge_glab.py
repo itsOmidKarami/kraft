@@ -428,6 +428,55 @@ def test_glab_ci_status_accepts_a_pipeline_for_the_current_head(tmp_path, monkey
     assert status.state == "success"
 
 
+def test_glab_branch_ci_status_never_resolves_a_merge_request(tmp_path, monkeypatch):
+    """merge_watch's whole reason to call this instead of `ci_status`: the
+    checked-out branch's MR is already merged, so this must never shell out
+    to `glab mr view` at all (code-review)."""
+    repo = make_repo(tmp_path)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    argv_log = _recording_stub(
+        tmp_path,
+        monkeypatch,
+        "glab",
+        f'[{{"id":1,"status":"success","ref":"main","sha":"{head}","web_url":"http://x/1"}}]',
+    )
+
+    status = asyncio.run(forge.GlabCli().branch_ci_status(repo=repo, branch="main", head_sha=head))
+
+    assert status.state == "success"
+    assert status.mergeable is None
+    calls = argv_log.read_text().splitlines()
+    assert all("mr view" not in call for call in calls)
+
+
+def test_glab_branch_ci_status_guards_against_the_caller_s_head_not_the_checkout_s(
+    tmp_path, monkeypatch
+):
+    """Second finding: the sha guard must compare against `head_sha` -- the
+    caller's freshly-fetched upstream head -- not `git._head_sha(repo)`, the
+    local checkout's own HEAD, which post-merge may not be pulled at all."""
+    repo = make_repo(tmp_path)
+    local_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    # The pipeline is for the checkout's local HEAD, which the caller's own
+    # upstream_head has already moved past.
+    _stub(
+        tmp_path,
+        monkeypatch,
+        "glab",
+        f'[{{"id":1,"status":"success","ref":"main","sha":"{local_head}","web_url":"http://x/1"}}]',
+    )
+
+    status = asyncio.run(
+        forge.GlabCli().branch_ci_status(repo=repo, branch="main", head_sha="not-pulled-yet")
+    )
+
+    assert status.state == "pending", "matched the stale local HEAD instead of the caller's"
+
+
 def test_glab_ci_status_reads_the_mr_merge_state(tmp_path, monkeypatch):
     """Kraft-ejj9. A branch with a green pipeline and a real conflict against
     main passed mr_checks as done, walked through human_review, and only met

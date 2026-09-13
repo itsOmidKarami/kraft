@@ -29,6 +29,8 @@ const report: Analytics = {
     fix_cycles: 1.6,
     fix_cycles_capped: 9,
     rejected_gates: 7,
+    unplanned_touches_per_item: 0.4,
+    open_mr_to_green_ci_ms: 45 * 60_000,
   },
   weekly_merged: [{ week_start: "2026-08-31", n: 4 }],
   by_node: [
@@ -109,15 +111,17 @@ describe("AnalyticsView", () => {
     expect(screen.queryByText(/last 7 days/i)).toBeNull();
   });
 
-  it("shows six KPIs", async () => {
+  it("shows eight KPIs", async () => {
     const { container } = renderView();
     await screen.findAllByText("6");
-    expect(container.querySelectorAll(".kpi")).toHaveLength(6);
+    expect(container.querySelectorAll(".kpi")).toHaveLength(8);
     const labels = [...container.querySelectorAll(".kpi-label")].map((n) => n.textContent);
     expect(labels).toEqual([
       "Completed",
       "Median lead time",
       "Human wait",
+      "Unplanned touches",
+      "Open MR → green CI",
       "Fix cycles",
       "Cost",
       "Rejected gates",
@@ -127,6 +131,8 @@ describe("AnalyticsView", () => {
       "6",
       elapsed(report.totals.median_lead_ms),
       "38%",
+      "0.40",
+      elapsed(report.totals.open_mr_to_green_ci_ms),
       "1.6",
       usd(18, true),
       "7",
