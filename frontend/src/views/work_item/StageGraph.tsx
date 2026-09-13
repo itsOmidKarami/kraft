@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { Flag, ShieldCheck } from "@phosphor-icons/react";
+import * as api from "../../api";
 import type { ChainNode, WorkItem } from "../../types";
 
 /**
@@ -7,11 +9,47 @@ import type { ChainNode, WorkItem } from "../../types";
  * whose effective `auto_escalate` is on. Selecting a pill sets `#node=<id>`
  * (`useNodeSelection`, `index.tsx`) — the inspector and right pane follow it.
  *
- * Trimmed-node placeholders (21's dimmed `spec` with a `–` glyph) are out of
- * scope here: rendering one needs the *template's* full node list, which the
- * detail payload does not carry and fetching `/templates/{id}` per page load
- * is a second round trip for a rare state. Filed as Kraft-1brd rather than built.
+ * Trimmed-node placeholders (21's dimmed `spec` with a `–` glyph, Kraft-1brd):
+ * a node an attachment satisfied at intake never enters `chain_definition`,
+ * so it needs the *template*'s own node list to know it existed at all.
+ * `GET /templates/{id}` (`api.getTemplate`) already returns that shape, keyed
+ * by `chain_template` -- fetched here rather than carried on the detail
+ * payload since it is only needed for this rare state.
  */
+
+/** A node the template lists that the live chain never got — its gate was
+ *  already satisfied by an attachment at intake (`templates.materialize`). */
+type TrimmedNode = { id: string; trimmed: true };
+
+function useFullNodeList(item: WorkItem, liveNodes: ChainNode[]): (ChainNode | TrimmedNode)[] {
+  const [templateIds, setTemplateIds] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setTemplateIds(null);
+    api
+      .getTemplate(item.chain_template)
+      .then((t) => {
+        if (!cancelled) setTemplateIds(t.nodes.map((n) => n.id));
+      })
+      .catch(() => {
+        if (!cancelled) setTemplateIds(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [item.chain_template]);
+
+  // Only trust the template order when it actually accounts for every live
+  // node -- a template edited since this item was created could otherwise
+  // drop a live node off the graph entirely instead of just missing a
+  // placeholder for a trimmed one.
+  if (!templateIds || !liveNodes.every((n) => templateIds.includes(n.id))) {
+    return liveNodes;
+  }
+  const byId = new Map(liveNodes.map((n) => [n.id, n]));
+  return templateIds.map((id) => byId.get(id) ?? { id, trimmed: true });
+}
 
 /** Shared with `Phone.tsx`'s vertical stage list (m04) — same three states,
  *  one glyph vocabulary. */
@@ -33,10 +71,25 @@ export function StageGraph({
   selected: string | null;
   onSelect: (nodeId: string) => void;
 }) {
-  const nodes = (item.effective_chain ?? item.chain_definition).nodes;
+  const liveNodes = (item.effective_chain ?? item.chain_definition).nodes;
+  const nodes = useFullNodeList(item, liveNodes);
   return (
     <nav className="stage-graph" aria-label="chain stages">
       {nodes.map((n, i) => {
+        if ("trimmed" in n) {
+          return (
+            <span className="stage-link-wrap" key={n.id}>
+              <span
+                className="stage-pill"
+                data-state="trimmed"
+                title={`${n.id} — skipped, its gate was already satisfied at intake`}
+              >
+                –
+              </span>
+              {i < nodes.length - 1 && <span className="stage-link" />}
+            </span>
+          );
+        }
         const isCurrent = n.id === item.current_node_id;
         return (
         <span className="stage-link-wrap" key={n.id}>
