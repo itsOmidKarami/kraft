@@ -88,10 +88,25 @@ _ARTIFACT = (
     "node_id: {node_id}\n"
     "hook_point: {hook_point}\n"
     "kind: {kind}s\n"
-    "title: <a one-line title for this {kind}>\n"
+    "{title_line}"
     "---\n"
     "If that file already exists, a human has read it and asked for changes: "
     "revise it in place rather than starting a new one."
+)
+
+#: The default `title:` line every other artifact kind gets.
+_TITLE_LINE = "title: <a one-line title for this {kind}>\n"
+
+#: The extra front-matter keys an `mr_meta` artifact carries, replacing
+#: `_TITLE_LINE` for this kind only. Kraft reads these straight into `glab mr
+#: create` arguments, so they are part of the contract, not of the method --
+#: the skill can be swapped without losing them.
+_MR_META_KEYS = (
+    "title: <the merge request's title, one line, in whatever pattern this "
+    "repo's merged MRs already follow>\n"
+    "labels: [<labels that already exist in this project, or an empty list>]\n"
+    "assignees: [<a username the repo names, or an empty list>]\n"
+    "reviewers: [<usernames CODEOWNERS names for these paths, or an empty list>]\n"
 )
 
 
@@ -376,12 +391,14 @@ async def run_agent_task(
         session_id=session_id,
     )
     if artifact:
+        title_line = _MR_META_KEYS if artifact == "mr_meta" else _TITLE_LINE.format(kind=artifact)
         ctx += _ARTIFACT.format(
             kind=artifact,
             path=artifact_path(artifact, work_item_id),
             work_item_id=work_item_id,
             node_id=node_id,
             hook_point=hook_point,
+            title_line=title_line,
         )
     if review_package:
         # By path, like $KRAFT_RESULT_PATH. A diff pasted into every review of

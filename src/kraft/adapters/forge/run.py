@@ -20,34 +20,11 @@ from kraft.adapters.forge.ci import (
 from kraft.adapters.forge.gh import GhCli
 from kraft.adapters.forge.glab import GlabCli
 from kraft.adapters.forge.models import MR, FailedJob, FakeForge, Forge, ForgeError
-from kraft.worktree_read import read_worktree_file
 
-#: A summary is capped again, tighter, once assembled into a body
-#: (`mr.MR_BODY_MAX_CHARS`) -- this is only large enough to stop an agent's
-#: multi-gigabyte mistake from being read into memory in full just to decide
-#: it is too big (same cap `api.routes.artifacts` reads gate artifacts at).
-_SUMMARY_READ_MAX_BYTES = 1_000_000
-
-
-def _session_summaries(db, work_item_id: str, worktree: Path) -> tuple[str, ...]:
-    """Every readable session summary this item's agents wrote, oldest first.
-
-    `session_summary_ref` is agent-supplied and untrusted (spec §4.2): read
-    through the same containment walk the gate-artifact reader uses, so a
-    path that is absolute, escapes the worktree via `..`, or passes through a
-    symlink is refused rather than published in a merge request description.
-    A NULL ref, a missing file, or a refused read are all the ordinary case
-    (spec §5) -- dropped silently here, never raised, never logged with the
-    file's own contents. `open_mr` must still open an MR when every summary
-    is missing.
-    """
-    refs = db.read(lambda c: store.session_summaries_for_item(c, work_item_id))
-    texts = []
-    for ref in refs:
-        result, _reason = read_worktree_file(worktree, ref, _SUMMARY_READ_MAX_BYTES)
-        if result is not None:
-            texts.append(result.text)
-    return tuple(texts)
+#: The empty metadata a node with no `on.mr.describe` artifact, or a run
+#: before Task 4's node exists, falls back to -- one shared instance so this
+#: stays a lint-clean default rather than a fresh call per signature.
+_EMPTY_META = mr_ops.MRMeta()
 
 
 def resolve(name: str) -> Forge:
@@ -116,7 +93,7 @@ async def _run_one(
     poll_interval: float,
     merge_timeout: float,
     merge_interval: float,
-    summaries: tuple[str, ...] = (),
+    meta: mr_ops.MRMeta = _EMPTY_META,
 ) -> tuple[str, str, list[dict] | None]:
     """One forge handler against one repo. Extracted from `run_task` so the
     multi-repo loop there can call it once per `work_item_repos` row; a
@@ -127,12 +104,12 @@ async def _run_one(
     finding per failed job, for the fix-loop plumbing `on.ci.poll` now feeds
     (Kraft-cbr §3).
 
-    `summaries` is resolved once by the caller against the item's own
-    worktree, not `repo` -- a multi-repo item's submodule targets are not
-    where the agent's `.engineering/sessions/*.md` lives.
+    `meta` is resolved once by the caller against the item's own worktree,
+    not `repo` -- a multi-repo item's submodule targets are not where the
+    agent's `on.mr.describe` artifact lives.
     """
     findings: list[dict] | None = None
-    body = mr_ops.mr_body(work_item_id, branch, await git.commits_on(repo, branch), summaries)
+    body = mr_ops.mr_body(work_item_id, branch, await git.commits_on(repo, branch), meta)
     match handler:
         case "open_mr":
             # Ask first: a rejected review re-entering the chain at
@@ -144,13 +121,26 @@ async def _run_one(
             if existing is not None and existing.state == "open":
                 # The same two calls `sync_mr` makes, for the same reason:
                 # the description has to describe the head a reviewer will
-                # see, and the head has to be pushed.
+                # see, and the head has to be pushed. Retitling an existing
+                # MR is not something either CLI does in this call, so the
+                # reused path keeps today's title.
                 await forge.push(repo=repo, branch=branch)
                 await forge.update_mr(repo=repo, branch=branch, body=body)
                 number, url = existing.number, existing.url
                 log, status = f"reusing !{number}: {url}\n", "done"
             else:
-                mr = await forge.open_mr(repo=repo, branch=branch, title=title, body=body)
+                # ponytail: the description predates any commit `mr_checks`'
+                # fix loop adds -- `sync_mr` rebuilds the body from this same
+                # artifact, not from the newer head. Re-run on.mr.describe
+                # from the fix loop if CI-fix commits start changing the
+                # story.
+                mr = await forge.open_mr(
+                    repo=repo,
+                    branch=branch,
+                    title=mr_ops.mr_title_for(title, meta),
+                    body=body,
+                    meta=meta,
+                )
                 number, url = mr.number, mr.url
                 log, status = f"opened {url}\n", "done"
             # An event, not a work-item column (Kraft-d2sq): no migration,
@@ -544,8 +534,8 @@ async def run_task(
         live_forge = resolve(backend_for(backend, repo_forge))
         # Resolved once against the item's own worktree (`repo`, not whichever
         # target the loop below is on) -- a multi-repo item's submodule paths
-        # are not where the agent's `.engineering/sessions/*.md` lives.
-        summaries = _session_summaries(db, work_item_id, repo)
+        # are not where the agent's `on.mr.describe` artifact lives.
+        meta = mr_ops.read_mr_meta(repo, work_item_id)
         for row_id, target_repo, role in targets:
             if handler == "open_mr" and role == "root" and multi:
                 await git._assert_submodules_covered(target_repo, {t for _, t, _ in targets})
@@ -564,7 +554,7 @@ async def run_task(
                 poll_interval=poll_interval,
                 merge_timeout=merge_timeout,
                 merge_interval=merge_interval,
-                summaries=summaries,
+                meta=meta,
             )
             if not multi:
                 findings = one_findings

@@ -139,6 +139,7 @@ def fake_registry(python_exe: str, fake_agent_path: Path) -> Registry:
     # nor a real agent, so they go back to noop here — the same reason the spec
     # and plan commands are swapped above.
     for hook in (
+        "on.mr.describe",
         "on.mr.open",
         "on.mr.sync",
         "on.ci.poll",
@@ -224,6 +225,7 @@ def fake_templates_dir(
                     },
                     "on.review.local.run": noop(),
                     "on.mr.rebase": {"kind": "builtin", "handler": "mr_rebase"},
+                    "on.mr.describe": noop(),
                     "on.mr.open": noop(),
                     "on.ci.poll": noop(),
                     "on.review.mr.run": noop(),

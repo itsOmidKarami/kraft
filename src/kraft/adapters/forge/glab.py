@@ -54,7 +54,15 @@ _UNREADABLE_JOBS = (FailedJob("(unreadable)", "failed", None),)
 class GlabCli:
     """GitLab through `glab`. Credentials stay in glab's own keyring."""
 
-    async def open_mr(self, *, repo: Path, branch: str, title: str, body: str) -> MR:
+    async def open_mr(
+        self,
+        *,
+        repo: Path,
+        branch: str,
+        title: str,
+        body: str,
+        meta: mr_ops.MRMeta | None = None,
+    ) -> MR:
         await git.assert_clean(repo)
         # Both forges refuse to create against an unpushed branch. `--fill --yes`
         # would push too, but pushing explicitly keeps the failure legible when
@@ -74,6 +82,7 @@ class GlabCli:
                 mr_ops.mr_title(title),
                 "--description",
                 body,
+                *mr_ops.meta_flags(meta or mr_ops.MRMeta()),
                 "--yes",
             ],
         )

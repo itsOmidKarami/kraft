@@ -902,6 +902,7 @@ HOOK_KEYWORDS = {
     # No candidates: rebasing onto the repo's current HEAD is the forge
     # adapter's own job, not something an installed skill serves.
     "on.mr.rebase": (),
+    "on.mr.describe": ("mr-metadata",),
     "on.mr.open": ("finishing", "branch", "pull-request", "merge-request"),
     # No candidates: rewriting a merge request description from the branch is
     # the forge adapter's own job, not something an installed skill serves.
