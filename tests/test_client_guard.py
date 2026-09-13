@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from kraft import client
+from kraft.client import actions
 
 
 @pytest.fixture
@@ -48,3 +51,19 @@ def test_acting_with_no_target_and_no_context_says_so(run_dir, tmp_path, monkeyp
     monkeypatch.chdir(tmp_path)
     with pytest.raises(ValueError, match="no work item"):
         client.context._forbid_self_action(None)
+
+
+def test_a_worker_cannot_set_its_own_agent_overrides(run_dir, monkeypatch):
+    """Kraft-g1ebw: set_agent_overrides used to resolve via `resolve_work_item`,
+    which skips the guard -- a worker could dial its own model/effort mid-run
+    with no gate, unlike every other mutating verb here."""
+    monkeypatch.setenv("KRAFT_WORK_ITEM_ID", "mine")
+    with pytest.raises(PermissionError, match="its own work item"):
+        asyncio.run(actions.set_agent_overrides(model="opus"))
+
+
+def test_a_worker_cannot_set_its_own_node_overrides(run_dir, monkeypatch):
+    """Kraft-g1ebw, same gap on the node-scoped override door."""
+    monkeypatch.setenv("KRAFT_WORK_ITEM_ID", "mine")
+    with pytest.raises(PermissionError, match="its own work item"):
+        asyncio.run(actions.set_node_overrides("some_node", auto_escalate=True))
