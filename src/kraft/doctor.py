@@ -30,10 +30,19 @@ AGENT_COMMAND = "claude"
 BEADS_COMMAND = "bd"
 
 
-def _check(name: str, ok: bool, detail: str = "", *, skipped: bool = False) -> dict:
+def _check(
+    name: str, ok: bool, detail: str = "", *, skipped: bool = False, warn: bool = False
+) -> dict:
     """A skipped check is `ok`: it did not fail, it did not run. Only a real
-    failure may set the exit code, or one dead server reads as five problems."""
-    return {"name": name, "ok": ok, "detail": detail, "skipped": skipped}
+    failure may set the exit code, or one dead server reads as five problems.
+
+    `warn` is also `ok` for the same reason, but it is not a skip: the check
+    ran and could not confirm the answer (a release feed that didn't
+    respond, say), which is worth a human noticing even though `doctor &&
+    deploy` must not break on it. A skip and a warn look the same to the exit
+    code and different to the human reading the output.
+    """
+    return {"name": name, "ok": ok, "detail": detail, "skipped": skipped, "warn": warn}
 
 
 async def run_checks() -> list[dict]:
@@ -427,7 +436,11 @@ def _version_check() -> dict:
         return _check("version", True, f"{here} (skipped: KRAFT_NO_UPDATE_CHECK)", skipped=True)
     release = update.latest()
     if release is None:
-        return _check("version", True, f"{here} (skipped: no release feed)", skipped=True)
+        # Not a skip: this ran and failed to get an answer, which on a
+        # private project usually means no GITLAB_TOKEN and no authenticated
+        # `glab` - worth a human's attention, unlike an opt-out or a missing
+        # server.
+        return _check("version", True, f"{here} (could not reach the release feed)", warn=True)
     if update.is_behind(release):
         return _check("version", True, f"{here} installed, {release.tag} available")
     return _check("version", True, f"{here} (the newest release)")
