@@ -429,7 +429,14 @@ async def walk_node(
         # item on the trend `/retry` was supposed to escape.
         previous_fix = _previous_fix_session(db, work_item_id, node["id"])
         counter_row = db.read(lambda c: store.read_counter(c, work_item_id, key))
-        judge_due = previous_fix is not None and counter_row is not None and not steer
+        # Only a *human*-authored steer gets the free pass the comment above
+        # describes. A seeded one (Kraft's own recap of findings the last
+        # review already left, Kraft-7sec second half) is not a person's
+        # deliberate answer to the trend this judge exists to brake, so it
+        # must not silently stand in for one (review finding on this plan).
+        judge_due = (
+            previous_fix is not None and counter_row is not None and not (steer and steer.human)
+        )
         found, reported = dispatch.collect_findings(db, work_item_id, node, round)
         eligible = [f for f in found if f.severity in policy.loop_severities]
         prints = sorted({f.fingerprint for f in eligible})
@@ -660,10 +667,11 @@ async def run_once(
     start_index: int = 0,
     policy: _policy.Policy | None = None,
     steer: str | None = None,
+    steer_seeded: bool = False,
     launch: LaunchContext | None = None,
 ) -> str:
     # the note is good for one agent launch, whichever task gets there first
-    carried = Steer(steer)
+    carried = Steer(steer, human=not steer_seeded)
     row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
     )
@@ -778,6 +786,7 @@ async def run(
     start_index: int = 0,
     policy: _policy.Policy | None = None,
     steer: str | None = None,
+    steer_seeded: bool = False,
     launch: LaunchContext | None = None,
     on_approve: OnApprove | None = None,
 ) -> str:
@@ -790,6 +799,7 @@ async def run(
         start_index=start_index,
         policy=policy,
         steer=steer,
+        steer_seeded=steer_seeded,
         launch=launch,
     )
     status = await gates.review_gates(

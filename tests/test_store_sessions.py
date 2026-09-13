@@ -568,3 +568,559 @@ def test_running_sessions_for_node_includes_an_escalation_on_another_node(tmp_pa
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_reusable_session_matches_a_done_session_at_the_current_head(tmp_path):
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="verify",
+                    hook_point="on.test.run",
+                    log_path="/l",
+                    result_path="/r",
+                    round=0,
+                    head_sha="sha-a",
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "s1", "done"))
+            got = database.read(
+                lambda c: store.reusable_session(c, "w1", "verify", "on.test.run", 0, "sha-a")
+            )
+            assert got is not None and got["id"] == "s1"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_reusable_session_rejects_a_stale_head_sha(tmp_path):
+    """The worktree moved since this session ran (a rebase, or a fix commit
+    from a later cycle) -- the recorded 'done' no longer describes the code as
+    it stands, so it must not be reused."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="verify",
+                    hook_point="on.test.run",
+                    log_path="/l",
+                    result_path="/r",
+                    round=0,
+                    head_sha="sha-old",
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "s1", "done"))
+            got = database.read(
+                lambda c: store.reusable_session(c, "w1", "verify", "on.test.run", 0, "sha-new")
+            )
+            assert got is None
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_reusable_session_rejects_a_null_head_sha_on_either_side(tmp_path):
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="verify",
+                    hook_point="on.test.run",
+                    log_path="/l",
+                    result_path="/r",
+                    round=0,
+                    # no head_sha kwarg -- stays NULL
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "s1", "done"))
+            # a NULL stored row never matches a real sha the caller asks about
+            assert (
+                database.read(
+                    lambda c: store.reusable_session(c, "w1", "verify", "on.test.run", 0, "sha-a")
+                )
+                is None
+            )
+            # a caller with no sha of its own (worktree HEAD unreadable) never reuses either
+            assert (
+                database.read(
+                    lambda c: store.reusable_session(c, "w1", "verify", "on.test.run", 0, None)
+                )
+                is None
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_reusable_session_ignores_a_non_done_status(tmp_path):
+    """`failed`, `rate_limited`, `done_with_concerns` and still-`running` are
+    all not a known-good result to stand in for a fresh dispatch."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            for sid, status in (
+                ("s-failed", "failed"),
+                ("s-rl", "rate_limited"),
+                ("s-concerns", "done_with_concerns"),
+            ):
+                await database.write(
+                    lambda c, sid=sid: store.create_session(
+                        c,
+                        id=sid,
+                        work_item_id="w1",
+                        node_id="verify",
+                        hook_point="on.test.run",
+                        log_path="/l",
+                        result_path="/r",
+                        round=0,
+                        head_sha="sha-a",
+                    )
+                )
+                await database.write(
+                    lambda c, sid=sid, status=status: store.session_exited(c, sid, status)
+                )
+            got = database.read(
+                lambda c: store.reusable_session(c, "w1", "verify", "on.test.run", 0, "sha-a")
+            )
+            assert got is None
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_reusable_session_excludes_a_session_whose_node_already_completed(tmp_path):
+    """A node revisited after its own completion (a gate rejection walking
+    back to it, not a crash mid-measurement) must not reuse a prior pass's
+    session even if hook_point/round/head_sha all still line up -- an agent
+    task that makes no further change on a second pass leaves head_sha
+    exactly where the first, already-closed pass left it too."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="implementation",
+                    hook_point="on.implementation.start",
+                    log_path="/l",
+                    result_path="/r",
+                    round=0,
+                    head_sha="sha-a",
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "s1", "done"))
+            await database.write(lambda c: store.complete_node(c, "w1", "implementation"))
+            got = database.read(
+                lambda c: store.reusable_session(
+                    c, "w1", "implementation", "on.implementation.start", 0, "sha-a"
+                )
+            )
+            assert got is None
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_reusable_session_excludes_a_second_pass_after_a_second_rejection(tmp_path):
+    """`complete_node` only ever writes `node_completed` once (Kraft-gbt /
+    Kraft-126), so a SECOND pass over a node reached via `reject_to` closes
+    out as a silent no-op -- nothing marks it done a second time. Without the
+    `node_started` re-entry check, the second pass's own session would still
+    be sitting there, unexcluded, ready to be handed back on a third pass."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            # pass 1: implementation runs, then the chain walks on to a gate
+            # node before rejecting back.
+            await database.write(lambda c: store.enter_node(c, "w1", "implementation"))
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="implementation",
+                    hook_point="on.implementation.start",
+                    log_path="/l1",
+                    result_path="/r1",
+                    round=0,
+                    head_sha="sha-a",
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "s1", "done"))
+            await database.write(lambda c: store.complete_node(c, "w1", "implementation"))
+            await database.write(lambda c: store.enter_node(c, "w1", "human_review"))
+
+            # pass 2: rejected back to implementation. Its own session leaves
+            # head_sha unchanged, and `complete_node` no-ops this time.
+            await database.write(lambda c: store.enter_node(c, "w1", "implementation"))
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s2",
+                    work_item_id="w1",
+                    node_id="implementation",
+                    hook_point="on.implementation.start",
+                    log_path="/l2",
+                    result_path="/r2",
+                    round=0,
+                    head_sha="sha-a",
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "s2", "done"))
+            await database.write(lambda c: store.complete_node(c, "w1", "implementation"))
+            await database.write(lambda c: store.enter_node(c, "w1", "human_review"))
+
+            # pass 3: rejected a second time -- `measure_node` enters the node
+            # (writing its own `node_started`) before it ever asks whether a
+            # prior session can stand in for a fresh dispatch.
+            await database.write(lambda c: store.enter_node(c, "w1", "implementation"))
+            got = database.read(
+                lambda c: store.reusable_session(
+                    c, "w1", "implementation", "on.implementation.start", 0, "sha-a"
+                )
+            )
+            assert got is None
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_reusable_session_ignores_a_stuck_pending_sibling(tmp_path):
+    """A multi-scope `on.test.run` mints one session per scope, all sharing
+    (node, hook point, round, head_sha) -- a crash between scopes leaves an
+    earlier scope `done` and the next one stuck `pending` forever. The `done`
+    row must not be handed back as if the whole hook finished (code review)."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s-scope-a",
+                    work_item_id="w1",
+                    node_id="verify",
+                    hook_point="on.test.run",
+                    log_path="/l1",
+                    result_path="/r1",
+                    round=0,
+                    head_sha="sha-a",
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "s-scope-a", "done"))
+            # scope B's row is inserted before it runs, and the crash lands
+            # before it ever exits -- left stuck 'pending'.
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s-scope-b",
+                    work_item_id="w1",
+                    node_id="verify",
+                    hook_point="on.test.run",
+                    log_path="/l2",
+                    result_path="/r2",
+                    round=0,
+                    head_sha="sha-a",
+                )
+            )
+            got = database.read(
+                lambda c: store.reusable_session(c, "w1", "verify", "on.test.run", 0, "sha-a")
+            )
+            assert got is None
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_latest_session_per_task_drops_a_failed_earlier_attempt(tmp_path):
+    """Kraft-s15p0: an earlier attempt's failed row for the same hook_point
+    must not survive alongside the current attempt's own row."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s-attempt-1",
+                    work_item_id="w1",
+                    node_id="plan",
+                    hook_point="on.plan.requested",
+                    log_path="/l1",
+                    result_path="/r1",
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "s-attempt-1", "failed"))
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s-attempt-2",
+                    work_item_id="w1",
+                    node_id="plan",
+                    hook_point="on.plan.requested",
+                    log_path="/l2",
+                    result_path="/r2",
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "s-attempt-2", "done"))
+            rows = database.read(
+                lambda c: store.latest_session_per_task(c, "w1", "plan", ["on.plan.requested"])
+            )
+            assert [r["id"] for r in rows] == ["s-attempt-2"]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_latest_session_per_task_ignores_a_hook_point_the_node_never_declared(tmp_path):
+    """Kraft-s15p0: an `escalation` session is never one of `node['tasks']`,
+    so it must never be selected regardless of when it ran."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s-escalation",
+                    work_item_id="w1",
+                    node_id="plan",
+                    hook_point="escalation",
+                    log_path="/l1",
+                    result_path="/r1",
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "s-escalation", "done"))
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s-task",
+                    work_item_id="w1",
+                    node_id="plan",
+                    hook_point="on.plan.requested",
+                    log_path="/l2",
+                    result_path="/r2",
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "s-task", "done"))
+            rows = database.read(
+                lambda c: store.latest_session_per_task(c, "w1", "plan", ["on.plan.requested"])
+            )
+            assert [r["id"] for r in rows] == ["s-task"]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_latest_session_per_task_omits_a_hook_point_with_no_session_at_all(tmp_path):
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            rows = database.read(
+                lambda c: store.latest_session_per_task(c, "w1", "plan", ["on.plan.requested"])
+            )
+            assert rows == []
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_latest_session_per_task_surfaces_a_stuck_sibling_over_a_finished_scope(tmp_path):
+    """A multi-scope `on.test.run` mints one session per scope sharing this
+    hook_point -- a crash between scopes leaves an earlier scope `done` and
+    the next one stuck `pending`. Picking the merely-latest-created row would
+    return the finished scope and read the whole hook as clean; the stuck
+    sibling must win instead so the caller's `all(... in _ADVANCING)` check
+    still fails closed (code review)."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s-scope-a",
+                    work_item_id="w1",
+                    node_id="verify",
+                    hook_point="on.test.run",
+                    log_path="/l1",
+                    result_path="/r1",
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "s-scope-a", "done"))
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s-scope-b",
+                    work_item_id="w1",
+                    node_id="verify",
+                    hook_point="on.test.run",
+                    log_path="/l2",
+                    result_path="/r2",
+                )
+            )
+            rows = database.read(
+                lambda c: store.latest_session_per_task(c, "w1", "verify", ["on.test.run"])
+            )
+            assert [r["id"] for r in rows] == ["s-scope-b"]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_reusable_session_excludes_a_node_rejected_back_to_itself(tmp_path):
+    """The `node_started` re-entry check needs a departure to another node in
+    between, which a gate with no `reject_to` never produces: `plan`'s gate
+    (`templates/default.yaml`) re-enters `plan` itself, and its artifact lives
+    in gitignored `.engineering/`, so `head_sha` does not move either. Without
+    the `gate_rejected` check, the first pass's session matches every other
+    key on a second rejection, the plan agent never runs, and the human's
+    second rejection note is silently dropped."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            # pass 1: plan runs and closes out; its gate is then rejected,
+            # which re-enters `plan` itself -- no other node in between.
+            await database.write(lambda c: store.enter_node(c, "w1", "plan"))
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="plan",
+                    hook_point="on.plan.requested",
+                    log_path="/l1",
+                    result_path="/r1",
+                    round=0,
+                    head_sha="sha-a",
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "s1", "done"))
+            await database.write(lambda c: store.complete_node(c, "w1", "plan"))
+            await database.write(
+                lambda c: store.reject_gate(
+                    c, "w1", "plan_approval", "section 3 is wrong", reopen=True
+                )
+            )
+            # pass 2: the re-planned document is rejected a second time. Its
+            # own `complete_node` is the silent no-op (Kraft-gbt / Kraft-126),
+            # so nothing marks `plan` done again and the `node_completed`
+            # check has nothing newer than s2 to exclude against.
+            await database.write(lambda c: store.enter_node(c, "w1", "plan"))
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s2",
+                    work_item_id="w1",
+                    node_id="plan",
+                    hook_point="on.plan.requested",
+                    log_path="/l2",
+                    result_path="/r2",
+                    round=0,
+                    head_sha="sha-a",
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "s2", "done"))
+            await database.write(lambda c: store.complete_node(c, "w1", "plan"))
+            await database.write(
+                lambda c: store.reject_gate(
+                    c, "w1", "plan_approval", "section 3 is still wrong", reopen=True
+                )
+            )
+            # pass 3 enters `plan` and asks whether s2 can stand in for it.
+            await database.write(lambda c: store.enter_node(c, "w1", "plan"))
+
+            got = database.read(
+                lambda c: store.reusable_session(c, "w1", "plan", "on.plan.requested", 0, "sha-a")
+            )
+            assert got is None, "a rejected node must re-run its agent, not reuse the last pass"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_reusable_session_still_reuses_a_crash_recovery_after_an_older_rejection(tmp_path):
+    """The `gate_rejected` exclusion is scoped to rejections that come *after*
+    the candidate session. A rejection earlier in the item's life started the
+    pass this session belongs to, so it must not block the reuse Kraft-gl9d is
+    for."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            await database.write(lambda c: store.enter_node(c, "w1", "plan"))
+            await database.write(
+                lambda c: store.reject_gate(
+                    c, "w1", "plan_approval", "try again", reopen=True, node="plan"
+                )
+            )
+            # the pass the rejection started: its session runs, then the
+            # server crashes and re-enters the same still-open node.
+            await database.write(lambda c: store.enter_node(c, "w1", "plan"))
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="plan",
+                    hook_point="on.plan.requested",
+                    log_path="/l1",
+                    result_path="/r1",
+                    round=0,
+                    head_sha="sha-a",
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "s1", "done"))
+
+            got = database.read(
+                lambda c: store.reusable_session(c, "w1", "plan", "on.plan.requested", 0, "sha-a")
+            )
+            assert got is not None and got["id"] == "s1"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())

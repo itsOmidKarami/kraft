@@ -96,11 +96,13 @@ async def reconcile_current_node(
         if task is not None:
             await task
 
+    # Scoped to this node's own declared tasks, latest attempt only
+    # (Kraft-s15p0) -- not every worker_sessions row this node has ever
+    # accumulated across every escalation and every earlier failed attempt.
+    # See `store.latest_session_per_task`'s own docstring for the observed
+    # history this fixes.
     final = db.read(
-        lambda c: c.execute(
-            "SELECT status FROM worker_sessions WHERE work_item_id = ? AND node_id = ?",
-            (work_item_id, node_id),
-        ).fetchall()
+        lambda c: store.latest_session_per_task(c, work_item_id, node_id, node["tasks"])
     )
     # ponytail: single-task-node resume only. A crash mid-fan-out of a multi-task
     # node (fewer sessions than tasks, none failed) -> needs_human, no partial

@@ -716,6 +716,9 @@ async def resume_after_escalation(
         payload["gate_key"],
         payload["steer"],
     )
+    # Absent on an event written before this field existed, or on a
+    # hand-built test payload -- default False rather than KeyError either way.
+    seeded = payload.get("seeded", False)
     row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
     )
@@ -757,7 +760,14 @@ async def resume_after_escalation(
         await db.write(lambda c: store.set_base_ref(c, work_item_id, new_base))
     await db.write(
         lambda c: store.retry_after_cap(
-            c, work_item_id, node_id, key, steer, gate_key=gate_key, escalated=True
+            c,
+            work_item_id,
+            node_id,
+            key,
+            steer,
+            gate_key=gate_key,
+            escalated=True,
+            seeded=seeded,
         )
     )
     chain = json.loads(row["chain_definition"])
@@ -771,6 +781,7 @@ async def resume_after_escalation(
         start_index=start,
         policy=policy,
         steer=steer,
+        steer_seeded=seeded,
         launch=launch,
         on_approve=on_approve,
     )

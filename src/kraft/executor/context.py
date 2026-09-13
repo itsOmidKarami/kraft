@@ -68,10 +68,21 @@ class Steer:
     Both entry points mean the same thing by it — "say this to the next agent you
     start" — so it is carried down the walk and consumed by whichever dispatch
     gets there first, rather than each caller guessing which task that will be.
+
+    `human` is True unless the caller says otherwise -- every existing
+    constructor call (a typed `/retry --steer`, a `/resume --steer`, the
+    rebase-drift note Kraft writes for itself mid-bounce) keeps meaning what
+    it already means. The flag exists for exactly one reader,
+    `kraft.executor.walk.walk_node`'s `judge_due`: a carried-in steer is meant
+    to be the human's own answer to the trend the fix-loop judge might stop
+    on, so it is exempted from that judge -- a *seeded* steer (Kraft's own
+    recap of the last review's unresolved findings, Kraft-7sec second half)
+    is not that answer, and must not silently claim to be one.
     """
 
-    def __init__(self, text: str | None = None) -> None:
+    def __init__(self, text: str | None = None, *, human: bool = True) -> None:
         self._text = text or None
+        self.human = human
 
     def take(self) -> str | None:
         text, self._text = self._text, None
