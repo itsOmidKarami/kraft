@@ -102,6 +102,9 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 .hairline-section { background: var(--hairline-48); }
 
 .row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.row-title, .row-sub {
+  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .row-title { font-size: 14px; color: var(--color-text); }
 .row-sub { font-size: 12px; color: var(--color-neutral-500); }
 
@@ -1195,6 +1198,11 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
 .intake-grid { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 24px; align-items: start; }
 .intake-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .intake-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+/* Screen 10: label left, control right — the opposite of .control-row's
+ * other user (ActionBar), so scoped to this rail rather than changed
+ * everywhere .control-row appears. */
+.intake-side .control-row { justify-content: space-between; }
+.intake-side .control-row > input, .intake-side .control-row > .readout { flex: none; width: 140px; }
 .intake-foot { position: sticky; bottom: 0; background: var(--color-surface); }
 .chain-template-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .attachment-chip {
@@ -1325,7 +1333,7 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; w
     var(--color-divider) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
 }
 .hook-row { grid-template-columns: minmax(0, 1fr) 240px 60px; }
-.cap-row { grid-template-columns: minmax(0, 1fr) 110px 140px; }
+.cap-row { grid-template-columns: minmax(0, 1fr) 110px 140px minmax(0, 1fr); }
 .budget-row { grid-template-columns: minmax(0, 1fr) 140px; }
 .hook-head, .cap-head {
   padding: 0 0 6px; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;

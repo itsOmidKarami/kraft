@@ -96,35 +96,37 @@ export function AnalyticsView() {
   return (
     <div className="analytics analytics-body">
       <div className="analytics-head">
-        <h2>Analytics</h2>
-        <span className="analytics-scope">
-          completed work items · what they cost and where the time went
-        </span>
-      </div>
-      <div className="analytics-scope-bar">
-        <span className="chip-static">last 8 weeks</span>
-        <label className="chip-select">
-          repo:
-          <select value={repo ?? ""} onChange={(e) => setRepo(e.target.value || null)}>
-            <option value="">all</option>
-            {repoOptions.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="chip-select">
-          template:
-          <select value={tpl ?? ""} onChange={(e) => setTpl(e.target.value || null)}>
-            <option value="">all</option>
-            {tplOptions.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div>
+          <h2>Analytics</h2>
+          <span className="analytics-scope">
+            completed work items · what they cost and where the time went
+          </span>
+        </div>
+        <div className="analytics-filters">
+          <span className="chip chip-static">last 8 weeks</span>
+          <label className="chip" data-active={repo != null || undefined}>
+            repo:
+            <select value={repo ?? ""} onChange={(e) => setRepo(e.target.value || null)}>
+              <option value="">all</option>
+              {repoOptions.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="chip" data-active={tpl != null || undefined}>
+            template:
+            <select value={tpl ?? ""} onChange={(e) => setTpl(e.target.value || null)}>
+              <option value="">all</option>
+              {tplOptions.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
 
       {error && <p className="form-error">{error}</p>}
@@ -236,55 +238,57 @@ export function AnalyticsView() {
               </p>
             </section>
 
-            <section className="table-block by-repo">
-              <div className="table-title">By repo</div>
-              <div className="repo-row repo-head">
-                <span>repo</span>
-                <span>items</span>
-                <span>done</span>
-                <span>cost</span>
-                <span>cycles</span>
-              </div>
-              {report!.by_repo.map((r) => (
-                <div key={r.repo} className="repo-row" data-repo={r.repo}>
-                  <span title={r.repo} data-label="repo">
-                    {repoName(r.repo)}
-                  </span>
-                  <span className="num" data-label="items">
-                    {r.items}
-                  </span>
-                  <span className="num" data-label="done">
-                    {r.done}
-                  </span>
-                  <span className="num strong" data-label="cost">
-                    {usd(r.cost_usd, r.cost_complete)}
-                  </span>
-                  <span className="num" data-label="cycles">
-                    {r.cycles}
-                  </span>
+            <div className="table-col">
+              <section className="table-block by-repo">
+                <div className="table-title">By repo</div>
+                <div className="repo-row repo-head">
+                  <span>repo</span>
+                  <span>items</span>
+                  <span>done</span>
+                  <span>cost</span>
+                  <span>cycles</span>
                 </div>
-              ))}
-            </section>
-          </div>
+                {report!.by_repo.map((r) => (
+                  <div key={r.repo} className="repo-row" data-repo={r.repo}>
+                    <span title={r.repo} data-label="repo">
+                      {repoName(r.repo)}
+                    </span>
+                    <span className="num" data-label="items">
+                      {r.items}
+                    </span>
+                    <span className="num" data-label="done">
+                      {r.done}
+                    </span>
+                    <span className="num strong" data-label="cost">
+                      {usd(r.cost_usd, r.cost_complete)}
+                    </span>
+                    <span className="num" data-label="cycles">
+                      {r.cycles}
+                    </span>
+                  </div>
+                ))}
+              </section>
 
-          <section className="table-block stop-reasons">
-            <div className="table-title">Why items stopped for a person</div>
-            {report!.stop_reasons.length === 0 && (
-              <p className="empty">nothing stopped for a person in this range</p>
-            )}
-            {report!.stop_reasons.map((s) => {
-              const max = report!.stop_reasons[0]?.n || 1;
-              return (
-                <div key={s.label} className="stop-row" data-label={s.label}>
-                  <span className="stop-label">{s.label}</span>
-                  <span className="stop-bar">
-                    <span style={{ width: `${(s.n / max) * 100}%` }} />
-                  </span>
-                  <span className="stop-n">{s.n}</span>
-                </div>
-              );
-            })}
-          </section>
+              <section className="table-block stop-reasons">
+                <div className="table-title">Why items stopped for a person</div>
+                {report!.stop_reasons.length === 0 && (
+                  <p className="empty">nothing stopped for a person in this range</p>
+                )}
+                {report!.stop_reasons.map((s) => {
+                  const max = report!.stop_reasons[0]?.n || 1;
+                  return (
+                    <div key={s.label} className="stop-row" data-label={s.label}>
+                      <span className="stop-label">{s.label}</span>
+                      <span className="stop-bar">
+                        <span style={{ width: `${(s.n / max) * 100}%` }} />
+                      </span>
+                      <span className="stop-n">{s.n}</span>
+                    </div>
+                  );
+                })}
+              </section>
+            </div>
+          </div>
         </>
       )}
     </div>

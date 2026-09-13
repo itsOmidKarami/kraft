@@ -9,7 +9,7 @@ import * as api from "../../../api";
 import type { KraftEvent, WorkerSession, WorkItem } from "../../../types";
 import { ActionBar } from ".";
 import { dismissTurn } from "./EscalationCard";
-import { NEEDS_HUMAN_EVENT, escSession, item } from "./testFixtures";
+import { NEEDS_HUMAN_EVENT, escMessage, escSession, item } from "./testFixtures";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -178,7 +178,7 @@ describe("ActionBar", () => {
     renderBar(
       item({ status: "needs_human", cappedOut: { cycles: 3, attempts: 3 } }),
       [escSession()],
-      [NEEDS_HUMAN_EVENT],
+      [NEEDS_HUMAN_EVENT, escMessage()],
     );
     expect(screen.getByTestId("escalating-pill")).toBeInTheDocument();
     expect(screen.getByText(/turn 1/)).toBeInTheDocument();
@@ -189,7 +189,7 @@ describe("ActionBar", () => {
     renderBar(
       item({ status: "needs_human", cappedOut: { cycles: 3, attempts: 3 } }),
       [escSession()],
-      [NEEDS_HUMAN_EVENT],
+      [NEEDS_HUMAN_EVENT, escMessage()],
     );
     await userEvent.click(screen.getByRole("button", { name: /stop agent/i }));
     expect(await screen.findByText("stop failed")).toBeInTheDocument();
@@ -216,7 +216,7 @@ describe("ActionBar", () => {
     renderBar(
       item({ status: "needs_human", cappedOut: { cycles: 3, attempts: 3 } }),
       [done],
-      [NEEDS_HUMAN_EVENT],
+      [NEEDS_HUMAN_EVENT, escMessage()],
     );
     expect(screen.getByTestId("escalated-card")).toBeInTheDocument();
   });
@@ -240,7 +240,7 @@ describe("ActionBar", () => {
     renderBar(
       item({ status: "needs_human", cappedOut: { cycles: 3, attempts: 3 } }),
       [done],
-      [NEEDS_HUMAN_EVENT],
+      [NEEDS_HUMAN_EVENT, escMessage({ payload: { session_id: "e9", message: "go" } })],
     );
     expect(screen.getByTestId("escalated-card")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /dismiss/i }));
@@ -270,6 +270,7 @@ describe("ActionBar", () => {
     });
     const laterStop: KraftEvent = {
       ...NEEDS_HUMAN_EVENT,
+      seq: 2,
       created_at: "2026-01-01T00:10:00Z",
     };
     renderBar(
@@ -312,6 +313,7 @@ describe("ActionBar", () => {
     });
     const laterStop: KraftEvent = {
       ...NEEDS_HUMAN_EVENT,
+      seq: 3,
       created_at: "2026-01-01T00:10:00Z",
     };
     renderBar(

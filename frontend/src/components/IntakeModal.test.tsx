@@ -264,6 +264,30 @@ describe("IntakeModal", () => {
     );
   });
 
+  it("shows fix attempts and wall clock read from the Policy default, not a raw auto_gate identifier", async () => {
+    vi.spyOn(api, "getPolicy").mockResolvedValue({
+      loops: {},
+      default: { attempts: 4, wall_clock_s: 1800 },
+      max_concurrent: 3,
+    });
+    renderModal();
+    await fillBasics();
+    expect(await screen.findByLabelText(/fix attempts, policy default/i)).toHaveTextContent("4");
+    expect(screen.getByLabelText(/wall clock, policy default/i)).toHaveTextContent("30 min");
+    expect(screen.queryByText("auto_gate", { exact: true })).toBeNull();
+    expect(screen.getByText(/let an agent review those escalations first/i)).toBeInTheDocument();
+  });
+
+  it("puts the $ in the budget placeholder, not the label (never-wrap rule)", async () => {
+    renderModal();
+    await fillBasics();
+    expect(screen.getByText("budget", { exact: true })).toBeInTheDocument();
+    expect(screen.getByLabelText("budget")).toHaveAttribute(
+      "placeholder",
+      expect.stringMatching(/^\$/),
+    );
+  });
+
   it("sends auto_gate and node_overrides from the Overrides switches", async () => {
     vi.spyOn(api, "getTemplates").mockResolvedValue([
       {

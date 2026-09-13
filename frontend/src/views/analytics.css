@@ -1,15 +1,23 @@
 /* ══ analytics (design 35) ════════════════════════════════════════════════ */
 .analytics-body { padding: 24px 32px 32px; display: flex; flex-direction: column; gap: 30px; }
-.analytics-head { display: flex; align-items: baseline; gap: 12px; }
+.analytics-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .analytics-head h2 { font-size: 20px; margin: 0; }
 .analytics-scope { font-size: 12px; color: var(--color-neutral-500); }
 
-.analytics-scope-bar { display: flex; align-items: center; gap: 14px; padding: 4px 0 2px; font-size: 12px; color: var(--color-neutral-500); }
-.chip-static { padding: 3px 10px; border-radius: 999px; border: 1px solid var(--color-divider); }
-.chip-select { display: flex; align-items: center; gap: 6px; }
-.chip-select select {
-  background: transparent; border: 1px solid var(--color-divider); border-radius: 999px;
-  color: var(--color-text); font: inherit; font-size: 12px; padding: 3px 8px;
+/* repo/template filters, right-aligned in the page head (design 35) — the
+ * same .chip pill the board filter row uses, a select in place of a button
+ * so the native picker (and this file's own combobox tests) stay unchanged. */
+.analytics-filters { display: flex; align-items: center; gap: 10px; }
+.chip-static { cursor: default; }
+label.chip { gap: 6px; cursor: default; }
+label.chip select {
+  background: transparent; border: none; color: inherit; font: inherit; font-size: 12px;
+  cursor: pointer;
+}
+.chip[data-active] {
+  border-color: var(--color-accent-700);
+  background: var(--color-accent-900);
+  color: var(--color-accent-300);
 }
 
 .kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 20px; }
@@ -53,6 +61,10 @@
   gap: 32px; align-items: start;
 }
 .table-block { display: flex; flex-direction: column; }
+/* By repo + stop-reasons stacked as one grid item, so stop-reasons lands
+ * under By repo (screen 35) instead of wherever grid auto-flow puts a third
+ * item in a two-column .analytics-tables. */
+.table-col { display: flex; flex-direction: column; gap: 28px; }
 .table-title { font-size: 13px; font-weight: 500; margin-bottom: 8px; }
 .node-row, .repo-row {
   display: grid; gap: 10px; align-items: center; padding: 9px 0; font-size: 12.5px;
@@ -69,7 +81,10 @@
 }
 .node-head span:not(:first-child):not(:nth-child(2)),
 .repo-head span:not(:first-child) { text-align: right; }
-.node-name { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.node-name {
+  font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .share {
   height: 4px; border-radius: 2px; background: var(--color-neutral-900); overflow: hidden;
 }
@@ -92,7 +107,8 @@
 }
 
 @media (max-width: 767px) {
-  .analytics-scope-bar { flex-wrap: wrap; }
+  .analytics-head { flex-wrap: wrap; }
+  .analytics-filters { flex-wrap: wrap; }
   .stop-row { grid-template-columns: 1fr; gap: 4px; }
   .stop-n { text-align: left; }
 }

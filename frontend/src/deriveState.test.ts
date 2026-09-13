@@ -145,10 +145,24 @@ const NEEDS_HUMAN_EVENT: KraftEvent = {
   created_at: "2026-01-01T00:00:00Z",
 };
 
+/** The `escalation_message` event `escalate.dispatch` appends for a turn —
+ *  the id-based tie deriveState now scopes an episode by, in place of a
+ *  timestamp compare (Kraft-bffrk). */
+const escMessage = (over: Partial<KraftEvent> = {}): KraftEvent => ({
+  seq: 2,
+  work_item_id: "wi_1",
+  type: "escalation_message",
+  payload: { session_id: "e1", message: "go" },
+  created_at: "2026-01-01T00:05:00Z",
+  ...over,
+});
+
 describe("deriveState — escalation and archived", () => {
   it("maps a running escalation turn to escalating, not needs-you", () => {
     const item = { ...BASE, status: "needs_human" as const, cappedOut: { cycles: 3, attempts: 3 } };
-    expect(deriveState(item, [escSession()], [NEEDS_HUMAN_EVENT])).toEqual({
+    expect(
+      deriveState(item, [escSession()], [NEEDS_HUMAN_EVENT, escMessage()]),
+    ).toEqual({
       state: "escalating",
       needsYou: false,
     });
@@ -157,7 +171,7 @@ describe("deriveState — escalation and archived", () => {
   it("maps a finished escalation turn to escalated, needs-you", () => {
     const item = { ...BASE, status: "needs_human" as const, cappedOut: { cycles: 3, attempts: 3 } };
     const done = escSession({ status: "done_with_concerns", exited_at: "2026-01-01T00:06:00Z" });
-    expect(deriveState(item, [done], [NEEDS_HUMAN_EVENT])).toEqual({
+    expect(deriveState(item, [done], [NEEDS_HUMAN_EVENT, escMessage()])).toEqual({
       state: "escalated",
       needsYou: true,
     });
@@ -165,8 +179,12 @@ describe("deriveState — escalation and archived", () => {
 
   it("ignores an escalation turn from a prior, already-resolved stop", () => {
     const item = { ...BASE, status: "needs_human" as const, cappedOut: { cycles: 3, attempts: 3 } };
+    // The stale turn's own escalation_message predates the current episode's
+    // boundary event (seq 1) — its session_id never lands in this episode's
+    // set, however its created_at compares against the boundary.
     const stale = escSession({ status: "done", created_at: "2025-12-31T00:00:00Z" });
-    expect(deriveState(item, [stale], [NEEDS_HUMAN_EVENT])).toEqual({
+    const staleMessage = escMessage({ seq: 0, created_at: "2025-12-31T00:00:00Z" });
+    expect(deriveState(item, [stale], [staleMessage, NEEDS_HUMAN_EVENT])).toEqual({
       state: "capped",
       needsYou: true,
     });
@@ -178,16 +196,39 @@ describe("deriveState — escalation and archived", () => {
     // episode boundary has to bound on both, same as `board._stop_reason`.
     const item = { ...BASE, status: "needs_human" as const, pending_gate: "human_review" };
     const stale = escSession({ status: "done", created_at: "2026-01-01T00:03:00Z" });
+    const staleMessage = escMessage({ seq: 2, created_at: "2026-01-01T00:03:00Z" });
     const gateRequested: KraftEvent = {
-      seq: 2,
+      seq: 3,
       work_item_id: "wi_1",
       type: "gate_requested",
       payload: { gate: "human_review" },
       created_at: "2026-01-01T00:04:00Z",
     };
-    expect(deriveState(item, [stale], [NEEDS_HUMAN_EVENT, gateRequested])).toEqual({
+    expect(
+      deriveState(item, [stale], [NEEDS_HUMAN_EVENT, staleMessage, gateRequested]),
+    ).toEqual({
       state: "gate",
       needsYou: true,
+    });
+  });
+
+  it("scopes a turn to its episode by event seq, not a created_at compare that can tie or invert by milliseconds", () => {
+    // The race Kraft-bffrk observed live: the session row's created_at lands
+    // 1.8ms *before* the boundary event's created_at (two different clocks
+    // in the same request), so a `>=` timestamp compare would drop this
+    // turn from its own episode. The escalation_message event's seq — not
+    // its created_at — is what actually orders after the boundary.
+    const item = { ...BASE, status: "needs_human" as const, cappedOut: { cycles: 3, attempts: 3 } };
+    const turn = escSession({ created_at: "2026-01-01T00:00:00.000Z" });
+    const boundary: KraftEvent = {
+      ...NEEDS_HUMAN_EVENT,
+      seq: 1,
+      created_at: "2026-01-01T00:00:00.0018Z",
+    };
+    const message = escMessage({ seq: 2, created_at: "2026-01-01T00:00:00.000Z" });
+    expect(deriveState(item, [turn], [boundary, message])).toEqual({
+      state: "escalating",
+      needsYou: false,
     });
   });
 
