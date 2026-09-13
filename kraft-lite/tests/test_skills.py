@@ -101,7 +101,16 @@ def test_the_readme_describes_the_chain_it_actually_ships():
     import re
 
     readme = (PLUGIN / "README.md").read_text()
-    words = {"two": 2, "three": 3, "four": 4, "five": 5, "ten": 10, "eleven": 11, "twelve": 12}
+    words = {
+        "two": 2,
+        "three": 3,
+        "four": 4,
+        "five": 5,
+        "ten": 10,
+        "eleven": 11,
+        "twelve": 12,
+        "thirteen": 13,
+    }
     nodes = re.search(r"chain itself is `chains/default\.json`: (\w+) nodes", readme)
     gates = re.search(r"with (\w+) gates", readme)
     assert nodes and gates, "the README no longer states the counts this test guards"
