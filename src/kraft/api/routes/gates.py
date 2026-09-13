@@ -11,7 +11,13 @@ from kraft.api import api_router, deps
 from kraft.api.routes import artifacts, board
 from kraft.api.routes.lifecycle import _stop_live_sessions
 from kraft.executor import gates
-from kraft.templates import GATE_NAMES, carry_forward_node_fields, validate_nodes
+from kraft.templates import (
+    GATE_NAMES,
+    carry_forward_node_fields,
+    strip_non_proposable_carryover_fields,
+    validate_nodes,
+    validate_proposed_node_overrides,
+)
 
 
 def _strip_front_matter(text: str) -> str:
@@ -25,53 +31,111 @@ def _strip_front_matter(text: str) -> str:
     return text[end + 5 :] if end != -1 else text
 
 
-def _splice_chain_review(st, row) -> tuple[dict | None, str | None]:
-    """The chain_finalized gate's approval decision (Kraft-hm0).
+def _splice_chain_review(st, row) -> tuple[dict | None, dict | None, str | None]:
+    """The chain_finalized gate's approval decision (Kraft-hm0, extended
+    Kraft-df4tc for escalation targets and the per-node model/effort dial).
 
-    Reads the `chain_review` artifact, parses its `{status,
-    revised_chain_nodes, rationale}` envelope (JSON in the artifact body,
-    after the shared front-matter block), and validates a revision through
-    Kraft-unk's splice-tier `validate_nodes` before it is trusted anywhere
-    near `chain_definition`.
-
-    Returns `(spliced_chain, None)` when the gate may advance, or `(None,
-    reason)` when it must not — approving a gate must never be the thing
-    that lets a corrupt chain through, so every failure here stops the item
-    at needs_human instead of silently keeping the old tail.
+    Returns `(spliced_chain, node_override_patch, None)` when the gate may
+    advance -- `node_override_patch` is `{}` when the reviewer proposed no
+    `proposed_node_overrides` at all -- or `(None, None, reason)` when it
+    must not: one bad field anywhere in the envelope stops the whole
+    approval, never a partial apply.
     """
     rel = agent_mod.artifact_path("chain_review", row["id"])
     path = st.run_dirs.worktrees / row["id"] / rel
     if not path.is_file():
-        return None, "chain_review: no artifact found; the worker did not write one"
+        return None, None, "chain_review: no artifact found; the worker did not write one"
     try:
         envelope = json.loads(_strip_front_matter(path.read_text()))
     except (OSError, ValueError) as exc:
-        return None, f"chain_review: could not parse artifact: {exc}"
+        return None, None, f"chain_review: could not parse artifact: {exc}"
     if not isinstance(envelope, dict) or envelope.get("status") not in (
         "ready_for_approval",
         "error",
     ):
-        return None, "chain_review: artifact is missing a valid 'status'"
+        return None, None, "chain_review: artifact is missing a valid 'status'"
     if envelope["status"] == "error":
-        return None, envelope.get("rationale") or "chain_review: reported status 'error'"
+        return None, None, envelope.get("rationale") or "chain_review: reported status 'error'"
 
     nodes = envelope.get("revised_chain_nodes")
-    errs = validate_nodes(nodes, st.registry) if isinstance(nodes, list) else ["not a list"]
-    if errs:
-        return None, f"chain_review: revised_chain_nodes invalid: {errs[0]}"
-
     chain = json.loads(row["chain_definition"])
     tail_start = board._gate_node_index(chain, "chain_finalized") + 1
+    preceding_ids = frozenset(n["id"] for n in chain["nodes"][:tail_start])
+    errs = (
+        validate_nodes(nodes, st.registry, preceding_ids=preceding_ids)
+        if isinstance(nodes, list)
+        else ["not a list"]
+    )
+    if errs:
+        return None, None, f"chain_review: revised_chain_nodes invalid: {errs[0]}"
+
+    # proposed_node_overrides (Kraft-df4tc point 2): reviewer-authored per-
+    # node model/effort dial, not a chain_definition field -- pull it off
+    # every node before the carryover/splice below ever sees it, validating
+    # as we go. Only model/escalate_model/effort are the reviewer's to
+    # propose (point 5); auto_escalate and everything else stay the human
+    # PATCH route's alone. One bad field anywhere rejects the whole approval.
+    proposals: dict[str, dict] = {}
+    for n in nodes:
+        proposed = n.pop("proposed_node_overrides", None)
+        if not proposed:
+            continue
+        if not isinstance(proposed, dict):
+            return (
+                None,
+                None,
+                (f"chain_review: node {n['id']!r} proposed_node_overrides must be an object"),
+            )
+        field_errs = validate_proposed_node_overrides(proposed)
+        if field_errs:
+            return (
+                None,
+                None,
+                (f"chain_review: node {n['id']!r} proposed_node_overrides: {field_errs[0]}"),
+            )
+        proposals[n["id"]] = proposed
+    if proposals:
+        started = st.db.read(
+            lambda c: {nid for nid in proposals if store.node_started(c, row["id"], nid)}
+        )
+        if started:
+            bad = sorted(started)[0]
+            return (
+                None,
+                None,
+                (f"chain_review: node {bad!r} has already started; its config is locked"),
+            )
+
+    # auto_escalate/auto_escalate_stuck/auto_escalate_delay_s are never the
+    # reviewer's to set (SKILL.md, point 5's PATCH-route boundary) -- unlike
+    # on_failure/reject_to/rebase_bounce_to, `validate_nodes` above does not
+    # (and cannot, since a template author legitimately sets these) reject
+    # them, so an agent-authored value must be dropped here, before it can
+    # ever reach `carry_forward_node_fields`, which only fills fields a node
+    # omits and would otherwise leave an explicit value in place untouched.
+    nodes = strip_non_proposable_carryover_fields(nodes)
+
     # No special-case for an unchanged tail (spec: splicing the same list back
     # in is a no-op in effect) -- one code path for both, not two that drift.
-    # `nodes` only carries the four fields the skill's schema teaches
-    # (Kraft-eod0); carry the rest -- on_failure, reject_to, rebase_bounce_to,
-    # auto_escalate -- forward from the node each one replaces, or a reviewer
-    # that says "unchanged" silently strips the repair/reject/escalate config
-    # those nodes had.
+    # `nodes` only carries the schema-taught fields (Kraft-eod0); carry the
+    # rest -- auto_escalate*, and any of on_failure/reject_to/
+    # rebase_bounce_to the reviewer chose not to set explicitly -- forward
+    # from the node each one replaces, or an "unchanged" node silently loses
+    # config it had.
     nodes = carry_forward_node_fields(chain["nodes"][tail_start:], nodes)
+    # Validate once more over the *merged* tail: the check above only saw the
+    # reviewer's own values, and a `reject_to`/`rebase_bounce_to` carried
+    # forward from the node being replaced can dangle against the revised tail
+    # (the reviewer renamed or dropped the target) or now point forward (the
+    # target moved later). Either one reaches walk.py's bare
+    # `next(j for j, n in ... if n["id"] == bounce_to)` -- StopIteration
+    # mid-walk, or a bounce that silently skips the nodes in between. Intake's
+    # `skip_nodes` route guards the identical case (work_items.py).
+    errs = validate_nodes(nodes, st.registry, preceding_ids=preceding_ids)
+    if errs:
+        return None, None, f"chain_review: revised_chain_nodes invalid: {errs[0]}"
     chain["nodes"][tail_start:] = nodes
-    return chain, None
+    return chain, proposals, None
 
 
 class GateReject(BaseModel):
@@ -100,10 +164,16 @@ async def apply_approval(st, row, gate: str) -> tuple[dict | None, str | None]:
     await artifacts._ingest_approved_gate_artifact(st, row, gate)
     if gate != "chain_finalized":
         return json.loads(row["chain_definition"]), None
-    chain, reason = _splice_chain_review(st, row)
+    chain, node_override_patch, reason = _splice_chain_review(st, row)
     if chain is None:
         return None, reason
-    await st.db.write(lambda c: store.splice_chain(c, row["id"], json.dumps(chain)))
+
+    def write(c):
+        store.splice_chain(c, row["id"], json.dumps(chain))
+        if node_override_patch:
+            store.set_node_overrides(c, row["id"], node_override_patch)
+
+    await st.db.write(write)
     return chain, None
 
 

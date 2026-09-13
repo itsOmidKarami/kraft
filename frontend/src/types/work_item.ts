@@ -7,6 +7,9 @@ export interface ChainNode {
   fix_loop?: string;
   /** Where rejecting this node's gate sends the chain; null re-runs this node. */
   reject_to?: string | null;
+  /** Where a rebase-triggered bounce (Kraft-4bgg) sends the chain back to
+   *  re-verify; null on a node that isn't a rebase check. */
+  rebase_bounce_to?: string | null;
   /** Whether an agent may review this node's gate before a human sees it
    *  (Kraft-zr3s). Only meaningful beside `gate_after`. */
   auto_escalate?: boolean | null;

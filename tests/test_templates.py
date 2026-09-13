@@ -231,6 +231,21 @@ def test_validate_nodes_rejects_a_fix_loop_node_with_no_tasks(tmp_path):
     assert errs and "fix_loop" in errs[0]
 
 
+def test_validate_nodes_rejects_a_bare_string_on_failure(tmp_path):
+    """Kraft-df4tc: the splice path never runs load_templates' bad_recover
+    check, so validate_nodes itself must catch a string on_failure -- else
+    walk.py iterates its characters as hook names."""
+    nodes = [{"id": "n1", "tasks": ["on.test.run"], "on_failure": "on.mr_checks.repair"}]
+    errs = templates.validate_nodes(nodes, _registry(tmp_path))
+    assert errs and "on_failure" in errs[0]
+
+
+def test_validate_nodes_rejects_an_empty_on_failure_list(tmp_path):
+    nodes = [{"id": "n1", "tasks": ["on.test.run"], "on_failure": []}]
+    errs = templates.validate_nodes(nodes, _registry(tmp_path))
+    assert errs and "on_failure" in errs[0]
+
+
 def test_validate_nodes_is_what_load_templates_calls_for_its_own_nodes(tmp_path):
     """Same error message shape, whole-template or spliced tail -- one rule
     set, two callers (Kraft-unk)."""
@@ -265,6 +280,22 @@ def test_validate_agent_overrides_rejects_non_string_model():
 
 def test_validate_agent_overrides_accepts_a_partial_object():
     assert templates.validate_agent_overrides({"model": "opus"}) == []
+
+
+def test_validate_model_effort_fields_rejects_bad_effort():
+    errs = templates.validate_model_effort_fields({"effort": "turbo"})
+    assert errs and "effort" in errs[0]
+
+
+def test_validate_model_effort_fields_accepts_null_model():
+    assert templates.validate_model_effort_fields({"model": None, "effort": "high"}) == []
+
+
+def test_validate_agent_overrides_still_rejects_non_string_model():
+    """Unchanged behaviour through the refactor -- same message shape as
+    before Kraft-df4tc moved the field checks into a shared function."""
+    errs = templates.validate_agent_overrides({"model": 5})
+    assert errs == ["agent_overrides 'model' must be a string or null"]
 
 
 def test_unknown_gate_after_quarantines_template(tmp_path):
@@ -1093,6 +1124,38 @@ def test_a_node_may_name_itself_as_its_own_reject_target(tmp_path):
     reg = templates.load_registry(d / "registry.yaml")
     ts = templates.load_templates(d, reg)
     assert "self" in ts.valid, ts.invalid
+
+
+def test_validate_nodes_reject_to_may_target_a_node_outside_the_list():
+    """`_splice_chain_review` (Kraft-df4tc) validates only the not-yet-run
+    tail; a tail node's reject_to routinely names an already-run node
+    outside that list, which must not be treated as a forward reference."""
+    from kraft.templates import Registry, validate_nodes
+
+    registry = Registry(hooks={})
+    nodes = [{"id": "human_review", "tasks": [], "gate_after": None, "reject_to": "plan"}]
+    assert validate_nodes(nodes, registry, preceding_ids=frozenset({"plan"})) == []
+
+
+def test_validate_nodes_reject_to_forward_reference_still_rejected():
+    from kraft.templates import Registry, validate_nodes
+
+    registry = Registry(hooks={})
+    nodes = [
+        {"id": "a", "tasks": [], "gate_after": None, "reject_to": "b"},
+        {"id": "b", "tasks": [], "gate_after": None},
+    ]
+    errs = validate_nodes(nodes, registry, preceding_ids=frozenset())
+    assert errs and "reject_to" in errs[0]
+
+
+def test_validate_nodes_rebase_bounce_to_unknown_node_rejected_even_with_preceding_ids():
+    from kraft.templates import Registry, validate_nodes
+
+    registry = Registry(hooks={})
+    nodes = [{"id": "a", "tasks": [], "gate_after": None, "rebase_bounce_to": "ghost"}]
+    errs = validate_nodes(nodes, registry, preceding_ids=frozenset({"other"}))
+    assert errs and "rebase_bounce_to" in errs[0]
 
 
 def test_rebase_bounce_to_must_name_an_earlier_node(tmp_path):

@@ -156,17 +156,27 @@ async def dispatch_node(
                 + prompts.progress_note(task_hook, work_item_row, worktree)
             )
         ) + prompts.BEAD_NOTE
+        if binding.get("artifact") == "chain_review":
+            chain_nodes = json.loads(work_item_row["chain_definition"])["nodes"]
+            at = next((i for i, n in enumerate(chain_nodes) if n["id"] == node["id"]), None)
+            tail = chain_nodes[at + 1 :] if at is not None else []
+            preceding = tuple(n["id"] for n in chain_nodes[: at + 1]) if at is not None else ()
+            instruction += prompts.chain_review_context(tail, registry, preceding)
+        item_override = (
+            json.loads(work_item_row["agent_overrides"]) if work_item_row["agent_overrides"] else {}
+        )
+        node_override = store.node_overrides_of(work_item_row).get(node["id"], {})
+        model_effort = {
+            k: v for k, v in node_override.items() if k in ("model", "escalate_model", "effort")
+        }
+        merged_override = {**item_override, **model_effort}
         inv = _agent.resolve_invocation(
             binding,
             launch.repo_entry if launch else None,
             launch.steering_dir if launch else None,
             skills_dir=launch.skills_dir if launch else None,
             escalate=escalate,
-            item_override=(
-                json.loads(work_item_row["agent_overrides"])
-                if work_item_row["agent_overrides"]
-                else None
-            ),
+            item_override=merged_override or None,
         )
         status = await _agent.run_agent_task(
             db,
