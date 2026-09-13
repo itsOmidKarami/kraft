@@ -662,3 +662,50 @@ def test_retry_clears_the_ci_infra_counter_for_the_current_node(tmp_path, monkey
 
         assert r.status_code == 200, r.text
         assert not _counter_exists(wid, "ci_infra:mr_checks")
+
+
+def test_retry_with_no_steer_seeds_the_last_measurements_findings(tmp_path, monkeypatch):
+    """Kraft-7sec, second half: a retry after a fix-loop cap breach with no
+    explicit steer must seed the agent with the last measurement's unresolved
+    findings, not start blind."""
+    from kraft import events as kraft_events
+
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+        _force_node(wid, "verify", "needs_human")
+
+        conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+        try:
+            kraft_events.append(
+                conn,
+                wid,
+                "findings_measured",
+                {
+                    "node_id": "verify",
+                    "cycle": 0,
+                    "findings": [
+                        {
+                            "severity": "important",
+                            "message": "missing null check",
+                            "file": "a.py",
+                            "line": 10,
+                            "source_plugin": "reviewer",
+                        }
+                    ],
+                    "fingerprints": ["x"],
+                    "noop_hooks": [],
+                },
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        r = client.post(f"/api/work-items/{wid}/retry", json={})
+        assert r.status_code == 200, r.text
+        assert "missing null check" in r.json()["steer"]
+
+        evts = client.get(f"/api/work-items/{wid}/events").json()
+        retried = next(e for e in evts if e["type"] == "work_item_retried")
+        assert retried["payload"]["seeded"] is True

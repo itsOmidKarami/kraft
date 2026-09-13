@@ -622,3 +622,88 @@ def test_needs_context_question_ignores_a_judge_session(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def _seeded_judge_scenario(tmp_path, monkeypatch, *, steer):
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(json.dumps([{"status": "done", "verdict": "continue"}]))
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_PLAN", str(plan_path))
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = _judge_registry()
+            pol = _judge_policy(tmp_path, attempts=1)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(repo),
+                template=_judge_template(),
+                bd_cwd=str(tracker),
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id=?", (wid,)).fetchone()
+            )
+            wt = rd.worktrees / wid
+            await database.write(lambda c: store.load_chain(c, wid, "env_setup"))
+            env_node = {"id": "env_setup", "tasks": ["on.env.prepare"], "fix_loop": None}
+            assert await executor.walk_node(database, rd, wid, env_node, row, registry, wt) == "ok"
+
+            await database.write(lambda c: store.enter_node(c, wid, "verify"))
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="prior-fix",
+                    work_item_id=wid,
+                    node_id="verify",
+                    hook_point="on.implementation.start",
+                    log_path="/l",
+                    result_path="/r",
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "prior-fix", "done"))
+            cap = policy.resolve_cap(pol, "verify_fix_loop")
+            await database.write(lambda c: store.bump_counter(c, wid, "verify_fix_loop", cap))
+
+            node = _judge_template().nodes[1]
+            result = await executor.walk_node(
+                database, rd, wid, node, row, registry, wt, policy=pol, steer=steer
+            )
+            types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, wid))]
+            return result, types
+        finally:
+            await database.close()
+
+    return asyncio.run(scenario())
+
+
+def test_judge_fires_on_a_kraft_seeded_steer_at_the_re_entry_it_exists_to_brake(
+    tmp_path, monkeypatch
+):
+    """Kraft-7sec's seeded retry steer must not defeat the fix-loop judge the
+    way a genuine human steer is designed to -- only a human-authored steer
+    gets `judge_due`'s free pass."""
+    result, types = _seeded_judge_scenario(
+        tmp_path,
+        monkeypatch,
+        steer=executor.Steer("findings the last review left unresolved", human=False),
+    )
+    assert result == "needs_human"  # cap (1) still breaches regardless
+    assert "judge_verdict" in types
+
+
+def test_human_steer_still_suppresses_the_judge_in_the_same_shape(tmp_path, monkeypatch):
+    """The control for the test above: a human-typed steer in the identical
+    pre-seeded shape still gets the free pass, unchanged."""
+    result, types = _seeded_judge_scenario(
+        tmp_path,
+        monkeypatch,
+        steer=executor.Steer("fix the timeout, not the retry logic", human=True),
+    )
+    assert result == "needs_human"  # cap (1) still breaches regardless
+    assert "judge_verdict" not in types
