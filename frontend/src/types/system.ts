@@ -37,6 +37,8 @@ export interface Analytics {
     fix_cycles: number;
     fix_cycles_capped: number;
     rejected_gates: number;
+    unplanned_touches_per_item: number;
+    open_mr_to_green_ci_ms: number;
   };
   weekly_merged: { week_start: string; n: number }[];
   by_node: {

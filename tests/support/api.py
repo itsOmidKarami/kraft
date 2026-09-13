@@ -46,6 +46,25 @@ def _poll_events(client, wid, want, timeout=30, count=1):
     raise AssertionError(f"{want} x{count} not seen; got {[e['type'] for e in seen]}")
 
 
+def _poll_node_started(client, wid, node_id, timeout=30):
+    """Like `_poll_events(..., "node_started")`, but waits for *this* node's
+    own start, not just any `node_started` -- a plain type/count check can
+    already be satisfied by an earlier node before the gate approval or skip
+    that this call follows has actually resumed the walk, since `approve_gate`/
+    `skip_node` write their own event synchronously before the continuation
+    is spawned in the background (Kraft-tsfpk added one more `await` -- a
+    `bd blocked` check -- ahead of every dispatch, widening that race enough
+    to make it flake for real)."""
+    deadline = time.monotonic() + timeout
+    seen = []
+    while time.monotonic() < deadline:
+        seen = client.get(f"/api/work-items/{wid}/events").json()
+        if any(e["type"] == "node_started" and e["payload"]["node_id"] == node_id for e in seen):
+            return seen
+        time.sleep(0.2)
+    raise AssertionError(f"node_started for {node_id!r} not seen; got {[e['type'] for e in seen]}")
+
+
 def _await_gate(client, wid, gate, timeout=30):
     """Wait for the server to report `gate` as the one waiting on a person."""
     deadline = time.monotonic() + timeout

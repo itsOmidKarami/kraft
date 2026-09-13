@@ -7,6 +7,7 @@ from dataclasses import asdict
 from kraft import builtins as _builtins
 from kraft import events, store
 from kraft import policy as _policy
+from kraft.adapters import beads
 from kraft.executor import dispatch, entry, gates, prompts, stops
 from kraft.executor.context import (
     BUDGET,
@@ -691,6 +692,42 @@ async def run_once(
     # entitled to expect.
     if start_index == 0:
         await db.write(lambda c: store.load_chain(c, work_item_id, nodes[0]["id"]))
+
+    # Kraft-tsfpk: a bd dependency the tracker already knows about (`bd dep
+    # add ... --type blocks`) must stop this walk before it spends a paid
+    # agent session re-discovering the blocker from prose. Checked once per
+    # dispatch attempt -- intake, resume, retry, and every poller re-entry all
+    # pass through here -- not once per node inside the loop below: a merge
+    # landing mid-walk is the rare case, and a `bd blocked` call on every node
+    # buys correctness nobody has hit yet at the cost of one more subprocess
+    # launch per node, every walk, forever.
+    #
+    # `row["bead_id"]` alone is a near-no-op for the case that motivated this
+    # bead (plan-review finding 1): `entry.intake` files a *fresh* tracking
+    # bead for every manually created item, and a brand-new bead has no `bd
+    # dep` edges of its own -- `bead_id`'s own `blocked_by` is always `[]`.
+    # The real edges live on the source beads named in the description,
+    # extracted at intake into `implements_beads` (`entry._extract_beads`).
+    # Both go into the one `bd blocked --json` call.
+    bead_ids = [i for i in (row["bead_id"], *entry._implements_beads(row)) if i]
+    if bead_ids:
+        # `row["bead_cwd"] or bd_cwd`, the same precedence
+        # `entry.close_beads` (`entry.py:221`) already uses -- not `bd_cwd or
+        # row["repo"]`. With `KRAFT_BD_CWD` set instance-wide, a bead filed
+        # into a per-repo workspace must still be looked up there, or it
+        # silently never reads as blocked (plan-review finding 4).
+        blocked_by = await beads.blocked_by(bead_ids, cwd=row["bead_cwd"] or bd_cwd)
+        # Blockers that are themselves part of this item's own bead set
+        # (e.g. two bundled beads with a `blocks` edge between them) aren't
+        # external dependencies -- this walk is how they get implemented.
+        blocked_by = [b for b in blocked_by if b not in set(bead_ids)]
+        if blocked_by:
+            await db.write(
+                lambda c: store.mark_blocked_by_dependency(
+                    c, work_item_id, nodes[start_index]["id"], blocked_by
+                )
+            )
+            return "paused"
 
     # Before the first dispatch, not inside the `env_setup` node: `default.yaml`
     # runs `spec` and `plan` first, and both need a checkout — and, for `plan`'s

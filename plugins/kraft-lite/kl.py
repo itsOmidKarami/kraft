@@ -911,6 +911,10 @@ HOOK_KEYWORDS = {
     "on.review.mr.run": ("review",),
     "on.human_review.requested": (),
     "on.merge": ("finishing", "merge"),
+    # No candidates: watching the pipeline the merge itself just triggered on
+    # the target branch is the forge adapter's own job, not something an
+    # installed skill serves.
+    "on.merge.watch": (),
 }
 
 #: Words in a hook name that say when it fires, not what it does. A custom hook

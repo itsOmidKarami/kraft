@@ -21,6 +21,15 @@ export function detailOf(e: KraftEvent): string | null {
   if (e.type === "work_item_waiting" && typeof p.retry_at === "string") {
     return `waiting on CI, next check at ${p.retry_at}`;
   }
+  if (e.type === "work_item_blocked_by_dependency" && Array.isArray(p.blocked_by)) {
+    return `blocked on ${(p.blocked_by as string[]).join(", ")}`;
+  }
+  if (e.type === "paused_by_broken_base" && typeof p.broken_by === "string") {
+    const bead = typeof p.follow_up_bead === "string" ? p.follow_up_bead : null;
+    return bead
+      ? `paused: ${p.broken_by} broke the base it rebased onto (${bead})`
+      : `paused: ${p.broken_by} broke the base it rebased onto`;
+  }
   if (e.type === "worker_session_exited") {
     const bits: string[] = [];
     if (typeof p.status === "string") bits.push(p.status);

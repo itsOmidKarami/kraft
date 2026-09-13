@@ -221,6 +221,28 @@ def mark_waiting(conn: sqlite3.Connection, work_item_id: str, node_id: str, retr
     )
 
 
+def mark_blocked_by_dependency(
+    conn: sqlite3.Connection, work_item_id: str, node_id: str, blocked_by: list[str]
+) -> None:
+    """Kraft-tsfpk: `run_once` found an open bd dependency before dispatching
+    the next node. `paused`, not a new status -- the board already renders a
+    paused card with a Resume button, `active_count` already excludes it, and
+    resume/retry already re-enter through `run_once`, so a still-blocked
+    resume costs one more `bd blocked` call and re-pauses here, not a full
+    agent session that reads the blocker from prose.
+    """
+    conn.execute(
+        "UPDATE work_items SET status = 'paused', retry_at = NULL, updated_at = ? WHERE id = ?",
+        (_now(), work_item_id),
+    )
+    events.append(
+        conn,
+        work_item_id,
+        "work_item_blocked_by_dependency",
+        {"node_id": node_id, "blocked_by": blocked_by},
+    )
+
+
 def mark_reentered(conn: sqlite3.Connection, work_item_id: str) -> None:
     """Flip a `waiting` (or `rate_limited`) item back to `active` the instant
     its own poller decides to re-enter it, before the spawned run has done
@@ -326,6 +348,34 @@ def pause_work_item(conn: sqlite3.Connection, work_item_id: str, session_ids: li
             (now, sid),
         )
         events.append(conn, work_item_id, "worker_session_paused", {"session_id": sid})
+
+
+def pause_for_broken_base(
+    conn: sqlite3.Connection, work_item_id: str, *, broken_by: str, follow_up_bead: str | None
+) -> None:
+    """Kraft-43kw: `post_merge_watch` found this item sitting on a commit
+    whose pipeline just came back red, and is warning it the way the bead's
+    description asks -- scoped to items actually on the broken commit, not a
+    broadcast to every open item.
+
+    A soft pause, unlike a human's own `/pause` (`api/routes/lifecycle.py`,
+    which reads `running_sessions_for_node` and SIGTERMs each pid): there is
+    no session id to signal from here, deep inside a different item's forge
+    node. The running node, if any, finishes what it is doing, and
+    `run_once`'s own between-nodes check (Kraft-e7pm, `walk.py`) stops the
+    walk at the next node rather than mid-session -- cheap and eventual, the
+    same posture Part 1's blocked-by pause takes.
+    """
+    conn.execute(
+        "UPDATE work_items SET status = 'paused', retry_at = NULL, updated_at = ? WHERE id = ?",
+        (_now(), work_item_id),
+    )
+    events.append(
+        conn,
+        work_item_id,
+        "paused_by_broken_base",
+        {"broken_by": broken_by, "follow_up_bead": follow_up_bead},
+    )
 
 
 def set_steer(conn: sqlite3.Connection, work_item_id: str, text: str) -> None:

@@ -767,3 +767,31 @@ def test_claim_for_run_limit_admits_when_a_slot_is_free(tmp_path):
     claimed, status = asyncio.run(scenario())
     assert claimed is True
     assert status == "active"
+
+
+def test_pause_for_broken_base_pauses_and_records_who_and_what(tmp_path):
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database, "w1")
+            await mk_item(database, "w2")
+            await database.write(
+                lambda c: store.pause_for_broken_base(
+                    c, "w2", broken_by="w1", follow_up_bead="Kraft-xyz"
+                )
+            )
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT status, retry_at FROM work_items WHERE id = 'w2'"
+                ).fetchone()
+            )
+            evts = database.read(lambda c: events.read_after(c, 0, "w2"))
+            return row["status"], row["retry_at"], evts
+        finally:
+            await database.close()
+
+    status, retry_at, evts = asyncio.run(scenario())
+    assert status == "paused"
+    assert retry_at is None
+    payload = next(e["payload"] for e in evts if e["type"] == "paused_by_broken_base")
+    assert payload == {"broken_by": "w1", "follow_up_bead": "Kraft-xyz"}

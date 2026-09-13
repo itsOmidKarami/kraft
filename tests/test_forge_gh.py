@@ -216,6 +216,42 @@ def test_gh_ci_status_maps_timed_out_to_the_infra_reason(tmp_path, monkeypatch):
     assert status.failed_jobs[0].failure_reason == "job_execution_timeout"
 
 
+GH_RUN_LIST = (
+    '[{"status":"completed","conclusion":"failure","headSha":"deadbeef",'
+    '"url":"https://github.com/o/r/actions/runs/123456","name":"build"}]'
+)
+
+
+def test_gh_branch_ci_status_reads_runs_not_a_pull_request(tmp_path, monkeypatch):
+    """merge_watch's whole reason to call this instead of `ci_status`: the
+    checked-out branch has no open PR left post-merge, so this must never
+    shell out to `gh pr view` (code-review)."""
+    argv_log = _recording_stub(tmp_path, monkeypatch, "gh", GH_RUN_LIST)
+
+    status = asyncio.run(
+        forge.GhCli().branch_ci_status(repo=tmp_path, branch="main", head_sha="deadbeef")
+    )
+
+    assert status.state == "failed"
+    assert status.sha == "deadbeef"
+    assert status.failed_jobs[0].failure_reason == "script_failure"
+    calls = argv_log.read_text().splitlines()
+    assert len(calls) == 1
+    assert calls == ["run list --branch main -L 20 --json status,conclusion,headSha,url,name"]
+
+
+def test_gh_branch_ci_status_waits_for_a_run_matching_the_given_head(tmp_path, monkeypatch):
+    """A run list that has not caught up to `head_sha` yet is a wait, not a
+    (wrong-commit) result -- same shape as glab's own sha guard."""
+    _stub(tmp_path, monkeypatch, "gh", GH_RUN_LIST)
+
+    status = asyncio.run(
+        forge.GhCli().branch_ci_status(repo=tmp_path, branch="main", head_sha="other-sha")
+    )
+
+    assert status.state == "pending"
+
+
 def test_gh_retry_jobs_reruns_the_actions_run_behind_the_failed_check(tmp_path, monkeypatch):
     _stub(tmp_path, monkeypatch, "gh", "")
 

@@ -37,6 +37,11 @@ hooks:
   on.mr.sync:                { kind: forge, handler: sync_mr, backend: auto }
   on.human_review.requested: { kind: agent, command: claude, skill: review-brief, artifact: review_brief, steering: [never-signal-processes-you-didnt-start] }
   on.merge:                  { kind: forge, handler: merge, backend: auto }
+  # Kraft-43kw: watches the pipeline `on.merge` itself just triggered on the
+  # target branch, so a break several near-simultaneous merges expose lands
+  # on this item's own tracking bead instead of silently becoming every other
+  # item's rebase problem to re-diagnose independently.
+  on.merge.watch:            { kind: forge, handler: merge_watch, backend: auto }
   # mr_checks' on_failure repair pass (Kraft-xh0q layer 3): reads why
   # on.ci.poll went red and, when the reason is a fixable MR-level thing like
   # a missing label, applies the fix via set_mr_labels. Judgment, not a rules
