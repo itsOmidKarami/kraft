@@ -324,20 +324,34 @@ class GlabCli:
         Labelling alone therefore leaves the merge request looking fixed and
         still red -- the re-create is part of the capability, not the caller's
         homework (Kraft-xh0q).
+
+        GitLab's free tier does not enforce a scoped label's exclusivity
+        server-side, so `--label` alone only adds: a second repair pass leaves
+        both `release::minor` and `release::patch` on the MR, and
+        `next_tag.py`'s "first match wins" then depends on GitLab's list order
+        instead of the repair's intent (Kraft-zfdu8). So any current label
+        sharing a new label's `scope::` prefix is dropped in the same call.
         """
         if not labels:
             return
         target = [str(mr.number)] if mr.number > 0 else []
-        await git.run_git(repo, ["glab", "mr", "update", *target, "--label", ",".join(labels)])
-        # `run_task` passes number 0 -- "resolve it from the checked-out branch"
-        # -- to every forge handler, so that is the number this gets on the path
-        # production actually takes. Skipping the re-create for it would leave
-        # the one real caller with a labelled merge request and the same red
-        # pipeline, which is exactly what the re-create exists to prevent.
-        number = mr.number
-        if number <= 0:
-            raw = await git.run_git(repo, ["glab", "mr", "view", "-F", "json"])
-            number = int(mr_ops.parse_json(raw, "glab mr view")["iid"])
+        # Also the read that used to be sentinel-only (`mr.number <= 0`, to
+        # resolve the number for the pipeline re-create below): every caller
+        # now needs the MR's current labels too, so one `mr view` serves both.
+        raw = await git.run_git(repo, ["glab", "mr", "view", *target, "-F", "json"])
+        data = mr_ops.parse_json(raw, "glab mr view")
+        number = mr.number if mr.number > 0 else int(data["iid"])
+        current = [str(label) for label in data.get("labels") or []]
+        scopes = {label.split("::", 1)[0] + "::" for label in labels if "::" in label}
+        drop = [
+            label
+            for label in current
+            if label not in labels and any(label.startswith(scope) for scope in scopes)
+        ]
+        args = ["glab", "mr", "update", *target, "--label", ",".join(labels)]
+        for label in drop:
+            args += ["--unlabel", label]
+        await git.run_git(repo, args)
         # `projects/:id` is glab's own placeholder for the repo the command is
         # run in, so this stays as repo-agnostic as every other call here.
         await git.run_git(
