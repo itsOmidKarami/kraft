@@ -5,6 +5,7 @@ import { ArrowSquareOut, ArrowsOutSimple, CaretDown, Check, Copy, Eye, FileText,
 import * as api from "../../../api";
 import { ago } from "../../../format";
 import type { WorkItem } from "../../../types";
+import { ChainReviewDiff } from "../../../components/ChainReviewDiff";
 import { Composer } from "../ActionBar/Composer";
 import { rejectTarget } from "../ActionBar/GateCard";
 import { useActionBar } from "../ActionBar/useActionBar";
@@ -262,7 +263,11 @@ export function Doc({
       <div className="doc-modal-body">
         {error && <p className="form-error">{error}</p>}
         {!doc && !error && <p className="empty">loading…</p>}
-        {doc && <Markdown remarkPlugins={[remarkGfm]}>{doc.content}</Markdown>}
+        {doc && item && gate === "chain_finalized" && isGateDoc ? (
+          <ChainReviewDiff item={item} content={doc.content} />
+        ) : (
+          doc && <Markdown remarkPlugins={[remarkGfm]}>{doc.content}</Markdown>
+        )}
         {doc?.truncated && <p className="doc-modal-note">truncated — the rest is in the file</p>}
         {doc && (
           <p className="doc-modal-foot">
