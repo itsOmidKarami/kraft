@@ -217,6 +217,59 @@ def test_patch_node_overrides_409s_on_a_node_that_has_started(tmp_path, monkeypa
         assert r2.status_code == 200, r2.text
 
 
+def test_patch_sets_an_attempts_and_wall_clock_s_node_override(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        repo = make_repo(tmp_path)
+        wid = client.post(
+            "/api/work-items",
+            json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
+        ).json()["id"]
+
+        r = client.patch(
+            f"/api/work-items/{wid}",
+            json={"node_overrides": {"implementation": {"attempts": 2, "wall_clock_s": 600}}},
+        )
+        assert r.status_code == 200, r.text
+
+        detail = client.get(f"/api/work-items/{wid}").json()
+        node = next(n for n in detail["effective_chain"]["nodes"] if n["id"] == "implementation")
+        assert node["attempts"] == 2
+        assert node["wall_clock_s"] == 600
+
+
+def test_patch_rejects_a_non_positive_attempts_override(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        repo = make_repo(tmp_path)
+        wid = client.post(
+            "/api/work-items",
+            json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
+        ).json()["id"]
+
+        r = client.patch(
+            f"/api/work-items/{wid}",
+            json={"node_overrides": {"implementation": {"attempts": 0}}},
+        )
+        assert r.status_code == 422
+
+
+def test_patch_rejects_a_non_positive_wall_clock_s_override(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        repo = make_repo(tmp_path)
+        wid = client.post(
+            "/api/work-items",
+            json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
+        ).json()["id"]
+
+        r = client.patch(
+            f"/api/work-items/{wid}",
+            json={"node_overrides": {"implementation": {"wall_clock_s": -1}}},
+        )
+        assert r.status_code == 422
+
+
 # --- point 2: reset to template ---------------------------------------------
 
 
@@ -382,6 +435,26 @@ def test_intake_node_overrides_and_budget_round_trip(tmp_path, monkeypatch):
         detail = client.get(f"/api/work-items/{wid}").json()
         assert detail["node_overrides"] == {"plan": {"auto_escalate": True}}
         assert detail["budget_cap"] == {"cap_usd": 7.5, "source": "item", "spent_usd": 0.0}
+
+
+def test_intake_node_overrides_accepts_attempts_and_wall_clock_s(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        repo = make_repo(tmp_path)
+        r = client.post(
+            "/api/work-items",
+            json={
+                "title": "t",
+                "repo": str(repo),
+                "chain_template": "default",
+                "node_overrides": {"implementation": {"attempts": 2, "wall_clock_s": 600}},
+                "autostart": False,
+            },
+        )
+        assert r.status_code == 201, r.text
+        wid = r.json()["id"]
+        detail = client.get(f"/api/work-items/{wid}").json()
+        assert detail["node_overrides"] == {"implementation": {"attempts": 2, "wall_clock_s": 600}}
 
 
 def test_intake_budget_usd_null_is_an_explicit_no_cap(tmp_path, monkeypatch):

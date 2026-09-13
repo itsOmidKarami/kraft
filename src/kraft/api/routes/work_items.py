@@ -229,6 +229,18 @@ async def create_work_item(body: NewWorkItem, request: Request):
             raise HTTPException(
                 422, f"node {node_id!r}: auto_escalate_delay_s must be a non-negative int"
             )
+        if "attempts" in fields and (
+            not isinstance(fields["attempts"], int)
+            or isinstance(fields["attempts"], bool)
+            or fields["attempts"] < 1
+        ):
+            raise HTTPException(422, f"node {node_id!r}: attempts must be a positive int")
+        if "wall_clock_s" in fields and (
+            not isinstance(fields["wall_clock_s"], int)
+            or isinstance(fields["wall_clock_s"], bool)
+            or fields["wall_clock_s"] < 1
+        ):
+            raise HTTPException(422, f"node {node_id!r}: wall_clock_s must be a positive int")
     try:
         wid = await executor.intake(
             st.db,
@@ -438,6 +450,18 @@ def _validate_node_overrides(st, row, patch: dict[str, dict]) -> None:
                 raise HTTPException(
                     422, f"node {node_id!r}: auto_escalate_delay_s must be a non-negative int"
                 )
+            if "attempts" in fields and (
+                not isinstance(fields["attempts"], int)
+                or isinstance(fields["attempts"], bool)
+                or fields["attempts"] < 1
+            ):
+                raise HTTPException(422, f"node {node_id!r}: attempts must be a positive int")
+            if "wall_clock_s" in fields and (
+                not isinstance(fields["wall_clock_s"], int)
+                or isinstance(fields["wall_clock_s"], bool)
+                or fields["wall_clock_s"] < 1
+            ):
+                raise HTTPException(422, f"node {node_id!r}: wall_clock_s must be a positive int")
             if store.node_started(c, row["id"], node_id):
                 raise HTTPException(409, f"node {node_id!r} has started; its config is locked")
 

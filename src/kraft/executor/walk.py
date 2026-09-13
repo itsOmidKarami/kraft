@@ -300,7 +300,8 @@ async def walk_node(
     if policy is None:
         raise RuntimeError(f"node {node['id']!r} has fix_loop but no policy was provided")
 
-    cap = _policy.resolve_cap(policy, key)
+    override_row = fresh_row if fresh_row is not None else row
+    cap = _policy.resolve_cap(policy, key, store.node_overrides_of(override_row).get(node["id"]))
     # `round` is the fix-cycle index every session in this pass is stamped with,
     # so per-round usage can be read back without joining against the events.
     round = 0

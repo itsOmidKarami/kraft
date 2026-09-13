@@ -142,6 +142,48 @@ def test_fix_loop_cap_breach(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
+def test_fix_loop_per_item_attempts_override_breaches_before_policy_cap(tmp_path, monkeypatch):
+    """A per-node `node_overrides` attempts value must be what `resolve_cap`
+    actually applies, not just what's stored -- the policy default alone
+    would let this item run 5 cycles; the override caps it at 1."""
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = _registry()
+            pol = _make_policy(tmp_path, attempts=5)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="capped tighter than policy by this item's own override",
+                repo=str(repo),
+                template=_fixloop_template(),
+                bd_cwd=str(tracker),
+                node_overrides={"verify": {"attempts": 1}},
+            )
+            result = await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+            )
+            assert result == "needs_human"
+            types = _types(database, wid)
+            assert types.count("fix_cycle_started") == 1
+            row = database.read(lambda c: store.read_counter(c, wid, "verify_fix_loop"))
+            assert row["count"] == 2  # override attempts (1) + 1, the breaching bump
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 def test_resume_mid_fix_loop_reenters_and_continues_budget(tmp_path, monkeypatch):
     """Crash-recovery on a fix_loop node that already ran >=1 cycle must re-enter
     the loop (not escalate), and the surviving counter row continues the budget."""
