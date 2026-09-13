@@ -74,13 +74,27 @@ export function deriveState(
     // `work_item_needs_human` / `gate_requested` is newest, since a gate
     // stop supersedes an escalation episode without emitting its own
     // `work_item_needs_human` event.
-    const episodeStart = [...events]
+    //
+    // Bounded by event `seq`, tying each session to the episode via its own
+    // `escalation_message` event's `session_id` (the same correlation
+    // ActionBar/Tasks already read) rather than comparing
+    // `session.created_at` against the boundary event's `created_at` — two
+    // ISO strings from different clocks that can tie or invert by a
+    // millisecond or two (Kraft-bffrk).
+    const boundary = [...events]
       .reverse()
-      .find((e) => e.type === "work_item_needs_human" || e.type === "gate_requested")
-      ?.created_at;
+      .find((e) => e.type === "work_item_needs_human" || e.type === "gate_requested");
+    const episodeSessionIds = boundary
+      ? new Set(
+          events
+            .filter((e) => e.type === "escalation_message" && e.seq > boundary.seq)
+            .map((e) => e.payload.session_id as string),
+        )
+      : null;
     const turns = sessions
       .filter(
-        (s) => s.hook_point === "escalation" && (!episodeStart || s.created_at >= episodeStart),
+        (s) =>
+          s.hook_point === "escalation" && (!episodeSessionIds || episodeSessionIds.has(s.id)),
       )
       .sort((a, b) => a.created_at.localeCompare(b.created_at));
     const latestTurn = turns.at(-1);

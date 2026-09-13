@@ -227,6 +227,7 @@ describe("PeekPane", () => {
         ...s.eventsByItem,
         w1: [
           { seq: 1, work_item_id: "w1", type: "work_item_needs_human", payload: {}, created_at: "2026-01-01T00:00:00Z" },
+          { seq: 2, work_item_id: "w1", type: "escalation_message", payload: { session_id: "e1", message: "go" }, created_at: "2026-01-01T00:05:00Z" },
         ],
       },
     }) as never);
@@ -253,6 +254,7 @@ describe("PeekPane", () => {
         ...s.eventsByItem,
         w1: [
           { seq: 1, work_item_id: "w1", type: "work_item_needs_human", payload: {}, created_at: "2026-01-01T00:00:00Z" },
+          { seq: 2, work_item_id: "w1", type: "escalation_message", payload: { session_id: "e1", message: "go" }, created_at: "2026-01-01T00:05:00Z" },
         ],
       },
     }) as never);
