@@ -378,11 +378,16 @@ def test_gate_reject_requires_note_and_re_runs_the_producer(tmp_path, monkeypatc
 
 
 def test_gate_reject_is_bounded_by_its_reject_loop(tmp_path, monkeypatch):
-    """Rejections are capped like a fix loop; the breach stops the item."""
+    """Rejections are capped like a fix loop; the breach stops the item.
+
+    `auto_escalate_stuck` is explicitly disarmed here: this test is about
+    the cap, not about the escalation dispatch the breach also now triggers
+    (Kraft-h48r) -- see `test_gate_reject_loop_breach_auto_escalates_when_armed`
+    for that."""
     repo = make_repo(tmp_path)
     templates = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
     (templates / "policy.yaml").write_text(
-        "loops: {}\ndefault: {attempts: 1, wall_clock_s: 3600}\n"
+        "loops: {}\ndefault: {attempts: 1, wall_clock_s: 3600}\nauto_escalate_stuck: false\n"
     )
     with _client(tmp_path, monkeypatch, templates_dir=templates) as client:
         wid = _post_default(client, repo)
@@ -409,6 +414,64 @@ def test_gate_reject_is_bounded_by_its_reject_loop(tmp_path, monkeypatch):
             if e["type"] == "work_item_needs_human"
         ]
         assert stops and "spec_approval_reject_loop" in stops[-1]["payload"]["reason"]
+
+
+def test_gate_reject_loop_breach_auto_escalates_when_armed(tmp_path, monkeypatch):
+    """Kraft-h48r: `reject_gate`'s cap-breach branch used to return straight
+    past `auto_escalate_stuck` -- the agent-side `reject` verdict re-enters
+    `walk.run_once`, whose own post-step call reaches it normally, but this
+    HTTP route never goes through either `walk.run` or `resuming.resume`."""
+    calls = []
+
+    async def fake_dispatch(database, run_dirs, *, work_item_id, message, launch, auto, evts=None):
+        calls.append((work_item_id, auto))
+        return "done"
+
+    monkeypatch.setattr("kraft.executor.gates.escalate.dispatch", fake_dispatch)
+    repo = make_repo(tmp_path)
+    templates = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
+    (templates / "policy.yaml").write_text(
+        "loops: {}\ndefault: {attempts: 1, wall_clock_s: 3600}\n"
+    )
+    with _client(tmp_path, monkeypatch, templates_dir=templates) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+        client.post(f"/api/work-items/{wid}/gates/spec_approval/reject", json={"note": "again"})
+        _poll_events(client, wid, "gate_requested", count=2)
+        r = client.post(
+            f"/api/work-items/{wid}/gates/spec_approval/reject", json={"note": "still no"}
+        )
+        assert r.status_code == 200, r.text
+        assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
+        assert calls == [(wid, True)]
+
+
+def test_gate_reject_loop_breach_does_not_escalate_when_disarmed(tmp_path, monkeypatch):
+    """Regression guard for the branch above: `auto_escalate_stuck: false`
+    must still no-op here exactly like it does on the walk-driven path."""
+    calls = []
+
+    async def fake_dispatch(database, run_dirs, *, work_item_id, message, launch, auto, evts=None):
+        calls.append((work_item_id, auto))
+        return "done"
+
+    monkeypatch.setattr("kraft.executor.gates.escalate.dispatch", fake_dispatch)
+    repo = make_repo(tmp_path)
+    templates = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
+    (templates / "policy.yaml").write_text(
+        "loops: {}\ndefault: {attempts: 1, wall_clock_s: 3600}\nauto_escalate_stuck: false\n"
+    )
+    with _client(tmp_path, monkeypatch, templates_dir=templates) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+        client.post(f"/api/work-items/{wid}/gates/spec_approval/reject", json={"note": "again"})
+        _poll_events(client, wid, "gate_requested", count=2)
+        r = client.post(
+            f"/api/work-items/{wid}/gates/spec_approval/reject", json={"note": "still no"}
+        )
+        assert r.status_code == 200, r.text
+        assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
+        assert calls == []
 
 
 def test_rejecting_the_final_gate_re_enters_at_implementation(tmp_path, monkeypatch):
