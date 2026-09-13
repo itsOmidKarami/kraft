@@ -248,6 +248,12 @@ async def create_work_item(body: NewWorkItem, request: Request):
             root_merge_policy=body.root_merge_policy,
             attachments=attachments,
             status="active" if body.autostart else "paused",
+            # Folded into intake's own INSERT transaction, not a separate
+            # `active_count` read here: two autostart creates racing a few
+            # milliseconds apart must not both see a free slot and both win
+            # one (Kraft-m43g, Kraft-nxht). `None` when not autostarting --
+            # `status` is already "paused" and needs no capacity decision.
+            limit=(st.policy.max_concurrent if st.policy else 1) if body.autostart else None,
             auto_gate=body.auto_gate,
             skip_nodes=frozenset(body.skip_nodes),
             budget_set="budget_usd" in body.model_fields_set,
@@ -269,6 +275,15 @@ async def create_work_item(body: NewWorkItem, request: Request):
         # current_node_id falls through that handler's `next(..., 0)` default.
         return {"id": wid, "status": "paused", **extra}
 
+    row = st.db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+    )
+    if row["status"] != "active":
+        # Lost the capacity race inside `intake`'s own INSERT (Kraft-m43g,
+        # Kraft-nxht): landed "paused" same as an explicit `not autostart`,
+        # not rejected -- there is no walk to spawn.
+        return {"id": wid, "status": row["status"], **extra}
+
     deps.spawn(
         request.app,
         wid,
@@ -286,9 +301,6 @@ async def create_work_item(body: NewWorkItem, request: Request):
                 on_approve=deps._on_approve(st),
             ),
         ),
-    )
-    row = st.db.read(
-        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
     )
     chain = json.loads(row["chain_definition"])
     return JSONResponse(
