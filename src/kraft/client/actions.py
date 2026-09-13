@@ -281,8 +281,11 @@ async def set_agent_overrides(
     chain. `clear` sends `{}`, resetting every field to the template's own
     binding; naming any of `model`/`escalate_model`/`effort` *replaces* the
     whole stored override, it does not merge with what is already there.
+    `_forbid_self_action`, not `resolve_work_item` (Kraft-g1ebw): a running
+    worker dialing its own model/effort mid-run is exactly the kind of
+    self-action the other verbs already refuse.
     """
-    target = await context.resolve_work_item(work_item_id)
+    target = context._forbid_self_action(work_item_id)
     if clear:
         overrides: dict = {}
     else:
@@ -318,8 +321,10 @@ async def set_node_overrides(
     sends `{}` for this node, dropping its overrides back to the template;
     naming a field *replaces* that node's whole stored override, it does not
     merge with what is already there. 409s once the node has started.
+    `_forbid_self_action`, not `resolve_work_item` (Kraft-g1ebw): same
+    self-action door every other mutating verb here already goes through.
     """
-    target = await context.resolve_work_item(work_item_id)
+    target = context._forbid_self_action(work_item_id)
     if clear:
         fields: dict = {}
     else:
