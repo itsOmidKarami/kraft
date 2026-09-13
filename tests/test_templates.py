@@ -4,10 +4,17 @@ from pathlib import Path
 import pytest
 import yaml
 
-from kraft import templates
-from kraft.templates import ATTACHMENT_GATES, GATE_NAMES, Template, materialize
+from kraft import skill, templates
+from kraft.templates import (
+    ATTACHMENT_GATES,
+    GATE_NAMES,
+    Template,
+    load_registry,
+    materialize,
+)
 
 TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
+SKILLS_DIR = Path(__file__).parent.parent / "src" / "kraft" / "skills"
 
 
 def test_shipped_yaml_parses_and_matches_spec():
@@ -1183,3 +1190,27 @@ def test_default_template_still_loads_with_the_judge_hook_present():
     ts = templates.load_templates(TEMPLATES_DIR, reg)
     assert "default" in ts.valid
     assert ts.invalid == {}
+
+
+def test_the_security_review_hook_is_registered_and_its_skill_resolves():
+    """Kraft-l2cg: `chain_review`'s own rules tell it to add a security-review
+    task when a plan touches auth, sessions, tokens, secrets or permission
+    checks, and to refuse to approximate with a different hook when the right
+    one is missing. Before this hook existed, the only possible outcome for such
+    a plan was a rationale noting the gap and a chain with no security review.
+
+    Registered but deliberately in no default chain -- `chain_review` adds it.
+    """
+    registry = load_registry(TEMPLATES_DIR / "registry.yaml", skills_dir=SKILLS_DIR)
+    hook = registry.hooks["on.review.security.run"]
+
+    assert hook["kind"] == "agent"
+    assert hook["skill"] == "security-review"
+    # Not a lookup for its own sake: `skill.validate` raising here is exactly how
+    # a registry naming a skill directory nobody wrote would be caught.
+    skill.validate(SKILLS_DIR, hook["skill"], where="registry.yaml")
+
+    for template in ("default.yaml", "quick-task.yaml"):
+        chain = yaml.safe_load((TEMPLATES_DIR / template).read_text())
+        tasks = [t for node in chain["nodes"] for t in node.get("tasks", [])]
+        assert "on.review.security.run" not in tasks

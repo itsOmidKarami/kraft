@@ -256,3 +256,79 @@ def test_main_exits_one_on_a_malformed_req_id(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "MALFORMED" in out
     assert "Bad_ID" in out
+
+
+FRONTEND_TREE = """\
+# Intent: board
+
+## REQ board-shows-needs-you-first
+The board SHALL sort items needing a human above the rest.
+enforced-by: frontend/src/views/board/Board.test.tsx::sorts needs-you first
+
+## REQ mixed-pins
+The system SHALL do a thing the backend and the UI both carry.
+enforced-by: tests/test_gates.py::test_one, frontend/src/store.test.ts::derives state
+"""
+
+
+def test_a_frontend_pin_counts_as_pinned_not_unpinned(tmp_path):
+    """Kraft-fxyz: a capability covered by a vitest test used to read as UNPINNED,
+    because `collect_node_ids` asks pytest and pytest has never heard of
+    `frontend/**/*.test.tsx`. Two of eleven `gates` requirements were false gaps."""
+    reqs = parse_file(_write(tmp_path, FRONTEND_TREE))
+    report = check(reqs, {"tests/test_gates.py::test_one"})
+
+    assert report.unpinned == []
+    assert report.pinned == 2
+    assert [pin for _req, pin in report.unverified] == [
+        "frontend/src/views/board/Board.test.tsx::sorts needs-you first",
+        "frontend/src/store.test.ts::derives state",
+    ]
+
+
+def test_a_frontend_pin_is_never_reported_broken(tmp_path):
+    """It is unresolvable here, not wrong -- pytest's node ids are the wrong
+    place to look for it, so absence from that set proves nothing."""
+    reqs = parse_file(_write(tmp_path, FRONTEND_TREE))
+    report = check(reqs, set())
+
+    assert [pin for _req, pin in report.broken] == ["tests/test_gates.py::test_one"]
+    assert len(report.unverified) == 2
+    assert not report.ok  # the *pytest* pin is genuinely broken
+
+
+def test_frontend_pins_alone_leave_the_report_ok(tmp_path):
+    body = "\n".join(FRONTEND_TREE.splitlines()[:6])
+    reqs = parse_file(_write(tmp_path, body))
+    report = check(reqs, set())
+
+    assert report.ok
+    assert len(report.unverified) == 1
+
+
+def test_render_names_frontend_pins_as_unchecked_rather_than_silent(tmp_path):
+    reqs = parse_file(_write(tmp_path, FRONTEND_TREE))
+    text = render(check(reqs, {"tests/test_gates.py::test_one"}))
+
+    assert "FRONTEND" in text
+    assert "(not checked here)" in text
+    assert text.splitlines()[-1] == (
+        "intent: 2 requirements, 2 pinned, 0 unpinned, 0 broken, 2 frontend pins not checked here"
+    )
+
+
+def test_a_frontend_pin_with_no_test_name_is_broken_not_silent_coverage(tmp_path):
+    """Nothing resolves a frontend pin, so shape is the only check left. Without
+    it, `enforced-by: frontend/Board.test.tsx` reads as coverage forever -- the
+    opposite failure to the one Kraft-fxyz reported, and quieter."""
+    body = (
+        "# Intent: board\n\n"
+        "## REQ half-written-pin\n"
+        "The board SHALL do a thing.\n"
+        "enforced-by: frontend/src/views/board/Board.test.tsx\n"
+    )
+    report = check(parse_file(_write(tmp_path, body)), set())
+
+    assert [pin for _req, pin in report.broken] == ["frontend/src/views/board/Board.test.tsx"]
+    assert report.unverified == []
+    assert not report.ok

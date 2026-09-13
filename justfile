@@ -16,12 +16,24 @@ setup-vector:
     uv sync --extra vector
     cd frontend && npm install
 
+# The dev instance's port, in one place (Kraft-y0g2). It used to be written out
+# three times -- here, in `ui`, and as `vite.config.ts`'s fallback -- and the
+# three disagreed: vite said 8765, which is an installed daemon's default, so a
+# bare `npm run dev` proxied to the operator's real instance.
+#
+# 8766 is a default, not a guarantee. `python -m kraft` refuses to start when
+# something already answers on its host:port (Kraft-kquf), so a collision here
+# is loud rather than a silent second server on somebody else's address -- but
+# an operator whose daemon sits on 8766 still needs a way out, hence the
+# override. Set KRAFT_DEV_PORT and both halves of `just dev` follow it.
+dev_port := env_var_or_default("KRAFT_DEV_PORT", "8766")
+
 # Everything a checkout-local instance needs to stay off the real ~/.kraft: its
 # own home, and beads writing into the throwaway seed repo instead of this one.
 dev_env := "KRAFT_HOME=" + justfile_directory() + "/.dev" + \
     " KRAFT_BD_CWD=" + justfile_directory() + "/.dev/repo" + \
     " KRAFT_FRONTEND_DIST=" + justfile_directory() + "/frontend/dist" + \
-    " KRAFT_PORT=8766"
+    " KRAFT_PORT=" + dev_port
 
 # The fake agent ahead of the real `claude`, so a dev instance never spends tokens.
 fake_agent := "PATH=" + justfile_directory() + "/fixtures/bin:$PATH"
@@ -37,13 +49,13 @@ _dev-home:
     @rm -f .dev/templates/access.yaml
     @{{dev_env}} uv run python dev/seed.py --repo-only
 
-# Run backend only, against the dev home (127.0.0.1:8766)
+# Run backend only, against the dev home (127.0.0.1:8766, or KRAFT_DEV_PORT)
 api: _dev-home
     {{dev_env}} {{fake_agent}} uv run python -m kraft
 
 # Run frontend dev server only (localhost:5173, proxies to backend)
 ui:
-    cd frontend && KRAFT_PORT=8766 npm run dev
+    cd frontend && KRAFT_PORT={{dev_port}} npm run dev
 
 # Dev instance: backend + vite, fake agents, state in .dev/ (Ctrl-C stops both)
 dev: _dev-home
