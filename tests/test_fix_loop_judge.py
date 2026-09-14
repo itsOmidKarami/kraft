@@ -72,6 +72,75 @@ def test_format_judge_history_labels_each_finding_by_source():
     assert "(on.test.run)" in text
 
 
+def test_stuck_fingerprint_none_below_the_limit():
+    """Two rounds of the same fingerprint, each separated by a fix -- one
+    short of the default limit of 3 -- must not read as stuck."""
+    history = [
+        {
+            "round": 0,
+            "findings": [_findings.Finding("critical", "boom", "a.py", 1, "p")],
+            "fix_result_path": "/r0",
+        },
+        {
+            "round": 1,
+            "findings": [_findings.Finding("critical", "boom", "a.py", 1, "p")],
+            "fix_result_path": "/r1",
+        },
+    ]
+    assert dispatch.stuck_fingerprint(history, min_repeats=3) is None
+
+
+def test_stuck_fingerprint_found_once_it_survives_enough_fixes():
+    """The same fingerprint surviving 3 fix attempts is stuck, even though a
+    sibling finding changes shape every round (Kraft-0i6z4)."""
+    persistent = _findings.Finding("critical", "still red", None, None, "on.test.run")
+    history = [
+        {
+            "round": 0,
+            "findings": [persistent, _findings.Finding("critical", "one", "a.py", 1, "p")],
+            "fix_result_path": "/r0",
+        },
+        {
+            "round": 1,
+            "findings": [persistent, _findings.Finding("critical", "two", "b.py", 1, "p")],
+            "fix_result_path": "/r1",
+        },
+        {
+            "round": 2,
+            "findings": [persistent, _findings.Finding("critical", "three", "c.py", 1, "p")],
+            "fix_result_path": "/r2",
+        },
+    ]
+    assert dispatch.stuck_fingerprint(history, min_repeats=3) == persistent.fingerprint
+
+
+def test_stuck_fingerprint_streak_breaks_when_the_finding_disappears():
+    """A fingerprint absent from one round resets its streak -- resolving and
+    then recurring later starts counting from 1 again, not from where it left
+    off."""
+    finding = _findings.Finding("critical", "boom", "a.py", 1, "p")
+    history = [
+        {"round": 0, "findings": [finding], "fix_result_path": "/r0"},
+        {"round": 1, "findings": [finding], "fix_result_path": "/r1"},
+        {"round": 2, "findings": [], "fix_result_path": "/r2"},
+        {"round": 3, "findings": [finding], "fix_result_path": "/r3"},
+    ]
+    assert dispatch.stuck_fingerprint(history, min_repeats=3) is None
+
+
+def test_stuck_fingerprint_requires_a_fix_between_rounds():
+    """Two measurements of the same fingerprint with no fix session between
+    them (e.g. a crash/resume re-measuring before fixing) must not count as a
+    streak -- the finding never had a chance to change."""
+    finding = _findings.Finding("critical", "boom", "a.py", 1, "p")
+    history = [
+        {"round": 0, "findings": [finding], "fix_result_path": None},
+        {"round": 1, "findings": [finding], "fix_result_path": None},
+        {"round": 2, "findings": [finding], "fix_result_path": None},
+    ]
+    assert dispatch.stuck_fingerprint(history, min_repeats=3) is None
+
+
 def test_judge_history_keeps_only_eligible_findings_with_their_fix_pointer(tmp_path):
     async def scenario():
         rd = RunDirs(tmp_path / "run").ensure()

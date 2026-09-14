@@ -447,6 +447,26 @@ def test_a_growing_set_is_progress(tmp_path, monkeypatch):
     assert _cycles(out) == 2  # both cycles ran; neither was mistaken for no-progress
 
 
+def test_a_persisting_fingerprint_is_stuck_despite_a_changing_sibling(tmp_path, monkeypatch):
+    """Kraft-0i6z4: the SAME fingerprint recurring for 3 rounds trips the
+    stuck detector even though a co-occurring finding changes shape every
+    round, so the whole set never repeats exactly."""
+    persistent = _finding("blind failure", file="blind.py")
+    out = _run(
+        tmp_path,
+        monkeypatch,
+        [
+            {"status": "failed", "findings": [persistent, _finding("one", file="a.py")]},
+            {"status": "failed", "findings": [persistent, _finding("two", file="b.py")]},
+            {"status": "failed", "findings": [persistent, _finding("three", file="c.py")]},
+        ],
+        attempts=5,
+    )
+    assert out["result"] == "needs_human"
+    assert _needs_human_reason(out).startswith("stuck:")
+    assert _cycles(out) == 2  # escalated on round 3's measurement, short of the cap
+
+
 def test_no_progress_does_not_mark_sessions_capped_out(tmp_path, monkeypatch):
     """The sessions did not cap out; only a real cap breach may claim they did."""
     same = [_finding("unfixed")]

@@ -109,6 +109,15 @@ async def _diagnosis_bundle(db, work_item_id: str, node: dict, worktree) -> dict
 #: measurement after the *first* paid cycle uses.
 _REPAIR_ROUND = -1
 
+#: Kraft-0i6z4: rounds a single fingerprint must survive fix attempts
+#: unchanged before it alone (not the whole set) counts as stuck. Must be
+#: higher than the whole-set check's effective bar of 2 (previous round ==
+#: current round) -- at 2, a fingerprint that is still present while a
+#: sibling finding is newly added (progress, not stuck) would false-positive.
+#: No policy.yaml knob: same precedent as the fix-loop judge hook, no
+#: measured need yet to make this operator-tunable.
+_FINGERPRINT_STREAK_LIMIT = 3
+
 
 async def recover_node(
     db,
@@ -578,17 +587,37 @@ async def walk_node(
             )
             return "needs_human"
 
-        if prints and fix_ran and prints == previous_prints:
-            reason = f"stuck: {len(prints)} finding(s) unchanged across cycle {count - 1}"
-            bundle = await _diagnosis_bundle(db, work_item_id, node, worktree)
-            # Deliberately NOT mark_sessions_capped_out: these sessions did not
-            # cap out, and only a real cap breach may claim they did.
-            await db.write(
-                lambda c, reason=reason, bundle=bundle: store.mark_needs_human(
-                    c, work_item_id, node["id"], reason, bundle=bundle
+        if prints and fix_ran:
+            # Whole-set equality catches "nothing at all changed". Kraft-0i6z4:
+            # a single fingerprint recurring for `_FINGERPRINT_STREAK_LIMIT`
+            # rounds is also stuck, even while a co-occurring finding keeps
+            # changing shape and the set as a whole never repeats exactly.
+            # Only reached when the cheap set check didn't already answer it,
+            # so the common (non-stuck) path pays no extra history read.
+            stuck_fp = (
+                None
+                if prints == previous_prints
+                else dispatch.stuck_fingerprint(
+                    dispatch.judge_history(db, work_item_id, node["id"], policy.loop_severities),
+                    _FINGERPRINT_STREAK_LIMIT,
                 )
             )
-            return "needs_human"
+            if prints == previous_prints or stuck_fp:
+                reason = (
+                    f"stuck: {len(prints)} finding(s) unchanged across cycle {count - 1}"
+                    if stuck_fp is None
+                    else f"stuck: finding {stuck_fp} unchanged across "
+                    f"{_FINGERPRINT_STREAK_LIMIT} cycles"
+                )
+                bundle = await _diagnosis_bundle(db, work_item_id, node, worktree)
+                # Deliberately NOT mark_sessions_capped_out: these sessions did
+                # not cap out, and only a real cap breach may claim they did.
+                await db.write(
+                    lambda c, reason=reason, bundle=bundle: store.mark_needs_human(
+                        c, work_item_id, node["id"], reason, bundle=bundle
+                    )
+                )
+                return "needs_human"
 
         payload = {"node_id": node["id"], "cycle": count, "failed_tasks": failed}
         await db.write(
