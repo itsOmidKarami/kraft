@@ -10,6 +10,7 @@ import { BudgetCard } from "./BudgetCard";
 import { CappedCard } from "./CappedCard";
 import { PausedCard } from "./PausedCard";
 import { ago, clock, logLineText, repoName } from "../format";
+import { ShortId } from "./ShortId";
 import type { LogLine } from "../types";
 import {
   EscalatedCard,
@@ -80,6 +81,7 @@ export function PeekPane({ id, onClose }: { id: string; onClose: () => void }) {
       .catch(() => setLines([]));
   }, [currentSession?.id]);
   const [dismissed, setDismissed] = useState(() => dismissedTurnId(id));
+  const [full, setFull] = useState(false);
   const { busy, err, run } = useActionBar(id);
   const navigate = useNavigate();
 
@@ -136,12 +138,22 @@ export function PeekPane({ id, onClose }: { id: string; onClose: () => void }) {
       {/* Under 1280 the pane floats over the list (UI v3 · 46); CSS hides
           this above that width, where the pane sits beside the rows. */}
       <div className="peek-scrim" onClick={onClose} aria-hidden />
-      <aside className="peek-pane" aria-label="peek">
+      <aside className="peek-pane" aria-label="peek" data-full={full || undefined}>
+        {/* Phone (W3.6): a 60vh bottom sheet; the handle takes it full height. */}
+        <button
+          type="button"
+          className="peek-handle phone-only"
+          aria-label={full ? "Collapse sheet" : "Expand sheet"}
+          aria-expanded={full}
+          onClick={() => setFull((v) => !v)}
+        />
+        {/* W4.4: line 1 id · state · Open → · ✕; line 2 repo · template.
+            Neither line wraps. */}
         <div className="peek-head">
-          <code>{item.id}</code>
-          <span title={item.repo}>{repoName(item.repo)}</span>
-          <span>{item.chain_template}</span>
-          <span className="tag tag-outline tag-tight">{state.state}</span>
+          <div className="peek-head-row">
+          <ShortId id={item.id} />
+          {/* W8.8: words, not the identifier ("not started", never "not_started"). */}
+          <span className="tag tag-outline tag-tight">{state.state.replace(/_/g, " ")}</span>
           {/* Kraft-absw: one click from the board to the artefact a
               human_review gate is about -- render-only, mr_ref is already
               on the item hydrateItem fetches. */}
@@ -164,9 +176,15 @@ export function PeekPane({ id, onClose }: { id: string; onClose: () => void }) {
           <Link to={`/work-items/${item.id}`} className="peek-open" onClick={onClose}>
             Open →
           </Link>
-          <button className="btn btn-ghost" title="Close (Esc)" aria-label="Close" onClick={onClose}>
+          <button className="btn btn-ghost peek-close" title="Close (Esc)" aria-label="Close" onClick={onClose}>
             <X size={12} />
           </button>
+          </div>
+          <div className="peek-head-row peek-head-sub">
+            <span title={item.repo}>{repoName(item.repo)}</span>
+            <span>·</span>
+            <span>{item.chain_template}</span>
+          </div>
         </div>
         <h2 className="peek-title">{item.title}</h2>
         <div className="peek-hero">

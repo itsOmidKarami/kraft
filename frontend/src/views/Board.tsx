@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { CaretDown, ClipboardText, Clock, Prohibit } from "@phosphor-icons/react";
 import * as api from "../api";
@@ -9,7 +9,9 @@ import { RepoSheet } from "../components/RepoSheet";
 import { deriveState } from "../deriveState";
 import { ago, clock, repoName } from "../format";
 import { useStore } from "../store";
+import { showToast } from "../components/Toast";
 import type { Repo, Theme, WorkItem } from "../types";
+import { usePhone } from "./work_item/usePhone";
 
 const FILTERS_KEY = "kraft.board_filters";
 
@@ -32,30 +34,32 @@ function toggleFacet(current: Set<string>, name: string, additive: boolean): Set
   return current.size === 1 && current.has(name) ? new Set<string>() : new Set([name]);
 }
 
-function Facet({
-  label,
-  rows,
-  value,
-  onPick,
-}: {
-  label: string;
-  rows: [string, number][];
-  value: Set<string>;
-  onPick: (v: string, additive: boolean) => void;
-}) {
-  return (
-    <div className="board-facet">
-      {rows.map(([name, n]) => (
-        <Chip
-          key={name}
-          label={label === "Repos" ? repoName(name) : name}
-          count={n}
-          selected={value.has(name)}
-          onClick={(e) => onPick(name, e.metaKey || e.ctrlKey)}
-        />
-      ))}
-    </div>
-  );
+type FacetChip = { key: string; label: string; n: number; selected: boolean; pick: (additive: boolean) => void };
+
+/** W4.1: at >= 768 the facet chips hold one row. Returns the index of the
+ *  first chip that wrapped onto a second (hidden) line, or null when all fit
+ *  -- measured, so a long repo name moves into "+N" whole instead of being
+ *  cut to an ellipsis. The phone scrolls the row and never overflows. */
+function useChipOverflow(ref: RefObject<HTMLDivElement>, enabled: boolean, key: string) {
+  const [from, setFrom] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || !enabled) {
+      setFrom(null);
+      return;
+    }
+    const measure = () => {
+      const chips = [...el.children].filter((k) => k.classList.contains("chip")) as HTMLElement[];
+      const i = chips.findIndex((c) => c.offsetTop > chips[0].offsetTop);
+      setFrom(i === -1 ? null : i);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref, enabled, key]);
+  return from;
 }
 
 /** A status the poller drives forward on its own, not a person: not
@@ -198,12 +202,21 @@ export function Board({ onNewWorkItem }: { onNewWorkItem?: () => void } = {}) {
   // Done-group selection (design 06): only the Done group's rows get a
   // checkbox. Cleared on every archive so a stale id cannot post twice.
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // W4.9: archiving says so, and can be taken back for 6s.
+  const archiveIds = async (ids: string[]) => {
+    await Promise.all(ids.map((id) => api.archiveWorkItem(id)));
+    const refresh = () => useStore.getState().bootstrap().then(refreshArchivedCount);
+    await refresh();
+    showToast(`${ids.length} item${ids.length === 1 ? "" : "s"} archived`, undefined, {
+      ms: 6000,
+      action: { label: "Undo", run: () => Promise.all(ids.map((id) => api.restoreWorkItem(id))).then(refresh) },
+    });
+  };
   const archiveSelected = async () => {
-    await Promise.all([...selected].map((id) => api.archiveWorkItem(id)));
+    const ids = [...selected];
     setSelected(new Set());
     setPeek(null);
-    await useStore.getState().bootstrap();
-    refreshArchivedCount();
+    await archiveIds(ids);
   };
 
   const initial = useMemo(loadFilters, []);
@@ -254,6 +267,8 @@ export function Board({ onNewWorkItem }: { onNewWorkItem?: () => void } = {}) {
     return out;
   }, [items]);
   const [repoSheetOpen, setRepoSheetOpen] = useState(false);
+  const chipsRef = useRef<HTMLDivElement>(null);
+  const phone = usePhone();
   const tplRows = useMemo(
     () => tally(items.filter((i) => matchesRepo(i) && matchesStatus(i)), (i) => i.chain_template),
     [items, repo, status],
@@ -295,6 +310,45 @@ export function Board({ onNewWorkItem }: { onNewWorkItem?: () => void } = {}) {
     );
   };
 
+  const facetChips: FacetChip[] = [
+    ...statusRows.map(([name, n]) => ({
+      key: `status:${name}`, label: name, n, selected: status.has(name),
+      pick: (a: boolean) => setStatus((cur) => toggleFacet(cur, name, a)),
+    })),
+    ...repoRows.map(([name, n]) => ({
+      key: `repo:${name}`, label: repoName(name), n, selected: repo.has(name),
+      pick: (a: boolean) => setRepo((cur) => toggleFacet(cur, name, a)),
+    })),
+    ...tplRows.map(([name, n]) => ({
+      key: `tpl:${name}`, label: name, n, selected: tpl.has(name),
+      pick: (a: boolean) => setTpl((cur) => toggleFacet(cur, name, a)),
+    })),
+  ];
+  const overflowFrom = useChipOverflow(
+    chipsRef,
+    !phone,
+    facetChips.map((c) => `${c.label}${c.n}`).join("|") + archivedCount,
+  );
+  const chipEl = (c: FacetChip, overflow: boolean) => (
+    <Chip
+      label={c.label}
+      count={c.n}
+      selected={c.selected}
+      overflow={overflow}
+      onClick={(e) => c.pick(e.metaKey || e.ctrlKey)}
+    />
+  );
+  const archivedLink = (overflow: boolean) => (
+    <Link
+      to="/archived"
+      className="chip"
+      data-overflow={overflow || undefined}
+      tabIndex={overflow ? -1 : undefined}
+    >
+      Archived <span className="chip-count">{archivedCount}</span>
+    </Link>
+  );
+
   if (repos !== null && repos.length === 0) {
     return <FreshInstallBoard onNewWorkItem={onNewWorkItem} />;
   }
@@ -302,16 +356,6 @@ export function Board({ onNewWorkItem }: { onNewWorkItem?: () => void } = {}) {
   return (
     <div className={`board${peek ? " has-peek" : ""}`}>
       <div className="board-groups">
-        {/* Repo pill (design m01): phone's own way into the repo facet --
-            desktop reaches it through the Repos chip row below. */}
-        <button
-          className="repo-pill phone-only"
-          onClick={() => setRepoSheetOpen(true)}
-        >
-          <span className="repo-pill-avatar">{repoName(repo.size === 1 ? [...repo][0] : "all")[0]?.toUpperCase()}</span>
-          {repo.size === 1 ? repoName([...repo][0]) : "all repos"}
-          <CaretDown size={12} />
-        </button>
         {repoSheetOpen && (
           <RepoSheet
             repos={repoRows}
@@ -322,35 +366,42 @@ export function Board({ onNewWorkItem }: { onNewWorkItem?: () => void } = {}) {
           />
         )}
         <div className="board-filter-row" role="group" aria-label="filters">
-          {/* Chips scroll as a unit below 1024; board-sort stays outside this
-              wrapper so its disclosure isn't clipped by the scroll box (a
-              scrolling axis forces both axes to clip, per CSS overflow). */}
-          <div className="board-filter-chips">
-            <Facet
-              label="Status"
-              rows={statusRows}
-              value={status}
-              onPick={(name, additive) => setStatus((cur) => toggleFacet(cur, name, additive))}
-            />
-            <span className="board-filter-divider" />
-            <Facet
-              label="Repos"
-              rows={repoRows}
-              value={repo}
-              onPick={(name, additive) => setRepo((cur) => toggleFacet(cur, name, additive))}
-            />
-            <Facet
-              label="Template"
-              rows={tplRows}
-              value={tpl}
-              onPick={(name, additive) => setTpl((cur) => toggleFacet(cur, name, additive))}
-            />
-            {archivedCount != null && (
-              <Link to="/archived" className="chip">
-                Archived <span className="chip-count">{archivedCount}</span>
-              </Link>
-            )}
+          {/* One row: chips, then "+N" for what did not fit, then Sort (W4.1,
+              W4.7). board-sort and board-more stay outside the chip box so
+              their disclosures aren't clipped by its overflow. */}
+          {/* Repo pill (design m01): phone's own way into the repo facet, on
+              the facet row rather than a band of its own (W7/8) -- desktop
+              reaches repos through the chips beside it. */}
+          <button
+            className="repo-pill phone-only"
+            onClick={() => setRepoSheetOpen(true)}
+          >
+            <span className="repo-pill-avatar">{repoName(repo.size === 1 ? [...repo][0] : "all")[0]?.toUpperCase()}</span>
+            {repo.size === 1 ? repoName([...repo][0]) : "all repos"}
+            <CaretDown size={12} />
+          </button>
+          <div className="board-filter-chips" ref={chipsRef}>
+            {facetChips.map((c, i) => (
+              <Fragment key={c.key}>
+                {i === statusRows.length && <span className="board-filter-divider" />}
+                {chipEl(c, overflowFrom != null && i >= overflowFrom)}
+              </Fragment>
+            ))}
+            {archivedCount != null && archivedLink(overflowFrom != null && facetChips.length >= overflowFrom)}
           </div>
+          {overflowFrom != null && (
+            <details className="board-more">
+              <summary className="chip" aria-label="more filters">
+                +{facetChips.length + (archivedCount != null ? 1 : 0) - overflowFrom}
+              </summary>
+              <div className="board-more-menu">
+                {facetChips.slice(overflowFrom).map((c) => (
+                  <Fragment key={c.key}>{chipEl(c, false)}</Fragment>
+                ))}
+                {archivedCount != null && archivedLink(false)}
+              </div>
+            </details>
+          )}
           <details className="board-sort">
             <summary>
               Sort · {SORT_LABELS[sort]} <CaretDown size={11} />
@@ -411,7 +462,7 @@ export function Board({ onNewWorkItem }: { onNewWorkItem?: () => void } = {}) {
                     return next;
                   })
                 }
-                onArchive={() => api.archiveWorkItem(i.id).then(() => useStore.getState().bootstrap()).then(refreshArchivedCount)}
+                onArchive={() => archiveIds([i.id])}
                 onLongPress={() => setPeek(i.id)}
                 onSelect={(metaKey) => {
                   if (metaKey || boardPrefs.open_in === "full") {

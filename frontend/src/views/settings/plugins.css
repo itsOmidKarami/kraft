@@ -20,7 +20,8 @@
    Steer switch, too narrow for a command string). */
 .plugin-repo-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 44px minmax(0, 2fr);
+  /* W5.4: a repo name never truncates below 14ch; the command yields first. */
+  grid-template-columns: minmax(14ch, 1fr) 44px minmax(0, 2fr);
   gap: 12px;
   align-items: center;
   padding: 9px 0;
@@ -38,7 +39,10 @@
   padding: 6px 0;
   border-bottom: 1px solid var(--color-divider);
 }
-.plugin-run-result { color: var(--color-text-muted); white-space: nowrap; }
+.plugin-run-row > .row-sub:first-child { white-space: normal; text-overflow: clip; }
+.plugin-run-result { color: var(--color-text-muted); flex: none; overflow: visible; }
+/* A repo name (W5.4): wraps, never an ellipsis. */
+.plugin-repo-row > .row-sub { white-space: normal; text-overflow: clip; overflow-wrap: anywhere; }
 
 @media (max-width: 1023px) {
   /* Task 1's specificity fix means the settings-wide `.template-editor,

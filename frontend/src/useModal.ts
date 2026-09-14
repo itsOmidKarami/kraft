@@ -16,7 +16,9 @@ export function useModal<T extends HTMLElement>(onClose: () => void) {
   useEffect(() => {
     const node = ref.current;
     const previouslyFocused = document.activeElement as HTMLElement | null;
-    node?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+    // A dialog names its first field with data-autofocus (W6.9: the intake
+    // title, not the ✕ that happens to come first in the DOM).
+    (node?.querySelector<HTMLElement>("[data-autofocus]") ?? node?.querySelector<HTMLElement>(FOCUSABLE))?.focus();
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {

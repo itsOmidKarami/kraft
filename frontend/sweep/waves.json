@@ -1,0 +1,108 @@
+{
+  "W0": {
+    "title": "Item page layout",
+    "screens": ["item", "item-tasks", "item-changes", "item-documents", "item-timeline", "item-config", "item-log", "composer", "el", "flow-inspector-tabs-selection", "flow-log-maximize", "flow-graph-resize", "flow-item-tabs-keyboard", "menu", "log-modal"],
+    "rules": [
+      { "kind": "not-collapsed", "match": "^el-(inspector|right-pane)/", "min": 320 },
+      { "kind": "no-flag", "flag": "neg-duration", "match": "." },
+      { "kind": "flow-completes", "match": "^flow-(inspector-tabs-selection|log-maximize|graph-resize|item-tabs-keyboard)/" },
+      { "kind": "differs", "a": "item/gate-comfortable@1280~comfortable", "b": "item/gate-comfortable@1280" },
+      { "kind": "no-console", "match": "^(item|el-|composer)" }
+    ]
+  },
+  "W1": {
+    "title": "Light mode",
+    "screens": ["board", "board-peek", "item", "item-tasks", "item-documents", "settings-repos", "settings-policy", "analytics", "login", "new-item", "search"],
+    "specs": ["sweep.spec.ts"],
+    "rules": [
+      { "kind": "no-flag", "flag": "contrast", "match": "~light" },
+      { "kind": "no-console", "match": "~light" },
+      { "kind": "no-flag-increase", "flag": "contrast", "match": "^(?!.*~light)" }
+    ]
+  },
+  "W2": {
+    "title": "Tablet + breakpoint unification",
+    "screens": ["board", "board-peek", "item", "item-tasks", "item-changes", "item-documents", "item-timeline", "item-config", "item-log", "new-item", "settings", "analytics"],
+    "specs": ["sweep.spec.ts"],
+    "rules": [
+      { "kind": "no-flag", "flag": "overflow-x", "match": "@(768|1024)" },
+      { "kind": "no-flag", "flag": "offscreen", "match": "@(768|1024)" },
+      { "kind": "no-console", "match": "@(768|1024)" }
+    ]
+  },
+  "W3": {
+    "title": "Phone",
+    "screens": ["board", "board-peek", "item", "phone-node", "composer", "new-item", "settings", "el-phone-list", "flow-peek-open-close", "flow-phone-node-page", "flow-gate-reject", "flow-new-item-full"],
+    "rules": [
+      { "kind": "no-flag", "flag": "offscreen", "match": "@390" },
+      { "kind": "no-flag", "flag": "overflow-x", "match": "@390" },
+      { "kind": "no-flag", "flag": "target<44", "match": "@390" },
+      { "kind": "flow-completes", "match": "^flow-(peek-open-close|phone-node-page)/.*@390" }
+    ]
+  },
+  "W4": {
+    "title": "Board, peek, archive",
+    "screens": ["board", "board-peek", "archived", "flow-peek-open-close", "flow-board-selection-archive", "flow-sidebar-toggle", "flow-search-keyboard", "flow-new-item-full"],
+    "rules": [
+      { "kind": "no-flag", "flag": "offscreen", "match": "^(board|board-peek|archived)/" },
+      { "kind": "no-flag", "flag": "ellipsis", "match": "^board/long@1920" },
+      { "kind": "flow-completes", "match": "^flow-(peek-open-close|board-selection-archive|sidebar-toggle)/" }
+    ]
+  },
+  "W5": {
+    "title": "Text overflow",
+    "screens": ["item", "item-tasks", "item-documents", "item-config", "item-timeline", "item-log", "el-inspector", "el-right-pane", "el-action-bar", "search", "doc-modal", "settings-policy", "settings-steering", "settings-plugins", "new-item"],
+    "specs": ["sweep.spec.ts", "elements.spec.ts"],
+    "rules": [
+      { "kind": "no-flag", "flag": "ellipsis", "match": "@1920" },
+      { "kind": "no-flag", "flag": "clipped-v", "match": "." }
+    ]
+  },
+  "W6": {
+    "title": "Composers, toasts, focus, post-action",
+    "screens": ["composer", "toast", "flow-gate-approve", "flow-gate-reject", "flow-pause-steer-resume", "flow-escalate-thread", "flow-search-keyboard", "flow-new-item-full", "flow-board-selection-archive", "flow-sidebar-toggle", "flow-item-tabs-keyboard"],
+    "specs": ["sweep.spec.ts", "interactions.spec.ts"],
+    "rules": [
+      { "kind": "flow-completes", "match": "^flow-" },
+      { "kind": "no-flag", "flag": "focus-ring", "match": "^flow-" }
+    ]
+  },
+  "W7": {
+    "title": "Settings",
+    "screens": ["settings", "flow-settings-save-roundtrip"],
+    "rules": [
+      { "kind": "no-flag", "flag": "offscreen", "match": "^settings-" },
+      { "kind": "no-flag", "flag": "clipped-v", "match": "^settings-" },
+      { "kind": "no-flag", "flag": "ellipsis", "match": "^settings-.*@1920" },
+      { "kind": "flow-completes", "match": "^flow-settings-save-roundtrip/" }
+    ]
+  },
+  "W8": {
+    "title": "Correctness and copy",
+    "screens": ["analytics", "search", "item", "el-inspector", "el-right-pane", "doc-modal", "login", "composer"],
+    "specs": ["sweep.spec.ts", "elements.spec.ts"],
+    "rules": [
+      { "kind": "no-console", "match": "^login/" }
+    ]
+  },
+  "W78": {
+    "title": "Settings + correctness (round-3 slice)",
+    "screens": ["settings", "flow-settings-save-roundtrip", "analytics", "search", "item", "el-inspector", "el-right-pane", "doc-modal", "login", "composer", "board", "archived"],
+    "rules": [
+      { "kind": "no-flag", "flag": "offscreen", "match": "^settings-" },
+      { "kind": "no-flag", "flag": "clipped-v", "match": "^settings-" },
+      { "kind": "no-flag", "flag": "ellipsis", "match": "^settings-.*@1920" },
+      { "kind": "flow-completes", "match": "^flow-settings-save-roundtrip/" },
+      { "kind": "no-console", "match": "^login/" }
+    ]
+  },
+  "W9": {
+    "title": "Dead surfaces and no-op settings",
+    "screens": ["menu", "log-modal", "board", "item"],
+    "specs": ["sweep.spec.ts"],
+    "rules": [
+      { "kind": "differs", "a": "board/group-template@1280~template", "b": "board/group-template@1280" },
+      { "kind": "no-console", "match": "^(menu|log-modal)/" }
+    ]
+  }
+}

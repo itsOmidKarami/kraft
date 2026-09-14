@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Flag, ShieldCheck } from "@phosphor-icons/react";
 import * as api from "../../api";
-import type { ChainNode, WorkItem } from "../../types";
+import { elapsedBetween, nodeRunSpan } from "../../format";
+import type { ChainNode, KraftEvent, WorkerSession, WorkItem } from "../../types";
 
 /**
  * The clickable stage graph (UI v2 · 05): a pill per node, a link between
@@ -64,10 +65,14 @@ export function nodeState(
 
 export function StageGraph({
   item,
+  events = [],
+  sessions = [],
   selected,
   onSelect,
 }: {
   item: WorkItem;
+  events?: KraftEvent[];
+  sessions?: WorkerSession[];
   selected: string | null;
   onSelect: (nodeId: string) => void;
 }) {
@@ -91,6 +96,14 @@ export function StageGraph({
           );
         }
         const isCurrent = n.id === item.current_node_id;
+        // W0.6: the gate mark follows `pending_gate`, not `auto_escalate` —
+        // an item whose review node had auto-escalate overridden off lost
+        // its only sign on the graph that it was waiting on a gate.
+        const gated = isCurrent && !!item.pending_gate;
+        const span = nodeRunSpan(n.id, events, sessions);
+        const tip = [n.id, span && elapsedBetween(span.from, span.to), gated && `waiting at ${item.pending_gate}`]
+          .filter(Boolean)
+          .join(" · ");
         return (
         <span className="stage-link-wrap" key={n.id}>
           <button
@@ -98,10 +111,13 @@ export function StageGraph({
             className="stage-pill"
             data-state={nodeState(n, item)}
             data-selected={n.id === selected}
+            data-gate={gated || undefined}
             aria-current={isCurrent ? "step" : undefined}
             aria-pressed={n.id === selected}
+            title={tip}
             onClick={() => onSelect(n.id)}
           >
+            {gated && <Flag size={11} weight="fill" className="stage-pill-gate" aria-hidden />}
             {n.auto_escalate && (
               <ShieldCheck size={12} weight="fill" className="stage-pill-escalate" />
             )}

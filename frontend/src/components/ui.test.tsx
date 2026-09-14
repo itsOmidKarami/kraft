@@ -20,6 +20,29 @@ describe("TaskLine", () => {
   });
 });
 
+describe("Tabs", () => {
+  it("is one Tab stop with a roving tabindex; arrows move focus, Enter selects (W6.8)", async () => {
+    const onChange = vi.fn();
+    render(
+      <Tabs
+        value="changes"
+        onChange={onChange}
+        tabs={[{ id: "tasks", label: "Tasks" }, { id: "changes", label: "Changes" }, { id: "docs", label: "Docs" }]}
+      />,
+    );
+    const [tasks, changes, docs] = screen.getAllByRole("tab");
+    expect([tasks.tabIndex, changes.tabIndex, docs.tabIndex]).toEqual([-1, 0, -1]);
+    changes.focus();
+    await userEvent.keyboard("{ArrowRight}");
+    expect(docs).toHaveFocus();
+    await userEvent.keyboard("{ArrowRight}");
+    expect(tasks).toHaveFocus();
+    expect(onChange).not.toHaveBeenCalled();
+    await userEvent.keyboard("{Enter}");
+    expect(onChange).toHaveBeenCalledWith("tasks");
+  });
+});
+
 describe("TaskBar", () => {
   it("renders one segment per task, marking done, current and pending", () => {
     render(<TaskBar progress={{ current: 3, total: 6, title: "t" }} />);

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
@@ -65,10 +65,28 @@ describe("ActionBar", () => {
   it("shows a failed Cancel work item", async () => {
     vi.spyOn(api, "abandonWorkItem").mockRejectedValue(new Error("409 busy"));
     renderBar(item({ status: "paused" }));
-    await userEvent.click(screen.getByRole("button", { name: "More" }));
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
     await userEvent.click(screen.getByRole("menuitem", { name: /cancel work item/i }));
     await userEvent.click(screen.getByRole("menuitem", { name: /cancel work item/i }));
     expect(await screen.findByText(/409 busy/)).toBeInTheDocument();
+  });
+
+  it("offers the item menu on a running item too: Archive, Open worktree, Copy id, Copy link (W0.9)", async () => {
+    renderBar(item({ status: "active" }));
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+    expect(screen.getAllByRole("menuitem").map((m) => m.textContent)).toEqual([
+      "Archive",
+      "Open worktree",
+      "Copy id",
+      "Copy link",
+    ]);
+  });
+
+  it("offers Restore instead of Archive once archived (W0.9)", async () => {
+    renderBar(item({ status: "completed", archived_at: "2026-09-13T08:00:00Z" }));
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+    expect(screen.getByRole("menuitem", { name: "Restore" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Archive" })).toBeNull();
   });
 
   it("not_started: Start resumes the never-run item", async () => {
@@ -130,6 +148,25 @@ describe("ActionBar", () => {
     expect(
       screen.queryByLabelText(/composer message/i),
     ).not.toBeInTheDocument();
+  });
+
+  it("composer: Cmd-Enter submits on the item it was opened on and closes the composer (W6.3, W6.4)", async () => {
+    const resume = vi.spyOn(api, "resumeWorkItem").mockResolvedValue({ id: "w1", node_id: null, steer: "go" });
+    renderBar(item({ status: "paused" }));
+    await userEvent.click(screen.getByRole("button", { name: /^steer$/i }));
+    await userEvent.type(screen.getByLabelText(/composer message/i), "go");
+    await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
+    expect(resume).toHaveBeenCalledWith(item({ status: "paused" }).id, "go");
+    await waitFor(() => expect(screen.queryByLabelText(/composer message/i)).toBeNull());
+  });
+
+  it("composer: Escape cancels and puts focus back on the trigger (W6.4)", async () => {
+    renderBar(item({ status: "paused" }));
+    await userEvent.click(screen.getByRole("button", { name: /^steer$/i }));
+    expect(screen.getByLabelText(/composer message/i)).toHaveFocus();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByLabelText(/composer message/i)).toBeNull();
+    await waitFor(() => expect(screen.getByRole("button", { name: /^steer$/i })).toHaveFocus());
   });
 
   it("budget: Steer and Raise budget both reach the item, via different composers", async () => {
@@ -350,14 +387,13 @@ describe("ActionBar", () => {
     expect(bar.querySelector("textarea")).toBeTruthy();
   });
 
-  it("keeps the hint on one line and never wraps the bar", () => {
+  it("never wraps the bar, and the hint takes two lines rather than an ellipsis at any width (W5.6)", () => {
     // jsdom has no cascade to compute a layout from; pin the source instead,
     // the way styles.order.test.ts does.
     const css = readFileSync(join(here, "../../../styles.css"), "utf-8");
     expect(css).toMatch(/\.control-row\s*\{[^}]*flex-wrap:\s*nowrap/);
-    expect(css).toMatch(
-      /\.control-hint\s*\{[^}]*white-space:\s*nowrap;[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis/,
-    );
+    expect(css).toMatch(/\.control-hint\s*\{[^}]*-webkit-line-clamp:\s*2/);
     expect(css).toMatch(/\.control-hint\s*\{[^}]*min-width:\s*0/);
+    expect(css).not.toMatch(/\.control-hint\s*\{[^}]*(text-overflow:\s*ellipsis|display:\s*none)/);
   });
 });

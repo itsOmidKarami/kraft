@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ago, elapsed, logLineText, statusWord, tokens, until, usd } from "./format";
-import type { LogLine } from "./types/work_item";
+import { ago, docBody, elapsed, elapsedBetween, logLineText, nodeRunSpan, shortId, statusWord, tokens, until, usd } from "./format";
+import type { KraftEvent, LogLine, WorkerSession } from "./types/work_item";
 
 const logLine = (over: Partial<LogLine>): LogLine => ({
   n: 0,
@@ -30,6 +30,54 @@ describe("elapsed", () => {
     expect(elapsed(4 * 60_000)).toBe("4m");
     expect(elapsed(2 * 3_600_000)).toBe("2h");
     expect(elapsed(2 * 3_600_000 + 5 * 60_000)).toBe("2h 5m");
+    expect(elapsed(51 * 3_600_000)).toBe("2d 3h");
+  });
+
+  it("reads a negative span as 0s", () => {
+    expect(elapsed(-31_317_000)).toBe("0s");
+  });
+});
+
+describe("shortId", () => {
+  it("keeps the first 8 and last 5 of a 32-hex id and passes short ids through", () => {
+    expect(shortId("8cbfe6e27c1044b3e445c0f0d726357d")).toBe("8cbfe6e2…6357d");
+    expect(shortId("ses_b71e0")).toBe("ses_b71e0");
+  });
+});
+
+describe("elapsedBetween + nodeRunSpan (W0.4)", () => {
+  const ev = (seq: number, type: string, node_id: string, ms: number) =>
+    ({ seq, work_item_id: "w", type, payload: { node_id }, created_at: at(ms) }) as KraftEvent;
+  const ses = (over: Partial<WorkerSession>) =>
+    ({
+      id: "s", work_item_id: "w", node_id: "verify", hook_point: "on.test.run", status: "running",
+      attempt: 1, round: 0, created_at: at(3_500_000), started_at: at(3_500_000), exited_at: null,
+      ...over,
+    }) as WorkerSession;
+  const span = (sessions: WorkerSession[]) => {
+    const s = nodeRunSpan("verify", [ev(1, "node_started", "verify", 3_600_000)], sessions)!;
+    return elapsedBetween(s.from, s.to, now);
+  };
+
+  it("freezes a node once its latest session has exited", () => {
+    expect(span([ses({ status: "capped_out", exited_at: at(3_000_000) })])).toBe("10m");
+  });
+
+  it("keeps counting while the latest session runs", () => {
+    expect(span([ses({ status: "running" })])).toBe("1h");
+  });
+
+  it("does not restart the clock for an escalation turn", () => {
+    expect(span([ses({ status: "done", exited_at: at(3_000_000) }), ses({ id: "e", hook_point: "escalation", created_at: at(60_000) })])).toBe("10m");
+  });
+
+  it("reads 0s for a session start in the future", () => {
+    expect(elapsedBetween(new Date(now + 31_317_000).toISOString(), null, now)).toBe("0s");
+  });
+
+  it("ends a completed node at node_completed", () => {
+    const s = nodeRunSpan("verify", [ev(1, "node_started", "verify", 3_600_000), ev(2, "node_completed", "verify", 1_800_000)], [])!;
+    expect(elapsedBetween(s.from, s.to, now)).toBe("30m");
   });
 });
 
@@ -95,5 +143,17 @@ describe("statusWord", () => {
 
   it("falls back to the raw string for anything unmapped", () => {
     expect(statusWord("active")).toBe("active");
+  });
+});
+
+describe("docBody (W8.2)", () => {
+  it("drops a leading H1 that repeats the title and headings with no body", () => {
+    const md = "# Reuse what we measured\n\nIntro.\n\n## Summary\n\n## Plan\n\nStep one.\n\n## Notes\n";
+    expect(docBody(md, "Reuse what we measured")).toBe("\nIntro.\n\n\n## Plan\n\nStep one.\n\n");
+  });
+
+  it("keeps a heading whose body is a deeper heading, and leaves fenced code alone", () => {
+    const md = "## Design\n\n### Cache\n\ntext\n\n```sh\n# not a heading\n```";
+    expect(docBody(md, "Other")).toBe(md);
   });
 });

@@ -10,6 +10,7 @@ import type {
   TemplateSummary,
 } from "../types";
 import { SectionLabel, Switch } from "./ui";
+import { showToast } from "./Toast";
 import { backdropProps, useModal } from "../useModal";
 
 /**
@@ -61,6 +62,8 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [advanced, setAdvanced] = useState(false);
+  // Phone (W3.8): the overrides panel sits behind its own disclosure.
+  const [overridesOpen, setOverridesOpen] = useState(false);
   const [available, setAvailable] = useState<string[]>([]);
   const [picked, setPicked] = useState<string[]>([]);
   const [mergePolicy, setMergePolicy] = useState("bump");
@@ -241,7 +244,9 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
         autostart,
       });
       onClose();
+      // The id this create returned, and a word that it worked (W6.3).
       nav(`/work-items/${id}`);
+      showToast(autostart ? "Created · started" : "Created · paused");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setBusy(false);
@@ -304,6 +309,7 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
                 id="intake-title"
                 className="input"
                 aria-label="title"
+                data-autofocus
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 required
@@ -574,7 +580,16 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
             )}
           </div>
 
-          <div className="intake-side">
+          <button
+            type="button"
+            className="disclosure-head intake-overrides-toggle phone-only"
+            aria-expanded={overridesOpen}
+            onClick={() => setOverridesOpen((v) => !v)}
+          >
+            {overridesOpen ? <CaretDown size={12} /> : <CaretRight size={12} />}
+            Advanced · overrides
+          </button>
+          <div className="intake-side" data-open={overridesOpen || undefined}>
             <SectionLabel>Overrides for this item</SectionLabel>
             <label className="control-row">
               <span>auto-escalate every gate</span>

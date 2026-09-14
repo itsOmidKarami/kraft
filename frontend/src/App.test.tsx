@@ -36,6 +36,14 @@ describe("App", () => {
     expect(screen.getByRole("dialog", { name: "Search" })).toBeInTheDocument();
   });
 
+  it("mounts straight into Login when boot's one probe came back 401", async () => {
+    const list = vi.spyOn(api, "listWorkItems");
+    render(<App initiallyLocked />);
+    expect(await screen.findByLabelText(/password/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /new work item/i })).toBeNull();
+    expect(list).not.toHaveBeenCalled();
+  });
+
   it("opens intake from the header's primary action", async () => {
     vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "quick-task", nodes: [], gates: 0 }, { id: "default", nodes: [], gates: 0 }]);
     render(<App />);

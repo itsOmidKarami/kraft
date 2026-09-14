@@ -182,7 +182,9 @@ export function AnalyticsView() {
               <span className="chart-title">Throughput by week</span>
               <span className="chart-note">completed items · current week partial</span>
             </div>
-            {weeks.every((w) => w.n === 0) ? (
+            {/* W8.4: empty only when the range's own total is 0 -- the KPI row
+                above and this chart read the same range. */}
+            {t.completed === 0 ? (
               <p className="empty chart-empty">nothing completed in this range</p>
             ) : (
               <>
@@ -212,6 +214,10 @@ export function AnalyticsView() {
           <div className="analytics-tables">
             <section className="table-block by-node">
               <div className="table-title">Where the time and money go · by node</div>
+              {/* An empty table is one line, not a header row over nothing (W4.7). */}
+              {report!.by_node.length === 0 ? (
+                <p className="empty">nothing here yet</p>
+              ) : (
               <div className="node-row node-head">
                 <span>node</span>
                 <span>share of cost</span>
@@ -220,6 +226,7 @@ export function AnalyticsView() {
                 <span>$</span>
                 <span>%</span>
               </div>
+              )}
               {report!.by_node.map((n) => (
                 <div key={n.node} className="node-row" data-node={n.node}>
                   <span className="node-name" data-label="node">
@@ -251,6 +258,9 @@ export function AnalyticsView() {
             <div className="table-col">
               <section className="table-block by-repo">
                 <div className="table-title">By repo</div>
+                {report!.by_repo.length === 0 ? (
+                  <p className="empty">nothing here yet</p>
+                ) : (
                 <div className="repo-row repo-head">
                   <span>repo</span>
                   <span>items</span>
@@ -258,6 +268,7 @@ export function AnalyticsView() {
                   <span>cost</span>
                   <span>cycles</span>
                 </div>
+                )}
                 {report!.by_repo.map((r) => (
                   <div key={r.repo} className="repo-row" data-repo={r.repo}>
                     <span title={r.repo} data-label="repo">

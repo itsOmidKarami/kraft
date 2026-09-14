@@ -7,7 +7,8 @@
    `.template-editor` is inert -- it is why the YAML pane was rendering under
    the templates list instead of in the third column. Root cause: Kraft-9fj8. */
 .template-editor.chain-editor {
-  grid-template-columns: 200px minmax(0, 1fr) 340px;
+  /* Two panes: the list, and the editor that shows the node form or the YAML. */
+  grid-template-columns: 200px minmax(0, 1fr);
   /* stretch, not the base rule's `align-items: start` -- the validity card
      pins to the bottom of this column via margin-top: auto below, which
      needs the column's own height to reach the row's full height. */
@@ -91,7 +92,7 @@
 
 .chain-pill-count {
   font-size: 10px;
-  opacity: 0.8;
+  color: var(--color-neutral-500);
 }
 
 .chain-insert {
@@ -143,7 +144,7 @@
   min-width: 0;
 }
 
-@media (max-width: 1200px) {
+@media (max-width: 1279px) {
   .template-editor.chain-editor {
     grid-template-columns: 1fr;
   }

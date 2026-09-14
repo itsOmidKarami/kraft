@@ -114,17 +114,36 @@ describe("WorkItemDetail on a phone (m04)", () => {
     expect(screen.queryByTestId("phone-stage-list")).not.toBeInTheDocument();
   });
 
-  it("the node page has its own back button, with no Timeline tab", async () => {
+  it("the node page has its own back button labelled with the item title (W3.7), with no Timeline tab", async () => {
     renderDetail("#node=plan");
     const page = await screen.findByTestId("phone-node-page");
-    expect(within(page).getByRole("button", { name: /wi_01HX3K9/ })).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "‹ T" })).toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: /wi_01HX3K9/ })).not.toBeInTheDocument();
     expect(within(page).queryByRole("tab", { name: /timeline/i })).not.toBeInTheDocument();
+  });
+
+  it("the phone item header is back + title only: no repo, no id (W3.1)", () => {
+    setup({ title: "Design the caching layer", repo: "/code/kraft-plugins" });
+    renderDetail();
+    const bar = document.querySelector(".phone-topbar") as HTMLElement;
+    expect(within(bar).getByRole("link", { name: "‹ Board" })).toHaveAttribute("href", "/");
+    expect(within(bar).getByText("Design the caching layer")).toBeInTheDocument();
+    expect(bar.textContent).not.toMatch(/wi_01HX3K9|kraft-plugins|swipe/);
+  });
+
+  it("maximizes the node page's log as a page layout, not a dead button (W0)", async () => {
+    const user = userEvent.setup();
+    setup({}, [session({ id: "s1", node_id: "verify" })]);
+    renderDetail("#node=verify&tab=tasks&session=s1");
+    await user.click(await screen.findByRole("button", { name: /maximi/i }));
+    expect(document.querySelector(".item-max-strip")).toBeTruthy();
+    expect(screen.queryByTestId("phone-node-page")).toBeNull();
   });
 
   it("the back button returns to the stage list", async () => {
     renderDetail("#node=plan");
     await screen.findByTestId("phone-node-page");
-    await userEvent.click(screen.getByRole("button", { name: /wi_01HX3K9/ }));
+    await userEvent.click(screen.getByRole("button", { name: "‹ T" }));
     await waitFor(() => expect(screen.getByTestId("phone-stage-list")).toBeInTheDocument());
   });
 

@@ -146,6 +146,24 @@ describe("SearchOverlay", () => {
     expect(spy).toHaveBeenCalledWith("w1", "plan_approval");
   });
 
+  it("ArrowDown moves aria-activedescendant and Enter acts on that row, not the first (W6.5)", async () => {
+    useStore.setState({
+      workItems: {
+        w1: wi({ id: "w1", status: "needs_human", pending_gate: "plan_approval", title: "first gated" }),
+        w2: wi({ id: "w2", status: "needs_human", pending_gate: "spec_approval", title: "second gated" }),
+      },
+    } as never);
+    const spy = vi.spyOn(api, "approveGate").mockResolvedValue();
+    renderOverlay();
+    const box = screen.getByRole("searchbox");
+    expect(box).toHaveAttribute("aria-activedescendant", "search-opt-0");
+    await userEvent.type(box, "{ArrowDown}");
+    expect(box).toHaveAttribute("aria-activedescendant", "search-opt-1");
+    expect(document.getElementById("search-opt-1")).toHaveAttribute("data-active", "true");
+    await userEvent.type(box, "{Enter}");
+    expect(spy).toHaveBeenCalledWith("w2", "spec_approval");
+  });
+
   it("puts repo · node · Task N/M · title on a work-item row's second line", async () => {
     useStore.setState({
       workItems: {

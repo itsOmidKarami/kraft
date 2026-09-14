@@ -55,6 +55,19 @@ describe("ArchivedView", () => {
     await waitFor(() => expect(screen.queryByText("Item")).toBeNull());
   });
 
+  it("an empty archive is one line with no header row, and sorts through the board's disclosure (W4.7)", async () => {
+    vi.spyOn(api, "listArchivedWorkItems").mockResolvedValue({ items: [], cursor: 0 });
+    render(
+      <MemoryRouter>
+        <ArchivedView />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText("nothing here yet")).toBeInTheDocument();
+    expect(screen.queryByText("WORK ITEM")).toBeNull();
+    expect(document.querySelector("select")).toBeNull();
+    expect(document.querySelector(".board-sort summary")?.textContent).toContain("Sort · archived date");
+  });
+
   it("search archive filters by title, client-side", async () => {
     vi.spyOn(api, "listArchivedWorkItems").mockResolvedValue({
       items: [

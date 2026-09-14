@@ -7,7 +7,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: var(--space-4);
+  padding: calc(var(--density-row-pad) + 4px) var(--space-4);
   border-radius: var(--radius-md);
   border: 1px solid var(--color-neutral-800);
   background: color-mix(in srgb, var(--color-surface) 60%, transparent);
@@ -122,9 +122,13 @@
 }
 
 /* — task row (12): a row, not a card ──────────────────────────────────── */
-.task-row { padding: 7px 6px; }
+.task-row { padding: var(--density-row-pad) 6px; }
 .task-row .row-title { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; }
-.task-row .row-sub { font-size: 11px; }
+/* Two lines, not an ellipsis (W5): a turn's message or a metrics line. */
+.task-row .row-sub {
+  font-size: 11px; white-space: normal; text-overflow: clip;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+}
 .task-row .row-state { font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
 .task-row .glyph { width: 16px; height: 16px; }
 
@@ -132,7 +136,7 @@
 .graph-split {
   display: flex;
   flex-direction: column;
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
 }
 .graph-split-graph {
@@ -140,11 +144,12 @@
   overflow-y: auto;
   padding-bottom: var(--space-2);
 }
-/* The lower half takes what the graph does not (48). */
+/* The lower half takes what the graph does not (48), and never under 320px
+   (W0.2): index.tsx's useSplitFit tightens the fixed block above instead. */
 .graph-split-lower {
   display: flex;
-  flex: 1;
-  min-height: 0;
+  flex: 1 1 0;
+  min-height: 320px;
 }
 .graph-split-handle {
   height: 6px;
@@ -163,8 +168,8 @@
   grid-template-columns: 420px minmax(0, 1fr);
   gap: var(--space-6);
   align-items: stretch;   /* was `start`, which is why the columns were short */
-  flex: 1;
-  min-height: 0;
+  flex: 1 1 0;
+  min-height: 320px;
 }
 /* Two independent scrollers, never nested (48). */
 .inspector, .item-right-pane { overflow-y: auto; min-height: 0; }
@@ -231,7 +236,9 @@
 }
 .tree-row[data-kind="folder"] { color: var(--color-neutral-400); }
 .tree-row[data-selected="true"] { background: var(--color-accent-900); border-radius: var(--radius-sm); }
-.tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A deep folder's name breaks rather than ellipsizing (W5); counts never wrap. */
+.tree-name { min-width: 0; overflow-wrap: anywhere; }
+.tree-row .row-sub { overflow: visible; text-overflow: clip; }
 .plan-list {
   list-style: none;
   margin: 0 0 var(--space-3);
@@ -258,7 +265,7 @@
 .plan-task-n {
   width: 16px;
   text-align: right;
-  opacity: 0.6;
+  color: var(--color-neutral-500);
 }
 .inspector-foot {
   font-size: 11.5px;
@@ -278,7 +285,10 @@
   height: 36px; box-sizing: border-box; padding: 0 14px;
   border-bottom: 1px solid var(--color-divider); min-width: 0;
 }
-.item-max-title { font-size: 13px; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-max-title {
+  font-size: 13px; font-weight: 500; min-width: 0; overflow: hidden;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+}
 .item-max-node { font-size: 12px; color: var(--color-neutral-500); white-space: nowrap; }
 .item-max-actions { margin-left: auto; display: flex; gap: 8px; flex: none; }
 .detail[data-maximized="true"] { padding: 0; gap: 0; height: 100%; }
@@ -295,12 +305,15 @@
   flex-direction: column;
   gap: var(--space-2);
 }
-.config-fields { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; font-size: 12px; margin: 0; }
+/* W5.7: value beside its label, not stranded at the far edge of the pane. */
+.config-fields { display: grid; grid-template-columns: 160px minmax(0, 560px); gap: 6px 12px; font-size: 12px; margin: 0; }
 .config-fields dt {
   color: var(--color-neutral-500);
 }
-.config-fields dd { font-family: ui-monospace, Menlo, monospace; text-align: right; margin: 0; color: var(--color-neutral-300); }
-.config-locked .config-fields { opacity: 0.5; }
+.config-fields dd { font-family: ui-monospace, Menlo, monospace; margin: 0; overflow-wrap: anywhere; color: var(--color-neutral-300); }
+/* Locked still has to be read: muted colour, not half opacity (2.2:1 in light). */
+.config-locked .config-fields dt,
+.config-locked .config-fields dd { color: var(--color-text-muted); }
 .config-readonly {
   border: 1px solid var(--color-divider); border-radius: 8px;
   padding: 10px 12px; font-size: 12px; color: var(--color-neutral-400);
@@ -313,9 +326,11 @@
   width: 140px;
 }
 /* One row -- checkbox · input · button -- opened by Edit, never wraps. */
-.budget-row { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
-.budget-row label, .budget-row .btn { white-space: nowrap; flex: none; }
-.budget-row input { min-width: 0; }
+/* Scoped to the pane: unscoped, this flex row also hit Settings → Policy's
+   `.cap-row.budget-row` grid and cut its labels to "Max active work…". */
+.config-pane .budget-row { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
+.config-pane .budget-row label, .config-pane .budget-row .btn { white-space: nowrap; flex: none; }
+.config-pane .budget-row input { min-width: 0; }
 .config-yaml {
   font-size: 11.5px;
   line-height: 1.5;
@@ -342,6 +357,30 @@
 }
 
 /* — composers (17-20, 23): expand inside the action bar ────────────────── */
+/* W8.1: the agent's question, in full, on its own line above Answer. The item
+   page never scrolls, so a long question scrolls inside its own 4 lines. */
+.stop-question { flex-basis: 100%; margin: 0; max-height: 4lh; overflow-y: auto; white-space: pre-wrap; }
+
+/* Spec 21: the never-started item's intake card and chain list. */
+.not-started-card { display: flex; flex-direction: column; gap: 10px; padding: 16px; align-self: start; }
+.not-started-chain { padding: 0 16px; }
+.not-started-chain ol { margin: 8px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+
+/* W6.2: the first line never sits under the top edge, and the box grows with
+   its text from 3 to 10 lines (field-sizing), then scrolls. */
+.composer-input {
+  padding-top: 8px;
+  scroll-padding-top: 8px;
+  field-sizing: content;
+  min-height: calc(3lh + 16px);
+  max-height: calc(10lh + 16px);
+  resize: none;
+}
+/* The item page never scrolls (48) and its split keeps a 320px floor, so
+   there the growth stops at whatever the viewport has left over that chrome
+   (~710px of hero, bar, graph and floor; 90px at 800 tall, 10 lines by 940)
+   and never below 3 lines; past that the textarea scrolls inside. */
+.detail .composer-input { max-height: max(calc(3lh + 16px), min(calc(10lh + 16px), calc(100vh - 710px))); }
 .composer {
   display: flex;
   flex-direction: column;
@@ -436,12 +475,17 @@ textarea.composer-input {
   padding: env(safe-area-inset-top) env(safe-area-inset-right)
     env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
+/* W3.5: Cancel · title, with the body's primary pinned top-right (styles.css
+   phone block) -- one action pair, not Cancel here and Cancel + primary below. */
 .phone-composer-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: var(--space-3) var(--space-4);
+  gap: var(--space-3);
+  min-height: 56px;
+  padding: 0 140px 0 var(--space-4);
 }
+.phone-composer-head > .btn { flex: none; width: auto; }
+.phone-composer-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .phone-composer-context {
   font-size: 12px;
   color: var(--color-neutral-500);
@@ -466,27 +510,49 @@ textarea.composer-input {
 }
 
 /* — phone item + node page (m04/m05) ───────────────────────────────────── */
+/* W3.1: the phone item header -- ‹ Board and the title on one 44px line,
+   sticky at the top of the scrolling page, edge to edge over .detail's padding. */
 .phone-topbar {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  align-items: center;
   gap: var(--space-3);
-  padding-bottom: var(--space-2);
+  min-height: 44px;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--color-bg);
+  margin: -16px -12px 8px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--color-divider);
+}
+/* The node page (m05) is its own box inside .detail: a bleed there pokes past
+   that box and the page scrolls sideways (e2e phone.visual: the diff viewer). */
+.phone-node > .phone-topbar { margin-inline: 0; padding-inline: 0; }
+.phone-topbar-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .phone-back {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  min-height: 44px;
   color: var(--color-neutral-300);
+  font: inherit;
   font-size: 14px;
   text-decoration: none;
   background: none;
   border: none;
-  padding: var(--space-2) 0;
+  padding: 0;
   cursor: pointer;
 }
-.phone-topbar-context {
-  font-size: 12px;
-  color: var(--color-neutral-500);
-  white-space: nowrap;
-}
+/* The node page's back label is the item title (W3.7): it takes the line. */
+.phone-back-title { flex: 1; min-width: 0; display: block; line-height: 44px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .phone-stage-list {
   display: flex;
   flex-direction: column;
@@ -530,3 +596,146 @@ textarea.composer-input {
   gap: var(--space-4);
   padding-top: var(--space-3);
 }
+
+/* — W0 · a fixed block over a split with a 320px floor ───────────────────── */
+/* Header, gate card, action bar and graph keep their own height; only the
+   split gives way (48). When they would push it under its floor, useSplitFit
+   (index.tsx) steps `data-fit` through tight → tighter → tightest. */
+.detail.item-page:not([data-maximized]) > * { flex: none; }
+.detail.item-page:not([data-maximized]) > .graph-split { flex: 1 1 0; min-height: 0; }
+/* Last step: the graph's drag height is an inline max-height, so its 48px
+   minimum has to outrank that. */
+.detail[data-fit="tightest"] .graph-split-graph { max-height: 48px !important; }
+
+/* Task progress: its own full-width row under the title (W0.1). */
+.detail-progress { grid-area: progress; display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.detail-progress .task-title { min-width: 0; overflow: hidden; }
+.detail-progress .task-title::before { content: "· "; color: var(--color-text-muted); }
+.detail-progress .task-bar { width: 100%; }
+
+.detail-submodules { cursor: pointer; border: 0; font-family: inherit; }
+
+/* Title editor (W0.11): grows with its text to three lines. */
+textarea.detail-title-input {
+  field-sizing: content; resize: none; font-size: 18px; line-height: 1.3;
+  min-height: calc(1.3em + 16px); max-height: calc(3.9em + 16px);
+}
+
+/* Description (W0.1): markdown, two lines until "more". Clamped, every block
+   below the one wrapper flows inline, so the two lines read as the brief's
+   prose rather than a heading and a gap. */
+.detail-description-wrap { display: flex; align-items: flex-end; gap: 6px; min-width: 0; }
+.detail-description {
+  flex: 1; min-width: 0; margin: 0;
+  font-size: var(--density-body-size); line-height: 1.5; color: var(--color-neutral-300);
+}
+.detail-description[data-expanded="false"] {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+}
+.detail-description[data-expanded="false"] :is(h1, h2, h3, h4, h5, h6, p, ul, ol, li, blockquote, pre, table, thead, tbody, tr, th, td) {
+  display: inline; margin: 0; padding: 0; font-size: inherit; font-weight: inherit; white-space: normal;
+}
+.detail-description[data-expanded="false"] :is(h1, h2, h3, h4, h5, h6, p, li, pre, tr)::after { content: " "; }
+.detail-description[data-expanded="true"] { max-height: 40vh; overflow-y: auto; }
+.detail-description[data-expanded="true"] :is(h1, h2, h3) { font-size: 14px; font-weight: 600; margin: 10px 0 4px; }
+.detail-description[data-expanded="true"] .detail-description-md > :first-child { margin-top: 0; }
+.detail[data-fit="tighter"] .detail-description[data-expanded="false"],
+.detail[data-fit="tightest"] .detail-description[data-expanded="false"] { -webkit-line-clamp: 1; }
+.detail[data-fit="tighter"] .detail-description[data-expanded="true"],
+.detail[data-fit="tightest"] .detail-description[data-expanded="true"] { max-height: 20vh; }
+.detail-description-more { flex: none; font-size: 12px; padding: 0 2px; }
+
+/* Gate card (W0.3): content in a 720px column instead of hugging 200px of a
+   964px card; above 1280 the findings line and the judge note sit side by
+   side. At any fit step each collapses to one line with "+N more". */
+.gate-card > .attention-head,
+.gate-card > .gate-actions,
+.gate-card > .gate-artifacts,
+.gate-card > .composer { max-width: 720px; }
+.gate-notes {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px; align-items: start; max-width: 1200px;
+}
+.gate-notes > :only-child { grid-column: 1 / -1; max-width: 720px; }
+.gate-notes .gate-deferred, .gate-notes .gate-judge-note { margin: 0; }
+.gate-actions .gate-artifacts { display: contents; }
+.gate-more { display: none; flex: none; font-size: 11px; color: var(--color-text-muted); }
+/* Two lines, never an ellipsis: the judge note is the reason (W5). */
+.detail[data-fit] .gate-deferred,
+.detail[data-fit] .gate-judge-entry {
+  min-width: 0; overflow: hidden;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+}
+.detail[data-fit] .gate-judge-note { flex-direction: row; align-items: baseline; }
+.detail[data-fit] .gate-judge-entry { flex: 1; }
+.detail[data-fit] .gate-judge-entry:not(:first-child) { display: none; }
+.detail[data-fit] .gate-more { display: inline; }
+@media (max-width: 1279px) {
+  .gate-notes { grid-template-columns: minmax(0, 1fr); max-width: 720px; }
+  /* 1024–1279 (W2.5): a 360px inspector, and an action bar that wraps to
+     two rows — buttons + hint, then the secondary actions — instead of
+     ellipsizing the hint to nothing. */
+  .item-split { grid-template-columns: 360px minmax(0, 1fr); }
+  /* Five tabs in a 360px column broke "Timeline · 42" onto two lines: one
+     line, scrolling inside the inspector if it must. */
+  .inspector .tabs { flex-wrap: nowrap; overflow-x: auto; }
+  .inspector .tab { white-space: nowrap; flex: none; }
+  /* A 360px column cut a session's metrics line ("attempt 1 · 54.3k tokens ·
+     $0.410 · 6m") — it wraps to a second line instead. */
+  .action-bar-row { flex-wrap: wrap; row-gap: var(--space-3); }
+  .action-bar-left, .action-bar-right { flex: 1 1 100%; }
+  .action-bar-right { justify-content: flex-end; }
+  .action-bar-mid:empty { display: none; }
+}
+
+@media (max-width: 1023px) {
+  /* Stacked (47, W2.2): the tab strip stays on top; under it one pane shows
+     the inspector's list or the right pane, chosen by List / Detail. */
+  .item-split { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 0; }
+  .item-split[data-view="detail"] { grid-template-rows: auto minmax(0, 1fr); }
+  .item-split[data-view="list"] > .item-right-pane { display: none; }
+  .item-split[data-view="detail"] .inspector-body { display: none; }
+  .item-split[data-view="detail"] > .inspector { overflow: visible; border-bottom: 1px solid var(--color-neutral-800); }
+  .inspector { border-right: 0; padding-right: 0; }
+}
+.inspector-head-extra { margin-left: auto; }
+/* The shared segmented control's idle option read 4.23:1 here; this one sits
+   on the page background, so lift it just past 4.5:1 (W1 owns the tokens). */
+.inspector-head-extra .segmented-opt[aria-pressed="false"] { color: var(--color-neutral-400); }
+
+/* Current pill at a gate (W0.6, 44). */
+.stage-pill-gate { color: var(--color-accent-300); }
+
+/* Config → Repos (W0.7). */
+.config-repos-policy { margin: 0; font-size: 12px; color: var(--color-neutral-400); }
+.config-repo-path { font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+.config-repos .row-title {
+  white-space: normal; text-overflow: clip; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+}
+
+/* Density (W0.10): comfortable applies to the item page, not only board rows. */
+.detail.item-page .detail-meta { font-size: calc(var(--density-body-size) - 1px); }
+.inspector .row:not(.task-row) { padding-block: calc(var(--density-row-pad) + 3px); }
+.log-line { padding-block: calc(var(--density-row-pad) - 7px); }
+.event-row { padding-block: calc(var(--density-row-pad) - 1px); }
+
+/* Fit steps close the page's own spacing before anything is hidden: at 800px
+   tall a gate item's three 24px gaps and the card's padding were the last
+   ~70px the split needed. On a short viewport (700px) the last step also
+   takes the title to one line and the description off -- the split's floor
+   outranks the brief's prose there. */
+.detail.item-page[data-fit] { gap: 12px; padding-top: 16px; }
+.detail[data-fit] .gate-card { padding: 10px 14px; gap: 8px; }
+.detail[data-fit] .gate-notes .gate-deferred { border-top: 0; padding-top: 0; }
+.detail[data-fit] .graph-split-graph { padding-bottom: 0; }
+.detail[data-fit="tightest"] .detail-title { -webkit-line-clamp: 1; }
+.detail[data-fit="tightest"] .detail-description-wrap { display: none; }
+/* A judge entry is a <p>: its default bottom margin padded a one-line note
+   into a two-line box. The note's flex gap already spaces entries. */
+.gate-judge-entry { margin: 0; }
+.detail[data-fit] .gate-judge-note { padding: 4px 10px; }
+/* Last step: the hero's fix-cycle / capped tags stack under the node and set
+   the header's height; the Tasks rows still carry the cycle. */
+.detail[data-fit="tightest"] .detail-hero .tag { display: none; }
+.detail.item-page[data-fit="tightest"] { gap: 8px; padding-top: 10px; }

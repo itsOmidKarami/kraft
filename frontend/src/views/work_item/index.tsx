@@ -1,20 +1,23 @@
-import { useEffect, useState, type WheelEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject, type WheelEvent } from "react";
 import { useLocation, useParams } from "react-router-dom";
 import * as api from "../../api";
-import { Row, RowState, RowText, StatusGlyph } from "../../components/ui";
 import { until } from "../../format";
 import { useStore } from "../../store";
-import type { SessionStatus, WorkItemDiff } from "../../types";
+import type { WorkItemDiff } from "../../types";
 import { ActionBar } from "./ActionBar";
 import { GraphSplit } from "./GraphSplit";
+import { deriveState } from "../../deriveState";
 import { Header } from "./Header";
 import { Inspector } from "./Inspector";
+import { ChainDescription, NotStartedCard } from "./NotStarted";
 import { PhoneNode, PhoneStageList, PhoneTopBar } from "./Phone";
 import { Log } from "./RightPane/Log";
 import { RightPane } from "./RightPane";
 import { StageGraph } from "./StageGraph";
+import { Segmented } from "../../components/ui";
+import type { InspectorTab, Selection } from "./selection";
 import { useItemUrlState } from "./useItemUrlState";
-import { usePhone } from "./usePhone";
+import { useMedia, usePhone } from "./usePhone";
 import "./work_item.css";
 
 /**
@@ -24,12 +27,48 @@ import "./work_item.css";
  * their own module.
  */
 
-/** repos-panel state → the glyph/label vocabulary session rows already use. */
-function repoGlyphStatus(state: string): SessionStatus {
-  if (state === "merged") return "done";
-  if (state === "failed") return "failed";
-  if (state === "open") return "running";
-  return "pending";
+/** W0.2: the split never goes under 320px. When the fixed block (header,
+ *  gate card, action bar, graph) leaves less than that, it gives way in
+ *  steps — gate-card notes to one line, then the description to one line,
+ *  then the graph to its 48px minimum — each a `data-fit` value the CSS
+ *  reads; no pixel heights are set from here. Re-derived from the loosest
+ *  step on every resize, so a closed composer or a taller window relaxes it.
+ *  Watching `.graph-split` catches every change above it: the page's height
+ *  is fixed, so anything that grows the fixed block shrinks the split. */
+const FIT_STEPS = ["tight", "tighter", "tightest"] as const;
+const SPLIT_FLOOR = 320;
+
+function useSplitFit(ref: RefObject<HTMLDivElement>, enabled: boolean, key: string | undefined) {
+  useLayoutEffect(() => {
+    const page = ref.current;
+    if (!enabled || !page || typeof ResizeObserver === "undefined") return;
+    let frame = 0;
+    const fit = () => {
+      frame = 0;
+      const lower = page.querySelector<HTMLElement>(".graph-split-lower");
+      if (!lower) return;
+      const room = () =>
+        page.getBoundingClientRect().bottom -
+        parseFloat(getComputedStyle(page).paddingBottom) -
+        lower.getBoundingClientRect().top;
+      delete page.dataset.fit;
+      for (const step of FIT_STEPS) {
+        if (room() >= SPLIT_FLOOR) break;
+        page.dataset.fit = step;
+      }
+    };
+    const ro = new ResizeObserver(() => {
+      if (!frame) frame = requestAnimationFrame(fit);
+    });
+    ro.observe(page);
+    const split = page.querySelector(".graph-split");
+    if (split) ro.observe(split);
+    return () => {
+      ro.disconnect();
+      cancelAnimationFrame(frame);
+      delete page.dataset.fit;
+    };
+  }, [ref, enabled, key]);
 }
 
 export function WorkItemDetail() {
@@ -53,9 +92,43 @@ export function WorkItemDetail() {
     else if (e.deltaY < -24 && headCollapsed) setHeadCollapsed(false);
   };
 
+  // A finished item has no current node; select the one it finished on, so
+  // the inspector names a node and Tasks counts that node's sessions (W0.5, W0.8).
+  const finished = !!item && (item.status === "completed" || item.status === "abandoned" || !!item.archived_at);
   const { nodeId, nodeExplicit, tab, selection, maximized, selectNode, setTab, select, setMaximized, goTo, goToNode, reviewHref } =
-    useItemUrlState(item?.current_node_id ?? null);
+    useItemUrlState(item?.current_node_id ?? (finished ? (item.chain_definition.nodes.at(-1)?.id ?? null) : null));
   const location = useLocation();
+
+  // Tablet (768–1023, W2.2): one pane under the tab strip — the list, or the
+  // selected row's detail. Picking a row shows its detail; a new tab starts
+  // on its list.
+  const tablet = useMedia("(max-width: 1023px)") && !phone;
+  const [paneView, setPaneView] = useState<"list" | "detail">("list");
+  const pickRow = (s: Selection) => {
+    select(s);
+    if (tablet) setPaneView("detail");
+  };
+  const pickTab = (t: InspectorTab) => {
+    setTab(t);
+    if (tablet) setPaneView("list");
+  };
+
+  const pageRef = useRef<HTMLDivElement>(null);
+  useSplitFit(pageRef, !!item && !phone && !maximized, item?.id);
+
+  // The hero's "+N submodules" chip (W0.7): switch to Config, then scroll the
+  // inspector — not the window — so the Repos section sits under its tabs.
+  // Keyed on `tab` too, since the Config tab renders a commit after setTab.
+  const [reposFocus, setReposFocus] = useState(0);
+  useEffect(() => {
+    if (!reposFocus) return;
+    const target = document.getElementById("config-repos");
+    const scroller = target?.closest<HTMLElement>(".inspector");
+    if (!target || !scroller) return;
+    const under = scroller.querySelector(".tabs")?.getBoundingClientRect().bottom ?? scroller.getBoundingClientRect().top;
+    scroller.scrollTop += target.getBoundingClientRect().top - under;
+    setReposFocus(0);
+  }, [reposFocus, tab]);
 
   useEffect(() => {
     if (!maximized) return;
@@ -118,6 +191,11 @@ export function WorkItemDetail() {
     if (phone && item?.current_node_id) goToNode("config", item.current_node_id);
     else setTab("config");
   };
+  const showRepos = () => {
+    if (phone) return goToConfig();
+    setTab("config");
+    setReposFocus((n) => n + 1);
+  };
 
   if (loadErr && !item) {
     return (
@@ -127,32 +205,6 @@ export function WorkItemDetail() {
     );
   }
   if (!item) return <p className="empty">unknown work item</p>;
-
-  // m05: tapping a stage on the phone list opens this full-screen instead
-  // of the desktop split — a real hash-selected node, not just the item's
-  // current one (`nodeExplicit`, from `useItemUrlState` above).
-  if (phone && nodeExplicit && nodeId) {
-    return (
-      <div className="detail item-page">
-        <PhoneNode
-          item={item}
-          sessions={sessions}
-          events={events}
-          nodeId={nodeId}
-          tab={tab}
-          onTabChange={setTab}
-          selection={selection}
-          onSelect={select}
-        />
-      </div>
-    );
-  }
-
-  // The phone list's own log summary is always the Tasks tab's session,
-  // regardless of which tab the hash currently names — read that key
-  // directly rather than through `selection`, which only ever reflects the
-  // active tab.
-  const currentLogSessionId = new URLSearchParams(location.hash.replace(/^#/, "")).get("session");
 
   // Maximize is a page layout, not the pane's own state (43): the header,
   // repos panel, action bar, graph and inspector all give way to a 36px
@@ -192,43 +244,45 @@ export function WorkItemDetail() {
     );
   }
 
+  // m05: tapping a stage on the phone list opens this full-screen instead
+  // of the desktop split — a real hash-selected node, not just the item's
+  // current one (`nodeExplicit`, from `useItemUrlState` above).
+  if (phone && nodeExplicit && nodeId) {
+    return (
+      <div className="detail item-page">
+        <PhoneNode
+          item={item}
+          sessions={sessions}
+          events={events}
+          nodeId={nodeId}
+          tab={tab}
+          onTabChange={setTab}
+          selection={selection}
+          onSelect={select}
+          onToggleMaximize={() => setMaximized(true)}
+        />
+      </div>
+    );
+  }
+
+  // The phone list's own log summary is always the Tasks tab's session,
+  // regardless of which tab the hash currently names — read that key
+  // directly rather than through `selection`, which only ever reflects the
+  // active tab.
+  const currentLogSessionId = new URLSearchParams(location.hash.replace(/^#/, "")).get("session");
+
   return (
-    <div className="detail item-page" data-head={headCollapsed ? "collapsed" : undefined}>
+    <div className="detail item-page" ref={pageRef} data-head={headCollapsed ? "collapsed" : undefined}>
       {phone && <PhoneTopBar item={item} />}
       <Header
         item={item}
         events={events}
+        sessions={sessions}
         collapsed={headCollapsed}
         onWheel={onHeadWheel}
         onExpand={() => setHeadCollapsed(false)}
+        onShowRepos={showRepos}
       />
-
-      {!!item.repos?.length && (
-        <section className="repos-panel">
-          <div className="repos-head">
-            <span className="section-label">Repos</span>
-            <span>merge rank · deepest first</span>
-            <span className="repos-policy">
-              root_merge_policy: <b>{item.root_merge_policy}</b>
-            </span>
-          </div>
-          {item.repos.map((r) => (
-            <Row key={r.path} columns="22px 1fr 100px auto" data-repo={r.path}>
-              <StatusGlyph status={repoGlyphStatus(r.state)} />
-              <RowText
-                title={r.repo}
-                sub={
-                  <>
-                    <code>{r.path}</code> · merge rank {r.merge_rank}
-                  </>
-                }
-              />
-              <span className="row-sub">{r.role}</span>
-              <RowState status={repoGlyphStatus(r.state)}>{r.state}</RowState>
-            </Row>
-          ))}
-        </section>
-      )}
 
       <ActionBar
         item={item}
@@ -241,7 +295,7 @@ export function WorkItemDetail() {
 
       {phone ? (
         <>
-          <PhoneStageList item={item} events={events} onSelect={selectNode} />
+          <PhoneStageList item={item} events={events} sessions={sessions} onSelect={selectNode} />
           {currentLogSessionId && (
             <div className="phone-node-log">
               <p className="section-label">Log · {item.current_node_id}</p>
@@ -251,20 +305,43 @@ export function WorkItemDetail() {
         </>
       ) : (
         <GraphSplit
-          graph={<StageGraph item={item} selected={nodeId} onSelect={selectNode} />}
+          graph={<StageGraph item={item} events={events} sessions={sessions} selected={nodeId} onSelect={selectNode} />}
           lower={
-            <div className="item-split">
+            // Spec 21 (Kraft-pfqdb): nothing has run, so the default view is
+            // the intake card and the chain it will walk. "Edit chain" (Config)
+            // or any other tab still opens the normal split.
+            deriveState(item, sessions, events).state === "not_started" && tab === "tasks" ? (
+              <div className="item-split not-started-split">
+                <NotStartedCard item={item} />
+                <div className="item-right-pane">
+                  <ChainDescription item={item} />
+                </div>
+              </div>
+            ) : (
+            <div className="item-split" data-view={tablet ? paneView : undefined}>
               <Inspector
                 item={item}
                 sessions={sessions}
                 events={events}
                 nodeId={nodeId}
                 tab={tab}
-                onTabChange={setTab}
+                onTabChange={pickTab}
                 selection={selection}
-                onSelect={select}
+                onSelect={pickRow}
                 diff={diff}
                 diffError={diffError}
+                headExtra={
+                  tablet ? (
+                    <Segmented
+                      options={[
+                        { id: "list", label: "List" },
+                        { id: "detail", label: "Detail" },
+                      ]}
+                      value={paneView}
+                      onChange={setPaneView}
+                    />
+                  ) : undefined
+                }
               />
               <div className="item-right-pane">
                 <RightPane
@@ -282,6 +359,7 @@ export function WorkItemDetail() {
                 />
               </div>
             </div>
+            )
           }
         />
       )}

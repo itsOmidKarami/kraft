@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detailOf, titleOf } from "./timelineHelpers";
+import { detailOf, groupByNode, titleOf } from "./timelineHelpers";
 import type { KraftEvent } from "../../types";
 
 const ev = (over: Partial<KraftEvent>): KraftEvent =>
@@ -49,5 +49,22 @@ describe("timelineHelpers: paused_by_broken_base", () => {
       payload: { broken_by: "w1", follow_up_bead: null },
     });
     expect(detailOf(e)).toBe("paused: w1 broke the base it rebased onto");
+  });
+});
+
+describe("timelineHelpers: groupByNode", () => {
+  const ev = (seq: number, type: string, payload: Record<string, unknown> = {}): KraftEvent =>
+    ({ seq, work_item_id: "w1", type, payload, created_at: `2026-09-14T10:00:0${seq}Z` }) as KraftEvent;
+
+  it("names the pre-node group 'created' and keeps the terminal event in the last node's group (W8.3; e2e chain/lifecycle read it there)", () => {
+    const groups = groupByNode([
+      ev(1, "work_item_created"),
+      ev(2, "node_started", { node_id: "implement" }),
+      ev(3, "node_completed", { node_id: "implement" }),
+      ev(4, "work_item_completed"),
+    ]);
+    expect(groups.map((g) => g.node)).toEqual(["implement", "created"]);
+    expect(groups[0].events.map((e) => e.type)).toContain("work_item_completed");
+    expect(groups.some((g) => g.node === "—")).toBe(false);
   });
 });
