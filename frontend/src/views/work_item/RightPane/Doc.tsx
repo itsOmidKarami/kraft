@@ -3,8 +3,9 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ArrowSquareOut, ArrowsOutSimple, CaretDown, Check, Copy, Eye, FileText, ListChecks, Notebook } from "@phosphor-icons/react";
 import * as api from "../../../api";
-import { ago, docBody, docTitle } from "../../../format";
-import type { WorkItem } from "../../../types";
+import { ago, cleanTitle, docBody, docTitle, runLabel } from "../../../format";
+import type { DocumentLink, WorkerSession, WorkItem } from "../../../types";
+import { ShortId } from "../../../components/ShortId";
 import { ChainReviewDiff } from "../../../components/ChainReviewDiff";
 import { Composer } from "../ActionBar/Composer";
 import { rejectTarget } from "../ActionBar/ItemCard";
@@ -59,11 +60,16 @@ type Viewed = {
   truncated?: boolean;
   source_updated_at?: string | null;
   origin?: string;
+  source_kind?: string;
+  links?: DocumentLink[];
 };
+
+const KIND_WORDS: Record<string, string> = { specs: "spec", plans: "plan", reviews: "review", sessions: "session" };
 
 export function Doc({
   source,
   item,
+  sessions = [],
   maximized,
   onToggleMaximize,
 }: {
@@ -72,6 +78,8 @@ export function Doc({
    *  document is `item.pending_gate`'s own artifact — omitted where there
    *  is no item to check against (the phone page's own `Doc` usage). */
   item?: WorkItem;
+  /** The item's sessions: a summary's run (attempt, round) for the eyebrow (W13 · B.4). */
+  sessions?: WorkerSession[];
   maximized?: boolean;
   onToggleMaximize?: () => void;
 }) {
@@ -153,6 +161,20 @@ export function Doc({
     }
   };
 
+  const link = doc?.links?.find((l) => l.worker_session_id) ?? doc?.links?.[0];
+  const sessionId = link?.worker_session_id ?? null;
+  const session = sessionId ? sessions.find((s) => s.id === sessionId) : undefined;
+  const hook = link?.hook_point ?? session?.hook_point ?? null;
+  const when = ago(doc?.source_updated_at ?? doc?.indexed_at);
+  const eyebrow = (
+    doc?.source_kind === "session_summary"
+      ? [hook, session ? runLabel(hook, session.attempt, session.round) : null, when]
+      : [KIND_WORDS[doc?.kind ?? ""] ?? doc?.kind ?? (isArtifact ? "artifact" : null), hook, when]
+  )
+    .filter(Boolean)
+    .join(" · ");
+  const fullTitle = doc ? docTitle(doc) : "";
+  const heading = cleanTitle({ title: fullTitle }, item) || fullTitle;
   const Icon = KIND_ICONS[doc?.kind ?? ""] ?? FileText;
   const current = EDITORS.find((e) => e.id === preferred) ?? EDITORS[EDITORS.length - 1];
   const hasFile = !isArtifact && doc?.origin !== "event_ingest";
@@ -162,14 +184,33 @@ export function Doc({
       <header className="doc-modal-head">
         <Icon size={20} className="doc-modal-icon" />
         <div className="doc-modal-title">
-          <span className="doc-modal-name" title={doc ? docTitle(doc) : undefined}>{doc ? docTitle(doc) : "…"}</span>
+          {/* W13 · B.4: an eyebrow -- `hook · run · time` and the session's
+              ShortId for a summary, `kind · hook · time` for an artifact --
+              then the cleaned title and the path (W12.2's one-line cuts, whole
+              in `title`), then the index note. */}
           {doc && (
-            <div className="doc-modal-meta">
-              {doc.kind && <span className="tag tag-neutral doc-kind">{doc.kind}</span>}
-              {doc.source_updated_at && <span>written {ago(doc.source_updated_at)}</span>}
-              <span className="doc-modal-path">{doc.path}</span>
-              {doc.indexed_at ? <span>indexed {ago(doc.indexed_at)}</span> : <span>not indexed yet — read from the worktree</span>}
-            </div>
+            <span className="doc-eyebrow">
+              {eyebrow}
+              {sessionId && (
+                <>
+                  {eyebrow && " · "}
+                  <ShortId id={sessionId} />
+                </>
+              )}
+            </span>
+          )}
+          <span className="doc-modal-name" data-allow-ellipsis title={heading}>
+            {doc ? heading : "…"}
+          </span>
+          {doc && (
+            <>
+              <span className="doc-path" data-allow-ellipsis title={doc.path}>
+                <span dir="ltr">{doc.path}</span>
+              </span>
+              <div className="doc-modal-meta">
+                {doc.indexed_at ? <span>indexed {ago(doc.indexed_at)}</span> : <span>not indexed yet — read from the worktree</span>}
+              </div>
+            </>
           )}
         </div>
         <div className="doc-modal-actions" ref={menuRef}>

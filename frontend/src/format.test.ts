@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ago, docBody, docTitle, elapsed, elapsedBetween, logLineText, nodeRunSpan, shortId, statusWord, tokens, until, usd } from "./format";
+import { ago, cleanTitle, docBody, docTitle, elapsed, runLabel, elapsedBetween, logLineText, nodeRunSpan, shortId, statusWord, tokens, until, usd } from "./format";
 import type { KraftEvent, LogLine, WorkerSession } from "./types/work_item";
 
 const logLine = (over: Partial<LogLine>): LogLine => ({
@@ -155,6 +155,47 @@ describe("docBody (W8.2)", () => {
   it("keeps a heading whose body is a deeper heading, and leaves fenced code alone", () => {
     const md = "## Design\n\n### Cache\n\ntext\n\n```sh\n# not a heading\n```";
     expect(docBody(md, "Other")).toBe(md);
+  });
+});
+
+describe("cleanTitle (W13 · B.3)", () => {
+  const item = { title: "Chain review: cover hook configs and escalation logic", bead_id: "Kraft-df4tc" };
+  it("drops a trailing bead id in parentheses", () => {
+    expect(cleanTitle({ title: "Chain-review diff review (Kraft-df4tc)" }, item)).toBe("Chain-review diff review");
+  });
+  it("drops an em dash, the bead id and everything after it", () => {
+    expect(cleanTitle({ title: "Security review — Kraft-df4tc (chain review: hook configs and escalation logic)" }, item)).toBe(
+      "Security review",
+    );
+  });
+  it("leaves a title with no bead id or item title alone", () => {
+    expect(cleanTitle({ title: "Fix-loop judge: verify (round 4 decision)" }, item)).toBe("Fix-loop judge: verify (round 4 decision)");
+  });
+  it("is empty for a title that is only the item's title", () => {
+    expect(cleanTitle({ title: "Chain review: cover hook configs and escalation logic" }, item)).toBe("");
+  });
+  it("takes the item's title out only as whole words", () => {
+    expect(cleanTitle({ title: "Review: Design the caching layer" }, { title: "T", bead_id: null })).toBe("Review: Design the caching layer");
+    expect(cleanTitle({ title: "Security review of chain review: cover hook configs and escalation logic" }, item)).toBe("Security review of");
+  });
+
+  it("drops a leading `Bead-id:` and still finds a bead id without the item", () => {
+    expect(cleanTitle({ title: "Kraft-df4tc: tighten the judge prompt" }, item)).toBe("tighten the judge prompt");
+    expect(cleanTitle({ title: "Chain-review diff review (Kraft-df4tc)" })).toBe("Chain-review diff review");
+  });
+});
+
+describe("runLabel (W13 · B.1)", () => {
+  it("names a turn, a round or an attempt from the hook and the run", () => {
+    expect(runLabel("escalation", 2, 0)).toBe("turn 2");
+    expect(runLabel("on.test.run", 1, 3)).toBe("round 3");
+    expect(runLabel("on.fix.apply", 1, 0)).toBe("round 0");
+    expect(runLabel("on.judge.decide", 1, 0)).toBe("round 0");
+    expect(runLabel("on.review.requested", 2, 0)).toBe("attempt 2");
+  });
+  it("is null when the server sent no run info", () => {
+    expect(runLabel("on.test.run", undefined, undefined)).toBeNull();
+    expect(runLabel("on.test.run", null, null)).toBeNull();
   });
 });
 

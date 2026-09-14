@@ -388,11 +388,38 @@ class Indexer:
         docs = [{**{k: r[k] for k in r.keys()}, "attachment_kind": None} for r in rows]
         seen = {d["document_id"] for d in docs}
         docs += [d for d in self._attachment_docs(work_item_id) if d["document_id"] not in seen]
+        # W13 A: the run a session summary came from. worker_sessions lives in
+        # the state db, not the index, so the join is a keyed lookup rather
+        # than SQL. Artifacts and attachments have no session: all three null.
+        runs = self._session_runs(
+            [d["worker_session_id"] for d in docs if d.get("worker_session_id")]
+        )
+        for d in docs:
+            run = runs.get(d.get("worker_session_id"))
+            d["attempt"] = run["attempt"] if run else None
+            d["round"] = run["round"] if run else None
+            d["session_status"] = run["status"] if run else None
         # source_created_at/updated_at aren't populated for every document kind
         # (session summaries never carry them); indexed_at is the one time field
         # every row has, so it's what "sorted by time" sorts on.
         docs.sort(key=lambda d: d["indexed_at"], reverse=True)
         return docs
+
+    def _session_runs(self, session_ids: list[str]) -> dict[str, dict]:
+        """attempt/round/status per worker session id, for the ids given."""
+        if not session_ids:
+            return {}
+        marks = ",".join("?" * len(session_ids))
+        rows = self._state.read(
+            lambda c: c.execute(
+                f"SELECT id, attempt, round, status FROM worker_sessions WHERE id IN ({marks})",
+                session_ids,
+            ).fetchall()
+        )
+        return {
+            r["id"]: {"attempt": r["attempt"], "round": r["round"], "status": r["status"]}
+            for r in rows
+        }
 
     def _attachment_docs(self, work_item_id: str) -> list[dict]:
         """Intake attachments (Kraft-dgh), joined at read time rather than stored

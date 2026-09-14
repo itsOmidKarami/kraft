@@ -1,5 +1,5 @@
 import { clock, elapsed } from "../../format";
-import type { Finding, KraftEvent } from "../../types";
+import type { Finding, KraftEvent, WorkerSession } from "../../types";
 
 /**
  * Shared by `Inspector/Timeline.tsx` (one row per node that has run) and
@@ -152,4 +152,178 @@ export function groupByNode(events: KraftEvent[]): NodeGroup[] {
     const to = clock(rows[rows.length - 1].created_at);
     return { node: n, events: [...rows].reverse(), span: from === to ? from : `${from} – ${to}` };
   });
+}
+
+/* ── W13 · C: rounds → sessions ───────────────────────────────────────────── */
+
+/** One pass of a node: opened by `node_started` (round 0) or a
+ *  `fix_cycle_started`, closed by the judge's verdict or the next round. */
+export interface Round {
+  node: string;
+  n: number;
+  startedAt: string;
+  endedAt: string | null;
+  sessions: WorkerSession[];
+  findings: Finding[];
+  verdict: string | null;
+  reasoning: string | null;
+  /** The round's own events (fix_cycle_started, findings_measured, judge_verdict), oldest first. */
+  events: KraftEvent[];
+}
+
+/** A row the left list shows at its time: a round, an escalation turn, or a
+ *  node-level event (gates, node and item lifecycle, a run of task_progress). */
+export type TimelineEntry =
+  | { kind: "round"; at: string; round: Round }
+  | { kind: "escalation"; at: string; session: WorkerSession; turn: number }
+  | { kind: "event"; at: string; event: KraftEvent; label: string; last?: KraftEvent };
+
+export interface NodeRounds {
+  node: string;
+  rounds: Round[];
+  /** Oldest first. */
+  entries: TimelineEntry[];
+  /** Oldest first. */
+  events: KraftEvent[];
+  startedAt: string | null;
+  endedAt: string | null;
+}
+
+const SESSION_TYPES = new Set(["worker_session_created", "worker_session_started", "worker_session_exited", "escalation_message"]);
+// node_started opens round 0 and is also a node-level row (C.2's `node_started · 16:02`).
+const ROUND_TYPES = new Set(["fix_cycle_started", "findings_measured", "judge_verdict"]);
+const sessionOf = (e: KraftEvent) => (typeof e.payload.session_id === "string" ? e.payload.session_id : null);
+
+/** A verdict as C.2/D.2 write it: every `stop…` (stop_needs_human, stop_downgrade) is `stop`. */
+export const verdictWord = (verdict: string) => (verdict.startsWith("stop") ? "stop" : verdict);
+
+/** Rounds from one node's events (any order) and its sessions (C.1). Escalation
+ *  sessions are not in any round -- `nodeRounds` groups them on their own. */
+export function roundsOf(events: KraftEvent[], sessions: WorkerSession[]): Round[] {
+  const asc = [...events].sort((a, b) => a.seq - b.seq);
+  const node = asc.map((e) => e.payload.node_id).find((v): v is string => typeof v === "string") ?? "";
+  const rounds: Round[] = [];
+  const open = (e: KraftEvent): Round => {
+    const prev = rounds[rounds.length - 1];
+    if (prev && !prev.endedAt) prev.endedAt = e.created_at;
+    const next: Round = { node, n: rounds.length, startedAt: e.created_at, endedAt: null, sessions: [], findings: [], verdict: null, reasoning: null, events: [] };
+    rounds.push(next);
+    return next;
+  };
+  for (const e of asc) {
+    const cur: Round | undefined = rounds[rounds.length - 1];
+    if (e.type === "node_started") open(e);
+    else if (e.type === "fix_cycle_started") open(e).events.push(e);
+    else if (e.type === "findings_measured" && cur) {
+      cur.findings.push(...findingsOf(e));
+      cur.events.push(e);
+    } else if (e.type === "judge_verdict" && cur) {
+      cur.verdict = typeof e.payload.verdict === "string" ? e.payload.verdict : null;
+      cur.reasoning = typeof e.payload.reasoning === "string" ? e.payload.reasoning : null;
+      cur.endedAt = e.created_at;
+      cur.events.push(e);
+    }
+  }
+  const runs = sessions.filter((s) => s.hook_point !== "escalation").sort((a, b) => a.created_at.localeCompare(b.created_at));
+  for (const s of runs) {
+    let home: Round | undefined;
+    for (const r of rounds) if (r.startedAt <= s.created_at) home = r;
+    (home ?? rounds[0])?.sessions.push(s);
+  }
+  // A round nobody closed ends with the last thing that happened in it.
+  for (const r of rounds) {
+    if (r.endedAt) continue;
+    const times = [...r.events.map((e) => e.created_at), ...r.sessions.map((s) => s.exited_at ?? s.created_at)].sort();
+    const running = r.sessions.some((s) => !s.exited_at);
+    r.endedAt = running ? null : (times[times.length - 1] ?? r.startedAt);
+  }
+  return rounds;
+}
+
+/** `node_started · 16:02`, `gate_requested · code_review` -- a node-level row's label. */
+function eventLabel(e: KraftEvent): string {
+  const p = e.payload as Record<string, unknown>;
+  if (typeof p.gate === "string") return `${e.type} · ${p.gate}`;
+  const detail = detailOf(e);
+  return detail ? `${e.type} · ${detail}` : e.type;
+}
+
+/** Everything the left list shows for one node (C.1): its rounds, its
+ *  escalation turns, and the node-level events between them. */
+export function nodeRounds(node: string, events: KraftEvent[], sessions: WorkerSession[]): NodeRounds {
+  const own = (groupByNode(events).find((g) => g.node === node)?.events ?? []).slice().reverse();
+  const nodeSessions = sessions.filter((s) => s.node_id === node);
+  const rounds = roundsOf(own, nodeSessions);
+  const entries: TimelineEntry[] = rounds.map((r) => ({ kind: "round", at: r.startedAt, round: r }));
+  for (const s of nodeSessions.filter((x) => x.hook_point === "escalation")) {
+    entries.push({ kind: "escalation", at: s.created_at, session: s, turn: s.attempt ?? 1 });
+  }
+  let progress: Extract<TimelineEntry, { kind: "event" }> | null = null;
+  for (const e of own) {
+    if (SESSION_TYPES.has(e.type) || ROUND_TYPES.has(e.type) || sessionOf(e)) {
+      if (e.type !== "task_progress") progress = null;
+      continue;
+    }
+    if (e.type === "task_progress") {
+      // A run of task_progress is one row (D.2's rule, applied here too).
+      if (progress) {
+        progress.last = e;
+        continue;
+      }
+      progress = { kind: "event", at: e.created_at, event: e, label: "task_progress", last: e };
+      entries.push(progress);
+      continue;
+    }
+    progress = null;
+    entries.push({ kind: "event", at: e.created_at, event: e, label: eventLabel(e) });
+  }
+  // Oldest first; at the same instant an event sits before the round it opens,
+  // so newest-first lists show the round above its `node_started`.
+  entries.sort((a, b) => a.at.localeCompare(b.at) || (a.kind === "event" ? -1 : 0) - (b.kind === "event" ? -1 : 0));
+  const times = own.map((e) => e.created_at);
+  return { node, rounds, entries, events: own, startedAt: times[0] ?? null, endedAt: times[times.length - 1] ?? null };
+}
+
+/** `Task 3 → 6 of 6` for a run of task_progress events. */
+export function taskRunLabel(first: KraftEvent, last: KraftEvent = first): string {
+  const a = first.payload.task as number | undefined;
+  const b = last.payload.task as number | undefined;
+  const total = last.payload.total as number | undefined;
+  if (a == null || b == null) return "task_progress";
+  return `Task ${a === b ? a : `${a} → ${b}`}${total != null ? ` of ${total}` : ""}`;
+}
+
+/** The Timeline selection (`tnode` in the URL, C.4): `session:<id>`,
+ *  `round:<node>:<n>`, `event:<seq>`. W11's `node:<seq>` (one event) and a bare
+ *  `node` (a node's whole stream, a card's "see Timeline") still parse. */
+export type TimelineSelection =
+  | { kind: "session"; id: string }
+  | { kind: "round"; node: string; n: number }
+  | { kind: "event"; seq: number; node: string | null }
+  | { kind: "node"; node: string };
+
+export function parseTimelineSelection(sel: string | null | undefined): TimelineSelection | null {
+  if (!sel) return null;
+  if (sel.startsWith("session:")) return { kind: "session", id: sel.slice("session:".length) };
+  const round = sel.match(/^round:(.+):(\d+)$/);
+  if (round) return { kind: "round", node: round[1], n: Number(round[2]) };
+  const event = sel.match(/^event:(\d+)$/);
+  if (event) return { kind: "event", seq: Number(event[1]), node: null };
+  const legacy = sel.match(/^(.+):(\d+)$/);
+  if (legacy) return { kind: "event", seq: Number(legacy[2]), node: legacy[1] };
+  return { kind: "node", node: sel };
+}
+
+/** Which node a selection is about, for the right pane and the pill. */
+export function selectionNode(
+  sel: TimelineSelection | null,
+  events: KraftEvent[],
+  sessions: WorkerSession[],
+): string | null {
+  if (!sel) return null;
+  if (sel.kind === "round" || sel.kind === "node") return sel.node;
+  if (sel.kind === "session") return sessions.find((s) => s.id === sel.id)?.node_id ?? null;
+  if (sel.node) return sel.node;
+  const hit = groupByNode(events).find((g) => g.events.some((e) => e.seq === sel.seq));
+  return hit?.node ?? null;
 }

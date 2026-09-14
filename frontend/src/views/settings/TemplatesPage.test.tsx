@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -109,6 +112,19 @@ describe("Settings · chains editor (W11 · D)", () => {
     expect(within(card).getByText(/verify · node 3 of 4/)).toBeInTheDocument();
     expect(within(card).getByLabelText("fix_loop")).toHaveValue("verify_fix_loop");
     expect((within(card).getByLabelText("node yaml") as HTMLTextAreaElement).value).toBe(serializeFragment(DEFAULT_NODES[2]));
+  });
+
+  it("gate_after, fix_loop and reject_to use the settings select Appearance uses; text inputs are the short kind (W12.3)", async () => {
+    renderAt("/settings/chains?tpl=default&node=human_review");
+    await screen.findByLabelText("gate_after");
+    for (const label of ["gate_after", "fix_loop", "reject_to"]) {
+      const el = screen.getByLabelText(label);
+      expect(el.tagName).toBe("SELECT");
+      expect(el).toHaveClass("input");
+    }
+    expect(screen.getByLabelText("id")).toHaveClass("input");
+    const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "templates.css"), "utf-8");
+    expect(css).toMatch(/\.chain-node-form input\.input\s*\{\s*max-width:\s*320px;/);
   });
 
   it("editing a form field updates the node's YAML and the whole file's", async () => {

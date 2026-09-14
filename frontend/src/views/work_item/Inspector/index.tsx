@@ -128,6 +128,8 @@ export function Inspector({
             scope={scope}
             onScope={setScope}
             onCount={setDocCount}
+            item={item}
+            sessions={sessions}
           />
         )}
         {tab === "timeline" && (
