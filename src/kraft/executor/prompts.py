@@ -344,7 +344,9 @@ def format_judge_history(history: list[dict]) -> str:
     for h in history:
         found = h["findings"]
         if found:
-            text = "; ".join(f"[{f.severity}] {f.fingerprint} {f.message}" for f in found)
+            text = "; ".join(
+                f"[{f.severity}] {f.fingerprint} ({f.source_plugin}) {f.message}" for f in found
+            )
         else:
             text = "clean"
         fix_note = (

@@ -439,7 +439,7 @@ async def walk_node(
         judge_due = (
             previous_fix is not None and counter_row is not None and not (steer and steer.human)
         )
-        found, reported = dispatch.collect_findings(db, work_item_id, node, round)
+        found, reported = dispatch.collect_findings(db, work_item_id, node, round, registry)
         eligible = [f for f in found if f.severity in policy.loop_severities]
         prints = sorted({f.fingerprint for f in eligible})
         # A task on `builtin: noop` exits 'done' in milliseconds having done

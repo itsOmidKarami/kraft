@@ -431,7 +431,12 @@ async def measure_node(
     return "ok", [], []
 
 
-def collect_findings(db, work_item_id: str, node: dict, round: int):
+#: A task in one of these states failed outright -- the same set
+#: `measure_node` treats as failed.
+_FAILING_STATUSES = ("failed", "needs_context", "conflict")
+
+
+def collect_findings(db, work_item_id: str, node: dict, round: int, registry: Registry):
     """(findings, hook points that reported at least one) for one cycle.
 
     Only the node's own measuring tasks: the fix task is dispatched with
@@ -439,6 +444,16 @@ def collect_findings(db, work_item_id: str, node: dict, round: int):
     unfiltered query folds the fix agent's result file into the cycle. Only the
     most recent row per hook point, because a resume can re-enter this node with
     `round` reset while stale rows sit at the same number.
+
+    A hook that failed without writing a findings file at all -- `on.test.run`
+    is the common case, `kind: subprocess` with no findings schema to write to
+    -- gets a synthesized `Finding` via `_findings.from_blind_failure` instead
+    of vanishing (traced live on a work item that spun for 7 cycles on an
+    identical, invisible test failure). `reported` is not extended for it:
+    that set means "wrote a real, parseable result file", which a synthesized
+    finding does not change -- `walk.py`'s `blind_failures` still computes the
+    same way and still forces the loop open, now redundantly with `eligible`,
+    which is harmless.
     """
     rows = db.read(lambda c: store.sessions_for_round(c, work_item_id, node["id"], round))
     latest: dict[str, sqlite3.Row] = {}
@@ -451,7 +466,19 @@ def collect_findings(db, work_item_id: str, node: dict, round: int):
         parsed = _findings.parse(row["result_path"])
         if parsed:
             reported.add(hook)
-        found.extend(parsed)
+            found.extend(parsed)
+        elif row["status"] in _FAILING_STATUSES:
+            binding = registry.hooks.get(hook, {})
+            reproduce = (
+                shlex.join(binding["command"])
+                if binding.get("kind") == "subprocess" and binding.get("command")
+                else None
+            )
+            found.append(
+                _findings.from_blind_failure(
+                    hook, row["log_path"], work_item_id, row["id"], reproduce=reproduce
+                )
+            )
     return found, reported
 
 
