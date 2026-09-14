@@ -228,7 +228,7 @@ def test_a_crashed_adopt_marks_the_work_item_needs_human(monkeypatch, tmp_path):
     `_guarded_adopt` is the fix; this pins its catch, not the log-polling loop
     (that's Kraft-jgs6, covered elsewhere)."""
 
-    async def _boom(db, session_id, pid, poll_s=0.1, progress_s=5.0):
+    async def _boom(db, session_id, pid, poll_s=0.1, progress_s=5.0, **kw):
         raise ValueError("boom")
 
     monkeypatch.setattr(reattach, "_adopt", _boom)
@@ -525,6 +525,206 @@ def test_an_adopted_session_records_its_usage(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_reattach_resumes_a_deferred_self_retry_left_by_an_escalation_turn(tmp_path, monkeypatch):
+    """Kraft-atdbw: `lifecycle.retry_work_item` defers a self-retry from a
+    live escalation session by writing `work_item_self_retry_requested`
+    rather than running it inline, because the caller's own session is still
+    live. The only consumers are `gates.resume_after_escalation`, called
+    from inside `escalate.dispatch`'s awaiting frame -- gone if the server
+    restarts mid-turn. `_adopt`'s tail must pick the deferred request back up
+    for an adopted `hook_point='escalation'` session, or it sits unconsumed
+    forever and the item re-escalates onto an already-fixed stop.
+
+    Exercises the *live-pid* branch (a real orphaned subprocess, not a
+    dead-pid/result-file row). The resolved-from-file branch has the same
+    consumer wired in too (see
+    `test_reattach_resumes_a_deferred_self_retry_from_a_resolved_from_file_session`),
+    but as a backgrounded task rather than inline: `resume_after_escalation`
+    awaits `walk.run(...)`, which can run as long as a full agent turn, and
+    running it synchronously inside `reattach()`'s own loop would block
+    `reattach()` -- and so the whole server's startup -- for that long.
+    """
+    walk_calls = []
+
+    async def fake_walk_run(database, run_dirs, **kw):
+        walk_calls.append(kw)
+        return "completed"
+
+    async def fake_refresh(worktree, repo, branch):
+        return None
+
+    monkeypatch.setattr("kraft.executor.walk.run", fake_walk_run)
+    monkeypatch.setattr("kraft.builtins.refresh_worktree_base", fake_refresh)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        proc = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(0.3)"],
+            start_new_session=True,
+        )
+        try:
+            import psutil
+
+            pst = psutil.Process(proc.pid).create_time()
+            await _seed_item(database)
+            await database.write(
+                lambda c: store.mark_needs_human(c, "w1", "implementation", "budget exhausted")
+            )
+            # The escalation turn: a worker_sessions row with
+            # hook_point='escalation', its escalation_message event, and --
+            # as if the agent called `kraft item retry` on itself mid-turn --
+            # a deferred self-retry request, exactly what lifecycle.py's
+            # retry_work_item writes.
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="esc1",
+                    work_item_id="w1",
+                    node_id="implementation",
+                    hook_point="escalation",
+                    log_path=str(rd.logs / "esc1.log"),
+                    result_path=str(rd.results / "esc1.json"),
+                )
+            )
+            await database.write(
+                lambda c: events.append(
+                    c,
+                    "w1",
+                    "escalation_message",
+                    {"session_id": "esc1", "message": "please fix it", "auto": False},
+                )
+            )
+            await database.write(
+                lambda c: events.append(
+                    c,
+                    "w1",
+                    "work_item_self_retry_requested",
+                    {
+                        "session_id": "esc1",
+                        "node_id": "implementation",
+                        "key": None,
+                        "gate_key": None,
+                        "steer": "fixed it",
+                        "seeded": False,
+                    },
+                )
+            )
+            (rd.results / "esc1.json").write_text('{"status": "done"}')
+            await database.write(lambda c: store.session_running(c, "esc1", proc.pid, pst))
+
+            summary, adopted = await reattach.reattach(
+                database, rd, _REG, launch_factory=lambda repo: None
+            )
+            assert summary.adopted == ["esc1"]
+            await adopted["esc1"]
+            proc.wait()
+
+            evs = database.read(lambda c: events.read_after(c, 0, "w1"))
+            return [e["type"] for e in evs]
+        finally:
+            proc.wait()
+            await database.close()
+
+    types = asyncio.run(scenario())
+    assert len(walk_calls) == 1
+    assert walk_calls[0]["steer"] == "fixed it"
+    # Retried and re-entered -- not sitting needs_human on the original
+    # (already "fixed") stop, and not re-escalated.
+    assert "work_item_retried" in types
+    assert types.index("work_item_self_retry_requested") < types.index("work_item_retried")
+
+
+def test_reattach_resumes_a_deferred_self_retry_from_a_resolved_from_file_session(
+    tmp_path, monkeypatch
+):
+    """Kraft-atdbw's exact failure mode: an escalation session calls
+    `kraft item retry` on itself, then exits while the server is down --
+    so its pid is gone and it resolves from its result file instead of
+    through the live-pid `_adopt` path. Before this fix that branch only
+    ran `_exit_from_file` and never `resume_after_escalation`, leaving the
+    self-retry request unconsumed: the item sat `needs_human`, and the
+    `auto_escalate_delay` poller (which fires before any human runs
+    `kraft item retry`) would dispatch a new paid turn on a stop the agent
+    had already fixed, its cursor past the stale request.
+    """
+    walk_calls = []
+
+    async def fake_walk_run(database, run_dirs, **kw):
+        walk_calls.append(kw)
+        return "completed"
+
+    async def fake_refresh(worktree, repo, branch):
+        return None
+
+    monkeypatch.setattr("kraft.executor.walk.run", fake_walk_run)
+    monkeypatch.setattr("kraft.builtins.refresh_worktree_base", fake_refresh)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed_item(database)
+            await database.write(
+                lambda c: store.mark_needs_human(c, "w1", "implementation", "budget exhausted")
+            )
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="esc1",
+                    work_item_id="w1",
+                    node_id="implementation",
+                    hook_point="escalation",
+                    log_path=str(rd.logs / "esc1.log"),
+                    result_path=str(rd.results / "esc1.json"),
+                )
+            )
+            await database.write(
+                lambda c: events.append(
+                    c,
+                    "w1",
+                    "escalation_message",
+                    {"session_id": "esc1", "message": "please fix it", "auto": False},
+                )
+            )
+            await database.write(
+                lambda c: events.append(
+                    c,
+                    "w1",
+                    "work_item_self_retry_requested",
+                    {
+                        "session_id": "esc1",
+                        "node_id": "implementation",
+                        "key": None,
+                        "gate_key": None,
+                        "steer": "fixed it",
+                        "seeded": False,
+                    },
+                )
+            )
+            (rd.results / "esc1.json").write_text('{"status": "done"}')
+            # A definitely-dead pid -- the session exited while the server
+            # was down, so it resolves from the result file, not _adopt.
+            await database.write(lambda c: store.session_running(c, "esc1", 2_000_000_000, 123.0))
+
+            summary, adopted = await reattach.reattach(
+                database, rd, _REG, launch_factory=lambda repo: None
+            )
+            assert summary.resolved_from_file == ["esc1"]
+            await adopted["esc1"]
+
+            evs = database.read(lambda c: events.read_after(c, 0, "w1"))
+            return [e["type"] for e in evs]
+        finally:
+            await database.close()
+
+    types = asyncio.run(scenario())
+    assert len(walk_calls) == 1
+    assert walk_calls[0]["steer"] == "fixed it"
+    assert "work_item_retried" in types
+    assert types.index("work_item_self_retry_requested") < types.index("work_item_retried")
 
 
 def test_adopting_a_session_leaves_its_backgrounded_child_alone(tmp_path):

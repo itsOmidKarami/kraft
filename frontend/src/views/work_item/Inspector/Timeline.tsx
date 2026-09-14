@@ -90,6 +90,32 @@ export function Timeline({
     }
   };
 
+  const sessionRow = (s: WorkerSession, title: string) => (
+    <button
+      key={s.id}
+      type="button"
+      data-trow
+      className="row timeline-row timeline-session"
+      data-testid={`timeline-session-${s.id}`}
+      data-selected={sel?.kind === "session" && sel.id === s.id}
+      onClick={() => onSelect(`session:${s.id}`)}
+    >
+      <RowText
+        title={title}
+        sub={`${statusWord(s.status)} · ${elapsedBetween(s.started_at ?? s.created_at, s.exited_at)}`}
+      />
+      <span className="row-sub">{hm(s.exited_at ?? s.created_at)}</span>
+    </button>
+  );
+
+  const threadBody = (sessions: WorkerSession[]) => (
+    <>
+      {[...sessions]
+        .map((s, i) => sessionRow(s, `escalation · turn ${i + 1}`))
+        .reverse()}
+    </>
+  );
+
   const entryRow = (nt: NodeRounds, en: TimelineEntry) => {
     if (en.kind === "round") {
       const r = en.round;
@@ -114,24 +140,39 @@ export function Timeline({
         </button>
       );
     }
-    if (en.kind === "escalation") {
-      const s = en.session;
+    if (en.kind === "escalationThread") {
+      const last = en.sessions.at(-1)!;
+      const running = en.sessions.some((s) => !s.exited_at);
+      const key = `escalation-thread:${last.node_id}:${en.thread}`;
+      const threadEntries = nt.entries.filter((e) => e.kind === "escalationThread");
+      const current = en === threadEntries.at(-1);
+      const open = isOpen(key, current);
+      // A single escalation thread on this node: no header, its turns stand
+      // in the list directly.
+      if (threadEntries.length === 1) return <Fragment key={key}>{threadBody(en.sessions)}</Fragment>;
       return (
-        <button
-          key={s.id}
-          type="button"
-          data-trow
-          className="row timeline-row timeline-session"
-          data-testid={`timeline-session-${s.id}`}
-          data-selected={sel?.kind === "session" && sel.id === s.id}
-          onClick={() => onSelect(`session:${s.id}`)}
-        >
-          <RowText
-            title={`escalation · turn ${en.turn}`}
-            sub={`${statusWord(s.status)} · ${elapsedBetween(s.started_at ?? s.created_at, s.exited_at)}`}
-          />
-          <span className="row-sub">{hm(s.exited_at ?? s.created_at)}</span>
-        </button>
+        <Fragment key={key}>
+          <button
+            type="button"
+            data-trow
+            data-fold={key}
+            aria-expanded={open}
+            className="row timeline-row timeline-round"
+            data-testid={`timeline-escalation-thread-${en.thread}`}
+            data-selected={sel?.kind === "session" && en.sessions.some((s) => s.id === sel.id)}
+            onClick={() => {
+              onSelect(`session:${last.id}`);
+              setOpen(key, !open);
+            }}
+          >
+            <span className="timeline-caret" aria-hidden>
+              {open ? "▾" : "▸"}
+            </span>
+            <RowText title={`escalation · thread ${en.thread}`} sub={`${en.sessions.length} turn${en.sessions.length === 1 ? "" : "s"}`} />
+            <span className="row-sub">{running ? "running" : "done"}</span>
+          </button>
+          {open && threadBody(en.sessions)}
+        </Fragment>
       );
     }
     const e = en.event;

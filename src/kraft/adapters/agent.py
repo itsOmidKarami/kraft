@@ -373,6 +373,7 @@ async def run_agent_task(
     #: existing caller keeps today's behavior by leaving this `True`.
     identify_as_worker: bool = True,
     head_sha: str | None = None,
+    thread: int = 1,
 ) -> str:
     # Kraft-avpe: wording alone didn't hold -- a later session read "don't
     # background work" as forbidding only a separate watcher, backgrounded a
@@ -482,5 +483,6 @@ async def run_agent_task(
         post_resolve=_resolve_status(artifact, work_item_id, cwd),
         round=round,
         head_sha=head_sha,
+        thread=thread,
         require_result_file=True,
     )

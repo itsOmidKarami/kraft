@@ -325,6 +325,10 @@ async def get_work_item(wid: str, request: Request):
         "progress": progress_mod.for_item(st.db, row, st.run_dirs.worktrees / wid),
         # empty on a single-repo item; the detail's repos panel is multi-repo only
         "repos": st.db.read(lambda c: store.repos_for(c, wid)),
+        # One entry per escalation thread this item has had, oldest first
+        # (Kraft-dkb6g) -- so the UI can render thread headers without
+        # scanning every session/event itself.
+        "escalation_threads": st.db.read(lambda c: store.escalation_threads(c, wid)),
         # local-only: the checkout the agents are editing, for "Open worktree"
         "worktree_path": str(st.run_dirs.worktrees / wid),
         # What the *diff on screen* is, so the gate can tell a measurement taken

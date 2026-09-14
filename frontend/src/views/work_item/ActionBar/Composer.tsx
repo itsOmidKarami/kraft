@@ -1,4 +1,5 @@
 import { useRef, type ReactNode } from "react";
+import { SplitButton } from "./SplitButton";
 
 /** The one shape every composer variant (steer, steer & retry, reject,
  *  answer, escalate/reply, budget) shares (README shared primitives:
@@ -17,6 +18,7 @@ export function Composer({
   busy,
   disabled,
   error,
+  splitMenu,
 }: {
   /** `Steer verify` (spec §3) — every composer opens under a header line. */
   title?: ReactNode;
@@ -34,6 +36,10 @@ export function Composer({
   busy: boolean;
   disabled?: boolean;
   error?: string | null;
+  /** Escalate/Reply only (Kraft-dkb6g): renders the primary submit as a
+   *  `SplitButton` instead of a plain button, its menu entry submitting
+   *  `onMenuSelect` instead of `onSubmit`. */
+  splitMenu?: { menuLabel: string; menuHint: string; onMenuSelect: () => void };
 }) {
   // Where the composer was opened from, read on its first render — before
   // autoFocus moves focus into the textarea (W6.4, W6.10).
@@ -90,9 +96,20 @@ export function Composer({
       />
       {footnote && <p className="field-hint composer-footnote">{footnote}</p>}
       <div className="gate-actions">
-        <button className="btn btn-primary" disabled={busy || disabled} onClick={onSubmit}>
-          {submitLabel}
-        </button>
+        {splitMenu ? (
+          <SplitButton
+            primaryLabel={submitLabel}
+            onPrimary={onSubmit}
+            disabled={busy || disabled}
+            menuLabel={splitMenu.menuLabel}
+            menuHint={splitMenu.menuHint}
+            onMenuSelect={splitMenu.onMenuSelect}
+          />
+        ) : (
+          <button className="btn btn-primary" disabled={busy || disabled} onClick={onSubmit}>
+            {submitLabel}
+          </button>
+        )}
         <button className="btn btn-ghost" disabled={busy} onClick={cancel}>
           Cancel
         </button>

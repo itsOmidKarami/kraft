@@ -36,17 +36,40 @@ _AUTO_OPENING = (
     "-- if it differs from what you remember from an earlier turn on this "
     "same item, trust this over your memory.\n"
 )
-_STATE = (
-    "{opening}"
-    "Status: needs_human\n"
-    "Current node: {node_id}\n"
-    "Why it is stopped: {reason}\n"
-    "{description_line}"
-    "\n"
+#: `{action_line}` for a `needs_human` item: `retry_work_item` accepts a
+#: self-retry from exactly this session (lifecycle.py's
+#: `work_item_self_retry_requested` deferral), so telling the agent it may
+#: run `kraft item retry` itself is true for this status only.
+_NEEDS_HUMAN_ACTION = (
     "You are not a Kraft worker session for this launch: if you resolve the "
     "problem, you may run `kraft item retry` yourself to resume the chain. "
     "If you are not confident it is fixed, say so and stop instead -- a "
     "human decides from there.\n"
+)
+#: `{action_line}` for a `paused` item (Kraft-k5ol widened `/escalate` to
+#: accept one). Neither self-action route works here: `retry_work_item` 409s
+#: on anything but `needs_human`, and `resume_work_item` 409s while *any*
+#: escalation session is running, including this one -- unlike retry, it has
+#: no self-caller carve-out. Telling the agent to run `kraft item retry` (the
+#: needs_human wording) would send it at a route that refuses it; this
+#: version asks it to report back instead of pretending it can act.
+_PAUSED_ACTION = (
+    "This item is paused, not stopped on an error -- a human parked it here "
+    "deliberately, and resuming it is that human's call, not yours. You are "
+    "not a Kraft worker session for this launch, but running `kraft item "
+    "resume` or `kraft item retry` yourself will fail here (both refuse a "
+    "paused item mid-escalation). Investigate and report what you find; say "
+    "clearly whether you think it's ready to resume, and let a human run "
+    "`kraft item resume` themselves.\n"
+)
+_STATE = (
+    "{opening}"
+    "Status: {status}\n"
+    "Current node: {node_id}\n"
+    "{reason_line}"
+    "{description_line}"
+    "\n"
+    "{action_line}"
     "\n"
     "The human's message:\n{message}"
 )
@@ -69,6 +92,17 @@ def _reason(db, work_item_id: str, evts: list | None = None) -> str:
         if e["type"] == "work_item_needs_human":
             return e["payload"].get("reason") or "(no reason recorded)"
     return "(no reason recorded)"
+
+
+def _reason_line(db, work_item_id: str, status: str, evts: list | None = None) -> str:
+    """The `{reason_line}` `_STATE` slot. `needs_human` only -- a `paused`
+    item's most recent `work_item_needs_human` reason (if it has one at all)
+    belongs to whatever it stopped for *before* being paused, not to why it
+    is paused now, so reporting it here would be stale or actively
+    misleading (Kraft-k5ol code-review finding)."""
+    if status != "needs_human":
+        return ""
+    return f"Why it is stopped: {_reason(db, work_item_id, evts=evts)}\n"
 
 
 def _extract_cli_session_id(log_path: Path) -> str | None:
@@ -124,6 +158,41 @@ def escalation_running(db, work_item_id: str) -> str | None:
     return row["id"] if row else None
 
 
+def last_escalation_status(db, work_item_id: str) -> str | None:
+    """The status of `work_item_id`'s most recently *created* escalation
+    session, finished or still running -- unlike `escalation_running`, which
+    only ever returns an id for a `pending`/`running` one. Lets
+    `gates.auto_escalate_stuck` tell "the last turn asked a question and is
+    still waiting on a human to answer it" (status `needs_context`) from "the
+    last turn finished some other way and nobody has looked since"
+    (Kraft-b52cm) -- the existing `needs_context:` reason guard only catches
+    a *chain node's* needs_context stop, not the escalation session's own.
+    """
+    row = db.read(
+        lambda c: c.execute(
+            "SELECT status FROM worker_sessions WHERE work_item_id = ? "
+            "AND hook_point = 'escalation' ORDER BY created_at DESC LIMIT 1",
+            (work_item_id,),
+        ).fetchone()
+    )
+    return row["status"] if row else None
+
+
+def session_status(db, session_id: str) -> str | None:
+    """The status of a single `worker_sessions` row by its own id, or None if
+    no such session exists. `gates._current_run_escalation_session_id`'s
+    counterpart: that picks out *which* session id belongs to the current
+    run of `needs_human` stuckness (scoped by `_RUN_BOUNDARY`), this reads
+    that specific session's status rather than `last_escalation_status`'s
+    unscoped "newest ever" (Kraft-b52cm)."""
+    row = db.read(
+        lambda c: c.execute(
+            "SELECT status FROM worker_sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+    )
+    return row["status"] if row else None
+
+
 async def dispatch(
     db,
     run_dirs,
@@ -132,6 +201,11 @@ async def dispatch(
     message: str,
     launch: LaunchContext,
     auto: bool = False,
+    #: Start a fresh agent session instead of continuing the item's latest
+    #: escalation thread (ESCALATION_THREADS_SPEC.md §1). No-op on an item's
+    #: very first escalation -- there is no prior thread to be "new" from,
+    #: and `row["escalation_session_id"]` is already `None` either way.
+    new_thread: bool = False,
     #: A timeline the caller already fetched, reused instead of a fresh
     #: `events.read_after` here. `None` (the manual `/escalate` route's
     #: only call site) falls back to reading it fresh -- that path calls
@@ -141,7 +215,8 @@ async def dispatch(
     evts: list | None = None,
 ) -> str:
     """One escalation turn: send `message` into `work_item_id`'s escalation
-    thread, resuming it if `work_items.escalation_session_id` is already set.
+    thread, resuming it if `work_items.escalation_session_id` is already set
+    (unless `new_thread` starts a fresh one instead).
 
     Assumes its caller already checked the item is `needs_human` and that no
     escalation turn is currently running for it (`escalation_running`) --
@@ -156,22 +231,35 @@ async def dispatch(
     if row is None:
         raise LookupError(f"unknown work_item {work_item_id!r}")
 
+    latest_thread = db.read(lambda c: store.latest_escalation_thread(c, work_item_id))
+    thread = latest_thread + 1 if new_thread else (latest_thread or 1)
+    resume_session_id = None if new_thread else row["escalation_session_id"]
+    turn = db.read(lambda c: store.escalation_thread_turn_count(c, work_item_id, thread)) + 1
+
     session_id = uuid.uuid4().hex
     await db.write(
         lambda c: events.append(
             c,
             work_item_id,
             "escalation_message",
-            {"session_id": session_id, "message": message, "auto": auto},
+            {
+                "session_id": session_id,
+                "message": message,
+                "auto": auto,
+                "thread": thread,
+                "turn": turn,
+            },
         )
     )
     worktree = run_dirs.worktrees / work_item_id
 
     task_instruction = _STATE.format(
         opening=_AUTO_OPENING if auto else _MANUAL_OPENING,
+        status=row["status"],
         node_id=row["current_node_id"],
-        reason=_reason(db, work_item_id, evts=evts),
+        reason_line=_reason_line(db, work_item_id, row["status"], evts=evts),
         description_line=_description_line(row),
+        action_line=_NEEDS_HUMAN_ACTION if row["status"] == "needs_human" else _PAUSED_ACTION,
         message=message,
     )
 
@@ -200,9 +288,10 @@ async def dispatch(
         title=row["title"],
         repo_path=row["repo"],
         cwd=worktree,
-        resume_session_id=row["escalation_session_id"],
+        resume_session_id=resume_session_id,
         autocompact="auto",
         identify_as_worker=False,
+        thread=thread,
     )
 
     cli_session_id = _extract_cli_session_id(run_dirs.logs / f"{session_id}.log")

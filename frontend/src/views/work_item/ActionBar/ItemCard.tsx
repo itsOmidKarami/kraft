@@ -6,7 +6,7 @@ import * as api from "../../../api";
 import { itemMenuItems } from "../../../components/itemMenu";
 import { OverflowMenu, StatusGlyph, type OverflowItem } from "../../../components/ui";
 import { deriveState } from "../../../deriveState";
-import { ago, elapsedBetween, judgeReasoning, tokens, until, usd, waitingSince } from "../../../format";
+import { ago, clock, elapsedBetween, judgeReasoning, tokens, until, usd, waitingSince } from "../../../format";
 import type { KraftEvent, WorkerSession, WorkItem } from "../../../types";
 import { PhoneComposer } from "../PhoneComposer";
 import type { InspectorTab } from "../selection";
@@ -24,6 +24,11 @@ import { useActionBar } from "./useActionBar";
  * rest. It replaced the gate card + action bar pair. Composers open inline
  * under the button row, as a full-screen sheet on phone.
  */
+
+/** HH:MM, matching the Timeline's own `hm` (Inspector/Timeline.tsx) --
+ *  `clock` alone includes seconds, more precision than a thread divider
+ *  needs. */
+const hm = (iso: string | null | undefined) => (iso ? clock(iso).slice(0, 5) : "");
 
 const PROMPTS: Record<string, string> = {
   spec_approval: "approve the spec to continue",
@@ -138,10 +143,23 @@ export function ItemCard({
   initialOpen?: ComposerKind;
 }) {
   const { state: rawState, needsYou } = deriveState(item, sessions, events);
-  const escalationTurns = sessions
+  const escalationSessions = sessions
     .filter((s) => s.hook_point === "escalation")
     .sort((a, b) => a.created_at.localeCompare(b.created_at));
-  const latestTurn = escalationTurns.at(-1);
+  // One entry per escalation thread, oldest first (Kraft-dkb6g) -- the
+  // composer's thread list, the "escalated" title's turn count, and the
+  // escalating pill all read the *latest* thread's turns, not every turn
+  // across every thread ever.
+  const escalationThreads = Object.values(
+    escalationSessions.reduce<Record<number, WorkerSession[]>>((acc, s) => {
+      (acc[s.thread] ??= []).push(s);
+      return acc;
+    }, {}),
+  ).sort((a, b) => a[0].thread - b[0].thread);
+  const latestThread = escalationThreads.at(-1) ?? [];
+  const latestTurn = latestThread.at(-1);
+  const latestThreadNumber = latestTurn?.thread ?? 1;
+  const latestTurnNumber = latestThread.length; // 1-based position within its own thread
   // Dismiss is a localStorage write, not a store field the item re-renders on:
   // tracked in state too so the card changes the moment it is clicked.
   const [dismissed, setDismissed] = useState(() => dismissedTurnId(item.id));
@@ -339,7 +357,6 @@ export function ItemCard({
           Resume
         </button>,
       );
-      // No Escalate: escalate_work_item 409s on anything but needs_human (Kraft-k5ol).
       if (item.steerable !== false) {
         row.push(
           <button key="steer" className="btn btn-secondary" onClick={() => openComposer("steer")}>
@@ -347,6 +364,8 @@ export function ItemCard({
           </button>,
         );
       }
+      // escalate_work_item now accepts paused as well as needs_human (Kraft-k5ol).
+      stateItems.push(escalate);
       break;
     }
     case "capped": {
@@ -425,7 +444,10 @@ export function ItemCard({
       );
       title = "escalation running";
       sub.push(nodeCode, auto ? "fired automatically — nobody had acted on it yet" : "one escalation turn at a time");
-      if (latestTurn) row.push(<EscalatingPill key="pill" turn={latestTurn.attempt} auto={auto} />);
+      if (latestTurn)
+        row.push(
+          <EscalatingPill key="pill" turn={latestTurnNumber} auto={auto} thread={latestThreadNumber} />,
+        );
       stateItems.push({
         label: "Stop escalation",
         onSelect: () => run(() => api.stopEscalation(item.id), "Agent stopped"),
@@ -433,7 +455,7 @@ export function ItemCard({
       break;
     }
     case "escalated": {
-      title = `Escalation · turn ${latestTurn?.attempt ?? 1} · reported`;
+      title = `Escalation · ${latestThreadNumber > 1 ? `thread ${latestThreadNumber} · ` : ""}turn ${latestTurnNumber || 1} · reported`;
       sub.push(nodeCode, waited);
       // Markdown emits blocks, so a <div>; capped with its own scroll so the
       // buttons below stay on the never-scrolling page. While Reply is open the
@@ -641,17 +663,36 @@ export function ItemCard({
         />
       );
       break;
-    case "escalate":
-      // Escalate and Reply share it (18): turn > 1 shows the thread above.
+    case "escalate": {
+      // Escalate and Reply share it (18): a prior turn shows the thread
+      // above. A prior *thread* folds to one row each, only the latest
+      // thread's turns shown in full (Kraft-dkb6g).
+      const priorThreads = escalationThreads.slice(0, -1);
+      const turnsInLatest = latestThread.length;
       composer = (
         <>
-          {escalationTurns.length > 0 && (
+          {priorThreads.map((t) => (
+            <p
+              key={`thread-${t[0].thread}`}
+              className="field-hint escalation-thread-fold"
+              data-testid={`escalation-thread-fold-${t[0].thread}`}
+            >
+              ▸ thread {t[0].thread} · {t.length} turn{t.length === 1 ? "" : "s"} · ended{" "}
+              {elapsedBetween(t.at(-1)!.exited_at ?? t.at(-1)!.created_at)} ago · {t.at(-1)!.id.slice(0, 8)}
+            </p>
+          ))}
+          {latestThread.length > 0 && (
             <div className="escalation-thread" data-testid="escalation-thread">
-              {escalationTurns.map((s) => {
+              {priorThreads.length > 0 && (
+                <p className="escalation-thread-divider" data-testid="escalation-thread-divider">
+                  new thread · {hm(latestThread[0].created_at)} · previous turns not in context
+                </p>
+              )}
+              {latestThread.map((s, i) => {
                 const sent = events.find((e) => e.type === "escalation_message" && e.payload.session_id === s.id);
                 return (
                   <p key={s.id} className="field-hint">
-                    turn {s.attempt}
+                    turn {i + 1}
                     {sent?.payload.auto ? " (auto-escalated)" : ""}: {String(sent?.payload.message ?? "")}
                   </p>
                 );
@@ -659,20 +700,40 @@ export function ItemCard({
             </div>
           )}
           <Composer
-            title={`Escalation · turn ${escalationTurns.length + 1}`}
+            title={
+              escalationThreads.length === 0
+                ? `Escalation · turn 1`
+                : `${state === "escalated" ? "Reply" : "Escalation"} · ${
+                    latestThreadNumber > 1 ? `thread ${latestThreadNumber} · ` : ""
+                  }${turnsInLatest} turn${turnsInLatest === 1 ? "" : "s"}`
+            }
             value={text}
             onChange={setText}
             busy={busy}
             error={err}
             placeholder="What should the agent look at?"
-            submitLabel="Send to agent"
+            submitLabel={state === "escalated" ? "Reply" : "Escalate"}
             disabled={text.trim() === ""}
             onSubmit={() => submit(() => api.escalateWorkItem(item.id, text.trim()), "Sent to the agent")}
             onCancel={close}
+            splitMenu={
+              escalationThreads.length > 0
+                ? {
+                    menuLabel: state === "escalated" ? "Reply in new thread" : "Escalate in new thread",
+                    menuHint: `Starts without turns 1–${turnsInLatest}. Documents, log and findings stay available.`,
+                    onMenuSelect: () =>
+                      submit(
+                        () => api.escalateWorkItem(item.id, text.trim(), true),
+                        "Sent to the agent — new thread",
+                      ),
+                  }
+                : undefined
+            }
           />
         </>
       );
       break;
+    }
   }
   // m08: a composer is a full-screen page on phone. Reject stays inline in the
   // card there, as it always has.

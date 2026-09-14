@@ -194,8 +194,11 @@ export const retryWorkItem = (id: string, steer?: string) =>
 export const skipWorkItem = (id: string, note?: string) =>
   req<void>(`/work-items/${id}/skip`, json("POST", { note: note ?? null }));
 
-export const escalateWorkItem = (id: string, message: string) =>
-  req<{ id: string; status: string }>(`/work-items/${id}/escalate`, json("POST", { message }));
+export const escalateWorkItem = (id: string, message: string, newThread = false) =>
+  req<{ id: string; status: string }>(
+    `/work-items/${id}/escalate`,
+    json("POST", { message, new_thread: newThread }),
+  );
 
 export const stopEscalation = (id: string) =>
   req<{ id: string; session_id: string; status: string }>(

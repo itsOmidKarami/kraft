@@ -35,6 +35,7 @@ def test_session_lifecycle(tmp_path):
                 "hook_point": "on.env.prepare",
                 "round": 0,
                 "attempt": 1,
+                "thread": 1,
             }
 
             await database.write(lambda c: store.session_running(c, "s1", 4321, 111.5))
@@ -52,6 +53,7 @@ def test_session_lifecycle(tmp_path):
                 # without it here the merge would reset a fix cycle to round 0
                 "round": 0,
                 "attempt": 1,
+                "thread": 1,
                 "pid": 4321,
             }
 
@@ -67,6 +69,174 @@ def test_session_lifecycle(tmp_path):
                 database.read(lambda c: events.read_after(c, 0, "w1"))[-1]["type"]
                 == "worker_session_exited"
             )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_create_session_defaults_thread_to_one(tmp_path):
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="env_setup",
+                    hook_point="on.env.prepare",
+                    log_path="/l",
+                    result_path="/r",
+                )
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT thread FROM worker_sessions WHERE id='s1'").fetchone()
+            )
+            assert row["thread"] == 1
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_create_session_stores_an_explicit_thread(tmp_path):
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="implementation",
+                    hook_point="escalation",
+                    log_path="/l",
+                    result_path="/r",
+                    thread=2,
+                )
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT thread FROM worker_sessions WHERE id='s1'").fetchone()
+            )
+            assert row["thread"] == 2
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_latest_escalation_thread_and_turn_count(tmp_path):
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            assert database.read(lambda c: store.latest_escalation_thread(c, "w1")) == 0
+
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="e1",
+                    work_item_id="w1",
+                    node_id="implementation",
+                    hook_point="escalation",
+                    log_path="/l1",
+                    result_path="/r1",
+                    thread=1,
+                )
+            )
+            assert database.read(lambda c: store.latest_escalation_thread(c, "w1")) == 1
+            assert database.read(lambda c: store.escalation_thread_turn_count(c, "w1", 1)) == 1
+
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="e2",
+                    work_item_id="w1",
+                    node_id="implementation",
+                    hook_point="escalation",
+                    log_path="/l2",
+                    result_path="/r2",
+                    thread=1,
+                )
+            )
+            assert database.read(lambda c: store.escalation_thread_turn_count(c, "w1", 1)) == 2
+
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="e3",
+                    work_item_id="w1",
+                    node_id="implementation",
+                    hook_point="escalation",
+                    log_path="/l3",
+                    result_path="/r3",
+                    thread=2,
+                )
+            )
+            assert database.read(lambda c: store.latest_escalation_thread(c, "w1")) == 2
+            assert database.read(lambda c: store.escalation_thread_turn_count(c, "w1", 1)) == 2
+            assert database.read(lambda c: store.escalation_thread_turn_count(c, "w1", 2)) == 1
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_escalation_threads_projection(tmp_path):
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="e1",
+                    work_item_id="w1",
+                    node_id="implementation",
+                    hook_point="escalation",
+                    log_path="/l1",
+                    result_path="/r1",
+                    thread=1,
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "e1", "done"))
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="e2",
+                    work_item_id="w1",
+                    node_id="implementation",
+                    hook_point="escalation",
+                    log_path="/l2",
+                    result_path="/r2",
+                    thread=1,
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "e2", "done"))
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="e3",
+                    work_item_id="w1",
+                    node_id="implementation",
+                    hook_point="escalation",
+                    log_path="/l3",
+                    result_path="/r3",
+                    thread=2,
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "e3", "needs_context"))
+
+            threads = database.read(lambda c: store.escalation_threads(c, "w1"))
+            assert [t["thread"] for t in threads] == [1, 2]
+            assert [t["turns"] for t in threads] == [2, 1]
+            assert threads[0]["session_id"] == "e2"
+            assert threads[1]["session_id"] == "e3"
+            assert threads[1]["status"] == "needs_context"
+            assert threads[0]["ended_at"] is not None
         finally:
             await database.close()
 
@@ -171,6 +341,7 @@ def test_create_session_announces_the_session(tmp_path):
                 "hook_point": "on.chain.review_ready",
                 "round": 0,
                 "attempt": 1,
+                "thread": 1,
             }
         finally:
             await database.close()

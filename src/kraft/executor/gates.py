@@ -570,6 +570,25 @@ def _auto_escalate_already_handled(evts: list) -> bool:
     return False
 
 
+def _current_run_escalation_session_id(evts: list) -> str | None:
+    """The `session_id` of the newest `escalation_message` dispatched since
+    this run of `needs_human` stuckness began, or None if none was.
+
+    Scoped like `_auto_dispatch_count` and `_auto_escalate_already_handled`:
+    bounded by `_RUN_BOUNDARY`, so a human retry that starts a fresh run
+    doesn't inherit a verdict from an escalation session that answered a
+    *previous* stop (Kraft-b52cm). `escalate.last_escalation_status` looks
+    at the item's newest escalation session ever, which is exactly the
+    unscoped read that bug came from.
+    """
+    for e in reversed(evts):
+        if e["type"] in _RUN_BOUNDARY:
+            break
+        if e["type"] == "escalation_message":
+            return e["payload"].get("session_id")
+    return None
+
+
 async def auto_escalate_stuck(
     status: str,
     db,
@@ -598,6 +617,12 @@ async def auto_escalate_stuck(
     lookup -- four separate full `events.read_after` reads on every single
     `run()`/`resume()` call otherwise, for one function.
     """
+    if launch is None:
+        # The only known caller passing this (startup.py's reattach path,
+        # pre-Kraft-atdbw) crashed into `deps.guard`, overwriting the item's
+        # real stop reason with "executor crashed: ...". Kraft-atdbw removes
+        # that call site; this guard is defense in depth (Kraft-9046).
+        return status
     if status != "needs_human":
         return status
     evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
@@ -607,6 +632,20 @@ async def auto_escalate_stuck(
     if reason is not None and reason.startswith("needs_context:"):
         # A worker asked a direct question. Dispatching an agent back onto
         # it only asks again; a human has to actually answer.
+        return status
+    current_session_id = _current_run_escalation_session_id(evts)
+    if current_session_id and escalate.session_status(db, current_session_id) == "needs_context":
+        # The *escalation session itself* asked a question and is waiting on
+        # a human to answer it -- distinct from the guard above, which only
+        # catches a chain node's own needs_context stop (Kraft-b52cm). Scoped
+        # to this run of stuckness (see `_current_run_escalation_session_id`)
+        # so a stale needs_context from a prior run doesn't suppress escalation
+        # forever. Dispatching another turn just asks again.
+        await db.write(
+            lambda c: events.append(
+                c, work_item_id, "work_item_auto_escalate_skipped", {"reason": "needs_context"}
+            )
+        )
         return status
     if escalate.escalation_running(db, work_item_id) is not None:
         return status

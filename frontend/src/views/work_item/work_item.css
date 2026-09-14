@@ -416,6 +416,29 @@ textarea.composer-input {
   font-size: 11px;
   margin: 0;
 }
+/* Kraft-dkb6g: primary + caret sharing one border (ESCALATION_THREADS_SPEC.md
+   §3's "Escalate ⌘↵ | ▾"). This app's `.btn-primary` is outline, not filled
+   (nocturne.css), so "the caret's fill a shade darker" becomes the same
+   accent tint `.btn-primary:hover`/`:active` already use, applied at rest. */
+.split-button { display: inline-flex; }
+.split-button .split-button-primary { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.split-button .overflow { margin-left: -1px; }
+.split-button .overflow-btn-caret {
+  height: 100%;
+  border: 1px solid var(--color-accent);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+.split-button .overflow-btn-caret:hover { background: color-mix(in srgb, var(--color-accent) 22%, transparent); }
+.escalation-thread-fold { color: var(--color-text-muted); cursor: default; }
+.escalation-thread-divider {
+  text-align: center;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin: var(--space-1) 0;
+}
 /* On the item page the footnote shares the actions' line when there is room
    (Kraft-migvn): the page never scrolls, and at 1100 × 800 the answer
    composer was still one row too tall. A narrow composer wraps it back under. */

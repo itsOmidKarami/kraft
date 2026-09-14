@@ -278,6 +278,7 @@ async def run_task(
     group_kill_grace: float = 10.0,
     round: int = 0,
     head_sha: str | None = None,
+    thread: int = 1,
     #: Every agent hook is told by `_CTX` to write $KRAFT_RESULT_PATH,
     #: regardless of whether it also declares `artifact:` -- this holds it to
     #: that half of the contract on its own (Kraft-avpe). Only run_agent_task
@@ -299,6 +300,7 @@ async def run_task(
             result_path=str(result_path),
             round=round,
             head_sha=head_sha,
+            thread=thread,
         )
     )
 
