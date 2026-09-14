@@ -632,3 +632,131 @@ def test_retry_after_no_progress_dispatches_a_fix_instead_of_re_escalating(tmp_p
         e["type"] == "fix_cycle_started" and e["seq"] > retried_seq for e in all_events
     )
     assert post_retry_cycles >= 1
+
+
+_FAILING_SUBPROCESS = (
+    "import sys; "
+    "print('\\u2718 1 e2e/x.spec.ts:1:1 \\u203a a flaky test (2.0m)'); "
+    "print('Error: locator.click: Test timeout of 120000ms exceeded.'); "
+    "sys.exit(1)"
+)
+
+
+def _blind_failure_registry():
+    """`on.check` is a real subprocess that fails with no result file at all --
+    the genuinely blind case `on.review.local.run`'s scripted reviewer (which
+    always writes a result file, even an empty-findings one) can't exercise."""
+    hooks = dict(_registry().hooks)
+    hooks["on.check"] = {
+        "kind": "subprocess",
+        "command": [sys.executable, "-c", _FAILING_SUBPROCESS],
+    }
+    return Registry(hooks=hooks)
+
+
+def _blind_failure_template() -> Template:
+    return Template(
+        id="blind",
+        nodes=[
+            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None, "fix_loop": None},
+            {
+                "id": "verify",
+                "tasks": ["on.check"],
+                "gate_after": None,
+                "fix_loop": "verify_fix_loop",
+            },
+        ],
+    )
+
+
+def _run_template(tmp_path, monkeypatch, template, registry, *, attempts=3):
+    """Like `_run`, but for a caller-supplied template/registry instead of the
+    scripted-reviewer `review` node -- the blind-failure tests need a real
+    subprocess, not the fake reviewer's plan file."""
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    out = {}
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="blind failure",
+                repo=str(repo),
+                template=template,
+                bd_cwd=str(tracker),
+            )
+            out["result"] = await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=_policy(tmp_path, attempts=attempts),
+            )
+            out["events"] = database.read(lambda c: events.read_after(c, 0, wid))
+            out["wid"] = wid
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    return out
+
+
+def test_blind_subprocess_failure_becomes_a_synthetic_finding(tmp_path, monkeypatch):
+    out = _run_template(
+        tmp_path, monkeypatch, _blind_failure_template(), _blind_failure_registry(), attempts=2
+    )
+    measured = _measured(out)
+    assert measured, "no findings_measured event was written"
+    findings = measured[0]["payload"]["findings"]
+    assert len(findings) == 1
+    f = findings[0]
+    assert f["source_plugin"] == "on.check"
+    assert f["severity"] == "critical"
+    assert "e2e/x.spec.ts:1:1" in f["message"]
+    assert "Test timeout" in f["message"]
+
+
+def test_blind_subprocess_failure_fingerprint_is_stable_across_rounds(tmp_path, monkeypatch):
+    """The regression this whole feature exists to fix: an identical blind
+    failure recurring for several rounds must now trip the stuck-detector, the
+    same way a recurring review finding already does."""
+    out = _run_template(
+        tmp_path,
+        monkeypatch,
+        _blind_failure_template(),
+        _blind_failure_registry(),
+        attempts=5,
+    )
+    assert out["result"] == "needs_human"
+    assert _needs_human_reason(out).startswith("stuck:")
+
+
+def test_blind_failure_findings_are_labeled_by_source_in_judge_history(tmp_path, monkeypatch):
+    from kraft.executor import dispatch as _dispatch
+
+    out = _run_template(
+        tmp_path, monkeypatch, _blind_failure_template(), _blind_failure_registry(), attempts=2
+    )
+
+    async def read_history():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            return _dispatch.judge_history(
+                database, out["wid"], "verify", frozenset({"critical", "important"})
+            )
+        finally:
+            await database.close()
+
+    # judge_history reconstructs from the same on-disk DB `_run_template` just
+    # closed -- reopen it read-only for this assertion rather than threading a
+    # second handle through `_run_template`.
+    history = asyncio.run(read_history())
+    assert history, "no rounds recorded"
+    assert any(f.source_plugin == "on.check" for h in history for f in h["findings"])

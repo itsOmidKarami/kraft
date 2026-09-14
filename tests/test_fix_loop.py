@@ -100,7 +100,17 @@ def test_fix_loop_cap_breach(tmp_path, monkeypatch):
         database = await db.Database.open(rd.db)
         try:
             registry = _registry()
-            pol = _make_policy(tmp_path, attempts=2)
+            # attempts=1, not 2: on.test.run's blind failure is now a stable
+            # synthesized Finding (Kraft: findings.from_blind_failure), so
+            # with a noop fix agent the identical fingerprint recurring at
+            # round 1 now correctly trips the stuck-detector before a
+            # 2-attempt cap would ever be reached -- that's the loop working
+            # as intended, not a regression. attempts=1 breaches the cap on
+            # the second bump, strictly before the stuck-check runs, so this
+            # test still exercises the cap-breach path specifically rather
+            # than the stuck path (both are `needs_human`, but for different
+            # reasons, and this test is about the cap).
+            pol = _make_policy(tmp_path, attempts=1)
             wid = await executor.intake(
                 database,
                 rd,
@@ -119,7 +129,7 @@ def test_fix_loop_cap_breach(tmp_path, monkeypatch):
             )
             assert result == "needs_human"
             types = _types(database, wid)
-            assert types.count("fix_cycle_started") == 2
+            assert types.count("fix_cycle_started") == 1
             wi = database.read(
                 lambda c: c.execute(
                     "SELECT status, current_node_id FROM work_items WHERE id=?", (wid,)
@@ -135,7 +145,7 @@ def test_fix_loop_cap_breach(tmp_path, monkeypatch):
             )
             assert any(r["status"] == "capped_out" for r in caps)
             row = database.read(lambda c: store.read_counter(c, wid, "verify_fix_loop"))
-            assert row["count"] == 3  # attempts + 1, the breaching bump
+            assert row["count"] == 2  # attempts + 1, the breaching bump
         finally:
             await database.close()
 
