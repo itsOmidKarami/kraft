@@ -1,5 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
 import type { KraftEvent, WorkerSession } from "../../../types";
 import { Events } from "./Events";
 
@@ -51,6 +52,35 @@ describe("Events (W13 · D)", () => {
     expect(head.querySelector(".stream-head")).toHaveTextContent("on.test.run · done · 1m");
     expect(within(head).getByRole("button", { name: "view log" })).toBeInTheDocument();
     expect(within(head).getByTitle("s1")).toBeInTheDocument();
+  });
+
+  it("session rows select: a click, Up/Down move the selection, Enter opens the log; a session streams its round (W14 · A)", async () => {
+    const user = userEvent.setup();
+    const s = (id: string, at: string, exit: string) =>
+      ({ id, node_id: "verify", hook_point: "on.test.run", status: "done", attempt: 1, round: 0, created_at: at, started_at: at, exited_at: exit }) as WorkerSession;
+    const sessions = [s("s1", "2024-01-01T00:00:10Z", "2024-01-01T00:01:00Z"), s("s2", "2024-01-01T00:01:10Z", "2024-01-01T00:02:00Z")];
+    const events = [
+      ev(1, "node_started", "2024-01-01T00:00:00Z"),
+      ev(2, "worker_session_created", "2024-01-01T00:00:10Z", { session_id: "s1" }),
+      ev(3, "worker_session_created", "2024-01-01T00:01:10Z", { session_id: "s2" }),
+    ];
+    const onSelect = vi.fn();
+    const onViewLog = vi.fn();
+    const { rerender } = render(<Events events={events} sessions={sessions} nodeId="verify" onSelect={onSelect} onViewLog={onViewLog} />);
+    const pane = screen.getByTestId("right-pane-events");
+    await user.click(pane.querySelector<HTMLElement>('[data-srow="s1"]')!);
+    expect(onSelect).toHaveBeenLastCalledWith("session:s1");
+
+    rerender(<Events events={events} sessions={sessions} nodeId="verify" selection={{ kind: "session", id: "s1" }} onSelect={onSelect} onViewLog={onViewLog} />);
+    // s1's round streams, so s2 is still there to move to
+    expect([...pane.querySelectorAll("[data-srow]")].map((r) => r.getAttribute("data-srow"))).toEqual(["s1", "s2"]);
+    expect(pane.querySelector('[data-srow="s1"]')).toHaveAttribute("data-selected", "true");
+    pane.querySelector<HTMLElement>('[data-srow="s1"]')!.focus();
+    await user.keyboard("{Enter}");
+    expect(onViewLog).toHaveBeenLastCalledWith("s1");
+    await user.keyboard("{ArrowDown}");
+    expect(onSelect).toHaveBeenLastCalledWith("session:s2");
+    expect(pane.querySelector('[data-srow="s2"]')).toHaveFocus();
   });
 
   it("names a round in its header: duration, sessions, findings and the verdict", () => {

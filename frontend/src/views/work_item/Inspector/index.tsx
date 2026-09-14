@@ -64,6 +64,13 @@ export function Inspector({
   // Reported by the Documents list once it has loaded; follows the scope (G.4).
   const [docCount, setDocCount] = useState<number | undefined>(undefined);
   const nodeEvents = groupByNode(events).find((g) => g.node === nodeId)?.events.length ?? 0;
+  // W14 · D: a zero explained. Sessions whose hook is not an agent never write a
+  // summary, so a node run by a test command has tasks and no documents (Kraft-1s6u2).
+  const docSessions = scope === "node" && nodeId ? nodeSessions.length : sessions.length;
+  const docHint =
+    docCount === 0 && docSessions > 0
+      ? `Documents · 0 · ${docSessions === 1 ? "1 session has" : `${docSessions} sessions have`} no summary`
+      : undefined;
   useLayoutEffect(() => {
     if (headRef.current) setHeadHeight(headRef.current.offsetHeight);
   });
@@ -87,7 +94,7 @@ export function Inspector({
           // "SESSIONS · N" eyebrow (W0.8).
           { id: "tasks", label: "Tasks", count: nodeId ? nodeSessions.length : sessions.length },
           { id: "changes", label: "Changes" },
-          { id: "documents", label: "Documents", count: docCount },
+          { id: "documents", label: "Documents", count: docCount, hint: docHint },
           // Follows the scope (F.2): this node's events, or all of them.
           { id: "timeline", label: "Timeline", count: scope === "node" ? nodeEvents : events.length },
           { id: "config", label: "Config" },
@@ -128,6 +135,7 @@ export function Inspector({
             scope={scope}
             onScope={setScope}
             onCount={setDocCount}
+            onShowTasks={() => onTabChange("tasks")}
             item={item}
             sessions={sessions}
           />

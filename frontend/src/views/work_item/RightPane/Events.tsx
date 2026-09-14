@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { ShortId } from "../../../components/ShortId";
 import { clock, elapsed, elapsedBetween, statusWord } from "../../../format";
 import type { KraftEvent, WorkerSession } from "../../../types";
@@ -111,6 +111,14 @@ function scopeOf(
 ): { events: KraftEvent[]; head: ReactNode; session?: WorkerSession; sessionId?: string } {
   const nodeEvents = (node: string | null) => (groupByNode(events).find((g) => g.node === node)?.events ?? []).slice().reverse();
   const roundOfSession = (s: WorkerSession, rounds: Round[]) => rounds.find((r) => r.sessions.some((x) => x.id === s.id));
+  const roundEvents = (own: KraftEvent[], r: Round) => {
+    const ids = new Set(r.sessions.map((s) => s.id));
+    return own.filter((e) => {
+      const sid = sessionOf(e);
+      if (sid) return ids.has(sid);
+      return e.created_at >= r.startedAt && (!r.endedAt || e.created_at <= r.endedAt) && e.type !== "node_started";
+    });
+  };
   if (sel?.kind === "event") {
     const e = events.find((x) => x.seq === sel.seq);
     if (e) return { events: [e], head: `${e.type} · ${clock(e.created_at)}` };
@@ -121,11 +129,15 @@ function scopeOf(
     const own = nodeEvents(node);
     const from = s?.created_at ?? "";
     const to = s?.exited_at ?? null;
-    const mine = own.filter(
-      (e) => sessionOf(e) === sel.id || (e.type === "task_progress" && e.created_at >= from && (!to || e.created_at <= to)),
-    );
-    const rounds = node ? nodeRounds(node, events, sessions).rounds : [];
+    const nr = node ? nodeRounds(node, events, sessions) : null;
+    const rounds = nr?.rounds ?? [];
     const r = s ? roundOfSession(s, rounds) : undefined;
+    // W14 · A: a session in a round streams its round, the session row lit, so
+    // Up/Down has its neighbours; an escalation turn streams on its own.
+    const mine =
+      nr && r
+        ? roundEvents(nr.events, r)
+        : own.filter((e) => sessionOf(e) === sel.id || (e.type === "task_progress" && e.created_at >= from && (!to || e.created_at <= to)));
     const bits = [
       s?.hook_point ?? "session",
       s?.hook_point === "escalation" ? `turn ${s.attempt ?? 1}` : rounds.length > 1 && r ? `round ${r.n + 1}` : null,
@@ -138,12 +150,7 @@ function scopeOf(
     const nr = nodeRounds(sel.node, events, sessions);
     const r = nr.rounds[sel.n];
     if (r) {
-      const ids = new Set(r.sessions.map((s) => s.id));
-      const mine = nr.events.filter((e) => {
-        const sid = sessionOf(e);
-        if (sid) return ids.has(sid);
-        return e.created_at >= r.startedAt && (!r.endedAt || e.created_at <= r.endedAt) && e.type !== "node_started";
-      });
+      const mine = roundEvents(nr.events, r);
       const head = [
         `round ${r.n + 1}`,
         elapsedBetween(r.startedAt, r.endedAt),
@@ -180,6 +187,7 @@ export function Events({
   sessions = [],
   nodeId,
   selection = null,
+  onSelect,
   onViewLog,
 }: {
   events: KraftEvent[];
@@ -187,9 +195,38 @@ export function Events({
   nodeId: string | null;
   /** What the Timeline list picked (W13 · C.4); null streams the node. */
   selection?: TimelineSelection | null;
+  /** W14 · A: a session row picked here, as `session:<id>`. */
+  onSelect?: (id: string) => void;
   onViewLog: (sessionId: string) => void;
 }) {
   const [filter, setFilter] = useState<"all" | "gates" | "tasks">("all");
+  const listRef = useRef<HTMLOListElement>(null);
+  const refocus = useRef(false);
+  const selectedSession = selection?.kind === "session" ? selection.id : null;
+  // Picking a session can restream the pane (node → its round); keep focus on the lit row.
+  useEffect(() => {
+    if (!refocus.current) return;
+    refocus.current = false;
+    listRef.current?.querySelector<HTMLElement>('[data-srow][data-selected="true"]')?.focus();
+  }, [selectedSession]);
+
+  // W14 · A: session rows are the pane's rows -- Up/Down move the selection, Enter opens the log.
+  const onRowsKey = (e: KeyboardEvent<HTMLOListElement>) => {
+    const rows = [...(listRef.current?.querySelectorAll<HTMLElement>("[data-srow]") ?? [])];
+    const at = rows.indexOf(e.target as HTMLElement);
+    if (at < 0) return;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      onViewLog(rows[at].dataset.srow!);
+    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const next = rows[Math.min(rows.length - 1, Math.max(0, at + (e.key === "ArrowDown" ? 1 : -1)))];
+      if (next === rows[at]) return;
+      refocus.current = true;
+      next.focus();
+      onSelect?.(`session:${next.dataset.srow}`);
+    }
+  };
   const hooks = new Map(sessions.map((s) => [s.id, s.hook_point]));
   const scope = scopeOf(selection, events, sessions, nodeId);
   const all = streamRows(scope.events, sessions);
@@ -312,13 +349,20 @@ export function Events({
         </div>
       </header>
       {rows.length === 0 && <p className="empty">no {filter === "gates" ? "gate " : ""}events here</p>}
-      <ol className="stream">
+      <ol className="stream" ref={listRef} onKeyDown={onRowsKey}>
         {rows.map((r, i) => (
           <li
             key={`${r.kind}:${r.at}:${i}`}
             className="stream-row"
             data-kind={r.kind}
             data-type={"event" in r ? r.event.type : r.kind === "session" ? "worker_session" : r.kind === "tasks" ? "task_progress" : undefined}
+            {...(r.kind === "session" && {
+              "data-srow": r.run.id,
+              "data-selected": r.run.id === selectedSession,
+              "aria-current": r.run.id === selectedSession ? ("true" as const) : undefined,
+              tabIndex: 0,
+              onClick: () => onSelect?.(`session:${r.run.id}`),
+            })}
           >
             <div className="stream-body">{body(r)}</div>
             {r.kind !== "gap" && <time className="stream-time">{times[i]}</time>}

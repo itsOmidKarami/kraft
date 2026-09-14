@@ -409,6 +409,8 @@ export interface Tab {
   id: string;
   label: string;
   count?: number;
+  /** A tooltip for the tab (hints are tooltips, never standing text). */
+  hint?: string;
 }
 
 export function Tabs({
@@ -441,6 +443,7 @@ export function Tabs({
           aria-selected={t.id === value}
           tabIndex={t.id === focusable ? 0 : -1}
           className="tab"
+          title={t.hint}
           onClick={() => onChange(t.id)}
         >
           {t.label}

@@ -57,6 +57,7 @@ export function Documents({
   onCount,
   item = null,
   sessions = [],
+  onShowTasks,
 }: {
   workItemId: string;
   eventCount: number;
@@ -90,6 +91,8 @@ export function Documents({
   item?: { title?: string | null; bead_id?: string | null } | null;
   /** The item's sessions, for the newest-run-first order (B.6). */
   sessions?: WorkerSession[];
+  /** The empty state's "see Tasks": switch the inspector to Tasks. */
+  onShowTasks?: () => void;
 }) {
   const [docs, setDocs] = useState<WorkItemDocument[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -148,6 +151,7 @@ export function Documents({
   const allShown = scope === "all" || !nodeId;
   const expandAll = allShown || !!q;
 
+  const scopedRuns = allShown ? sessions.length : sessions.filter((s) => s.node_id === nodeId).length;
   const gateRows = gatePending ? 1 : 0;
   const count = allShown ? rest.length + gateRows : rest.filter((d) => nodeOf(d) === nodeId).length + gateRows;
   useEffect(() => {
@@ -278,7 +282,6 @@ export function Documents({
         onChange={(e) => setFilter(e.target.value)}
       />
       {error && <p className="form-error" role="alert">{error}</p>}
-      {!error && docs?.length === 0 && <p className="empty">no linked documents yet</p>}
 
       {gatePending && (
         <>
@@ -337,6 +340,32 @@ export function Documents({
             ))}
           </>
         )}
+
+      {/* An explained zero, under the empty list: sessions of non-agent hooks
+          write no summary by design (Kraft-1s6u2). The gap row's muted look. */}
+      {!error && docs && !q && count === 0 && (
+        <div className="doc-empty" data-testid="documents-empty">
+          <span className="stream-gap-label">No documents</span>
+          <span className="stream-gap-label">
+            {scopedRuns > 0 ? (
+              <>
+                {scopedRuns === 1 ? "1 session" : `${scopedRuns} sessions`} ran without a summary · see{" "}
+                <a
+                  href="#tab=tasks"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onShowTasks?.();
+                  }}
+                >
+                  Tasks
+                </a>
+              </>
+            ) : (
+              "This node has not run yet"
+            )}
+          </span>
+        </div>
+      )}
 
       {!!docs?.length && (
         <p className="inspector-foot">
