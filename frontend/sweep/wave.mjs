@@ -23,7 +23,8 @@ if (waveArg !== "all" && !wave) { console.error(`unknown wave ${waveArg}; known:
 
 const OUT = path.resolve("e2e-shots/sweep");
 const BASE = path.resolve("e2e-shots/baseline", waveArg);
-const screens = wave ? wave.screens : null;
+// "all" (W10) is every screen and every spec, same as `wave.mjs all`.
+const screens = wave && wave.screens !== "all" ? wave.screens : null;
 
 let pixelmatch = null;
 try { pixelmatch = (await import("pixelmatch")).default; } catch { /* fallback compare */ }
@@ -53,7 +54,7 @@ if (BASELINE) {
 // 1. Re-shoot the wave's screens.
 const env = { ...process.env };
 if (screens) env.SWEEP_SCREEN = screens.join(",");
-const specs = wave?.specs ?? ["sweep.spec.ts", "elements.spec.ts", "interactions.spec.ts"];
+const specs = wave?.specs && wave.specs !== "all" ? wave.specs : ["sweep.spec.ts", "elements.spec.ts", "interactions.spec.ts"];
 for (const spec of specs) {
   try { execSync(`npx playwright test -c sweep/playwright.sweep.config.ts sweep/${spec}`, { stdio: "inherit", env }); }
   catch { /* the specs never assert; a non-zero exit is a harness crash and is visible in the list reporter */ }

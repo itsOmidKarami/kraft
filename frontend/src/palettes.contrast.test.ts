@@ -54,7 +54,7 @@ const contrast = (a: string, b: string) => {
 const PALETTES = ["nocturne", "rose", "forest", "amber", "slate"];
 const STATUS = ["needs-you", "running", "done", "capped", "budget"];
 // Ramp steps that styles.css uses as text colour.
-const TEXT_STEPS = ["neutral-100", "neutral-200", "neutral-300", "neutral-400", "neutral-500", "accent-100", "accent-200", "accent-300"];
+const TEXT_STEPS = ["neutral-100", "neutral-200", "neutral-300", "neutral-400", "neutral-500", "accent-100", "accent-200", "accent-300", "accent-400"];
 
 describe.each(PALETTES)("palette %s", (palette) => {
   it.each(["dark", "light"])("%s: text and muted hold 4.5:1, faint 3:1, on bg and surface", (mode) => {
@@ -65,6 +65,20 @@ describe.each(PALETTES)("palette %s", (palette) => {
       expect(contrast(resolve(t, "--color-text-muted"), g), `muted on ${ground}`).toBeGreaterThanOrEqual(4.5);
       expect(contrast(resolve(t, "--color-text-faint"), g), `faint on ${ground}`).toBeGreaterThanOrEqual(3);
     }
+  });
+
+  // W10.A: dark mode's small text on its three grounds -- the page, a card, and
+  // the selected-row fill (accent-900) the tree, documents and chains lists paint.
+  it("dark: muted, neutral-400 and accent-400 hold 4.5:1 on bg, surface and the selected-row fill", () => {
+    const t = tokens(palette, "dark");
+    for (const tok of ["--color-text-muted", "--color-neutral-400", "--color-accent-400"])
+      for (const ground of ["--color-bg", "--color-surface", "--color-accent-900"])
+        expect(contrast(resolve(t, tok), resolve(t, ground)), `${tok} on ${ground}`).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it.each(["dark", "light"])("%s: the bottom-nav badge's ground ink holds 4.5:1 on the accent fill", (mode) => {
+    const t = tokens(palette, mode);
+    expect(contrast(resolve(t, "--color-bg"), resolve(t, "--color-accent"))).toBeGreaterThanOrEqual(4.5);
   });
 
   it("light: every ramp step used as text holds 4.5:1 on bg and surface", () => {

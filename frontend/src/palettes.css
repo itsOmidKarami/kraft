@@ -62,7 +62,7 @@
   --color-accent-2-700: #715074;
   --color-accent-2-800: #513952;
   --color-accent-2-900: #332634;
-  --color-text-muted: #918998;
+  --color-text-muted: var(--color-neutral-500);
 }
 
 :root[data-palette="forest"] {
@@ -95,7 +95,7 @@
   --color-accent-2-700: #406948;
   --color-accent-2-800: #2e4b34;
   --color-accent-2-900: #203023;
-  --color-text-muted: #879082;
+  --color-text-muted: var(--color-neutral-500);
 }
 
 :root[data-palette="amber"] {
@@ -128,7 +128,7 @@
   --color-accent-2-700: #7d5236;
   --color-accent-2-800: #583b27;
   --color-accent-2-900: #38281d;
-  --color-text-muted: #9b8882;
+  --color-text-muted: var(--color-neutral-500);
 }
 
 :root[data-palette="slate"] {
@@ -166,7 +166,7 @@
   --color-accent-2-700: #2a667b;
   --color-accent-2-800: #204958;
   --color-accent-2-900: #1a2f37;
-  --color-text-muted: #7c9195;
+  --color-text-muted: var(--color-neutral-500);
 }
 
 /* ── 2. mode blocks — must stay AFTER the ramp blocks above ─────────────── */
@@ -202,7 +202,7 @@
   --color-bg: #161826;
   --color-surface: #232532;
   --color-text: #e9e9ed;
-  --color-text-muted: #888c9c;
+  --color-text-muted: var(--color-neutral-500);
 }
 :root[data-palette="nocturne"][data-mode="light"] {
   --color-bg: #f2f3f8;
@@ -253,7 +253,7 @@
   --color-bg: #1e1522;
   --color-surface: #2a232f;
   --color-text: #ebe8ec;
-  --color-text-muted: #918998;
+  --color-text-muted: var(--color-neutral-500);
 }
 :root[data-palette="rose"][data-mode="light"] {
   --color-bg: #f5f2f6;
@@ -304,7 +304,7 @@
   --color-bg: #131c10;
   --color-surface: #20291d;
   --color-text: #e7eae7;
-  --color-text-muted: #879082;
+  --color-text-muted: var(--color-neutral-500);
 }
 :root[data-palette="forest"][data-mode="light"] {
   --color-bg: #f1f4f0;
@@ -355,7 +355,7 @@
   --color-bg: #24150f;
   --color-surface: #30221c;
   --color-text: #ede9e6;
-  --color-text-muted: #9b8882;
+  --color-text-muted: var(--color-neutral-500);
 }
 :root[data-palette="amber"][data-mode="light"] {
   --color-bg: #f7f2f0;
@@ -406,7 +406,7 @@
   --color-bg: #081d21;
   --color-surface: #18292d;
   --color-text: #e6eaec;
-  --color-text-muted: #7c9195;
+  --color-text-muted: var(--color-neutral-500);
 }
 :root[data-palette="slate"][data-mode="light"] {
   --color-bg: #eff5f6;

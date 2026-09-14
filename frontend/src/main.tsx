@@ -21,24 +21,30 @@ const saved = savedTheme();
 if (saved) applyTheme(saved.palette, saved.mode);
 
 async function boot() {
+  // Kraft-yx79s: a server whose public /health says this browser has no
+  // session answers the question without a 401, and the probe below is
+  // skipped. A server that does not send `authenticated` keeps the probe.
+  const health = await api.getHealth().catch(() => null);
+  let locked = health?.authenticated === false;
   // /api/theme doubles as the session check (W8.7): on a locked instance it is
   // the one request that comes back 401, and nothing else is asked until a
   // login -- bootstrap, the event socket and every view's own fetch would
   // each add their own 401 to the login screen.
-  let locked = false;
   const onLocked = () => (locked = true);
-  window.addEventListener("kraft:unauthenticated", onLocked, { once: true });
-  try {
-    const theme = await api.getTheme();
-    applyTheme(theme.palette, theme.mode);
-    applyDensity(theme.density);
-  } catch (e) {
-    // Nocturne dark (nocturne.css's unscoped :root) is already the page's
-    // look with no attributes set — a failed fetch here just means the
-    // saved choice doesn't apply yet, not a broken page.
-    if (!locked) console.error("theme fetch failed", e);
+  if (!locked) {
+    window.addEventListener("kraft:unauthenticated", onLocked, { once: true });
+    try {
+      const theme = await api.getTheme();
+      applyTheme(theme.palette, theme.mode);
+      applyDensity(theme.density);
+    } catch (e) {
+      // Nocturne dark (nocturne.css's unscoped :root) is already the page's
+      // look with no attributes set — a failed fetch here just means the
+      // saved choice doesn't apply yet, not a broken page.
+      if (!locked) console.error("theme fetch failed", e);
+    }
+    window.removeEventListener("kraft:unauthenticated", onLocked);
   }
-  window.removeEventListener("kraft:unauthenticated", onLocked);
   if (!locked) {
     try {
       await useStore.getState().bootstrap();
