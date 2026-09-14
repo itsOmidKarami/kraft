@@ -81,6 +81,36 @@ def backend_for(backend: str, repo_forge: str | None) -> str:
     return cli
 
 
+async def _rebase_conflict_away(
+    db, forge: Forge, *, repo: Path, orig_repo: Path, branch: str, work_item_id: str
+) -> tuple[str, str]:
+    """Force-rebase onto the target's current default branch -- the one
+    thing that can turn a real conflict into nothing left to fix, since a
+    conflict against wherever main was when this branch was cut may not
+    exist against main's current tip. Shared by `ci_poll` (Kraft-9h7v, the
+    original) and `merge` (draft-MR workflow spec): same rebase, same
+    "done, not conflict" report that lets `run_once`'s `rebase_bounce_to`
+    machinery see the moved `base_ref` and bounce the chain back to
+    `verify` in the same walk, before either node ever calls `forge.merge`.
+
+    Returns ("<why it didn't take>\\n", "conflict") unchanged on a rebase
+    that could not resolve it (a real conflict, `git rebase --abort`ed, or
+    nothing to rebase) -- the caller appends this to its own log and keeps
+    its own status. Returns ("<what changed>\\n", "done") when it worked,
+    with the branch already rebased, `base_ref` persisted, and pushed.
+    """
+    default = await git.default_branch(orig_repo)
+    try:
+        new_head = await _builtins.mr_rebase_forced(repo, orig_repo, default)
+    except RuntimeError as exc:
+        return f"rebase onto {default} failed: {exc}\n", "conflict"
+    if not new_head:
+        return "", "conflict"
+    await db.write(lambda c, h=new_head: store.set_base_ref(c, work_item_id, h))
+    await forge.push(repo=repo, branch=branch)
+    return f"rebased {branch} onto {new_head} and re-pushed\n", "done"
+
+
 async def _run_one(
     forge: Forge,
     db,
@@ -98,6 +128,7 @@ async def _run_one(
     merge_timeout: float,
     merge_interval: float,
     meta: mr_ops.MRMeta = _EMPTY_META,
+    has_rebase_bounce: bool = False,
 ) -> tuple[str, str, list[dict] | None]:
     """One forge handler against one repo. Extracted from `run_task` so the
     multi-repo loop there can call it once per `work_item_repos` row; a
@@ -111,6 +142,14 @@ async def _run_one(
     `meta` is resolved once by the caller against the item's own worktree,
     not `repo` -- a multi-repo item's submodule targets are not where the
     agent's `on.mr.describe` artifact lives.
+
+    `has_rebase_bounce` is whether *this* node's own `chain_definition` entry
+    carries `rebase_bounce_to` -- read from the frozen chain, not from
+    whatever `templates/default.yaml` says today. The `merge` handler's
+    conflict rebase relies on it: without a configured bounce nothing will
+    ever re-verify the rebased head, so reporting "done" without calling
+    `forge.merge` would leave the branch unmerged while the walk moves on
+    regardless (code-review).
     """
     findings: list[dict] | None = None
     body = mr_ops.mr_body(work_item_id, branch, await git.commits_on(repo, branch), meta)
@@ -252,38 +291,15 @@ async def _run_one(
                     if status == "infra":
                         status = "waiting"
             if status == "conflict":
-                default = await git.default_branch(orig_repo)
-                try:
-                    new_head = await _builtins.mr_rebase_forced(repo, orig_repo, default)
-                except RuntimeError as exc:
-                    # A real conflict: `mr_rebase_forced` already ran `git
-                    # rebase --abort`. Fail the node with the conflict detail
-                    # a human needs, same shape `mr_rebase`'s own docstring
-                    # already promises for this exception. `status` stays
-                    # "conflict" -- the repair/fix-loop machinery this node
-                    # now has (Task 6/7) routes a real conflict through the
-                    # ordinary on_failure/fix-cycle path, which cannot fix a
-                    # git conflict either, so Task 11's stuck detector (or the
-                    # loop's own cap) is what eventually stops this for a
-                    # human.
-                    log += f"rebase onto {default} failed: {exc}\n"
-                else:
-                    if new_head:
-                        await db.write(lambda c, h=new_head: store.set_base_ref(c, work_item_id, h))
-                        await forge.push(repo=repo, branch=branch)
-                        log += f"rebased {branch} onto {new_head} and re-pushed\n"
-                        # A successful forced rebase has done this node's
-                        # whole job (the branch now lands cleanly): reporting
-                        # "done" here -- not "conflict" -- is what lets
-                        # `run_once`'s existing `rebase_bounce_to` machinery
-                        # see the moved base_ref and bounce back to `verify`
-                        # in this same walk_node call, rather than parking on
-                        # a WAITING re-measure (the freshly-pushed head almost
-                        # certainly has no pipeline yet) that returns out of
-                        # `run_once` above the bounce comparison, so the move
-                        # would never be compared against and the bounce
-                        # would silently never fire.
-                        status = "done"
+                rebase_log, status = await _rebase_conflict_away(
+                    db,
+                    forge,
+                    repo=repo,
+                    orig_repo=orig_repo,
+                    branch=branch,
+                    work_item_id=work_item_id,
+                )
+                log += rebase_log
             if status == "failed" and ci_status.failed_jobs:
                 findings = [
                     {
@@ -307,6 +323,17 @@ async def _run_one(
             existing = await forge.find_mr(repo=repo, branch=branch)
             if existing is not None and existing.state == "merged":
                 return f"already merged (!{existing.number}); nothing to sync\n", "done", findings
+            # Undraft before anything else: every MR opens as a draft now
+            # (open_mr always does), and mr_sync is the one node every
+            # chain shape runs before merge, gated or not -- see the
+            # draft-MR workflow spec's "Undraft" decision. A no-op on an
+            # MR that is already ready (both CLIs' own docs), so calling
+            # it unconditionally costs nothing on a re-entry.
+            await forge.mark_ready(
+                repo=repo,
+                branch=branch,
+                mr=MR(number=existing.number if existing else 0, url=""),
+            )
             # Push first: every commit after `open_mr` -- verify's fixes,
             # mr_checks' findings -- is local only until this runs, and
             # `merge` refuses a branch ahead of its remote (Kraft-nh5m).
@@ -348,11 +375,93 @@ async def _run_one(
                 ci_log, gate_status = await ci.wait_for_ci(
                     forge, repo=repo, branch=branch, timeout=poll_timeout, interval=poll_interval
                 )
-                if gate_status != "done":
+                rebased = False
+                unresolved_conflict = gate_status == "conflict"
+                if gate_status == "conflict":
+                    # mr_sync's push, or a rebase since mr_checks last
+                    # looked, can turn up a conflict only merge ever sees
+                    # -- give it the same rebase-and-bounce mr_checks
+                    # already has (draft-MR workflow spec) rather than
+                    # failing a conflict a rebase might dissolve.
+                    rebase_log, gate_status = await _rebase_conflict_away(
+                        db,
+                        forge,
+                        repo=repo,
+                        orig_repo=orig_repo,
+                        branch=branch,
+                        work_item_id=work_item_id,
+                    )
+                    ci_log += rebase_log
+                    rebased = gate_status == "done"
+                    unresolved_conflict = not rebased
+                    if rebased and not has_rebase_bounce:
+                        # No `rebase_bounce_to` on *this* node's own
+                        # chain_definition -- an installed
+                        # templates/default.yaml seeded before the field
+                        # existed, or a chain_definition frozen before this
+                        # node grew it. Nothing will bounce the walk back to
+                        # verify to re-run tests over the rebased diff, so
+                        # the "done, not merged" shortcut below would leave
+                        # the branch unmerged while `post_merge_watch` and
+                        # `mark_completed`/`close_beads` still run as if it
+                        # had landed (code-review). Re-check CI on the
+                        # rebased head instead -- the one guarantee this
+                        # node can still make on its own -- and fall through
+                        # to the ordinary gate below to merge only if it's
+                        # actually green.
+                        recheck_log, gate_status = await ci.wait_for_ci(
+                            forge,
+                            repo=repo,
+                            branch=branch,
+                            timeout=poll_timeout,
+                            interval=poll_interval,
+                        )
+                        ci_log += recheck_log
+                        rebased = False
+                        unresolved_conflict = gate_status == "conflict"
+                if rebased:
+                    # Rebased the conflict away, not merged: this node's
+                    # `rebase_bounce_to: verify` (templates/default.yaml)
+                    # is what acts on the moved base_ref next, re-running
+                    # tests over the rebased diff before anything is ever
+                    # merged -- the same guarantee a rebase at mr_checks
+                    # already gets. "rebased", not "done" -- `run_task`'s
+                    # multi-repo loop must not count this target as merged
+                    # (code-review); it normalizes back to "done" itself
+                    # once it knows no later target got skipped over a
+                    # rebase that only looked like a landing.
+                    log, status = ci_log, "rebased"
+                elif unresolved_conflict:
+                    # Thread the real status through rather than collapsing
+                    # to a bare "failed" (draft-MR workflow spec): a real
+                    # conflict a rebase couldn't dissolve either, same
+                    # status `ci_poll` already reports for the identical
+                    # case -- both read the same by `dispatch`'s failure
+                    # handling, but "conflict" names the actual problem.
+                    log, status = ci_log, "conflict"
+                elif gate_status != "done":
                     log, status = ci_log, "failed"
                 else:
-                    # A genuine refusal -- conflicts, unmet approval rules --
-                    # still raises inside forge.merge and still fails the node.
+                    # An approval rule the pipeline can't see for itself:
+                    # `mergeable` reads this as undecided (mr_checks must
+                    # not fail on it pre-gate, since it's an ordinary state
+                    # before human_review even runs), so it survives
+                    # unnoticed all the way here. One more read, now that
+                    # CI is confirmed green and conflict-free, catches it
+                    # before forge.merge() does, with a message a human
+                    # reads at a glance instead of the CLI's own refusal
+                    # text (draft-MR workflow spec).
+                    fresh = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
+                    if fresh.block_reason == "not_approved":
+                        log = (
+                            "merge request needs approval before it can land: "
+                            f"{fresh.merge_detail}\n"
+                        )
+                        status = "failed"
+                        return log, status, findings
+                    # A genuine refusal -- unmet approval rules this read
+                    # didn't catch, or anything else -- still raises inside
+                    # forge.merge and still fails the node.
                     await forge.merge(repo=repo, branch=branch, mr=MR(number=0, url=""))
                     # And a refusal the CLI reported as success does not get
                     # through either. This node's stated end state is "this
@@ -675,6 +784,11 @@ async def run_task(
     merge_timeout: float = MERGE_VERIFY_TIMEOUT,
     merge_interval: float = MERGE_VERIFY_INTERVAL,
     head_sha: str | None = None,
+    #: Whether this node's own `chain_definition` entry carries
+    #: `rebase_bounce_to` -- see `_run_one`'s docstring. Defaults to False,
+    #: the safe assumption for any caller (a test, a future handler) that
+    #: does not know any better.
+    has_rebase_bounce: bool = False,
 ) -> str:
     """One forge node -- against every repo `work_item_repos` names for this
     item, deepest submodule first, root last (design 3a), or just `repo` when
@@ -778,6 +892,7 @@ async def run_task(
                 merge_timeout=merge_timeout,
                 merge_interval=merge_interval,
                 meta=meta,
+                has_rebase_bounce=has_rebase_bounce,
             )
             if not multi:
                 findings = one_findings
@@ -785,7 +900,17 @@ async def run_task(
             if row_id is not None:
                 new_state = {
                     "open_mr": "open",
-                    "merge": "merged" if one_status == "done" else "failed",
+                    # "rebased" (conflict rebased away, not actually merged --
+                    # see `_run_one`) maps to `None`: this row stays whatever
+                    # it already was (`open`), not "merged" -- the bounce
+                    # this triggers below re-enters `merge` from scratch once
+                    # verify has re-run, and `_run_one`'s own "already
+                    # merged" check is what makes that re-entry idempotent.
+                    "merge": (
+                        "merged"
+                        if one_status == "done"
+                        else ("failed" if one_status != "rebased" else None)
+                    ),
                 }.get(handler)
                 if new_state:
                     await db.write(
@@ -794,6 +919,12 @@ async def run_task(
                         )
                     )
             if one_status != "done":
+                # Stop here rather than merging later targets (root last) or
+                # running the root pointer-bump below: a "rebased" result
+                # means this target never actually landed, and root must not
+                # bump a submodule pointer past a branch nothing merged yet
+                # (code-review). Normalized back to "done" below once the
+                # loop is known to have stopped for this reason alone.
                 status = one_status
                 break
         if (
@@ -837,6 +968,13 @@ async def run_task(
                     f"bumped {', '.join(bumped)} directly on {root_default}, "
                     "no root merge request\n"
                 )
+        if status == "rebased":
+            # Internal-only marker (worker_sessions.status has no "rebased"
+            # value, and the walk's own bounce -- keyed off base_ref moving,
+            # not this string -- already treats a plain "done" as the signal
+            # to re-verify). Everything above that must not treat this target
+            # as landed has already run off the un-normalized value.
+            status = "done"
     except ForgeError as exc:
         log, status, findings = f"{hook_point} failed: {exc}\n", "failed", None
 

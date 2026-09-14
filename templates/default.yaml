@@ -69,6 +69,11 @@ nodes:
   - id: merge
     tasks: [on.merge]
     gate_after: null
+    # A conflict mr_sync's push (or a rebase since mr_checks last looked)
+    # turns up is handled the same way mr_checks handles one: a forced
+    # rebase, then straight back to verify to re-run tests over the
+    # rebased diff before anything is ever merged (draft-MR workflow spec).
+    rebase_bounce_to: verify
   # Kraft-43kw: a plain read-and-react step, not a fix_loop -- nothing here
   # is this item's own defect to iterate on. mark_completed/close_beads now
   # fire after this node, not after `merge`, so the item's tracking bead does

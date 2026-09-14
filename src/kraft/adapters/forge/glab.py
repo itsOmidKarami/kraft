@@ -79,6 +79,10 @@ class GlabCli:
                 "glab",
                 "mr",
                 "create",
+                # Every MR Kraft opens starts as a draft: `human_review` is
+                # the gate that decides it's ready, not this call (draft-MR
+                # workflow spec). `mr_sync` un-drafts it after the gate.
+                "--draft",
                 "--title",
                 mr_ops.mr_title(title),
                 "--description",
@@ -91,6 +95,13 @@ class GlabCli:
         raw = await git.run_git(repo, ["glab", "mr", "view", "-F", "json"])
         data = mr_ops.parse_json(raw, "glab mr view")
         return MR(number=int(data["iid"]), url=str(data["web_url"]))
+
+    async def mark_ready(self, *, repo: Path, branch: str, mr: MR) -> None:
+        """Un-draft the merge request. `--ready` is a no-op on an
+        already-ready MR (glab's own docs), so this is safe to call
+        unconditionally rather than reading the MR back first to check."""
+        target = [str(mr.number)] if mr.number > 0 else []
+        await git.run_git(repo, ["glab", "mr", "update", *target, "--ready"])
 
     async def push(self, *, repo: Path, branch: str) -> None:
         await git.push(repo, branch)
@@ -157,9 +168,12 @@ class GlabCli:
                 merge_detail="merged",
             )
         mergeable = mr_ops.mergeable(detail)
+        block_reason = mr_ops.classify_block_reason(detail)
         expected_sha = await git._head_sha(repo)
         pipeline = await self._pipeline_on_ref(repo, branch, pipeline_id, expected_sha)
-        return replace(pipeline, mergeable=mergeable, merge_detail=detail)
+        return replace(
+            pipeline, mergeable=mergeable, merge_detail=detail, block_reason=block_reason
+        )
 
     async def branch_ci_status(
         self, *, repo: Path, branch: str, head_sha: str, pipeline_id: str = ""

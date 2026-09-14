@@ -324,6 +324,12 @@ async def dispatch_node(
             orig_repo=Path(work_item_row["repo"]),
             branch=store.branch_for(work_item_row),
             title=work_item_row["title"],
+            # `merge`'s conflict-rebase shortcut may only report "done"
+            # without calling forge.merge when this node's own frozen
+            # chain_definition will actually bounce the walk back to verify
+            # afterwards (code-review) -- not whatever the current
+            # templates/default.yaml happens to say.
+            has_rebase_bounce=bool(node.get("rebase_bounce_to")),
             **poll,
             **common,
         )
