@@ -24,6 +24,7 @@ export function RightPane({
   diff,
   diffError,
   onViewLog,
+  onTimelineSelect,
   maximized,
   onToggleMaximize,
 }: {
@@ -36,6 +37,8 @@ export function RightPane({
   diff: WorkItemDiff | null;
   diffError: string | null;
   onViewLog: (sessionId: string) => void;
+  /** The Timeline stream's session rows select in place (W14 · A). */
+  onTimelineSelect?: (id: string) => void;
   maximized: boolean;
   onToggleMaximize: () => void;
 }) {
@@ -87,6 +90,7 @@ export function RightPane({
       sessions={sessions}
       nodeId={selectionNode(tsel, events, sessions) ?? nodeId}
       selection={tsel}
+      onSelect={onTimelineSelect}
       onViewLog={onViewLog}
     />
   );

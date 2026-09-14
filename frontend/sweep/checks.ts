@@ -86,7 +86,8 @@ export async function runChecks(page: Page, phone: boolean, consoleErrors: strin
           .filter((el) => { const r = el.getBoundingClientRect(); return r.height < 44 || r.width < 44; })
       : [];
     const inputs = phone
-      ? [...document.querySelectorAll("input, textarea, select")].filter(visible).filter((el) => parseFloat(getComputedStyle(el).fontSize) < 16)
+      // iOS Safari zooms on focus under 16px after rounding, so 15.5px and up passes (W14 · C.3).
+      ? [...document.querySelectorAll("input, textarea, select")].filter(visible).filter((el) => parseFloat(getComputedStyle(el).fontSize) < 15.5)
       : [];
     const scrollers = all.filter((el) => {
       const cs = getComputedStyle(el);

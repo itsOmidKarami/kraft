@@ -15,12 +15,12 @@ import {
 import { ScopeChips, type Scope } from "./Tasks";
 
 /**
- * Inspector · Timeline (UI v2 · 05, 15; W11 · F; W13 · C). Under "this node"
- * the node's rounds, newest first -- a round header folds its sessions and
- * findings -- with escalation turns and node-level events (gates, lifecycle)
- * at their time between them. Under "all", one folded row per node with its
- * rounds inside. `RightPane/Events.tsx` streams whatever is selected: a
- * session, a round, one event, or (nothing picked) the node.
+ * Inspector · Timeline (UI v2 · 05, 15; W11 · F; W13 · C; W14 · A). Under
+ * "this node" one row per round, newest first -- `round 2 · 16:02 → 16:09 · 7m`
+ * with its sessions, findings and verdict on the right -- and escalation turns
+ * and node-level events outside every round at their time between them. The
+ * sessions themselves are rows in the right pane (`RightPane/Events.tsx`),
+ * which streams whatever is selected. Under "all", one folded row per node.
  */
 
 const hm = (iso: string | null | undefined) => (iso ? clock(iso).slice(0, 5) : "");
@@ -31,19 +31,14 @@ function span(from: string | null, to: string | null): string {
   return `${hm(from)} → ${to ? hm(to) : "now"} · ${elapsedBetween(from, to)}`;
 }
 
-/** `judge: stop`, `judge: continue · 5 findings`, `running`. */
+/** `2 sessions · 5 findings · judge: continue`, `1 session · 0 findings · running`. */
 function outcome(r: Round, current: boolean): string {
-  const found = r.findings.length ? plural(r.findings.length, "finding") : "";
-  if (r.verdict === "continue") return ["judge: continue", found].filter(Boolean).join(" · ");
-  if (r.verdict) return `judge: ${verdictWord(r.verdict)}`;
-  if (current && r.sessions.some((s) => !s.exited_at)) return "running";
-  return found;
-}
-
-function findingsLine(r: Round): string | null {
-  if (!r.findings.length) return null;
-  const critical = r.findings.filter((f) => f.severity === "critical").length;
-  return [plural(r.findings.length, "finding"), critical ? `${critical} critical` : ""].filter(Boolean).join(" · ");
+  const judge = r.verdict
+    ? `judge: ${verdictWord(r.verdict)}`
+    : current && r.sessions.some((s) => !s.exited_at)
+      ? "running"
+      : null;
+  return [plural(r.sessions.length, "session"), plural(r.findings.length, "finding"), judge].filter(Boolean).join(" · ");
 }
 
 export function Timeline({
@@ -81,7 +76,7 @@ export function Timeline({
   const isOpen = (key: string, byDefault: boolean) => folds[key] ?? byDefault;
   const setOpen = (key: string, open: boolean) => setFolds((f) => ({ ...f, [key]: open }));
 
-  // C.5: rows are buttons; Up/Down move between them, Left/Right fold and unfold.
+  // C.5: rows are buttons; Up/Down move between them, Left/Right fold a node under "all".
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const rows = [...(listRef.current?.querySelectorAll<HTMLButtonElement>("button[data-trow]") ?? [])];
     const at = rows.indexOf(document.activeElement as HTMLButtonElement);
@@ -95,72 +90,50 @@ export function Timeline({
     }
   };
 
-  const sessionRow = (s: WorkerSession, title: string) => (
-    <button
-      key={s.id}
-      type="button"
-      data-trow
-      className="row timeline-row timeline-session"
-      data-testid={`timeline-session-${s.id}`}
-      data-selected={sel?.kind === "session" && sel.id === s.id}
-      onClick={() => onSelect(`session:${s.id}`)}
-    >
-      <RowText
-        title={title}
-        sub={`${statusWord(s.status)} · ${elapsedBetween(s.started_at ?? s.created_at, s.exited_at)}`}
-      />
-      <span className="row-sub">{hm(s.exited_at ?? s.created_at)}</span>
-    </button>
-  );
-
-  const roundBody = (r: Round) => {
-    const line = findingsLine(r);
-    return (
-      <>
-        {[...r.sessions].reverse().map((s) => sessionRow(s, s.hook_point))}
-        {line && (
-          <p className="timeline-findings" data-testid={`timeline-findings-${r.node}-${r.n}`}>
-            {line}
-          </p>
-        )}
-      </>
-    );
-  };
-
   const entryRow = (nt: NodeRounds, en: TimelineEntry) => {
     if (en.kind === "round") {
       const r = en.round;
-      // One round: no header at all, its sessions stand in the list (C.1).
-      if (nt.rounds.length === 1) return <Fragment key={`r${r.n}`}>{roundBody(r)}</Fragment>;
       const key = `round:${r.node}:${r.n}`;
       const current = r === nt.rounds[nt.rounds.length - 1];
-      const open = isOpen(key, current);
+      // A session picked in the right pane keeps its round lit here.
+      const picked =
+        (sel?.kind === "round" && sel.node === r.node && sel.n === r.n) ||
+        (sel?.kind === "session" && r.sessions.some((s) => s.id === sel.id));
       return (
-        <Fragment key={key}>
-          <button
-            type="button"
-            data-trow
-            data-fold={key}
-            aria-expanded={open}
-            className="row timeline-row timeline-round"
-            data-testid={`timeline-round-${r.node}-${r.n}`}
-            data-selected={sel?.kind === "round" && sel.node === r.node && sel.n === r.n}
-            onClick={() => {
-              onSelect(key);
-              setOpen(key, !open);
-            }}
-          >
-            <span className="timeline-caret" aria-hidden>
-              {open ? "▾" : "▸"}
-            </span>
-            <RowText title={`round ${r.n + 1}`} sub={span(r.startedAt, r.endedAt)} />
-            <span className="row-sub">{outcome(r, current)}</span>
-          </button>
-          {open && roundBody(r)}
-        </Fragment>
+        <button
+          key={key}
+          type="button"
+          data-trow
+          className="row timeline-row timeline-round"
+          data-testid={`timeline-round-${r.node}-${r.n}`}
+          data-selected={picked}
+          onClick={() => onSelect(key)}
+        >
+          <RowText title={[`round ${r.n + 1}`, span(r.startedAt, r.endedAt)].filter(Boolean).join(" · ")} />
+          <span className="row-sub">{outcome(r, current)}</span>
+        </button>
       );
     }
-    if (en.kind === "escalation") return sessionRow(en.session, `escalation · turn ${en.turn}`);
+    if (en.kind === "escalation") {
+      const s = en.session;
+      return (
+        <button
+          key={s.id}
+          type="button"
+          data-trow
+          className="row timeline-row timeline-session"
+          data-testid={`timeline-session-${s.id}`}
+          data-selected={sel?.kind === "session" && sel.id === s.id}
+          onClick={() => onSelect(`session:${s.id}`)}
+        >
+          <RowText
+            title={`escalation · turn ${en.turn}`}
+            sub={`${statusWord(s.status)} · ${elapsedBetween(s.started_at ?? s.created_at, s.exited_at)}`}
+          />
+          <span className="row-sub">{hm(s.exited_at ?? s.created_at)}</span>
+        </button>
+      );
+    }
     const e = en.event;
     const label = e.type === "task_progress" ? taskRunLabel(e, en.last) : en.label;
     return (

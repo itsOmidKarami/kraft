@@ -177,3 +177,10 @@ test("checks/contrast: decoration is exempt, faded controls are not", async ({ p
   await page.setContent(ground(`<button style="background:none;border:0;color:#9397ab;opacity:.3">faded action</button>`));
   expect((await runChecks(page, false, [])).lowContrast.count).toBe(1);
 });
+
+test("checks/input<16: 15.5px and up passes (Safari rounds to 16), under that counts", async ({ page }) => {
+  await page.setContent(`<input style="font-size:15.6px"><input style="font-size:15.5px"><textarea style="font-size:16px"></textarea>`);
+  expect((await runChecks(page, true, [])).smallInputs.count).toBe(0);
+  await page.setContent(`<input style="font-size:15.4px"><select style="font-size:14px"><option>a</option></select>`);
+  expect((await runChecks(page, true, [])).smallInputs.count).toBe(2);
+});

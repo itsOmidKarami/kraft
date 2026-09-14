@@ -248,8 +248,8 @@ function eventLabel(e: KraftEvent): string {
   return detail ? `${e.type} · ${detail}` : e.type;
 }
 
-/** Everything the left list shows for one node (C.1): its rounds, its
- *  escalation turns, and the node-level events between them. */
+/** Everything the left list shows for one node (C.1, W14 · A): its rounds, its
+ *  escalation turns, and the node-level events outside every round. */
 export function nodeRounds(node: string, events: KraftEvent[], sessions: WorkerSession[]): NodeRounds {
   const own = (groupByNode(events).find((g) => g.node === node)?.events ?? []).slice().reverse();
   const nodeSessions = sessions.filter((s) => s.node_id === node);
@@ -258,8 +258,18 @@ export function nodeRounds(node: string, events: KraftEvent[], sessions: WorkerS
   for (const s of nodeSessions.filter((x) => x.hook_point === "escalation")) {
     entries.push({ kind: "escalation", at: s.created_at, session: s, turn: s.attempt ?? 1 });
   }
+  // W14 · A: a round is one row, so what happened inside it is not; and a
+  // node_started / node_completed within a minute of a round's edge is that edge.
+  // The end is exclusive: a gate requested as the round's last session exits is the node's, not the round's.
+  const inRound = (at: string) => rounds.some((r) => at >= r.startedAt && (!r.endedAt || at < r.endedAt));
+  const nearEdge = (at: string) =>
+    rounds.some((r) => [r.startedAt, r.endedAt].some((edge) => edge && Math.abs(Date.parse(at) - Date.parse(edge)) <= 60_000));
   let progress: Extract<TimelineEntry, { kind: "event" }> | null = null;
   for (const e of own) {
+    if (inRound(e.created_at) || ((e.type === "node_started" || e.type === "node_completed") && nearEdge(e.created_at))) {
+      progress = null;
+      continue;
+    }
     if (SESSION_TYPES.has(e.type) || ROUND_TYPES.has(e.type) || sessionOf(e)) {
       if (e.type !== "task_progress") progress = null;
       continue;
