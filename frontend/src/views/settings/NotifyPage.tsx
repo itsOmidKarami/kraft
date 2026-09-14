@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import * as api from "../../api";
+import { isEnabled as browserNotifyEnabled, NOTIFY_EVENTS, requestPermission, setEnabled as setBrowserNotifyEnabled } from "../../browserNotify";
 import { Switch } from "../../components/ui";
 import { ago } from "../../format";
 import type { Notify } from "../../types";
@@ -8,17 +9,14 @@ import "./notify.css";
 
 /* ── 5f notifications ─────────────────────────────────────────────────────── */
 
-/** The two states Kraft is blocked on a person. Anything else gets muted
- *  within a week, and a muted channel is the same as no channel. */
-const NOTIFY_EVENTS: { id: string; label: string }[] = [
-  { id: "gate_requested", label: "a decision is waiting" },
-  { id: "work_item_needs_human", label: "stopped — gate wait or cap breach" },
-];
-
 export function NotifyPage() {
   const { value, error, reload } = useResource(() => api.getNotify());
   const [url, setUrl] = useState("");
   const [baseUrl, setBaseUrl] = useState<string | null>(null);
+  const [browserEnabled, setBrowserEnabled] = useState(browserNotifyEnabled);
+  const [browserPermission, setBrowserPermission] = useState<NotificationPermission>(
+    typeof Notification !== "undefined" ? Notification.permission : "denied",
+  );
   // `where` is the control that triggered the save — "channel", "url",
   // "base", or an event id (each event switch is its own control) — so a
   // message only ever renders next to the control that produced it, not
@@ -62,6 +60,12 @@ export function NotifyPage() {
 
   const base = baseUrl ?? notify?.base_url ?? "";
 
+  const toggleBrowserNotify = async (next: boolean) => {
+    setBrowserNotifyEnabled(next);
+    setBrowserEnabled(next);
+    if (next) setBrowserPermission(await requestPermission());
+  };
+
   return (
     <>
       <PageHead
@@ -69,6 +73,19 @@ export function NotifyPage() {
         note="one webhook — ntfy, Pushover, Slack, Discord, or your own receiver"
       />
       {error && <p className="form-error">{error}</p>}
+
+      <section className="settings-section">
+        <h6>Browser notifications</h6>
+        <div className="save-row field-row">
+          <Switch checked={browserEnabled} onChange={toggleBrowserNotify} label="Alerts on this device" />
+          <span className="save-hint">
+            {browserPermission === "denied"
+              ? "blocked in browser settings — allow notifications for this site to use it"
+              : "this device only, while this tab is in the background"}
+          </span>
+        </div>
+      </section>
+
       {notify && (
         <>
           <section className="settings-section">
