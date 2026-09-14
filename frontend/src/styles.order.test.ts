@@ -94,3 +94,12 @@ describe("Hairline utility", () => {
     expect(rowRule).toMatch(/var\(--hairline-48\)/);
   });
 });
+
+describe("phone inputs (W14 · C.3)", () => {
+  // A field's own size is a class (`.input` 14px), which beats a bare type
+  // selector: without `!important` the phone 16px rule was inert on 28 cells.
+  it("sets every phone input, select and textarea to 16px over their classes", () => {
+    const css = readFileSync(join(here, "styles.css"), "utf-8");
+    expect(css).toMatch(/input, select, textarea \{ font-size: 16px !important; \}/);
+  });
+});

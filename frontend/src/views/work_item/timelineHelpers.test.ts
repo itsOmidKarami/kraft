@@ -117,6 +117,24 @@ describe("roundsOf (W13 · E)", () => {
   });
 });
 
+describe("nodeRounds entries (W14 · A)", () => {
+  it("lists rounds, not what happened inside them, and drops lifecycle events at a round's edge", () => {
+    const events = [
+      wev(1, "node_started", at(0)),
+      wev(2, "task_progress", at(1), { task: 1, total: 3 }), // inside round 1
+      wev(3, "judge_verdict", at(5), { verdict: "continue" }),
+      wev(4, "gate_requested", at(10), { gate: "code_review" }), // outside every round
+      wev(9, "gate_approved", at(5), { gate: "spec_approval" }), // at round 1's end: the node's
+      wev(5, "fix_cycle_started", at(20)),
+      wev(6, "judge_verdict", at(25), { verdict: "stop" }),
+      wev(7, "node_completed", at(25, 40)), // 40s after round 2's edge
+      wev(8, "node_completed", at(40)), // a minute and more from any edge: a row
+    ];
+    const nr = nodeRounds("verify", events, []);
+    expect(nr.entries.map((e) => (e.kind === "event" ? e.event.seq : e.kind))).toEqual(["round", 9, 4, "round", 8]);
+  });
+});
+
 describe("streamRows (W13 · E)", () => {
   it("collapses a session's created, started and exited events into one row", () => {
     const rows = streamRows([

@@ -753,19 +753,22 @@ textarea.detail-title-input {
 }
 
 /* W13 · C · Timeline rows are buttons (C.5): the list row's look, a button's
-   keyboard. Round and node headers are 44px with a fold caret; session and
-   node-level rows 40px. */
+   keyboard. Rounds (W14 · A: one row each, no fold) and node headers are 44px;
+   escalation turns and node-level rows 40px. */
 button.timeline-row {
   width: 100%; border: 0; margin: 0; font: inherit; color: inherit; text-align: left; cursor: pointer;
   grid-template-columns: minmax(0, 1fr) auto; min-height: 40px; padding-block: 6px;
 }
-button.timeline-round, button.timeline-node-row { grid-template-columns: 14px minmax(0, 1fr) auto; min-height: 44px; }
-/* 13px: at 11px the ▸/▾ read as a dot beside the round (seen in item-timeline/capped@1280). */
+/* The round's name and span never cut (item-timeline/capped@1280 cut `10:25 · …`);
+   the counts and verdict wrap on the right instead. */
+button.timeline-round { min-height: 44px; grid-template-columns: max-content minmax(0, 1fr); }
+button.timeline-round > .row-sub { text-align: right; white-space: normal; }
+button.timeline-node-row { grid-template-columns: 14px minmax(0, 1fr) auto; min-height: 44px; }
+/* 13px: at 11px the ▸/▾ read as a dot beside the node (seen in item-timeline/capped@1280). */
 .timeline-caret { color: var(--color-text-muted); font-size: 13px; }
 .timeline-session .row-title, .timeline-event .row-title { font-size: 13px; }
 .timeline-row .row-title, .timeline-row .row-sub { overflow-wrap: anywhere; }
 .timeline-nested { padding-left: 14px; }
-.timeline-findings { margin: 0; padding: 2px 0 8px; font-size: 12px; color: var(--color-text-muted); }
 button.timeline-row:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
 
 /* W13 · D · the right pane's event stream: a 2px rail, one row per row-worthy
@@ -784,9 +787,16 @@ button.timeline-row:focus-visible { outline: 2px solid var(--color-accent); outl
   content: ""; position: absolute; left: -21px; top: 14px;
   width: 8px; height: 8px; border-radius: 50%; background: var(--color-neutral-500);
 }
+/* W14 · A: a session row is the pane's selectable row. */
+.stream-row[data-srow] { cursor: pointer; margin-left: -8px; padding-left: 8px; border-radius: 4px; }
+.stream-row[data-srow]::before { left: -13px; }
+.stream-row[data-srow][data-selected="true"] { background: var(--color-accent-900); }
+.stream-row[data-srow]:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
 .stream-row[data-kind="gap"] { padding-block: 2px; }
 .stream-row[data-kind="gap"]::before { display: none; }
 .stream-gap-label { display: block; text-align: center; font-size: 11px; color: var(--color-text-muted); }
+/* W14 · the Documents list's explained zero, in the gap row's look. */
+.doc-empty { display: flex; flex-direction: column; gap: 2px; padding-block: 16px; }
 .stream-body { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; min-width: 0; }
 .stream-head { font-size: 13px; overflow-wrap: anywhere; }
 .stream-title { font-size: 13px; color: var(--color-text); overflow-wrap: anywhere; }

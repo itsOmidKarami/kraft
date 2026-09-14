@@ -642,7 +642,7 @@ export function analyticsFor(variant: Variant) {
     // whole weeks (a Sunday), and `long ? 52 : 12 - i` put every long week at 52.
     weekly_merged: empty ? [] : (() => { const n = long ? 52 : 12; const d = new Date(T0); const mon = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return Array.from({ length: n }, (_, i) => ({ week_start: new Date(mon - (n - 1 - i) * 7 * 86400e3).toISOString().slice(0, 10), n: (i * 7) % 11 })); })(),
     by_node: empty ? [] : DEFAULT_NODES.map((n, i) => ({ node: n.id, runs: 30 + i * 4, wall_ms: 4e7 + i * 1e7, avg_ms: 1.2e6, tokens: 4e6 + i * 5e5, cost_usd: 21.5 + i * 3.1, cost_complete: i !== 4, rounds: 12, capped_out: i === 3 ? 6 : 0 })),
-    by_repo: (empty ? [] : long ? LONG_REPO_PATHS : REPO_PATHS).map((p, i) => ({ repo: p, items: 14 - i, mrs: 9 - i, tokens: 1.2e7, cost_usd: 70.2 - i * 5, cost_complete: true, done: 9 - i, cycles: 30 })),
+    by_repo: (empty ? [] : long ? LONG_REPO_PATHS : REPO_PATHS).map((p, i) => ({ repo: p, items: 14 - i, mrs: Math.max(0, 9 - i), tokens: 1.2e7, cost_usd: 70.2 - i * 5, cost_complete: true, done: Math.max(0, 9 - i), cycles: 30 })),
     rejected_gates_by_gate: empty ? [] : [{ gate: "spec_approval", n: 4 }, { gate: "plan_approval", n: 3 }, { gate: "code_review", n: 2 }],
     stop_reasons: empty ? [] : [{ label: "verify_fix_loop hit its cap", n: 6 }, { label: "spend cap reached", n: 2 }, { label: long ? "worktree refresh failed: fatal: Not possible to fast-forward, aborting (origin/main diverged after a force-push on the protected branch)" : "agent needs context", n: 1 }],
   };
