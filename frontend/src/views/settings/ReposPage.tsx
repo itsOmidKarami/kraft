@@ -148,7 +148,7 @@ function AddRepo({
           </div>
         </div>
 
-        <div className="field">
+        <div className="field repo-cross">
           <Switch checked={crossRepo} onChange={setCrossRepo} label="allow cross-repo items" />
           <span className="field-hint">
             {probe && probe.submodules.length === 0
@@ -166,9 +166,10 @@ function AddRepo({
             Connect
           </button>
         </div>
+        {/* W7.8: a whole sentence, not a fragment ending on "Repos → …". */}
         <p className="field-hint">
-          writes one entry to repos.yaml · you can change everything later in Repos →{" "}
-          {probe?.name ?? "…"}
+          Connecting writes one entry to repos.yaml. You can change all of it later in Repos
+          {probe?.name ? ` → ${probe.name}` : ""}.
         </p>
       </form>
     </div>

@@ -131,7 +131,12 @@ export interface NodeGroup {
 export function groupByNode(events: KraftEvent[]): NodeGroup[] {
   const order: string[] = [];
   const byNode = new Map<string, KraftEvent[]>();
-  let node = "—";
+  // Every group is named (W8.3): what happened before the first node is
+  // "created", never "—". The item's own end (work_item_completed/abandoned,
+  // no node_id) stays in the last node's group -- the Events pane shows the
+  // selected node's group, and that is where a reader (and chain.spec /
+  // lifecycle.spec) looks for the terminal row.
+  let node = "created";
   for (const e of events) {
     const id = (e.payload as Record<string, unknown>).node_id;
     if (typeof id === "string") node = id;

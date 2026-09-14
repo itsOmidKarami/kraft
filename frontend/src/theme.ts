@@ -11,6 +11,20 @@ export const PALETTES: { id: PaletteId; name: string; bg: string; accent: string
   { id: "slate", name: "Slate", bg: "#081d21", accent: "#04a1cb" },
 ];
 
+const THEME_KEY = "kraft.theme";
+
+/** The palette/mode the last `applyTheme` wrote, so `main.tsx` can paint it
+ *  before `/api/theme` answers (W1.3) -- and on the login screen, where
+ *  `/api/theme` cannot answer at all. */
+export function savedTheme(): { palette: PaletteId; mode: ThemeMode } | null {
+  try {
+    const t = JSON.parse(localStorage.getItem(THEME_KEY) ?? "null");
+    return t && typeof t.palette === "string" && typeof t.mode === "string" ? t : null;
+  } catch {
+    return null;
+  }
+}
+
 let systemQuery: MediaQueryList | null = null;
 let systemListener: ((e: MediaQueryListEvent) => void) | null = null;
 
@@ -31,6 +45,11 @@ function teardownSystemListener(): void {
 export function applyTheme(palette: PaletteId, mode: ThemeMode): void {
   const root = document.documentElement;
   root.dataset.palette = palette;
+  try {
+    localStorage.setItem(THEME_KEY, JSON.stringify({ palette, mode }));
+  } catch {
+    /* storage blocked: the next load just waits for /api/theme again */
+  }
 
   teardownSystemListener();
 

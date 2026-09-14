@@ -4,7 +4,7 @@ import { CaretRight, Flag, ShieldCheck } from "@phosphor-icons/react";
 import * as api from "../../api";
 import { Row, RowText, StatusGlyph, Tabs } from "../../components/ui";
 import { deriveState } from "../../deriveState";
-import { elapsed } from "../../format";
+import { elapsedBetween, nodeRunSpan } from "../../format";
 import { useStore } from "../../store";
 import type { KraftEvent, WorkerSession, WorkItem, WorkItemDiff } from "../../types";
 import { Changes } from "./Inspector/Changes";
@@ -57,12 +57,12 @@ function useSwipeNeighbors(item: WorkItem) {
 
 const SWIPE_MIN_PX = 60;
 
-/** m04's top bar: back to Board, and "N of M <group> · swipe" — a
- *  horizontal swipe on it moves to the next/previous item in the same
- *  board group (README "Header swipe"). */
+/** The phone item header (W3.1): ‹ Board and the item title, one line, 44px
+ *  -- no repo, no id. A horizontal swipe on it still moves to the
+ *  next/previous item in the same board group (README "Header swipe"). */
 export function PhoneTopBar({ item }: { item: WorkItem }) {
   const navigate = useNavigate();
-  const { label, index, total, prevId, nextId } = useSwipeNeighbors(item);
+  const { prevId, nextId } = useSwipeNeighbors(item);
   const start = useRef<{ x: number; y: number } | null>(null);
 
   const onTouchStart = (e: React.TouchEvent) => {
@@ -86,11 +86,9 @@ export function PhoneTopBar({ item }: { item: WorkItem }) {
       <Link className="phone-back" to="/">
         ‹ Board
       </Link>
-      {index >= 0 && total > 1 && (
-        <span className="phone-topbar-context">
-          {index + 1} of {total} {label} · swipe
-        </span>
-      )}
+      <span className="phone-topbar-title" title={item.title}>
+        {item.title}
+      </span>
     </div>
   );
 }
@@ -101,20 +99,15 @@ export function PhoneTopBar({ item }: { item: WorkItem }) {
  *  already draws as pill colours, spelled out as a duration instead. */
 function nodeDuration(
   events: KraftEvent[],
+  sessions: WorkerSession[],
   nodeId: string,
   state: "current" | "done" | "todo",
-  item: WorkItem,
 ): string {
   if (state === "todo") return "–";
-  const started = events.find((e) => e.type === "node_started" && e.payload.node_id === nodeId);
-  if (state === "current") {
-    if (item.status !== "active") return started ? elapsed(Date.now() - Date.parse(started.created_at)) : "now";
-    return "now";
-  }
-  const completed = [...events].reverse().find((e) => e.type === "node_completed" && e.payload.node_id === nodeId);
-  if (!started || !completed) return "–";
-  const ms = Date.parse(completed.created_at) - Date.parse(started.created_at);
-  return Number.isNaN(ms) ? "–" : elapsed(ms);
+  // The same helper and inputs as the desktop hero (W0.4): this list said
+  // "now" while the hero said "-31317s" for the same node.
+  const span = nodeRunSpan(nodeId, events, sessions);
+  return span ? elapsedBetween(span.from, span.to) : "–";
 }
 
 /** m04's "CHAIN · TAP A STAGE" list — StageGraph's pills as a vertical,
@@ -122,10 +115,12 @@ function nodeDuration(
 export function PhoneStageList({
   item,
   events,
+  sessions = [],
   onSelect,
 }: {
   item: WorkItem;
   events: KraftEvent[];
+  sessions?: WorkerSession[];
   onSelect: (nodeId: string) => void;
 }) {
   const nodes = (item.effective_chain ?? item.chain_definition).nodes;
@@ -153,7 +148,7 @@ export function PhoneStageList({
                 </>
               }
             />
-            <span className="row-sub">{nodeDuration(events, n.id, state, item)}</span>
+            <span className="row-sub">{nodeDuration(events, sessions, n.id, state)}</span>
             <CaretRight size={14} />
           </Row>
         );
@@ -177,6 +172,7 @@ export function PhoneNode({
   onTabChange,
   selection,
   onSelect,
+  onToggleMaximize,
 }: {
   item: WorkItem;
   sessions: WorkerSession[];
@@ -186,6 +182,8 @@ export function PhoneNode({
   onTabChange: (t: InspectorTab) => void;
   selection: Selection;
   onSelect: (s: Selection) => void;
+  /** Maximize is a page layout (43) on the phone too — index.tsx renders it. */
+  onToggleMaximize?: () => void;
 }) {
   const navigate = useNavigate();
   const chain = item.effective_chain ?? item.chain_definition;
@@ -193,7 +191,8 @@ export function PhoneNode({
   const at = chain.nodes.findIndex((n) => n.id === nodeId);
   const nodeSessions = sessions.filter((s) => s.node_id === nodeId);
   const running = nodeSessions.find((s) => s.status === "running");
-  const runtime = running?.started_at ? elapsed(Date.now() - Date.parse(running.started_at)) : null;
+  const span = nodeRunSpan(nodeId, events, sessions);
+  const runtime = running && span ? elapsedBetween(span.from, span.to) : null;
 
   // The phone page (m05) is its own render path, separate from the desktop
   // split index.tsx fetches the diff for — fetch its own copy the way the
@@ -213,9 +212,13 @@ export function PhoneNode({
 
   return (
     <div className="phone-node" data-testid="phone-node-page">
-      <button className="phone-back" onClick={() => navigate(`/work-items/${item.id}`)}>
-        ‹ {item.id}
-      </button>
+      {/* The node page's header: back to the item, labelled with its title
+          (W3.7), never the id. */}
+      <div className="phone-topbar">
+        <button className="phone-back phone-back-title" onClick={() => navigate(`/work-items/${item.id}`)}>
+          ‹ {item.title}
+        </button>
+      </div>
       <div className="phone-node-head">
         <span className="phone-node-title">
           {nodeId}
@@ -232,7 +235,8 @@ export function PhoneNode({
         value={tab}
         onChange={(t) => onTabChange(t as InspectorTab)}
         tabs={[
-          { id: "tasks", label: "Tasks", count: sessions.length },
+          // Sessions on this node, as the pane's own eyebrow counts them (W0.8).
+          { id: "tasks", label: "Tasks", count: nodeSessions.length },
           { id: "changes", label: "Changes" },
           { id: "documents", label: "Documents" },
           { id: "config", label: "Config" },
@@ -250,7 +254,7 @@ export function PhoneNode({
               onSelect={(id) => onSelect({ kind: "session", id })}
             />
             {selection.kind === "session" && selection.id ? (
-              <Log sessionId={selection.id} />
+              <Log sessionId={selection.id} maximized={false} onToggleMaximize={onToggleMaximize} />
             ) : (
               <p className="empty pane">select a task to view its log</p>
             )}

@@ -5,7 +5,17 @@ import { Fragment } from "react";
 // [ ... ] pair; everything else is plain text (never dangerouslySetInnerHTML).
 const PART = /\[([^\]]+)\]/g;
 
-export function Snippet({ text }: { text: string }) {
+/** Snippets are cut from raw markdown (W5.3): drop link targets, heading /
+ *  quote / list markers, bold and code ticks. Single `_` stays -- it is in
+ *  every snake_case identifier. ponytail: regex, not a markdown parser. */
+export const plainMarkdown = (s: string) =>
+  s
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+\.)\s+/gm, "")
+    .replace(/\*\*|__|`|\*/g, "");
+
+export function Snippet({ text: raw }: { text: string }) {
+  const text = plainMarkdown(raw);
   const nodes: React.ReactNode[] = [];
   let last = 0;
   for (const m of text.matchAll(PART)) {

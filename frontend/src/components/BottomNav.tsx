@@ -2,6 +2,7 @@ import { NavLink } from "react-router-dom";
 import { ChartBar, GearSix, MagnifyingGlass, SquaresFour } from "@phosphor-icons/react";
 import { deriveState } from "../deriveState";
 import { useStore } from "../store";
+import "./BottomNav.css";
 
 /**
  * The phone app shell's tab bar (mobile app shell design, §1). Desktop keeps

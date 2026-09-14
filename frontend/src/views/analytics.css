@@ -101,7 +101,7 @@ label.chip select {
 .stop-bar > span { display: block; height: 100%; background: var(--color-accent); opacity: 0.8; }
 .stop-n { text-align: right; color: var(--color-text); }
 
-@media (max-width: 900px) {
+@media (max-width: 1023px) {
   .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .analytics-tables { grid-template-columns: 1fr; }
 }

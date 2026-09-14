@@ -1,4 +1,4 @@
-import type { LogLine } from "./types/work_item";
+import type { KraftEvent, LogLine, WorkerSession } from "./types";
 
 /** A log line's one-line text. `summary` is a server-rendered stream-json
  *  line; but the server's own summariser (logs.py summary()) falls back to
@@ -49,15 +49,90 @@ export function until(iso: string | null | undefined, now = Date.now()): string 
   return `in ${Math.floor(hr / 24)}d`;
 }
 
-/** Elapsed span, for "running 4m" and node timings. */
+/** Elapsed span, for "running 4m" and node timings: `52s`, `4m`, `1h 21m`,
+ *  `2d 3h`. Clamped at zero — a start stamped ahead of this machine's clock
+ *  reads "0s", never "-31317s". */
 export function elapsed(ms: number): string {
-  const s = Math.round(ms / 1000);
+  const s = Number.isFinite(ms) ? Math.max(0, Math.round(ms / 1000)) : 0;
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
   if (m < 60) return `${m}m`;
   const h = Math.floor(m / 60);
-  return m % 60 ? `${h}h ${m % 60}m` : `${h}h`;
+  if (h < 24) return m % 60 ? `${h}h ${m % 60}m` : `${h}h`;
+  const d = Math.floor(h / 24);
+  return h % 24 ? `${d}d ${h % 24}h` : `${d}d`;
 }
+
+/** The span between two timestamps; `to = null` means now. Every duration on
+ *  the item page (hero, split header, stage-graph tooltip, phone stage list)
+ *  goes through this with the same inputs, so they cannot disagree. */
+export function elapsedBetween(
+  fromIso: string | null | undefined,
+  toIso: string | null = null,
+  now = Date.now(),
+): string {
+  const from = fromIso ? Date.parse(fromIso) : NaN;
+  const to = toIso ? Date.parse(toIso) : now;
+  return Number.isNaN(from) || Number.isNaN(to) ? "0s" : elapsed(to - from);
+}
+
+/** A node's run time: from its latest `node_started` to its `node_completed`,
+ *  or — while it has not completed — to when its latest session exited. The
+ *  clock is frozen once that session exits (gated, paused, capped, question,
+ *  failed); only a session still running or pending keeps it counting
+ *  (`to: null`). Escalation turns are conversation about the node, not its
+ *  run, and do not restart the clock. Waiting on a person is shown separately
+ *  (`waitingSince`). */
+export function nodeRunSpan(
+  nodeId: string | null | undefined,
+  events: KraftEvent[],
+  sessions: WorkerSession[],
+): { from: string; to: string | null } | null {
+  if (!nodeId) return null;
+  let startIdx = -1;
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].type === "node_started" && events[i].payload.node_id === nodeId) {
+      startIdx = i;
+      break;
+    }
+  }
+  const runs = sessions
+    .filter((s) => s.node_id === nodeId && s.hook_point !== "escalation")
+    .sort((a, b) => a.created_at.localeCompare(b.created_at));
+  const from = startIdx >= 0 ? events[startIdx].created_at : (runs[0]?.started_at ?? null);
+  if (!from) return null;
+  const completed = events
+    .slice(startIdx + 1)
+    .find((e) => e.type === "node_completed" && e.payload.node_id === nodeId);
+  if (startIdx >= 0 && completed) return { from, to: completed.created_at };
+  const latest = runs.at(-1);
+  if (latest && latest.status !== "running" && latest.status !== "pending") {
+    return { from, to: latest.exited_at ?? from };
+  }
+  return { from, to: null };
+}
+
+/** When the item started waiting on a person: the latest `gate_requested`
+ *  (for `gate`, when given) or `work_item_needs_human` event. */
+export function waitingSince(events: KraftEvent[], gate?: string | null): string | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e.type === "gate_requested" && (!gate || e.payload.gate === gate)) return e.created_at;
+    if (!gate && e.type === "work_item_needs_human") return e.created_at;
+  }
+  return null;
+}
+
+/** A 32-hex id as `first8…last5` (README §5): short enough never to be
+ *  ellipsized, both ends kept so two ids still tell apart. Shorter ids pass
+ *  through. Render the full id in a `title` beside it. */
+export function shortId(id: string): string {
+  return id.length > 16 ? `${id.slice(0, 8)}…${id.slice(-5)}` : id;
+}
+
+/** Every 32-hex id inside a string, shortened (W5.1): session summaries are
+ *  titled `Session <id>` or the bare id. */
+export const shortIds = (s: string) => s.replace(/\b[0-9a-f]{32}\b/g, shortId);
 
 /** Wall-clock time of day, for timeline rows and log lines. */
 export function clock(iso: string): string {
@@ -132,4 +207,33 @@ export function adapterOf(b: { kind: string; handler?: string; command?: string 
  *  undefined for any other stop reason. */
 export function judgeReasoning(stopReason: string | null | undefined): string | undefined {
   return stopReason?.startsWith("judge:") ? stopReason.slice("judge:".length).trim() : undefined;
+}
+
+/** A document's body as the viewer shows it (W8.2). The header already names
+ *  the document, so a leading H1 that repeats the title goes; so does any
+ *  heading with nothing under it before the next heading of its level or
+ *  higher (a "## Summary" an agent never filled in). Fenced code is left
+ *  alone. ponytail: line scan, not a markdown parser. */
+export function docBody(md: string, title?: string): string {
+  const lines = md.split("\n");
+  const heading = (l: string) => l.match(/^(#{1,6})\s+(.*?)\s*#*\s*$/);
+  const fence = /^\s*(```|~~~)/;
+  let at = 0;
+  while (at < lines.length && !lines[at].trim()) at++;
+  const first = heading(lines[at] ?? "");
+  if (first && first[1].length === 1 && title && first[2].trim() === title.trim()) lines.splice(at, 1);
+  const out: string[] = [];
+  let inFence = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (fence.test(lines[i])) inFence = !inFence;
+    const h = inFence ? null : heading(lines[i]);
+    if (h) {
+      let j = i + 1;
+      while (j < lines.length && !lines[j].trim()) j++;
+      const next = j < lines.length ? heading(lines[j]) : null;
+      if (j >= lines.length || (next && next[1].length <= h[1].length)) continue;
+    }
+    out.push(lines[i]);
+  }
+  return out.join("\n");
 }

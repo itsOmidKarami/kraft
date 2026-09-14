@@ -296,4 +296,37 @@ describe("EscalationCard", () => {
       screen.queryByRole("button", { name: /apply as steer/i }),
     ).not.toBeInTheDocument();
   });
+
+  it("quotes the turn's own message instead of 'no summary reported' when it has one (W8.6)", () => {
+    const sess = {
+      id: "e3",
+      work_item_id: "w1",
+      node_id: "v",
+      hook_point: "escalation",
+      status: "done",
+      attempt: 2,
+      round: 0,
+      created_at: "t",
+      started_at: "t",
+      exited_at: "t",
+      tokens_in: null,
+      tokens_out: null,
+      cost_usd: null,
+      wall_ms: null,
+      model: null,
+      head_sha: null,
+    } as WorkerSession;
+    const events = [
+      { seq: 1, type: "escalation_message", payload: { session_id: "e3", message: "what about submodules?" } },
+    ] as unknown as KraftEvent[];
+    const { rerender } = render(
+      <EscalatedCard item={item()} session={sess} events={events} onOpenReply={() => {}} onDismiss={() => {}} />,
+    );
+    expect(screen.getByText("what about submodules?")).toBeInTheDocument();
+    expect(screen.queryByText(/no summary reported/i)).not.toBeInTheDocument();
+    rerender(
+      <EscalatedCard item={item()} session={sess} events={[]} onOpenReply={() => {}} onDismiss={() => {}} />,
+    );
+    expect(screen.getByText(/no summary reported/i)).toBeInTheDocument();
+  });
 });

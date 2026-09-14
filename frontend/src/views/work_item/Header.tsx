@@ -1,15 +1,20 @@
-import { useEffect, useState, type WheelEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type WheelEvent } from "react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { CaretDown, PencilSimple, Prohibit } from "@phosphor-icons/react";
 import * as api from "../../api";
-import { elapsed, repoName, statusWord } from "../../format";
+import { deriveState } from "../../deriveState";
+import { ago, elapsedBetween, nodeRunSpan, repoName, statusWord } from "../../format";
 import { useStore } from "../../store";
 import { OverflowMenu, TaskBar, TaskLine } from "../../components/ui";
-import type { KraftEvent, WorkItem } from "../../types";
+import { ShortId } from "../../components/ShortId";
+import { plainMarkdown } from "../../components/Snippet";
+import type { KraftEvent, WorkerSession, WorkItem } from "../../types";
 
 /**
  * Desktop 11's header (UI v2 · 05): the meta line, the title/description
- * editors carried over from the old `WorkItemDetail.tsx` unchanged, and the
- * hero node block on the right.
+ * editors carried over from the old `WorkItemDetail.tsx`, the hero node block
+ * on the right, and the task progress row under the title (W0.1).
  */
 
 const STATUS_TAG: Record<WorkItem["status"], string> = {
@@ -21,17 +26,6 @@ const STATUS_TAG: Record<WorkItem["status"], string> = {
   rate_limited: "tag tag-outline",
   waiting: "tag tag-outline",
 };
-
-/** How long the current node has been running, from its last node_started. */
-function nodeRuntime(events: KraftEvent[], nodeId: string | null): string | null {
-  if (!nodeId) return null;
-  const start = [...events]
-    .reverse()
-    .find((e) => e.type === "node_started" && e.payload.node_id === nodeId);
-  if (!start) return null;
-  const ms = Date.now() - Date.parse(start.created_at);
-  return Number.isNaN(ms) ? null : elapsed(ms);
-}
 
 /** The label. Read-only until asked from the ⋯ menu or the hover pencil. */
 function Title({
@@ -72,12 +66,25 @@ function Title({
     return (
       <div className="field" data-testid="item-title">
         <label htmlFor="item-title-edit">Title</label>
-        <input
+        {/* A textarea, not an input: a 140-character title was cut off in a
+            one-line box (W0.11). Grows to three lines; Enter saves,
+            Shift+Enter is a newline, Escape cancels. */}
+        <textarea
           id="item-title-edit"
-          className="input"
+          className="input detail-title-input"
           aria-label="title"
+          rows={1}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              if (!busy && draft.trim()) void save();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              onDone();
+            }
+          }}
         />
         <div className="gate-actions capped-actions">
           <button className="btn btn-primary" disabled={busy || !draft.trim()} onClick={save}>
@@ -97,10 +104,62 @@ function Title({
     // one element naming which work item is on screen) — keep it a plain
     // sibling of the pencil, not wrapped in a button.
     <div className="detail-title-row" data-testid="item-title">
-      <h2 className="detail-title">{item.title}</h2>
+      <h2 className="detail-title" title={item.title}>
+        {item.title}
+      </h2>
       <button className="btn btn-quiet detail-title-pencil" aria-label="edit title" onClick={onEdit}>
         <PencilSimple size={13} />
       </button>
+    </div>
+  );
+}
+
+/** The brief as rendered markdown, clamped to two lines with "more" to expand
+ *  it in place (W0.1) — never raw `##`/`**`. Clamped, its blocks flow inline
+ *  (work_item.css) so the two lines are prose, not a heading and a blank. */
+function DescriptionText({ text }: { text: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [clamped, setClamped] = useState(false);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => setClamped(el.scrollHeight > el.clientHeight + 1);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [text]);
+
+  return (
+    <div className="detail-description-wrap">
+      <div ref={ref} className="detail-description" data-expanded={expanded} data-testid="item-description">
+        {/* One block child: a -webkit-box blockifies its direct children,
+            so the markdown's own blocks sit one level down, where the
+            clamped rules can flow them inline. */}
+        <div className="detail-description-md">
+          {/* Clamped, it is a two-line preview: prose only, headings and list
+              markers stripped ("Context The verify node…" read as one run-on
+              sentence). Expanded keeps the full markdown. */}
+          {expanded ? (
+            <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
+          ) : (
+            <p>{plainMarkdown(text.replace(/^\s{0,3}#{1,6}\s.*$/gm, "")).trim()}</p>
+          )}
+        </div>
+      </div>
+      {(clamped || expanded) && (
+        <button
+          type="button"
+          className="btn btn-quiet detail-description-more"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? "less" : "more"}
+        </button>
+      )}
     </div>
   );
 }
@@ -165,23 +224,56 @@ function Description({
   }
 
   if (!item.description) return null;
+  return <DescriptionText text={item.description} />;
+}
 
-  return (
-    <p className="detail-description" data-testid="item-description">
-      {item.description}
-    </p>
-  );
+/** The hero's node and the line under it (W0.4, W0.5). A finished item names
+ *  the node it finished on — never "—" or "not started" — and a running
+ *  node's duration is the shared run-time helper, frozen once its session
+ *  exits. */
+function hero(item: WorkItem, events: KraftEvent[], sessions: WorkerSession[]): { node: string; sub: string } {
+  const { state } = deriveState(item, sessions, events);
+  const nodes = item.chain_definition.nodes;
+  const last = (type: string) => [...events].reverse().find((e) => e.type === type);
+  const lastNode =
+    item.current_node_id ?? (last("node_completed")?.payload.node_id as string | undefined) ?? nodes.at(-1)?.id ?? "—";
+
+  if (state === "archived") return { node: lastNode, sub: "archived · read-only" };
+  if (state === "done") {
+    return { node: lastNode, sub: `completed ${ago(last("work_item_completed")?.created_at ?? item.updated_at)}` };
+  }
+  if (state === "not_started") {
+    return { node: "not started", sub: `filed ${ago(item.created_at)}${nodes[0] ? ` · starts at ${nodes[0].id}` : ""}` };
+  }
+
+  const at = nodes.findIndex((n) => n.id === item.current_node_id);
+  const parts = at >= 0 ? [`node ${at + 1} of ${nodes.length}`] : [];
+  if (state === "abandoned") {
+    parts.push(`abandoned ${ago(last("work_item_abandoned")?.created_at ?? item.updated_at)}`);
+  } else {
+    const span = nodeRunSpan(item.current_node_id, events, sessions);
+    if (span) {
+      const d = elapsedBetween(span.from, span.to);
+      // "running 6s" on an item that stopped an hour ago is a lie the clock
+      // keeps telling. Only a node whose session still runs is running.
+      parts.push(span.to === null && item.status === "active" ? `running ${d}` : d);
+    }
+  }
+  return { node: lastNode, sub: parts.join(" · ") };
 }
 
 export function Header({
   item,
   events,
+  sessions = [],
   collapsed = false,
   onWheel,
   onExpand,
+  onShowRepos,
 }: {
   item: WorkItem;
   events: KraftEvent[];
+  sessions?: WorkerSession[];
   /** WI-3 · Kraft-yx8v: the title/description hide once the top block has
    *  been scrolled past. Owned by the page (`index.tsx`), not this
    *  component, since the collapsed flag is read by `.detail`'s
@@ -189,11 +281,13 @@ export function Header({
   collapsed?: boolean;
   onWheel?: (e: WheelEvent<HTMLDivElement>) => void;
   onExpand?: () => void;
+  /** The "+N submodules" chip opens Config → Repos (W0.1, W0.7). */
+  onShowRepos?: () => void;
 }) {
-  const nodes = item.chain_definition.nodes;
-  const at = nodes.findIndex((n) => n.id === item.current_node_id);
-  const runtime = nodeRuntime(events, item.current_node_id);
   const mr = [...events].reverse().find((e) => e.type === "mr_opened");
+  const { state } = deriveState(item, sessions, events);
+  const { node, sub } = hero(item, events, sessions);
+  const submodules = (item.repos?.length ?? 0) - 1;
   // Everything not the one frequent action lives in the ⋯ menu (spec §2);
   // editing the title/description moved here from an always-visible Edit
   // button so the header's flow is free for the two-column grid.
@@ -203,8 +297,10 @@ export function Header({
     <div className="detail-head" onWheel={onWheel}>
       <div className="detail-meta">
         <span title={item.repo}>{repoName(item.repo)}</span>
-        {!!item.repos?.length && (
-          <span className="tag tag-neutral tag-tight">+{item.repos.length - 1} submodules</span>
+        {submodules > 0 && (
+          <button type="button" className="tag tag-neutral tag-tight detail-submodules desktop-only" onClick={onShowRepos}>
+            +{submodules} submodule{submodules === 1 ? "" : "s"}
+          </button>
         )}
         <span>{item.chain_template}</span>
         {mr && (
@@ -212,14 +308,18 @@ export function Header({
             !{String(mr.payload.number)}
           </a>
         )}
-        {item.bead_id && <code title={`work item ${item.id}`}>{item.bead_id}</code>}
+        {/* Phone meta (W3.2): repo · template · id · status only. */}
+        {item.bead_id && <code className="desktop-only">{item.bead_id}</code>}
+        <ShortId id={item.id} />
         {item.attachments?.length ? (
-          <span className="tag tag-outline tag-tight">
+          <span className="tag tag-outline tag-tight desktop-only">
             from {item.attachments.map((a) => a.kind).join("+")}
           </span>
         ) : null}
+        {/* A never-started item is `paused` in the database, but "paused"
+            beside "not started" reads as two different things (21). */}
         <span className={`${STATUS_TAG[item.status]} detail-status`}>
-          {statusWord(item.status)}
+          {state === "not_started" ? "waiting to start" : statusWord(item.status)}
         </span>
         {/* A wheel gesture collapses the block, but that's unreachable from
             the keyboard on its own -- this chevron is the way back in
@@ -255,7 +355,7 @@ export function Header({
         />
       </div>
       <div className="detail-hero">
-        <span className="hero-node">{item.current_node_id ?? "—"}</span>
+        <span className="hero-node">{node}</span>
         {item.fixCycle != null && (
           <span className="tag tag-outline">fix · cycle {item.fixCycle}</span>
         )}
@@ -265,20 +365,16 @@ export function Header({
             capped {item.cappedOut.cycles}/{item.cappedOut.attempts}
           </span>
         )}
-        <span className="hero-sub">
-          {at >= 0 && `node ${at + 1} of ${nodes.length}`}
-          {/* "running 6s" on an item that stopped an hour ago is a lie the
-              clock keeps telling. Only an active item is running. */}
-          {runtime && (item.status === "active" ? ` · running ${runtime}` : ` · ${runtime}`)}
-          {at < 0 && !item.current_node_id && " · not started"}
-        </span>
-        {item.progress && (
-          <>
-            <TaskLine progress={item.progress} />
-            <TaskBar progress={item.progress} />
-          </>
-        )}
+        <span className="hero-sub">{sub}</span>
       </div>
+      {/* Full width under the title, never a column beside it: a long task
+          title squeezed the item title into 280px (W0.1). */}
+      {item.progress && (
+        <div className="detail-progress">
+          <TaskLine progress={item.progress} />
+          <TaskBar progress={item.progress} />
+        </div>
+      )}
     </div>
   );
 }

@@ -112,7 +112,7 @@ function NodeGraph({
       <button
         type="button"
         className="chain-insert"
-        aria-label="insert node at start"
+        aria-label="Add node at start"
         onClick={() => onInsert(0)}
       >
         ⊕
@@ -154,7 +154,7 @@ function NodeGraph({
           <button
             type="button"
             className="chain-insert"
-            aria-label={`insert node after ${n.id || i}`}
+            aria-label={`Add node after ${n.id || i}`}
             onClick={() => onInsert(i + 1)}
           >
             ⊕
@@ -427,6 +427,8 @@ export function TemplatesPage() {
   const yamlParseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [yamlError, setYamlError] = useState<string | null>(null);
   const [tab, setTab] = useState<"yaml" | "diff">("yaml");
+  // The editor pane shows the node form or the template's YAML (W7.4 / Kraft-b9syf).
+  const [view, setView] = useState<"form" | "yaml">("form");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<TemplateValidation | null>(null);
@@ -513,6 +515,8 @@ export function TemplatesPage() {
     next.splice(index, 0, blank);
     setDraftNodes(next);
     setYamlDraftText(null);
+    // Selected and shown: the new node's form is what the operator fills next.
+    setView("form");
     setParams({ tpl: current?.id ?? "", node: blank.id });
   };
 
@@ -609,7 +613,7 @@ export function TemplatesPage() {
               className="facet-opt"
               onClick={() => setParams({ tpl: t.id })}
             >
-              {t.id}
+              <span className="template-row-name">{t.id}</span>
               <span className="facet-count">
                 {t.nodes.length} nodes · {gatesOf(t.nodes)} gates · used by {usedBy[t.id] ?? 0}{" "}
                 items
@@ -700,9 +704,22 @@ export function TemplatesPage() {
     <>
       <PageHead
         title={current.id}
-        note={`~/.kraft/templates/${current.id}.yaml · ${nodes.length} nodes · ${gatesOf(nodes)} gates`}
+        note={
+          <>
+            {`~/.kraft/templates/${current.id}.yaml · ${nodes.length} node${nodes.length === 1 ? "" : "s"} · ${gatesOf(nodes)} gates`}
+            {/* The template's own status, beside what it is (W7/8), not under the New button. */}
+            {validation?.valid && <span className="tag tag-accent validation-badge">valid</span>}
+          </>
+        }
         action={
           <div className="save-row">
+            <button
+              className="btn btn-secondary"
+              aria-pressed={view === "yaml"}
+              onClick={() => setView((v) => (v === "yaml" ? "form" : "yaml"))}
+            >
+              YAML
+            </button>
             <button className="btn btn-ghost" disabled={!dirty} onClick={() => setDraftNodes(null)}>
               Revert
             </button>
@@ -744,7 +761,9 @@ export function TemplatesPage() {
               >
                 <span className="template-row-top">
                   <span className="template-row-name">{t.id}</span>
-                  <span className="template-row-count">{t.nodes.length} nodes</span>
+                  <span className="template-row-count">
+                    {t.nodes.length} node{t.nodes.length === 1 ? "" : "s"}
+                  </span>
                 </span>
                 <span className="template-row-meta">
                   {gatesOf(t.nodes)} gates · used by {usedBy[t.id] ?? 0} items
@@ -754,11 +773,11 @@ export function TemplatesPage() {
             <button className="btn btn-secondary" onClick={createTemplate}>
               New
             </button>
-            {validation && (
-              <div className="validation" data-valid={validation.valid}>
-                {validation.valid ? (
-                  <span>valid</span>
-                ) : validation.unresolved?.length ? (
+            {/* Valid is a badge in the page head; problems keep their box here. */}
+            {validation &&
+              !validation.valid && (
+              <div className="validation" data-valid={false}>
+                {validation.unresolved?.length ? (
                   // Per node and per task, not per repo (settings.py's own
                   // comment on why: a repo-level "unresolvable" bit told the
                   // operator nothing the node id doesn't already say better).
@@ -771,26 +790,26 @@ export function TemplatesPage() {
                   <span>{validation.error}</span>
                 )}
               </div>
-            )}
+              )}
           </div>
 
           <div className="chain-middle">
-            {selectedNode ? (
-              <NodeForm
-                key={selectedNode.id}
-                node={selectedNode}
-                index={selectedIndex}
-                total={nodes.length}
-                loopNames={loopNames}
-                earlierIds={earlierIds}
-                onChange={patchNode}
-                onRemove={removeNode}
-              />
+            {view === "form" ? (
+              selectedNode ? (
+                <NodeForm
+                  key={selectedNode.id}
+                  node={selectedNode}
+                  index={selectedIndex}
+                  total={nodes.length}
+                  loopNames={loopNames}
+                  earlierIds={earlierIds}
+                  onChange={patchNode}
+                  onRemove={removeNode}
+                />
+              ) : (
+                <p className="empty">select a node</p>
+              )
             ) : (
-              <p className="empty">select a node</p>
-            )}
-          </div>
-
           <div className="chain-yaml-pane">
             <div className="field-hint">{current.id}.yaml live · edits either side</div>
             <Tabs
@@ -817,6 +836,8 @@ export function TemplatesPage() {
                 before={serializeNodes(current.id, current.nodes)}
                 after={serializeNodes(current.id, nodes)}
               />
+            )}
+          </div>
             )}
           </div>
         </div>

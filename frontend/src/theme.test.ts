@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { applyDensity, applyTheme, PALETTES } from "./theme";
+import { applyDensity, applyTheme, PALETTES, savedTheme } from "./theme";
 
 function mockMatchMedia(initialMatches: boolean) {
   const listeners: ((e: MediaQueryListEvent) => void)[] = [];
@@ -77,6 +77,20 @@ describe("applyTheme", () => {
     // a change firing after teardown must not resurrect system behaviour
     media.fire(true);
     expect(document.documentElement.dataset.mode).toBe("dark");
+  });
+});
+
+describe("savedTheme", () => {
+  it("returns what the last applyTheme wrote, for main.tsx to paint before /api/theme", () => {
+    localStorage.clear();
+    expect(savedTheme()).toBeNull();
+    applyTheme("amber", "light");
+    expect(savedTheme()).toEqual({ palette: "amber", mode: "light" });
+  });
+
+  it("ignores a malformed entry", () => {
+    localStorage.setItem("kraft.theme", "{not json");
+    expect(savedTheme()).toBeNull();
   });
 });
 

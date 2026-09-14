@@ -20,10 +20,12 @@ function setPhoneWidth(matches: boolean) {
 }
 
 describe("Settings shell phone drill-down (Kraft-j92g)", () => {
-  it("still lands on Repos at desktop width", () => {
+  it("is a real index page at desktop width too, a line per section (W7.9)", async () => {
     setPhoneWidth(false);
     renderAt("/settings");
-    expect(screen.queryByText("How work runs")).toBeNull();
+    expect(await screen.findByText("How work runs")).toBeInTheDocument();
+    expect(screen.getByText(/Loop caps, concurrency/)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Repos" })).toBeNull();
   });
 
   it("shows the m10 list, not a page body, at phone width", async () => {

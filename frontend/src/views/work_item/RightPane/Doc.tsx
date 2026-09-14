@@ -3,7 +3,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ArrowSquareOut, ArrowsOutSimple, CaretDown, Check, Copy, Eye, FileText, ListChecks, Notebook } from "@phosphor-icons/react";
 import * as api from "../../../api";
-import { ago } from "../../../format";
+import { ago, docBody, shortIds } from "../../../format";
 import type { WorkItem } from "../../../types";
 import { ChainReviewDiff } from "../../../components/ChainReviewDiff";
 import { Composer } from "../ActionBar/Composer";
@@ -162,7 +162,7 @@ export function Doc({
       <header className="doc-modal-head">
         <Icon size={20} className="doc-modal-icon" />
         <div className="doc-modal-title">
-          <span className="doc-modal-name">{doc?.title ?? "…"}</span>
+          <span className="doc-modal-name" title={doc?.title}>{doc ? shortIds(doc.title) : "…"}</span>
           {doc && (
             <div className="doc-modal-meta">
               {doc.kind && <span className="tag tag-neutral doc-kind">{doc.kind}</span>}
@@ -266,7 +266,7 @@ export function Doc({
         {doc && item && gate === "chain_finalized" && isGateDoc ? (
           <ChainReviewDiff item={item} content={doc.content} />
         ) : (
-          doc && <Markdown remarkPlugins={[remarkGfm]}>{doc.content}</Markdown>
+          doc && <Markdown remarkPlugins={[remarkGfm]}>{docBody(doc.content, doc.title)}</Markdown>
         )}
         {doc?.truncated && <p className="doc-modal-note">truncated — the rest is in the file</p>}
         {doc && (

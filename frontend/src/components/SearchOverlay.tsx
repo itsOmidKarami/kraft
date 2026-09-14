@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { Link, useNavigate } from "react-router-dom";
 import { Check, CirclesThree, MagnifyingGlass } from "@phosphor-icons/react";
 import * as api from "../api";
-import { repoName } from "../format";
+import { repoName, shortIds } from "../format";
 import { backdropProps } from "../useModal";
 import { SectionLabel, TaskLine } from "./ui";
 import { useStore } from "../store";
@@ -65,8 +65,13 @@ export function SearchOverlay({
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Focus goes back where it came from when the overlay closes (W6.5).
   useEffect(() => {
+    const prev = document.activeElement as HTMLElement | null;
     inputRef.current?.focus();
+    return () => {
+      if (prev?.isConnected) prev.focus({ preventScroll: true });
+    };
   }, []);
 
   useEffect(() => {
@@ -171,10 +176,18 @@ export function SearchOverlay({
   ).map((p) => ({ kind: "goto" as const, key: `goto:${p.to}`, label: p.label, to: p.to }));
 
   const rows: Row[] = [...actionRows, ...workItemRows, ...documentRows, ...gotoRows];
+  const resultCount = actionRows.length + workItemRows.length + documentRows.length;
 
   useEffect(() => {
     setActiveIndex(0);
   }, [q]);
+
+  // The input keeps focus; the active row is announced through
+  // aria-activedescendant and scrolled into its own list, not the window.
+  const optId = (row: Row) => `search-opt-${rows.indexOf(row)}`;
+  useEffect(() => {
+    document.getElementById(`search-opt-${activeIndex}`)?.scrollIntoView?.({ block: "nearest" });
+  }, [activeIndex]);
 
   const activate = (row: Row | undefined) => {
     if (!row) return;
@@ -213,6 +226,7 @@ export function SearchOverlay({
           ref={inputRef}
           type="search"
           aria-label="search"
+          aria-activedescendant={rows[activeIndex] ? `search-opt-${activeIndex}` : undefined}
           placeholder="Search…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -250,11 +264,12 @@ export function SearchOverlay({
         >
           advanced
         </button>
+        {/* W8.5: every result row this overlay lists, not just the indexed documents. */}
         <span className="search-count">
-          {results.length} {results.length === 1 ? "result" : "results"} · lagging index, not
-          live state
+          {resultCount} {resultCount === 1 ? "result" : "results"}
         </span>
       </div>
+      <p className="field-hint search-lag">documents come from a lagging index, not live state</p>
 
       {advanced && (
         <div className="search-filters">
@@ -299,6 +314,7 @@ export function SearchOverlay({
             {actionRows.map((row) => (
               <button
                 key={row.key}
+                id={optId(row)}
                 className="search-row"
                 data-active={rows[activeIndex] === row || undefined}
                 onClick={() => activate(row)}
@@ -319,6 +335,7 @@ export function SearchOverlay({
             {workItemRows.map((row) => (
               <button
                 key={row.key}
+                id={optId(row)}
                 className="search-row"
                 data-active={rows[activeIndex] === row || undefined}
                 onClick={() => activate(row)}
@@ -348,11 +365,12 @@ export function SearchOverlay({
             return (
               <button
                 key={row.key}
+                id={optId(row)}
                 className="search-result"
                 data-active={rows[activeIndex] === row || undefined}
                 onClick={() => activate(row)}
               >
-                <span className="search-result-title">{r.title}</span>
+                <span className="search-result-title" title={r.title}>{shortIds(r.title)}</span>
                 <span className="search-result-where">
                   <span className="search-result-kind">{r.kind ?? r.source_kind}</span>·
                   <span title={r.repo}>{repoName(r.repo)}</span>
@@ -371,6 +389,7 @@ export function SearchOverlay({
             {gotoRows.map((row) => (
               <Link
                 key={row.key}
+                id={optId(row)}
                 to={row.to}
                 className="search-row"
                 data-active={rows[activeIndex] === row || undefined}
@@ -392,7 +411,7 @@ export function SearchOverlay({
           <span className="bead-hit">no bead matches</span>
         ) : (
           beads.slice(0, 2).map((b) => (
-            <span key={b.id} className="bead-hit">
+            <span key={b.id} className="bead-hit" title={`${b.id} ${b.title}`}>
               <code>{b.id}</code> {b.title}
               {/* closed beads are searchable (Kraft-evm), so say which are */}
               {b.status === "closed" && <span className="tag tag-neutral">closed</span>}

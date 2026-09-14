@@ -1,8 +1,17 @@
 import { useState } from "react";
 import * as api from "../../../api";
+import { repoName } from "../../../format";
 import { useStore } from "../../../store";
-import { Switch } from "../../../components/ui";
-import type { WorkItem } from "../../../types";
+import { Row, RowState, StatusGlyph, Switch } from "../../../components/ui";
+import type { SessionStatus, WorkItem } from "../../../types";
+
+/** A repo row's state → the glyph/label vocabulary session rows already use. */
+function repoGlyphStatus(state: string): SessionStatus {
+  if (state === "merged") return "done";
+  if (state === "failed") return "failed";
+  if (state === "open") return "running";
+  return "pending";
+}
 
 /**
  * Inspector · Config (UI v3 · 41, G3-01/02): the selected node's own fields
@@ -85,6 +94,36 @@ export function Config({
         )}
       </section>
       {err && <p className="form-error">{err}</p>}
+      {/* W0.7: the per-repo list used to sit inline under the hero and push
+          the split off the page on a 12-repo item. It is configuration, so it
+          lives here; the hero's "+N submodules" chip scrolls to it. */}
+      {!!item.repos?.length && (
+        <section className="config-block config-repos" id="config-repos" data-testid="config-repos">
+          <p className="section-label">Repos · merge rank, deepest first</p>
+          <p className="config-repos-policy">
+            root_merge_policy: <b>{item.root_merge_policy}</b>
+          </p>
+          {item.repos.map((r) => (
+            <Row key={r.path} columns="22px minmax(0, 1fr) auto auto" data-repo={r.path}>
+              <StatusGlyph status={repoGlyphStatus(r.state)} />
+              <span className="row-text">
+                <span className="row-title" title={r.repo}>
+                  {repoName(r.repo)}
+                </span>
+                {/* Shown whole, broken anywhere (W5.2): the tail tells two
+                    submodules apart, the head which checkout they are in. */}
+                <span className="row-sub config-repo-path path" title={r.path}>
+                  {r.path}
+                </span>
+              </span>
+              <span className="row-sub">
+                {r.role} · rank {r.merge_rank}
+              </span>
+              <RowState status={repoGlyphStatus(r.state)}>{r.state}</RowState>
+            </Row>
+          ))}
+        </section>
+      )}
     </div>
   );
 }

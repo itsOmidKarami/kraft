@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { CaretRight, DotsThree, MagnifyingGlass, Plus } from "@phosphor-icons/react";
+import { CaretRight, MagnifyingGlass, Plus } from "@phosphor-icons/react";
 import * as api from "../api";
 import { SETTINGS_NAV } from "../settingsNav";
 import { useStore } from "../store";
-import { repoName } from "../format";
 import { usePhone } from "../views/settings/shared";
+import type { WorkItem } from "../types";
+import { itemMenuItems } from "./itemMenu";
+import { OverflowMenu } from "./ui";
 
 /** How many repos are connected — a fresh install has 0 items *and* 0 repos,
  *  which reads differently from "0 items, repos connected" (design 08). Not
@@ -37,7 +39,7 @@ type Crumb = { text: string; sub?: string; to?: string };
 function useCrumb(
   repoCount: number | null,
   archivedCount: number | null,
-): { crumb: Crumb[]; primary: "new" | "more" | null } {
+): { crumb: Crumb[]; primary: "new" | "more" | null; item?: WorkItem } {
   const { pathname } = useLocation();
   const items = useStore((s) => Object.values(s.workItems));
   const itemMatch = pathname.match(/^\/work-items\/([^/]+)/);
@@ -58,19 +60,22 @@ function useCrumb(
       return {
         crumb: [
           { text: "Board", to: "/" },
-          { text: `Archived ${archivedCount ?? 0} items` },
+          { text: `Archived · ${archivedCount ?? 0} ${archivedCount === 1 ? "item" : "items"}` },
         ],
         primary: null,
       };
     }
     if (itemMatch && item) {
       return {
+        // Board › title (W5.1): the title, never the 32-hex id, which moved
+        // to the hero meta. No repo segment -- the hero meta leads with it, and
+        // screens 14/41 start the crumb at the title.
         crumb: [
-          { text: repoName(item.repo) },
           { text: "Board", to: "/" },
-          { text: itemMatch[1] },
+          { text: item.title },
         ],
         primary: "more",
+        item,
       };
     }
     if (pathname === "/analytics") return { crumb: [{ text: "Analytics" }], primary: null };
@@ -110,7 +115,7 @@ function useArchivedCount(): number | null {
 export function Header({ onSearch, onNew }: { onSearch: () => void; onNew: () => void }) {
   const repoCount = useRepoCount();
   const archivedCount = useArchivedCount();
-  const { crumb, primary } = useCrumb(repoCount, archivedCount);
+  const { crumb, primary, item } = useCrumb(repoCount, archivedCount);
   const phone = usePhone();
   const { pathname } = useLocation();
   // m10: every settings sub-page has its own phone header (`shared.tsx`'s
@@ -118,6 +123,9 @@ export function Header({ onSearch, onNew }: { onSearch: () => void; onNew: () =>
   // second top bar stacked above it. The bare `/settings` index has no
   // such header of its own, so it still needs this one.
   if (phone && pathname.startsWith("/settings/")) return null;
+  // W3.1: an item page on phone has its own header -- `PhoneTopBar`, back +
+  // title. This crumb stacked repo, Board and the title above it.
+  if (phone && pathname.startsWith("/work-items/")) return null;
 
   return (
     <header className="app-header">
@@ -145,18 +153,15 @@ export function Header({ onSearch, onNew }: { onSearch: () => void; onNew: () =>
           <span className="kbd">⌘K</span>
         </button>
         {primary === "new" && (
-          <button className="btn btn-primary" onClick={onNew} disabled={repoCount === 0}>
+          // Icon-only on phone (W7/8): the label wrapped to two lines beside the crumb.
+          <button className="btn btn-primary" onClick={onNew} disabled={repoCount === 0} aria-label="New work item">
             <Plus size={14} />
-            New work item
+            {!phone && "New work item"}
           </button>
         )}
-        {primary === "more" && (
-          // Wired by the item-detail redesign (handoff README "Suggested
-          // order" step 3) — this shell only has to draw it, per screen 11.
-          <button className="btn btn-ghost" aria-label="More">
-            <DotsThree size={14} />
-          </button>
-        )}
+        {/* The same item menu as the action bar's `…` (W0.9) -- this was a
+            button with no handler. */}
+        {primary === "more" && item && <OverflowMenu label="More actions" items={itemMenuItems(item)} />}
       </div>
     </header>
   );
