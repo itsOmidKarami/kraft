@@ -1,3 +1,4 @@
+import { maybeNotify } from "./browserNotify";
 import { useStore } from "./store";
 
 const BACKOFF = [1000, 2000, 5000, 10000];
@@ -19,7 +20,9 @@ export function connectEvents(): () => void {
       useStore.getState().setConnection("open");
     };
     socket.onmessage = (e) => {
-      useStore.getState().applyEvent(JSON.parse(e.data));
+      const ev = JSON.parse(e.data);
+      useStore.getState().applyEvent(ev);
+      maybeNotify(ev, useStore.getState().workItems[ev.work_item_id]?.title ?? "Kraft");
     };
     const retry = () => {
       // A broken socket fires 'error' then 'close'; detach both so only the
