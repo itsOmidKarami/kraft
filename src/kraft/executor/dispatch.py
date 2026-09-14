@@ -626,6 +626,29 @@ def judge_history(
     ]
 
 
+def stuck_fingerprint(history: list[dict], min_repeats: int) -> str | None:
+    """The first fingerprint (of the latest round's) that has survived
+    `min_repeats` consecutive fix attempts unchanged, or None.
+
+    Generalizes `walk.walk_node`'s whole-set stuck check (`prints ==
+    previous_prints`) to a single recurring fingerprint: a blind-failure
+    fingerprint (Kraft-0i6z4) can persist for many rounds while a
+    co-occurring review finding keeps changing shape, so the set as a whole
+    never repeats -- but this one thing never moved. A round only extends a
+    streak from the one before it if its OWN `fix_result_path` is set --
+    that is the fix which ran and produced this measurement (see
+    `judge_history`'s round/cycle alignment); two measurements taken back to
+    back with no fix in between (crash/resume) never had a chance to change
+    and must not count as "no progress".
+    """
+    streaks: dict[str, int] = {}
+    for round_ in history:
+        prints = {f.fingerprint for f in round_["findings"]}
+        fix_ran = round_["fix_result_path"] is not None
+        streaks = {fp: streaks.get(fp, 0) + 1 if fix_ran and fp in streaks else 1 for fp in prints}
+    return next((fp for fp, n in streaks.items() if n >= min_repeats), None)
+
+
 def unresolved_findings_steer(
     db, work_item_id: str, node_id: str, policy: _policy.Policy | None
 ) -> str | None:
