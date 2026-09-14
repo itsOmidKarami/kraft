@@ -45,6 +45,29 @@ test("checks/offscreen: no clipping ancestor still counts", async ({ page }) => 
   expect((await runChecks(page, true, [])).offscreenRight.count).toBeGreaterThan(0);
 });
 
+test("checks/offscreen: a fixed panel's own scroll does not exempt what it cuts off", async ({ page }) => {
+  // A peek: fixed, overflow-y auto (so x computes auto too), a head row wider than the pane.
+  await page.setContent(`
+    <style>body { margin: 0; } .peek { position: fixed; top: 0; right: -40px; bottom: 0; width: 300px; overflow-y: auto; }
+      .head { display: flex; gap: 8px; white-space: nowrap; } .head > * { flex: none; }</style>
+    <aside class="peek" aria-label="peek"><div class="head"><code>c7446dca…49a7b11</code><span>running</span><a href="#">Open →</a><button>✕</button></div></aside>`);
+  expect((await runChecks(page, true, [])).offscreenRight.count).toBeGreaterThan(0);
+});
+
+test("checks/offscreen: a page-filling scroller does not exempt a row past the edge", async ({ page }) => {
+  await page.setContent(`
+    <style>body { margin: 0; } main { height: 100vh; overflow: auto; } .wide { display: flex; } .wide > span { flex: none; width: 160px; }</style>
+    <main><div class="wide"><span>a</span><span>b</span><span>c</span><span>d</span></div></main>`);
+  expect((await runChecks(page, true, [])).offscreenRight.count).toBeGreaterThan(0);
+});
+
+/** data-allow-ellipsis exempts the element carrying it, and nothing else. */
+test("checks/ellipsis: data-allow-ellipsis skips a deliberate cut, a plain one still counts", async ({ page }) => {
+  const cut = (attr: string) => `<span ${attr} style="display:block;width:120px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">.claude/worktrees/c7446dca30d840a8a69977c6649a7b11/docs/superpowers/plans/x.md</span>`;
+  await page.setContent(`<div data-allow-ellipsis>${cut("")}</div>${cut("data-allow-ellipsis")}`);
+  expect((await runChecks(page, false, [])).clippedEllipsis.count).toBe(1);
+});
+
 /** The contrast check: muted text still has to clear 4.5:1; only text nobody
  *  has to read (disabled, placeholder, aria-hidden, faded decoration) is exempt. */
 const ground = (body: string) => `<style>body { margin: 0; background: #0f1019; font: 13px sans-serif; }</style>${body}`;
@@ -54,6 +77,18 @@ test("checks/contrast: #9397ab on #0f1019 passes, #5a5d70 fails", async ({ page 
   expect((await runChecks(page, false, [])).lowContrast.count).toBe(0);
   await page.setContent(ground(`<p style="color:#5a5d70">too faint muted text</p>`));
   expect((await runChecks(page, false, [])).lowContrast.count).toBe(1);
+});
+
+/** Gradients are grounds too (Kraft-aqrs9): the worst colour stop decides. */
+test("checks/contrast: light text on a dark→light gradient fails, on dark→darker passes", async ({ page }) => {
+  const over = (grad: string) => ground(`<div style="background:${grad};padding:40px"><p style="color:#e9e9ed">text over a gradient</p></div>`);
+  await page.setContent(over("linear-gradient(#0f1019, #f4f4f8)"));
+  expect((await runChecks(page, false, [])).lowContrast.count).toBe(1);
+  await page.setContent(over("linear-gradient(#0f1019, #232532)"));
+  expect((await runChecks(page, false, [])).lowContrast.count).toBe(0);
+  // A 1px divider drawn as a gradient is not the ground under the text.
+  await page.setContent(over("linear-gradient(#f4f4f8, #f4f4f8) no-repeat bottom / 100% 1px, #0f1019"));
+  expect((await runChecks(page, false, [])).lowContrast.count).toBe(0);
 });
 
 /** The focus-ring check (Kraft-s400i): it has to fire on a real missing ring. */

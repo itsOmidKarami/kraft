@@ -112,3 +112,13 @@ label.chip select {
   .stop-row { grid-template-columns: 1fr; gap: 4px; }
   .stop-n { text-align: left; }
 }
+
+/* W10: a long repo name sized the phone filter's <select> past the viewport
+   (analytics/long@390, offscreen). The chip holds at the row's width and the
+   select shrinks inside it; the native picker still lists names in full. */
+@media (max-width: 767px) {
+  .analytics-filters { max-width: 100%; min-width: 0; }
+  .analytics-filters label.chip { max-width: 100%; }
+  /* No min-width here: the 44px phone floor on select stays (W3.3). */
+  .analytics-filters label.chip select { flex: 0 1 auto; max-width: 100%; text-overflow: ellipsis; }
+}
