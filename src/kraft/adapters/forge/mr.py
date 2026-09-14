@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from kraft.adapters.forge.models import ForgeError, MRRef
 from kraft.index.ingest import split_front_matter
@@ -239,6 +240,47 @@ def mergeable(*states: str) -> bool | None:
         return False
     if any(s in _MERGEABLE for s in states):
         return True
+    return None
+
+
+#: An approval rule, not a code problem: GitLab's `detailed_merge_status`
+#: (`not_approved`, `requested_changes`, `policies_denied`) and GitHub's
+#: `reviewDecision` (`REVIEW_REQUIRED`, `CHANGES_REQUESTED`) all mean the
+#: same thing -- someone has to approve or re-approve on the forge, and
+#: nothing Kraft does to the branch changes that.
+_NOT_APPROVED = {
+    "not_approved",
+    "requested_changes",
+    "policies_denied",
+    "REVIEW_REQUIRED",
+    "CHANGES_REQUESTED",
+}
+
+#: GitLab's own draft indicator inside `detailed_merge_status`; GitHub
+#: answers the same question as `mergeStateStatus: "DRAFT"`.
+_DRAFT = {"draft_status", "DRAFT"}
+
+
+def classify_block_reason(*states: str) -> Literal["draft", "conflict", "not_approved"] | None:
+    """Why a merge request can't land, distinct from whether it can
+    (`mergeable`, above): a draft, a conflict, and a missing approval are
+    three different problems with three different fixes, and code that
+    only reads `mergeable`'s bool can't tell them apart.
+
+    Variadic for the same reason `mergeable` is: GitHub answers across
+    two or three fields (`mergeable`, `mergeStateStatus`, `reviewDecision`),
+    and any one of them can carry the reason. Conflict wins ties -- a
+    state that is somehow both a conflict and pending approval is a code
+    problem first, since nothing else is worth evaluating until the
+    branch itself is fixed. `None` when nothing here recognises any state
+    given, same as `mergeable`'s own `None`.
+    """
+    if any(s in _UNMERGEABLE for s in states):
+        return "conflict"
+    if any(s in _DRAFT for s in states):
+        return "draft"
+    if any(s in _NOT_APPROVED for s in states):
+        return "not_approved"
     return None
 
 
