@@ -57,9 +57,16 @@ def test_default_chain_fix_loop_breach_over_http(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     # Own policy fixture — do not gate on the shipped attempts value.
     tdir = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
+    # attempts=1, not 2: on.test.run's blind failure is now a stable
+    # synthesized Finding (Kraft: findings.from_blind_failure), so with a
+    # noop fix agent the identical fingerprint recurring at round 1 now
+    # correctly trips the stuck-detector before a 2-attempt cap would ever
+    # be reached. attempts=1 breaches the cap on the second bump, strictly
+    # before the stuck-check runs, so this test still exercises the
+    # cap-breach path specifically.
     (tdir / "policy.yaml").write_text(
-        "loops:\n  verify_fix_loop: { attempts: 2, wall_clock_s: 3600 }\n"
-        "default: { attempts: 2, wall_clock_s: 3600 }\n"
+        "loops:\n  verify_fix_loop: { attempts: 1, wall_clock_s: 3600 }\n"
+        "default: { attempts: 1, wall_clock_s: 3600 }\n"
     )
     with _client(tmp_path, monkeypatch, templates_dir=tdir) as client:
         wid = client.post(
@@ -76,7 +83,7 @@ def test_default_chain_fix_loop_breach_over_http(tmp_path, monkeypatch):
             assert _approve_gate(client, wid, gate, timeout=60).status_code == 200
         events = _poll_events(client, wid, "work_item_needs_human", timeout=60)
 
-        assert len([e for e in events if e["type"] == "fix_cycle_started"]) == 2
+        assert len([e for e in events if e["type"] == "fix_cycle_started"]) == 1
 
         item = client.get(f"/api/work-items/{wid}").json()
         assert item["status"] == "needs_human"

@@ -50,6 +50,28 @@ def test_format_judge_history_shows_the_trend_across_rounds():
     assert "/r1" in text
 
 
+def test_format_judge_history_labels_each_finding_by_source():
+    """A recurring blind test failure (`source_plugin` = the hook name, via
+    `from_blind_failure`) must read distinctly from a recurring review
+    finding (`source_plugin` = the reviewer's own name) -- both are just
+    fingerprinted lines in the same round otherwise, and the judge's whole
+    job is telling "review findings narrowing" apart from "the test is still
+    red"."""
+    history = [
+        {
+            "round": 0,
+            "findings": [
+                _findings.Finding("critical", "boom", "a.py", 1, "code-review"),
+                _findings.Finding("critical", "still red", None, None, "on.test.run"),
+            ],
+            "fix_result_path": None,
+        },
+    ]
+    text = prompts.format_judge_history(history)
+    assert "(code-review)" in text
+    assert "(on.test.run)" in text
+
+
 def test_judge_history_keeps_only_eligible_findings_with_their_fix_pointer(tmp_path):
     async def scenario():
         rd = RunDirs(tmp_path / "run").ensure()
