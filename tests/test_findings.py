@@ -1,6 +1,6 @@
 import json
 
-from kraft.findings import Finding, from_payload, parse
+from kraft.findings import Finding, from_blind_failure, from_payload, parse
 
 
 def _write(tmp_path, data):
@@ -190,3 +190,79 @@ def test_parse_line_bool_yields_none(tmp_path):
     )
     (f,) = parse(p)
     assert f.line is None
+
+
+def _log(tmp_path, text):
+    p = tmp_path / "s.log"
+    p.write_text(text)
+    return p
+
+
+def test_from_blind_failure_extracts_marker_lines(tmp_path):
+    log = _log(
+        tmp_path,
+        "some setup noise\n"
+        "  ✘  27 e2e/regression.spec.ts:65:1 › a flaky test (2.0m)\n"
+        "    Error: locator.click: Test timeout of 120000ms exceeded.\n",
+    )
+    f = from_blind_failure("on.test.run", log, "wid1", "sess1")
+    assert f.severity == "critical"
+    assert f.source_plugin == "on.test.run"
+    assert f.file is None
+    assert "e2e/regression.spec.ts:65:1" in f.message
+    assert "Test timeout" in f.message
+
+
+def test_from_blind_failure_strips_duration_and_timestamp_noise(tmp_path):
+    """The same failure at two different wall-clock costs must fingerprint
+    the same -- that's the entire point of this feature."""
+    a = _log(tmp_path, "✘ 1 e2e/x.spec.ts:1:1 › t (2.0m)\n14:03:11 done\n")
+    b = _log(tmp_path, "✘ 1 e2e/x.spec.ts:1:1 › t (2.3m)\n14:09:58 done\n")
+    # Same session id on purpose: isolating noise-stripping in the extracted
+    # content from the (separately tested, and by design volatile) log
+    # pointer's own session id.
+    fa = from_blind_failure("on.test.run", a, "wid1", "sess1")
+    fb = from_blind_failure("on.test.run", b, "wid1", "sess1")
+    assert fa.fingerprint == fb.fingerprint
+
+
+def test_from_blind_failure_falls_back_to_tail_when_no_marker_matches(tmp_path):
+    log = _log(tmp_path, "line one\nline two\nline three\n")
+    f = from_blind_failure("on.test.run", log, "wid1", "sess1")
+    assert "line three" in f.message
+
+
+def test_from_blind_failure_caps_message_length(tmp_path):
+    log = _log(tmp_path, "Error: " + ("x" * 5000) + "\n")
+    f = from_blind_failure("on.test.run", log, "wid1", "sess1")
+    assert len(f.message) <= 500  # 400 cap + short pointer line
+
+
+def test_from_blind_failure_missing_log_is_not_an_error(tmp_path):
+    f = from_blind_failure("on.test.run", tmp_path / "absent.log", "wid1", "sess1")
+    assert "no output captured" in f.message
+    assert f.severity == "critical"
+
+
+def test_from_blind_failure_missing_log_fingerprints_the_same_every_time(tmp_path):
+    # Same session id: isolating the fixed "no output captured" fallback
+    # string from the (separately tested) log pointer's own session id.
+    f1 = from_blind_failure("on.test.run", tmp_path / "absent.log", "wid1", "sess1")
+    f2 = from_blind_failure("on.test.run", tmp_path / "still-absent.log", "wid1", "sess1")
+    assert f1.fingerprint == f2.fingerprint
+
+
+def test_from_blind_failure_prefers_a_reproduce_command_over_a_log_pointer(tmp_path):
+    """`reproduce` (Task 2 passes it for kind: subprocess hooks) must not
+    embed anything round-specific -- it's what keeps a subprocess hook's
+    fingerprint stable, which the plain log-pointer fallback cannot."""
+    log = _log(tmp_path, "✘ 1 e2e/x.spec.ts:1:1 › t (2.0m)\n")
+    f = from_blind_failure("on.test.run", log, "wid1", "sess1", reproduce="uv run pytest -q")
+    assert "Reproduce with: uv run pytest -q" in f.message
+    assert "sess1" not in f.message
+
+
+def test_from_blind_failure_without_reproduce_points_at_the_session_log(tmp_path):
+    log = _log(tmp_path, "✘ 1 e2e/x.spec.ts:1:1 › t\n")
+    f = from_blind_failure("on.test.run", log, "wid1", "sess1")
+    assert "kraft view logs wid1 --session sess1" in f.message

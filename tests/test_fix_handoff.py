@@ -15,13 +15,39 @@ from support.harness import fake_registry, isolated_bd, make_repo
 from kraft import db, executor, policy, store
 from kraft.adapters.subprocess import read_concerns
 from kraft.paths import RunDirs
-from kraft.templates import Template
+from kraft.templates import Registry, Template
 
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
 
+#: A "never fixed" `on.test.run` whose failure text differs every invocation
+#: (via a `KRAFT_FAKE_TESTRUN_COUNTER` sidecar, same pattern as
+#: `tests/support/fake_reviewer.py`'s own invocation counter). This suite's
+#: whole point is exercising multiple fix cycles' prompt handoff; a *real*
+#: pytest run against the sample repo now fails with byte-identical output
+#: every round (`findings.from_blind_failure`, Kraft), so with a noop fix
+#: agent the identical fingerprint recurring at round 1 correctly trips the
+#: stuck-detector before a second cycle ever dispatches -- exactly the
+#: behaviour this whole feature exists to add. That's real progress, and
+#: also incompatible with this file's fixture: it needs the loop to keep
+#: cycling, so its failure must keep changing shape, never converging.
+_VARYING_FAILING_SUBPROCESS = (
+    "import os, pathlib, sys; "
+    "counter = pathlib.Path(os.environ['KRAFT_FAKE_TESTRUN_COUNTER']); "
+    "n = int(counter.read_text()) if counter.exists() else 0; "
+    "counter.write_text(str(n + 1)); "
+    "print(f'FAILED tests/test_calc.py::test_add - AssertionError: attempt {n}'); "
+    "sys.exit(1)"
+)
+
 
 def _registry():
-    return fake_registry(sys.executable, _FAKE_AGENT)
+    base = fake_registry(sys.executable, _FAKE_AGENT)
+    hooks = dict(base.hooks)
+    hooks["on.test.run"] = {
+        "kind": "subprocess",
+        "command": [sys.executable, "-c", _VARYING_FAILING_SUBPROCESS],
+    }
+    return Registry(hooks=hooks)
 
 
 def _fixloop_template() -> Template:
@@ -59,6 +85,7 @@ def _run(tmp_path, monkeypatch, prompts_path):
     """
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")  # never patches calc.py
     monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompts_path))
+    monkeypatch.setenv("KRAFT_FAKE_TESTRUN_COUNTER", str(tmp_path / "attempt.count"))
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
 
@@ -180,6 +207,7 @@ def test_fix_cycle_names_the_post_retry_attempt_not_the_abandoned_one(tmp_path, 
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")  # never fixes calc.py, either side of the retry
     prompts_path = tmp_path / "prompts.txt"
     monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompts_path))
+    monkeypatch.setenv("KRAFT_FAKE_TESTRUN_COUNTER", str(tmp_path / "attempt.count"))
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
 
@@ -252,6 +280,7 @@ def test_fix_dispatch_after_resume_still_carries_the_previous_attempt(tmp_path, 
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")  # keeps failing so a 2nd cycle dispatches
     prompts_path = tmp_path / "prompts.txt"
     monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompts_path))
+    monkeypatch.setenv("KRAFT_FAKE_TESTRUN_COUNTER", str(tmp_path / "attempt.count"))
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
 
@@ -383,6 +412,7 @@ def test_a_fix_cycle_past_escalate_after_launches_with_escalate_model(tmp_path, 
     argv_log = tmp_path / "argv.jsonl"
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")  # never patches calc.py, so it never converges
     monkeypatch.setenv("KRAFT_FAKE_AGENT_ARGV_LOG", str(argv_log))
+    monkeypatch.setenv("KRAFT_FAKE_TESTRUN_COUNTER", str(tmp_path / "attempt.count"))
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
 
