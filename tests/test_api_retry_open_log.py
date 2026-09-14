@@ -247,6 +247,28 @@ def _completed_item(client, repo):
     raise AssertionError("work item never completed")
 
 
+def test_work_item_documents_carry_the_run_their_session_came_from(tmp_path, monkeypatch):
+    """W13 A: a session summary row names its session's attempt, round and
+    status, joined from worker_sessions on worker_session_id."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _completed_item(client, repo)
+        sessions = {
+            s["id"]: s for s in client.get(f"/api/work-items/{wid}").json()["worker_sessions"]
+        }
+        docs = client.get(f"/api/work-items/{wid}/documents").json()["documents"]
+        summaries = [d for d in docs if d["worker_session_id"]]
+        assert summaries, "the fake agent writes a session summary"
+        for d in summaries:
+            s = sessions[d["worker_session_id"]]
+            assert (d["attempt"], d["round"], d["session_status"]) == (
+                s["attempt"],
+                s["round"],
+                s["status"],
+            )
+            assert isinstance(d["attempt"], int) and isinstance(d["round"], int)
+
+
 def test_log_jsonl_and_plain_text_are_both_served(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:

@@ -720,3 +720,93 @@ textarea.detail-title-input {
 .detail[data-fit="tightest"] .escalation-thread p {
   overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1;
 }
+
+/* W12.2 · the document pane head: the title on one line, the path on one line
+   cut from the left so the filename survives (the inner <span dir="ltr"> keeps
+   a leading "." in place), then the kind / written / index note. Each cut
+   carries its whole text in `title` (sweep README allowlist). DocumentModal
+   shares .doc-modal-name and keeps its three-line clamp. */
+.doc-pane .doc-modal-name {
+  display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.doc-pane .doc-path {
+  display: block; min-width: 0;
+  font-size: 11px; color: var(--color-text-muted); font-family: ui-monospace, Menlo, monospace;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  direction: rtl; text-align: left;
+}
+
+/* W13 · B · Documents rows. A summary leads with `hook · run · time` (13px,
+   text); its cleaned title is a muted 12px second line clamped to one line
+   (the row's `title` is the path, so the clamp is the line's only cut). */
+.linked-docs .doc-run { font-size: 13px; color: var(--color-text); }
+.linked-docs .doc-time { color: var(--color-text-muted); }
+.linked-docs .doc-line2 {
+  font-size: 12px; color: var(--color-text-muted);
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1;
+  overflow: hidden; overflow-wrap: anywhere;
+}
+/* B.4 · the pane head's eyebrow: what wrote it and when, mono and muted. */
+.doc-pane .doc-eyebrow {
+  font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* W13 · C · Timeline rows are buttons (C.5): the list row's look, a button's
+   keyboard. Round and node headers are 44px with a fold caret; session and
+   node-level rows 40px. */
+button.timeline-row {
+  width: 100%; border: 0; margin: 0; font: inherit; color: inherit; text-align: left; cursor: pointer;
+  grid-template-columns: minmax(0, 1fr) auto; min-height: 40px; padding-block: 6px;
+}
+button.timeline-round, button.timeline-node-row { grid-template-columns: 14px minmax(0, 1fr) auto; min-height: 44px; }
+/* 13px: at 11px the ▸/▾ read as a dot beside the round (seen in item-timeline/capped@1280). */
+.timeline-caret { color: var(--color-text-muted); font-size: 13px; }
+.timeline-session .row-title, .timeline-event .row-title { font-size: 13px; }
+.timeline-row .row-title, .timeline-row .row-sub { overflow-wrap: anywhere; }
+.timeline-nested { padding-left: 14px; }
+.timeline-findings { margin: 0; padding: 2px 0 8px; font-size: 12px; color: var(--color-text-muted); }
+button.timeline-row:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+
+/* W13 · D · the right pane's event stream: a 2px rail, one row per row-worthy
+   event (a session, a task run, findings, a verdict, a gate), a centred
+   `waiting 4m` hairline over a gap, times on the right. */
+.stream {
+  list-style: none; margin: 0; padding: 0 0 0 16px;
+  border-left: 2px solid var(--color-border, var(--color-divider));
+  display: flex; flex-direction: column;
+}
+.stream-row {
+  position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px; align-items: baseline; padding-block: 8px;
+}
+.stream-row::before {
+  content: ""; position: absolute; left: -21px; top: 14px;
+  width: 8px; height: 8px; border-radius: 50%; background: var(--color-neutral-500);
+}
+.stream-row[data-kind="gap"] { padding-block: 2px; }
+.stream-row[data-kind="gap"]::before { display: none; }
+.stream-gap-label { display: block; text-align: center; font-size: 11px; color: var(--color-text-muted); }
+.stream-body { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; min-width: 0; }
+.stream-head { font-size: 13px; overflow-wrap: anywhere; }
+.stream-title { font-size: 13px; color: var(--color-text); overflow-wrap: anywhere; }
+.stream-meta { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--color-text-muted); overflow-wrap: anywhere; }
+.stream-time { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--color-text-muted); white-space: nowrap; }
+.stream-findings { flex-basis: 100%; list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.stream-findings li {
+  display: grid; grid-template-columns: auto minmax(0, 22ch) minmax(0, 1fr);
+  gap: 8px; align-items: baseline; font-size: 12px;
+}
+.stream-severity { font-size: 10px; padding: 1px 6px; }
+/* file:line is a path: one line cut from the left (the allowlisted .doc-path). */
+.events-pane .doc-path {
+  display: block; max-width: 100%; min-width: 0;
+  font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--color-text-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left;
+}
+.stream-message {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1;
+  overflow: hidden; overflow-wrap: anywhere; color: var(--color-neutral-300);
+}
+.stream-artifact { flex-basis: 100%; }
+.stream-quote { flex-basis: 100%; font-size: 12px; color: var(--color-neutral-400); overflow-wrap: anywhere; }

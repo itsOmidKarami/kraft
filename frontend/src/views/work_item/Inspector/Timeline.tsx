@@ -1,17 +1,51 @@
-import { useEffect, useRef } from "react";
-import { Row, RowText } from "../../../components/ui";
-import { clock } from "../../../format";
+import { Fragment, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { RowText } from "../../../components/ui";
+import { clock, elapsedBetween, statusWord } from "../../../format";
 import type { KraftEvent, WorkerSession } from "../../../types";
-import { detailOf, groupByNode, titleOf } from "../timelineHelpers";
+import {
+  groupByNode,
+  nodeRounds,
+  parseTimelineSelection,
+  taskRunLabel,
+  verdictWord,
+  type NodeRounds,
+  type Round,
+  type TimelineEntry,
+} from "../timelineHelpers";
 import { ScopeChips, type Scope } from "./Tasks";
 
 /**
- * Inspector · Timeline (UI v2 · 05, 15; W11 · F). Under "this node" -- the
- * default, one scope with Tasks -- the selected node's events flat, newest
- * first, and one folded row for every other node; under "all", one row per
- * node that has run. `RightPane/Events.tsx` shows the selected node's events.
- * A selection is `node:seq` for one event, a bare `node` for a group.
+ * Inspector · Timeline (UI v2 · 05, 15; W11 · F; W13 · C). Under "this node"
+ * the node's rounds, newest first -- a round header folds its sessions and
+ * findings -- with escalation turns and node-level events (gates, lifecycle)
+ * at their time between them. Under "all", one folded row per node with its
+ * rounds inside. `RightPane/Events.tsx` streams whatever is selected: a
+ * session, a round, one event, or (nothing picked) the node.
  */
+
+const hm = (iso: string | null | undefined) => (iso ? clock(iso).slice(0, 5) : "");
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+function span(from: string | null, to: string | null): string {
+  if (!from) return "";
+  return `${hm(from)} → ${to ? hm(to) : "now"} · ${elapsedBetween(from, to)}`;
+}
+
+/** `judge: stop`, `judge: continue · 5 findings`, `running`. */
+function outcome(r: Round, current: boolean): string {
+  const found = r.findings.length ? plural(r.findings.length, "finding") : "";
+  if (r.verdict === "continue") return ["judge: continue", found].filter(Boolean).join(" · ");
+  if (r.verdict) return `judge: ${verdictWord(r.verdict)}`;
+  if (current && r.sessions.some((s) => !s.exited_at)) return "running";
+  return found;
+}
+
+function findingsLine(r: Round): string | null {
+  if (!r.findings.length) return null;
+  const critical = r.findings.filter((f) => f.severity === "critical").length;
+  return [plural(r.findings.length, "finding"), critical ? `${critical} critical` : ""].filter(Boolean).join(" · ");
+}
+
 export function Timeline({
   events,
   sessions = [],
@@ -29,98 +63,166 @@ export function Timeline({
   selected: string | null;
   onSelect: (id: string) => void;
 }) {
-  const groups = groupByNode(events);
-  const hooks = new Map(sessions.map((s) => [s.id, s.hook_point]));
-  const own = groups.find((g) => g.node === nodeId);
-  const ownAt = own ? groups.indexOf(own) : -1;
-  const others = groups.filter((g) => g !== own);
-  const selectedNode = selected?.split(":")[0] ?? null;
-  const pickedEvent = selected?.includes(":") ?? false;
+  const nodes = groupByNode(events).map((g) => nodeRounds(g.node, events, sessions));
+  const own = nodes.find((n) => n.node === nodeId) ?? null;
+  const sel = parseTimelineSelection(selected);
+  const [folds, setFolds] = useState<Record<string, boolean>>({});
+  const listRef = useRef<HTMLDivElement>(null);
 
-  // "this node" opens the right pane on the node's newest event (F.2). A link
-  // to another node's group (a card's "see Timeline") shows that group under
-  // "all" instead -- unless the person just chose "this node" themselves.
+  // A card's "see Timeline" link to another node's stream (a bare node) shows
+  // it under "all" -- unless the person just chose "this node" themselves.
   const lastScope = useRef(scope);
   useEffect(() => {
     const scopeChanged = lastScope.current !== scope;
     lastScope.current = scope;
-    if (scope !== "node") return;
-    if (!scopeChanged && selected && !pickedEvent && selectedNode !== nodeId) {
-      onScope("all");
-      return;
-    }
-    if (pickedEvent && selectedNode === nodeId) return;
-    const first = own?.events[0];
-    if (first) onSelect(`${own.node}:${first.seq}`);
+    if (scope === "node" && !scopeChanged && sel?.kind === "node" && sel.node !== nodeId) onScope("all");
   });
 
-  const showAll = () => {
-    onScope("all");
-    if (nodeId) onSelect(nodeId);
+  const isOpen = (key: string, byDefault: boolean) => folds[key] ?? byDefault;
+  const setOpen = (key: string, open: boolean) => setFolds((f) => ({ ...f, [key]: open }));
+
+  // C.5: rows are buttons; Up/Down move between them, Left/Right fold and unfold.
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    const rows = [...(listRef.current?.querySelectorAll<HTMLButtonElement>("button[data-trow]") ?? [])];
+    const at = rows.indexOf(document.activeElement as HTMLButtonElement);
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const next = at < 0 ? 0 : Math.min(rows.length - 1, Math.max(0, at + (e.key === "ArrowDown" ? 1 : -1)));
+      rows[next]?.focus();
+    } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && at >= 0 && rows[at].dataset.fold) {
+      e.preventDefault();
+      setOpen(rows[at].dataset.fold!, e.key === "ArrowRight");
+    }
   };
 
-  const count = scope === "node" ? (own?.events.length ?? 0) : events.length;
-  const otherEvents = others.flatMap((g) => g.events);
-  const times = otherEvents.map((e) => e.created_at).sort();
-  const span = times.length ? `${clock(times[0])} – ${clock(times[times.length - 1])}` : "";
-  // Groups run newest first: every other node sits after this one when this
-  // is the newest node the item has run.
-  const earlier = others.every((g) => groups.indexOf(g) > ownAt) ? "earlier" : "other";
+  const sessionRow = (s: WorkerSession, title: string) => (
+    <button
+      key={s.id}
+      type="button"
+      data-trow
+      className="row timeline-row timeline-session"
+      data-testid={`timeline-session-${s.id}`}
+      data-selected={sel?.kind === "session" && sel.id === s.id}
+      onClick={() => onSelect(`session:${s.id}`)}
+    >
+      <RowText
+        title={title}
+        sub={`${statusWord(s.status)} · ${elapsedBetween(s.started_at ?? s.created_at, s.exited_at)}`}
+      />
+      <span className="row-sub">{hm(s.exited_at ?? s.created_at)}</span>
+    </button>
+  );
+
+  const roundBody = (r: Round) => {
+    const line = findingsLine(r);
+    return (
+      <>
+        {[...r.sessions].reverse().map((s) => sessionRow(s, s.hook_point))}
+        {line && (
+          <p className="timeline-findings" data-testid={`timeline-findings-${r.node}-${r.n}`}>
+            {line}
+          </p>
+        )}
+      </>
+    );
+  };
+
+  const entryRow = (nt: NodeRounds, en: TimelineEntry) => {
+    if (en.kind === "round") {
+      const r = en.round;
+      // One round: no header at all, its sessions stand in the list (C.1).
+      if (nt.rounds.length === 1) return <Fragment key={`r${r.n}`}>{roundBody(r)}</Fragment>;
+      const key = `round:${r.node}:${r.n}`;
+      const current = r === nt.rounds[nt.rounds.length - 1];
+      const open = isOpen(key, current);
+      return (
+        <Fragment key={key}>
+          <button
+            type="button"
+            data-trow
+            data-fold={key}
+            aria-expanded={open}
+            className="row timeline-row timeline-round"
+            data-testid={`timeline-round-${r.node}-${r.n}`}
+            data-selected={sel?.kind === "round" && sel.node === r.node && sel.n === r.n}
+            onClick={() => {
+              onSelect(key);
+              setOpen(key, !open);
+            }}
+          >
+            <span className="timeline-caret" aria-hidden>
+              {open ? "▾" : "▸"}
+            </span>
+            <RowText title={`round ${r.n + 1}`} sub={span(r.startedAt, r.endedAt)} />
+            <span className="row-sub">{outcome(r, current)}</span>
+          </button>
+          {open && roundBody(r)}
+        </Fragment>
+      );
+    }
+    if (en.kind === "escalation") return sessionRow(en.session, `escalation · turn ${en.turn}`);
+    const e = en.event;
+    const label = e.type === "task_progress" ? taskRunLabel(e, en.last) : en.label;
+    return (
+      <button
+        key={`e${e.seq}`}
+        type="button"
+        data-trow
+        className="row timeline-row timeline-event"
+        data-testid={`timeline-event-${e.seq}`}
+        data-selected={sel?.kind === "event" && sel.seq === e.seq}
+        onClick={() => onSelect(`event:${e.seq}`)}
+      >
+        <RowText title={label} />
+        <span className="row-sub">{hm(e.created_at)}</span>
+      </button>
+    );
+  };
+
+  const nodeList = (nt: NodeRounds) => [...nt.entries].reverse().map((en) => entryRow(nt, en));
+
+  const count = scope === "node" ? (own?.rounds.length ?? 0) : nodes.reduce((n, nt) => n + nt.rounds.length, 0);
 
   return (
-    <div className="inspector-list" data-testid="inspector-timeline">
+    <div className="inspector-list" data-testid="inspector-timeline" ref={listRef} onKeyDown={onKeyDown}>
       <p className="section-label">
-        EVENTS · {count}
+        ROUNDS · {count}
         <ScopeChips scope={scope} onScope={onScope} nodeId={nodeId} />
       </p>
       {scope === "node" ? (
-        <>
-          {!own && <p className="empty">no events on this node yet</p>}
-          {own?.events.map((e) => (
-            <Row
-              key={e.seq}
-              data-testid={`timeline-event-${e.seq}`}
-              data-selected={selected === `${own.node}:${e.seq}`}
-              onClick={() => onSelect(`${own.node}:${e.seq}`)}
-              columns="minmax(0, 1fr) auto"
-            >
-              <RowText title={titleOf(e, hooks) ?? e.type} sub={detailOf(e) ?? undefined} />
-              <span className="row-sub">{clock(e.created_at)}</span>
-            </Row>
-          ))}
-          {others.length > 0 && (
-            <Row className="timeline-fold" data-testid="timeline-fold" onClick={showAll} columns="minmax(0, 1fr) auto">
-              <RowText
-                title={`▸ ${others.length} ${earlier} node${others.length === 1 ? "" : "s"} · ${otherEvents.length} events${span ? ` · ${span}` : ""}`}
-              />
-              <button
-                type="button"
-                className="btn btn-quiet"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  showAll();
-                }}
-              >
-                show all
-              </button>
-            </Row>
-          )}
-        </>
-      ) : groups.length === 0 ? (
+        own ? nodeList(own) : <p className="empty">no events on this node yet</p>
+      ) : nodes.length === 0 ? (
         <p className="empty">no events yet</p>
       ) : (
         <>
-          {groups.map((g) => (
-            <Row
-              key={g.node}
-              data-selected={g.node === (selectedNode ?? nodeId)}
-              onClick={() => onSelect(g.node)}
-              columns="1fr auto"
-            >
-              <RowText title={g.node} sub={g.span} />
-              <span className="row-sub">{g.events.length} events</span>
-            </Row>
-          ))}
+          {nodes.map((nt) => {
+            const key = `node:${nt.node}`;
+            const open = isOpen(key, nt.node === nodeId);
+            const what = nt.rounds.length ? plural(nt.rounds.length, "round") : plural(nt.events.length, "event");
+            return (
+              <Fragment key={nt.node}>
+                <button
+                  type="button"
+                  data-trow
+                  data-fold={key}
+                  aria-expanded={open}
+                  className="row timeline-row timeline-node-row"
+                  data-testid={`timeline-node-${nt.node}`}
+                  data-selected={sel?.kind === "node" && sel.node === nt.node}
+                  onClick={() => {
+                    onSelect(nt.node);
+                    setOpen(key, !open);
+                  }}
+                >
+                  <span className="timeline-caret" aria-hidden>
+                    {open ? "▾" : "▸"}
+                  </span>
+                  <RowText title={`${nt.node} · ${what}${nt.startedAt ? ` · ${elapsedBetween(nt.startedAt, nt.endedAt)}` : ""}`} />
+                </button>
+                {open && <div className="timeline-nested">{nodeList(nt)}</div>}
+              </Fragment>
+            );
+          })}
           <p className="inspector-foot">{events.length} events total</p>
         </>
       )}

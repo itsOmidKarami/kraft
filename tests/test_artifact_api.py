@@ -274,6 +274,12 @@ def test_approving_a_gate_ingests_its_artifact_into_the_index(client, item_at_sp
     assert len(artifacts) == 1
     assert artifacts[0]["kind"] == "specs"
     assert artifacts[0]["path"] == f".engineering/specs/{item_at_spec_gate}.md"
+    # W13 A: an artifact has no session, so no run info.
+    assert (artifacts[0]["attempt"], artifacts[0]["round"], artifacts[0]["session_status"]) == (
+        None,
+        None,
+        None,
+    )
 
     doc = client.get(f"/api/documents/{artifacts[0]['document_id']}").json()
     assert doc["title"] == "A spec"
