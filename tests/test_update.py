@@ -147,6 +147,19 @@ def test_perform_downloads_the_wheel_and_installs_the_local_copy(monkeypatch):
     assert seen["wheel_bytes"] == b"WHEEL BYTES"
 
 
+def test_perform_downloads_with_the_long_timeout_not_the_check_timeout(monkeypatch):
+    seen = {}
+
+    def request(_url, timeout):
+        seen["timeout"] = timeout
+        return b""
+
+    monkeypatch.setattr(update, "_request", request)
+    run = lambda _command, **_kwargs: type("R", (), {"returncode": 0})()  # noqa: E731
+    update.perform(update.Release(tag="v0.4.0", wheel_url="u/w.whl"), run=run)
+    assert seen["timeout"] == update.DOWNLOAD_TIMEOUT > update.TIMEOUT
+
+
 def test_perform_reports_a_failing_installer(monkeypatch):
     monkeypatch.setattr(update, "_request", lambda _url, _timeout: b"")
 

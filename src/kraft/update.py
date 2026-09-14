@@ -34,6 +34,10 @@ CACHE_TTL = 86_400
 #: with no route out is not something anybody times.
 TIMEOUT = 2.0
 
+#: The wheel download in `perform`. Someone asked for it and is watching, and
+#: a multi-megabyte wheel through `glab api` does not fit in `TIMEOUT`.
+DOWNLOAD_TIMEOUT = 120.0
+
 
 @dataclass(frozen=True)
 class Release:
@@ -200,7 +204,7 @@ def perform(release: Release, *, run=None) -> int:
     run = run or subprocess.run
     with tempfile.TemporaryDirectory() as tmpdir:
         wheel_path = Path(tmpdir) / release.wheel_url.rsplit("/", 1)[-1]
-        wheel_path.write_bytes(_request(release.wheel_url, TIMEOUT))
+        wheel_path.write_bytes(_request(release.wheel_url, DOWNLOAD_TIMEOUT))
         command = ["uv", "tool", "install", "--force", "--from", str(wheel_path), "kraft"]
         try:
             return run(command).returncode
