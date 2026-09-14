@@ -5,6 +5,7 @@ import { clock, elapsed, logLineText, tokens, usd } from "../../../format";
 import { findSession, useStore } from "../../../store";
 import type { LogLine } from "../../../types";
 import { StatusGlyph } from "../../../components/ui";
+import { ShortId } from "../../../components/ShortId";
 
 /**
  * Right pane · Log (UI v2 · 05, 12/16): `LogModal`'s fetch/follow logic,
@@ -171,26 +172,30 @@ export function Log({
           source chips · following · Copy · maximize. The Tasks row already
           says which session this is, so the title block that used to sit
           above the chips was saying it twice. */}
+      {/* W5.5: identity and chips scroll sideways in their own track; the
+          actions keep theirs, so the row stays one line at every width. */}
       <header className="log-head">
-        <StatusGlyph status={session?.status ?? "unknown"} />
-        <span className="log-static-title">Log</span>
-        <span className="log-sid">{sessionId}</span>
-        <span className="log-hook">{session?.hook_point ?? sessionId}</span>
-        {meta.map((m) => (
-          <span key={m} className="log-meta-part">{m}</span>
-        ))}
-        {!live && <span className="log-not-following">stopped · not following</span>}
-        {CHIPS.map((c) => (
-          <button
-            key={c.id}
-            className="log-chip"
-            aria-pressed={filter === c.id}
-            onClick={() => setFilter(c.id)}
-          >
-            {c.label}
-          </button>
-        ))}
-        <span className="log-count">{shown.length} lines</span>
+        <div className="log-head-main">
+          <StatusGlyph status={session?.status ?? "unknown"} />
+          <span className="log-static-title">Log</span>
+          <ShortId id={sessionId} className="log-sid" />
+          <span className="log-hook">{session?.hook_point ?? sessionId}</span>
+          {meta.map((m) => (
+            <span key={m} className="log-meta-part">{m}</span>
+          ))}
+          {!live && <span className="log-not-following">stopped · not following</span>}
+          {CHIPS.map((c) => (
+            <button
+              key={c.id}
+              className="log-chip"
+              aria-pressed={filter === c.id}
+              onClick={() => setFilter(c.id)}
+            >
+              {c.label}
+            </button>
+          ))}
+          <span className="log-count">{shown.length} lines</span>
+        </div>
         <div className="log-actions">
           <button
             className="btn btn-secondary log-follow"

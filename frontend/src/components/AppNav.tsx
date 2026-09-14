@@ -17,6 +17,7 @@ import { HealthBadge } from "./HealthBadge";
 import type { Health } from "../types";
 
 const COLLAPSE_KEY = "kraft.sidebar_collapsed";
+const SETTINGS_OPEN_KEY = "kraft.sidebar_settings_open";
 
 /** Under 1280 the sidebar is a rail by default (UI v3 · 45). An explicit
  *  choice still wins: only an absent localStorage key falls through to the
@@ -59,7 +60,11 @@ function connectionWord(c: "connecting" | "open" | "reconnecting"): string {
 
 export function AppNav() {
   const [collapsed, setCollapsed] = useState(readCollapsed);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  // W4.8: the open Settings group survives a reload, like the rail choice.
+  const [settingsOpen, setSettingsOpen] = useState(() => localStorage.getItem(SETTINGS_OPEN_KEY) === "true");
+  useEffect(() => {
+    localStorage.setItem(SETTINGS_OPEN_KEY, String(settingsOpen));
+  }, [settingsOpen]);
   const { pathname } = useLocation();
   const connection = useStore((s) => s.connection);
   const items = useStore((s) => Object.values(s.workItems));
@@ -174,12 +179,16 @@ export function AppNav() {
           </div>
         )}
       </nav>
+      {/* Its own slot above the footer (W0.12): inside the footer a long
+          degraded message grew into a bubble drawn over it. */}
+      <div className="app-sidebar-health">
+        <HealthBadge />
+      </div>
       <div className="app-sidebar-foot">
         <span>
           {runningCount} running · {needsYouCount} need you
         </span>
         {bindLine && <span>{bindLine}</span>}
-        <HealthBadge />
       </div>
     </aside>
   );

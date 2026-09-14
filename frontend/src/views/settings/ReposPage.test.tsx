@@ -121,12 +121,10 @@ describe("Settings · repos (5a)", () => {
     expect(await within(dialog).findByText("gitea")).toBeInTheDocument();
   });
 
-  it("lands on Repos when /settings is opened with no page", async () => {
-    // The router's `<Route index>` does this. A `useEffect` reading
-    // window.location.pathname used to do it as well; this pins the surviving
-    // half so the deletion of the other one stays honest.
+  it("/settings with no page is the Settings index, not a redirect to Repos (W7.9)", async () => {
     renderAt("/settings");
-    expect(await screen.findByRole("heading", { name: "Repos" })).toBeInTheDocument();
+    expect(await screen.findByText("How work runs")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Repos" })).toBeNull();
   });
 });
 

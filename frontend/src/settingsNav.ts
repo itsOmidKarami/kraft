@@ -30,18 +30,20 @@ export interface SettingsNavItem {
   label: string;
   icon: typeof GitBranch;
   group: SettingsGroup;
+  /** One line on the Settings index (W7.9). */
+  description: string;
 }
 
 export const SETTINGS_NAV: SettingsNavItem[] = [
-  { to: "repos", label: "Repos", icon: GitBranch, group: "how" },
-  { to: "chains", label: "Chains", icon: TreeStructure, group: "how" },
-  { to: "plugins", label: "Plugins", icon: Plugs, group: "how" },
-  { to: "policy", label: "Policy", icon: SlidersHorizontal, group: "how" },
-  { to: "steering", label: "Steering", icon: FileText, group: "how" },
-  { to: "intake", label: "Auto-intake", icon: DownloadSimple, group: "instance" },
-  { to: "notify", label: "Notifications", icon: Bell, group: "instance" },
-  { to: "access", label: "Access", icon: LockKey, group: "instance" },
-  { to: "appearance", label: "Appearance", icon: Palette, group: "instance" },
+  { to: "repos", label: "Repos", icon: GitBranch, group: "how", description: "Connected repositories, their default chain and test command" },
+  { to: "chains", label: "Chains", icon: TreeStructure, group: "how", description: "Chain templates: the nodes, gates and fix loops an item walks" },
+  { to: "plugins", label: "Plugins", icon: Plugs, group: "how", description: "What runs for each hook, and with which model" },
+  { to: "policy", label: "Policy", icon: SlidersHorizontal, group: "how", description: "Loop caps, concurrency, spend budgets and auto-archive" },
+  { to: "steering", label: "Steering", icon: FileText, group: "how", description: "Guidance files that worker sessions read" },
+  { to: "intake", label: "Auto-intake", icon: DownloadSimple, group: "instance", description: "Pull ready beads in as work items on a schedule" },
+  { to: "notify", label: "Notifications", icon: Bell, group: "instance", description: "Where Kraft tells you an item needs you" },
+  { to: "access", label: "Access", icon: LockKey, group: "instance", description: "Password, bind address and signed-in sessions" },
+  { to: "appearance", label: "Appearance", icon: Palette, group: "instance", description: "Palette, light or dark, density and board defaults" },
 ];
 
 export const SETTINGS_GROUP_LABEL: Record<SettingsGroup, string> = {

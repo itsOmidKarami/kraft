@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Eye, FileText, ListChecks, Notebook } from "@phosphor-icons/react";
 import * as api from "../../../api";
+import { shortIds } from "../../../format";
 import type { WorkItemDocument } from "../../../types";
 import { GATE_DOC_ID } from "../selection";
 
@@ -124,8 +125,8 @@ export function Documents({
       >
         <Icon size={16} className="doc-icon" />
         <span className="doc-text">
-          <span className="doc-title">{d.title}</span>
-          <span className="doc-path">{d.path}</span>
+          <span className="doc-title" title={d.title}>{shortIds(d.title)}</span>
+          <span className="doc-path path" title={d.path}>{d.path}</span>
         </span>
         <span className="tag tag-neutral doc-kind">{d.kind ?? d.source_kind}</span>
         {d.attachment_kind && <span className="tag tag-outline doc-attached">attached at intake</span>}
@@ -152,7 +153,7 @@ export function Documents({
             >
               <FileText size={16} className="doc-icon" />
               <span className="doc-text">
-                <span className="doc-title">{preselectPath}</span>
+                <span className="doc-title path" title={preselectPath ?? undefined}>{preselectPath}</span>
               </span>
               <span className="row-sub">{gateArtifactPending ? "not indexed yet" : "not written yet"}</span>
             </button>

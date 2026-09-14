@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { ArrowSquareOut, FolderOpen, Pause, Play } from "@phosphor-icons/react";
 import * as api from "../../../api";
+import { itemMenuItems } from "../../../components/itemMenu";
 import { OverflowMenu } from "../../../components/ui";
 import { deriveState } from "../../../deriveState";
-import { judgeReasoning, tokens, usd, until } from "../../../format";
+import { elapsedBetween, judgeReasoning, tokens, usd, until, waitingSince } from "../../../format";
 import type { KraftEvent, WorkerSession, WorkItem } from "../../../types";
 import { BudgetComposer } from "./BudgetComposer";
 import { Composer } from "./Composer";
@@ -95,9 +96,21 @@ export function ActionBar({
     rawState === "escalated" && latestTurn && dismissed === latestTurn.id
       ? deriveState(item, [], events).state
       : rawState;
+  // A stop that waits on a person shows how long, apart from the node's
+  // frozen run time (W0.4); a gate shows it on its own card instead.
+  const waitingOn = ["capped", "budget", "question", "escalated"].includes(state) ? waitingSince(events) : null;
   const [open, setOpen] = useState<ComposerKind | null>(null);
   const [text, setText] = useState("");
-  const { busy, err, run } = useActionBar(item.id);
+  const { busy, pending, err, run } = useActionBar(item.id);
+  // A composer closes once its action lands (W6.3), whatever state the
+  // server reports next -- it never sits open holding a sent note.
+  const submit = (fn: () => Promise<unknown>, toast?: string) =>
+    run(fn, toast).then((ok) => {
+      if (ok) {
+        setOpen(null);
+        setText("");
+      }
+    });
   const [cancelling, setCancelling] = useState(false);
   // Worktree/Cancel errors: both live on the right side, whose actions
   // no state's left-side hint reports.
@@ -268,7 +281,7 @@ export function ActionBar({
             footnote="attempt 2 restarts the node's tasks · fix-loop progress is kept"
             submitLabel="Resume with this steer"
             onSubmit={() =>
-              run(
+              submit(
                 () => api.resumeWorkItem(item.id, text.trim()),
                 "Steer applied — resumed",
               )
@@ -339,7 +352,7 @@ export function ActionBar({
             footnote="retry resets the loop counter; steer text carries into cycle 1"
             submitLabel="Steer & retry"
             onSubmit={() =>
-              run(
+              submit(
                 () => api.retryWorkItem(item.id, text.trim() || undefined),
                 "Steer applied — retrying",
               )
@@ -399,7 +412,7 @@ export function ActionBar({
             footnote="retry resets the loop counter; steer text carries into cycle 1"
             submitLabel="Steer & retry"
             onSubmit={() =>
-              run(
+              submit(
                 () => api.retryWorkItem(item.id, text.trim() || undefined),
                 "Steer applied — retrying",
               )
@@ -418,7 +431,7 @@ export function ActionBar({
             spentUsd={item.budget?.spent_usd}
             busy={busy}
             err={err}
-            run={run}
+            run={submit}
             onCancel={() => setOpen(null)}
           />
         );
@@ -462,7 +475,7 @@ export function ActionBar({
             submitLabel="Answer and resume"
             disabled={text.trim() === ""}
             onSubmit={() =>
-              run(
+              submit(
                 () => api.resumeWorkItem(item.id, text.trim()),
                 "Answered — resumed",
               )
@@ -474,6 +487,12 @@ export function ActionBar({
       }
       left = (
         <div className="control-row">
+          {/* W8.1: the question itself, in full, above the Answer button. */}
+          {item.needs_context_question && (
+            <p className="stop-question" data-testid="stop-question">
+              {item.needs_context_question}
+            </p>
+          )}
           <button className="btn btn-primary" onClick={() => setOpen("answer")}>
             Answer
           </button>
@@ -562,7 +581,7 @@ export function ActionBar({
           submitLabel="Send to agent"
           disabled={text.trim() === ""}
           onSubmit={() =>
-            run(
+            submit(
               () => api.escalateWorkItem(item.id, text.trim()),
               "Sent to the agent",
             )
@@ -580,7 +599,7 @@ export function ActionBar({
     left = (
       <PhoneComposer
         title={COMPOSER_TITLES[open]}
-        context={`${item.id} · ${item.current_node_id ?? "—"}`}
+        context={`${item.title} · ${item.current_node_id ?? "—"}`}
         onCancel={() => setOpen(null)}
       >
         {left}
@@ -614,7 +633,9 @@ export function ActionBar({
         <div className="action-bar-row">
           <div className="action-bar-left">{left}</div>
 
-          <div className="action-bar-mid" />
+          <div className="action-bar-mid">
+            {pending ? <span className="action-pending">pending…</span> : waitingOn && <>waiting {elapsedBetween(waitingOn)}</>}
+          </div>
 
           <div className="action-bar-right">
             {gate !== "human_review_approval" && (
@@ -663,21 +684,25 @@ export function ActionBar({
               <span className="control-usage-detail">{usage.detail}</span>
               {usage.figure && <> · {usage.figure}</>}
             </span>
-            {item.status !== "completed" &&
-              item.status !== "abandoned" &&
-              item.status !== "active" && (
-                <OverflowMenu
-                  items={[
-                    {
-                      label: cancelling ? "Cancelling…" : "Cancel work item",
-                      danger: true,
-                      confirm:
-                        "Abandon this work item? This reclaims its worktree and destroys any uncommitted work.",
-                      onSelect: cancel,
-                    },
-                  ]}
-                />
-              )}
+            {/* On every state (W0.9): the item menu, plus Cancel wherever
+                the item can still be abandoned. */}
+            <OverflowMenu
+              label="More actions"
+              items={[
+                ...itemMenuItems(item),
+                ...(item.status !== "completed" && item.status !== "abandoned" && item.status !== "active"
+                  ? [
+                      {
+                        label: cancelling ? "Cancelling…" : "Cancel work item",
+                        danger: true,
+                        confirm:
+                          "Abandon this work item? This reclaims its worktree and destroys any uncommitted work.",
+                        onSelect: cancel,
+                      },
+                    ]
+                  : []),
+              ]}
+            />
             {sideErr && <span className="control-hint">{sideErr}</span>}
           </div>
         </div>

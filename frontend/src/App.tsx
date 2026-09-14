@@ -15,12 +15,13 @@ import { SearchView } from "./views/Search";
 import { Settings } from "./views/settings";
 import { WorkItemDetail } from "./views/work_item";
 
-export function App() {
+export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) {
   const [search, setSearch] = useState(false);
   const [intake, setIntake] = useState(false);
   // Off localhost, any API call can come back 401; `api` raises one event for
   // all of them so the login screen is decided in one place (design 1m).
-  const [locked, setLocked] = useState(false);
+  // `main.tsx` already knows before mount when its one probe came back 401.
+  const [locked, setLocked] = useState(initiallyLocked);
   const [bind, setBind] = useState<string | undefined>();
   const [sessionExpiryDays, setSessionExpiryDays] = useState<number | undefined>();
 

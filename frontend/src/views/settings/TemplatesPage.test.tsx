@@ -114,6 +114,7 @@ describe("Settings · chains editor (task 8)", () => {
     renderAt("/settings/chains");
     await userEvent.click(await screen.findByText("verify"));
     await userEvent.selectOptions(screen.getByLabelText("gate_after"), "human_review_approval");
+    await userEvent.click(screen.getByRole("button", { name: "YAML" }));
     const yaml = screen.getByLabelText("chain yaml") as HTMLTextAreaElement;
     expect(yaml.value).toContain("gate_after: human_review_approval");
   });
@@ -125,6 +126,7 @@ describe("Settings · chains editor (task 8)", () => {
     const delay = screen.getByLabelText("auto_escalate_delay_s");
     await userEvent.clear(delay);
     await userEvent.type(delay, "30");
+    await userEvent.click(screen.getByRole("button", { name: "YAML" }));
     const yaml = screen.getByLabelText("chain yaml") as HTMLTextAreaElement;
     expect(yaml.value).toContain("auto_escalate_stuck: false");
     expect(yaml.value).toContain("auto_escalate_delay_s: 30");
@@ -134,9 +136,32 @@ describe("Settings · chains editor (task 8)", () => {
     vi.spyOn(api, "parseTemplateYaml").mockResolvedValue({ nodes: null, error: "bad indent" });
     renderAt("/settings/chains");
     await userEvent.click(await screen.findByText("verify"));
+    await userEvent.click(screen.getByRole("button", { name: "YAML" }));
     await userEvent.type(screen.getByLabelText("chain yaml"), "  broken");
     expect(await screen.findByText(/bad indent/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "YAML" }));
     expect(screen.getByLabelText("fix_loop")).toHaveValue("verify_fix_loop"); // unchanged
+  });
+
+  it("Kraft-b9syf: the YAML toggle switches the editor pane between the node form and the YAML", async () => {
+    renderAt("/settings/chains");
+    await userEvent.click(await screen.findByText("verify"));
+    const toggle = screen.getByRole("button", { name: "YAML" });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByLabelText("fix_loop")).toBeInTheDocument();
+    expect(screen.queryByLabelText("chain yaml")).toBeNull();
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("chain yaml")).toBeInTheDocument();
+    expect(screen.queryByLabelText("fix_loop")).toBeNull();
+  });
+
+  it("Kraft-b9syf: Add node inserts a node and selects it, back in the form view", async () => {
+    renderAt("/settings/chains");
+    await userEvent.click(await screen.findByRole("button", { name: "YAML" }));
+    await userEvent.click((await screen.findAllByRole("button", { name: /add node/i }))[0]);
+    expect(await screen.findByText(/node 1 of 5/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^node_5/ })).toHaveAttribute("data-selected", "true");
   });
 
   it("Kraft-xhro: names the node and task an unresolved hook belongs to, not just a repo bit", async () => {
@@ -163,7 +188,7 @@ describe("Settings · chains editor (task 8)", () => {
 
   it("insert, remove, and reorder nodes mark the template dirty", async () => {
     renderAt("/settings/chains");
-    await userEvent.click((await screen.findAllByRole("button", { name: /insert node/i }))[0]);
+    await userEvent.click((await screen.findAllByRole("button", { name: /add node/i }))[0]);
     expect(await screen.findByRole("button", { name: "Save" })).toBeEnabled();
   });
 
@@ -176,7 +201,7 @@ describe("Settings · chains editor (task 8)", () => {
     });
     renderAt("/settings/chains");
     await userEvent.click(await screen.findByText("verify"));
-    await userEvent.click((await screen.findAllByRole("button", { name: /insert node/i }))[0]);
+    await userEvent.click((await screen.findAllByRole("button", { name: /add node/i }))[0]);
     await new Promise((r) => setTimeout(r, 450)); // past the 400ms validation debounce
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });

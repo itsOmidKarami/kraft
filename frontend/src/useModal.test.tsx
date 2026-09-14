@@ -22,6 +22,20 @@ describe("useModal", () => {
     expect(screen.getByRole("button", { name: "first" })).toHaveFocus();
   });
 
+  it("focuses the [data-autofocus] field over an earlier control (W6.9: intake title, not ✕)", () => {
+    function Intake() {
+      const ref = useModal<HTMLDivElement>(() => {});
+      return (
+        <div role="dialog" aria-label="intake" ref={ref}>
+          <button aria-label="close">✕</button>
+          <input aria-label="title" data-autofocus />
+        </div>
+      );
+    }
+    render(<Intake />);
+    expect(screen.getByLabelText("title")).toHaveFocus();
+  });
+
   it("closes on Escape", async () => {
     const onClose = vi.fn();
     render(<Dialog onClose={onClose} />);

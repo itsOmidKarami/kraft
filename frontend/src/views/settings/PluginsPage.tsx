@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import * as api from "../../api";
 import { SectionLabel, Segmented, Switch } from "../../components/ui";
+import { ShortId } from "../../components/ShortId";
 import { adapterOf, ago } from "../../format";
 import type { HookBinding, HookRun, TemplateSummary } from "../../types";
 import "./plugins.css";
@@ -127,8 +128,9 @@ export function PluginsPage() {
       )}
       <SectionLabel>Binding</SectionLabel>
       <div className="field">
-        <label>kind</label>
+        <label id="plugin-kind-label">kind</label>
         <Segmented
+          labelledBy="plugin-kind-label"
           options={[
             { id: "builtin", label: "builtin" },
             { id: "subprocess", label: "subprocess" },
@@ -225,7 +227,7 @@ export function PluginsPage() {
       {runs.map((run, i) => (
         <div key={i} className="plugin-run-row">
           <span className="row-sub">
-            {run.work_item_id} · {run.node_id} · cycle {run.round}
+            <ShortId id={run.work_item_id} /> · {run.node_id} · cycle {run.round}
           </span>
           <span className="row-sub plugin-run-result">
             {run.wall_ms != null ? `${(run.wall_ms / 1000).toFixed(1)}s` : "—"} · {run.status}

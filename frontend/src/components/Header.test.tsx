@@ -33,18 +33,34 @@ describe("Header", () => {
     expect(screen.getByRole("button", { name: /New work item/i })).toBeInTheDocument();
   });
 
-  it("shows repo › Board › id on an item page, with a ⋯ control instead of New", () => {
+  it("shows Board › title on an item page, with a ⋯ control instead of New", () => {
     useStore.setState({
-      workItems: { wi_1: { id: "wi_1", repo: "/repo-a" } as WorkItem },
+      workItems: { wi_1: { id: "wi_1", repo: "/repo-a", title: "Fix the flaky import" } as WorkItem },
     } as never);
     renderAt("/work-items/wi_1");
-    expect(screen.getByText("repo-a")).toBeInTheDocument();
-    expect(screen.getByText("wi_1")).toBeInTheDocument();
+    // The title, never the id; the repo is in the hero meta, not the crumb (W5.1).
+    expect(screen.queryByText("repo-a")).not.toBeInTheDocument();
+    expect(screen.getByText("Fix the flaky import")).toBeInTheDocument();
+    expect(screen.queryByText("wi_1")).not.toBeInTheDocument();
     // "Board" is a real link here (Final's screen 11 draws it as `<a href>`),
     // unlike the plain-text "Board"/"Settings" on their own current pages.
     expect(screen.getByRole("link", { name: "Board" })).toHaveAttribute("href", "/");
     expect(screen.queryByRole("button", { name: /New work item/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "More" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "More actions" })).toBeInTheDocument();
+  });
+
+  it("opens the item menu from the ⋯ control on an item page (W0.9)", async () => {
+    useStore.setState({
+      workItems: { wi_1: { id: "wi_1", repo: "/repo-a" } as WorkItem },
+    } as never);
+    renderAt("/work-items/wi_1");
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+    expect(screen.getAllByRole("menuitem").map((m) => m.textContent)).toEqual([
+      "Archive",
+      "Open worktree",
+      "Copy id",
+      "Copy link",
+    ]);
   });
 
   it("shows Settings › <page> from settingsNav's label", () => {
@@ -71,13 +87,31 @@ describe("Header", () => {
     vi.unstubAllGlobals();
   });
 
-  it("shows Board › Archived N items on the archived route", async () => {
+  it("hides on phone width on an item page, where PhoneTopBar is the one header (W3.1)", () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn().mockImplementation((query: string) => ({
+        matches: true,
+        media: query,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+    useStore.setState({
+      workItems: { wi_1: { id: "wi_1", repo: "/repo-a", title: "Fix the flaky import" } as WorkItem },
+    } as never);
+    const { container } = renderAt("/work-items/wi_1");
+    expect(container.querySelector(".app-header")).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it("shows Board › Archived · N item(s) on the archived route, singular for one (Kraft-h7igq)", async () => {
     vi.spyOn(api, "listArchivedWorkItems").mockResolvedValue({
       items: [{ id: "a" } as never],
       cursor: 1,
     });
     renderAt("/archived");
-    expect(await screen.findByText("Archived 1 items")).toBeInTheDocument();
+    expect(await screen.findByText("Archived · 1 item")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Board" })).toHaveAttribute("href", "/");
   });
 
@@ -85,7 +119,7 @@ describe("Header", () => {
     renderAt("/analytics");
     expect(screen.getByText("Analytics")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /New work item/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "More" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument();
   });
 
   it("disables New work item and shows '0 work items · no repos' with zero repos", async () => {

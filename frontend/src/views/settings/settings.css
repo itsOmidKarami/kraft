@@ -32,8 +32,14 @@
   border-bottom: none;
 }
 
+/* The name keeps its width; the one-line description (W7.9) takes what is left.
+   `flex: 1` on the title let the description squeeze it to 0px at 390, where
+   settings' 2-line clamp sets min-width: 0 (e2e phone.visual "Settings landing"). */
 .settings-index-row .row-title {
-  flex: 1;
+  flex: none;
+}
+.settings-index-row .row-sub {
+  flex: 1 1 auto;
 }
 
 .phone-header {

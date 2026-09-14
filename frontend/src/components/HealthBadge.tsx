@@ -11,9 +11,10 @@ export function HealthBadge() {
     return () => clearInterval(t);
   }, []);
   if (!h || h.status !== "degraded") return null;
+  const text = `degraded: ${[...Object.values(h.invalid_templates), ...h.invalid_policy].join(", ")}`;
   return (
-    <span className="health-badge">
-      degraded: {[...Object.values(h.invalid_templates), ...h.invalid_policy].join(", ")}
+    <span className="health-badge" title={text}>
+      {text}
     </span>
   );
 }

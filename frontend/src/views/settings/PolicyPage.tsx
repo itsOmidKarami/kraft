@@ -240,7 +240,8 @@ export function PolicyPage() {
           <button
             key={sev}
             type="button"
-            className={`tag ${selectedSeverities.includes(sev) ? "" : "tag-off"}`}
+            // A filter chip (W7.5): chip tokens and its pressed state, not a white tag.
+            className="chip"
             aria-pressed={selectedSeverities.includes(sev)}
             onClick={() => toggleSeverity(sev)}
           >

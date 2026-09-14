@@ -92,6 +92,15 @@ describe("AppNav", () => {
     expect(await screen.findByText("r")).toBeInTheDocument();
   });
 
+  it("remembers the open Settings group across a remount (W4.8)", async () => {
+    const { unmount } = renderAt("/");
+    await userEvent.click(screen.getByRole("button", { name: /Settings/ }));
+    expect(localStorage.getItem("kraft.sidebar_settings_open")).toBe("true");
+    unmount();
+    renderAt("/");
+    expect(screen.getByText("How work runs")).toBeInTheDocument();
+  });
+
   it("expands Settings in place, listing both groups", async () => {
     renderAt("/settings/repos");
     expect(await screen.findByText("How work runs")).toBeInTheDocument();

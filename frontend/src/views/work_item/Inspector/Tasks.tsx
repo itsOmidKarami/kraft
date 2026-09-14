@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Robot } from "@phosphor-icons/react";
 import { Row, RowState, RowText, StatusGlyph } from "../../../components/ui";
-import { clock, elapsed, tokens, usd } from "../../../format";
+import { clock, elapsed, shortId, tokens, usd } from "../../../format";
 import type { KraftEvent, WorkerSession, WorkItem } from "../../../types";
 
 /**
@@ -101,7 +101,7 @@ export function Tasks({
           const m = metricsOf(s);
           const sub =
             s.status === "running" || s.status === "pending"
-              ? `turn ${s.attempt} · ${s.id} · ${m || "starting…"}`
+              ? `turn ${s.attempt} · ${shortId(s.id)} · ${m || "starting…"}`
               : sent
                 ? `sent ${clock(sent.created_at)} · "${sent.payload.message}"`
                 : `turn ${s.attempt}`;
@@ -143,9 +143,6 @@ export function Tasks({
           </Row>
         );
       })}
-      <p className="inspector-foot">
-        {shown.length} task{shown.length === 1 ? "" : "s"} · newest first
-      </p>
     </div>
   );
 }

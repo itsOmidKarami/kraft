@@ -69,14 +69,12 @@ export function dismissTurn(itemId: string, sessionId: string): void {
 }
 
 /** No `concerns`/`question` on the exit event means the turn never reported
- *  a summary -- fall back to why it actually stopped (Stop agent leaves the
- *  session `paused`; anything else that isn't a clean report is a failure)
- *  rather than a bare "no summary reported" that reads as the agent's own
- *  words. */
-function stopReasonText(session: WorkerSession): string {
+ *  a summary -- say why it actually stopped (Stop agent leaves the session
+ *  `paused`; a failure is a failure). A clean finish has no reason to give. */
+function stopReasonText(session: WorkerSession): string | null {
   if (session.status === "paused") return "stopped by Stop agent";
   if (session.status === "failed") return "turn failed";
-  return "no summary reported";
+  return null;
 }
 
 /** The escalated proposal card: "Escalation · turn N · reported", the
@@ -135,7 +133,15 @@ export function EscalatedCard({
   // reason fallback below is our own placeholder text, not something the
   // agent said.
   const summary = exitSummary ?? docSummary;
-  const text = summary ?? stopReasonText(session);
+  // No summary: quote what this turn was sent (W8.6) -- "no summary
+  // reported" only when there is no message either.
+  const asked = events.find(
+    (e) => e.type === "escalation_message" && e.payload.session_id === session.id,
+  )?.payload.message as string | undefined;
+  const text =
+    summary ??
+    ([asked && `> ${asked}`, stopReasonText(session)].filter(Boolean).join("\n\n") ||
+      "no summary reported");
   return (
     <div className="card attention-card" data-testid="escalated-card">
       <div className="attention-head">
