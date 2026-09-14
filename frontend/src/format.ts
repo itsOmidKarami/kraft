@@ -192,6 +192,43 @@ export function docTitle(d: {
   return `Session · ${d.hook_point ?? d.node_id ?? d.kind ?? "summary"}`;
 }
 
+/** How a session's run reads beside its hook (W13 · B.1): `turn N` for an
+ *  escalation, `round N` once a fix loop is involved (a round past 0, or a fix
+ *  / judge hook), `attempt N` otherwise. Null when the server sent no run info
+ *  (an older server, or an artifact). */
+export function runLabel(hook: string | null | undefined, attempt?: number | null, round?: number | null): string | null {
+  if (attempt == null && round == null) return null;
+  if (hook === "escalation") return `turn ${attempt ?? 1}`;
+  if ((round ?? 0) > 0 || /fix|judge/.test(hook ?? "")) return `round ${round ?? 0}`;
+  return `attempt ${attempt ?? 1}`;
+}
+
+// ponytail: without the item's own bead id, a bead id is guessed as
+// `Capitalised-xxxx` -- tight enough for Kraft ids; pass the item for an exact match.
+const BEAD_ID = "[A-Z][A-Za-z]*-[a-z0-9]{4,6}";
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** A document title with what its row already says taken out (W13 · B.3): a
+ *  leading/trailing bead id -- `(Kraft-df4tc)`, `— Kraft-df4tc …`,
+ *  `Kraft-df4tc:` -- and the item's own title. `""` when under 3 characters
+ *  remain. */
+export function cleanTitle(
+  doc: { title?: string | null },
+  item?: { title?: string | null; bead_id?: string | null } | null,
+): string {
+  const bead = item?.bead_id ? escapeRe(item.bead_id) : BEAD_ID;
+  const flags = item?.bead_id ? "i" : "";
+  let t = doc.title ?? "";
+  t = t.replace(new RegExp(`\\s+[—–]\\s*${bead}\\b.*$`, flags), "");
+  t = t.replace(new RegExp(`\\(\\s*${bead}\\s*\\)`, `g${flags}`), " ");
+  t = t.replace(new RegExp(`^\\s*${bead}\\s*:\\s*`, flags), "");
+  // Whole words only: an item titled "T" must not eat the t out of "the".
+  const own = item?.title?.trim();
+  if (own) t = t.replace(new RegExp(`(^|\\W)${escapeRe(own)}(?=\\W|$)`, "i"), "$1");
+  t = t.replace(/\s+/g, " ").replace(/^[\s—–·:-]+|[\s—–·:-]+$/g, "");
+  return t.length < 3 ? "" : t;
+}
+
 /** Wall-clock time of day, for timeline rows and log lines. */
 export function clock(iso: string): string {
   const d = new Date(iso);

@@ -130,7 +130,7 @@ const FLOWS: Flow[] = [
     { name: "selection-bar", run: async () => {} },
     { name: "archive", run: async (p) => { await p.getByTestId("archive-selected").click(); }, wait: 900 },
     // The Archived chip may sit under the facet bar's "+N" (W4.1); open it first when it does.
-    { name: "archived-chip", run: async (p) => { const vis = () => p.locator('a[href="/archived"]:visible'); if (!(await vis().count())) await p.getByLabel("more filters").click(); await vis().first().click(); }, wait: 700 },
+    { name: "archived-chip", run: async (p) => { const vis = () => p.locator('a[href="/archived"]:visible'); if (!(await vis().count())) await p.locator(".board-more > summary").click(); await vis().first().click(); }, wait: 700 },
   ] },
   { name: "phone-node-page", data: "long", widths: [390], start: item("gate"), steps: [
     { name: "tap-stage", run: async (p) => { await p.locator('[data-testid^="phone-stage-"]').nth(2).click(); } },

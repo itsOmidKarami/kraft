@@ -76,6 +76,36 @@ const renderBoard = () =>
     </MemoryRouter>,
   );
 
+describe("Board facet overflow chip (W12.5)", () => {
+  it("reads '+N more' with a caret and says it opens a list", async () => {
+    setItems(
+      wi({ id: "w1", repo: "/repo-a" }),
+      wi({ id: "w2", repo: "/repo-b", status: "completed" }),
+      wi({ id: "w3", repo: "/repo-c" }),
+    );
+    // jsdom has no layout: put every chip after the first two on a second row,
+    // which is what Board measures to decide what spills into "+N".
+    vi.spyOn(HTMLElement.prototype, "offsetTop", "get").mockImplementation(function (this: HTMLElement) {
+      const box = this.parentElement;
+      if (!box?.classList.contains("board-filter-chips")) return 0;
+      const chips = [...box.children].filter((k) => k.classList.contains("chip"));
+      return chips.indexOf(this) >= 2 ? 40 : 0;
+    });
+    const { container } = renderBoard();
+    const summary = await waitFor(() => {
+      const s = container.querySelector(".board-more > summary");
+      expect(s).not.toBeNull();
+      return s as HTMLElement;
+    });
+    const hidden = container.querySelectorAll(".board-filter-chips > [data-overflow]").length;
+    expect(hidden).toBeGreaterThan(0);
+    expect(summary).toHaveClass("chip");
+    expect(summary).toHaveAttribute("aria-haspopup", "true");
+    expect(summary.textContent).toBe(`+${hidden} more `);
+    expect(summary.querySelector("svg")).not.toBeNull();
+  });
+});
+
 /** So the peek-clear test (Kraft-3e16 §2.2) can read the URL of whichever
  *  history entry is current, and press Back to move between entries —
  *  properties `renderBoard()`'s plain MemoryRouter has no sibling to expose. */

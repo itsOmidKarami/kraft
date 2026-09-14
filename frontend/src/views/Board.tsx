@@ -395,8 +395,9 @@ export function Board({ onNewWorkItem }: { onNewWorkItem?: () => void } = {}) {
           </div>
           {overflowFrom != null && (
             <details className="board-more">
-              <summary className="chip" aria-label="more filters">
-                +{facetChips.length + (archivedCount != null ? 1 : 0) - overflowFrom}
+              {/* W12.5: says what it is -- "+2 more ▾" -- and that it opens a list. */}
+              <summary className="chip" aria-haspopup="true">
+                +{facetChips.length + (archivedCount != null ? 1 : 0) - overflowFrom} more <CaretDown size={11} />
               </summary>
               <div className="board-more-menu">
                 {facetChips.slice(overflowFrom).map((c) => (

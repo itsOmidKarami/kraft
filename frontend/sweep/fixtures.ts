@@ -378,9 +378,15 @@ export function buildItem(state: DisplayState, seed: number, variant: Variant): 
     }
     case "capped": {
       startCurrent("capped_out");
+      // W13 · E: each fix cycle is a round with its own fix session; the judge
+      // lets the first two continue, the third hits the cap with no verdict.
       for (let c = 1; c <= 3; c++) {
         ev("fix_cycle_started", { node_id: currentNode, cycle: c, failed_tasks: ["on.test.run"] }, 3);
+        const fix = sess(currentNode!, "done", { round: c, wall_ms: 70_000 }, "on.test.fix");
+        ev("worker_session_created", { session_id: fix.id, hook_point: fix.hook_point, node_id: currentNode }, 0.1);
+        ev("worker_session_exited", { session_id: fix.id, node_id: currentNode, status: "done", wall_ms: 70_000 }, 1.2);
         ev("findings_measured", { node_id: currentNode, findings: [{ severity: "critical", message: `test_parse_anchors fails (cycle ${c})`, file: "tests/test_templates.py", line: 77, source_plugin: "pytest" }] }, 1);
+        if (c < 3) ev("judge_verdict", { node_id: currentNode, verdict: "continue", reasoning: `one critical remains after cycle ${c}; retrying` }, 0.3);
       }
       ev("work_item_needs_human", { node_id: currentNode, reason: "verify_fix_loop hit its cap", capped: { cycles: 3, attempts: 3 } }, 1);
       item.status = "needs_human"; item.stop_reason = "verify_fix_loop hit its cap";
@@ -498,10 +504,17 @@ export function documentsFor(item: any, variant: Variant) {
     { kind: "sessions", node: "open_mr", hook: "on.mr.describe", path: `.engineering/sessions/${hex(991)}.md`, title: hex(991), headingless: true },
   );
   if (long) for (let i = 0; i < 12; i++) docs.push({ kind: "sessions", node: "implement", hook: "on.implementation.start", path: `.engineering/sessions/${hex(910 + i)}.md`, title: `Session ${hex(910 + i)}` });
+  // W13 A: run info joined from the session. Artifacts and attachments have none;
+  // summaries are attempt 1, and the long variant's implement sessions span rounds 0–2.
+  let implementRun = 0;
   return docs.map((d, i) => ({
     document_id: hex(700 + i), work_item_id: item.id,
     repo: item.repo, title: d.title, kind: d.kind, source_kind: d.kind === "sessions" ? "session_summary" : "artifact",
-    path: d.path, node_id: d.node, hook_point: d.hook, worker_session_id: hex(item.id.length + i),
+    path: d.path, node_id: d.node, hook_point: d.hook,
+    worker_session_id: d.kind === "sessions" ? hex(item.id.length + i) : null,
+    attempt: d.kind === "sessions" ? 1 : null,
+    round: d.kind !== "sessions" ? null : long && d.node === "implement" ? Math.min(2, Math.floor(implementRun++ / 5)) : 0,
+    session_status: d.kind === "sessions" ? "done" : null,
     attachment_kind: d.attached ?? null,
     headingless: d.headingless ?? false,
     indexed_at: t(200 - i * 7),
@@ -516,9 +529,8 @@ const headinglessLead = (hook: string) =>
 
 export function documentDetail(id: string, docs: any[]) {
   const d = docs.find((x) => x.document_id === id) ?? docs[0];
+  // W12.2: no "Status · repo · path" lead line -- the pane header already says it.
   const body = `${d.headingless ? headinglessLead(d.hook_point) : `# ${d.title}`}
-
-> Status: draft · repo \`${d.repo}\` · path \`${d.path}\`
 
 ## Summary
 

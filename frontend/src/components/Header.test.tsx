@@ -49,6 +49,20 @@ describe("Header", () => {
     expect(screen.getByRole("button", { name: "More actions" })).toBeInTheDocument();
   });
 
+  it("cuts the item title crumb to one line with the whole title in its tooltip (W12.1)", () => {
+    const title = "Design the caching layer for document search: embedding cache keyed by (repo, path, blob_sha)";
+    useStore.setState({
+      workItems: { wi_1: { id: "wi_1", repo: "/repo-a", title } as WorkItem },
+    } as never);
+    renderAt("/work-items/wi_1");
+    const crumb = screen.getByText(title);
+    expect(crumb).toHaveClass("app-header-crumb-current");
+    expect(crumb).toHaveAttribute("title", title);
+    expect(crumb).toHaveAttribute("data-allow-ellipsis");
+    // the Board link before it is not cut
+    expect(screen.getByRole("link", { name: "Board" })).not.toHaveAttribute("data-allow-ellipsis");
+  });
+
   it("opens the item menu from the ⋯ control on an item page (W0.9)", async () => {
     useStore.setState({
       workItems: { wi_1: { id: "wi_1", repo: "/repo-a" } as WorkItem },

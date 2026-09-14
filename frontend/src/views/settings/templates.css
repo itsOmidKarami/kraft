@@ -111,6 +111,8 @@
   min-width: 0;
 }
 .chain-node-title { font-size: 14px; font-weight: 500; margin: 0; overflow-wrap: anywhere; }
+/* W12.3: an id or a delay is a short value; the selects keep settings' 420px. */
+.chain-node-form input.input { max-width: 320px; }
 
 .chain-task-row {
   display: grid;

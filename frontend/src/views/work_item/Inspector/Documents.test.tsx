@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../../api";
-import type { ChainNode, WorkItemDocument } from "../../../types";
+import type { ChainNode, WorkerSession, WorkItemDocument } from "../../../types";
 import { Documents } from "./Documents";
 import type { Scope } from "./Tasks";
 
@@ -38,7 +38,15 @@ const DOCS = [
   doc("s1", "spec", "specs"),
 ];
 
-function renderDocs(over: { scope?: Scope; gatePending?: boolean; preselectPath?: string | null } = {}) {
+function renderDocs(
+  over: {
+    scope?: Scope;
+    gatePending?: boolean;
+    preselectPath?: string | null;
+    item?: { title: string; bead_id: string | null };
+    sessions?: WorkerSession[];
+  } = {},
+) {
   const onCount = vi.fn();
   const gatePending = over.gatePending ?? true;
   render(
@@ -55,12 +63,16 @@ function renderDocs(over: { scope?: Scope; gatePending?: boolean; preselectPath?
       preselectPath={"preselectPath" in over ? over.preselectPath : GATE_PATH}
       gatePending={gatePending}
       gateArtifactPending={gatePending}
+      item={over.item}
+      sessions={over.sessions}
     />,
   );
   return { onCount };
 }
 
-const titles = (sel: string) => [...document.querySelectorAll(sel)].map((t) => t.textContent);
+/** Row ids in the order shown. */
+const ids = (sel = ".doc-row:not(.doc-fold)") => [...document.querySelectorAll(sel)].map((r) => r.getAttribute("data-document-id"));
+const rowOf = (id: string) => document.querySelector(`[data-document-id="${id}"]`) as HTMLElement;
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -79,9 +91,9 @@ describe("Documents (W11 · G)", () => {
   it("this node lists only its own documents, and folds each other node with documents into one counted row", async () => {
     const { onCount } = renderDocs();
     await screen.findByText("reviews g1");
-    expect(titles(".doc-row:not(.doc-fold) .doc-title")).toEqual(["reviews g1", "sessions r2"]);
-    expect(titles(".doc-fold-label")).toEqual(["spec · 1 spec", "verify · 1 review · 2 sessions"]);
-    expect(titles(".doc-fold-count")).toEqual(["1", "3"]);
+    expect(ids()).toEqual(["g1", "r2"]);
+    expect([...document.querySelectorAll(".doc-fold-label")].map((t) => t.textContent)).toEqual(["spec · 1 spec", "verify · 1 review · 2 sessions"]);
+    expect([...document.querySelectorAll(".doc-fold-count")].map((t) => t.textContent)).toEqual(["1", "3"]);
     // The gate's row and this node's one document.
     expect(onCount).toHaveBeenLastCalledWith(2);
   });
@@ -105,7 +117,7 @@ describe("Documents (W11 · G)", () => {
     );
     await screen.findByText("reviews g1");
     expect(document.querySelectorAll(".doc-fold")).toHaveLength(0);
-    expect(titles(".doc-row .doc-title")).toHaveLength(6);
+    expect(ids(".doc-row")).toHaveLength(6);
     expect(onCount).toHaveBeenLastCalledWith(6);
   });
 
@@ -123,39 +135,26 @@ describe("Documents (W11 · G)", () => {
     const { onCount } = renderDocs({ scope: "all" });
     await screen.findByText("reviews g1");
     expect(document.querySelectorAll(".doc-fold")).toHaveLength(0);
-    expect(titles(".doc-row .doc-title")).toEqual(["reviews g1", "specs s1", "reviews v1", "sessions v2", "sessions v3", "sessions r2"]);
+    expect(ids(".doc-row")).toEqual(["g1", "s1", "v1", "v2", "v3", "r2"]);
     expect(onCount).toHaveBeenLastCalledWith(6);
   });
 
-  it("the filter matches title, path, node and hook across every node, whatever the scope", async () => {
-    renderDocs();
-    await screen.findByText("reviews g1");
-    const box = screen.getByLabelText("filter documents");
-    await userEvent.type(box, "verify");
-    expect(titles(".doc-row:not([data-gate]) .doc-title")).toEqual(["reviews v1", "sessions v2", "sessions v3"]);
-    await userEvent.clear(box);
-    await userEvent.type(box, "on.spec.run");
-    expect(titles(".doc-row:not([data-gate]) .doc-title")).toEqual(["specs s1"]);
-    await userEvent.clear(box);
-    await userEvent.type(box, "sessions/r2");
-    expect(titles(".doc-row:not([data-gate]) .doc-title")).toEqual(["sessions r2"]);
-  });
-
-  it("a row is icon · title · node · hook · time · one kind label, a paperclip for an intake attachment, and no path", async () => {
+  it("an intake attachment keeps its title first, with `hook · time`, a paperclip, no node and no path", async () => {
     vi.spyOn(api, "getWorkItemDocuments").mockResolvedValue({
       work_item_id: "w1",
       documents: [doc("a1", "review", "plans", { attachment_kind: "plan", hook_point: "on.plan.requested" })],
     });
     renderDocs({ gatePending: false, preselectPath: null });
     const row = (await screen.findByText("plans a1")).closest(".doc-row") as HTMLElement;
-    expect(row.querySelector(".doc-sub")).toHaveTextContent("review · on.plan.requested");
+    expect(row.querySelector(".doc-sub")).toHaveTextContent(/^on\.plan\.requested/);
+    expect(row.querySelector(".doc-sub")).not.toHaveTextContent("review");
     expect(row.querySelector(".doc-kind")).toHaveTextContent(/^plan$/);
     expect(row).toHaveAttribute("title", ".engineering/plans/a1.md");
     expect(within(row).queryByText(".engineering/plans/a1.md")).toBeNull();
     expect(within(row).getByLabelText("attached at intake")).toHaveAttribute("title", "attached at intake");
   });
 
-  it("never shows a sha as a row title: an id-titled summary names its hook (W11 · H)", async () => {
+  it("never shows a sha on a row: an id-titled summary is its hook, with no second line (W11 · H)", async () => {
     vi.spyOn(api, "getWorkItemDocuments").mockResolvedValue({
       work_item_id: "w1",
       documents: [
@@ -164,19 +163,95 @@ describe("Documents (W11 · G)", () => {
       ],
     });
     renderDocs({ gatePending: false, preselectPath: null });
-    await screen.findByText("Session · on.review.local.run");
-    expect(titles(".doc-row .doc-title")).toEqual(["Session · on.review.local.run", "Session · on.mr.describe"]);
-    expect(titles(".doc-title").join(" ")).not.toMatch(/[0-9a-f]{8}…?[0-9a-f]{4,}/);
+    await screen.findByText("on.review.local.run");
+    expect([...document.querySelectorAll(".doc-row .doc-title")].map((t) => t.textContent)).toEqual(["on.review.local.run", "on.mr.describe"]);
+    expect(document.querySelectorAll(".doc-line2")).toHaveLength(0);
+    expect(document.querySelector(".linked-docs")!.textContent).not.toMatch(/[0-9a-f]{8}…?[0-9a-f]{4,}/);
   });
 
-  it("names an escalation turn's summary escalation, and shows its session id", async () => {
+  it("an escalation turn's summary is kind escalation, and its session id is not row text", async () => {
     vi.spyOn(api, "getWorkItemDocuments").mockResolvedValue({
       work_item_id: "w1",
-      documents: [doc("e1", "review", "sessions", { hook_point: "escalation", worker_session_id: "8cbfe6e27c1044b3e445c0f0d726357d" })],
+      documents: [doc("e1", "review", "sessions", { hook_point: "escalation", worker_session_id: "8cbfe6e27c1044b3e445c0f0d726357d", attempt: 2, round: 0 })],
     });
     renderDocs({ gatePending: false, preselectPath: null });
-    const row = (await screen.findByText("sessions e1")).closest(".doc-row") as HTMLElement;
+    const row = (await screen.findByText(/^escalation · turn 2/)).closest(".doc-row") as HTMLElement;
     expect(row.querySelector(".doc-kind")).toHaveTextContent(/^escalation$/);
-    expect(within(row).getByTitle("8cbfe6e27c1044b3e445c0f0d726357d")).toHaveTextContent("8cbfe6e2…6357d");
+    expect(within(row).queryByTitle("8cbfe6e27c1044b3e445c0f0d726357d")).toBeNull();
+    expect(row.textContent).not.toContain("8cbfe6e2");
+  });
+});
+
+describe("Documents rows (W13 · B)", () => {
+  const item = { title: "Chain review: cover hook configs and escalation logic", bead_id: "Kraft-df4tc" };
+  const runs = [
+    doc("d1", "review", "sessions", { hook_point: "on.review.requested", attempt: 1, round: 0, title: "Chain-review diff review (Kraft-df4tc)", worker_session_id: "s1", indexed_at: "2026-09-14T10:00:00Z" }),
+    doc("d2", "review", "sessions", { hook_point: "on.test.run", attempt: 1, round: 4, title: "Fix-loop judge: verify (round 4 decision)", worker_session_id: "s2", indexed_at: "2026-09-14T09:00:00Z" }),
+    doc("d3", "review", "sessions", { hook_point: "on.security.review", attempt: 2, round: 0, title: "Security review — Kraft-df4tc (chain review: hook configs and escalation logic)", worker_session_id: "s3", indexed_at: "2026-09-14T11:00:00Z" }),
+    doc("d4", "review", "sessions", { hook_point: "on.review.summary", attempt: 1, round: 0, title: item.title, worker_session_id: "s4", indexed_at: "2026-09-14T08:00:00Z" }),
+  ];
+  const session = (id: string, created: string) => ({ id, created_at: created }) as WorkerSession;
+
+  beforeEach(() => {
+    vi.spyOn(api, "getWorkItemDocuments").mockResolvedValue({ work_item_id: "w1", documents: runs });
+  });
+
+  it("a summary row is `hook · run label · time`, then its cleaned title as a second line", async () => {
+    renderDocs({ gatePending: false, preselectPath: null, item });
+    await screen.findByText(/^on\.review\.requested · attempt 1/);
+    expect(rowOf("d1").querySelector(".doc-title")).toHaveTextContent(/^on\.review\.requested · attempt 1 · /);
+    expect(rowOf("d1").querySelector(".doc-line2")).toHaveTextContent(/^Chain-review diff review$/);
+    expect(rowOf("d2").querySelector(".doc-title")).toHaveTextContent(/^on\.test\.run · round 4/);
+    expect(rowOf("d2").querySelector(".doc-line2")).toHaveTextContent("Fix-loop judge: verify (round 4 decision)");
+    expect(rowOf("d3").querySelector(".doc-title")).toHaveTextContent(/^on\.security\.review · attempt 2/);
+    expect(rowOf("d3").querySelector(".doc-line2")).toHaveTextContent(/^Security review$/);
+    // only the item's title: no second line
+    expect(rowOf("d4").querySelector(".doc-line2")).toBeNull();
+    // no node on the row, the path is its tooltip
+    expect(rowOf("d1")).toHaveAttribute("title", ".engineering/sessions/d1.md");
+    expect(rowOf("d1").textContent).not.toContain("review ·");
+  });
+
+  it("an older server with no run info shows just the hook", async () => {
+    vi.spyOn(api, "getWorkItemDocuments").mockResolvedValue({
+      work_item_id: "w1",
+      documents: [doc("o1", "review", "sessions", { hook_point: "on.review.requested", title: "Old one" })],
+    });
+    renderDocs({ gatePending: false, preselectPath: null });
+    const title = (await screen.findByText("Old one")).closest(".doc-row")!.querySelector(".doc-title")!;
+    expect(title.textContent).toMatch(/^on\.review\.requested( · .*)?$/);
+    expect(title.textContent).not.toMatch(/attempt|round|turn/);
+  });
+
+  it("puts the newest run on top: the session's created_at when known, indexed_at otherwise", async () => {
+    renderDocs({ gatePending: false, preselectPath: null, item });
+    await screen.findByText(/^on\.review\.requested/);
+    expect(ids()).toEqual(["d3", "d1", "d2", "d4"]);
+    document.body.innerHTML = "";
+    renderDocs({
+      gatePending: false,
+      preselectPath: null,
+      item,
+      sessions: [session("s1", "2026-09-14T07:00:00Z"), session("s2", "2026-09-14T12:00:00Z"), session("s3", "2026-09-14T06:00:00Z"), session("s4", "2026-09-14T05:00:00Z")],
+    });
+    await screen.findAllByText(/^on\.review\.requested/);
+    expect(ids()).toEqual(["d2", "d1", "d3", "d4"]);
+  });
+
+  it("the filter matches hook, run label, cleaned title and path", async () => {
+    renderDocs({ gatePending: false, preselectPath: null, item });
+    await screen.findByText(/^on\.review\.requested/);
+    const box = screen.getByLabelText("filter documents");
+    await userEvent.type(box, "on.test");
+    expect(ids()).toEqual(["d2"]);
+    await userEvent.clear(box);
+    await userEvent.type(box, "round 4");
+    expect(ids()).toEqual(["d2"]);
+    await userEvent.clear(box);
+    await userEvent.type(box, "security review");
+    expect(ids()).toEqual(["d3"]);
+    await userEvent.clear(box);
+    await userEvent.type(box, "sessions/d4");
+    expect(ids()).toEqual(["d4"]);
   });
 });

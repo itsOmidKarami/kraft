@@ -129,5 +129,15 @@
       { "kind": "no-console", "match": "^(?!login/)" },
       { "kind": "flow-completes", "match": "^flow-" }
     ]
+  },
+  "W13": {
+    "title": "Documents rows led by hook · run, Timeline rounds → sessions, event stream (no-new-flags: wave.mjs's built-in \"no newly flagged cells\" rule)",
+    "screens": ["item-documents", "item-timeline", "el-inspector", "el-right-pane", "flow-inspector-tabs-selection", "search"],
+    "rules": [
+      { "kind": "no-flag", "flag": "offscreen", "match": "." },
+      { "kind": "no-flag", "flag": "clipped-v", "match": "." },
+      { "kind": "no-console", "match": "^(?!login/)" },
+      { "kind": "flow-completes", "match": "^flow-inspector-tabs-selection/" }
+    ]
   }
 }

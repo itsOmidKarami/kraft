@@ -219,12 +219,13 @@ describe("WorkItemDetail (item page)", () => {
       },
     ] as never);
     await user.click(screen.getByRole("tab", { name: /timeline/i }));
-    // The Timeline list names the same events (W11 · F); the right pane is the one under test.
+    // Nothing selected: the right pane streams the node (W13 · D.4); a task run is one row.
     const pane = screen.getByTestId("right-pane-events");
-    expect(within(pane).getByText("Started task 3 — open_mr refuses a dirty worktree")).toBeInTheDocument();
-    expect(within(pane).getByText("3 of 6")).toBeInTheDocument();
-    await user.click(within(pane).getByRole("button", { name: "tasks" }));
-    expect(within(pane).queryByText("worker_session_started")).toBeNull();
+    expect(within(pane).getByText("Task 3 of 6")).toBeInTheDocument();
+    expect(pane.querySelector('.stream-row[data-kind="session"]')).not.toBeNull();
+    expect(pane.textContent).not.toContain("worker_session_started");
+    await user.click(within(pane).getByRole("button", { name: "gates" }));
+    expect(within(pane).queryByText("Task 3 of 6")).toBeNull();
   });
 
   const tev = (seq: number, type: string, node: string): KraftEvent =>
@@ -237,20 +238,52 @@ describe("WorkItemDetail (item page)", () => {
     tev(5, "judge_verdict", "verify"),
   ];
 
-  it("Timeline defaults to this node: its events flat, counted on the tab, the rest in one folded row (W11 · F)", async () => {
+  it("Timeline shows this node as rounds, newest first, the current round open, and folds nodes under all (W13 · C)", async () => {
     const user = userEvent.setup();
     renderDetailWithEvents(timelineEvents);
     await user.click(screen.getByRole("tab", { name: /timeline/i }));
+    // The tab still counts the scope's events (as built); the list counts rounds.
     expect(screen.getByRole("tab", { name: /timeline/i }).textContent).toBe("Timeline · 3");
     const list = screen.getByTestId("inspector-timeline");
-    expect(within(list).getAllByTestId(/^timeline-event-/)).toHaveLength(3);
-    expect(within(list).getByTestId("timeline-fold")).toHaveTextContent(/1 earlier node · 2 events/);
-    // The right pane opens on the node's newest event.
-    expect(within(list).getByTestId("timeline-event-5")).toHaveAttribute("data-selected", "true");
-    await user.click(within(list).getByRole("button", { name: "show all" }));
-    expect(screen.getByRole("tab", { name: /timeline/i }).textContent).toBe("Timeline · 5");
-    expect(within(list).queryByTestId("timeline-fold")).toBeNull();
-    expect(within(list).getByRole("button", { name: "all" })).toHaveAttribute("aria-pressed", "true");
+    expect(list).toHaveTextContent("ROUNDS · 2");
+    const current = within(list).getByTestId("timeline-round-verify-1");
+    const first = within(list).getByTestId("timeline-round-verify-0");
+    expect(current).toHaveTextContent("round 2");
+    expect(current).toHaveAttribute("aria-expanded", "true");
+    expect(first).toHaveTextContent("round 1");
+    expect(first).toHaveAttribute("aria-expanded", "false");
+    // node-level rows keep their place; the round events themselves are not rows
+    expect(within(list).getByTestId("timeline-event-3")).toHaveTextContent("node_started");
+    expect(within(list).queryByTestId("timeline-event-4")).toBeNull();
+    const order = [...list.querySelectorAll("button[data-trow]")].map((b) => b.getAttribute("data-testid"));
+    expect(order).toEqual(["timeline-round-verify-1", "timeline-round-verify-0", "timeline-event-3"]);
+    // Nothing is picked for the person: the right pane streams the node (D.4).
+    expect(list.querySelector('[data-selected="true"]')).toBeNull();
+
+    await user.click(within(list).getByRole("button", { name: "all" }));
+    expect(list).toHaveTextContent("ROUNDS · 3");
+    expect(within(list).getByTestId("timeline-node-verify")).toHaveTextContent(/^▾verify · 2 rounds/);
+    expect(within(list).getByTestId("timeline-node-spec")).toHaveTextContent(/^▸spec · 1 round/);
+    expect(within(list).getByTestId("timeline-node-verify")).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("Timeline rows are buttons: arrows move, Left/Right fold a round, a click selects it (W13 · C.4, C.5)", async () => {
+    const user = userEvent.setup();
+    renderDetailWithEvents(timelineEvents);
+    await user.click(screen.getByRole("tab", { name: /timeline/i }));
+    const list = screen.getByTestId("inspector-timeline");
+    const current = within(list).getByTestId("timeline-round-verify-1");
+    current.focus();
+    await user.keyboard("{ArrowLeft}");
+    expect(current).toHaveAttribute("aria-expanded", "false");
+    await user.keyboard("{ArrowRight}");
+    expect(current).toHaveAttribute("aria-expanded", "true");
+    await user.keyboard("{ArrowDown}");
+    expect(within(list).getByTestId("timeline-round-verify-0")).toHaveFocus();
+    await user.click(within(list).getByTestId("timeline-round-verify-0"));
+    expect(within(list).getByTestId("timeline-round-verify-0")).toHaveAttribute("data-selected", "true");
+    await user.click(within(list).getByTestId("timeline-event-3"));
+    expect(within(list).getByTestId("timeline-event-3")).toHaveAttribute("data-selected", "true");
   });
 
   it("Timeline and Tasks share one scope, and picking a pill rescopes to that node (W11 · F.1)", async () => {
@@ -688,6 +721,28 @@ describe("WorkItemDetail (item page)", () => {
     await userEvent.click(await screen.findByRole("tab", { name: /documents/i }));
     expect(await screen.findByText("not indexed yet")).toBeInTheDocument();
     expect(screen.queryByText("not written yet")).not.toBeInTheDocument();
+  });
+
+  it("heads the document pane with a one-line title, a one-line path and the index note (W12.2)", async () => {
+    vi.spyOn(api, "getWorkItemDocuments").mockResolvedValue({ work_item_id: "w1", documents: [] });
+    const path = ".engineering/reviews/2026-09-13-design-the-caching-layer-for-document-search.md";
+    vi.spyOn(api, "getWorkItemArtifact").mockResolvedValue({
+      work_item_id: "w1", path, title: "Review: Design the caching layer for document search",
+      content: "body", truncated: false, artifact_max_bytes: 1_000_000,
+    });
+    renderDetailAtGate();
+    await userEvent.click(await screen.findByRole("tab", { name: /documents/i }));
+    const head = (await screen.findByTestId("right-pane-doc")).querySelector(".doc-modal-title") as HTMLElement;
+    const name = head.querySelector(".doc-modal-name")!;
+    expect(name).toHaveAttribute("title", "Review: Design the caching layer for document search");
+    expect(name).toHaveAttribute("data-allow-ellipsis");
+    const pathEl = head.querySelector(".doc-path")!;
+    expect(pathEl).toHaveAttribute("title", path);
+    expect(pathEl).toHaveAttribute("data-allow-ellipsis");
+    expect(pathEl).toHaveTextContent(path);
+    // the path is its own line, not a meta chip beside the note
+    expect(head.querySelector(".doc-modal-meta")).not.toHaveTextContent(path);
+    expect(within(head).getByText("not indexed yet — read from the worktree")).toBeInTheDocument();
   });
 
   it("approves the gate from the artifact pane", async () => {

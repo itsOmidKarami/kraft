@@ -5,6 +5,7 @@ import { ConfigPane } from "./ConfigPane";
 import { Diff } from "./Diff";
 import { Doc, type DocSource } from "./Doc";
 import { GATE_DOC_ID } from "../selection";
+import { parseTimelineSelection, selectionNode } from "../timelineHelpers";
 import { Events } from "./Events";
 import { Log } from "./Log";
 
@@ -74,17 +75,18 @@ export function RightPane({
     }
     const source: DocSource =
       selection.id === GATE_DOC_ID ? { kind: "artifact", workItemId: item.id } : { kind: "document", id: selection.id };
-    return <Doc source={source} item={item} maximized={maximized} onToggleMaximize={onToggleMaximize} />;
+    return <Doc source={source} item={item} sessions={sessions} maximized={maximized} onToggleMaximize={onToggleMaximize} />;
   }
 
-  // timeline: `node` (a group) or `node:seq` (one event, W11 · F).
-  const tsel = selection.kind === "timeline-node" && selection.id ? selection.id : null;
+  // timeline: `session:<id>`, `round:<node>:<n>`, `event:<seq>`, or W11's
+  // `node:<seq>` / bare `node` (W13 · C.4).
+  const tsel = parseTimelineSelection(selection.kind === "timeline-node" ? selection.id : null);
   return (
     <Events
       events={events}
       sessions={sessions}
-      nodeId={tsel ? tsel.split(":")[0] : nodeId}
-      selectedSeq={tsel?.includes(":") ? Number(tsel.split(":")[1]) : null}
+      nodeId={selectionNode(tsel, events, sessions) ?? nodeId}
+      selection={tsel}
       onViewLog={onViewLog}
     />
   );

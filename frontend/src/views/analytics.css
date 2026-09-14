@@ -75,8 +75,21 @@ label.chip select {
     transparent, var(--color-divider) 48px,
     var(--color-divider) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
 }
-.node-row { grid-template-columns: 90px minmax(40px, 1fr) 40px 60px 60px 44px; }
-.repo-row { grid-template-columns: minmax(56px, 1fr) 44px 44px 60px 50px; }
+/* W12.4: the name column is as wide as its longest name (at least 14ch), so
+   `pre_mr_rebase` reads whole; the share bar is the column that gives. One grid
+   per table, rows on a subgrid, so every row's columns line up. */
+.table-block.by-node {
+  display: grid; column-gap: 10px;
+  grid-template-columns: minmax(14ch, max-content) minmax(40px, 1fr) 40px 60px 60px 44px;
+}
+/* by-repo has no bar to give, so the items column (right-aligned) takes the
+   slack and the numbers stay on the table's right edge. */
+.table-block.by-repo {
+  display: grid; column-gap: 10px;
+  grid-template-columns: minmax(14ch, max-content) minmax(44px, 1fr) 44px 60px 50px;
+}
+.table-block.by-node > *, .table-block.by-repo > * { grid-column: 1 / -1; }
+.node-row, .repo-row { grid-template-columns: subgrid; }
 .node-head, .repo-head {
   padding: 0 0 6px; background: none;
   font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
@@ -109,6 +122,8 @@ label.chip select {
 }
 
 @media (max-width: 767px) {
+  /* The phone stacks rows into cards (styles.css): no shared columns to line up. */
+  .table-block.by-node, .table-block.by-repo { display: flex; }
   /* E.5: one tile per row, 26px, the hairline runs under each instead. */
   .kpis { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .kpi { padding: 0 0 16px; border-left: 0; border-bottom: 1px solid var(--color-divider); }

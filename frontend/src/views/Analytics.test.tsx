@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -143,6 +146,13 @@ describe("AnalyticsView", () => {
     expect(container.querySelectorAll(".bar-col")).toHaveLength(0);
     expect(container.querySelector(".kpi-value")).toHaveTextContent("0");
     expect(container.querySelector(".kpi-sub")).toHaveTextContent(/^\+0 vs previous$/);
+  });
+
+  it("sizes the by-node and by-repo name columns to their names, the share bar gives (W12.4)", () => {
+    const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "analytics.css"), "utf-8");
+    expect(css).toMatch(/\.table-block\.by-node \{[^}]*grid-template-columns: minmax\(14ch, max-content\) minmax\(40px, 1fr\) 40px 60px 60px 44px;/);
+    expect(css).toMatch(/\.table-block\.by-repo \{[^}]*grid-template-columns: minmax\(14ch, max-content\) minmax\(44px, 1fr\) 44px 60px 50px;/);
+    expect(css).toMatch(/\.node-row, \.repo-row \{ grid-template-columns: subgrid; \}/);
   });
 
   it("draws eight week columns", async () => {
