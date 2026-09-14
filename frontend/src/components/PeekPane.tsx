@@ -147,10 +147,11 @@ export function PeekPane({ id, onClose }: { id: string; onClose: () => void }) {
           aria-expanded={full}
           onClick={() => setFull((v) => !v)}
         />
-        {/* W4.4: line 1 id · state · Open → · ✕; line 2 repo · template.
-            Neither line wraps. */}
+        {/* W10.D: one grid that never scrolls sideways -- id, state, MR and
+            the repo · template meta wrap inside the first cell; Open → and ✕
+            keep their own columns at any pane width. */}
         <div className="peek-head">
-          <div className="peek-head-row">
+          <div className="peek-head-id">
           <ShortId id={item.id} />
           {/* W8.8: words, not the identifier ("not started", never "not_started"). */}
           <span className="tag tag-outline tag-tight">{state.state.replace(/_/g, " ")}</span>
@@ -168,6 +169,10 @@ export function PeekPane({ id, onClose }: { id: string; onClose: () => void }) {
               MR !{item.mr_ref.number}
             </a>
           )}
+          <span className="peek-head-sub">
+            <span title={item.repo}>{repoName(item.repo)}</span> · <span>{item.chain_template}</span>
+          </span>
+          </div>
           {/* Kraft-3e16 (spec §2.2): `onClose` (Board's `setPeek(null)`,
               written with `replace: true`) clears the board's own ?peek
               before Link's push runs — Link fires this handler first, then
@@ -179,12 +184,6 @@ export function PeekPane({ id, onClose }: { id: string; onClose: () => void }) {
           <button className="btn btn-ghost peek-close" title="Close (Esc)" aria-label="Close" onClick={onClose}>
             <X size={12} />
           </button>
-          </div>
-          <div className="peek-head-row peek-head-sub">
-            <span title={item.repo}>{repoName(item.repo)}</span>
-            <span>·</span>
-            <span>{item.chain_template}</span>
-          </div>
         </div>
         <h2 className="peek-title">{item.title}</h2>
         <div className="peek-hero">

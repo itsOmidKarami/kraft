@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Eye, FileText, ListChecks, Notebook } from "@phosphor-icons/react";
+import { Eye, FileText, ListChecks, Notebook, Paperclip } from "@phosphor-icons/react";
 import * as api from "../../../api";
 import { shortIds } from "../../../format";
 import type { WorkItemDocument } from "../../../types";
@@ -124,12 +124,25 @@ export function Documents({
         onClick={() => onSelect(d.document_id)}
       >
         <Icon size={16} className="doc-icon" />
+        {/* W10.D: stacked lines, not columns -- the title (2-line clamp) with its
+            chips, then the path on one line cut from the left so the filename
+            survives (the whole path is its title). The chips drop under the
+            path when the row is too narrow to keep them beside the title. */}
         <span className="doc-text">
           <span className="doc-title" title={d.title}>{shortIds(d.title)}</span>
-          <span className="doc-path path" title={d.path}>{d.path}</span>
+          <span className="doc-chips">
+            <span className="tag tag-neutral doc-kind">{d.kind ?? d.source_kind}</span>
+            {d.attachment_kind && (
+              <span className="tag tag-outline doc-attached" title="attached at intake">
+                <Paperclip size={11} aria-hidden />
+                <span className="doc-attached-text">attached at intake</span>
+              </span>
+            )}
+          </span>
+          <span className="doc-path path" title={d.path} data-allow-ellipsis>
+            <span dir="ltr">{d.path}</span>
+          </span>
         </span>
-        <span className="tag tag-neutral doc-kind">{d.kind ?? d.source_kind}</span>
-        {d.attachment_kind && <span className="tag tag-outline doc-attached">attached at intake</span>}
       </button>
     );
   };
@@ -154,8 +167,10 @@ export function Documents({
               <FileText size={16} className="doc-icon" />
               <span className="doc-text">
                 <span className="doc-title path" title={preselectPath ?? undefined}>{preselectPath}</span>
+                <span className="doc-chips">
+                  <span className="row-sub">{gateArtifactPending ? "not indexed yet" : "not written yet"}</span>
+                </span>
               </span>
-              <span className="row-sub">{gateArtifactPending ? "not indexed yet" : "not written yet"}</span>
             </button>
           )}
         </>
