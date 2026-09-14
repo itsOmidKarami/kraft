@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="_ds/nocturne-d0c338da-cd62-483a-916a-d8539ca213a0/styles.css"><style>body{margin:0;background:#0f1019;font-family:Inter,system-ui,sans-serif;color:#e9e9ed}a{color:#b5abfc}a:hover{color:#d2cefd}button{font:inherit;cursor:pointer}textarea,input,select{font:inherit}</style></helmet>
+<div style="min-height:100vh;display:flex;flex-direction:column">
+  <div style="position:sticky;top:0;z-index:5;background:#0f1019;border-bottom:1px solid #292b31;padding:18px 28px 14px;display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
+      <span style="font-size:20px;font-weight:500">Kraft — UI sweep</span>
+      <span style="font-size:12.5px;color:#9397ab">{{ summary }}</span>
+      <span style="flex:1"></span>
+      <button onClick="{{ exportMd }}" style="background:#5d5294;color:#e7e5fe;border:0;border-radius:6px;padding:6px 12px;font-size:12.5px">Export punch list</button>
+      <button onClick="{{ exportJson }}" style="background:#22242d;color:#e9e9ed;border:1px solid #3f424d;border-radius:6px;padding:6px 12px;font-size:12.5px">Triage JSON</button>
+    </div>
+    <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;font-size:12px">
+      <div style="display:flex;gap:6px;align-items:center"><span style="color:#75798c;text-transform:uppercase;letter-spacing:.08em;font-size:10px">screen</span><select value="{{ screen }}" onChange="{{ setScreen }}" style="background:#161826;color:#e9e9ed;border:1px solid #3f424d;border-radius:6px;padding:4px 8px;font-size:12px"><sc-for list="{{ screenOptions }}" as="o" hint-placeholder-count="3"><option value="{{ o.id }}">{{ o.label }}</option></sc-for></select></div>
+      <div style="display:flex;gap:4px;align-items:center"><span style="color:#75798c;text-transform:uppercase;letter-spacing:.08em;font-size:10px;margin-right:4px">width</span><sc-for list="{{ widthChips }}" as="w" hint-placeholder-count="7"><button onClick="{{ w.on }}" style="background:{{ w.bg }};color:{{ w.fg }};border:1px solid #3f424d;border-radius:999px;padding:3px 9px;font-size:11.5px">{{ w.label }}</button></sc-for></div>
+      <div style="display:flex;gap:4px;align-items:center"><span style="color:#75798c;text-transform:uppercase;letter-spacing:.08em;font-size:10px;margin-right:4px">data</span><sc-for list="{{ dataChips }}" as="w" hint-placeholder-count="4"><button onClick="{{ w.on }}" style="background:{{ w.bg }};color:{{ w.fg }};border:1px solid #3f424d;border-radius:999px;padding:3px 9px;font-size:11.5px">{{ w.label }}</button></sc-for></div>
+      <div style="display:flex;gap:4px;align-items:center"><span style="color:#75798c;text-transform:uppercase;letter-spacing:.08em;font-size:10px;margin-right:4px">show</span><sc-for list="{{ showChips }}" as="w" hint-placeholder-count="4"><button onClick="{{ w.on }}" style="background:{{ w.bg }};color:{{ w.fg }};border:1px solid #3f424d;border-radius:999px;padding:3px 9px;font-size:11.5px">{{ w.label }}</button></sc-for></div>
+    </div>
+  </div>
+
+  <sc-if value="{{ missing }}" hint-placeholder-val="{{ false }}">
+  <div style="padding:60px 28px;max-width:720px;display:flex;flex-direction:column;gap:14px;font-size:13.5px;line-height:1.6;color:#cfd3e5">
+    <div style="font-size:16px;font-weight:500;color:#e9e9ed">No sweep loaded yet</div>
+    <div>{{ error }}</div>
+    <div>Run the sweep (see <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#e9e9ed">sweep/README.md</span>), then copy <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#e9e9ed">frontend/e2e-shots/sweep/</span> into this project as <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#e9e9ed">sweep-shots/</span>. This page reads <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#e9e9ed">sweep-shots/manifest.json</span> and shows one contact sheet per screen: rows are data variant × shell, columns are viewport widths, badges are the machine checks. Click a cell to triage it; Export builds the punch list grouped by component.</div>
+  </div>
+  </sc-if>
+
+  <div style="padding:22px 28px 80px;display:flex;flex-direction:column;gap:34px">
+    <sc-for list="{{ groups }}" as="g" hint-placeholder-count="2">
+    <section id="{{ g.id }}" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:120px">
+      <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+        <a href="#{{ g.id }}" style="font:600 12px ui-monospace,Menlo,monospace;text-decoration:none;color:#f3f5fe;background:#3f424d;padding:3px 8px;border-radius:5px">{{ g.id }}</a>
+        <span style="font-size:12px;color:#9397ab">{{ g.count }}</span>
+        <sc-if value="{{ g.spec }}" hint-placeholder-val="{{ false }}"><a href="{{ g.spec }}" target="_blank" style="font-size:12px;text-decoration:none">spec → {{ g.specLabel }}</a></sc-if>
+      </div>
+      <div style="display:grid;grid-template-columns:150px repeat({{ g.cols }}, minmax(0,1fr));gap:8px 10px;align-items:start">
+        <span></span>
+        <sc-for list="{{ g.widths }}" as="w" hint-placeholder-count="4"><span style="font:500 11px ui-monospace,Menlo,monospace;color:#75798c">{{ w }}</span></sc-for>
+        <sc-for list="{{ g.rows }}" as="r" hint-placeholder-count="2">
+          <div style="font-size:11.5px;color:#cfd3e5;padding-top:4px;word-break:break-word;line-height:1.35">{{ r.label }}<sc-if value="{{ r.shell }}" hint-placeholder-val="{{ false }}"><div style="font:10.5px ui-monospace,Menlo,monospace;color:#75798c">~{{ r.shell }}</div></sc-if></div>
+          <sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="4">
+            <div onClick="{{ c.open }}" style="display:flex;flex-direction:column;gap:5px;min-width:0;cursor:pointer;opacity:{{ c.opacity }}">
+              <sc-if value="{{ c.file }}" hint-placeholder-val="{{ true }}">
+              <div style="position:relative;background:#161826;border-radius:6px;box-shadow:0 0 0 1px {{ c.ring }};overflow:hidden;height:{{ c.h }}px;display:flex;align-items:flex-start;justify-content:center">
+                <img src="{{ c.src }}" loading="lazy" alt="{{ c.id }}" style="max-width:100%;max-height:100%;object-fit:contain;object-position:top;display:block">
+                <sc-if value="{{ c.status }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;top:6px;left:6px;font-size:10px;padding:1px 6px;border-radius:999px;background:{{ c.statusBg }};color:#fff">{{ c.status }}</span></sc-if>
+              </div>
+              <div style="display:flex;flex-wrap:wrap;gap:3px;min-height:14px">
+                <sc-for list="{{ c.flags }}" as="f" hint-placeholder-count="0"><span style="font:10px ui-monospace,Menlo,monospace;padding:1px 5px;border-radius:4px;background:{{ f.bg }};color:{{ f.fg }}">{{ f.t }}</span></sc-for>
+              </div>
+              </sc-if>
+            </div>
+          </sc-for>
+        </sc-for>
+      </div>
+    </section>
+    </sc-for>
+  </div>
+
+  <sc-if value="{{ sel }}" hint-placeholder-val="{{ false }}">
+  <div style="position:fixed;inset:0;background:rgba(6,7,12,.55);z-index:20" onClick="{{ close }}"></div>
+  <aside style="position:fixed;top:0;right:0;bottom:0;width:min(760px,100vw);background:#141522;box-shadow:-12px 0 40px rgba(0,0,0,.5);z-index:21;display:flex;flex-direction:column;overflow:hidden">
+    <div style="display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid #292b31">
+      <span style="font:600 12px ui-monospace,Menlo,monospace;color:#f3f5fe;word-break:break-all">{{ sel.id }}</span>
+      <span style="flex:1"></span>
+      <button onClick="{{ prev }}" style="background:#22242d;color:#e9e9ed;border:1px solid #3f424d;border-radius:6px;padding:4px 10px;font-size:12px">←</button>
+      <button onClick="{{ next }}" style="background:#22242d;color:#e9e9ed;border:1px solid #3f424d;border-radius:6px;padding:4px 10px;font-size:12px">→</button>
+      <button onClick="{{ close }}" style="background:transparent;color:#9397ab;border:0;font-size:18px;padding:0 4px">×</button>
+    </div>
+    <div style="flex:1;overflow:auto;display:flex;flex-direction:column;gap:16px;padding:16px 18px 30px">
+      <a href="{{ selSrc }}" target="_blank" style="display:block;flex:none;background:#0f1019;border-radius:8px;box-shadow:0 0 0 1px #292b31;overflow:hidden">{{ selImg }}</a>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;font-size:12.5px;line-height:1.5">
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <span style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#9397ab">Checks</span>
+          <sc-for list="{{ sel.checkRows }}" as="k" hint-placeholder-count="3">
+            <div style="display:flex;flex-direction:column;gap:2px;padding:6px 0;border-bottom:1px solid #292b31"><span style="color:{{ k.color }}">{{ k.label }}</span><sc-for list="{{ k.examples }}" as="x" hint-placeholder-count="0"><span style="font:11px ui-monospace,Menlo,monospace;color:#9397ab;word-break:break-all">{{ x }}</span></sc-for></div>
+          </sc-for>
+          <span style="font:11px ui-monospace,Menlo,monospace;color:#75798c;word-break:break-all;padding-top:6px">{{ sel.url }}</span>
+          <sc-if value="{{ sel.spec }}" hint-placeholder-val="{{ false }}"><a href="{{ sel.spec }}" target="_blank" style="font-size:12px;text-decoration:none">spec screen → {{ sel.specLabel }}</a></sc-if>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <span style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#9397ab">Triage</span>
+          <div style="display:flex;gap:4px;flex-wrap:wrap"><sc-for list="{{ statusChips }}" as="s" hint-placeholder-count="5"><button onClick="{{ s.on }}" style="background:{{ s.bg }};color:{{ s.fg }};border:1px solid #3f424d;border-radius:999px;padding:3px 10px;font-size:11.5px">{{ s.label }}</button></sc-for></div>
+          <input value="{{ tri.component }}" onChange="{{ setComponent }}" placeholder="component · e.g. board-row title, action-bar reflow, doc path" list="components" style="background:#0f1019;color:#e9e9ed;border:1px solid #3f424d;border-radius:6px;padding:7px 9px;font-size:12.5px">
+          <datalist id="components"><sc-for list="{{ componentOptions }}" as="o" hint-placeholder-count="0"><option value="{{ o }}"></option></sc-for></datalist>
+          <textarea value="{{ tri.note }}" onChange="{{ setNote }}" rows="7" placeholder="what is wrong · what it should be (spec ref)" style="background:#0f1019;color:#e9e9ed;border:1px solid #3f424d;border-radius:6px;padding:8px 9px;font-size:12.5px;line-height:1.5;resize:vertical"></textarea>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span style="font-size:11px;color:#75798c">priority</span><sc-for list="{{ priChips }}" as="s" hint-placeholder-count="2"><button onClick="{{ s.on }}" style="background:{{ s.bg }};color:{{ s.fg }};border:1px solid #3f424d;border-radius:999px;padding:2px 9px;font-size:11px">{{ s.label }}</button></sc-for><span style="flex:1"></span><button onClick="{{ applyToRow }}" title="Copy this triage to every width of the same row" style="background:#22242d;color:#e9e9ed;border:1px solid #3f424d;border-radius:6px;padding:4px 10px;font-size:11.5px">Apply to whole row</button></div>
+          <span style="font-size:11px;color:#75798c">saved locally · {{ triagedCount }} cells triaged</span>
+        </div>
+      </div>
+    </div>
+  </aside>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;thumbHeight&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:150,&quot;min&quot;:90,&quot;max&quot;:320,&quot;step&quot;:10,&quot;unit&quot;:&quot;px&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Layout&quot;},&quot;manifestPath&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;sweep-shots/manifest.json&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Data&quot;}}">
+class Component extends DCLogic {
+  state = { manifest: null, error: null, screen: 'all', widths: [], data: 'all', show: 'all', sel: null, triage: this.load() };
+  load() { try { return JSON.parse(localStorage.getItem('kraft.sweep.triage') || '{}'); } catch { return {}; } }
+  save(t) { localStorage.setItem('kraft.sweep.triage', JSON.stringify(t)); this.setState({ triage: t }); }
+  componentDidMount() {
+    const src = this.props.manifestPath ?? 'sweep-shots/manifest.json';
+    fetch(src).then(r => { if (!r.ok) throw new Error(`${src} → ${r.status} ${r.statusText}`); return r.json(); })
+      .then(m => this.setState({ manifest: m })).catch(e => this.setState({ error: String(e.message || e) }));
+    // Seed triage shipped beside the manifest; local edits win.
+    fetch(src.replace(/manifest\.json$/, 'triage.json')).then(r => r.ok ? r.json() : {}).then(seed => {
+      const merged = { ...seed, ...this.state.triage };
+      if (Object.keys(merged).length !== Object.keys(this.state.triage).length) this.save(merged);
+    }).catch(() => {});
+    this._key = (e) => { if (!this.state.sel) return; if (e.key === 'Escape') this.setState({ sel: null }); if (e.key === 'ArrowRight') this.step(1); if (e.key === 'ArrowLeft') this.step(-1); };
+    window.addEventListener('keydown', this._key);
+  }
+  componentWillUnmount() { window.removeEventListener('keydown', this._key); }
+
+  flagsOf(e) {
+    const c = e.checks || {}, f = [];
+    const n = (k) => (c[k] && c[k].count) || 0;
+    if (c.setupError) f.push(['setup', 'bad']);
+    if (c.pageOverflowX) f.push(['overflow-x', 'bad']);
+    if (n('offscreenRight')) f.push([`offscreen×${n('offscreenRight')}`, 'bad']);
+    if (n('clippedEllipsis')) f.push([`ellipsis×${n('clippedEllipsis')}`, 'warn']);
+    if (n('clippedVertical')) f.push([`clipped-v×${n('clippedVertical')}`, 'warn']);
+    if (n('smallTargets')) f.push([`target<44×${n('smallTargets')}`, 'warn']);
+    if (n('smallInputs')) f.push([`input<16×${n('smallInputs')}`, 'warn']);
+    if (n('nestedScrollers')) f.push([`nested-scroll×${n('nestedScrollers')}`, 'info']);
+    if ((c.consoleErrors || []).length) f.push([`console×${c.consoleErrors.length}`, 'bad']);
+    if ((e.chromeMoved || []).length) f.push([`chrome-moved`, 'bad']);
+    return f;
+  }
+  specFor(e) {
+    const S = 'design_handoff_kraft_v3/screens/';
+    const phone = e.width < 768;
+    const M = { board: 'mobile-m01-board', 'board-peek': 'mobile-m03-peek-search', item: 'mobile-m04-item-running', composer: 'mobile-m08-composers', 'new-item': 'mobile-m09-new-work-item', 'settings-policy': 'mobile-m10-settings-policy', 'settings-access': 'mobile-m11-access-notifications', 'settings-notify': 'mobile-m11-access-notifications', 'settings-repos': 'mobile-m12-repos', 'settings-chains': 'mobile-m13-chains', 'settings-plugins': 'mobile-m14-plugins-steering', 'settings-steering': 'mobile-m14-plugins-steering', analytics: 'mobile-m15-analytics-intake-appearance', 'settings-intake': 'mobile-m15-analytics-intake-appearance', 'settings-appearance': 'mobile-m15-analytics-intake-appearance', login: 'mobile-m16-login' };
+    const D = { board: 'desktop-04-board', 'board-peek': 'desktop-05-board-peek', archived: 'desktop-07-archived', item: 'desktop-12-item-tasks', 'item-tasks': 'desktop-12-item-tasks', 'item-changes': 'desktop-42-changes-corrected', 'item-documents': 'desktop-44-gate-review-spec', 'item-timeline': 'desktop-15-item-timeline', 'item-config': 'desktop-41-config-corrected', 'item-log': 'desktop-43-log-maximized-corrected', composer: 'desktop-17-paused-steer', 'new-item': 'desktop-10-new-work-item', search: 'desktop-05-board-peek', analytics: 'desktop-35-analytics', 'settings-repos': 'desktop-24-repos', 'settings-chains': 'desktop-27-chains', 'settings-plugins': 'desktop-28-plugins', 'settings-policy': 'desktop-29-policy', 'settings-steering': 'desktop-30-steering', 'settings-intake': 'desktop-31-auto-intake', 'settings-notify': 'desktop-32-notifications', 'settings-access': 'desktop-33-access', 'settings-appearance': 'desktop-34-appearance', 'settings-index': 'desktop-01-sidebar-settings-open', login: 'desktop-36-login' };
+    const ITEM = { paused: '17-paused-steer', capped: '18-capped-escalate', escalating: '18b-escalation-running', gate: '19-gate-approve-reject', question: '20-agent-question', not_started: '21-not-started', rate_limited: '22-rate-limited', budget: '23-budget-stopped', running: '38-item-progress' };
+    let name = phone ? M[e.screen] : D[e.screen];
+    if (!phone && e.screen === 'item') { const st = Object.keys(ITEM).find(k => e.variant.startsWith(k)); if (st) name = 'desktop-' + ITEM[st]; }
+    if (!phone && e.screen === 'composer') { if (e.variant.startsWith('reject') || e.variant.startsWith('escalate')) name = 'desktop-19-gate-approve-reject'; if (e.variant.startsWith('answer')) name = 'desktop-20-agent-question'; if (e.variant.startsWith('raise')) name = 'desktop-23-budget-stopped'; if (e.variant.startsWith('steer-retry')) name = 'desktop-18-capped-escalate'; }
+    if (!phone && e.width < 1280 && (e.screen === 'board' || e.screen === 'board-peek')) name = 'desktop-46-board-1100-peek-overlay';
+    if (!phone && e.width < 1280 && e.screen.startsWith('item')) name = 'desktop-47-item-tablet';
+    return name ? { spec: S + name + '.png', specLabel: name.replace(/^(desktop|mobile)-/, '') } : { spec: false, specLabel: '' };
+  }
+  step(d) {
+    const ids = this._visibleIds || [];
+    const i = ids.indexOf(this.state.sel);
+    if (i < 0) return;
+    this.setState({ sel: ids[(i + d + ids.length) % ids.length] });
+  }
+  exportMd = () => {
+    const { manifest, triage } = this.state; if (!manifest) return;
+    const by = {};
+    for (const e of manifest.entries) { const t = triage[e.id]; if (!t || !t.status || t.status === 'ok') continue; const k = t.component || '(untagged)'; (by[k] ??= []).push({ e, t }); }
+    let md = `# Kraft UI punch list\n\n_${new Date().toISOString().slice(0, 10)} · ${Object.values(by).flat().length} findings in ${Object.keys(by).length} components_\n\n`;
+    for (const [comp, rows] of Object.entries(by).sort((a, b) => b[1].length - a[1].length)) {
+      md += `## ${comp}\n\n`;
+      const notes = {};
+      for (const { e, t } of rows) { const key = `${t.pri || 'P2'}|${t.status}|${(t.note || '').trim()}`; (notes[key] ??= []).push(e); }
+      for (const [key, es] of Object.entries(notes)) {
+        const [pri, status, note] = key.split('|');
+        md += `- **${pri}** · ${status} · ${note || '(no note)'}\n  - shots: ${es.map(e => `\`${e.id}\``).join(', ')}\n  - files: ${es.map(e => `sweep-shots/${e.file}`).join(', ')}\n`;
+      }
+      md += '\n';
+    }
+    this.download('kraft-punchlist.md', md, 'text/markdown');
+  };
+  exportJson = () => this.download('kraft-sweep-triage.json', JSON.stringify(this.state.triage, null, 1), 'application/json');
+  download(name, text, type) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
+
+  renderVals() {
+    const { manifest, error, screen, widths, data, show, sel, triage } = this.state;
+    const thumbH = this.props.thumbHeight ?? 150;
+    const chip = (label, on, active, tone) => ({ label, on, bg: active ? (tone || '#5d5294') : '#161826', fg: active ? '#fff' : '#cfd3e5' });
+    const STATUS_BG = { bug: '#b4404a', ux: '#c07a2c', ok: '#3d7a4f', dup: '#3f424d' };
+    const FLAG = { bad: ['#4a2230', '#ffb3bd'], warn: ['#453619', '#ffd48a'], info: ['#22242d', '#9397ab'] };
+    const setScreen = (ev) => this.setState({ screen: ev.target.value });
+    const toggleW = (w) => () => this.setState({ widths: widths.includes(w) ? widths.filter(x => x !== w) : [...widths, w] });
+    const tri = sel ? (triage[sel] || {}) : {};
+    const setTri = (patch) => this.save({ ...triage, [sel]: { ...(triage[sel] || {}), ...patch } });
+
+    if (!manifest) {
+      return { missing: !!error || !manifest, error: error || 'loading sweep-shots/manifest.json…', summary: '', groups: [], screenOptions: [{ id: 'all', label: 'all screens' }], widthChips: [], dataChips: [], showChips: [], sel: null, setScreen, exportMd: this.exportMd, exportJson: this.exportJson, screen, tri, statusChips: [], priChips: [], componentOptions: [], triagedCount: 0, selSrc: '', selId: '', selImg: null };
+    }
+    const entries = manifest.entries.map(e => ({ ...e, flagList: e.flags ? e.flags.map(f => [f, /setup|overflow|offscreen|console|chrome/.test(f) ? 'bad' : /nested/.test(f) ? 'info' : 'warn']) : this.flagsOf(e) }));
+    const allW = manifest.widths || [...new Set(entries.map(e => e.width))].sort((a, b) => a - b);
+    const filt = entries.filter(e => (screen === 'all' || e.screen === screen) && (!widths.length || widths.includes(e.width)) && (data === 'all' || e.data === data)
+      && (show === 'all' || (show === 'flagged' && e.flagList.length) || (show === 'untriaged' && !(triage[e.id] && triage[e.id].status)) || (show === 'bugs' && triage[e.id] && (triage[e.id].status === 'bug' || triage[e.id].status === 'ux'))));
+    const screens = manifest.screens || [...new Set(entries.map(e => e.screen))];
+    const groups = [];
+    const visible = [];
+    for (const s of screens) {
+      const es = filt.filter(e => e.screen === s); if (!es.length) continue;
+      const gw = allW.filter(w => es.some(e => e.width === w));
+      const rowsMap = new Map();
+      for (const e of es) { const k = `${e.variant}~${e.shell}`; if (!rowsMap.has(k)) rowsMap.set(k, { label: e.variant, shell: e.shell !== 'auto' ? e.shell : false, by: {} }); rowsMap.get(k).by[e.width] = e; }
+      const rows = [...rowsMap.values()].map(r => ({ ...r, cells: gw.map(w => {
+        const e = r.by[w]; if (!e) return { file: false, id: '', open: () => {}, opacity: 1, flags: [], h: thumbH, src: '', ring: '#292b31', status: false, statusBg: '' };
+        visible.push(e.id);
+        const t = triage[e.id] || {};
+        return { id: e.id, file: e.file, src: 'sweep-shots/' + e.file, h: thumbH, open: () => this.setState({ sel: e.id }),
+          ring: t.status ? STATUS_BG[t.status] : e.flagList.length ? '#6b3a44' : '#292b31', opacity: t.status === 'ok' || t.status === 'dup' ? 0.45 : 1,
+          status: t.status || false, statusBg: STATUS_BG[t.status] || '#3f424d',
+          flags: e.flagList.map(([f, tone]) => ({ t: f, bg: FLAG[tone][0], fg: FLAG[tone][1] })) };
+      }) }));
+      const spec = this.specFor(es[0]);
+      groups.push({ id: s, count: `${es.length} shots · ${es.filter(e => e.flagList.length).length} flagged · ${es.filter(e => triage[e.id] && triage[e.id].status).length} triaged`, widths: gw, cols: gw.length, rows, ...spec });
+    }
+    this._visibleIds = visible;
+    const selE = sel ? entries.find(e => e.id === sel) : null;
+    const c = selE ? selE.checks || {} : {};
+    const checkRows = selE ? [
+      c.setupError && { label: `setup error · ${c.setupError}`, color: '#ffb3bd', examples: [] },
+      { label: `page overflow-x · ${c.pageOverflowX ? 'YES' : 'no'}`, color: c.pageOverflowX ? '#ffb3bd' : '#9397ab', examples: [] },
+      ...['offscreenRight', 'clippedEllipsis', 'clippedVertical', 'smallTargets', 'smallInputs', 'nestedScrollers'].map(k => c[k] && { label: `${k} · ${c[k].count}`, color: c[k].count ? (k === 'nestedScrollers' ? '#cfd3e5' : '#ffd48a') : '#9397ab', examples: c[k].examples || [] }),
+      { label: `console errors · ${(c.consoleErrors || []).length}`, color: (c.consoleErrors || []).length ? '#ffb3bd' : '#9397ab', examples: c.consoleErrors || [] },
+      selE.chromeMoved && selE.chromeMoved.length && { label: `chrome moved on scroll · ${selE.chromeMoved.join(', ')}`, color: '#ffb3bd', examples: [] },
+    ].filter(Boolean) : [];
+    const components = [...new Set(Object.values(triage).map(t => t.component).filter(Boolean))].sort();
+    const flaggedN = entries.filter(e => e.flagList.length).length;
+    const triagedN = Object.values(triage).filter(t => t.status).length;
+    return {
+      missing: false, error: '',
+      summary: `${entries.length} shots · ${screens.length} screens · ${flaggedN} flagged by checks · ${triagedN} triaged · run ${String(manifest.generated || '').slice(0, 16).replace('T', ' ')}`,
+      screen, setScreen, screenOptions: [{ id: 'all', label: `all screens (${entries.length})` }, ...screens.map(s => ({ id: s, label: `${s} (${entries.filter(e => e.screen === s).length})` }))],
+      widthChips: allW.map(w => chip(String(w), toggleW(w), widths.includes(w))),
+      dataChips: ['all', 'default', 'long', 'many', 'empty'].map(d => chip(d, () => this.setState({ data: d }), data === d)),
+      showChips: [['all', 'all'], ['flagged', 'flagged'], ['untriaged', 'untriaged'], ['bugs', 'bugs + ux']].map(([id, l]) => chip(l, () => this.setState({ show: id }), show === id)),
+      groups,
+      sel: selE ? { ...selE, src: 'sweep-shots/' + selE.file, checkRows, ...this.specFor(selE) } : null,
+      selSrc: selE ? 'sweep-shots/' + selE.file : '', selId: selE ? selE.id : '',
+      selImg: selE ? React.createElement('img', { src: 'sweep-shots/' + selE.file, alt: selE.id, style: { width: '100%', display: 'block' } }) : null,
+      close: () => this.setState({ sel: null }), prev: () => this.step(-1), next: () => this.step(1),
+      tri: { component: tri.component || '', note: tri.note || '' },
+      statusChips: ['bug', 'ux', 'ok', 'dup'].map(s => chip(s, () => setTri({ status: tri.status === s ? null : s }), tri.status === s, STATUS_BG[s])),
+      priChips: ['P1', 'P2'].map(p => chip(p, () => setTri({ pri: p }), (tri.pri || 'P2') === p)),
+      setComponent: (ev) => setTri({ component: ev.target.value }), setNote: (ev) => setTri({ note: ev.target.value }),
+      applyToRow: () => { if (!selE) return; const t = { ...triage }; for (const e of entries) if (e.screen === selE.screen && e.variant === selE.variant && e.shell === selE.shell) t[e.id] = { ...(t[e.id] || {}), ...tri }; this.save(t); },
+      componentOptions: components, triagedCount: triagedN,
+      exportMd: this.exportMd, exportJson: this.exportJson,
+    };
+  }
+}
+</script>
+</body>
+</html>
