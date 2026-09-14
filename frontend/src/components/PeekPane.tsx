@@ -4,20 +4,13 @@ import { ArrowSquareOut, X } from "@phosphor-icons/react";
 import * as api from "../api";
 import { useStore } from "../store";
 import { deriveState } from "../deriveState";
-import { Gate } from "./Gate";
 import { StatusGlyph, TaskBar, TaskLine } from "./ui";
-import { BudgetCard } from "./BudgetCard";
-import { CappedCard } from "./CappedCard";
-import { PausedCard } from "./PausedCard";
 import { ago, clock, logLineText, repoName } from "../format";
 import { ShortId } from "./ShortId";
 import type { LogLine } from "../types";
-import {
-  EscalatedCard,
-  EscalatingPill,
-  dismissedTurnId,
-} from "../views/work_item/ActionBar/EscalationCard";
-import { useActionBar } from "../views/work_item/ActionBar/useActionBar";
+import { dismissedTurnId } from "../views/work_item/ActionBar/EscalationCard";
+import { ItemCard, type ComposerKind } from "../views/work_item/ActionBar/ItemCard";
+import { SELECTION_KEY } from "../views/work_item/useItemUrlState";
 
 /**
  * The board's peek pane (UI v2 · 05): the row's own detail, without leaving
@@ -25,11 +18,18 @@ import { useActionBar } from "../views/work_item/ActionBar/useActionBar";
  * `hydrateItem` (detail endpoint) plus the last few log lines of the current
  * session -- no new endpoint.
  *
- * A `needs_context` stop (an agent's question) has no reusable card outside
- * `WorkItemDetail.tsx`, which this group does not own -- Open → is the answer
- * path for that one state until that's split out.
+ * Its action card is the item page's own (W11 · I), rendered narrow.
  */
-export function PeekPane({ id, onClose }: { id: string; onClose: () => void }) {
+export function PeekPane({
+  id,
+  onClose,
+  compose,
+}: {
+  id: string;
+  onClose: () => void;
+  /** The composer a board row's button asked for (W11 · B.3). */
+  compose?: ComposerKind;
+}) {
   const item = useStore((s) => s.workItems[id]);
   const sessions = useStore((s) => s.sessionsByItem[id] ?? []);
   const events = useStore((s) => s.eventsByItem[id] ?? []);
@@ -80,29 +80,27 @@ export function PeekPane({ id, onClose }: { id: string; onClose: () => void }) {
       .then((r) => setLines(r.lines.slice(-4)))
       .catch(() => setLines([]));
   }, [currentSession?.id]);
-  const [dismissed, setDismissed] = useState(() => dismissedTurnId(id));
   const [full, setFull] = useState(false);
-  const { busy, err, run } = useActionBar(id);
   const navigate = useNavigate();
 
   if (!item) return null;
-  // Same events/sessions the header tag and the card must agree on -- the
-  // card used to test raw fields (item.cappedOut etc.) instead of this, so a
-  // stranded needs_human stop could show "capped" in the header and a card
-  // that refused to act (Kraft-av3t).
+  // Same events/sessions the header tag and the card must agree on (Kraft-av3t).
   const rawState = deriveState(item, sessions, events);
-  const gate = item.status === "needs_human" ? item.pending_gate : null;
-  const escalationTurns = sessions
+  const latestTurn = sessions
     .filter((s) => s.hook_point === "escalation")
-    .sort((a, b) => a.created_at.localeCompare(b.created_at));
-  const latestTurn = escalationTurns.at(-1);
-  // Same idiom as the item page's ActionBar: dismissing an escalated card is
-  // client-side-only state, so re-derive without that escalation session
-  // rather than leaving the header stuck on a card the user already closed.
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))
+    .at(-1);
+  // Same idiom as the card: a dismissed escalated turn is client-side state
+  // (localStorage), so the header re-derives without it too.
   const state =
-    rawState.state === "escalated" && latestTurn && dismissed === latestTurn.id
+    rawState.state === "escalated" && latestTurn && dismissedTurnId(id) === latestTurn.id
       ? deriveState(item, [], events)
       : rawState;
+  // The card's item-page doors: close the peek first (Kraft-3e16), then go.
+  const openItem = (hash = "") => {
+    onClose();
+    navigate(`/work-items/${item.id}${hash}`);
+  };
 
   const nodes = item.chain_definition.nodes;
   const rawIndex = item.current_node_id ? nodes.findIndex((n) => n.id === item.current_node_id) : -1;
@@ -209,50 +207,26 @@ export function PeekPane({ id, onClose }: { id: string; onClose: () => void }) {
             </div>
           ))}
         </div>
-        {/* Selected from `state.state`, the same derivation the header tag
-            above reads -- so the two can never disagree (Kraft-av3t). */}
-        {state.state === "gate" && gate ? (
-          <Gate item={item} gate={gate} sessions={sessions} navigateReject />
-        ) : state.state === "budget" ? (
-          <BudgetCard item={item} sessions={sessions} />
-        ) : state.state === "capped" ? (
-          <CappedCard item={item} sessions={sessions} events={events} />
-        ) : state.state === "paused" || state.state === "not_started" ? (
-          <PausedCard item={item} sessions={sessions} />
-        ) : state.state === "escalated" && latestTurn ? (
-          <EscalatedCard
-            item={item}
-            session={latestTurn}
-            events={events}
-            // The reply composer lives on the item page's action bar, not
-            // in this pane -- same carve-out as `question` above.
-            onOpenReply={() => navigate(`/work-items/${item.id}`)}
-            onDismiss={() => setDismissed(latestTurn.id)}
-          />
-        ) : state.state === "escalating" && latestTurn ? (
-          // Nobody is needed while the turn runs (deriveState's own
-          // comment) -- the pill reads "agent is on it", not a demand.
-          <EscalatingPill
-            turn={latestTurn.attempt}
-            auto={Boolean(
-              events.find(
-                (e) =>
-                  e.type === "escalation_message" &&
-                  e.payload.session_id === latestTurn.id,
-              )?.payload.auto,
-            )}
-            busy={busy}
-            err={err}
-            onStop={() => run(() => api.stopEscalation(item.id), "Agent stopped")}
-          />
-        ) : state.needsYou ? (
-          <div className="card attention-card">
-            <p>Needs a decision this pane cannot make yet.</p>
-            <Link className="btn btn-secondary" to={`/work-items/${item.id}`} onClick={onClose}>
-              Open →
-            </Link>
-          </div>
-        ) : null}
+        {/* The item page's own card, narrow (W11 · I): the same buttons, More
+            actions and inline composers on every state, so the two never
+            drift apart. Keyed on the composer a board row asked for, so a
+            second row's button opens its own. */}
+        <ItemCard
+          key={`${item.id}:${compose ?? ""}`}
+          variant="peek"
+          item={item}
+          sessions={sessions}
+          events={events}
+          initialOpen={compose}
+          onOpenItem={() => openItem()}
+          onReviewChanges={() => openItem("#tab=changes")}
+          onEditChain={() => openItem("#tab=config")}
+          reviewHref={(node, tab, sel) => {
+            const p = new URLSearchParams({ node, tab });
+            if (SELECTION_KEY[tab] && sel) p.set(SELECTION_KEY[tab], sel);
+            return `/work-items/${item.id}#${p}`;
+          }}
+        />
         {lines.length > 0 && (
           <div className="peek-log">
             {lines.map((l) => (

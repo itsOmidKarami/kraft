@@ -223,7 +223,58 @@ describe("PeekPane", () => {
   // Kraft-av3t: the card is selected from the same `deriveState` the header
   // tag reads, so a stranded needs_human stop (no cappedOut, no pending_gate)
   // can't show "capped" in the header with a card that refuses to act.
-  it("renders PausedCard's Start button for a created-but-never-started item", () => {
+  it("renders the item page's card, narrow: no stats line, no document link, Open item → first in More (W11 · I)", async () => {
+    setOneItem({ status: "needs_human", pending_gate: "plan_approval", current_node_id: "plan", gate_artifact: "docs/plan.md" });
+    renderPeek();
+    const card = document.querySelector(".peek-pane .item-card") as HTMLElement;
+    expect(card).toBeTruthy();
+    expect(card.querySelector(".item-card-stats")).toBeNull();
+    expect(within(card).queryByRole("link", { name: /review plan|read document/i })).toBeNull();
+    await userEvent.click(within(card).getByRole("button", { name: "More actions" }));
+    expect(screen.getAllByRole("menuitem")[0]).toHaveTextContent("Open item →");
+  });
+
+  it.each<[string, Partial<WorkItem>, string[]]>([
+    ["gate", { status: "needs_human", pending_gate: "plan_approval", current_node_id: "plan" }, ["Approve", "Reject"]],
+    ["running", { status: "active" }, ["Pause"]],
+    ["paused", { status: "paused" }, ["Resume", "Steer"]],
+    ["capped", { status: "needs_human", cappedOut: { cycles: 3, attempts: 3 } }, ["Steer & retry", "Escalate"]],
+    ["budget", { status: "needs_human", budget: { scope: "work_item", spent_usd: 5, cap_usd: 5 } }, ["Raise budget", "Escalate"]],
+    ["question", { status: "needs_human", needs_context_question: "which?" }, ["Answer"]],
+    ["done", { status: "completed", mr_ref: { number: 1, url: "https://x" } }, ["Open MR"]],
+  ])("%s: the peek's button row is the state's set", (_, over, want) => {
+    setOneItem(over);
+    renderPeek();
+    const row = document.querySelector(".peek-pane .item-card-actions") as HTMLElement;
+    expect([...row.querySelectorAll(":scope > button, :scope > a")].map((b) => b.textContent?.trim())).toEqual(want);
+  });
+
+  it("opens on the composer a board row's button asked for, inside the peek (W11 · B.3, I.3)", () => {
+    setOneItem({ status: "needs_human", cappedOut: { cycles: 3, attempts: 3 } });
+    render(
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <PeekPane id="w1" onClose={vi.fn()} compose="steerRetry" />
+      </MemoryRouter>,
+    );
+    const pane = screen.getByLabelText("peek");
+    expect(within(pane).getByLabelText(/composer message/i)).toBeInTheDocument();
+  });
+
+  it("Escape in More actions closes the menu, not the peek", async () => {
+    const onClose = vi.fn();
+    setOneItem({ status: "active" });
+    render(
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <PeekPane id="w1" onClose={onClose} />
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("renders the card's Start button for a created-but-never-started item", () => {
     // paused with no current_node_id derives to "not_started" (Kraft-av3t);
     // it must still get PausedCard's neverStarted branch, not a blank pane.
     setOneItem({ status: "paused", current_node_id: null });
@@ -231,7 +282,7 @@ describe("PeekPane", () => {
     expect(screen.getByRole("button", { name: /start/i })).toBeInTheDocument();
   });
 
-  it("renders CappedCard, not the generic refusal, for a stranded needs_human stop", () => {
+  it("renders the capped card, not a refusal, for a stranded needs_human stop", () => {
     setOneItem({ status: "needs_human" });
     renderPeek();
     expect(document.querySelector(".tag-outline")?.textContent).toBe("capped");

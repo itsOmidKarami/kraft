@@ -239,6 +239,6 @@ export async function scrollAllToBottom(page: Page) {
 export async function chromeRects(page: Page) {
   return page.evaluate(() => {
     const pick = (sel: string) => { const el = document.querySelector(sel); return el ? Math.round(el.getBoundingClientRect().top) : null; };
-    return { header: pick("header, .app-header, .detail-head"), actionBar: pick(".action-bar, .item-actions, .control-row"), tabs: pick('[role="tablist"]'), stageGraph: pick(".stage-graph") };
+    return { header: pick("header, .app-header, .detail-head"), actionBar: pick(".item-card-actions, .item-actions, .control-row"), tabs: pick('[role="tablist"]'), stageGraph: pick(".stage-graph") };
   });
 }

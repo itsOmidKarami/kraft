@@ -6,7 +6,7 @@ import type { WorkItem } from "../types";
 import { BottomNav } from "./BottomNav";
 
 beforeEach(() => {
-  useStore.setState({ workItems: {} } as never);
+  useStore.setState({ workItems: {}, sessionsByItem: {}, eventsByItem: {} } as never);
 });
 
 describe("BottomNav", () => {
@@ -43,5 +43,24 @@ describe("BottomNav", () => {
     expect(
       within(screen.getByRole("link", { name: /search/i })).queryByText("1"),
     ).toBeNull();
+  });
+
+  it("leaves an escalating item out of the badge (W11 · J.3)", () => {
+    useStore.setState({
+      workItems: { w1: { id: "w1", status: "needs_human", pending_gate: "plan_approval" } as WorkItem },
+      sessionsByItem: { w1: [{ id: "e1", hook_point: "escalation", status: "running", created_at: "t" }] },
+      eventsByItem: {
+        w1: [
+          { seq: 1, work_item_id: "w1", type: "gate_requested", payload: {}, created_at: "t" },
+          { seq: 2, work_item_id: "w1", type: "escalation_message", payload: { session_id: "e1" }, created_at: "t" },
+        ],
+      },
+    } as never);
+    render(
+      <MemoryRouter>
+        <BottomNav />
+      </MemoryRouter>,
+    );
+    expect(document.querySelector(".bottom-nav-badge")).toBeNull();
   });
 });

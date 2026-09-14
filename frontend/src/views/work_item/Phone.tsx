@@ -3,14 +3,14 @@ import { Link, useNavigate } from "react-router-dom";
 import { CaretRight, Flag, ShieldCheck } from "@phosphor-icons/react";
 import * as api from "../../api";
 import { Row, RowText, StatusGlyph, Tabs } from "../../components/ui";
-import { deriveState } from "../../deriveState";
+import type { DerivedState } from "../../deriveState";
 import { elapsedBetween, nodeRunSpan } from "../../format";
-import { useStore } from "../../store";
+import { useItemStates, useStore } from "../../store";
 import type { KraftEvent, WorkerSession, WorkItem, WorkItemDiff } from "../../types";
 import { Changes } from "./Inspector/Changes";
 import { Config } from "./Inspector/Config";
 import { Documents } from "./Inspector/Documents";
-import { Tasks } from "./Inspector/Tasks";
+import { Tasks, type Scope } from "./Inspector/Tasks";
 import { Diff } from "./RightPane/Diff";
 import { Doc } from "./RightPane/Doc";
 import { Log } from "./RightPane/Log";
@@ -29,21 +29,22 @@ import { nodeState } from "./StageGraph";
  *  counts against the group the item is actually in there. Not imported
  *  from Board.tsx: its groups are local render state (facet filters), not
  *  something this page can reach without becoming a Board dependency. */
-const SWIPE_GROUPS: { label: string; test: (i: WorkItem) => boolean }[] = [
-  { label: "needs you", test: (i) => deriveState(i).needsYou },
+const SWIPE_GROUPS: { label: string; test: (d: DerivedState) => boolean }[] = [
+  { label: "needs you", test: (d) => d.needsYou },
   {
     label: "running",
-    test: (i) => ["running", "rate_limited", "waiting"].includes(deriveState(i).state),
+    test: (d) => ["running", "rate_limited", "waiting", "escalating"].includes(d.state),
   },
-  { label: "not started", test: (i) => deriveState(i).state === "not_started" },
-  { label: "done", test: (i) => deriveState(i).state === "done" },
+  { label: "not started", test: (d) => d.state === "not_started" },
+  { label: "done", test: (d) => d.state === "done" },
 ];
 
 function useSwipeNeighbors(item: WorkItem) {
   const items = useStore((s) => Object.values(s.workItems));
-  const group = SWIPE_GROUPS.find((g) => g.test(item)) ?? SWIPE_GROUPS[SWIPE_GROUPS.length - 1];
+  const stateOf = useItemStates();
+  const group = SWIPE_GROUPS.find((g) => g.test(stateOf(item))) ?? SWIPE_GROUPS[SWIPE_GROUPS.length - 1];
   const siblings = items
-    .filter((i) => group.test(i))
+    .filter((i) => group.test(stateOf(i)))
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
   const index = siblings.findIndex((i) => i.id === item.id);
   return {
@@ -199,6 +200,8 @@ export function PhoneNode({
   // desktop tree and pane used to before Task 4 lifted theirs.
   const [diff, setDiff] = useState<WorkItemDiff | null>(null);
   const [diffError, setDiffError] = useState<string | null>(null);
+  // The node page's own this node · all switch (no Timeline tab here).
+  const [scope, setScope] = useState<Scope>("node");
   useEffect(() => {
     let alive = true;
     api
@@ -252,6 +255,8 @@ export function PhoneNode({
               nodeId={nodeId}
               selected={selection.kind === "session" ? selection.id : null}
               onSelect={(id) => onSelect({ kind: "session", id })}
+              scope={scope}
+              onScope={setScope}
             />
             {selection.kind === "session" && selection.id ? (
               <Log sessionId={selection.id} maximized={false} onToggleMaximize={onToggleMaximize} />
@@ -281,6 +286,10 @@ export function PhoneNode({
               preselectPath={item.gate_artifact}
               gatePending={!!item.pending_gate}
               gateArtifactPending={!!item.pending_gate && !!item.gate_artifact}
+              nodeId={nodeId}
+              nodes={chain.nodes}
+              scope={scope}
+              onScope={setScope}
             />
             {selection.kind === "document" && selection.id ? (
               <Doc

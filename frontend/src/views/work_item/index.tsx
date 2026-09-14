@@ -4,7 +4,7 @@ import * as api from "../../api";
 import { until } from "../../format";
 import { useStore } from "../../store";
 import type { WorkItemDiff } from "../../types";
-import { ActionBar } from "./ActionBar";
+import { ItemCard } from "./ActionBar/ItemCard";
 import { GraphSplit } from "./GraphSplit";
 import { deriveState } from "../../deriveState";
 import { Header } from "./Header";
@@ -284,7 +284,7 @@ export function WorkItemDetail() {
         onShowRepos={showRepos}
       />
 
-      <ActionBar
+      <ItemCard
         item={item}
         sessions={sessions}
         events={events}

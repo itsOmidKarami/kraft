@@ -219,10 +219,49 @@ describe("WorkItemDetail (item page)", () => {
       },
     ] as never);
     await user.click(screen.getByRole("tab", { name: /timeline/i }));
-    expect(screen.getByText("Started task 3 — open_mr refuses a dirty worktree")).toBeInTheDocument();
-    expect(screen.getByText("3 of 6")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "tasks" }));
-    expect(screen.queryByText("worker_session_started")).toBeNull();
+    // The Timeline list names the same events (W11 · F); the right pane is the one under test.
+    const pane = screen.getByTestId("right-pane-events");
+    expect(within(pane).getByText("Started task 3 — open_mr refuses a dirty worktree")).toBeInTheDocument();
+    expect(within(pane).getByText("3 of 6")).toBeInTheDocument();
+    await user.click(within(pane).getByRole("button", { name: "tasks" }));
+    expect(within(pane).queryByText("worker_session_started")).toBeNull();
+  });
+
+  const tev = (seq: number, type: string, node: string): KraftEvent =>
+    ({ seq, work_item_id: "w1", type, payload: { node_id: node }, created_at: `2026-01-01T00:0${seq}:00Z` }) as KraftEvent;
+  const timelineEvents = [
+    tev(1, "node_started", "spec"),
+    tev(2, "node_completed", "spec"),
+    tev(3, "node_started", "verify"),
+    tev(4, "fix_cycle_started", "verify"),
+    tev(5, "judge_verdict", "verify"),
+  ];
+
+  it("Timeline defaults to this node: its events flat, counted on the tab, the rest in one folded row (W11 · F)", async () => {
+    const user = userEvent.setup();
+    renderDetailWithEvents(timelineEvents);
+    await user.click(screen.getByRole("tab", { name: /timeline/i }));
+    expect(screen.getByRole("tab", { name: /timeline/i }).textContent).toBe("Timeline · 3");
+    const list = screen.getByTestId("inspector-timeline");
+    expect(within(list).getAllByTestId(/^timeline-event-/)).toHaveLength(3);
+    expect(within(list).getByTestId("timeline-fold")).toHaveTextContent(/1 earlier node · 2 events/);
+    // The right pane opens on the node's newest event.
+    expect(within(list).getByTestId("timeline-event-5")).toHaveAttribute("data-selected", "true");
+    await user.click(within(list).getByRole("button", { name: "show all" }));
+    expect(screen.getByRole("tab", { name: /timeline/i }).textContent).toBe("Timeline · 5");
+    expect(within(list).queryByTestId("timeline-fold")).toBeNull();
+    expect(within(list).getByRole("button", { name: "all" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("Timeline and Tasks share one scope, and picking a pill rescopes to that node (W11 · F.1)", async () => {
+    const user = userEvent.setup();
+    renderDetailWithEvents(timelineEvents);
+    await user.click(screen.getByRole("tab", { name: /timeline/i }));
+    await user.click(screen.getByRole("button", { name: /^spec$/ }));
+    expect(screen.getByRole("tab", { name: /timeline/i }).textContent).toBe("Timeline · 2");
+    await user.click(within(screen.getByTestId("inspector-timeline")).getByRole("button", { name: "all" }));
+    await user.click(screen.getByRole("tab", { name: /tasks/i }));
+    expect(within(screen.getByTestId("inspector-tasks")).getByRole("button", { name: "all" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("disables Review spec with 'not written yet' when the artifact is absent", () => {
@@ -232,11 +271,25 @@ describe("WorkItemDetail (item page)", () => {
     expect(btn.getAttribute("title")).toMatch(/not written yet/);
   });
 
-  it("hydrates on mount and leads with the current node in the hero", () => {
+  it("hydrates on mount and names the current node and its position in the header's run (W11 rule 2)", () => {
     renderDetail();
     expect(useStore.getState().hydrateItem).toHaveBeenCalledWith("w1");
-    expect(screen.getByText("verify", { selector: ".hero-node" })).toBeInTheDocument();
-    expect(screen.getByText(/node 3 of 3/)).toBeInTheDocument();
+    expect(document.querySelector(".detail-run-node")?.textContent).toMatch(/^verify · 3\/3/);
+    expect(document.querySelector(".detail-hero")).toBeNull();
+  });
+
+  it.each([
+    ["running", {}],
+    ["gate", { status: "needs_human", pending_gate: "spec_approval", current_node_id: "spec" }],
+    ["paused", { status: "paused" }],
+    ["capped", { status: "needs_human", cappedOut: { cycles: 3, attempts: 3 } }],
+    ["done", { status: "completed", current_node_id: null }],
+    ["not started", { status: "paused", current_node_id: null }],
+  ] as [string, Partial<WorkItem>][])("%s: one item card, and no action bar (W11 · A)", (_, over) => {
+    setup(over);
+    renderDetail();
+    expect(document.querySelector(".action-bar")).toBeNull();
+    expect(document.querySelectorAll(".item-card")).toHaveLength(1);
   });
 
   it("renders no modal for logs, diffs or documents — panes instead", () => {
@@ -399,7 +452,7 @@ describe("WorkItemDetail (item page)", () => {
     expect(await screen.findByTestId("plan-list")).toBeInTheDocument();
   });
 
-  it("puts the hero in the header's right column and the state tag inline in the meta line", () => {
+  it("lays the header out as a grid with the state chip leading its run", () => {
     // jsdom has no cascade to compute a grid layout from; pin the source
     // instead, the way styles.order.test.ts does.
     const css = readFileSync(join(here, "../../styles.css"), "utf-8");
@@ -493,15 +546,18 @@ describe("WorkItemDetail (item page)", () => {
     expect(spy).toHaveBeenCalledWith("w1", { title: "TX" });
   });
 
-  it("previews the description as prose, never raw ## or ** and no heading in the clamp (W0.1, W7/8)", () => {
+  it("keeps the brief closed until the description link opens it as rendered markdown (W11 rule 3)", async () => {
+    const user = userEvent.setup();
     setup({ description: "## Context\n\n- The **verify** node measures." });
     renderDetail();
+    expect(screen.queryByTestId("item-description")).toBeNull();
+    const link = screen.getByRole("button", { name: "description" });
+    expect(link).toHaveAttribute("aria-expanded", "false");
+    await user.click(link);
     const desc = screen.getByTestId("item-description");
-    expect(desc.textContent).not.toMatch(/##|\*\*|^- /m);
-    // The heading line goes from the preview entirely, not just its ## marker.
-    expect(desc.textContent).not.toContain("Context");
-    expect(within(desc).getByText(/The verify node measures\./)).toBeTruthy();
-    expect(desc.querySelector("h1, h2, h3, ul, li")).toBeNull();
+    expect(link).toHaveAttribute("aria-expanded", "true");
+    expect(desc.textContent).not.toMatch(/##|\*\*/);
+    expect(within(desc).getByRole("heading", { name: "Context" })).toBeTruthy();
   });
 
   it("lists repos under Config → Repos, not under the hero, and the submodules chip opens it (W0.7)", async () => {
@@ -556,18 +612,34 @@ describe("WorkItemDetail (item page)", () => {
     expect(screen.queryByRole("button", { name: "Detail" })).toBeNull();
   });
 
-  it("a never-started item says not started, without a paused chip (W0.5)", () => {
+  it("a never-started item says where it starts, without a paused chip (W0.5)", () => {
     setup({ current_node_id: null, status: "paused" });
     renderDetail();
-    expect(document.querySelector(".hero-node")?.textContent).toBe("not started");
+    expect(document.querySelector(".detail-run-node")?.textContent).toMatch(/^starts at spec/);
     expect(document.querySelector(".detail-status")?.textContent).toBe("waiting to start");
+  });
+
+  it("an escalating item's status chip reads escalating, not needs you (W11 · J.5)", () => {
+    setup({ status: "needs_human", cappedOut: { cycles: 3, attempts: 3 } }, [
+      session({ id: "e1", hook_point: "escalation", status: "running" }),
+    ]);
+    useStore.setState({
+      eventsByItem: {
+        w1: [
+          { seq: 1, work_item_id: "w1", type: "work_item_needs_human", payload: {}, created_at: "t" },
+          { seq: 2, work_item_id: "w1", type: "escalation_message", payload: { session_id: "e1", message: "go" }, created_at: "t" },
+        ],
+      },
+    } as never);
+    renderDetail();
+    expect(document.querySelector(".detail-status")).toHaveTextContent("escalating");
+    expect(document.querySelector(".detail-status")).toHaveClass("tag-escalating");
   });
 
   it("a completed item names its last node, never — or not started (W0.5)", () => {
     setup({ current_node_id: null, status: "completed" });
     renderDetail();
-    expect(document.querySelector(".hero-node")?.textContent).toBe("verify");
-    expect(document.querySelector(".hero-sub")?.textContent).toMatch(/^completed/);
+    expect(document.querySelector(".detail-run-node")?.textContent).toMatch(/^verify · 3\/3 · completed/);
   });
 
   it("shows how long a gate has waited on its card (W0.4)", () => {

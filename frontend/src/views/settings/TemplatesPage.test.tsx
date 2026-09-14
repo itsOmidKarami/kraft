@@ -1,9 +1,9 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import type { TemplateNode } from "../../types";
-import { reparseSerializedNodes, serializeNodes } from "./TemplatesPage";
+import { reparseSerializedNodes, serializeFragment, serializeNodes } from "./TemplatesPage";
 import { renderAt, setupSettingsMocks } from "./testing";
 
 function setPhoneWidth(matches: boolean) {
@@ -18,30 +18,18 @@ function setPhoneWidth(matches: boolean) {
   );
 }
 
+const DEFAULT_NODES: TemplateNode[] = [
+  { id: "spec", tasks: ["on.spec.requested"], gate_after: "spec_approval" },
+  { id: "plan", tasks: ["on.plan.requested"], gate_after: "plan_approval" },
+  { id: "verify", tasks: ["on.test.run"], gate_after: null, fix_loop: "verify_fix_loop" },
+  { id: "human_review", tasks: ["on.human_review.requested"], gate_after: "human_review_approval", reject_to: "verify" },
+];
+
+const QUICK = { id: "quick-task", gates: 0, nodes: [{ id: "implement", tasks: ["on.implementation.start"], gate_after: null }] };
+
 beforeEach(() => {
   setupSettingsMocks();
-  vi.spyOn(api, "getTemplates").mockResolvedValue([
-    {
-      id: "default",
-      gates: 4,
-      nodes: [
-        { id: "spec", tasks: ["on.spec.requested"], gate_after: "spec_approval" },
-        { id: "plan", tasks: ["on.plan.requested"], gate_after: "plan_approval" },
-        {
-          id: "verify",
-          tasks: ["on.test.run"],
-          gate_after: null,
-          fix_loop: "verify_fix_loop",
-        },
-        {
-          id: "human_review",
-          tasks: ["on.human_review.requested"],
-          gate_after: "human_review_approval",
-          reject_to: "verify",
-        },
-      ],
-    },
-  ]);
+  vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "default", gates: 3, nodes: DEFAULT_NODES }]);
 });
 
 describe("serializeNodes (task 8b)", () => {
@@ -65,58 +53,94 @@ describe("serializeNodes (task 8b)", () => {
         "    gate_after: null\n",
     );
   });
+
+  it("a node's fragment is its own block of the file, without the id and nodes lines (W11 · D.3)", () => {
+    expect(serializeFragment(DEFAULT_NODES[2])).toBe(
+      "  - id: verify\n    tasks: [on.test.run]\n    gate_after: null\n    fix_loop: verify_fix_loop\n",
+    );
+  });
 });
 
 describe("serializeNodes round trip (task 8c)", () => {
   it("round-trips every node key of a node list through the serializer, including keys the form doesn't render", () => {
     const nodes: TemplateNode[] = [
       { id: "spec", tasks: ["on.spec.requested"], gate_after: "spec_approval" },
-      {
-        id: "pre_mr_rebase",
-        tasks: ["on.mr.rebase"],
-        gate_after: null,
-        rebase_bounce_to: "verify",
-      },
-      {
-        id: "mr_checks",
-        tasks: ["on.ci.poll", "on.review.mr.run"],
-        gate_after: null,
-        on_failure: ["on.mr_checks.repair"],
-      },
-      {
-        id: "human_review",
-        tasks: ["on.human_review.requested"],
-        gate_after: "human_review_approval",
-        reject_to: "implementation",
-      },
+      { id: "pre_mr_rebase", tasks: ["on.mr.rebase"], gate_after: null, rebase_bounce_to: "verify" },
+      { id: "mr_checks", tasks: ["on.ci.poll", "on.review.mr.run"], gate_after: null, on_failure: ["on.mr_checks.repair"] },
+      { id: "human_review", tasks: ["on.human_review.requested"], gate_after: "human_review_approval", reject_to: "implementation" },
     ];
-    const text = serializeNodes("default", nodes);
-    const reparsed = reparseSerializedNodes(text);
-    expect(reparsed).toEqual(nodes);
+    expect(reparseSerializedNodes(serializeNodes("default", nodes))).toEqual(nodes);
   });
 });
 
-describe("Settings · chains editor (task 8)", () => {
+describe("Settings · chains editor (W11 · D)", () => {
   it("renders a pill per node with its task count and a gate flag after a gated node", async () => {
     renderAt("/settings/chains");
     expect(await screen.findByText("spec")).toBeInTheDocument();
     expect(screen.getByTestId("chain-flag-spec")).toBeInTheDocument();
   });
 
-  it("selecting a pill opens its node form and highlights its YAML block", async () => {
+  it("heads the page with the template's name, its counts, the template dropdown, YAML, Revert and Save", async () => {
     renderAt("/settings/chains");
-    await userEvent.click(await screen.findByText("verify"));
-    expect(await screen.findByText(/node \d+ of 4/)).toBeInTheDocument();
-    expect(screen.getByLabelText("fix_loop")).toHaveValue("verify_fix_loop");
+    const head = (await screen.findByRole("heading", { name: "default" })).closest(".chain-head") as HTMLElement;
+    expect(head).toHaveTextContent("4 nodes · 3 gates");
+    for (const name of ["template", "YAML", "Revert", "Save"]) {
+      expect(within(head).getByRole("button", { name })).toBeInTheDocument();
+    }
   });
 
-  it("editing a form field updates the YAML pane", async () => {
+  it("renders no templates column", async () => {
+    const { container } = renderAt("/settings/chains");
+    await screen.findByText("spec");
+    expect(container.querySelector(".template-list, .templates-list")).toBeNull();
+  });
+
+  it("with nothing selected, the card shows what the template is", async () => {
+    renderAt("/settings/chains");
+    const summary = await screen.findByTestId("chain-summary");
+    expect(summary).toHaveTextContent("4 nodes · 3 gates · used by 0 items · ~/.kraft/templates/default.yaml");
+    expect(screen.queryByLabelText("fix_loop")).toBeNull();
+  });
+
+  it("selecting a pill opens the card on that node: its form, and its YAML beside it", async () => {
+    renderAt("/settings/chains");
+    await userEvent.click(await screen.findByText("verify"));
+    const card = screen.getByTestId("chain-card");
+    expect(within(card).getByText(/verify · node 3 of 4/)).toBeInTheDocument();
+    expect(within(card).getByLabelText("fix_loop")).toHaveValue("verify_fix_loop");
+    expect((within(card).getByLabelText("node yaml") as HTMLTextAreaElement).value).toBe(serializeFragment(DEFAULT_NODES[2]));
+  });
+
+  it("editing a form field updates the node's YAML and the whole file's", async () => {
     renderAt("/settings/chains");
     await userEvent.click(await screen.findByText("verify"));
     await userEvent.selectOptions(screen.getByLabelText("gate_after"), "human_review_approval");
+    expect((screen.getByLabelText("node yaml") as HTMLTextAreaElement).value).toContain("gate_after: human_review_approval");
     await userEvent.click(screen.getByRole("button", { name: "YAML" }));
-    const yaml = screen.getByLabelText("chain yaml") as HTMLTextAreaElement;
-    expect(yaml.value).toContain("gate_after: human_review_approval");
+    expect((screen.getByLabelText("chain yaml") as HTMLTextAreaElement).value).toContain("gate_after: human_review_approval");
+  });
+
+  it("editing the node's YAML replaces the node once it parses (edits either side)", async () => {
+    const parse = vi.spyOn(api, "parseTemplateYaml").mockResolvedValue({
+      nodes: [{ id: "verify", tasks: ["on.test.run"], gate_after: "human_review_approval", fix_loop: "verify_fix_loop" }],
+      error: null,
+    });
+    renderAt("/settings/chains");
+    await userEvent.click(await screen.findByText("verify"));
+    await userEvent.type(screen.getByLabelText("node yaml"), " ");
+    await waitFor(() => expect(parse).toHaveBeenCalled());
+    expect(parse.mock.calls.at(-1)![0]).toMatch(/^id: default\nnodes:\n {2}- id: verify/);
+    await waitFor(() => expect(screen.getByLabelText("gate_after")).toHaveValue("human_review_approval"));
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  });
+
+  it("a node YAML that does not parse to one node says so, and leaves the form alone", async () => {
+    vi.spyOn(api, "parseTemplateYaml").mockResolvedValue({ nodes: null, error: "bad indent" });
+    renderAt("/settings/chains");
+    await userEvent.click(await screen.findByText("verify"));
+    await userEvent.type(screen.getByLabelText("node yaml"), "  broken");
+    expect(await screen.findByText(/bad indent/)).toBeInTheDocument();
+    expect(screen.getByLabelText("fix_loop")).toHaveValue("verify_fix_loop");
   });
 
   it("toggling auto_escalate_stuck and setting a delay updates the YAML pane", async () => {
@@ -132,7 +156,7 @@ describe("Settings · chains editor (task 8)", () => {
     expect(yaml.value).toContain("auto_escalate_delay_s: 30");
   });
 
-  it("a YAML parse error shows inline and leaves the form untouched", async () => {
+  it("a full-file YAML parse error shows inline and leaves the form untouched", async () => {
     vi.spyOn(api, "parseTemplateYaml").mockResolvedValue({ nodes: null, error: "bad indent" });
     renderAt("/settings/chains");
     await userEvent.click(await screen.findByText("verify"));
@@ -143,25 +167,34 @@ describe("Settings · chains editor (task 8)", () => {
     expect(screen.getByLabelText("fix_loop")).toHaveValue("verify_fix_loop"); // unchanged
   });
 
-  it("Kraft-b9syf: the YAML toggle switches the editor pane between the node form and the YAML", async () => {
+  it("the YAML toggle swaps the card for the whole file, and keeps the pill strip (D.4)", async () => {
     renderAt("/settings/chains");
     await userEvent.click(await screen.findByText("verify"));
     const toggle = screen.getByRole("button", { name: "YAML" });
     expect(toggle).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByLabelText("fix_loop")).toBeInTheDocument();
-    expect(screen.queryByLabelText("chain yaml")).toBeNull();
+    expect(screen.getByTestId("chain-card")).toBeInTheDocument();
     await userEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByLabelText("chain yaml")).toBeInTheDocument();
-    expect(screen.queryByLabelText("fix_loop")).toBeNull();
+    expect(screen.queryByTestId("chain-card")).toBeNull();
+    expect(screen.getByText("spec")).toBeInTheDocument();
   });
 
-  it("Kraft-b9syf: Add node inserts a node and selects it, back in the form view", async () => {
+  it("Add node inserts a node and selects it, back in the card", async () => {
     renderAt("/settings/chains");
     await userEvent.click(await screen.findByRole("button", { name: "YAML" }));
     await userEvent.click((await screen.findAllByRole("button", { name: /add node/i }))[0]);
     expect(await screen.findByText(/node 1 of 5/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^node_5/ })).toHaveAttribute("data-selected", "true");
+  });
+
+  it("duplicate and remove in the card's footer act on the selected node", async () => {
+    renderAt("/settings/chains");
+    await userEvent.click(await screen.findByText("verify"));
+    await userEvent.click(screen.getByRole("button", { name: "duplicate node" }));
+    expect(screen.getByRole("button", { name: /^verify_copy/ })).toHaveAttribute("data-selected", "true");
+    await userEvent.click(screen.getByRole("button", { name: "remove node" }));
+    expect(screen.queryByRole("button", { name: /^verify_copy/ })).toBeNull();
   });
 
   it("Kraft-xhro: names the node and task an unresolved hook belongs to, not just a repo bit", async () => {
@@ -183,7 +216,7 @@ describe("Settings · chains editor (task 8)", () => {
     expect(prompt).not.toHaveBeenCalled();
     await userEvent.selectOptions(screen.getByLabelText("hook to add"), "on.env.prepare");
     await userEvent.click(screen.getByRole("button", { name: "Add" }));
-    expect(screen.getByText("on.env.prepare")).toBeInTheDocument();
+    expect(within(screen.getByTestId("chain-card")).getAllByText("on.env.prepare").length).toBeGreaterThan(0);
   });
 
   it("insert, remove, and reorder nodes mark the template dirty", async () => {
@@ -193,12 +226,7 @@ describe("Settings · chains editor (task 8)", () => {
   });
 
   it("Save is disabled while the debounced validator reports invalid", async () => {
-    vi.spyOn(api, "validateTemplate").mockResolvedValue({
-      id: "default",
-      valid: false,
-      error: "nope",
-      unresolved: [],
-    });
+    vi.spyOn(api, "validateTemplate").mockResolvedValue({ id: "default", valid: false, error: "nope", unresolved: [] });
     renderAt("/settings/chains");
     await userEvent.click(await screen.findByText("verify"));
     await userEvent.click((await screen.findAllByRole("button", { name: /add node/i }))[0]);
@@ -206,28 +234,50 @@ describe("Settings · chains editor (task 8)", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
-  it("+ New creates a template from a copy of the selected one", async () => {
+  it("template ▾ lists every template, then New…, Duplicate and Delete, and switches template (D.1)", async () => {
+    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "default", gates: 3, nodes: DEFAULT_NODES }, QUICK]);
+    renderAt("/settings/chains");
+    await userEvent.click(await screen.findByRole("button", { name: "template" }));
+    expect(screen.getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["default", "quick-task", "New…", "Duplicate", "Delete"]);
+    await userEvent.click(screen.getByRole("menuitem", { name: "quick-task" }));
+    expect(await screen.findByRole("heading", { name: "quick-task" })).toBeInTheDocument();
+    expect(screen.getByText("implement")).toBeInTheDocument();
+  });
+
+  it("Delete is there but disabled, naming the route it waits on", async () => {
+    renderAt("/settings/chains");
+    await userEvent.click(await screen.findByRole("button", { name: "template" }));
+    const del = screen.getByRole("menuitem", { name: "Delete" });
+    expect(del).toHaveAttribute("aria-disabled", "true");
+    expect(del.getAttribute("title")).toMatch(/Kraft-lwtco/);
+  });
+
+  it("New… writes a one-node template under the new name", async () => {
+    const put = vi.spyOn(api, "putTemplate").mockResolvedValue({ id: "fresh", nodes: [] });
+    vi.spyOn(window, "prompt").mockReturnValue("fresh");
+    renderAt("/settings/chains");
+    await userEvent.click(await screen.findByRole("button", { name: "template" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "New…" }));
+    expect(put).toHaveBeenCalledWith("fresh", [{ id: "node_1", tasks: [], gate_after: null }]);
+  });
+
+  it("Duplicate copies the current template under the new name", async () => {
     const put = vi.spyOn(api, "putTemplate").mockResolvedValue({ id: "default-2", nodes: [] });
     vi.spyOn(window, "prompt").mockReturnValue("default-2");
     renderAt("/settings/chains");
-    await userEvent.click(await screen.findByRole("button", { name: "New" }));
-    expect(put).toHaveBeenCalledWith("default-2", expect.any(Array));
+    await userEvent.click(await screen.findByRole("button", { name: "template" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Duplicate" }));
+    expect(put).toHaveBeenCalledWith("default-2", DEFAULT_NODES);
   });
 
-  it("+ New refuses a name that already exists, without calling the API", async () => {
+  it("New… and Duplicate refuse a name that already exists, without calling the API", async () => {
     const put = vi.spyOn(api, "putTemplate");
     vi.spyOn(window, "prompt").mockReturnValue("default");
     renderAt("/settings/chains");
-    await userEvent.click(await screen.findByRole("button", { name: "New" }));
+    await userEvent.click(await screen.findByRole("button", { name: "template" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Duplicate" }));
     expect(put).not.toHaveBeenCalled();
     expect(await screen.findByText(/already exists/)).toBeInTheDocument();
-  });
-
-  it("renders template rows with the name and meta on separate lines", async () => {
-    renderAt("/settings/chains");
-    const row = await screen.findByRole("button", { name: /default/ });
-    expect(row.querySelector(".template-row-name")?.textContent).toBe("default");
-    expect(row.querySelector(".template-row-meta")?.textContent).toMatch(/gates · used by/);
   });
 
   it("shows the legend row for the node graph's glyphs", async () => {
@@ -238,48 +288,40 @@ describe("Settings · chains editor (task 8)", () => {
   });
 });
 
-describe("Settings · chains phone (task 9, m13)", () => {
+describe("Settings · chains phone (W11 · D.6)", () => {
   beforeEach(() => setPhoneWidth(true));
   afterEach(() => vi.unstubAllGlobals());
 
-  it("phone: shows the template list with no template selected", async () => {
+  it("phone: one page -- a full-width template select, the pill strip and the card, no dropdown menu", async () => {
     renderAt("/settings/chains");
-    expect(await screen.findByText("default")).toBeInTheDocument();
-    expect(screen.queryByText(/node \d+ of/)).toBeNull();
+    expect(await screen.findByLabelText("template")).toHaveValue("default");
+    expect(screen.getByText("spec")).toBeInTheDocument();
+    expect(screen.getByTestId("chain-summary")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "template" })).toBeNull();
   });
 
-  it("phone: opening a template shows its node list, not the node form", async () => {
+  it("phone: the select switches template", async () => {
+    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "default", gates: 3, nodes: DEFAULT_NODES }, QUICK]);
     renderAt("/settings/chains");
-    await userEvent.click(await screen.findByText("default"));
-    expect(await screen.findByText(/verify/)).toBeInTheDocument();
-    expect(screen.queryByLabelText("gate_after")).toBeNull();
+    await userEvent.selectOptions(await screen.findByLabelText("template"), "quick-task");
+    expect(await screen.findByText("implement")).toBeInTheDocument();
   });
 
-  it("phone: the node list is a stage list with a trailing + node row, not desktop pills", async () => {
-    renderAt("/settings/chains");
-    await userEvent.click(await screen.findByText("default"));
-    const row = (await screen.findByText("verify")).closest(".row");
-    expect(row?.querySelector(".glyph")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "+ node" })).toBeInTheDocument();
-  });
-
-  it("phone: opening a node shows the form and a read-only YAML sheet", async () => {
+  it("phone: a picked node shows its form and its YAML, editable", async () => {
     renderAt("/settings/chains?tpl=default&node=verify");
     expect(await screen.findByLabelText("fix_loop")).toBeInTheDocument();
-    expect(screen.getByLabelText("chain yaml")).toHaveAttribute("readonly");
+    expect(screen.getByLabelText("node yaml")).not.toHaveAttribute("readonly");
   });
 
-  it("phone: the back link on the node page returns to the node list, not Settings", async () => {
+  it("phone: the header goes back to Settings", async () => {
     renderAt("/settings/chains?tpl=default&node=verify");
-    await userEvent.click(await screen.findByText("default")); // the PhoneHeader back link
-    expect(await screen.findByText(/verify/)).toBeInTheDocument();
-    expect(screen.queryByLabelText("fix_loop")).toBeNull();
+    expect(await screen.findByRole("link", { name: /Settings/ })).toHaveAttribute("href", "/settings");
   });
 });
 
 describe("Settings · route rename (UI v2 · 01)", () => {
   it("redirects the old /settings/templates path to /settings/chains", async () => {
     renderAt("/settings/templates");
-    expect(await screen.findByText("Templates")).toBeInTheDocument();
+    expect(await screen.findByText("spec")).toBeInTheDocument();
   });
 });

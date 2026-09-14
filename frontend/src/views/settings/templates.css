@@ -1,61 +1,28 @@
-/* Chains editor — graph, node form, YAML pane (design 27 / m13). New rules
- * only; `.template-editor`, `.template-list`, `.facet-opt`, `.validation`,
- * `.template-yaml` already live in styles.css and are reused here. */
+/* Chains editor (design 27 / m13; W11 · D) — a head row with the template
+ * dropdown, the node pill strip, and one editor card under it. `.validation`,
+ * `.validation-badge` and `.template-yaml` live in styles.css and are reused.
+ * This file is bundled after styles.css, so a one-class rule here wins a tie. */
 
-/* Two classes, not one: styles.css is bundled after every page stylesheet
-   (main.tsx imports App before styles.css), so a single-class override of
-   `.template-editor` is inert -- it is why the YAML pane was rendering under
-   the templates list instead of in the third column. Root cause: Kraft-9fj8. */
-.template-editor.chain-editor {
-  /* Two panes: the list, and the editor that shows the node form or the YAML. */
-  grid-template-columns: 200px minmax(0, 1fr);
-  /* stretch, not the base rule's `align-items: start` -- the validity card
-     pins to the bottom of this column via margin-top: auto below, which
-     needs the column's own height to reach the row's full height. */
-  align-items: stretch;
-}
+/* D.1: name · valid · counts · spacer · template ▾ · YAML · Revert · Save. */
+.chain-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.chain-head-name { font-size: 17px; font-weight: 500; margin: 0; overflow-wrap: anywhere; }
+.chain-head .validation-badge { margin-top: 0; align-self: center; }
+.chain-head-counts { font-size: 12px; color: var(--color-neutral-500); }
+.chain-head-spacer { flex: 1; }
+.chain-head .btn { font-size: 13px; }
+.chain-head .save-hint { margin-left: 0; flex-basis: 100%; text-align: right; }
 
-.chain-editor .template-list { height: 100%; }
-
-/* Kraft-xhro: screen 27 puts the node graph full width across the top, above
-   both lower panes, in ~2 rows -- built put it inside the ~700px middle
-   column of the three-column grid below, wrapping 12 pills into 8 rows. */
 .chain-page { display: flex; flex-direction: column; gap: var(--space-4); min-height: 0; }
 .chain-graph-row { display: flex; flex-direction: column; gap: 8px; }
-
-/* Template row: left-aligned name + node count on one line, meta line under
-   it -- a bare button with no CSS at all used to centre "default12 nodes ·
-   4 gates ·" as one run of text (Task 2 finding, G10-02). Two classes, not
-   one, to beat `.facet-opt`'s own flex-row layout in styles.css (same
-   inert-override shape Task 1 fixed for the grid columns). */
-.facet-opt.template-row {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 2px;
-  text-align: left;
-}
-.template-row-top { display: flex; align-items: baseline; gap: 8px; }
-.template-row-name { font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.template-row-count { margin-left: auto; font-size: 11px; color: var(--color-text-muted); white-space: nowrap; }
-.template-row-meta { font-size: 11px; color: var(--color-text-muted); }
-
-.chain-add-node-row { width: 100%; margin-top: 8px; }
 
 .chain-legend {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   font-size: 11px;
   color: var(--color-text-muted);
-  margin: 0;
-}
-
-.chain-middle {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-width: 0;
+  margin: 0 0 0 auto;
 }
 
 .chain-graph {
@@ -123,11 +90,27 @@
   padding: 1px 4px;
 }
 
+/* D.3: one card -- the node form left, the node's YAML right, a footer row. */
+.chain-card { gap: 12px; padding: 16px; }
+.chain-card-body { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 20px; align-items: start; }
+/* on_failure's tags are <button>s with no tone class, so they kept the UA
+   button fill (light, ~1.8:1 under the "+ add" text). Outline them instead. */
+.chain-node-form button.tag {
+  background: transparent; border: 1px solid var(--color-divider); color: var(--color-text);
+}
+.chain-node-form button.tag-off { color: var(--color-neutral-400); }
+.chain-card-foot {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  border-top: 1px solid var(--color-divider); padding-top: 10px;
+}
+
 .chain-node-form {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-width: 0;
 }
+.chain-node-title { font-size: 14px; font-weight: 500; margin: 0; overflow-wrap: anywhere; }
 
 .chain-task-row {
   display: grid;
@@ -137,6 +120,18 @@
   padding: 4px 0;
 }
 
+.chain-fragment { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* `textarea.` outranks nocturne.css's `textarea.input` (one element + one class). */
+textarea.chain-fragment-yaml {
+  min-height: 240px; font-size: 12px; line-height: 1.5;
+  white-space: pre; overflow-x: auto; resize: vertical;
+}
+
+/* D.5: nothing selected -- what the template is. */
+.chain-summary { display: flex; flex-direction: column; gap: 6px; }
+.chain-summary-line { margin: 0; font-size: 13px; color: var(--color-neutral-300); overflow-wrap: anywhere; }
+.chain-summary-line code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+
 .chain-yaml-pane {
   display: flex;
   flex-direction: column;
@@ -144,8 +139,20 @@
   min-width: 0;
 }
 
-@media (max-width: 1279px) {
-  .template-editor.chain-editor {
-    grid-template-columns: 1fr;
-  }
+.chain-template-select { width: 100%; }
+
+@media (max-width: 1023px) {
+  /* D.6: the card stacks -- the form, then its YAML. */
+  .chain-card-body { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 767px) {
+  /* D.6: the pill strip scrolls sideways; its pills and buttons are thumb targets. */
+  .chain-graph { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
+  .chain-graph-item, .chain-pill { flex: none; }
+  .chain-pill, .chain-insert, .chain-move button { min-height: 44px; min-width: 44px; justify-content: center; }
+  .chain-legend { margin-left: 0; }
+  /* styles.css's phone `input, select, textarea { 16px }` loses to `.input`
+     and to `textarea.chain-fragment-yaml` above; restate it at this page. */
+  .chain-page :is(input, select, textarea) { font-size: 16px; }
 }
