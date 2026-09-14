@@ -1,11 +1,10 @@
 :root {
-  /* Muted body text — labels, hints, counts, footnotes. The neutral ramp's own
-     600 step was doing this job at 4.08:1 on the board ground and 3.52:1 on a
-     card, under the 4.5:1 WCAG 1.4.3 needs for text this size. The ramp is
-     generated on one shared lightness scale (see nocturne.css) so its steps
-     must stay put; this is the text role, lifted just past the threshold on
-     both grounds. Ramp steps keep the borders, fills and glyphs. */
-  --color-text-muted: #888c9c;
+  /* Muted body text — labels, hints, counts, footnotes. A literal lifted just
+     past 4.5:1 on the board ground and a card fell under it on the selected-row
+     fill (accent-900) the tree, documents and chains lists paint (4.08–4.27:1,
+     W10.A). The ramp's 500 step clears all three grounds in every palette;
+     palettes.contrast.test.ts pins it. Lower steps keep borders, fills, glyphs. */
+  --color-text-muted: var(--color-neutral-500);
 
   /* Destructive actions. Nocturne is a blurple/neutral system with no danger
      role, so `[data-danger]` was rendering as a slightly lighter neutral —
@@ -72,6 +71,14 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
    local to that box and are not on this ladder. */
 
 
+/* An in-text link (no class of its own) takes accent-400 (W10.A): the accent
+   itself is 4.23:1 on a card. A link with a class keeps its own colour. */
+a[href]:not([class]) { color: var(--color-accent-400); }
+/* Nocturne's accent-text components on a card (the peek's gate and capped
+   cards, its state chip) measured 4.32:1 in dark mode; their text takes
+   accent-400, their borders and fills keep the accent (W10.A). */
+.btn-primary, .btn-ghost, .tag-outline { color: var(--color-accent-400); }
+
 /* W6.6: one keyboard ring for every interactive element. nocturne.css's own
    :focus-visible is the fallback; this names the ramp step the spec asks for. */
 :where(a[href], button, input, select, textarea, summary, [tabindex], [role="tab"], [role="radio"], [role="option"], [role="menuitem"]):focus-visible {
@@ -131,7 +138,7 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 .row-sub { font-size: 12px; color: var(--color-neutral-500); }
 
 .row-state { font-size: 12px; color: var(--color-neutral-400); }
-.row-state[data-status="running"]    { color: var(--color-accent); }
+.row-state[data-status="running"]    { color: var(--color-accent-400); } /* W10.A: accent was 4.43:1 on a selected row */
 .row-state[data-status="capped_out"] { color: var(--color-accent-300); }
 .row-state[data-status="failed"]     { color: var(--color-neutral-200); }
 .row-state[data-status="unknown"],
@@ -288,7 +295,9 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 .bottom-nav-badge {
   position: absolute; top: 4px; right: calc(50% - 20px);
   min-width: 15px; height: 15px; padding: 0 3px; border-radius: 999px;
-  background: var(--color-accent); color: var(--color-accent-contrast, #fff);
+  /* The page ground as ink on the accent fill (W10.A): white on the dark-mode
+     accent was 3.23:1. The ground flips with the accent, so both modes hold. */
+  background: var(--color-accent); color: var(--color-bg);
   font-size: 10px; line-height: 15px; text-align: center;
 }
 
@@ -423,7 +432,7 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 }
 .app-header-crumb-link { text-decoration: none; color: var(--color-neutral-500); }
 .app-header-crumb-link:hover { color: var(--color-text); }
-.app-header-crumb-sub { font-size: 11px; color: var(--color-neutral-600); margin-left: 6px; }
+.app-header-crumb-sub { font-size: 11px; color: var(--color-text-muted); margin-left: 6px; }
 .app-header-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 .app-header .btn { font-size: 13px; padding: 5px 10px; }
 
@@ -697,21 +706,22 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
   from { transform: translateY(24px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
-/* W4.4: two rows that never wrap -- id · state · Open → · ✕, then repo · template. */
+/* W10.D: the peek never scrolls sideways. Its head is one grid -- id · state ·
+   MR with the repo · template meta wrapping under them in the first cell,
+   Open → and ✕ in their own columns -- so nothing in it can push past the pane. */
+.peek-pane { overflow-x: hidden; }
 .peek-head {
-  display: flex; flex-direction: column; gap: 4px;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 4px 8px;
   font-size: 11.5px; color: var(--color-neutral-500);
   position: sticky; top: 0; z-index: 1;
   background: var(--color-surface);
 }
-.peek-head-row { display: flex; align-items: center; gap: 8px; min-width: 0; white-space: nowrap; }
-.peek-head-sub > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.peek-head-sub > span { flex: none; }
-.peek-head-sub > span:first-child { flex: 0 1 auto; }
+.peek-head-id { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.peek-head-sub { flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; }
 /* ✕ 12px from the viewport edge, not the pane's 20px padding. */
 .peek-close { margin-right: -8px; }
 .peek-head code { font-family: ui-monospace, Menlo, monospace; color: var(--color-neutral-400); }
-.peek-open { margin-left: auto; font-size: 12px; text-decoration: none; color: var(--color-accent-300); }
+.peek-open { font-size: 12px; text-decoration: none; color: var(--color-accent-300); white-space: nowrap; }
 .peek-title {
   font-size: 18px; font-weight: 500; line-height: 1.25; letter-spacing: -0.01em; margin: 0;
 }
@@ -750,7 +760,7 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 }
 /* One line each, ellipsized (UI v3 · 37) -- the pane is a glance, not a read. */
 .peek-log-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.peek-log-time { color: var(--color-neutral-600); margin-right: 6px; }
+.peek-log-time { color: var(--color-text-muted); margin-right: 6px; }
 
 /* ══ gate (design 2a inline · 4a card) ════════════════════════════════════ */
 .gate-inline {
@@ -965,10 +975,13 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
 
 /* ══ documents tab (design 4e) ════════════════════════════════════════════ */
 .linked-docs { display: flex; flex-direction: column; }
-/* W5.10: the title track takes what is left; kind and date size to content. */
+/* W10.D: icon | stacked text, not columns. Line 1 is the title (2-line clamp)
+   with its chips right-aligned beside it, line 2 the path, cut from the left
+   on one line so the filename survives. Real rows carry 90-char worktree
+   paths and two chips; columns squeezed the title to nothing. */
 .doc-row {
-  display: grid; grid-template-columns: 24px minmax(0, 1fr) auto auto; gap: 14px;
-  align-items: center; padding: 11px 4px;
+  display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 12px;
+  align-items: start; padding: 11px 4px;
   border: 0; border-radius: 6px; color: inherit; font: inherit;
   text-align: left; cursor: pointer;
   background: linear-gradient(to right,
@@ -978,6 +991,38 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
 .doc-row:hover { background: color-mix(in srgb, var(--color-text) 4%, transparent); }
 .doc-icon { color: var(--color-accent); }
 .doc-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.linked-docs .doc-text {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "title chips" "path path"; gap: 2px 10px;
+}
+.linked-docs .doc-title { grid-area: title; }
+.doc-chips { grid-area: chips; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: flex-start; align-self: start; gap: 4px; }
+/* One line, ellipsis at the start (a deliberate cut, the whole path in title;
+   data-allow-ellipsis tells the sweep). Reverses W5's whole-path rule for this
+   list only. The inner <span dir="ltr"> keeps the leading "." in place. */
+.linked-docs .doc-path {
+  grid-area: path; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal;
+  direction: rtl; text-align: left;
+}
+/* On a selected row's accent-900 fill the accent itself is 4.43:1 (W10.A). */
+.doc-attached { position: relative; gap: 4px; color: var(--color-accent-400); border-color: var(--color-accent-400); }
+/* The row decides from the inspector's width. ≤ 520px: "attached at intake" is
+   a paperclip, its words kept for assistive tech and in the chip's title. */
+.inspector { container: inspector / inline-size; }
+@container inspector (max-width: 520px) {
+  .doc-attached { padding-inline: 5px; }
+  .doc-attached-text { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); white-space: nowrap; }
+}
+/* Chips sit beside the title only while they fit in 40% of it. Full-text
+   chips (~200px) stop fitting until the inspector is past ~600px, so there
+   they drop to line 3 under the path.
+   ponytail: a width guess for the two known chips, not a measurement; move the
+   bound if a chip's text changes. */
+@container inspector (min-width: 521px) and (max-width: 600px) {
+  .linked-docs .doc-text:has(.doc-attached) { grid-template-areas: "title title" "path path" "chips chips"; }
+  .linked-docs .doc-text:has(.doc-attached) .doc-chips { justify-content: flex-start; }
+}
 .doc-title { font-size: 14px; }
 /* A list title clamps at two lines (W5.3), Documents pane only: Changes'
    `.change-row .doc-title` wraps long file paths on purpose (Kraft-l9lj). */
@@ -1289,7 +1334,8 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
 .search-row:hover, .search-row[data-active] { background: color-mix(in srgb, var(--color-text) 6%, transparent); }
 .search-row-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .search-row-title { font-size: 13px; font-weight: 500; }
-.search-row-sub { font-size: 11px; color: var(--color-neutral-500); }
+/* neutral-400: the active row's 6% tint took 500 to 4.47:1 (W10.A). */
+.search-row-sub { font-size: 11px; color: var(--color-neutral-400); }
 .search-result[data-active] { background: color-mix(in srgb, var(--color-text) 4%, transparent); }
 
 /* ══ intake (design 10) ═══════════════════════════════════════════════════ */
@@ -1311,7 +1357,13 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
  * everywhere .control-row appears. */
 .intake-side .control-row { justify-content: space-between; }
 .intake-side .control-row > input, .intake-side .control-row > .readout { flex: none; width: 140px; }
-.intake-foot { position: sticky; bottom: 0; background: var(--color-surface); }
+/* Kraft-fafow: the dialog is its own scroll container with no bottom padding,
+   so the sticky footer pins to its bottom edge and nothing shows beneath it.
+   A scroll container's padding insets where sticky pins: under the
+   backdrop's 44px, the budget field showed below Create. The footer carries
+   the dialog's bottom spacing instead. */
+.intake { max-height: calc(100vh - 88px); overflow-y: auto; padding-bottom: 0; }
+.intake-foot { position: sticky; bottom: 0; background: var(--color-surface); padding-bottom: 20px; }
 .chain-template-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .attachment-chip {
   display: inline-flex; align-items: center; gap: 6px;
@@ -1772,7 +1824,9 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; w
   .dialog-close, .toast-action, .board-sort > summary, .board-more > summary, .board-sort-menu button,
   button.tag, .chain-preview-node, .repo-pill, .seg-opt, .segmented-opt, .app-header-crumb-link,
   .bottom-nav-tab, .phone-header-back, .hook-row, select, select.input, .rate-limit-row > a,
-  .peek-open, .peek-head .mr-link {
+  .peek-open, .peek-head .mr-link,
+  /* Kraft-pzf7i: the phone Search page's rows, bead hits and filter controls. */
+  .search-row, .search-result, .bead-hit, .search-advanced, .search-filters .input {
     min-height: 44px; min-width: 44px;
   }
   .chip, button.tag, .chain-preview-node, .log-chip, .repo-pill, .app-header-crumb-link,
@@ -1956,7 +2010,7 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; w
 .diff-file-head .mono { flex: 1; min-width: 0; color: var(--color-neutral-300); }
 .diff-body { padding: 6px 0 14px; font-size: 12px; line-height: 1.45; }
 .diff-body > div { white-space: pre; }
-.diff-add  { color: var(--color-accent); }
+.diff-add  { color: var(--color-accent-400); } /* W10.A: accent was 4.43:1 on a selected tree row */
 .diff-del  { color: var(--color-accent-2); }
 .diff-hunk { color: var(--color-neutral-500); }
 .diff-ctx  { color: var(--color-neutral-300); }

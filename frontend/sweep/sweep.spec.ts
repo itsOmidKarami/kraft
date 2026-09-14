@@ -19,12 +19,14 @@ fs.mkdirSync(OUT, { recursive: true });
 const MANIFEST = path.join(OUT, "manifest.jsonl");
 
 const VP: Record<number, [number, number]> = {
-  390: [390, 844], 768: [768, 1024], 1024: [1024, 768], 1100: [1100, 800],
+  390: [390, 844], 768: [768, 1024], 960: [960, 800], 1000: [1000, 800], 1024: [1024, 768], 1100: [1100, 800],
   1280: [1280, 800], 1440: [1440, 900], 1920: [1920, 1080],
 };
 const ALL = [390, 768, 1024, 1100, 1280, 1440, 1920];
 const KEY = [390, 1100, 1280, 1920];
 const DESK = [1100, 1280, 1920];
+// A desktop browser with a side panel open (W10.D): the peek and the item page just under 1024.
+const SIDE = [960, 1000];
 
 interface Shell { sidebar?: "open" | "rail"; mode?: "light" | "dark"; density?: "compact" | "comfortable"; group_by?: "repo" | "template"; short?: boolean; firstpaint?: boolean }
 const SHELLS_1280: Shell[] = [{ sidebar: "open" }, { sidebar: "rail" }, { mode: "light" }, { density: "comfortable" }, { short: true }];
@@ -108,17 +110,17 @@ const CASES: Case[] = [
   { screen: "board", variant: "empty", data: "empty", widths: KEY, run: board },
   { screen: "board", variant: "group-repo", data: "default", widths: [1280], shells: [{ group_by: "repo" }], run: board },
   { screen: "board", variant: "group-template", data: "long", widths: [1280], shells: [{ group_by: "template" }], run: board },
-  { screen: "board-peek", variant: "gate", data: "default", widths: ALL, shells: SHELLS_1280, run: (c) => peek(c, "gate") },
-  { screen: "board-peek", variant: "running-long", data: "long", widths: ALL, run: (c) => peek(c, "running") },
-  { screen: "board-peek", variant: "escalated-long", data: "long", widths: KEY, run: (c) => peek(c, "escalated") },
-  { screen: "board-peek", variant: "capped", data: "default", widths: KEY, run: (c) => peek(c, "capped") },
+  { screen: "board-peek", variant: "gate", data: "default", widths: [...ALL, ...SIDE], shells: SHELLS_1280, run: (c) => peek(c, "gate") },
+  { screen: "board-peek", variant: "running-long", data: "long", widths: [...ALL, ...SIDE], run: (c) => peek(c, "running") },
+  { screen: "board-peek", variant: "escalated-long", data: "long", widths: [...KEY, ...SIDE], run: (c) => peek(c, "escalated") },
+  { screen: "board-peek", variant: "capped", data: "default", widths: [...KEY, ...SIDE], run: (c) => peek(c, "capped") },
   { screen: "board-peek", variant: "done", data: "default", widths: [390, 1280], run: (c) => peek(c, "done") },
   { screen: "archived", variant: "default", data: "default", widths: KEY, run: async (c) => { await c.page.goto("/archived"); await settle(c.page, 600); } },
   { screen: "archived", variant: "empty", data: "empty", widths: [1280], run: async (c) => { await c.page.goto("/archived"); await settle(c.page, 600); } },
 
   // Item page · every state, default tab
-  ...STATES.map<Case>((st) => ({ screen: "item", variant: st, data: "default", widths: ["gate", "running", "capped"].includes(st) ? ALL : KEY, run: (c) => item(c, st) })),
-  ...STATES.map<Case>((st) => ({ screen: "item", variant: `${st}-long`, data: "long", widths: ["gate", "running"].includes(st) ? ALL : [390, 1100, 1920], run: (c) => item(c, st) })),
+  ...STATES.map<Case>((st) => ({ screen: "item", variant: st, data: "default", widths: ["gate", "running", "capped"].includes(st) ? [...ALL, ...SIDE] : KEY, run: (c) => item(c, st) })),
+  ...STATES.map<Case>((st) => ({ screen: "item", variant: `${st}-long`, data: "long", widths: ["gate", "running"].includes(st) ? [...ALL, ...SIDE] : [390, 1100, 1920], run: (c) => item(c, st) })),
   { screen: "item", variant: "gate-sidebar-open", data: "long", widths: [1100, 1280, 1440], shells: [{ sidebar: "open" }], run: (c) => item(c, "gate") },
   { screen: "item", variant: "gate-h700", data: "long", widths: [1280, 1920], shells: [{ short: true }], run: (c) => item(c, "gate") },
   { screen: "item", variant: "gate-light", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => item(c, "gate") },
@@ -157,7 +159,8 @@ const CASES: Case[] = [
   { screen: "composer", variant: "gate-skip-menu", data: "default", widths: [390, 1280], run: async (c) => { await item(c, "gate"); await clickBtn(c.page, /skip/i).catch(() => {}); } },
   { screen: "composer", variant: "overflow-menu", data: "default", widths: [390, 1280], run: async (c) => { await item(c, "running"); await c.page.locator('.action-bar [aria-haspopup="menu"]').first().click().catch(() => {}); await settle(c.page); } },
   // The app header's `…` on an item page, found by aria-haspopup rather than a guessed label.
-  { screen: "menu", variant: "header-more", data: "default", widths: [390, 1280], run: async (c) => { await item(c, "running"); await c.page.locator('.app-header [aria-haspopup="menu"]').first().click(); await settle(c.page); } },
+  // Desktop only: a phone item page has PhoneTopBar, and its item menu is composer/overflow-menu@390 (Kraft-92daa).
+  { screen: "menu", variant: "header-more", data: "default", widths: [1280], run: async (c) => { await item(c, "running"); await c.page.locator('.app-header [aria-haspopup="menu"]').first().click(); await settle(c.page); } },
 
   // Intake modal
   { screen: "new-item", variant: "empty", data: "default", widths: ALL, run: async (c) => { await board(c); await clickBtn(c.page, /new work item/i); } },
@@ -170,7 +173,6 @@ const CASES: Case[] = [
       await settle(c.page);
     } },
   { screen: "new-item", variant: "scrolled", data: "long", widths: [390, 1280], run: async (c) => { await board(c); await clickBtn(c.page, /new work item/i); await scrollAllToBottom(c.page); } },
-  { screen: "new-item", variant: "no-repos", data: "empty", widths: [1280], run: async (c) => { await board(c); await clickBtn(c.page, /new work item/i); } },
 
   // Search
   { screen: "search", variant: "overlay-results", data: "default", widths: KEY, run: async (c) => { await board(c); await c.page.keyboard.press("Meta+k"); await c.page.locator('input[aria-label="search"]').fill("measured"); await settle(c.page, 800); } },

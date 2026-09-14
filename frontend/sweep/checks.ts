@@ -50,6 +50,14 @@ export async function runChecks(page: Page, phone: boolean, consoleErrors: strin
         if (ox === "visible") continue;
         if (ox !== "auto" && ox !== "scroll") return false;
         const ar = a.getBoundingClientRect();
+        // The exemption is for a strip that scrolls sideways, not for a panel
+        // whose x-scroll is a side effect of overflow-y (W10.D): the peek, a
+        // sheet or dialog itself, a fixed-positioned panel, or a scroller that
+        // fills the page (>80% of the viewport wide and over half its height).
+        // Content past such a panel's edge is cut off for the reader.
+        const panel = getComputedStyle(a).position === "fixed" || a.matches('[role="dialog"], [aria-modal="true"], [aria-label="peek"]')
+          || (ar.width > vw * 0.8 && ar.height > window.innerHeight * 0.5);
+        if (panel) return false;
         const inView = ar.left >= -1 && ar.right <= vw + 1;
         const inRow = r.top < ar.bottom && r.bottom > ar.top;
         return inView && inRow;
@@ -62,7 +70,9 @@ export async function runChecks(page: Page, phone: boolean, consoleErrors: strin
     });
     const clipped = all.filter((el) => {
       const cs = getComputedStyle(el);
-      return cs.textOverflow === "ellipsis" && cs.overflow !== "visible" && el.scrollWidth > el.clientWidth + 1;
+      // data-allow-ellipsis: a deliberate one-line cut with the whole text in its
+      // title (the Documents list path, W10.D). Only the element carrying it.
+      return cs.textOverflow === "ellipsis" && cs.overflow !== "visible" && el.scrollWidth > el.clientWidth + 1 && !el.hasAttribute("data-allow-ellipsis");
     });
     const clippedV = all.filter((el) => {
       const cs = getComputedStyle(el);
@@ -104,6 +114,8 @@ export async function runChecks(page: Page, phone: boolean, consoleErrors: strin
       if (!v) { cx.clearRect(0, 0, 1, 1); cx.fillStyle = "#000"; cx.fillStyle = s; cx.fillRect(0, 0, 1, 1); const d = cx.getImageData(0, 0, 1, 1).data; v = [d[0], d[1], d[2], d[3] / 255]; cache.set(s, v); }
       return v;
     };
+    // "a(b, c), d" → ["a(b, c)", "d"]: computed multi-layer values split on top-level commas only.
+    const topLevel = (s: string) => { const out: string[] = []; let d = 0, cur = ""; for (const ch of s) { if (ch === "(") d++; else if (ch === ")") d--; if (ch === "," && d === 0) { out.push(cur.trim()); cur = ""; } else cur += ch; } out.push(cur.trim()); return out; };
     const over = (top: number[], under: number[]) => [0, 1, 2].map((i) => top[i] * top[3] + under[i] * (1 - top[3])).concat(1);
     const lum = (c: number[]) => { const f = (x: number) => { x /= 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]); };
     const low: string[] = [];
@@ -120,26 +132,46 @@ export async function runChecks(page: Page, phone: boolean, consoleErrors: strin
       // exempt — that is exactly what the check is for.
       if (el.closest("[disabled], [aria-disabled='true'], option, [aria-hidden='true'], .placeholder, [data-placeholder]")) continue;
       const cs = getComputedStyle(el);
-      const layers: number[][] = [];
+      // Each layer is its alternatives: one colour for a background-color, every
+      // colour stop for a gradient (Kraft-aqrs9). The text has to clear its bar
+      // against the worst stop, since some part of the gradient sits under it.
+      const layers: number[][][] = [];
       let alpha = 1;
       let bg: number[] | null = null;
+      let unknown = false;
       for (let a: Element | null = el; a; a = a.parentElement) {
         const acs = getComputedStyle(a);
         alpha *= parseFloat(acs.opacity);
+        // Image layers top first, each paired with its own background-size.
+        const sizes = topLevel(acs.backgroundSize);
+        topLevel(acs.backgroundImage).forEach((img, i) => {
+          if (img === "none") return;
+          // A hairline (a 1px divider drawn as a gradient) is not a ground under text.
+          // ponytail: judged by background-size only, a positioned small tile would also be skipped.
+          if ((sizes[i % sizes.length] ?? "auto").split(/\s+/).some((s) => /px$/.test(s) && parseFloat(s) < 4)) return;
+          const stops = img.includes("url(") ? [] : (img.match(/(rgba?|color|oklab|oklch|lab|lch|hsla?)\([^)]*\)|#[0-9a-f]{3,8}\b|transparent/gi) ?? []);
+          if (stops.length) layers.push(stops.map(rgba));
+          else unknown = true;
+        });
         const b = rgba(acs.backgroundColor);
         if (b[3] >= 0.999) { bg = b; break; }
-        if (b[3] > 0) layers.push(b);
+        if (b[3] > 0) layers.push([b]);
       }
       // Faded below half opacity with no role and outside any control or
       // link: decoration (a ghost watermark, a dimmed separator), not copy.
       // Opacity on the path only up to the opaque ground is what shows.
       if (alpha < 0.5 && !el.closest("[role], button, a")) continue;
-      bg ??= [255, 255, 255, 1];
-      for (const l of layers.reverse()) bg = over(l, bg);
+      // An image ground the check cannot sample fails as unknown, never passes blind.
+      if (unknown) { lowCount++; if (low.length < 8) low.push(`${ex(el)} gradient`); continue; }
+      let grounds = [bg ?? [255, 255, 255, 1]];
+      for (const alts of layers.reverse()) grounds = grounds.flatMap((g) => alts.map((c) => over(c, g))).slice(0, 64);
       const fg0 = rgba(cs.color);
-      const fg = over([fg0[0], fg0[1], fg0[2], fg0[3] * alpha], bg);
-      const [L1, L2] = [lum(fg), lum(bg)].sort((x, y) => y - x);
-      const ratio = (L1 + 0.05) / (L2 + 0.05);
+      let ratio = Infinity;
+      for (const g of grounds) {
+        const fg = over([fg0[0], fg0[1], fg0[2], fg0[3] * alpha], g);
+        const [L1, L2] = [lum(fg), lum(g)].sort((x, y) => y - x);
+        ratio = Math.min(ratio, (L1 + 0.05) / (L2 + 0.05));
+      }
       const min = parseFloat(cs.fontSize) >= 24 ? 3 : 4.5;
       if (ratio < min) { lowCount++; if (low.length < 8) low.push(`${ex(el)} ${ratio.toFixed(2)}:1`); }
     }

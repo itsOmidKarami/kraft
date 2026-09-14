@@ -115,7 +115,8 @@ const FLOWS: Flow[] = [
     { name: "repo", run: async (p) => { const d = p.getByRole("dialog"); await d.getByLabel("repo").selectOption({ index: 1 }).catch(async () => { await d.getByRole("radio").first().click(); }); } },
     { name: "template-long", run: async (p) => { await p.getByRole("dialog").getByRole("radiogroup", { name: "template" }).getByRole("radio").nth(2).click(); } },
     { name: "skip-a-node", run: async (p) => { await p.getByRole("dialog").getByText(/^verify$/).first().click().catch(() => {}); } },
-    { name: "budget", run: async (p) => { await p.getByRole("dialog").getByLabel("budget").fill("12.5").catch(() => {}); } },
+    // Phone keeps the overrides behind a disclosure (W3.8): open it, or the fill lands in a hidden field (Kraft-ow8wo).
+    { name: "budget", run: async (p) => { const d = p.getByRole("dialog"); const t = d.getByRole("button", { name: /advanced · overrides/i }); if ((await t.isVisible()) && (await t.getAttribute("aria-expanded")) !== "true") await t.click(); await d.getByLabel("budget").fill("12.5"); } },
     { name: "scroll-bottom", run: async (p) => { await p.getByRole("dialog").evaluate((el) => { const s = el.querySelector("form, .modal-body, [class*=body]") ?? el; (s as HTMLElement).scrollTop = 99999; }); } },
     { name: "create-paused", run: btn(/create paused/i), wait: 900 },
   ] },

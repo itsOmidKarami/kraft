@@ -234,6 +234,8 @@
   /* 18px per level (42), as an inline --depth on the row. */
   padding-left: calc(6px + var(--depth, 0) * 18px);
 }
+/* A file row is a <button>: with no colour of its own it drew the UA's black (1.19:1, W10.A). */
+.tree-row[data-kind="file"] { color: var(--color-text); }
 .tree-row[data-kind="folder"] { color: var(--color-neutral-400); }
 .tree-row[data-selected="true"] { background: var(--color-accent-900); border-radius: var(--radius-sm); }
 /* A deep folder's name breaks rather than ellipsizing (W5); counts never wrap. */
@@ -269,7 +271,7 @@
 }
 .inspector-foot {
   font-size: 11.5px;
-  color: var(--color-neutral-600);
+  color: var(--color-text-muted);
   margin-top: var(--space-2);
 }
 .item-right-pane {
@@ -395,11 +397,20 @@ textarea.composer-input {
   min-height: 76px;
   font-size: 13.5px;
 }
+/* Kraft-migvn: the agent's question caps at 4 lines and scrolls inside, the
+   same treatment as the stop row's .stop-question (W8.1). Quoted in full it
+   pushed the never-scrolling item page past the viewport at 1100/1280. */
 .composer-quoted {
   font-size: 13px;
   color: var(--color-neutral-300);
   font-style: italic;
   margin: 0;
+  max-height: 4lh; overflow-y: auto; white-space: pre-wrap;
+}
+/* Under 1280 the action bar wraps to two rows (W2.5), and the page ran 28px
+   past 800px tall with four quoted lines: two, still scrolling inside. */
+@media (max-width: 1279px) {
+  .detail .composer-quoted { max-height: 2lh; }
 }
 /* Header line + 11px explanation (spec §3): `Steer verify · the note leads
    attempt 2's system prompt`. */
@@ -417,6 +428,19 @@ textarea.composer-input {
 .composer-footnote {
   font-size: 11px;
   margin: 0;
+}
+/* On the item page the footnote shares the actions' line when there is room
+   (Kraft-migvn): the page never scrolls, and at 1100 × 800 the answer
+   composer was still one row too tall. A narrow composer wraps it back under. */
+.detail .composer { flex-direction: row; flex-wrap: wrap; align-items: center; }
+.detail .composer > * { flex: 1 1 100%; }
+.detail .composer > .gate-actions { flex: 0 0 auto; order: 1; }
+.detail .composer > .composer-footnote { flex: 1 1 0; min-width: 16ch; order: 2; }
+.detail .composer > .form-error { order: 3; }
+/* Phone keeps the plain column (its composer is a sheet, W3.5). */
+@media (max-width: 767px) {
+  .detail .composer { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+  .detail .composer > * { flex: initial; order: 0; }
 }
 
 /* — rate-limit countdown row (22) ───────────────────────────────────────── */

@@ -96,6 +96,24 @@ describe("PeekPane", () => {
     expect(screen.queryByText(/updated .* ago/)).toBeNull();
   });
 
+  // W10.D: a reported build showed the raw 32-hex id and scrolled sideways. The
+  // head is one grid -- id + meta | Open → | ✕ -- and the id is ShortId's.
+  it("heads the pane with the short id, never the raw 32-hex, in id+meta | Open → | ✕ cells", () => {
+    const id = "c7446dca30d840a8a69977c6649a7b11";
+    useStore.setState({ workItems: { [id]: baseItem({ id, repo: "/Users/dev/code/kraft" }) } } as never);
+    render(
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <PeekPane id={id} onClose={vi.fn()} />
+      </MemoryRouter>,
+    );
+    const head = document.querySelector(".peek-head") as HTMLElement;
+    expect(head.textContent).not.toContain(id);
+    expect(within(head).getByTitle(id).textContent).toBe("c7446dca…a7b11");
+    const cells = [...head.children];
+    expect(cells.map((c) => c.classList.contains("peek-head-id") || c.classList.contains("peek-open") || c.classList.contains("peek-close"))).toEqual([true, true, true]);
+    expect(within(cells[0] as HTMLElement).getByText("kraft")).toBeTruthy();
+  });
+
   it("renders the hero card with the current node and its task line when progress is set", () => {
     setOneItem({
       current_node_id: "verify",

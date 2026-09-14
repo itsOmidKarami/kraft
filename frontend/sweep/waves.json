@@ -104,5 +104,19 @@
       { "kind": "differs", "a": "board/group-template@1280~template", "b": "board/group-template@1280" },
       { "kind": "no-console", "match": "^(menu|log-modal)/" }
     ]
+  },
+  "W10": {
+    "title": "Closing wave: dark contrast, open beads, harness cleanup, documents rows, peek overflow",
+    "screens": "all",
+    "specs": "all",
+    "rules": [
+      { "kind": "no-flag", "flag": "contrast", "match": "." },
+      { "kind": "no-flag", "flag": "clipped-v", "match": "." },
+      { "kind": "no-flag", "flag": "target<44", "match": "@390" },
+      { "kind": "no-flag", "flag": "offscreen", "match": "." },
+      { "kind": "no-console", "match": "^(?!login/)" },
+      { "kind": "flow-completes", "match": "^flow-" },
+      { "kind": "no-flag", "flag": "setup", "match": "." }
+    ]
   }
 }

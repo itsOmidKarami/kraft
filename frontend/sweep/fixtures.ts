@@ -481,19 +481,22 @@ ${variant === "long" ? "+    # " + "a very long line that never wraps because it
 export function documentsFor(item: any, variant: Variant) {
   const long = variant === "long";
   const slug = item.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, long ? 110 : 40);
-  const docs = [
-    { kind: "specs", node: "spec", hook: "on.spec.requested", path: `.engineering/specs/2026-09-12-${slug}.md`, title: item.title },
-    { kind: "plans", node: "plan", hook: "on.plan.requested", path: `.engineering/plans/2026-09-12-${slug}.md`, title: `Plan: ${item.title}` },
+  // Two documents attached at intake in every variant, at the real shape (W10.D):
+  // a plan in a Claude worktree, 90+ chars, so the row shows both chips and a path that must cut.
+  const wt = `.claude/worktrees/${item.id}/docs/superpowers/plans`;
+  const docs: { kind: string; node: string; hook: string; path: string; title: string; attached?: string }[] = [
+    { kind: "specs", node: "spec", hook: "on.spec.requested", path: `${wt}/2026-09-12-${slug}-design.md`, title: item.title, attached: "spec" },
+    { kind: "plans", node: "plan", hook: "on.plan.requested", path: `${wt}/2026-09-12-${slug}.md`, title: `Plan: ${item.title}`, attached: "plan" },
     { kind: "reviews", node: "review", hook: "on.review.requested", path: `.engineering/reviews/2026-09-13-${slug}.md`, title: `Review: ${item.title}` },
     { kind: "sessions", node: "implement", hook: "on.implementation.start", path: `.engineering/sessions/${hex(901)}.md`, title: `Session ${hex(901)}` },
     { kind: "sessions", node: "verify", hook: "on.test.run", path: `.engineering/sessions/${hex(902)}.md`, title: hex(902) },
   ];
   if (long) for (let i = 0; i < 12; i++) docs.push({ kind: "sessions", node: "implement", hook: "on.implementation.start", path: `.engineering/sessions/${hex(910 + i)}.md`, title: `Session ${hex(910 + i)}` });
   return docs.map((d, i) => ({
-    document_id: hex(700 + i),
+    document_id: hex(700 + i), work_item_id: item.id,
     repo: item.repo, title: d.title, kind: d.kind, source_kind: d.kind === "sessions" ? "session_summary" : "artifact",
     path: d.path, node_id: d.node, hook_point: d.hook, worker_session_id: hex(item.id.length + i),
-    attachment_kind: long && i === 0 ? "spec" : null,
+    attachment_kind: d.attached ?? null,
     indexed_at: t(200 - i * 7),
   }));
 }
@@ -628,7 +631,8 @@ export function searchFor(q: string, docs: any[], variant: Variant) {
       id: d.document_id, repo: d.repo, source_kind: d.source_kind, kind: d.kind, title: d.title, path: d.path,
       snippet: long ? `…${LONG_DESCRIPTION.slice(40, 380)}…` : "…carry findings_measured from the verify node into the fix loop's system prompt…",
       score: 0.91 - i * 0.05,
-      links: [{ work_item_id: hex(1), node_id: d.node_id, hook_point: d.hook_point, worker_session_id: d.worker_session_id }],
+      // The item the document belongs to, so opening a result lands on a real page (Kraft-hrlqs).
+      links: [{ work_item_id: d.work_item_id, node_id: d.node_id, hook_point: d.hook_point, worker_session_id: d.worker_session_id }],
     })),
   };
 }

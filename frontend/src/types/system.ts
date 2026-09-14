@@ -14,6 +14,10 @@ export interface Health {
   /** This build's installed version, or "0.0.0+source" for a checkout that
    *  was never installed (`kraft.update.installed()`). Sidebar footer only. */
   version?: string;
+  /** Whether this request carries a live session (Kraft-yx79s): lets a
+   *  locked instance open on Login without a 401 probe. Absent on a server
+   *  that does not send it yet, and then main.tsx probes /api/theme. */
+  authenticated?: boolean;
 }
 
 export interface Analytics {
