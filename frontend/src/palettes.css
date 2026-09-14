@@ -18,10 +18,16 @@
       specificity (`:root` + one attribute) — source order breaks the
       tie, and light mode's override has to win. palettes.order.test.ts
       pins this.
-   3. Role blocks (`[data-palette="X"][data-mode="Y"]`) — bg/surface/text/
-      text-muted only. These four don't derive from anything else, so
-      each (palette, mode) pair needs its own literal values. Two
-      attributes beats one, so these always win regardless of order.
+   3. Role blocks (`[data-palette="X"][data-mode="Y"]`) — literal values
+      per (palette, mode). Two attributes beats one, so these always win
+      regardless of order. Dark blocks carry bg/surface/text/text-muted;
+      dark mode derives the rest from the ramp (styles.css :root). Light
+      blocks restate the WHOLE set together (W1.1): roles, accent,
+      status fills, and every ramp step, because the ramps mirror in light
+      mode — each step keeps, against the light ground, the contrast it has
+      against the dark one, with text steps (100–600) floored at 5.2:1.
+      A light rule never redefines text without the surface under it.
+      palettes.contrast.test.ts checks every palette × mode.
 */
 
 /* ── 1. ramp blocks ─────────────────────────────────────────────────────── */
@@ -173,30 +179,74 @@
 }
 
 :root[data-mode="light"] {
-  /* Nocturne's accent (L 0.66) was tuned to read on a dark ground; on
-     white it falls short of 4.5:1 as link/button text. The ramp's own
-     700 step (L ~0.48) is dark enough to hold contrast on any palette's
-     light ground without a second hand-tuned value — verified by
-     test_palette_contrast.py. */
-  --color-accent: var(--color-accent-700);
-  --color-accent-2: var(--color-accent-2-700);
+  /* Accent, accent-2 and every ramp step are literal per palette in the role
+     blocks below: the ramps mirror in light mode, so `var(--color-accent-700)`
+     here would now resolve to a pale tint. Shadows take their ink from the
+     text colour for the same reason (neutral-900 is near-white in light). */
   --color-danger: #a92e55;
-  --shadow-sm: 0 1px 2px color-mix(in srgb, var(--color-neutral-900) 10%, transparent);
+  /* The login glow's deck indigo is a dark-ground colour; on light it drew a
+     dark blob under the form. The mirrored 900 step is that palette's pale tint. */
+  --color-section: var(--color-accent-900);
+  --shadow-sm: 0 1px 2px color-mix(in srgb, var(--color-text) 10%, transparent);
   --shadow-md:
-    0 1px 2px color-mix(in srgb, var(--color-neutral-900) 10%, transparent),
-    0 6px 18px color-mix(in srgb, var(--color-neutral-900) 16%, transparent);
+    0 1px 2px color-mix(in srgb, var(--color-text) 10%, transparent),
+    0 6px 18px color-mix(in srgb, var(--color-text) 16%, transparent);
   --shadow-lg:
-    0 1px 2px color-mix(in srgb, var(--color-neutral-900) 10%, transparent),
-    0 16px 40px color-mix(in srgb, var(--color-neutral-900) 22%, transparent);
+    0 1px 2px color-mix(in srgb, var(--color-text) 10%, transparent),
+    0 16px 40px color-mix(in srgb, var(--color-text) 22%, transparent);
 }
 
 /* ── 3. (palette, mode) role blocks ──────────────────────────────────────── */
 
+:root[data-palette="nocturne"][data-mode="dark"] {
+  --color-bg: #161826;
+  --color-surface: #232532;
+  --color-text: #e9e9ed;
+  --color-text-muted: #888c9c;
+}
 :root[data-palette="nocturne"][data-mode="light"] {
   --color-bg: #f2f3f8;
   --color-surface: #fbfcfe;
+  --color-surface-2: #d9dbe3;
   --color-text: #15151f;
   --color-text-muted: #545460;
+  --color-text-faint: #82828f;
+  --color-border: #b6b9c7;
+  --color-accent: #5d5294;
+  --color-accent-2: #5c5783;
+  --color-status-needs-you: #5d5294;
+  --color-status-running: #5d5294;
+  --color-status-done: #575a6d;
+  --color-status-capped: #5c5783;
+  --color-status-budget: #6051a2;
+  --color-status-ink: #fbfcfe;
+  --color-neutral-100: #15161d;
+  --color-neutral-200: #20212c;
+  --color-neutral-300: #2d303d;
+  --color-neutral-400: #404354;
+  --color-neutral-500: #575a6d;
+  --color-neutral-600: #616578;
+  --color-neutral-700: #9195a5;
+  --color-neutral-800: #b6b9c7;
+  --color-neutral-900: #d9dbe3;
+  --color-accent-100: #17161e;
+  --color-accent-200: #232033;
+  --color-accent-300: #322c51;
+  --color-accent-400: #483a81;
+  --color-accent-500: #6051a2;
+  --color-accent-600: #685aab;
+  --color-accent-700: #998fd7;
+  --color-accent-800: #bcb5ef;
+  --color-accent-900: #dcd9fb;
+  --color-accent-2-100: #17161e;
+  --color-accent-2-200: #232033;
+  --color-accent-2-300: #322c51;
+  --color-accent-2-400: #463f6f;
+  --color-accent-2-500: #5d568b;
+  --color-accent-2-600: #665f95;
+  --color-accent-2-700: #9692c1;
+  --color-accent-2-800: #bab6dc;
+  --color-accent-2-900: #dbd9f0;
 }
 
 :root[data-palette="rose"][data-mode="dark"] {
@@ -208,8 +258,46 @@
 :root[data-palette="rose"][data-mode="light"] {
   --color-bg: #f5f2f6;
   --color-surface: #fdfbfe;
+  --color-surface-2: #ddd9e1;
   --color-text: #1a131b;
   --color-text-muted: #5b525c;
+  --color-text-faint: #8a808b;
+  --color-border: #bdb7c4;
+  --color-accent: #7b477e;
+  --color-accent-2: #715074;
+  --color-status-needs-you: #7b477e;
+  --color-status-running: #7b477e;
+  --color-status-done: #62586a;
+  --color-status-capped: #715074;
+  --color-status-budget: #85478a;
+  --color-status-ink: #fdfbfe;
+  --color-neutral-100: #19151c;
+  --color-neutral-200: #26202a;
+  --color-neutral-300: #352d3a;
+  --color-neutral-400: #4a4151;
+  --color-neutral-500: #62586a;
+  --color-neutral-600: #6c6273;
+  --color-neutral-700: #9b92a3;
+  --color-neutral-800: #bdb7c4;
+  --color-neutral-900: #ddd9e1;
+  --color-accent-100: #1b141b;
+  --color-accent-200: #2b1d2c;
+  --color-accent-300: #442746;
+  --color-accent-400: #67316c;
+  --color-accent-500: #85478a;
+  --color-accent-600: #8c4e92;
+  --color-accent-700: #be86c0;
+  --color-accent-800: #dbaedc;
+  --color-accent-900: #efd4f0;
+  --color-accent-2-100: #1b141b;
+  --color-accent-2-200: #2b1d2c;
+  --color-accent-2-300: #442746;
+  --color-accent-2-400: #5d3860;
+  --color-accent-2-500: #774f7a;
+  --color-accent-2-600: #815783;
+  --color-accent-2-700: #af8cb3;
+  --color-accent-2-800: #ceb2cf;
+  --color-accent-2-900: #e8d6e9;
 }
 
 :root[data-palette="forest"][data-mode="dark"] {
@@ -221,8 +309,46 @@
 :root[data-palette="forest"][data-mode="light"] {
   --color-bg: #f1f4f0;
   --color-surface: #fafcfa;
+  --color-surface-2: #daddd7;
   --color-text: #101911;
   --color-text-muted: #4e584f;
+  --color-text-faint: #7c867d;
+  --color-border: #b3bbb0;
+  --color-accent: #296e3d;
+  --color-accent-2: #406948;
+  --color-status-needs-you: #296e3d;
+  --color-status-running: #296e3d;
+  --color-status-done: #535e4e;
+  --color-status-capped: #406948;
+  --color-status-budget: #02672c;
+  --color-status-ink: #fafcfa;
+  --color-neutral-100: #131812;
+  --color-neutral-200: #1e241b;
+  --color-neutral-300: #2a3226;
+  --color-neutral-400: #3c4637;
+  --color-neutral-500: #535e4e;
+  --color-neutral-600: #5e6959;
+  --color-neutral-700: #8e9888;
+  --color-neutral-800: #b3bbb0;
+  --color-neutral-900: #daddd7;
+  --color-accent-100: #121913;
+  --color-accent-200: #152519;
+  --color-accent-300: #10361b;
+  --color-accent-400: #054c20;
+  --color-accent-500: #02672c;
+  --color-accent-600: #1b7438;
+  --color-accent-700: #5ca06c;
+  --color-accent-800: #8fc39a;
+  --color-accent-900: #c3e1c9;
+  --color-accent-2-100: #121913;
+  --color-accent-2-200: #152519;
+  --color-accent-2-300: #10361b;
+  --color-accent-2-400: #1a4c29;
+  --color-accent-2-500: #31633c;
+  --color-accent-2-600: #3e704a;
+  --color-accent-2-700: #729d7a;
+  --color-accent-2-800: #9fbfa4;
+  --color-accent-2-900: #cbdfce;
 }
 
 :root[data-palette="amber"][data-mode="dark"] {
@@ -234,8 +360,46 @@
 :root[data-palette="amber"][data-mode="light"] {
   --color-bg: #f7f2f0;
   --color-surface: #fefbfa;
+  --color-surface-2: #e4d9d7;
   --color-text: #1d140e;
   --color-text-muted: #5f524b;
+  --color-text-faint: #8f8079;
+  --color-border: #c6b6b2;
+  --color-accent: #894b19;
+  --color-accent-2: #7d5236;
+  --color-status-needs-you: #894b19;
+  --color-status-running: #894b19;
+  --color-status-done: #6b574f;
+  --color-status-capped: #7d5236;
+  --color-status-budget: #924a06;
+  --color-status-ink: #fefbfa;
+  --color-neutral-100: #1c1513;
+  --color-neutral-200: #2b1f1b;
+  --color-neutral-300: #3d2d27;
+  --color-neutral-400: #534039;
+  --color-neutral-500: #6b574f;
+  --color-neutral-600: #76615a;
+  --color-neutral-700: #a5918c;
+  --color-neutral-800: #c6b6b2;
+  --color-neutral-900: #e4d9d7;
+  --color-accent-100: #1d1511;
+  --color-accent-200: #301e12;
+  --color-accent-300: #4a280e;
+  --color-accent-400: #6f3602;
+  --color-accent-500: #924a06;
+  --color-accent-600: #9e510c;
+  --color-accent-700: #cc8959;
+  --color-accent-800: #e7b08c;
+  --color-accent-900: #f6d5bf;
+  --color-accent-2-100: #1d1511;
+  --color-accent-2-200: #301e12;
+  --color-accent-2-300: #4a280e;
+  --color-accent-2-400: #673917;
+  --color-accent-2-500: #83502e;
+  --color-accent-2-600: #8c5a36;
+  --color-accent-2-700: #bc8d6f;
+  --color-accent-2-800: #d7b39c;
+  --color-accent-2-900: #ecd6c8;
 }
 
 :root[data-palette="slate"][data-mode="dark"] {
@@ -247,6 +411,44 @@
 :root[data-palette="slate"][data-mode="light"] {
   --color-bg: #eff5f6;
   --color-surface: #f9fcfd;
+  --color-surface-2: #d4dee0;
   --color-text: #0b181d;
   --color-text-muted: #4a585d;
+  --color-text-faint: #78868c;
+  --color-border: #acbdc0;
+  --color-accent: #006989;
+  --color-accent-2: #2a667b;
+  --color-status-needs-you: #006989;
+  --color-status-running: #006989;
+  --color-status-done: #486065;
+  --color-status-capped: #2a667b;
+  --color-status-budget: #00627d;
+  --color-status-ink: #f9fcfd;
+  --color-neutral-100: #12191b;
+  --color-neutral-200: #182528;
+  --color-neutral-300: #213438;
+  --color-neutral-400: #33484e;
+  --color-neutral-500: #486065;
+  --color-neutral-600: #536a6f;
+  --color-neutral-700: #84999d;
+  --color-neutral-800: #acbdc0;
+  --color-neutral-900: #d4dee0;
+  --color-accent-100: #11191d;
+  --color-accent-200: #0d252e;
+  --color-accent-300: #003545;
+  --color-accent-400: #07495d;
+  --color-accent-500: #00627d;
+  --color-accent-600: #026e90;
+  --color-accent-700: #4a9cbe;
+  --color-accent-800: #84c1dd;
+  --color-accent-900: #bbe2f3;
+  --color-accent-2-100: #11191d;
+  --color-accent-2-200: #0d252e;
+  --color-accent-2-300: #003545;
+  --color-accent-2-400: #054a5e;
+  --color-accent-2-500: #0e637d;
+  --color-accent-2-600: #1f6e89;
+  --color-accent-2-700: #629db4;
+  --color-accent-2-800: #94bfd1;
+  --color-accent-2-900: #c7e0eb;
 }

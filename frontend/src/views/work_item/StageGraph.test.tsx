@@ -20,6 +20,24 @@ const item = (over: Partial<WorkItem> = {}): WorkItem =>
     ...over,
   }) as WorkItem;
 
+describe("StageGraph (W0.6: gate mark)", () => {
+  it("flags the current pill whenever pending_gate is set, auto_escalate or not", () => {
+    vi.mocked(api.getTemplate).mockRejectedValue(new Error("nope"));
+    render(<StageGraph item={item({ pending_gate: "plan_approval", status: "needs_human" })} selected={null} onSelect={() => {}} />);
+    const current = document.querySelector(".stage-pill[aria-current='step']") as HTMLElement;
+    expect(current.dataset.gate).toBe("true");
+    expect(current.querySelector(".stage-pill-gate")).toBeTruthy();
+    expect(current.querySelector(".stage-pill-escalate")).toBeNull();
+    expect(document.querySelectorAll(".stage-pill-gate")).toHaveLength(1);
+  });
+
+  it("draws no gate mark when nothing is pending", () => {
+    vi.mocked(api.getTemplate).mockRejectedValue(new Error("nope"));
+    render(<StageGraph item={item()} selected={null} onSelect={() => {}} />);
+    expect(document.querySelector(".stage-pill-gate")).toBeNull();
+  });
+});
+
 describe("StageGraph (Kraft-1brd: trimmed-node placeholders)", () => {
   it("renders only the live nodes while the template fetch is pending or fails", async () => {
     vi.mocked(api.getTemplate).mockRejectedValue(new Error("nope"));

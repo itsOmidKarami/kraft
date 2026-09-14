@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ArrowSquareOut, Check, Flag } from "@phosphor-icons/react";
 import * as api from "../../../api";
+import { elapsedBetween, waitingSince } from "../../../format";
 import type { KraftEvent, WorkItem } from "../../../types";
 import type { InspectorTab } from "../selection";
 import { Composer } from "./Composer";
@@ -90,10 +91,51 @@ export function GateCard({
   reviewHref: (nodeId: string, tab: InspectorTab, id: string) => string;
   events?: KraftEvent[];
 }) {
-  const { busy, err, run } = useActionBar(item.id);
+  const { busy, pending, err, run } = useActionBar(item.id);
   const [note, setNote] = useState("");
   const target = rejectTarget(item, gate);
   const node = gateNodeId(item, gate) ?? item.current_node_id ?? "";
+  // Waiting on a person is its own clock, separate from the node's frozen
+  // run time in the hero (W0.4).
+  const since = waitingSince(events, gate);
+  const judge = item.judge_stop_note ?? [];
+  const deferred = (item.deferred_findings?.length ?? 0) > 0 || (item.concerns?.length ?? 0) > 0;
+
+  // Always shown, not just when an artifact exists: an absent one is
+  // rendered disabled with "not written yet" rather than hidden (G5-05
+  // — a gap the punch list flagged as a loose sentence instead).
+  const artifacts = (
+    <div className="gate-artifacts">
+      {gate !== "human_review_approval" &&
+        (item.gate_artifact ? (
+          // No document id to hand `reviewHref` — `Documents.tsx` already
+          // matches `item.gate_artifact` by repo path and selects it
+          // itself once the list lands (Kraft-esc); don't rebuild that.
+          <a className="btn btn-secondary" href={reviewHref(node, "documents", "")}>
+            {ARTIFACT_LABELS[gate] ?? "Read document"}
+          </a>
+        ) : (
+          <span className="btn btn-secondary" aria-disabled="true" title="not written yet">
+            {ARTIFACT_LABELS[gate] ?? "Read document"}
+          </span>
+        ))}
+      {gate === "human_review_approval" && (
+        <a className="btn btn-secondary" href={reviewHref(node, "changes", "")}>
+          Review changes
+        </a>
+      )}
+      {item.mr_ref && (
+        <a
+          className="btn btn-secondary mr-btn"
+          href={item.mr_ref.url}
+          target="_blank"
+          rel="noreferrer"
+        >
+          <ArrowSquareOut size={14} /> Open MR
+        </a>
+      )}
+    </div>
+  );
 
   return (
     <div className="card attention-card gate-card" data-gate={gate} data-testid="gate-card">
@@ -103,73 +145,42 @@ export function GateCard({
           <span className="attention-title">{PROMPTS[gate] ?? "approve to continue"}</span>
           <span className="attention-sub">
             <code>{gate}</code>
+            {since && <> · waiting {elapsedBetween(since)}</>}
           </span>
         </div>
       </div>
-      {/* Always shown, not just when an artifact exists: an absent one is
-          rendered disabled with "not written yet" rather than hidden (G5-05
-          — a gap the punch list flagged as a loose sentence instead). */}
-      <div className="gate-artifacts">
-          {gate !== "human_review_approval" &&
-            (item.gate_artifact ? (
-              // No document id to hand `reviewHref` — `Documents.tsx` already
-              // matches `item.gate_artifact` by repo path and selects it
-              // itself once the list lands (Kraft-esc); don't rebuild that.
-              <a className="btn btn-secondary" href={reviewHref(node, "documents", "")}>
-                {ARTIFACT_LABELS[gate] ?? "Read document"}
-              </a>
-            ) : (
-              <span className="btn btn-secondary" aria-disabled="true" title="not written yet">
-                {ARTIFACT_LABELS[gate] ?? "Read document"}
-              </span>
-            ))}
-          {gate === "human_review_approval" && (
-            <a className="btn btn-secondary" href={reviewHref(node, "changes", "")}>
-              Review changes
-            </a>
-          )}
-          {item.mr_ref && (
-            <a
-              className="btn btn-secondary mr-btn"
-              href={item.mr_ref.url}
-              target="_blank"
-              rel="noreferrer"
-            >
-              <ArrowSquareOut size={14} /> Open MR
-            </a>
-          )}
-        </div>
-      {/* Kraft-a4js: an unbounded list here (10 findings, 5.4k characters on
-          the live item) pushed the graph/inspector/right pane off the
-          viewport on a page that deliberately cannot scroll (screen 48 —
-          the only two scrollers are inside the split, below this card). A
-          `max-height` here would just stack a third scroller on top of
-          those two, which screen 48 forbids. `findings_measured` events are
-          already on the Timeline, which already has one -- so the card
-          stays a counted one-liner, never a roll-up nobody reads. */}
-      {((item.deferred_findings?.length ?? 0) > 0 || (item.concerns?.length ?? 0) > 0) && (
-        <p className="gate-deferred">
-          {deferredSummary(item)} ·{" "}
-          <a href={reviewHref(node, "timeline", findingsNodeId(events, node))}>see Timeline</a>
-        </p>
-      )}
-      {/* stop_downgrade findings: real (critical/important) findings a judge
-          decided were not worth chasing further -- a second, visually
-          distinct block from .gate-deferred so a human at the gate can tell
-          "these were never blocking" from "a judge decided not to keep
-          chasing these". Kraft-a4js: same clipped-container failure as
-          .gate-deferred above, so this stays a counted one-liner per node
-          too, rather than the findings themselves -- those are on the
-          Timeline already. */}
-      {item.judge_stop_note && item.judge_stop_note.length > 0 && (
-        <div className="gate-judge-note">
-          {item.judge_stop_note.map((note, i) => (
-            <p key={`${note.node_id}:${i}`} className="gate-judge-entry">
-              <span className="field-hint">judge stopped {note.node_id} early</span> {note.reasoning} ·{" "}
-              {note.findings.length} finding{note.findings.length === 1 ? "" : "s"} not chased ·{" "}
-              <a href={reviewHref(note.node_id, "timeline", note.node_id)}>see Timeline</a>
+      {/* Findings and the judge note side by side above 1280, one column
+          below (W0.3); both collapse to one line at any fit step. */}
+      {(deferred || judge.length > 0) && (
+        <div className="gate-notes">
+          {/* Kraft-a4js: an unbounded list here (10 findings, 5.4k characters
+              on the live item) pushed the graph/inspector/right pane off the
+              viewport on a page that deliberately cannot scroll (screen 48).
+              `findings_measured` events are already on the Timeline, which
+              scrolls -- so the card stays a counted one-liner. */}
+          {deferred && (
+            <p className="gate-deferred">
+              {deferredSummary(item)} ·{" "}
+              <a href={reviewHref(node, "timeline", findingsNodeId(events, node))}>see Timeline</a>
             </p>
-          ))}
+          )}
+          {/* stop_downgrade findings: real (critical/important) findings a
+              judge decided were not worth chasing further -- visually
+              distinct from .gate-deferred so a human at the gate can tell
+              "these were never blocking" from "a judge decided not to keep
+              chasing these". Counted per node, same as above. */}
+          {judge.length > 0 && (
+            <div className="gate-judge-note">
+              {judge.map((n, i) => (
+                <p key={`${n.node_id}:${i}`} className="gate-judge-entry">
+                  <span className="field-hint">judge stopped {n.node_id} early</span> {n.reasoning} ·{" "}
+                  {n.findings.length} finding{n.findings.length === 1 ? "" : "s"} not chased ·{" "}
+                  <a href={reviewHref(n.node_id, "timeline", n.node_id)}>see Timeline</a>
+                </p>
+              ))}
+              {judge.length > 1 && <span className="gate-more">+{judge.length - 1} more</span>}
+            </div>
+          )}
         </div>
       )}
       {!open ? (
@@ -186,34 +197,48 @@ export function GateCard({
           <button className="btn btn-secondary" disabled={busy} onClick={onOpen}>
             Reject
           </button>
+          {/* One row of actions (44): the review link sits beside Approve /
+              Reject instead of a row of its own. */}
+          {artifacts}
           <SkipControl itemId={item.id} />
+          {/* W6.3: between the server saying yes and the store re-reading the
+              item, the card says so instead of offering Approve again. */}
+          {pending && <span className="field-hint action-pending">pending…</span>}
           {err && <p className="form-error">{err}</p>}
         </div>
       ) : (
-        <Composer
-          title={`Reject ${gate}`}
-          value={note}
-          onChange={setNote}
-          busy={busy}
-          error={err}
-          placeholder="What should change?"
-          footnote={
-            target ? (
-              <>
-                re-enters at <code>{target}</code> with this note as its steer
-              </>
-            ) : undefined
-          }
-          submitLabel={target ? "Reject and send back" : "Reject and re-plan"}
-          disabled={note.trim() === ""}
-          onSubmit={() =>
-            run(
-              () => api.rejectGate(item.id, gate, note),
-              `Rejected — re-running from ${target ?? gate}`,
-            )
-          }
-          onCancel={onCancel}
-        />
+        <>
+          {artifacts}
+          <Composer
+            title={`Reject ${gate}`}
+            value={note}
+            onChange={setNote}
+            busy={busy}
+            error={err}
+            placeholder="What should change?"
+            footnote={
+              target ? (
+                <>
+                  re-enters at <code>{target}</code> with this note as its steer
+                </>
+              ) : undefined
+            }
+            submitLabel={target ? "Reject and send back" : "Reject and re-plan"}
+            disabled={note.trim() === ""}
+            onSubmit={() =>
+              run(
+                () => api.rejectGate(item.id, gate, note),
+                `Rejected — re-running from ${target ?? gate}`,
+              ).then((ok) => {
+                if (ok) {
+                  setNote("");
+                  onCancel();
+                }
+              })
+            }
+            onCancel={onCancel}
+          />
+        </>
       )}
     </div>
   );

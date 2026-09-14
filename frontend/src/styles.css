@@ -15,6 +15,21 @@
      the ramp's own lightness, 5.9:1 on a card and 6.8:1 on the board ground. */
   --color-danger: #e5849a;
 
+  /* The rest of the role set every palette's light block restates (W1.1).
+     Dark mode derives them from the palette's own ramp; light mode cannot,
+     because its ramps are mirrored, so palettes.css gives literals there. */
+  --color-surface-2: var(--color-neutral-900);
+  --color-text-faint: var(--color-neutral-600);
+  --color-border: var(--color-neutral-800);
+  /* Status fills. Dark keeps the look these spots had before; light holds
+     every one at 4.5:1 on the surface, so each also reads as text. */
+  --color-status-needs-you: var(--color-accent-800);
+  --color-status-running: var(--color-accent);
+  --color-status-done: var(--color-neutral-800);
+  --color-status-capped: var(--color-accent-700);
+  --color-status-budget: var(--color-accent-700);
+  --color-status-ink: var(--color-accent-100);
+
   /* Hairline (spec §4): the fading-gradient row divider, never a full-width
      solid border between rows. 24px insets by default; 48px ("section
      header" per the README) for the main content column's own rows. */
@@ -56,6 +71,13 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
    z-indexes *inside* .peek-pane, .dialog-backdrop or .board-filter-row are
    local to that box and are not on this ladder. */
 
+
+/* W6.6: one keyboard ring for every interactive element. nocturne.css's own
+   :focus-visible is the fallback; this names the ramp step the spec asks for. */
+:where(a[href], button, input, select, textarea, summary, [tabindex], [role="tab"], [role="radio"], [role="option"], [role="menuitem"]):focus-visible {
+  outline: 2px solid var(--color-accent-500);
+  outline-offset: 2px;
+}
 
 .empty { font-size: 12px; color: var(--color-text-muted); padding: 10px 0; }
 .form-error { font-size: 12px; color: var(--color-neutral-200); margin-top: 6px; }
@@ -125,15 +147,15 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 .glyph[data-status="running"]    { color: var(--color-accent);       border-color: var(--color-accent); animation: kpulse 1.8s infinite; }
 .glyph[data-status="done"]       { color: var(--color-neutral-400);  border-color: var(--color-neutral-700); }
 .glyph[data-status="failed"]     { color: var(--color-neutral-200);  border-color: var(--color-neutral-500); }
-.glyph[data-status="capped_out"] { color: var(--color-accent-300);   border-color: var(--color-accent-700); }
+.glyph[data-status="capped_out"] { color: var(--color-accent-300);   border-color: var(--color-status-capped); }
 .glyph[data-status="paused"]     { color: var(--color-neutral-400);  border-color: var(--color-neutral-600); }
 .glyph[data-status="unknown"]    { color: var(--color-neutral-500);  border-color: var(--color-neutral-800); }
 .glyph[data-status="pending"]    { color: var(--color-text-muted);  border-color: var(--color-neutral-800); }
 /* item-level design states (deriveState, UI v2 · 01) — Prototype's glyph() */
 .glyph[data-status="gate"]        { color: var(--color-accent);      border-color: var(--color-accent-700); }
-.glyph[data-status="capped"]      { color: var(--color-accent-300);  border-color: var(--color-accent-700); }
+.glyph[data-status="capped"]      { color: var(--color-accent-300);  border-color: var(--color-status-capped); }
 .glyph[data-status="question"]    { color: var(--color-accent);      border-color: var(--color-accent-700); }
-.glyph[data-status="budget"]      { color: var(--color-accent);      border-color: var(--color-accent-700); }
+.glyph[data-status="budget"]      { color: var(--color-accent);      border-color: var(--color-status-budget); }
 .glyph[data-status="not_started"] { color: var(--color-neutral-500); border-color: var(--color-neutral-800); }
 .glyph[data-status="abandoned"]   { color: var(--color-neutral-500); border-color: var(--color-neutral-800); }
 /* Prototype gives rate_limited/waiting their own color too, distinct from the
@@ -153,7 +175,7 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 .chain-bar.lg .chain-fill { height: 6px; }
 .chain-seg[data-state="done"]    .chain-fill { background: var(--color-neutral-500); }
 .chain-seg[data-state="current"] .chain-fill {
-  background: var(--color-accent);
+  background: var(--color-status-running);
   box-shadow: 0 0 10px color-mix(in srgb, var(--color-accent) 45%, transparent);
 }
 .chain-bar.sm .chain-seg[data-state="current"] .chain-fill,
@@ -231,7 +253,8 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 }
 .tab-count { margin-left: 4px; font-size: 11px; color: var(--color-text-muted); }
 
-.kbd { opacity: 0.5; font-size: 11px; margin-left: 4px; }
+/* A colour, not opacity: half-opacity text held in dark mode and fell to 3.3:1 in light. */
+.kbd { color: var(--color-neutral-500); font-size: 11px; margin-left: 4px; }
 
 /* — segmented control — */
 .segmented {
@@ -309,8 +332,13 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 .app-sidebar-row[aria-expanded="true"] { color: var(--color-text); }
 .app-sidebar-badge {
   font-size: 10px; padding: 0 6px; border-radius: 999px; line-height: 16px;
-  background: var(--color-accent-800); color: var(--color-accent-200);
+  background: var(--color-status-needs-you); color: var(--color-status-ink);
 }
+/* The item's status tag (work_item/Header.tsx STATUS_TAG): needs-you and
+   done/paused paint as status fills, not raw ramp steps. */
+.tag-accent { background: var(--color-status-needs-you); color: var(--color-status-ink); }
+.tag-neutral { background: var(--color-status-done); color: var(--color-neutral-100); }
+:root[data-mode="light"] .tag-neutral { color: var(--color-status-ink); }
 .app-sidebar-sub {
   display: flex; flex-direction: column; gap: 1px;
   margin: 2px 0 4px 14px; padding-left: 10px;
@@ -328,6 +356,16 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 .app-sidebar-foot {
   margin-top: auto; font-size: 11px; color: var(--color-neutral-500);
   padding: 0 6px; display: flex; flex-direction: column; gap: 4px;
+}
+/* The degraded-health note's own slot above the footer (W0.12): as a 999px
+   pill inside the footer, a long message grew into a bubble drawn over the
+   footer and past the sidebar's edge. Three lines; full text on hover. */
+.app-sidebar-health { margin-top: auto; padding: 0 6px 8px; min-width: 0; }
+.app-sidebar-health:empty { display: none; }
+.app-sidebar-health:not(:empty) + .app-sidebar-foot { margin-top: 0; }
+.app-sidebar-health .health-badge {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+  overflow: hidden; overflow-wrap: anywhere; border-radius: 8px; padding: 4px 8px;
 }
 
 .app-rail {
@@ -367,19 +405,21 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 .app-content { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 .app-header {
   display: flex; align-items: center; gap: 12px;
-  padding: 10px 20px; height: 48px; box-sizing: border-box;
+  padding: 6px 20px; min-height: 48px; box-sizing: border-box;
   border-bottom: 1px solid var(--color-divider);
   position: sticky; top: 0; z-index: 30; background: var(--color-bg); /* ladder: chrome */
 }
-/* min-width: 0 down the chain so the item id ellipsizes instead of pushing
+/* min-width: 0 down the chain so a long item title shrinks instead of pushing
    the header (and the page) past a 390px phone */
 .app-header-crumb {
   display: flex; align-items: center; gap: 6px; font-size: 13px;
   color: var(--color-neutral-500); min-width: 0; white-space: nowrap;
 }
 .app-header-crumb-part { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* The item title (W5.1): up to two lines, never an ellipsis. */
 .app-header-crumb-current {
-  color: var(--color-text); min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  color: var(--color-text); min-width: 0; overflow: hidden; white-space: normal;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 17px;
 }
 .app-header-crumb-link { text-decoration: none; color: var(--color-neutral-500); }
 .app-header-crumb-link:hover { color: var(--color-text); }
@@ -398,6 +438,7 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
   border: 1px solid var(--color-divider); background: var(--color-surface);
   color: var(--color-text); font: inherit; font-size: 12px;
 }
+.board-filter-row .repo-pill { margin-bottom: 0; flex: none; align-self: center; }
 .repo-pill-avatar {
   display: inline-flex; align-items: center; justify-content: center;
   width: 20px; height: 20px; border-radius: 50%;
@@ -430,6 +471,8 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
   background: var(--hairline-24); font-size: 12px; color: var(--color-neutral-400);
 }
 .archived-table { display: flex; flex-direction: column; }
+/* W4.7: on the filter row, not a full-width row of its own. */
+.archived-search { flex: 1 1 auto; min-width: 0; max-width: 320px; }
 .archived-head {
   display: grid; grid-template-columns: minmax(0, 1fr) 140px 180px 100px;
   padding: 6px 10px; font-size: 11px; color: var(--color-text-muted); letter-spacing: 0.04em;
@@ -487,23 +530,38 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
   background: var(--color-accent); animation: kpulse 1.8s infinite;
 }
 
-.board-groups { padding: 16px 20px 24px; display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+/* --facet-bar-h: the sticky filter row's height, so group heads stick under it. */
+.board-groups { padding: 16px 20px 24px; display: flex; flex-direction: column; gap: 22px; min-width: 0; --facet-bar-h: 40px; }
+/* One row (W4.1/4.7): chips, "+N", Sort. Opaque, with a hairline under it so
+   the row it scrolls over is not sliced with no edge. */
 .board-filter-row {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  display: flex; align-items: center; gap: 10px; flex-wrap: nowrap;
   position: sticky; top: 0; z-index: 3; /* ladder: sticky list chrome */
-  background: var(--color-bg);
+  background: var(--color-bg); box-shadow: 0 1px 0 var(--color-divider);
   padding-top: 4px; padding-bottom: 4px;
 }
-/* display: contents below 1024, so the chips scroll as their own box and
-   .board-sort (a sibling, margin-left: auto) stays outside it -- an
-   overflow-x: auto container forces overflow-y to auto too, which would
-   clip the sort disclosure if it lived inside the scroller. */
-.board-filter-chips { display: contents; }
-.board-facet { display: flex; align-items: center; gap: 6px; }
+/* At >= 768 the chips hold exactly one row: the ones that wrap are hidden
+   (Board measures which, `data-overflow`) and listed under "+N". The phone
+   scrolls this box instead (phone block). */
+.board-filter-chips {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  flex: 1 1 auto; min-width: 0; height: 32px; padding: 3px 2px; box-sizing: border-box; overflow: hidden;
+}
+.board-filter-chips > [data-overflow] { visibility: hidden; }
+.board-filter-row .chip { white-space: nowrap; flex: none; }
 .board-filter-divider {
   width: 1px; align-self: stretch; background: var(--color-divider);
 }
-.board-sort { margin-left: auto; font-size: 12px; color: var(--color-text-muted); position: relative; }
+.board-more { position: relative; flex: none; }
+.board-more > summary { list-style: none; }
+.board-more > summary::-webkit-details-marker { display: none; }
+.board-more-menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 5;
+  display: flex; flex-wrap: wrap; gap: 6px; width: max-content; max-width: min(480px, 70vw);
+  padding: 8px; border-radius: var(--radius-md);
+  background: var(--color-surface); box-shadow: var(--shadow-md);
+}
+.board-sort { margin-left: auto; flex: none; white-space: nowrap; font-size: 12px; color: var(--color-text-muted); position: relative; }
 .board-sort > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; }
 .board-sort > summary::-webkit-details-marker { display: none; }
 .board-sort-menu {
@@ -520,7 +578,7 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 .group-head {
   display: flex; align-items: baseline; gap: 10px;
   margin-bottom: 8px; padding-bottom: 6px;
-  position: sticky; top: 40px; z-index: 2; /* ladder: under the filter row */
+  position: sticky; top: var(--facet-bar-h, 40px); z-index: 2; /* ladder: under the filter row */
   background-color: var(--color-bg);
   background-image: linear-gradient(to right,
     transparent, var(--color-divider) 48px,
@@ -545,7 +603,7 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 }
 
 .board-row {
-  display: grid; grid-template-columns: 22px minmax(0, 1fr) 280px 170px;
+  display: grid; grid-template-columns: 22px minmax(0, 1fr) 200px 150px;
   gap: 16px; align-items: center;
   padding: var(--density-row-pad); border-radius: 8px; cursor: pointer;
   /* The same fading hairline every other list row in the interface carries
@@ -571,12 +629,17 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
   background-color: color-mix(in srgb, var(--color-accent) 10%, transparent);
   box-shadow: inset 0 0 0 1px var(--color-accent-700);
 }
+/* W4.6: the keyboard ring sits on the row, inside its own box. */
+.board-row:focus:not(:focus-visible) { outline: none; }
+.board-row:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
 /* 14px, first grid column, centred on a one-line row (UI v3 · G1-06). */
 .board-row > input[type="checkbox"] { width: 14px; height: 14px; margin: 0; align-self: center; }
 .board-row-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+/* A list title: two lines, never an ellipsis (W5.3). */
 .board-row-title {
   font-size: 14px; font-weight: 500; color: var(--color-text); text-decoration: none;
-  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  min-width: 0; overflow: hidden;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
 }
 .board-row-title:hover { color: var(--color-accent-300); }
 .board-row-meta {
@@ -586,8 +649,9 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 }
 .board-row-meta code { font-family: ui-monospace, Menlo, monospace; }
 .board-row-meta-current { display: none; }
+/* flex-start: a `fix·1` / retry pill keeps its own width, not the column's (W4.6). */
 .board-row-current {
-  display: flex; flex-direction: column; gap: 2px; min-width: 0;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0;
   font-size: 12.5px; color: var(--color-accent-300);
   white-space: nowrap; overflow: hidden;
 }
@@ -596,9 +660,10 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 /* ══ task progress (UI v3 · §2) ═════════════════════════════════════════ */
 .task-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 12.5px; }
 .task-count { color: var(--color-accent-300); white-space: nowrap; }
+/* Two lines, never an ellipsis (W5). */
 .task-title {
-  color: var(--color-neutral-400);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: var(--color-neutral-400); min-width: 0; overflow: hidden;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
 }
 .task-bar { display: flex; gap: 3px; height: 3px; }
 .task-seg { flex: 1; border-radius: 2px; background: var(--color-neutral-800); }
@@ -613,7 +678,8 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
    440px, an overlay above the list (UI v3 · G1-02) -- it never narrows the
    rows underneath it. */
 .peek-pane {
-  position: fixed; top: 48px; right: 0; bottom: 0; width: 440px; z-index: 25; /* ladder: over the list */
+  /* W4.3: min(520px, 45vw) at every desktop width; rows under it are covered. */
+  position: fixed; top: 48px; right: 0; bottom: 0; width: min(520px, 45vw); z-index: 25; /* ladder: over the list */
   overflow-y: auto;
   padding: 16px 20px 20px;
   background: var(--color-surface);
@@ -627,17 +693,27 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
   from { transform: translateX(24px); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
 }
+@keyframes peek-up {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+/* W4.4: two rows that never wrap -- id · state · Open → · ✕, then repo · template. */
 .peek-head {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; flex-direction: column; gap: 4px;
   font-size: 11.5px; color: var(--color-neutral-500);
   position: sticky; top: 0; z-index: 1;
   background: var(--color-surface);
 }
+.peek-head-row { display: flex; align-items: center; gap: 8px; min-width: 0; white-space: nowrap; }
+.peek-head-sub > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.peek-head-sub > span { flex: none; }
+.peek-head-sub > span:first-child { flex: 0 1 auto; }
+/* ✕ 12px from the viewport edge, not the pane's 20px padding. */
+.peek-close { margin-right: -8px; }
 .peek-head code { font-family: ui-monospace, Menlo, monospace; color: var(--color-neutral-400); }
 .peek-open { margin-left: auto; font-size: 12px; text-decoration: none; color: var(--color-accent-300); }
 .peek-title {
   font-size: 18px; font-weight: 500; line-height: 1.25; letter-spacing: -0.01em; margin: 0;
-  position: sticky; top: 22px; z-index: 1; background: var(--color-surface);
 }
 .peek-hero {
   display: flex; flex-direction: column; gap: 6px;
@@ -664,7 +740,9 @@ main { flex: 1; min-height: 0; overflow-y: auto; }
 .peek-stage[data-kind="current"] .peek-stage-right {
   font-family: ui-monospace, Menlo, monospace; color: var(--color-accent-300);
 }
+/* W4.5: the log block takes the pane's remaining height instead of leaving it empty. */
 .peek-log {
+  flex: 1; min-height: 0;
   display: flex; flex-direction: column; gap: 2px;
   font-family: ui-monospace, Menlo, monospace; font-size: 11px;
   color: var(--color-neutral-400);
@@ -735,6 +813,10 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
 /* Rendered markdown is taller than the plain-text line it replaced -- cap it
    so the Apply/Reply/Dismiss buttons stay visible below the card. */
 .attention-sub-md { max-height: 160px; overflow-y: auto; }
+/* It borrows `.doc-modal-body`'s markdown styles, not its 20px/26px padding:
+   that padding was the escalated card's empty band (W8.6). */
+.attention-sub-md.doc-modal-body { padding: 0; }
+.attention-sub-md > :last-child { margin-bottom: 0; }
 
 /* ══ work item detail (design 3a / 3b) ════════════════════════════════════ */
 .detail {
@@ -746,24 +828,24 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
 }
 /* The item page is exactly its container (48): `main` scrolls every other
    view, and gets nothing to scroll here, so the header and action bar stay
-   put and the two panes below do the scrolling. Desktop-only (§1's scope) —
+   put and the two panes below do the scrolling. Desktop and tablet only —
    below 768 the phone item page has no inner scroller and needs `main` to
-   scroll it, so this must not clip it there. */
-@media (min-width: 768px) {
-  .detail.item-page {
-    height: 100%; min-height: 0; overflow: hidden;
-    padding-bottom: 0;
-  }
+   scroll it; the phone block (max-width: 767px) undoes this there. */
+.detail.item-page {
+  height: 100%; min-height: 0; overflow: hidden;
+  padding-bottom: 0;
 }
 /* Meta + title + description left, hero right (11 · 38). */
 .detail-head {
   display: grid; grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas: "meta hero" "body hero";
+  grid-template-areas: "meta hero" "body hero" "progress progress";
   column-gap: 24px; row-gap: 8px; align-items: start;
 }
 .detail-meta {
   grid-area: meta;
-  display: flex; align-items: center; gap: 10px;
+  /* Wraps rather than running under the hero column: a long repo name plus
+     the id (W5.1) no longer fit one line at 1280. */
+  display: flex; align-items: center; gap: 4px 10px; flex-wrap: wrap; min-width: 0;
   font-size: 12px; color: var(--color-neutral-500); white-space: nowrap;
 }
 .detail-meta code { font-family: ui-monospace, Menlo, monospace; }
@@ -780,7 +862,8 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
    meta line, action bar or stage graph. */
 .detail-head-collapsible {
   grid-area: body; display: flex; flex-direction: column; gap: 8px; min-width: 0;
-  max-height: 300px; opacity: 1; overflow: hidden; transition: max-height 150ms, opacity 150ms;
+  /* Room for a two-line title plus an expanded description's 40vh. */
+  max-height: calc(40vh + 140px); opacity: 1; overflow: hidden; transition: max-height 150ms, opacity 150ms;
 }
 .detail-head-collapsible[data-collapsed="true"] { max-height: 0; opacity: 0; }
 .detail-head-collapsible > [data-testid="item-title"] { min-width: 0; }
@@ -794,6 +877,9 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
 .detail-title {
   font-size: 26px; line-height: 1.15; margin: 0; font-weight: 500;
   letter-spacing: -0.02em; color: var(--color-text);
+  /* Two lines at most (W0.1); the full title is on the `title` attribute. */
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  overflow: hidden; overflow-wrap: anywhere;
 }
 .detail-hero {
   grid-area: hero; display: flex; flex-direction: column; align-items: flex-end;
@@ -801,14 +887,11 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
 }
 .hero-node { font-size: 22px; line-height: 1.2; font-weight: 500; color: var(--color-neutral-300); }
 .hero-sub { font-size: 12px; color: var(--color-neutral-500); }
-.detail-hero .task-line { justify-content: flex-end; }
-.detail-hero .task-bar { width: 300px; }
 
 @media (max-width: 1023px) {
   /* No room for two columns: the hero stacks under the description. */
-  .detail-head { grid-template-columns: minmax(0, 1fr); grid-template-areas: "meta" "body" "hero"; }
+  .detail-head { grid-template-columns: minmax(0, 1fr); grid-template-areas: "meta" "body" "hero" "progress"; }
   .detail-hero { align-items: flex-start; text-align: left; }
-  .detail-hero .task-bar { width: 100%; }
 }
 
 .control-row {
@@ -816,11 +899,11 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
   flex-wrap: nowrap; min-width: 0;
 }
 .control-row .btn { font-size: 13px; flex: none; }
-/* The hint is the only thing allowed to give way: one line, ellipsized, and
-   the first thing hidden when the bar runs out of room (50). */
+/* The hint is the only sentence that says what Reject does or why the item
+   stopped: present at every width, up to two lines, never an ellipsis (W5.6). */
 .control-hint {
-  flex: 1 1 auto; min-width: 0;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  flex: 1 1 auto; min-width: 0; overflow: hidden;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
   font-size: 11px; color: var(--color-text-muted);
 }
 .capped-hint { margin: 6px 0 0; }
@@ -832,14 +915,15 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
 
 /* ══ timeline tab (design 4d) ═════════════════════════════════════════════ */
 .timeline { display: flex; flex-direction: column; gap: 18px; }
-.timeline-group { display: grid; grid-template-columns: 140px 1fr; gap: 20px; align-items: start; }
+.timeline-group { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 20px; align-items: start; }
 .timeline-node { display: flex; flex-direction: column; gap: 2px; padding-top: 6px; }
 .timeline-node-name { font-size: 13px; font-weight: 500; color: var(--color-neutral-400); }
 .timeline-node-name[data-age="0"] { color: var(--color-accent-300); }
 .timeline-span { font-size: 11px; color: var(--color-text-muted); }
 
 .event-row {
-  display: grid; grid-template-columns: 8px 1fr auto; gap: 12px;
+  /* W5.8: the message shrinks, the timestamp never does. */
+  display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; gap: 12px;
   align-items: baseline; padding: 7px 0;
   background: linear-gradient(to right,
     transparent, color-mix(in srgb, var(--color-text) 8%, transparent) 24px,
@@ -868,14 +952,22 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
 .event-findings { flex-basis: 100%; display: flex; flex-direction: column; gap: 4px; margin: 2px 0 0; }
 .event-log { font-size: 11px; }
 .event-row time {
-  font-size: 11px; color: var(--color-text-muted);
+  font-size: 11px; color: var(--color-text-muted); white-space: nowrap;
   font-family: ui-monospace, Menlo, monospace;
 }
 
+/* ══ text overflow policy (W5) ════════════════════════════════════════════ */
+/* A 32-hex id renders through <ShortId>: short, so never ellipsized. */
+.mono-id { font-family: ui-monospace, Menlo, monospace; white-space: nowrap; cursor: copy; }
+/* A path is shown whole (screen 14): it breaks anywhere rather than losing its
+   head or its tail to an ellipsis. */
+.path { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+
 /* ══ documents tab (design 4e) ════════════════════════════════════════════ */
 .linked-docs { display: flex; flex-direction: column; }
+/* W5.10: the title track takes what is left; kind and date size to content. */
 .doc-row {
-  display: grid; grid-template-columns: 20px 1fr 120px 130px; gap: 14px;
+  display: grid; grid-template-columns: 24px minmax(0, 1fr) auto auto; gap: 14px;
   align-items: center; padding: 11px 4px;
   border: 0; border-radius: 6px; color: inherit; font: inherit;
   text-align: left; cursor: pointer;
@@ -887,20 +979,17 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
 .doc-icon { color: var(--color-accent); }
 .doc-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .doc-title { font-size: 14px; }
-/* Ellipsize one-line, Documents pane only. Kraft-l9lj: overflow-wrap and
-   white-space are different properties -- a bare `.doc-title { white-space:
-   nowrap }` would also catch Changes' `.change-row .doc-title`, which sets
-   `overflow-wrap: anywhere` to deliberately wrap long file paths. Scoping to
-   `.linked-docs` (the Documents pane's root) leaves that alone. */
-.linked-docs .doc-title {
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+/* A list title clamps at two lines (W5.3), Documents pane only: Changes'
+   `.change-row .doc-title` wraps long file paths on purpose (Kraft-l9lj). */
+.linked-docs .doc-title:not(.path) {
+  overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
 }
 .doc-path {
   font-size: 11px; color: var(--color-text-muted);
   font-family: ui-monospace, Menlo, monospace;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .doc-kind { font-size: 10px; padding: 1px 7px; justify-self: start; }
+.doc-kind, .doc-attached { white-space: nowrap; }
 .doc-node { font-size: 12px; color: var(--color-neutral-500); }
 .doc-foot { font-size: 12px; color: var(--color-text-muted); padding: 12px 4px 0; }
 .doc-foot code { font-family: ui-monospace, Menlo, monospace; }
@@ -932,23 +1021,25 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
 }
 .doc-modal-icon { color: var(--color-accent); margin-top: 2px; flex: none; }
 .doc-modal-title { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1; }
-.doc-modal-name { font-size: 16px; font-weight: 500; }
+/* A title in a modal or pane head clamps at three lines (W5.3). */
+.doc-modal-name {
+  font-size: 16px; font-weight: 500; overflow: hidden;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+}
 .doc-modal-meta {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   font-size: 11px; color: var(--color-neutral-500);
 }
 .doc-modal-path {
-  font-family: ui-monospace, Menlo, monospace; color: var(--color-text-muted);
+  font-family: ui-monospace, Menlo, monospace; color: var(--color-text-muted); overflow-wrap: anywhere;
 }
 .doc-modal-actions { display: flex; gap: 6px; align-items: center; position: relative; }
 .doc-open { font-size: 12px; padding: 4px 10px; white-space: nowrap; }
 .doc-open-more { font-size: 12px; padding: 4px 6px; }
-/* The wrapper only exists to be hidden on a phone, so it may only lay itself
-   out where it is actually shown — an unguarded `display: flex` here outranks
-   `.desktop-only { display: none }` and the hiding never happens. */
-@media (min-width: 641px) {
-  .doc-modal-actions > .desktop-only { display: flex; align-items: center; gap: 6px; }
-}
+/* The wrapper only exists to be hidden on a phone. Its `display: flex`
+   outranks `.desktop-only { display: none }`, so the phone block
+   (max-width: 767px) hides it again with this same selector. */
+.doc-modal-actions > .desktop-only { display: flex; align-items: center; gap: 6px; }
 
 .doc-editor-menu {
   position: absolute; top: 34px; right: 72px; width: 220px; z-index: 2;
@@ -1013,15 +1104,27 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
 /* One 41px row (12 · 38): Log · session id · hook · attempt · lines · source
    chips · following · Copy · maximize. The Tasks row already says which
    session this is, so the title block above it was saying it twice. */
+/* LogModal's header wraps; the pane's (W5.5) is one row at every width. */
 .log-head {
-  display: flex; align-items: center; gap: 10px;
-  height: 41px; box-sizing: border-box; padding: 0 14px;
+  display: flex; align-items: center; gap: 6px 10px;
+  min-height: 41px; box-sizing: border-box; padding: 6px 14px;
   border-bottom: 1px solid var(--color-divider);
-  min-width: 0; flex-wrap: nowrap; overflow-x: auto;
+  min-width: 0; flex-wrap: wrap;
   position: sticky; top: 0; z-index: 2; background: var(--color-bg);
 }
 .log-static-title { font-size: 12.5px; font-weight: 500; flex: none; }
-.log-hook, .log-sid { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--color-text-muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.log-hook, .log-sid { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--color-text-muted); white-space: nowrap; }
+/* Grid, not wrap: identity, meta and chips scroll sideways in their own
+   track, so Follow / Copy / Maximize (the `auto` track) stay in reach. The
+   hook name is shown whole. */
+.log-pane > .log-head {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding-block: 0;
+}
+.log-head-main {
+  display: flex; align-items: center; gap: 10px; min-width: 0;
+  overflow-x: auto; scrollbar-width: none;
+}
+.log-head-main > * { flex: none; }
 .log-meta-part { font-size: 11px; color: var(--color-neutral-500); white-space: nowrap; flex: none; }
 .log-not-following { font-size: 11px; color: var(--color-neutral-500); white-space: nowrap; flex: none; }
 .log-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; flex: none; }
@@ -1088,11 +1191,12 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
   background: color-mix(in srgb, var(--color-accent) 10%, transparent);
   color: var(--color-accent-200);
 }
-.log-t { color: var(--color-neutral-700); }
+/* neutral-700 read 2.69:1 on the pane; timestamps are quiet, not illegible. */
+.log-t { color: var(--color-neutral-500); }
 .log-src { color: var(--color-text-muted); }
 .log-line[data-src="agent"] .log-src { color: var(--color-accent-300); }
 .log-text { white-space: pre-wrap; word-break: break-word; }
-.detail-description { white-space: pre-wrap; overflow-wrap: anywhere; }
+.detail-description { overflow-wrap: anywhere; }
 .log-following {
   display: flex; align-items: center; gap: 8px; padding: 6px 0 0;
   color: var(--color-text-muted); font-size: 11px; font-family: var(--font-body);
@@ -1144,7 +1248,7 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
 
 .search-results { display: flex; flex-direction: column; padding: 6px 8px; max-height: 52vh; overflow: auto; }
 .search-result {
-  display: grid; grid-template-columns: 1fr auto; gap: 2px 12px;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; width: 100%;
   padding: 10px; border: 0; border-radius: 6px;
   color: inherit; font: inherit; text-align: left; cursor: pointer;
   background: linear-gradient(to right,
@@ -1169,7 +1273,11 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
 .search-hint { padding: 18px 16px; font-size: 12px; color: var(--color-text-muted); }
 
 /* ══ palette sections (design 09) ═══════════════════════════════════════ */
-.search-sections { display: flex; flex-direction: column; max-height: 52vh; overflow: auto; }
+/* W5.9: the list scrolls inside the panel; no row is sliced by its edge. */
+.search-sections { display: flex; flex-direction: column; max-height: 60vh; overflow-y: auto; }
+.search-result-title {
+  overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+}
 .search-section { padding: 6px 8px; }
 .search-section .section-label { margin: 4px 4px 2px; }
 .search-row {
@@ -1232,6 +1340,23 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
 .settings-body {
   padding: 20px 24px 28px; display: flex; flex-direction: column; gap: 18px; max-width: 900px;
 }
+/* W7.6: the save bar stays in view at every scroll position of `main`. */
+.save-bar {
+  position: sticky; bottom: 0; z-index: 2;
+  background: var(--color-bg); box-shadow: 0 -1px 0 var(--color-divider);
+  padding-block: 10px;
+}
+.save-dirty { font-size: 12px; color: var(--color-accent); }
+/* W7.8: the switch and the sentence beside it, 8px apart on one line. */
+.repo-cross { flex-direction: row; align-items: center; gap: 8px; }
+/* W5 policy on settings lists (W7): names, paths, remotes and commands wrap to
+   two lines broken anywhere, never an ellipsis at any width. */
+.settings-body :is(.row-title, .row-sub, .template-row-name) {
+  min-width: 0; white-space: normal; text-overflow: clip; overflow: hidden; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+}
+/* W7.3: a segmented control never stretches past a readable width. */
+.settings-body :is(.seg, .segmented, select.input) { max-width: 420px; align-self: flex-start; }
 .settings-link { text-decoration: none; }
 .settings-link.active {
   background: color-mix(in srgb, var(--color-accent) 14%, transparent);
@@ -1270,7 +1395,8 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
 .probe-ok { color: var(--color-neutral-400); flex: none; }
 .probe-warn { color: var(--color-accent); flex: none; }
 
-.template-editor { display: grid; grid-template-columns: 200px 1fr; gap: 24px; align-items: start; }
+/* The file list is an identifier column (W5.4, spec 30 ≈ 280px), not a fixed 200px. */
+.template-editor { display: grid; grid-template-columns: minmax(14ch, 280px) minmax(0, 1fr); gap: 24px; align-items: start; }
 .template-list { display: flex; flex-direction: column; gap: 2px; }
 /* `.facet-opt`/`.facet-count` had no rules at all anywhere in the app --
    every list built from them (Chains' phone template list, Steering's file
@@ -1302,7 +1428,11 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
   gap: 2px;
   text-align: left;
 }
-.steering-row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* An identifier (W5.4): wraps to two lines, never an ellipsis. */
+.steering-row-name {
+  min-width: 0; overflow: hidden; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+}
 .steering-row .facet-count { margin-left: 0; white-space: normal; }
 .template-draft { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 /* `textarea.` is load-bearing: nocturne.css's `textarea.input { min-height: 90px }`
@@ -1324,7 +1454,7 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; w
   color: var(--color-neutral-200);
   margin-top: auto; /* pinned at the bottom of the Chains templates column */
 }
-.validation[data-valid="true"] { border-color: var(--color-accent-700); color: var(--color-accent-300); }
+.validation-badge { align-self: flex-start; margin-top: 6px; }
 
 .hook-row, .cap-row {
   display: grid; gap: 12px; align-items: center; padding: 9px 0; font-size: 13px;
@@ -1332,18 +1462,24 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; w
     transparent, var(--color-divider) 48px,
     var(--color-divider) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
 }
-.hook-row { grid-template-columns: minmax(0, 1fr) 240px 60px; }
-.cap-row { grid-template-columns: minmax(0, 1fr) 110px 140px minmax(0, 1fr); }
-.budget-row { grid-template-columns: minmax(0, 1fr) 140px; }
+/* W5.4: the identifier column (hook, loop) holds at least 14ch and takes the
+   larger share; the value column beside it yields first. Fractions, not
+   max-content, so every row of a list keeps the same tracks. */
+.hook-row { grid-template-columns: minmax(14ch, 2fr) minmax(0, 1fr) 60px; }
+.cap-row { grid-template-columns: minmax(14ch, 2fr) 110px 140px minmax(0, 1fr); }
+/* A settings label column is sized by its label, not a fixed width (29). */
+.budget-row { grid-template-columns: minmax(120px, max-content) 140px; }
+.budget-row > .hook-name { white-space: normal; }
 .hook-head, .cap-head {
   padding: 0 0 6px; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--color-text-muted);
 }
 .cap-row .input { min-height: 30px; padding: 3px 10px; font-size: 13px; }
-/* Text-bearing first child of each row: without min-width: 0 a long hook name
-   widens the first track and pushes the switch columns over the panel. */
-.hook-row > .hook-name, .hook-row > .row-sub, .cap-row > .hook-name {
-  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+/* Text-bearing cells: min-width: 0 so a long hook name cannot widen its track
+   past the panel; two lines broken anywhere, never an ellipsis (W5.4). */
+.hook-row > .hook-name, .hook-row > .row-sub, .cap-row > .hook-name, .cap-row > .row-sub {
+  min-width: 0; overflow: hidden; white-space: normal; text-overflow: clip; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
 }
 
 /* — appearance (theme palettes) — */
@@ -1396,12 +1532,15 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; w
   border: 1px solid var(--color-neutral-800); background: transparent;
   color: var(--color-neutral-400); font: inherit; font-size: 12px; cursor: pointer;
 }
-.chip[aria-pressed="true"] {
+/* A chip used as a radio (the intake's chain template) shows its selection
+   the same way a pressed filter chip does (W6.6). */
+.chip[aria-pressed="true"],
+.chip[role="radio"][aria-checked="true"] {
   border-color: var(--color-accent-700);
   background: var(--color-accent-900);
   color: var(--color-accent-300);
 }
-.chip-count { font-size: 10px; opacity: 0.7; }
+.chip-count { font-size: 10px; color: var(--color-neutral-500); }
 
 .access-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .session-current { font-size: 11px; color: var(--color-accent-300); }
@@ -1410,19 +1549,14 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; w
    The table on screen 45, top down. Phone (< 768) is the separate block
    below; these four ranges are the desktop ladder. */
 
-@media (min-width: 1440px) {
-  .board-groups { max-width: 1280px; margin: 0 auto; }
-}
-
-@media (max-width: 1439px) {
-  .board-row { grid-template-columns: 22px minmax(0, 1fr) 200px 150px; }
-  .item-split { grid-template-columns: 360px minmax(0, 1fr); }
-}
+/* One ladder (W2.1): 1279 · 1023 · 767, plus max-height 719. The ≥1440 and
+   1280–1439 rows of 45 are one base now: board rows 200/150 (base rule),
+   content capped at 1280 and centred once there is room for that. */
+.board-groups { max-width: 1280px; margin: 0 auto; }
 
 @media (max-width: 1279px) {
   .board-row { grid-template-columns: 22px minmax(0, 1fr) 160px 130px; }
-  .item-split { grid-template-columns: 320px minmax(0, 1fr); }
-  .peek-pane { width: 380px; }
+  /* The item split's 360px lives in work_item.css, after its base rule. */
   /* The pane floats over the rows: dim what it covers (46). */
   .peek-scrim {
     /* fixed, not absolute: `main` is the scroller, so an absolutely
@@ -1431,11 +1565,16 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; w
     display: block; position: fixed; inset: 0; z-index: 24;
     background: rgba(0, 0, 0, 0.4);
   }
-  /* Hints, footnotes and usage strings go before anything else (45). */
-  .control-hint, .group-head-note { display: none; }
-  /* WI-1 already hides .control-hint here; fold the usage string into its
-     $ figure, with the rest on the title attribute. */
+  /* Footnotes and usage strings go first (45). The action-bar hint stays:
+     the bar wraps to two rows instead (W2.5, work_item.css). */
+  .group-head-note { display: none; }
+  /* Fold the usage string into its $ figure, the rest on the title attribute. */
   .control-usage-detail { display: none; }
+  /* The item page's document pane is ~560px here: long code lines wrap
+     instead of running past the viewport. */
+  .doc-modal-body pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* A chip never outgrows its row, instead of breaking a repo name one word per line. */
+  .chip { white-space: nowrap; flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 }
 
 @media (max-width: 1023px) {
@@ -1466,44 +1605,67 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; w
      last. So child 4 keeps the 120px track and the chain is dropped. */
   .board-row { grid-template-columns: 22px minmax(0, 1fr) 120px; }
   .board-row > .chain-bar.sm { display: none; }
-  /* Stacked (47): inspector tabs on top, pane below, one scroller each. */
-  .item-split { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
-  .inspector { border-right: 0; border-bottom: 1px solid var(--color-neutral-800); padding-right: 0; max-height: 40vh; }
+  /* The stacked item split (47) lives in work_item.css: rules here lost to
+     its unconditional `.item-split` columns, bundled after this file. */
   /* Only the node text goes -- the Archive button, Copy-id overflow menu
      and fix/capped/retry tags are siblings in this column, not the node
      text, and stay put (§1: buttons hide last). */
   .board-row-current-node { display: none; }
   .board-row-meta-current { display: inline; color: var(--color-accent-300); font-weight: 500; }
   .board-groups { padding-left: 16px; padding-right: 16px; }
-  /* Chips may only wrap at >= 1024; below that they scroll (50). Rows with a
-     .board-sort disclosure (Board) scroll via the .board-filter-chips child
-     instead of the row itself, so board-sort stays outside the scroll box --
-     an overflow-x: auto container forces overflow-y to clip too, which would
-     trap the dropdown. Rows without one (Archived's native <select>, immune
-     to that clipping) keep scrolling as a whole row. */
-  .board-filter-row { flex-wrap: nowrap; }
-  .board-filter-row:not(:has(.board-sort)) { overflow-x: auto; }
-  .board-filter-chips {
-    display: flex; align-items: center; gap: 10px; flex-wrap: nowrap;
-    overflow-x: auto; min-width: 0;
+  /* Meta lines wrap rather than run under the edge: board rows, the item
+     header's meta line, a document's long code lines and the timeline's
+     filter row. */
+  .board-row-meta { flex-wrap: wrap; white-space: normal; }
+  .detail-meta { flex-wrap: wrap; white-space: normal; row-gap: 4px; }
+  .doc-modal-head, .log-filters { flex-wrap: wrap; }
+  /* Dialogs: an 820px width sizes its grid track before max-width can clamp
+     it (the phone block's old note) — at 768 New work item ran off the left
+     edge. One column, full width, under 1024. */
+  .dialog-backdrop { padding: 16px; }
+  .intake, .doc-modal, .diff-modal, .log-modal { width: 100%; }
+  .intake-grid { grid-template-columns: 1fr; }
+
+  /* Settings (W2.4): one column, label above its field. */
+  .template-editor, .access-grid { grid-template-columns: 1fr; }
+  .settings-body .cap-row.budget-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  /* W5.4's 14ch name floor is for wide screens; at 390 it plus the two fixed
+     inputs ran the row past the page (e2e phone.visual m15, Auto-intake). */
+  .settings-body .cap-row:not(.budget-row) { grid-template-columns: minmax(0, 1fr) 110px 140px minmax(0, 1fr); }
+  /* The repos table becomes cards: name + path and the menu on top, the
+     template / remote / test command as lines, the enable switch beside
+     them. `Row` sets its columns inline, hence !important. */
+  .settings-body .repo-row-head { display: none; }
+  .settings-body .row[data-repo] {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    row-gap: 4px; padding: 12px; margin-bottom: 8px;
+    border: 1px solid var(--color-divider); border-radius: 8px; background: none;
   }
-  .chip { white-space: nowrap; flex: none; }
+  .settings-body .row[data-repo] > :nth-child(1) { grid-column: 1; grid-row: 1; }
+  .settings-body .row[data-repo] > :nth-child(6) { grid-column: 2; grid-row: 1; }
+  .settings-body .row[data-repo] > :nth-child(5) { grid-column: 2; grid-row: 2 / span 3; align-self: start; }
+  .settings-body .row[data-repo] > :is(:nth-child(2), :nth-child(3), :nth-child(4)) { grid-column: 1; }
 }
 
 @media (max-height: 719px) {
-  .app-sidebar-foot { display: none; }
+  .app-sidebar-foot, .app-sidebar-health { display: none; }
   .detail-title { font-size: 20px; }
 }
 
 /* ══ phone (design 1n) ════════════════════════════════════════════════════
    Same grouped rows at touch size. Needs-you rows stay actionable; the rest is
-   a status view, and the detail screen says so. */
-@media (max-width: 640px) {
+   a status view, and the detail screen says so. One phone width (W2.1):
+   this used to switch at 640 while the shell switched at 767. */
+@media (max-width: 767px) {
   .chain-gate { display: none; }
+  /* Undo the desktop item page's fixed height: the phone page scrolls `main`. */
+  .detail.item-page { height: auto; overflow: visible; padding-bottom: 24px; }
+  .doc-modal-actions > .desktop-only { display: none; }
 
   .board, .settings, .analytics { grid-template-columns: 1fr; }
-  .board-filter-row:not(:has(.board-sort)) { padding-bottom: 2px; }
-  .board-filter-chips { padding-bottom: 2px; }
+  /* The phone scrolls the chip box (README §6) instead of capping it at one
+     row; Sort stays outside it, so its disclosure is not clipped. */
+  .board-filter-chips { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; height: auto; padding-bottom: 2px; }
   .board-foot { margin-top: 0; }
 
   .board-groups, .settings-body, .analytics-body { padding: 12px; }
@@ -1604,6 +1766,68 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; w
      already scrolls, so don't also cap results to half the viewport */
   .search-page .search-results { max-height: none; }
 
+  /* W3.3: a 44px floor on every control a thumb hits, and 16px inputs (under
+     16px mobile Safari zooms on focus and stays zoomed). */
+  .btn, .chip, .log-chip, .tab, [role="tab"], [role="menuitem"], .facet-opt, .disclosure-head,
+  .dialog-close, .toast-action, .board-sort > summary, .board-more > summary, .board-sort-menu button,
+  button.tag, .chain-preview-node, .repo-pill, .seg-opt, .segmented-opt, .app-header-crumb-link,
+  .bottom-nav-tab, .phone-header-back, .hook-row, select, select.input, .rate-limit-row > a,
+  .peek-open, .peek-head .mr-link {
+    min-height: 44px; min-width: 44px;
+  }
+  .chip, button.tag, .chain-preview-node, .log-chip, .repo-pill, .app-header-crumb-link,
+  .board-sort > summary, .seg-opt, .phone-header-back, .rate-limit-row > a,
+  .peek-open, .peek-head .mr-link { display: inline-flex; align-items: center; justify-content: safe center; }
+  /* A link inside running text grows its hit box, not its line (inline
+     padding does not move the line box). */
+  :where(p, li, span, .field-hint, .control-hint) > a[href]:not([class]) { padding-block: 16px; }
+  /* A switch is a 44px box; its 34×20 track is drawn inside it. */
+  .switch { width: 44px; height: 44px; border: 0; background: transparent; }
+  .switch[aria-checked="true"] { background: transparent; }
+  .switch::before {
+    content: ""; position: absolute; left: 5px; top: 12px; width: 34px; height: 20px;
+    box-sizing: border-box; border-radius: 10px; border: 1px solid var(--color-neutral-700);
+  }
+  .switch[aria-checked="true"]::before {
+    border-color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 25%, transparent);
+  }
+  .switch-knob { top: 15px; left: 8px; }
+  /* The Done group's checkbox: a 44px box that draws a 16px square, the
+     negative margin keeps the row's 22px glyph column. */
+  .board-row > input[type="checkbox"] {
+    --box: var(--color-neutral-500);
+    appearance: none; width: 44px; height: 44px; margin: -15px; border-radius: 8px; cursor: pointer;
+    background:
+      linear-gradient(var(--box), var(--box)) 14px 14px / 16px 1.5px no-repeat,
+      linear-gradient(var(--box), var(--box)) 14px 28.5px / 16px 1.5px no-repeat,
+      linear-gradient(var(--box), var(--box)) 14px 14px / 1.5px 16px no-repeat,
+      linear-gradient(var(--box), var(--box)) 28.5px 14px / 1.5px 16px no-repeat;
+  }
+  .board-row > input[type="checkbox"]:checked {
+    background: linear-gradient(var(--color-accent), var(--color-accent)) 14px 14px / 16px 16px no-repeat;
+  }
+  /* The phone filter row is taller (44px chips): group heads stick below it. */
+  .board-groups { --facet-bar-h: 56px; }
+  input, select, textarea { font-size: 16px; }
+  /* Chip rows scroll with snap points (W3.3). */
+  .board-filter-chips { scroll-snap-type: x mandatory; }
+  .board-filter-chips > * { scroll-snap-align: start; }
+
+  /* W3.8: the intake sheet's body scrolls, Create stays pinned; the
+     overrides open from their own disclosure. */
+  .intake { overflow-y: auto; }
+  .intake-side:not([data-open]) { display: none; }
+
+  /* W3.5: one action pair per composer sheet -- the body's primary moves up
+     beside the title (Cancel is the header's), the body's own Cancel goes. */
+  .phone-composer-body .composer .gate-actions .btn-ghost { display: none; }
+  /* The sheet header already names it; the body is fields only. */
+  .phone-composer-body .composer-head { display: none; }
+  .phone-composer-body .composer .gate-actions {
+    position: absolute; top: env(safe-area-inset-top); right: 16px; height: 56px;
+    display: flex; align-items: center; padding: 0; background: none;
+  }
+
 }
 
 /* the two halves of the phone rule (design 1n) */
@@ -1622,13 +1846,28 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; w
   .app-header .btn-secondary { display: none; }
 
   .bottom-nav { display: flex; }
-  main { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
-  /* "full width and full height below 768" (spec §2). The pane sits under
-     the header and over the list, but the tab bar is chrome (ladder: 30 over
-     the pane's 25), so keep the pane's own last lines clear of it. */
+  /* W3.4: every phone scroll container clears the tab bar by its height. */
+  main { padding-bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom)); }
+  /* W3.9: a sheet hides the tab bar instead of sitting over or under it. */
+  body:has(.phone-composer, .intake, .peek-pane, .repo-sheet) .bottom-nav { display: none; }
+  /* W3.6: the peek is a 60vh bottom sheet; its handle takes it to full
+     height. The scrim dims the board but lets a long-press reach another row
+     (which swaps the sheet); a tap outside still closes it (PeekPane). */
   .peek-pane {
-    width: 100%; border-left: 0;
-    padding-bottom: calc(76px + env(safe-area-inset-bottom));
+    top: auto; bottom: 0; height: 60vh; width: 100%; border-left: 0;
+    border-top: 1px solid var(--color-divider); border-radius: 16px 16px 0 0;
+    padding-top: 4px; padding-bottom: calc(20px + env(safe-area-inset-bottom));
+    animation: peek-up 200ms ease-out;
+  }
+  .peek-pane[data-full] { height: calc(100% - 48px); }
+  .peek-scrim { pointer-events: none; }
+  .peek-handle {
+    align-self: center; flex: none; position: relative;
+    width: 64px; min-height: 44px; margin: 0 0 -12px; border: 0; background: none; cursor: pointer;
+  }
+  .peek-handle::before {
+    content: ""; position: absolute; left: 16px; right: 16px; top: 20px; height: 4px;
+    border-radius: 2px; background: var(--color-neutral-600);
   }
   .app-sidebar, .app-rail { display: none; }
 
@@ -1645,9 +1884,12 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; w
 }
 .bead-icon { color: var(--color-neutral-500); flex: none; }
 .bead-label { flex: none; }
+/* Two lines each, never an ellipsis (the @1920 rule over W5.9's 1-line
+   ellipsis); the strip wraps a hit onto its own line when both don't fit. */
+.bead-strip { flex-wrap: wrap; }
 .bead-hit {
-  color: var(--color-neutral-400); overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap;
+  color: var(--color-neutral-400); overflow: hidden; min-width: 0; flex: 1 1 240px;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
 }
 .bead-hit code { font-family: ui-monospace, Menlo, monospace; }
 
@@ -1721,14 +1963,14 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; w
 
 /* the diff viewer (Kraft-8mu.2) is the screen a notification links into, so
    it is the one modal that has to survive a 390px viewport. This duplicates
-   the `@media (max-width: 640px)` selector from the main phone block above
+   the phone `@media (max-width: 767px)` selector from the main phone block above
    (design 1n) rather than living there: the rules it overrides — .diff-modal,
    .diff-body, .diff-files — are declared unconditionally
    further down the file than that block, so a same-specificity override
    placed up there would lose the cascade to these later base rules. Moving
    this block back up next to the rest of the phone rules would silently
    disable it again. */
-@media (max-width: 640px) {
+@media (max-width: 767px) {
   .diff-modal { max-height: calc(100vh - 24px); width: 100%; }
   .diff-modal-head, .diff-files, .diff-body {
     padding-left: 12px; padding-right: 12px;
@@ -1750,5 +1992,12 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; w
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
-.toast-stack { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 60; }
+/* W6.1: desktop top-right under the 48px header, 8px in; phone above the
+   bottom nav. Never centred over the control that was just pressed. */
+.toast-stack { position: fixed; top: 56px; right: 8px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; z-index: 60; }
+@media (max-width: 767px) {
+  .toast-stack { top: auto; left: 16px; right: 16px; align-items: stretch; bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom) + 8px); }
+}
 .toast { background: var(--color-surface); border: 1px solid var(--color-divider); border-radius: var(--radius-sm); padding: 8px 14px; font-size: 13px; color: var(--color-text); box-shadow: 0 4px 16px rgba(0,0,0,.3); animation: kfadein 200ms ease-out; }
+.toast-action { border: 0; background: none; padding: 0; font: inherit; color: var(--color-accent-300); cursor: pointer; }
+.toast-action:hover { text-decoration: underline; }

@@ -208,4 +208,12 @@ describe("AnalyticsView", () => {
     renderView();
     await screen.findAllByText("$18.00+");
   });
+
+  it("an empty by-node or by-repo table is one line, not a header row over nothing (W4.7)", async () => {
+    vi.spyOn(api, "getAnalytics").mockResolvedValue({ ...report, by_node: [], by_repo: [] });
+    const { container } = renderView();
+    expect(await screen.findAllByText("nothing here yet")).toHaveLength(2);
+    expect(container.querySelector(".node-head")).toBeNull();
+    expect(container.querySelector(".repo-head")).toBeNull();
+  });
 });

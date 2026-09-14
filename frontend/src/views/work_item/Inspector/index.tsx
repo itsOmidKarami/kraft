@@ -1,6 +1,6 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Tabs } from "../../../components/ui";
-import { elapsed } from "../../../format";
+import { elapsedBetween, nodeRunSpan } from "../../../format";
 import type { KraftEvent, WorkerSession, WorkItem, WorkItemDiff } from "../../../types";
 import { Changes } from "./Changes";
 import { Config } from "./Config";
@@ -32,6 +32,7 @@ export function Inspector({
   onSelect,
   diff,
   diffError,
+  headExtra,
 }: {
   item: WorkItem;
   sessions: WorkerSession[];
@@ -43,10 +44,14 @@ export function Inspector({
   onSelect: (s: Selection) => void;
   diff: WorkItemDiff | null;
   diffError: string | null;
+  /** Right end of the head row — the tablet List / Detail switch (W2.2). */
+  headExtra?: ReactNode;
 }) {
   const nodeSessions = sessions.filter((s) => s.node_id === nodeId);
   const running = nodeSessions.find((s) => s.status === "running");
-  const runtime = running?.started_at ? elapsed(Date.now() - Date.parse(running.started_at)) : null;
+  // Same helper and inputs as the hero (W0.4), so the two never disagree.
+  const span = nodeRunSpan(nodeId, events, sessions);
+  const runtime = span ? elapsedBetween(span.from, span.to) : null;
 
   // Two sticky siblings at the same `top: 0` stack on each other -- the tabs
   // need to sit below the head's actual height, not a guessed 40px.
@@ -65,12 +70,15 @@ export function Inspector({
       <div className="inspector-head" ref={headRef}>
         <span className="mono">{nodeId ?? "—"}</span>
         {running && <span className="row-state" data-status="running">running{runtime ? ` · ${runtime}` : ""}</span>}
+        {headExtra && <span className="inspector-head-extra">{headExtra}</span>}
       </div>
       <Tabs
         value={tab}
         onChange={(t) => onTabChange(t as InspectorTab)}
         tabs={[
-          { id: "tasks", label: "Tasks", count: sessions.length },
+          // Sessions on the selected node — the same N as the pane's
+          // "SESSIONS · N" eyebrow (W0.8).
+          { id: "tasks", label: "Tasks", count: nodeId ? nodeSessions.length : sessions.length },
           { id: "changes", label: "Changes" },
           { id: "documents", label: "Documents" },
           { id: "timeline", label: "Timeline", count: events.length },

@@ -13,7 +13,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import * as api from "../api";
-import { ago } from "../format";
+import { ago, docBody, shortIds } from "../format";
 import type { DocumentDetail } from "../types";
 import { backdropProps, useModal } from "../useModal";
 
@@ -140,7 +140,7 @@ export function DocumentModal({
         <header className="doc-modal-head">
           <Icon size={20} className="doc-modal-icon" />
           <div className="doc-modal-title">
-            <span className="doc-modal-name">{doc?.title ?? "…"}</span>
+            <span className="doc-modal-name" title={doc?.title}>{doc ? shortIds(doc.title) : "…"}</span>
             {doc && (
               <div className="doc-modal-meta">
                 <span className="tag tag-neutral doc-kind">{doc.kind ?? doc.source_kind}</span>
@@ -211,7 +211,7 @@ export function DocumentModal({
         <div className="doc-modal-body">
           {error && <p className="form-error">{error}</p>}
           {!doc && !error && <p className="empty">loading…</p>}
-          {doc && <Markdown remarkPlugins={[remarkGfm]}>{doc.content}</Markdown>}
+          {doc && <Markdown remarkPlugins={[remarkGfm]}>{docBody(doc.content, doc.title)}</Markdown>}
           {doc && (
             <p className="doc-modal-foot">
               {hasFile

@@ -8,14 +8,13 @@ import { PluginsPage } from "./PluginsPage";
 import { PolicyPage } from "./PolicyPage";
 import { ReposPage } from "./ReposPage";
 import "./settings.css";
-import { usePhone } from "./shared";
 import { SteeringPage } from "./SteeringPage";
 import { TemplatesPage } from "./TemplatesPage";
 
 /* ── shell ────────────────────────────────────────────────────────────────── */
 
-/** m10 left: the phone-only Settings index — a real drill-down state, not
- *  the desktop redirect straight to Repos (Kraft-j92g). */
+/** The Settings index (m10; W7.9 on desktop too): the nine sections with a
+ *  line each, so the "Settings" crumb names a page, not a redirect to Repos. */
 function SettingsIndex() {
   return (
     <div className="settings-index">
@@ -26,10 +25,9 @@ function SettingsIndex() {
             <Link key={n.to} to={n.to} className="settings-index-row">
               <n.icon size={18} />
               <span className="row-title">{n.label}</span>
-              {/* per-page summary line (design m10: "3 connected", "15 hooks", …)
-                  is each page's own job — its list already knows its count;
-                  wiring a live summary into this shared list would mean
-                  fetching every page's resource just to render this screen. */}
+              {/* What the page is for, static. A live count (design m10: "3
+                  connected") would fetch every page's resource for this list. */}
+              <span className="row-sub">{n.description}</span>
             </Link>
           ))}
         </div>
@@ -39,11 +37,10 @@ function SettingsIndex() {
 }
 
 export function Settings() {
-  const phone = usePhone();
   return (
     <div className="settings-body">
       <Routes>
-        <Route index element={phone ? <SettingsIndex /> : <Navigate to="repos" replace />} />
+        <Route index element={<SettingsIndex />} />
         <Route path="templates" element={<Navigate to="/settings/chains" replace />} />
         {SETTINGS_NAV.map((n) => (
           <Route

@@ -362,13 +362,26 @@ export function Tabs({
   value: string;
   onChange: (id: string) => void;
 }) {
+  // Roving tabindex (W6.8): one Tab stop for the strip; arrows move focus
+  // between tabs, Enter/Space (a button's own activation) select.
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const step = { ArrowRight: 1, ArrowLeft: -1, Home: -Infinity, End: Infinity }[e.key];
+    if (step === undefined) return;
+    const btns = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    const at = btns.indexOf(document.activeElement as HTMLButtonElement);
+    const next = Math.abs(step) === Infinity ? (step < 0 ? 0 : btns.length - 1) : (at + step + btns.length) % btns.length;
+    e.preventDefault();
+    btns[next]?.focus();
+  };
+  const focusable = tabs.some((t) => t.id === value) ? value : tabs[0]?.id;
   return (
-    <div className="tabs" role="tablist">
+    <div className="tabs" role="tablist" onKeyDown={onKeyDown}>
       {tabs.map((t) => (
         <button
           key={t.id}
           role="tab"
           aria-selected={t.id === value}
+          tabIndex={t.id === focusable ? 0 : -1}
           className="tab"
           onClick={() => onChange(t.id)}
         >
@@ -387,14 +400,17 @@ export function Segmented<T extends string>({
   value,
   onChange,
   disabled,
+  labelledBy,
 }: {
   options: { id: T; label: string }[];
   value: T;
   onChange: (id: T) => void;
   disabled?: boolean;
+  /** id of the visible label naming the group (W7.1). */
+  labelledBy?: string;
 }) {
   return (
-    <div className="segmented" role="group">
+    <div className="segmented" role="group" aria-labelledby={labelledBy}>
       {options.map((o) => (
         <button
           key={o.id}
@@ -463,6 +479,7 @@ export function Chip({
   onClick,
   trailing,
   dashed = false,
+  overflow = false,
 }: {
   label: ReactNode;
   count?: number;
@@ -473,12 +490,17 @@ export function Chip({
   trailing?: ReactNode;
   /** The dashed "+ Filter" affordance chip (design 04). */
   dashed?: boolean;
+  /** Wrapped past the facet bar's one row (W4.1): hidden there and out of
+   *  the tab order, listed under "+N" instead. */
+  overflow?: boolean;
 }) {
   return (
     <button
       type="button"
       className="chip"
       data-dashed={dashed || undefined}
+      data-overflow={overflow || undefined}
+      tabIndex={overflow ? -1 : undefined}
       aria-pressed={selected}
       onClick={onClick}
     >

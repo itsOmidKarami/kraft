@@ -48,8 +48,11 @@ export function SaveRow({
   dirty?: boolean;
   message?: string | null;
 }) {
+  // W7.6: a bar pinned to the bottom of the settings scroller, so Save and
+  // Discard are reachable from any scroll position, and it says when there is
+  // something to save.
   return (
-    <div className="save-row">
+    <div className="save-row save-bar" data-dirty={dirty || undefined}>
       <button className="btn btn-primary" disabled={busy || !dirty} onClick={onSave}>
         <Check size={14} />
         Save
@@ -57,12 +60,13 @@ export function SaveRow({
       <button className="btn btn-ghost" disabled={busy || !dirty} onClick={onDiscard}>
         Discard
       </button>
+      {dirty && <span className="save-dirty">unsaved changes</span>}
       <span className="save-hint">{message ?? hint}</span>
     </div>
   );
 }
 
-export function PageHead({ title, note, action }: { title: string; note: string; action?: React.ReactNode }) {
+export function PageHead({ title, note, action }: { title: string; note: React.ReactNode; action?: React.ReactNode }) {
   return (
     <div className="settings-head">
       <h2>{title}</h2>

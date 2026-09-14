@@ -50,7 +50,7 @@ export function RightPane({
         sessionId={selection.id}
         maximized={maximized}
         onToggleMaximize={onToggleMaximize}
-        capLines={phone ? 8 : undefined}
+        capLines={phone && !maximized ? 8 : undefined}
         taskTotal={item.progress?.total}
       />
     );

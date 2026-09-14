@@ -383,10 +383,13 @@ describe("WorkItemDetail (item page)", () => {
     expect(within(pane).getByText(/Effective chain/)).toBeTruthy();
   });
 
-  it("shows the not_started bar (21) for an unstarted item", () => {
+  it("shows the not_started bar and the intake card in the split (21, Kraft-pfqdb)", () => {
     setup({ current_node_id: null, status: "paused" });
     renderDetail();
-    expect(screen.getByRole("button", { name: /^start$/i })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^start$/i }).length).toBeGreaterThan(0);
+    expect(screen.getByTestId("not-started-card")).toBeInTheDocument();
+    expect(screen.getByTestId("not-started-chain")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /tasks/i })).toBeNull();
   });
 
   it("shows the hero task bar and the Tasks-tab plan list from item.progress", async () => {
@@ -470,9 +473,112 @@ describe("WorkItemDetail (item page)", () => {
     const user = userEvent.setup();
     renderDetail();
     expect(screen.queryByRole("button", { name: /^Edit$/ })).toBeNull();
-    await user.click(screen.getByRole("button", { name: /more/i }));
+    await user.click(screen.getByRole("button", { name: "More" }));
     await user.click(screen.getByRole("button", { name: /edit title/i }));
     expect(screen.getByLabelText("title")).toBeTruthy();
+  });
+
+  it("edits the title in a textarea: Escape cancels, Enter saves (W0.11)", async () => {
+    const user = userEvent.setup();
+    const spy = vi.spyOn(api, "updateWorkItem").mockResolvedValue({} as never);
+    renderDetail();
+    await user.click(screen.getByRole("button", { name: "edit title" }));
+    const box = screen.getByLabelText("title");
+    expect(box.tagName).toBe("TEXTAREA");
+    await user.click(box);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByLabelText("title")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "edit title" }));
+    await user.type(screen.getByLabelText("title"), "X{Enter}");
+    expect(spy).toHaveBeenCalledWith("w1", { title: "TX" });
+  });
+
+  it("previews the description as prose, never raw ## or ** and no heading in the clamp (W0.1, W7/8)", () => {
+    setup({ description: "## Context\n\n- The **verify** node measures." });
+    renderDetail();
+    const desc = screen.getByTestId("item-description");
+    expect(desc.textContent).not.toMatch(/##|\*\*|^- /m);
+    // The heading line goes from the preview entirely, not just its ## marker.
+    expect(desc.textContent).not.toContain("Context");
+    expect(within(desc).getByText(/The verify node measures\./)).toBeTruthy();
+    expect(desc.querySelector("h1, h2, h3, ul, li")).toBeNull();
+  });
+
+  it("lists repos under Config → Repos, not under the hero, and the submodules chip opens it (W0.7)", async () => {
+    const user = userEvent.setup();
+    setup({
+      root_merge_policy: "bump",
+      repos: [
+        { repo: "/r", path: "/r", role: "root", merge_rank: 0, state: "clean" },
+        { repo: "/code/sub", path: "/r/vendor/sub", role: "submodule", merge_rank: 1, state: "dirty" },
+      ],
+    } as never);
+    renderDetail();
+    expect(document.querySelector(".repos-panel")).toBeNull();
+    expect(screen.queryByTestId("config-repos")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "+1 submodule" }));
+    expect(screen.getByRole("tab", { name: /config/i })).toHaveAttribute("aria-selected", "true");
+    const repos = screen.getByTestId("config-repos");
+    expect(within(repos).getByText("sub")).toBeTruthy();
+    expect(within(repos).getByText(/root_merge_policy/)).toBeTruthy();
+  });
+
+  it("counts the selected node's sessions on the Tasks tab, the same N as the pane (W0.8)", () => {
+    setup({}, [session({ id: "a" }), session({ id: "b", status: "done" }), session({ id: "c", node_id: "spec" })]);
+    renderDetail("#node=verify&tab=tasks");
+    expect(screen.getByRole("tab", { name: /tasks/i }).textContent).toBe("Tasks · 2");
+    expect(screen.getByText(/SESSIONS · 2/)).toBeTruthy();
+    expect(screen.queryByText(/newest first/)).toBeNull();
+  });
+
+  it("under 1024 shows one pane: the list until a row is picked, then its detail (W2.2)", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((q: string) => ({ matches: q.includes("1023"), media: q, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
+    );
+    vi.spyOn(api, "getLogLines").mockResolvedValue({ session_id: "s1", status: "done", lines: [] });
+    setup({}, [session({ id: "s1", status: "done" })]);
+    renderDetail("#node=verify&tab=changes");
+    const split = document.querySelector(".item-split") as HTMLElement;
+    expect(split.dataset.view).toBe("list");
+    expect(screen.getByRole("button", { name: "List" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("tab", { name: /tasks/i }));
+    await user.click(screen.getByTestId("task-row-s1"));
+    expect(split.dataset.view).toBe("detail");
+    await user.click(screen.getByRole("button", { name: "List" }));
+    expect(split.dataset.view).toBe("list");
+  });
+
+  it("keeps the split with no List / Detail switch at desktop width (W2.2)", () => {
+    renderDetail();
+    expect((document.querySelector(".item-split") as HTMLElement).dataset.view).toBeUndefined();
+    expect(screen.queryByRole("button", { name: "Detail" })).toBeNull();
+  });
+
+  it("a never-started item says not started, without a paused chip (W0.5)", () => {
+    setup({ current_node_id: null, status: "paused" });
+    renderDetail();
+    expect(document.querySelector(".hero-node")?.textContent).toBe("not started");
+    expect(document.querySelector(".detail-status")?.textContent).toBe("waiting to start");
+  });
+
+  it("a completed item names its last node, never — or not started (W0.5)", () => {
+    setup({ current_node_id: null, status: "completed" });
+    renderDetail();
+    expect(document.querySelector(".hero-node")?.textContent).toBe("verify");
+    expect(document.querySelector(".hero-sub")?.textContent).toMatch(/^completed/);
+  });
+
+  it("shows how long a gate has waited on its card (W0.4)", () => {
+    setup({ status: "needs_human", pending_gate: "spec_approval", gate_artifact: "docs/spec.md", current_node_id: "spec" });
+    useStore.setState({
+      eventsByItem: {
+        w1: [{ seq: 1, work_item_id: "w1", type: "gate_requested", payload: { node_id: "spec", gate: "spec_approval" }, created_at: new Date(Date.now() - (3 * 60 + 12) * 60_000).toISOString() }],
+      },
+    } as never);
+    renderDetail();
+    expect(within(screen.getByTestId("gate-card")).getByText(/waiting 3h 12m/)).toBeTruthy();
   });
 
   it("renders the gate artifact when the index has not ingested it yet", async () => {

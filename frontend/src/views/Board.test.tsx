@@ -1,11 +1,12 @@
 import { readFileSync } from "node:fs";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../api";
 import { useStore } from "../store";
 import type { WorkItem } from "../types";
+import type { ToastPayload } from "../components/Toast";
 import { Board } from "./Board";
 
 const wi = (over: Partial<WorkItem>): WorkItem =>
@@ -385,6 +386,23 @@ describe("Board", () => {
     expect(screen.queryByText(/selected/i)).toBeNull();
   });
 
+  it("archiving says how many and offers Undo for 6s, which restores them (W4.9)", async () => {
+    vi.spyOn(api, "archiveWorkItem").mockResolvedValue({ id: "w1", archived_by: "you", worktree_removed: true });
+    const restore = vi.spyOn(api, "restoreWorkItem").mockResolvedValue({ id: "w1", status: "completed" });
+    const toasts: ToastPayload[] = [];
+    const onToast = (e: Event) => toasts.push((e as CustomEvent<ToastPayload>).detail);
+    window.addEventListener("kraft:toast", onToast);
+    setItems(wi({ id: "w1", status: "completed" }));
+    renderBoard();
+    await userEvent.click(within(group("Done")).getAllByRole("checkbox")[0]);
+    await userEvent.click(screen.getByTestId("archive-selected"));
+    await waitFor(() => expect(toasts[0]?.message).toBe("1 item archived"));
+    expect(toasts[0].ms).toBe(6000);
+    await toasts[0].action!.run();
+    expect(restore).toHaveBeenCalledWith("w1");
+    window.removeEventListener("kraft:toast", onToast);
+  });
+
   it("the ⋯ menu offers Archive and Copy id, and never Reopen or Delete worktree", async () => {
     setItems(wi({ id: "w1", status: "completed" }));
     renderBoard();
@@ -483,6 +501,23 @@ describe("Board", () => {
     renderBoard();
     expect(await screen.findAllByText("repo-a")).not.toHaveLength(0);
     expect(screen.getAllByText("repo-b").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Running", { selector: ".group-label" })).toBeNull();
+  });
+
+  it("groups by template when the board prefs say so, headed by template id (W4.10)", async () => {
+    vi.spyOn(api, "getTheme").mockResolvedValue({
+      palette: "nocturne",
+      mode: "dark",
+      density: "compact",
+      board: { group_by: "template", show_done: 5, open_in: "peek" },
+    });
+    setItems(
+      wi({ id: "w1", chain_template: "default", status: "active" }),
+      wi({ id: "w2", chain_template: "quick-task", status: "active" }),
+    );
+    renderBoard();
+    expect(await screen.findByText("default", { selector: ".group-label" })).toBeInTheDocument();
+    expect(screen.getByText("quick-task", { selector: ".group-label" })).toBeInTheDocument();
     expect(screen.queryByText("Running", { selector: ".group-label" })).toBeNull();
   });
 
