@@ -118,6 +118,11 @@ const CASES: Case[] = [
   { screen: "board", variant: "empty", data: "empty", widths: KEY, run: board },
   { screen: "board", variant: "group-repo", data: "default", widths: [1280], shells: [{ group_by: "repo" }], run: board },
   { screen: "board", variant: "group-template", data: "long", widths: [1280], shells: [{ group_by: "template" }], run: board },
+  // W14 · C.2: the two cells handoff_v4 names (d07, m03). Two done rows ticked → the selection bar.
+  { screen: "board", variant: "selection-bar", data: "default", widths: [1280], run: async (c) => { await board(c); const boxes = c.page.locator('.board-row input[type="checkbox"]'); await boxes.nth(0).check(); await boxes.nth(1).check(); await c.page.locator(".board-floating-bar").waitFor({ timeout: 4000 }); await settle(c.page); } },
+  // As built the repo sheet opens from the phone's repo pill; a long-press on a row opens the peek (m03's
+  // "long-press → sheet" was that peek sheet), so this cell taps the pill.
+  { screen: "board", variant: "repo-sheet", data: "default", widths: [390], run: async (c) => { await board(c); await c.page.locator(".repo-pill").click(); await c.page.locator(".repo-sheet").waitFor({ timeout: 4000 }); await settle(c.page); } },
   { screen: "board-peek", variant: "gate", data: "default", widths: [...ALL, ...SIDE], shells: SHELLS_1280, run: (c) => peek(c, "gate") },
   { screen: "board-peek", variant: "running-long", data: "long", widths: [...ALL, ...SIDE], run: (c) => peek(c, "running") },
   { screen: "board-peek", variant: "escalated-long", data: "long", widths: [...KEY, ...SIDE], run: (c) => peek(c, "escalated") },

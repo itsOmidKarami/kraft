@@ -236,6 +236,7 @@ export function WorkItemDetail() {
             diff={diff}
             diffError={diffError}
             onViewLog={goToLog}
+            onTimelineSelect={(id) => select({ kind: "timeline-node", id })}
             maximized
             onToggleMaximize={() => setMaximized(false)}
           />
@@ -354,6 +355,7 @@ export function WorkItemDetail() {
                   diff={diff}
                   diffError={diffError}
                   onViewLog={goToLog}
+                  onTimelineSelect={(id) => select({ kind: "timeline-node", id })}
                   maximized={false}
                   onToggleMaximize={() => setMaximized(true)}
                 />

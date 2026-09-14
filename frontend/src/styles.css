@@ -1811,7 +1811,11 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; w
   }
   /* The phone filter row is taller (44px chips): group heads stick below it. */
   .board-groups { --facet-bar-h: 56px; }
-  input, select, textarea { font-size: 16px; }
+  /* iOS zooms the page on focus under 16px. `!important` because every field's
+     own size is a class (`.input` 14px, `.cap-row .input` 13px, the search
+     overlay's), and a class beats this type selector (W14 · C.3: 28 phone cells
+     measured under 15.5px). */
+  input, select, textarea { font-size: 16px !important; }
   /* Chip rows scroll with snap points (W3.3). */
   .board-filter-chips { scroll-snap-type: x mandatory; }
   .board-filter-chips > * { scroll-snap-align: start; }

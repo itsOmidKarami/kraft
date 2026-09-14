@@ -238,7 +238,7 @@ describe("WorkItemDetail (item page)", () => {
     tev(5, "judge_verdict", "verify"),
   ];
 
-  it("Timeline shows this node as rounds, newest first, the current round open, and folds nodes under all (W13 · C)", async () => {
+  it("Timeline shows this node as one row per round, newest first, and folds nodes under all (W13 · C, W14 · A)", async () => {
     const user = userEvent.setup();
     renderDetailWithEvents(timelineEvents);
     await user.click(screen.getByRole("tab", { name: /timeline/i }));
@@ -248,15 +248,16 @@ describe("WorkItemDetail (item page)", () => {
     expect(list).toHaveTextContent("ROUNDS · 2");
     const current = within(list).getByTestId("timeline-round-verify-1");
     const first = within(list).getByTestId("timeline-round-verify-0");
-    expect(current).toHaveTextContent("round 2");
-    expect(current).toHaveAttribute("aria-expanded", "true");
-    expect(first).toHaveTextContent("round 1");
-    expect(first).toHaveAttribute("aria-expanded", "false");
-    // node-level rows keep their place; the round events themselves are not rows
-    expect(within(list).getByTestId("timeline-event-3")).toHaveTextContent("node_started");
+    // W14 · A: `round N · HH:MM → HH:MM · Xm`, the counts and verdict on the right; no fold
+    expect(current).toHaveTextContent(/^round 2 · \d\d:\d\d → \d\d:\d\d · 1m/);
+    expect(current).toHaveTextContent("0 sessions · 0 findings");
+    expect(current).not.toHaveAttribute("aria-expanded");
+    expect(first).toHaveTextContent(/^round 1 · /);
+    // node_started is round 1's edge, and the round events are not rows
+    expect(within(list).queryByTestId("timeline-event-3")).toBeNull();
     expect(within(list).queryByTestId("timeline-event-4")).toBeNull();
     const order = [...list.querySelectorAll("button[data-trow]")].map((b) => b.getAttribute("data-testid"));
-    expect(order).toEqual(["timeline-round-verify-1", "timeline-round-verify-0", "timeline-event-3"]);
+    expect(order).toEqual(["timeline-round-verify-1", "timeline-round-verify-0"]);
     // Nothing is picked for the person: the right pane streams the node (D.4).
     expect(list.querySelector('[data-selected="true"]')).toBeNull();
 
@@ -267,23 +268,64 @@ describe("WorkItemDetail (item page)", () => {
     expect(within(list).getByTestId("timeline-node-verify")).toHaveAttribute("aria-expanded", "true");
   });
 
-  it("Timeline rows are buttons: arrows move, Left/Right fold a round, a click selects it (W13 · C.4, C.5)", async () => {
+  it("Timeline rows are buttons: arrows move, a click selects, Left/Right fold a node under all (W13 · C.4, C.5)", async () => {
     const user = userEvent.setup();
     renderDetailWithEvents(timelineEvents);
     await user.click(screen.getByRole("tab", { name: /timeline/i }));
     const list = screen.getByTestId("inspector-timeline");
-    const current = within(list).getByTestId("timeline-round-verify-1");
-    current.focus();
-    await user.keyboard("{ArrowLeft}");
-    expect(current).toHaveAttribute("aria-expanded", "false");
-    await user.keyboard("{ArrowRight}");
-    expect(current).toHaveAttribute("aria-expanded", "true");
+    within(list).getByTestId("timeline-round-verify-1").focus();
     await user.keyboard("{ArrowDown}");
     expect(within(list).getByTestId("timeline-round-verify-0")).toHaveFocus();
     await user.click(within(list).getByTestId("timeline-round-verify-0"));
     expect(within(list).getByTestId("timeline-round-verify-0")).toHaveAttribute("data-selected", "true");
-    await user.click(within(list).getByTestId("timeline-event-3"));
-    expect(within(list).getByTestId("timeline-event-3")).toHaveAttribute("data-selected", "true");
+    await user.click(within(list).getByRole("button", { name: "all" }));
+    const node = within(list).getByTestId("timeline-node-verify");
+    node.focus();
+    await user.keyboard("{ArrowLeft}");
+    expect(node).toHaveAttribute("aria-expanded", "false");
+    await user.keyboard("{ArrowRight}");
+    expect(node).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("Timeline sessions are rows in the right pane, not the left list; a click there selects one (W14 · A)", async () => {
+    const user = userEvent.setup();
+    renderDetailWithEvents([
+      { seq: 1, work_item_id: "w1", type: "node_started", created_at: "2026-01-01T00:00:00Z", payload: { node_id: "verify" } },
+      {
+        seq: 2, work_item_id: "w1", type: "worker_session_started", created_at: "2026-01-01T00:00:05Z",
+        payload: { node_id: "verify", session_id: "s1", hook_point: "on.test.run" },
+      },
+    ] as never);
+    await user.click(screen.getByRole("tab", { name: /timeline/i }));
+    const list = screen.getByTestId("inspector-timeline");
+    expect(list.querySelector('[data-testid^="timeline-session-"]')).toBeNull();
+    const row = screen.getByTestId("right-pane-events").querySelector<HTMLElement>('.stream-row[data-srow="s1"]')!;
+    await user.click(row);
+    // Lit only once the pick has gone through the page's selection state and back.
+    expect(screen.getByTestId("right-pane-events").querySelector('.stream-row[data-srow="s1"]')).toHaveAttribute("data-selected", "true");
+  });
+
+  it("Documents · 0 on a node with sessions says so in the tab's hint and under the list, and links to Tasks (W14 · D)", async () => {
+    setup({}, [session({ id: "s1", status: "done" }), session({ id: "s2", status: "done" })]);
+    renderDetail();
+    const tab = screen.getByRole("tab", { name: /documents/i });
+    await userEvent.click(tab);
+    const empty = await screen.findByTestId("documents-empty");
+    expect(empty).toHaveTextContent(/^No documents2 sessions ran without a summary · see Tasks$/);
+    expect(tab).toHaveTextContent("Documents · 0");
+    expect(tab).toHaveAttribute("title", "Documents · 0 · 2 sessions have no summary");
+    expect(screen.getByRole("tab", { name: /tasks/i })).not.toHaveAttribute("title");
+    await userEvent.click(within(empty).getByRole("link", { name: "Tasks" }));
+    expect(screen.getByRole("tab", { name: /tasks/i })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("Documents · 0 on a node with no sessions says the node has not run yet (W14 · D)", async () => {
+    renderDetail();
+    await userEvent.click(screen.getByRole("tab", { name: /documents/i }));
+    const empty = await screen.findByTestId("documents-empty");
+    expect(empty).toHaveTextContent(/^No documentsThis node has not run yet$/);
+    expect(within(empty).queryByRole("link")).toBeNull();
+    expect(screen.getByRole("tab", { name: /documents/i })).not.toHaveAttribute("title");
   });
 
   it("Timeline and Tasks share one scope, and picking a pill rescopes to that node (W11 · F.1)", async () => {
