@@ -46,6 +46,8 @@ class GhCli:
                 "gh",
                 "pr",
                 "create",
+                # See GlabCli.open_mr.
+                "--draft",
                 "--title",
                 mr_ops.mr_title(title),
                 "--body",
@@ -56,6 +58,12 @@ class GhCli:
         raw = await git.run_git(repo, ["gh", "pr", "view", "--json", "number,url"])
         data = mr_ops.parse_json(raw, "gh pr view")
         return MR(number=int(data["number"]), url=str(data["url"]))
+
+    async def mark_ready(self, *, repo: Path, branch: str, mr: MR) -> None:
+        """`gh pr ready` is a no-op on an already-ready PR (gh's own docs),
+        same reasoning as `GlabCli.mark_ready`."""
+        target = [str(mr.number)] if mr.number > 0 else []
+        await git.run_git(repo, ["gh", "pr", "ready", *target])
 
     async def push(self, *, repo: Path, branch: str) -> None:
         await git.push(repo, branch)
@@ -81,14 +89,23 @@ class GhCli:
                 "pr",
                 "view",
                 "--json",
-                "number,url,statusCheckRollup,mergeable,mergeStateStatus,headRefOid",
+                "number,url,statusCheckRollup,mergeable,mergeStateStatus,reviewDecision,headRefOid",
             ],
         )
         data = mr_ops.parse_json(raw, "gh pr view")
         # Either field can carry the bad news: `mergeable` is
         # MERGEABLE/CONFLICTING/UNKNOWN, `mergeStateStatus` adds DIRTY.
-        states = (str(data.get("mergeable") or ""), str(data.get("mergeStateStatus") or ""))
+        # `reviewDecision` rides along for the same reason `mergeable`/
+        # `mergeStateStatus` do: `mergeStateStatus: BLOCKED` alone doesn't
+        # say whether that's a missing approval or something else, and
+        # `merge` has to tell those apart (draft-MR workflow spec).
+        states = (
+            str(data.get("mergeable") or ""),
+            str(data.get("mergeStateStatus") or ""),
+            str(data.get("reviewDecision") or ""),
+        )
         mergeable = mr_ops.mergeable(*states)
+        block_reason = mr_ops.classify_block_reason(*states)
         detail = "/".join(s for s in states if s)
         sha = str(data.get("headRefOid") or "")
         # gh's "no checks yet" (empty statusCheckRollup) stays "pending",
@@ -103,6 +120,7 @@ class GhCli:
                 jobs=("no checks yet",),
                 mergeable=mergeable,
                 merge_detail=detail,
+                block_reason=block_reason,
                 sha=sha,
             )
         jobs = tuple(f"{c.get('name')}: {c.get('conclusion') or 'PENDING'}" for c in checks)
@@ -133,6 +151,7 @@ class GhCli:
             jobs=jobs,
             mergeable=mergeable,
             merge_detail=detail,
+            block_reason=block_reason,
             sha=sha,
             failed_jobs=failed_jobs,
         )

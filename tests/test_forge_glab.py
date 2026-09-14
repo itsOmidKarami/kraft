@@ -70,6 +70,15 @@ GLAB_MR_VIEW_MERGED = (
 )
 
 
+# `glab mr view -F json` for a branch blocked on a required approval, not a
+# conflict -- captured against glab 1.117.0's `detailed_merge_status` vocabulary.
+GLAB_MR_VIEW_NOT_APPROVED = (
+    '{"iid":54,"state":"opened","source_branch":"kraft/abc",'
+    '"merge_status":"cannot_be_merged","detailed_merge_status":"not_approved",'
+    '"web_url":"https://gitlab.com/itsOmidKarami/kraft/-/merge_requests/54"}'
+)
+
+
 def _stub(tmp_path, monkeypatch, name: str, stdout: str, rc: int = 0):
     """Put a fake forge CLI first on PATH.
 
@@ -142,6 +151,29 @@ def test_glab_open_mr_parses_the_number_and_url(tmp_path, monkeypatch):
 
     assert mr.number == 54
     assert mr.url == "https://gitlab.com/itsOmidKarami/kraft/-/merge_requests/54"
+
+
+def test_glab_open_mr_creates_as_draft(tmp_path, monkeypatch):
+    """Every MR Kraft opens starts as a draft -- human_review is the gate
+    that decides when it's ready, not open_mr (draft-MR workflow spec)."""
+    _stub(tmp_path, monkeypatch, "glab", GLAB_MR_VIEW)
+    _stub(tmp_path, monkeypatch, "git", "")
+
+    asyncio.run(forge.GlabCli().open_mr(repo=tmp_path, branch="kraft/abc", title="t", body="b"))
+
+    assert "--draft" in _argv(tmp_path, "glab")
+
+
+def test_glab_mark_ready_unsets_draft(tmp_path, monkeypatch):
+    _stub(tmp_path, monkeypatch, "glab", "")
+
+    asyncio.run(
+        forge.GlabCli().mark_ready(
+            repo=tmp_path, branch="kraft/abc", mr=forge.MR(54, "http://x/54")
+        )
+    )
+
+    assert _argv(tmp_path, "glab") == ["mr", "update", "54", "--ready"]
 
 
 def test_open_mr_passes_the_authored_metadata(tmp_path, monkeypatch):
@@ -495,6 +527,40 @@ def test_glab_ci_status_reads_the_mr_merge_state(tmp_path, monkeypatch):
     assert status.state == "success", "the pipeline really is green — that is the whole bug"
     assert status.mergeable is False
     assert status.merge_detail == "conflict"
+
+
+def test_glab_ci_status_names_a_missing_approval_distinctly_from_a_conflict(tmp_path, monkeypatch):
+    """A conflict is a code problem; a missing approval is a person's to
+    grant on the forge. `merge` has to tell them apart (draft-MR workflow
+    spec) -- conflating them is exactly what `block_reason` exists to stop."""
+    _stub_routed(
+        tmp_path,
+        monkeypatch,
+        "glab",
+        {"mr view": GLAB_MR_VIEW_NOT_APPROVED, "ci list": GLAB_CI_SUCCESS},
+    )
+
+    status = asyncio.run(
+        forge.GlabCli().ci_status(repo=tmp_path, mr=forge.MR(0, ""), branch="kraft/abc")
+    )
+
+    assert status.mergeable is None, "unchanged: mr_checks must not fail pre-gate on this"
+    assert status.block_reason == "not_approved"
+
+
+def test_glab_ci_status_names_a_conflict_as_a_conflict(tmp_path, monkeypatch):
+    _stub_routed(
+        tmp_path,
+        monkeypatch,
+        "glab",
+        {"mr view": GLAB_MR_VIEW_CONFLICT, "ci list": GLAB_CI_SUCCESS},
+    )
+
+    status = asyncio.run(
+        forge.GlabCli().ci_status(repo=tmp_path, mr=forge.MR(0, ""), branch="kraft/abc")
+    )
+
+    assert status.block_reason == "conflict"
 
 
 @pytest.mark.parametrize(

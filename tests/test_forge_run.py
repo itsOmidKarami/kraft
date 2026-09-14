@@ -34,6 +34,33 @@ def test_fake_forge_round_trips_an_mr(tmp_path):
     assert asyncio.run(f.ci_status(repo=tmp_path, mr=mr)).state == "success"
 
 
+def test_fake_forge_opens_as_draft(tmp_path):
+    f = forge.FakeForge()
+
+    mr = asyncio.run(f.open_mr(repo=tmp_path, branch="kraft/abc", title="t", body="b"))
+
+    assert f.opened_draft[mr.number] is True
+
+
+def test_fake_forge_mark_ready_unsets_draft(tmp_path):
+    f = forge.FakeForge()
+    mr = asyncio.run(f.open_mr(repo=tmp_path, branch="kraft/abc", title="t", body="b"))
+    assert f.opened_draft[mr.number] is True
+
+    asyncio.run(f.mark_ready(repo=tmp_path, branch="kraft/abc", mr=mr))
+
+    assert f.opened_draft[mr.number] is False
+
+
+def test_fake_forge_ci_status_carries_the_block_reason(tmp_path):
+    f = forge.FakeForge(ci_states=["success"], block_reason="not_approved")
+    mr = asyncio.run(f.open_mr(repo=tmp_path, branch="kraft/abc", title="t", body="b"))
+
+    status = asyncio.run(f.ci_status(repo=tmp_path, mr=mr))
+
+    assert status.block_reason == "not_approved"
+
+
 def test_fake_forge_refuses_to_merge_an_unopened_mr(tmp_path):
     f = forge.FakeForge(ci_states=["success"])
     with pytest.raises(forge.ForgeError):
@@ -162,6 +189,33 @@ def test_sync_mr_pushes_before_it_rewrites_the_description(tmp_path, monkeypatch
     assert order == ["push", "update"], "the description was rewritten over an unpushed head"
     assert fake.pushed == ["kraft/w1"]
     assert fake.bodies["kraft/w1"]
+
+
+def test_sync_mr_marks_the_mr_ready_before_it_pushes(tmp_path, monkeypatch):
+    """`mr_sync` is the one node every chain shape runs before `merge`,
+    gated or not, so it's where the draft comes off (draft-MR workflow
+    spec's 'Undraft' decision) -- before the push, so a project that reruns
+    checks on ready-for-review sees the head it's about to check."""
+    order: list[str] = []
+
+    class Recording(forge.FakeForge):
+        async def mark_ready(self, *, repo, branch, mr):
+            order.append("mark_ready")
+            await super().mark_ready(repo=repo, branch=branch, mr=mr)
+
+        async def push(self, *, repo, branch):
+            order.append("push")
+            await super().push(repo=repo, branch=branch)
+
+    fake = Recording()
+    mr = asyncio.run(fake.open_mr(repo=tmp_path, branch="kraft/w1", title="t", body="b"))
+    assert fake.opened_draft[mr.number] is True
+
+    returned, recorded = _forge_session(tmp_path, monkeypatch, fake, "sync_mr", "s10")
+
+    assert (returned, recorded) == ("done", "done")
+    assert order == ["mark_ready", "push"]
+    assert fake.opened_draft[mr.number] is False
 
 
 def test_sync_mr_treats_an_already_merged_mr_as_done(tmp_path, monkeypatch):
@@ -1696,15 +1750,219 @@ def test_merge_waits_out_a_pipeline_recreated_after_mr_checks(tmp_path, monkeypa
 
 def test_merge_fails_fast_on_an_unmergeable_head_without_calling_merge(tmp_path, monkeypatch):
     """Kraft-266b. A conflict (or any other code-change-needed state) is an
-    answer, not something `forge.merge()` should ever be asked to resolve."""
+    answer, not something `forge.merge()` should ever be asked to resolve.
+
+    Status is "conflict", not a blanket "failed" -- Task 5 threads the real
+    status through instead of collapsing it (draft-MR workflow spec), same
+    as `ci_poll` already reports for the identical unresolved-conflict case
+    (`test_ci_poll_fails_when_the_mr_cannot_be_merged`)."""
     fake = forge.FakeForge(ci_states=["success"], mergeable=False, merge_detail="conflict")
     asyncio.run(fake.open_mr(repo=tmp_path, branch="kraft/w1", title="t", body="b"))
 
     returned, recorded = _forge_session(tmp_path, monkeypatch, fake, "merge", "g2", poll_interval=0)
 
-    assert (returned, recorded) == ("failed", "failed")
+    assert (returned, recorded) == ("conflict", "conflict")
     assert "not mergeable: conflict" in _session_log(tmp_path, "g2")
     assert fake.merged == [], "merge must not be called against an unmergeable head"
+
+
+def test_merge_rebases_a_conflict_away_before_calling_merge(tmp_path, monkeypatch):
+    """The same rebase-and-bounce `mr_checks` already has for a conflict
+    (Kraft-9h7v), now on `merge` too: `mr_sync`'s push after `human_review`
+    can turn up a conflict only `merge` ever sees (draft-MR workflow
+    spec). Against a real repo, a forced rebase onto an unmoved default
+    branch is a no-op fast-forward -- `new_head` comes back falsy, so the
+    node still reports the pre-existing conflict rather than a fabricated
+    'done'."""
+    repo = make_repo(tmp_path)
+    fake = forge.FakeForge(ci_states=["success"], mergeable=False, merge_detail="conflict")
+    asyncio.run(fake.open_mr(repo=repo, branch="kraft/w1", title="t", body="b"))
+
+    returned, recorded = _forge_session(repo, monkeypatch, fake, "merge", "r1", poll_interval=0)
+
+    assert (returned, recorded) == ("conflict", "conflict")
+    assert fake.merged == [], "an unresolved conflict must never reach forge.merge"
+
+
+def test_merge_completes_the_merge_after_a_rebase_when_no_bounce_is_configured(
+    tmp_path, monkeypatch
+):
+    """The forced rebase at `merge` only reports a bare "done" -- without
+    calling `forge.merge` -- when *this node's own* `chain_definition` entry
+    carries `rebase_bounce_to`, so a later re-verify at `verify` is
+    guaranteed before anything lands
+    (`test_merge_rebases_a_conflict_away_before_calling_merge` covers that
+    guaranteed case). A chain frozen before that field existed, or an
+    installed `templates/default.yaml` seeded before it shipped, has no such
+    node -- nothing would ever call `forge.merge` for it, and the walk would
+    sail on to `post_merge_watch`/`mark_completed`/`close_beads` with the
+    branch never merged (code-review). This one must still call
+    `forge.merge` once the rebased head is confirmed green."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    _gitignore_engineering(repo)
+
+    push_calls: list[str] = []
+
+    class ResolvesAfterRebase(forge.FakeForge):
+        async def push(self, *, repo, branch):
+            push_calls.append(branch)
+            await super().push(repo=repo, branch=branch)
+            if len(push_calls) >= 2:
+                # The conflict-rebase's own push is the second one -- a real
+                # forge would see the rebased head as mergeable again by the
+                # time anything re-reads it; flip the fake the same way.
+                self.mergeable = True
+
+    fake = ResolvesAfterRebase(ci_states=["success"], mergeable=False, merge_detail="conflict")
+    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+
+    template = Template(
+        id="merge-no-bounce",
+        nodes=[
+            {"id": "open_mr", "tasks": ["on.mr.open"], "gate_after": None, "fix_loop": None},
+            # No `rebase_bounce_to` here -- the point of this test.
+            {"id": "merge", "tasks": ["on.merge"], "gate_after": None, "fix_loop": None},
+        ],
+    )
+    registry = Registry(
+        hooks={
+            "on.mr.open": {"kind": "forge", "handler": "open_mr", "backend": "fake"},
+            "on.merge": {"kind": "forge", "handler": "merge", "backend": "fake"},
+        }
+    )
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="merge without a bounce",
+                repo=str(repo),
+                template=template,
+                bd_cwd=str(tracker),
+            )
+            await _builtins.ensure_worktree(database, rd, repo=str(repo), work_item_id=wid)
+
+            # Origin moves in a way the branch does not touch, so the forced
+            # rebase this triggers is clean.
+            (repo / "moved.txt").write_text("moved on\n")
+            subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-m", "moved on upstream"], cwd=repo, check=True)
+
+            return await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+        finally:
+            await database.close()
+
+    result = asyncio.run(scenario())
+
+    assert result == "completed"
+    assert fake.merged == [1], "a rebase with no configured bounce must still land the merge"
+
+
+def test_merge_does_not_treat_a_rebased_submodule_as_landed_in_a_multi_repo_item(
+    tmp_path, monkeypatch
+):
+    """code-review: `_run_one`'s conflict-rebase shortcut reports "rebased",
+    not "merged", for a target it only rebased and never actually merged
+    (guaranteed a re-verify via `has_rebase_bounce`). `run_task`'s per-target
+    loop must stop right there -- not record `merge_state='merged'` for that
+    row, not walk on to later targets, and not run the root's own no-MR
+    pointer bump (which, unpatched, would push root pointing at a submodule
+    branch nothing has actually merged -- and here would also crash, since
+    neither repo has an `origin` remote to push to)."""
+    fake = forge.FakeForge(ci_states=["success"])
+    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+    tracker = isolated_bd(tmp_path)
+    root, _sub = make_repo_with_submodule(tmp_path)
+
+    calls: list[Path] = []
+
+    async def fake_run_one(*args, **kwargs):
+        calls.append(kwargs["repo"])
+        return "rebased away, not merged\n", "rebased", None
+
+    monkeypatch.setattr(forge.run, "_run_one", fake_run_one)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(root),
+                template=_back_half_template(),
+                bd_cwd=str(tracker),
+                submodules=["repos/pkg"],
+                root_merge_policy="bump",
+            )
+            worktree = await _builtins.ensure_worktree(
+                database, rd, repo=str(root), work_item_id=wid
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+            branch = store.branch_for(row)
+            status = await forge.run_task(
+                database,
+                rd,
+                session_id="s1",
+                work_item_id=wid,
+                node_id="merge",
+                hook_point="on.merge",
+                handler="merge",
+                backend="fake",
+                repo=worktree,
+                branch=branch,
+                title="t",
+                has_rebase_bounce=True,
+            )
+            repos = database.read(lambda c: store.repos_for(c, wid))
+            return status, repos
+        finally:
+            await database.close()
+
+    status, repos = asyncio.run(scenario())
+
+    assert status == "done", "a guaranteed bounce still reports 'done' to the walk"
+    assert len(calls) == 1, "must stop right after the rebased target, never reach root"
+    assert all(r["state"] != "merged" for r in repos), "a rebased target is not a merged one"
+    assert fake.merged == [], "an unmerged target must never let the root land its pointer bump"
+
+
+def test_ci_poll_conflict_handling_is_unchanged_by_the_extraction(tmp_path, monkeypatch):
+    """Task 5 only moves this code into a shared helper -- it must not
+    change ci_poll's own behavior. Same case `test_ci_poll_still_resolves_
+    a_settled_pipeline` already covers; kept here as a named regression
+    for the extraction itself."""
+    fake = forge.FakeForge(ci_states=["success"], mergeable=False)
+    returned, recorded = _forge_session(tmp_path, monkeypatch, fake, "ci_poll", "r2")
+    assert (returned, recorded) == ("conflict", "conflict")
+
+
+def test_merge_fails_fast_on_a_missing_approval_without_calling_merge(tmp_path, monkeypatch):
+    """A green, non-conflicting pipeline can still be missing a required
+    approval -- `mergeable` alone reads this as undecided (mr_checks must
+    not fail pre-gate on it, per test_ci_poll_does_not_fail_on_an_
+    undecided_merge_state), so it survives unnoticed all the way to
+    merge. One more read, now that the gate is supposed to be done, is
+    what catches it before forge.merge() ever runs (draft-MR workflow
+    spec)."""
+    fake = forge.FakeForge(ci_states=["success"], block_reason="not_approved")
+    asyncio.run(fake.open_mr(repo=tmp_path, branch="kraft/w1", title="t", body="b"))
+
+    returned, recorded = _forge_session(tmp_path, monkeypatch, fake, "merge", "n1", poll_interval=0)
+
+    assert (returned, recorded) == ("failed", "failed")
+    assert "needs approval" in _session_log(tmp_path, "n1")
+    assert fake.merged == [], "merge must not be called against an unapproved head"
 
 
 def test_merge_times_out_on_the_pipeline_wait_rather_than_the_merge_wait(tmp_path, monkeypatch):
