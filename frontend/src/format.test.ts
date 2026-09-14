@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ago, docBody, elapsed, elapsedBetween, logLineText, nodeRunSpan, shortId, statusWord, tokens, until, usd } from "./format";
+import { ago, docBody, docTitle, elapsed, elapsedBetween, logLineText, nodeRunSpan, shortId, statusWord, tokens, until, usd } from "./format";
 import type { KraftEvent, LogLine, WorkerSession } from "./types/work_item";
 
 const logLine = (over: Partial<LogLine>): LogLine => ({
@@ -155,5 +155,48 @@ describe("docBody (W8.2)", () => {
   it("keeps a heading whose body is a deeper heading, and leaves fenced code alone", () => {
     const md = "## Design\n\n### Cache\n\ntext\n\n```sh\n# not a heading\n```";
     expect(docBody(md, "Other")).toBe(md);
+  });
+});
+
+describe("docTitle (W11 · H)", () => {
+  it("passes a real title through unchanged", () => {
+    expect(docTitle({ title: "WS transport design", content: "Something else entirely." })).toBe("WS transport design");
+  });
+
+  it("titles a heading-less summary with its first sentence", () => {
+    expect(
+      docTitle({
+        title: "8cbfe6e27c1044b3e445c0f0d726357d",
+        content: "\nReviewed the invalidation path against main. The check holds.\n\n## Findings\n",
+      }),
+    ).toBe("Reviewed the invalidation path against main.");
+  });
+
+  it("reads past front matter, headings, quotes and table rows to the first prose line, without its markdown", () => {
+    const content = "---\nauthor: claude\n---\n\n# Summary\n\n> quoted\n\n| a | b |\n\n**Opened** the merge request from the plan";
+    expect(docTitle({ title: "", content })).toBe("Opened the merge request from the plan");
+  });
+
+  it("treats `Session <id>`, a short id and the session's own id as no title", () => {
+    const content = "Rebased onto main and re-ran the verify node's tests.";
+    for (const title of ["Session 8cbfe6e27c1044b3e445c0f0d726357d", "8cbfe6e2…6357d", "s-123"]) {
+      expect(docTitle({ title, content, worker_session_id: "s-123" })).toBe(content);
+    }
+  });
+
+  it("cuts an opening line with no sentence end at 90 characters", () => {
+    const t = docTitle({ title: "", content: "word ".repeat(40) });
+    expect(t.length).toBeLessThanOrEqual(90);
+    expect(t.endsWith("…")).toBe(true);
+  });
+
+  it("prefixes Session · only when the derived line is under 12 characters", () => {
+    expect(docTitle({ title: "", content: "Fixed it." })).toBe("Session · Fixed it.");
+    expect(docTitle({ title: "", content: "Fixed the flaky import test." })).toBe("Fixed the flaky import test.");
+  });
+
+  it("never returns a bare id: with no body to read it names the hook", () => {
+    expect(docTitle({ title: "8cbfe6e27c1044b3e445c0f0d726357d", hook_point: "on.mr.describe" })).toBe("Session · on.mr.describe");
+    expect(docTitle({ title: "Session 8cbfe6e27c1044b3e445c0f0d726357d", kind: "sessions" })).toBe("Session · sessions");
   });
 });

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { clock } from "../../../format";
 import type { KraftEvent, WorkerSession } from "../../../types";
 import { detailOf, findingsOf, groupByNode, titleOf } from "../timelineHelpers";
@@ -15,14 +15,21 @@ export function Events({
   events,
   sessions = [],
   nodeId,
+  selectedSeq = null,
   onViewLog,
 }: {
   events: KraftEvent[];
   sessions?: WorkerSession[];
   nodeId: string | null;
+  /** The event the Timeline list picked (W11 · F): marked, and brought into view. */
+  selectedSeq?: number | null;
   onViewLog: (sessionId: string) => void;
 }) {
   const [filter, setFilter] = useState<"all" | "gates" | "tasks">("all");
+  const selectedRow = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    selectedRow.current?.scrollIntoView?.({ block: "nearest" });
+  }, [nodeId, selectedSeq]);
   const hooks = new Map(sessions.map((s) => [s.id, s.hook_point]));
   const group = groupByNode(events).find((g) => g.node === nodeId);
   const rows = (group?.events ?? []).filter(
@@ -51,7 +58,13 @@ export function Events({
       {rows.length === 0 && <p className="empty">no {filter === "gates" ? "gate " : ""}events on this node</p>}
       <div className="timeline">
         {rows.map((e) => (
-          <div key={e.seq} className="event-row" data-type={e.type}>
+          <div
+            key={e.seq}
+            ref={e.seq === selectedSeq ? selectedRow : undefined}
+            className="event-row"
+            data-type={e.type}
+            data-selected={e.seq === selectedSeq || undefined}
+          >
             <span className="event-dot" />
             <div className="event-body">
               {(() => {

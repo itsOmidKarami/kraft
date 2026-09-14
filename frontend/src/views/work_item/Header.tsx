@@ -1,20 +1,20 @@
-import { useEffect, useLayoutEffect, useRef, useState, type WheelEvent } from "react";
+import { useEffect, useId, useState, type ReactNode, type WheelEvent } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { CaretDown, PencilSimple, Prohibit } from "@phosphor-icons/react";
+import { CaretDown, PencilSimple, Prohibit, Robot } from "@phosphor-icons/react";
 import * as api from "../../api";
-import { deriveState } from "../../deriveState";
+import { deriveState, type ItemDisplayState } from "../../deriveState";
 import { ago, elapsedBetween, nodeRunSpan, repoName, statusWord } from "../../format";
 import { useStore } from "../../store";
 import { OverflowMenu, TaskBar, TaskLine } from "../../components/ui";
 import { ShortId } from "../../components/ShortId";
-import { plainMarkdown } from "../../components/Snippet";
 import type { KraftEvent, WorkerSession, WorkItem } from "../../types";
 
 /**
- * Desktop 11's header (UI v2 · 05): the meta line, the title/description
- * editors carried over from the old `WorkItemDetail.tsx`, the hero node block
- * on the right, and the task progress row under the title (W0.1).
+ * The item page's header (W11 · A, design 1e): one meta line and, on the same
+ * row, the status run -- state chip · node · position · time · cycle pill.
+ * Under them the title, a "description" link that opens the brief, and the
+ * task progress row (W0.1).
  */
 
 const STATUS_TAG: Record<WorkItem["status"], string> = {
@@ -33,11 +33,14 @@ function Title({
   editing,
   onEdit,
   onDone,
+  extra,
 }: {
   item: WorkItem;
   editing: boolean;
   onEdit: () => void;
   onDone: () => void;
+  /** The "description" link, after the title. */
+  extra?: ReactNode;
 }) {
   const hydrateItem = useStore((s) => s.hydrateItem);
   const [draft, setDraft] = useState(item.title);
@@ -110,79 +113,18 @@ function Title({
       <button className="btn btn-quiet detail-title-pencil" aria-label="edit title" onClick={onEdit}>
         <PencilSimple size={13} />
       </button>
+      {extra}
     </div>
   );
 }
 
-/** The brief as rendered markdown, clamped to two lines with "more" to expand
- *  it in place (W0.1) — never raw `##`/`**`. Clamped, its blocks flow inline
- *  (work_item.css) so the two lines are prose, not a heading and a blank. */
-function DescriptionText({ text }: { text: string }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [expanded, setExpanded] = useState(false);
-  const [clamped, setClamped] = useState(false);
-
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const measure = () => setClamped(el.scrollHeight > el.clientHeight + 1);
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [text]);
-
-  return (
-    <div className="detail-description-wrap">
-      <div ref={ref} className="detail-description" data-expanded={expanded} data-testid="item-description">
-        {/* One block child: a -webkit-box blockifies its direct children,
-            so the markdown's own blocks sit one level down, where the
-            clamped rules can flow them inline. */}
-        <div className="detail-description-md">
-          {/* Clamped, it is a two-line preview: prose only, headings and list
-              markers stripped ("Context The verify node…" read as one run-on
-              sentence). Expanded keeps the full markdown. */}
-          {expanded ? (
-            <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
-          ) : (
-            <p>{plainMarkdown(text.replace(/^\s{0,3}#{1,6}\s.*$/gm, "")).trim()}</p>
-          )}
-        </div>
-      </div>
-      {(clamped || expanded) && (
-        <button
-          type="button"
-          className="btn btn-quiet detail-description-more"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((v) => !v)}
-        >
-          {expanded ? "less" : "more"}
-        </button>
-      )}
-    </div>
-  );
-}
-
-/** The brief. Read-only until asked, because editing it changes what every
- *  later node is told. */
-function Description({
-  item,
-  editing,
-  onDone,
-}: {
-  item: WorkItem;
-  editing: boolean;
-  onDone: () => void;
-}) {
+/** The brief's editor. Read-only until asked, because editing it changes what
+ *  every later node is told. */
+function DescriptionEditor({ item, onDone }: { item: WorkItem; onDone: () => void }) {
   const hydrateItem = useStore((s) => s.hydrateItem);
   const [draft, setDraft] = useState(item.description ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (editing) setDraft(item.description ?? "");
-  }, [editing, item.description]);
 
   const save = async () => {
     setBusy(true);
@@ -198,68 +140,51 @@ function Description({
     }
   };
 
-  if (editing) {
-    return (
-      <div className="field">
-        <label htmlFor="item-description-edit">Description</label>
-        <textarea
-          id="item-description-edit"
-          className="input"
-          aria-label="description"
-          rows={4}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-        />
-        <div className="gate-actions capped-actions">
-          <button className="btn btn-primary" disabled={busy} onClick={save}>
-            Save
-          </button>
-          <button className="btn" disabled={busy} onClick={onDone}>
-            Cancel
-          </button>
-        </div>
-        {err && <p className="form-error">{err}</p>}
+  return (
+    <div className="field">
+      <label htmlFor="item-description-edit">Description</label>
+      <textarea
+        id="item-description-edit"
+        className="input"
+        aria-label="description"
+        rows={4}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+      />
+      <div className="gate-actions capped-actions">
+        <button className="btn btn-primary" disabled={busy} onClick={save}>
+          Save
+        </button>
+        <button className="btn" disabled={busy} onClick={onDone}>
+          Cancel
+        </button>
       </div>
-    );
-  }
-
-  if (!item.description) return null;
-  return <DescriptionText text={item.description} />;
+      {err && <p className="form-error">{err}</p>}
+    </div>
+  );
 }
 
-/** The hero's node and the line under it (W0.4, W0.5). A finished item names
- *  the node it finished on — never "—" or "not started" — and a running
- *  node's duration is the shared run-time helper, frozen once its session
- *  exits. */
-function hero(item: WorkItem, events: KraftEvent[], sessions: WorkerSession[]): { node: string; sub: string } {
-  const { state } = deriveState(item, sessions, events);
+/** `node · 5/8 · 6m` (W11 rule 2). A finished item names the node it finished
+ *  on -- never "—" or "not started" (W0.5) -- and a node's time is the shared
+ *  run-time helper, frozen once its session exits (W0.4). */
+function runLine(item: WorkItem, events: KraftEvent[], sessions: WorkerSession[], state: ItemDisplayState): string {
   const nodes = item.chain_definition.nodes;
   const last = (type: string) => [...events].reverse().find((e) => e.type === type);
-  const lastNode =
-    item.current_node_id ?? (last("node_completed")?.payload.node_id as string | undefined) ?? nodes.at(-1)?.id ?? "—";
-
-  if (state === "archived") return { node: lastNode, sub: "archived · read-only" };
-  if (state === "done") {
-    return { node: lastNode, sub: `completed ${ago(last("work_item_completed")?.created_at ?? item.updated_at)}` };
-  }
   if (state === "not_started") {
-    return { node: "not started", sub: `filed ${ago(item.created_at)}${nodes[0] ? ` · starts at ${nodes[0].id}` : ""}` };
+    return [nodes[0] && `starts at ${nodes[0].id}`, `filed ${ago(item.created_at)}`.trim()].filter(Boolean).join(" · ");
   }
-
-  const at = nodes.findIndex((n) => n.id === item.current_node_id);
-  const parts = at >= 0 ? [`node ${at + 1} of ${nodes.length}`] : [];
-  if (state === "abandoned") {
-    parts.push(`abandoned ${ago(last("work_item_abandoned")?.created_at ?? item.updated_at)}`);
-  } else {
+  const node =
+    item.current_node_id ?? (last("node_completed")?.payload.node_id as string | undefined) ?? nodes.at(-1)?.id ?? "—";
+  const at = nodes.findIndex((n) => n.id === node);
+  let time: string | null = null;
+  if (state === "archived") time = "archived";
+  else if (state === "done") time = `completed ${ago(last("work_item_completed")?.created_at ?? item.updated_at)}`;
+  else if (state === "abandoned") time = `abandoned ${ago(last("work_item_abandoned")?.created_at ?? item.updated_at)}`;
+  else {
     const span = nodeRunSpan(item.current_node_id, events, sessions);
-    if (span) {
-      const d = elapsedBetween(span.from, span.to);
-      // "running 6s" on an item that stopped an hour ago is a lie the clock
-      // keeps telling. Only a node whose session still runs is running.
-      parts.push(span.to === null && item.status === "active" ? `running ${d}` : d);
-    }
+    if (span) time = elapsedBetween(span.from, span.to);
   }
-  return { node: lastNode, sub: parts.join(" · ") };
+  return [node, at >= 0 && `${at + 1}/${nodes.length}`, time?.trim()].filter(Boolean).join(" · ");
 }
 
 export function Header({
@@ -281,56 +206,87 @@ export function Header({
   collapsed?: boolean;
   onWheel?: (e: WheelEvent<HTMLDivElement>) => void;
   onExpand?: () => void;
-  /** The "+N submodules" chip opens Config → Repos (W0.1, W0.7). */
+  /** The "+N submodules" link opens Config → Repos (W0.7). */
   onShowRepos?: () => void;
 }) {
-  const mr = [...events].reverse().find((e) => e.type === "mr_opened");
   const { state } = deriveState(item, sessions, events);
-  const { node, sub } = hero(item, events, sessions);
   const submodules = (item.repos?.length ?? 0) - 1;
-  // Everything not the one frequent action lives in the ⋯ menu (spec §2);
-  // editing the title/description moved here from an always-visible Edit
-  // button so the header's flow is free for the two-column grid.
+  const from = item.attachments?.length ? `from ${item.attachments.map((a) => a.kind).join("+")}` : null;
+  // Everything not the one frequent action lives in the ⋯ menu (spec §2).
   const [editing, setEditing] = useState<"title" | "description" | null>(null);
+  // The brief is closed by default; the link after the title opens it (rule 3).
+  const [descOpen, setDescOpen] = useState(false);
+  const descId = useId();
+
+  // One line, ellipsized (rule 1). Each part carries its own separator, so a
+  // part the phone hides (W3.2: bead, submodules, provenance) takes its `·`.
+  // A deliberate cut: the part's whole text is its title (sweep/README.md's
+  // data-allow-ellipsis allowlist, W11).
+  const part = (key: string, node: ReactNode, full: string, desktopOnly = false) => (
+    <span
+      key={key}
+      className={desktopOnly ? "detail-meta-part desktop-only" : "detail-meta-part"}
+      title={full}
+      data-allow-ellipsis
+    >
+      {node}
+    </span>
+  );
+  const metaTitle = [
+    repoName(item.repo),
+    item.chain_template,
+    item.bead_id,
+    item.id,
+    submodules > 0 && `+${submodules} submodule${submodules === 1 ? "" : "s"}`,
+    from,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <div className="detail-head" onWheel={onWheel}>
-      <div className="detail-meta">
-        <span title={item.repo}>{repoName(item.repo)}</span>
-        {submodules > 0 && (
-          <button type="button" className="tag tag-neutral tag-tight detail-submodules desktop-only" onClick={onShowRepos}>
-            +{submodules} submodule{submodules === 1 ? "" : "s"}
-          </button>
-        )}
-        <span>{item.chain_template}</span>
-        {mr && (
-          <a className="mr-link" href={String(mr.payload.url)} target="_blank" rel="noreferrer">
-            !{String(mr.payload.number)}
-          </a>
-        )}
-        {/* Phone meta (W3.2): repo · template · id · status only. */}
-        {item.bead_id && <code className="desktop-only">{item.bead_id}</code>}
-        <ShortId id={item.id} />
-        {item.attachments?.length ? (
-          <span className="tag tag-outline tag-tight desktop-only">
-            from {item.attachments.map((a) => a.kind).join("+")}
-          </span>
-        ) : null}
+      <div className="detail-meta" title={metaTitle}>
+        {part("repo", repoName(item.repo), item.repo)}
+        {part("template", item.chain_template, item.chain_template)}
+        {item.bead_id && part("bead", <code>{item.bead_id}</code>, item.bead_id, true)}
+        {part("id", <ShortId id={item.id} />, item.id)}
+        {submodules > 0 &&
+          part(
+            "submodules",
+            <button type="button" className="detail-submodules" onClick={onShowRepos}>
+              +{submodules} submodule{submodules === 1 ? "" : "s"}
+            </button>,
+            `+${submodules} submodule${submodules === 1 ? "" : "s"}`,
+            true,
+          )}
+        {from && part("from", from, from, true)}
+      </div>
+      <div className="detail-run">
         {/* A never-started item is `paused` in the database, but "paused"
             beside "not started" reads as two different things (21). */}
-        <span className={`${STATUS_TAG[item.status]} detail-status`}>
-          {state === "not_started" ? "waiting to start" : statusWord(item.status)}
-        </span>
+        {state === "escalating" ? (
+          // An agent is on it, not waiting on you (W11 · J.5).
+          <span className="tag tag-escalating detail-status">
+            <Robot size={11} aria-hidden />
+            escalating
+          </span>
+        ) : (
+          <span className={`${STATUS_TAG[item.status]} detail-status`}>
+            {state === "not_started" ? "waiting to start" : statusWord(item.status)}
+          </span>
+        )}
+        <span className="detail-run-node">{runLine(item, events, sessions, state)}</span>
+        {item.fixCycle != null && <span className="tag tag-outline">fix · cycle {item.fixCycle}</span>}
+        {item.cappedOut && (
+          <span className="tag tag-outline">
+            <Prohibit size={11} />
+            capped {item.cappedOut.cycles}/{item.cappedOut.attempts}
+          </span>
+        )}
         {/* A wheel gesture collapses the block, but that's unreachable from
-            the keyboard on its own -- this chevron is the way back in
-            without one. */}
+            the keyboard on its own -- this chevron is the way back in. */}
         {collapsed && (
-          <button
-            type="button"
-            className="btn btn-quiet detail-head-expand"
-            aria-label="expand title and description"
-            onClick={onExpand}
-          >
+          <button type="button" className="btn btn-quiet detail-head-expand" aria-label="expand title and description" onClick={onExpand}>
             <CaretDown size={13} />
           </button>
         )}
@@ -347,25 +303,31 @@ export function Header({
           editing={editing === "title"}
           onEdit={() => setEditing("title")}
           onDone={() => setEditing(null)}
+          extra={
+            item.description && editing !== "description" ? (
+              <button
+                type="button"
+                className="detail-description-link"
+                aria-expanded={descOpen}
+                aria-controls={descOpen ? descId : undefined}
+                onClick={() => setDescOpen((v) => !v)}
+              >
+                description
+              </button>
+            ) : null
+          }
         />
-        <Description
-          item={item}
-          editing={editing === "description"}
-          onDone={() => setEditing(null)}
-        />
-      </div>
-      <div className="detail-hero">
-        <span className="hero-node">{node}</span>
-        {item.fixCycle != null && (
-          <span className="tag tag-outline">fix · cycle {item.fixCycle}</span>
+        {editing === "description" ? (
+          <DescriptionEditor item={item} onDone={() => setEditing(null)} />
+        ) : (
+          descOpen &&
+          item.description && (
+            // Rendered markdown, never raw `##`/`**` (W0.1).
+            <div id={descId} className="detail-description" data-testid="item-description">
+              <Markdown remarkPlugins={[remarkGfm]}>{item.description}</Markdown>
+            </div>
+          )
         )}
-        {item.cappedOut && (
-          <span className="tag tag-outline">
-            <Prohibit size={11} />
-            capped {item.cappedOut.cycles}/{item.cappedOut.attempts}
-          </span>
-        )}
-        <span className="hero-sub">{sub}</span>
       </div>
       {/* Full width under the title, never a column beside it: a long task
           title squeezed the item title into 280px (W0.1). */}

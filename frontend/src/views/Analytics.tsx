@@ -47,10 +47,6 @@ const uniq = (xs: string[]) => [...new Set(xs)].sort().map((x) => ({ id: x, name
 const uniqRepos = (xs: string[]) =>
   [...new Set(xs)].sort().map((x) => ({ id: x, name: repoName(x) }));
 
-/** "plan_approval" → "plan", "human_review_approval" → "human_review" — the
- *  short form the KPI sub-line uses (design 35: "5 plan · 2 human_review"). */
-const shortGate = (gate: string) => gate.replace(/_approval$/, "");
-
 export function AnalyticsView() {
   const items = useStore((s) => Object.values(s.workItems));
   const [repo, setRepo] = useState<string | null>(null);
@@ -84,24 +80,14 @@ export function AnalyticsView() {
   const repoOptions = uniqRepos(items.map((i) => i.repo));
   const tplOptions = uniq(items.map((i) => i.chain_template));
 
-  const rejectedSub = report?.rejected_gates_by_gate.length
-    ? report.rejected_gates_by_gate
-        .slice(0, 2)
-        .map((g) => `${g.n} ${shortGate(g.gate)}`)
-        .join(" · ")
-    : "none";
-
   const completedDelta = t?.completed_prev != null ? t.completed - t.completed_prev : null;
 
   return (
     <div className="analytics analytics-body">
       <div className="analytics-head">
-        <div>
-          <h2>Analytics</h2>
-          <span className="analytics-scope">
-            completed work items · what they cost and where the time went
-          </span>
-        </div>
+        <h2>Analytics</h2>
+        <span className="analytics-scope">completed work items · last 8 weeks</span>
+        <span className="analytics-spacer" />
         <div className="analytics-filters">
           <span className="chip chip-static">last 8 weeks</span>
           <label className="chip" data-active={repo != null || undefined}>
@@ -134,47 +120,32 @@ export function AnalyticsView() {
 
       {t && (
         <>
+          {/* W11 · E: three headline tiles; the rest moved into the sub-lines and
+              the stop-reasons footer. The API sends fix cycles as a mean per
+              verify run, not a count, so the tile says so. */}
           <div className="kpis">
             <Kpi
               label="Completed"
               value={String(t.completed)}
-              sub={
+              sub={[
                 completedDelta == null
                   ? "no previous period"
-                  : `${completedDelta >= 0 ? "+" : ""}${completedDelta} vs previous 8 weeks`
-              }
-            />
-            <Kpi label="Median lead time" value={elapsed(t.median_lead_ms)} sub="create → merge" />
-            <Kpi
-              label="Human wait"
-              value={`${t.human_wait_pct}%`}
-              sub="of lead time spent at gates"
+                  : `${completedDelta >= 0 ? "+" : ""}${completedDelta} vs previous`,
+                t.completed ? `${usd(t.cost_usd / t.completed)} each` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             />
             <Kpi
-              label="Unplanned touches"
-              value={t.unplanned_touches_per_item.toFixed(2)}
-              sub="per completed item · stops nobody designed the chain to need"
-            />
-            <Kpi
-              label="Open MR → green CI"
-              value={elapsed(t.open_mr_to_green_ci_ms)}
-              sub="median, completed items"
-            />
-            <Kpi
-              label="Fix cycles"
-              value={t.fix_cycles.toFixed(1)}
-              sub={`per verify · ${t.fix_cycles_capped} capped out`}
+              label="Lead time"
+              value={elapsed(t.median_lead_ms)}
+              sub={`median create → merge · ${t.human_wait_pct}% waiting on you`}
             />
             <Kpi
               label="Cost"
               value={usd(t.cost_usd, t.cost_complete)}
-              sub={
-                t.completed
-                  ? `${usd(t.cost_usd / t.completed)} per completed item`
-                  : "nothing completed yet"
-              }
+              sub={`${t.fix_cycles.toFixed(1)} fix cycles per verify · ${t.fix_cycles_capped} capped · ${t.rejected_gates} rejected gates`}
             />
-            <Kpi label="Rejected gates" value={String(t.rejected_gates)} sub={rejectedSub} />
           </div>
 
           <section className="chart">
@@ -307,6 +278,10 @@ export function AnalyticsView() {
                     </div>
                   );
                 })}
+                <p className="table-foot">
+                  unplanned touches {t.unplanned_touches_per_item.toFixed(2)} per item · open MR →
+                  green CI {elapsed(t.open_mr_to_green_ci_ms)} median
+                </p>
               </section>
             </div>
           </div>

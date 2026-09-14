@@ -19,8 +19,9 @@ const MANIFEST = path.join(OUT, "manifest.jsonl");
 
 const REGIONS: [string, string][] = [
   ["hero", ".detail-head, .item-hero, [data-testid=\"item-title\"]"],
-  ["gate-card", "[data-testid=\"gate-card\"], [data-testid=\"escalated-card\"], [data-testid=\"escalating-pill\"]"],
-  ["action-bar", ".action-bar, .item-actions"],
+  // W11 · A: the gate card and the action bar are one card on every state; el-action-bar shoots its button row.
+  ["gate-card", ".item-card"],
+  ["action-bar", ".item-card-actions"],
   ["stage-graph", ".stage-graph"],
   ["inspector", "[data-testid=\"inspector\"]"],
   ["right-pane", ".item-right-pane, .pane"],

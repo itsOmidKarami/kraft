@@ -2,10 +2,11 @@ import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode }
 import { Tabs } from "../../../components/ui";
 import { elapsedBetween, nodeRunSpan } from "../../../format";
 import type { KraftEvent, WorkerSession, WorkItem, WorkItemDiff } from "../../../types";
+import { groupByNode } from "../timelineHelpers";
 import { Changes } from "./Changes";
 import { Config } from "./Config";
 import { Documents } from "./Documents";
-import { Tasks } from "./Tasks";
+import { Tasks, type Scope } from "./Tasks";
 import { Timeline } from "./Timeline";
 import type { InspectorTab, Selection } from "../selection";
 
@@ -57,6 +58,12 @@ export function Inspector({
   // need to sit below the head's actual height, not a guessed 40px.
   const headRef = useRef<HTMLDivElement>(null);
   const [headHeight, setHeadHeight] = useState(40);
+  // One this node · all scope for the lists that have one (W11 · F.1); the
+  // stage-graph pill is what "this node" follows.
+  const [scope, setScope] = useState<Scope>("node");
+  // Reported by the Documents list once it has loaded; follows the scope (G.4).
+  const [docCount, setDocCount] = useState<number | undefined>(undefined);
+  const nodeEvents = groupByNode(events).find((g) => g.node === nodeId)?.events.length ?? 0;
   useLayoutEffect(() => {
     if (headRef.current) setHeadHeight(headRef.current.offsetHeight);
   });
@@ -80,8 +87,9 @@ export function Inspector({
           // "SESSIONS · N" eyebrow (W0.8).
           { id: "tasks", label: "Tasks", count: nodeId ? nodeSessions.length : sessions.length },
           { id: "changes", label: "Changes" },
-          { id: "documents", label: "Documents" },
-          { id: "timeline", label: "Timeline", count: events.length },
+          { id: "documents", label: "Documents", count: docCount },
+          // Follows the scope (F.2): this node's events, or all of them.
+          { id: "timeline", label: "Timeline", count: scope === "node" ? nodeEvents : events.length },
           { id: "config", label: "Config" },
         ]}
       />
@@ -94,6 +102,8 @@ export function Inspector({
             nodeId={nodeId}
             selected={selection.kind === "session" ? selection.id : null}
             onSelect={(id) => onSelect({ kind: "session", id })}
+            scope={scope}
+            onScope={setScope}
           />
         )}
         {tab === "changes" && (
@@ -113,12 +123,21 @@ export function Inspector({
             preselectPath={item.gate_artifact}
             gatePending={!!item.pending_gate}
             gateArtifactPending={!!item.pending_gate && !!item.gate_artifact}
+            nodeId={nodeId}
+            nodes={(item.effective_chain ?? item.chain_definition).nodes}
+            scope={scope}
+            onScope={setScope}
+            onCount={setDocCount}
           />
         )}
         {tab === "timeline" && (
           <Timeline
             events={events}
-            selected={selection.kind === "timeline-node" && selection.id ? selection.id : nodeId}
+            sessions={sessions}
+            nodeId={nodeId}
+            scope={scope}
+            onScope={setScope}
+            selected={selection.kind === "timeline-node" ? selection.id : null}
             onSelect={(id) => onSelect({ kind: "timeline-node", id })}
           />
         )}

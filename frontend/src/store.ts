@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import * as api from "./api";
+import { deriveState, type DerivedState } from "./deriveState";
 import type { KraftEvent, WorkItem, WorkerSession } from "./types";
 
 type Connection = "connecting" | "open" | "reconnecting";
@@ -46,6 +47,11 @@ export const useStore = create<State>((set, get) => ({
       workItems: Object.fromEntries(items.map((i) => [i.id, i])),
       lastSeq: cursor,
     });
+    // W11 · J: whether a needs_human item has an escalation turn running lives
+    // in its sessions, which the list does not carry. Hydrate those items so
+    // the board, the sidebar badge and the bottom nav can tell escalating from
+    // needs-you without opening each one.
+    for (const i of items) if (i.status === "needs_human") get().hydrateItem(i.id).catch(() => {});
   },
 
   hydrateItem: async (id) => {
@@ -358,7 +364,16 @@ function blankSession(workItemId: string, createdAt: string): WorkerSession {
   };
 }
 
-/** A session by id, whichever work item it belongs to — the log modal has only the id. */
+/** `deriveState` with the sessions and events this client already holds for
+ *  each item — without them a list item's running escalation turn reads as
+ *  the stop underneath it (W11 · J). */
+export function useItemStates(): (item: WorkItem) => DerivedState {
+  const sessions = useStore((s) => s.sessionsByItem);
+  const events = useStore((s) => s.eventsByItem);
+  return (item) => deriveState(item, sessions[item.id] ?? [], events[item.id] ?? []);
+}
+
+/** A session by id, whichever work item it belongs to — the log pane has only the id. */
 export function findSession(sid: string): WorkerSession | undefined {
   for (const rows of Object.values(useStore.getState().sessionsByItem)) {
     const hit = rows.find((r) => r.id === sid);

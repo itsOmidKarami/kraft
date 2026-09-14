@@ -331,4 +331,15 @@ describe("bootstrap", () => {
     expect(s.workItems.wa).toBeDefined();
     expect(s.lastSeq).toBe(42);
   });
+
+  it("hydrates the needs_human items it lists, so a running escalation is known off the board (W11 · J)", async () => {
+    vi.spyOn(await import("./api"), "listWorkItems").mockResolvedValue({
+      items: [baseItem({ id: "wa", status: "needs_human" }), baseItem({ id: "wb" })],
+      cursor: 1,
+    });
+    const hydrate = vi.spyOn(useStore.getState(), "hydrateItem").mockResolvedValue();
+    await useStore.getState().bootstrap();
+    expect(hydrate).toHaveBeenCalledWith("wa");
+    expect(hydrate).not.toHaveBeenCalledWith("wb");
+  });
 });

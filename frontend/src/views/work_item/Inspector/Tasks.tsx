@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Robot } from "@phosphor-icons/react";
 import { Row, RowState, RowText, StatusGlyph } from "../../../components/ui";
 import { clock, elapsed, shortId, tokens, usd } from "../../../format";
@@ -11,6 +10,31 @@ import type { KraftEvent, WorkerSession, WorkItem } from "../../../types";
  * layout that component used is replaced by a flat, scope-toggled list —
  * the pane on the right is where a node's own detail lives now.
  */
+
+export type Scope = "node" | "all";
+
+/** The this node · all switch (38): Tasks' own, and Timeline's (W11 · F), one
+ *  state for both, held by the Inspector. */
+export function ScopeChips({
+  scope,
+  onScope,
+  nodeId,
+}: {
+  scope: Scope;
+  onScope: (s: Scope) => void;
+  nodeId: string | null;
+}) {
+  return (
+    <span className="inspector-scope">
+      <button className="chip" aria-pressed={scope === "node"} onClick={() => onScope("node")} disabled={!nodeId}>
+        this node
+      </button>
+      <button className="chip" aria-pressed={scope === "all"} onClick={() => onScope("all")}>
+        all
+      </button>
+    </span>
+  );
+}
 
 function metricsOf(s: WorkerSession): string {
   const parts: string[] = [];
@@ -29,6 +53,8 @@ export function Tasks({
   nodeId,
   selected,
   onSelect,
+  scope,
+  onScope,
 }: {
   item: WorkItem;
   sessions: WorkerSession[];
@@ -37,8 +63,9 @@ export function Tasks({
   nodeId: string | null;
   selected: string | null;
   onSelect: (sessionId: string) => void;
+  scope: Scope;
+  onScope: (s: Scope) => void;
 }) {
-  const [scope, setScope] = useState<"node" | "all">("node");
   const ordered = [...sessions].sort((a, b) =>
     b.created_at.localeCompare(a.created_at),
   );
@@ -66,23 +93,7 @@ export function Tasks({
       )}
       <p className="section-label">
         SESSIONS · {shown.length}
-        <span className="inspector-scope">
-          <button
-            className="chip"
-            aria-pressed={scope === "node"}
-            onClick={() => setScope("node")}
-            disabled={!nodeId}
-          >
-            this node
-          </button>
-          <button
-            className="chip"
-            aria-pressed={scope === "all"}
-            onClick={() => setScope("all")}
-          >
-            all
-          </button>
-        </span>
+        <ScopeChips scope={scope} onScope={onScope} nodeId={nodeId} />
       </p>
       {shown.length === 0 && (
         <p className="empty">

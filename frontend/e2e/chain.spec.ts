@@ -45,8 +45,13 @@ test("create a work item and watch it complete", async ({ page }) => {
   // opening a dialog from a row click.
   await page.getByRole("tab", { name: /Documents/ }).click();
   const docs = page.locator(".linked-docs");
-  await expect(docs.getByText(/\.engineering\/sessions\//)).toBeVisible({ timeout: scaledTimeout(30_000) });
-  await docs.getByRole("button").first().click();
+  // W11 · G: Documents opens on "this node" (the last node, verify), where the
+  // implementation session's summary sits behind a fold, and a row carries its
+  // path in `title` rather than as text. "all" lists every node's documents.
+  await docs.getByRole("button", { name: "all", exact: true }).click();
+  const session = docs.locator('.doc-row[title*=".engineering/sessions/"]').first();
+  await expect(session).toBeVisible({ timeout: scaledTimeout(30_000) });
+  await session.click();
   const viewer = page.getByTestId("right-pane-doc");
   await expect(viewer).toBeVisible();
   // the pane's meta line carries the document's kind, falling back to its source

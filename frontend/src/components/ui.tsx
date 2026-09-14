@@ -7,9 +7,10 @@
  * box. Colour, size and radius come from Nocturne tokens in `styles.css`; this
  * file carries no literal values.
  */
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import {
   Archive,
+  CaretDown,
   Check,
   ChatText,
   Circle,
@@ -256,16 +257,39 @@ export interface OverflowItem {
    *  a confirm row naming what is about to happen, the same two-step the gate's
    *  reject uses, rather than firing on the first click. */
   confirm?: string;
+  icon?: ReactNode;
+  /** Shown, focusable and dimmed, but inert (Open MR before an MR exists). */
+  disabled?: boolean;
+  /** The row's tooltip, also its accessible description (W11 rule 7). */
+  hint?: string;
+  /** A hairline above this row, starting a new group. */
+  divider?: boolean;
 }
 
 /**
  * Everything that is not the one frequent action lives here. Destructive
- * actions are never permanently visible (spec §2).
+ * actions are never permanently visible (spec §2). A menu button (W11 rule 11):
+ * opening focuses the first row, arrows move between rows, and Escape closes
+ * it and puts focus back on the button.
  */
-export function OverflowMenu({ items, label = "More" }: { items: OverflowItem[]; label?: string }) {
+export function OverflowMenu({
+  items,
+  label = "More",
+  text = false,
+  wide = false,
+}: {
+  items: OverflowItem[];
+  label?: string;
+  /** A labelled button ("More actions ▾") instead of the ⋯ icon. */
+  text?: boolean;
+  /** The item card's 280px menu. */
+  wide?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState<OverflowItem | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const hintId = useId();
 
   useEffect(() => {
     if (!open) return;
@@ -280,29 +304,51 @@ export function OverflowMenu({ items, label = "More" }: { items: OverflowItem[];
         e.stopPropagation();
         setOpen(false);
         setPending(null);
+        button.current?.focus();
       }
     };
     document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
+    // Capture, so Escape closes this menu before a surrounding surface's own
+    // Escape (the board peek) closes everything.
+    document.addEventListener("keydown", onKey, true);
+    ref.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
     return () => {
       document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("keydown", onKey, true);
     };
-  }, [open]);
+  }, [open, pending]);
+
+  const onMenuKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const step = { ArrowDown: 1, ArrowUp: -1, Home: -Infinity, End: Infinity }[e.key];
+    if (step === undefined) return;
+    e.preventDefault();
+    const rows = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    const at = rows.indexOf(document.activeElement as HTMLElement);
+    const next = Math.abs(step) === Infinity ? (step < 0 ? 0 : rows.length - 1) : (at + step + rows.length) % rows.length;
+    rows[next]?.focus();
+  };
 
   return (
     <div className="overflow" ref={ref}>
       <button
-        className="btn btn-ghost overflow-btn"
-        aria-label={label}
+        ref={button}
+        className={text ? "btn btn-secondary overflow-text" : "btn btn-ghost overflow-btn"}
+        aria-label={text ? undefined : label}
         aria-expanded={open}
         aria-haspopup="menu"
         onClick={() => setOpen((v) => !v)}
       >
-        <DotsThree size={16} />
+        {text ? (
+          <>
+            {label}
+            <CaretDown size={12} />
+          </>
+        ) : (
+          <DotsThree size={16} />
+        )}
       </button>
       {open && (
-        <div className="overflow-menu" role="menu">
+        <div className="overflow-menu" role="menu" data-wide={wide || undefined} onKeyDown={onMenuKey}>
           {pending ? (
             <>
               <p className="overflow-confirm">{pending.confirm}</p>
@@ -323,22 +369,34 @@ export function OverflowMenu({ items, label = "More" }: { items: OverflowItem[];
               </button>
             </>
           ) : (
-            items.map((it) => (
-              <button
-                key={it.label}
-                role="menuitem"
-                data-danger={it.danger || undefined}
-                onClick={() => {
-                  if (it.confirm) {
-                    setPending(it);
-                    return;
-                  }
-                  setOpen(false);
-                  it.onSelect();
-                }}
-              >
-                {it.label}
-              </button>
+            items.map((it, i) => (
+              <Fragment key={it.label}>
+                {it.divider && <div role="separator" className="overflow-sep" />}
+                <button
+                  role="menuitem"
+                  data-danger={it.danger || undefined}
+                  aria-disabled={it.disabled || undefined}
+                  title={it.hint}
+                  aria-describedby={it.hint ? `${hintId}-${i}` : undefined}
+                  onClick={() => {
+                    if (it.disabled) return;
+                    if (it.confirm) {
+                      setPending(it);
+                      return;
+                    }
+                    setOpen(false);
+                    it.onSelect();
+                  }}
+                >
+                  {it.icon}
+                  {it.label}
+                </button>
+                {it.hint && (
+                  <span id={`${hintId}-${i}`} hidden>
+                    {it.hint}
+                  </span>
+                )}
+              </Fragment>
             ))
           )}
         </div>

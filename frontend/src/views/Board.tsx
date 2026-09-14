@@ -1,16 +1,17 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { CaretDown, ClipboardText, Clock, Prohibit } from "@phosphor-icons/react";
+import { CaretDown, CircleNotch, ClipboardText } from "@phosphor-icons/react";
 import * as api from "../api";
-import { Chip, MiniChain, OverflowMenu, StatusGlyph, TaskLine } from "../components/ui";
-import { Gate } from "../components/Gate";
+import { Chip, MiniChain, StatusGlyph } from "../components/ui";
 import { PeekPane } from "../components/PeekPane";
 import { RepoSheet } from "../components/RepoSheet";
-import { deriveState } from "../deriveState";
-import { ago, clock, repoName } from "../format";
-import { useStore } from "../store";
+import type { DerivedState } from "../deriveState";
+import { ago, elapsedBetween, judgeReasoning, repoName, until } from "../format";
+import { useItemStates, useStore } from "../store";
 import { showToast } from "../components/Toast";
-import type { Repo, Theme, WorkItem } from "../types";
+import type { Repo, Theme, WorkItem, WorkerSession } from "../types";
+import type { ComposerKind } from "./work_item/ActionBar/ItemCard";
+import { useActionBar } from "./work_item/ActionBar/useActionBar";
 import { usePhone } from "./work_item/usePhone";
 
 const FILTERS_KEY = "kraft.board_filters";
@@ -62,18 +63,8 @@ function useChipOverflow(ref: RefObject<HTMLDivElement>, enabled: boolean, key: 
   return from;
 }
 
-/** A status the poller drives forward on its own, not a person: not
- *  mid-agent-call, but not waiting on a human either. `rate_limited` (an API
- *  limit resetting) and `waiting` (a pipeline settling, Kraft-ru98) are two
- *  instances of the same shape, both carrying `retry_at` for when the poller
- *  next acts. Named once, used everywhere this file cares which statuses
- *  those are, so a third instance is one addition instead of two. */
-function pollerDriven(i: WorkItem) {
-  return i.status === "rate_limited" || i.status === "waiting";
-}
-
-const STATUS_GROUPS: { id: string; label: string; test: (i: WorkItem) => boolean }[] = [
-  { id: "needs", label: "Needs you", test: (i) => deriveState(i).needsYou },
+const STATUS_GROUPS: { id: string; label: string; test: (d: DerivedState) => boolean }[] = [
+  { id: "needs", label: "Needs you", test: (d) => d.needsYou },
   {
     id: "running",
     label: "Running",
@@ -81,27 +72,29 @@ const STATUS_GROUPS: { id: string; label: string; test: (i: WorkItem) => boolean
     // waiting on a person either -- the poller drives it forward on its own,
     // the same story "Running" already tells for an active item. Leaving
     // either out would drop it off the main view, which is "a slow run
-    // looks like a hung one" from the other direction.
-    test: (i) =>
-      ["running", "rate_limited", "waiting"].includes(deriveState(i).state),
+    // looks like a hung one" from the other direction. An escalating item is
+    // an agent at work too, until it posts its message (W11 · J.1).
+    test: (d) => ["running", "rate_limited", "waiting", "escalating"].includes(d.state),
   },
-  { id: "not_started", label: "Not started", test: (i) => deriveState(i).state === "not_started" },
+  { id: "not_started", label: "Not started", test: (d) => d.state === "not_started" },
   {
     id: "done",
     label: "Done",
     // Design 06: "Done N · completed and abandoned items" -- an abandoned
     // item is Done for the board's purposes even though `deriveState` keeps
     // its own distinct `abandoned` display state (its glyph/tone differ).
-    test: (i) => ["done", "abandoned"].includes(deriveState(i).state),
+    test: (d) => ["done", "abandoned"].includes(d.state),
   },
 ];
 
-const SORTS: Record<string, (a: WorkItem, b: WorkItem) => number> = {
+type StateOf = (i: WorkItem) => DerivedState;
+
+const SORTS: Record<string, (a: WorkItem, b: WorkItem, stateOf: StateOf) => number> = {
   updated: (a, b) => b.updated_at.localeCompare(a.updated_at),
   created: (a, b) => b.created_at.localeCompare(a.created_at),
   // Needs-you first, recently updated within each half (UI v3 · 04).
-  attention: (a, b) =>
-    Number(deriveState(b).needsYou) - Number(deriveState(a).needsYou) ||
+  attention: (a, b, stateOf) =>
+    Number(stateOf(b).needsYou) - Number(stateOf(a).needsYou) ||
     b.updated_at.localeCompare(a.updated_at),
   title: (a, b) => a.title.localeCompare(b.title),
 };
@@ -116,9 +109,10 @@ const SORT_LABELS: Record<keyof typeof SORTS, string> = {
 /** "Needs you" always leads regardless of axis — the one cross-cutting group
  *  the redesign's group-by control doesn't touch (design 34's "group by" is
  *  about the rest of the board, not about hiding what needs a person). */
-function axisGroups(items: WorkItem[], axis: "repo" | "template", sort: keyof typeof SORTS) {
-  const needsItems = items.filter((i) => deriveState(i).needsYou);
-  const rest = items.filter((i) => !deriveState(i).needsYou);
+function axisGroups(items: WorkItem[], axis: "repo" | "template", sort: keyof typeof SORTS, stateOf: StateOf) {
+  const bySort = (a: WorkItem, b: WorkItem) => SORTS[sort](a, b, stateOf);
+  const needsItems = items.filter((i) => stateOf(i).needsYou);
+  const rest = items.filter((i) => !stateOf(i).needsYou);
   const key = axis === "repo" ? (i: WorkItem) => i.repo : (i: WorkItem) => i.chain_template;
   const byKey = new Map<string, WorkItem[]>();
   for (const i of rest) {
@@ -132,11 +126,11 @@ function axisGroups(items: WorkItem[], axis: "repo" | "template", sort: keyof ty
       id: k,
       label: axis === "repo" ? repoName(k) : k,
       tone: undefined as "accent" | undefined,
-      items: its.sort(SORTS[sort]),
+      items: its.sort(bySort),
     }));
   if (needsItems.length === 0) return groups;
   return [
-    { id: "needs", label: "Needs you", tone: "accent" as const, items: needsItems.sort(SORTS[sort]) },
+    { id: "needs", label: "Needs you", tone: "accent" as const, items: needsItems.sort(bySort) },
     ...groups,
   ];
 }
@@ -166,10 +160,14 @@ export function Board({ onNewWorkItem }: { onNewWorkItem?: () => void } = {}) {
   // any time over WS) are out of every board group, facet, and count until
   // restored -- the board is not the archive's read-only table (design 06).
   const items = useStore((s) => Object.values(s.workItems).filter((i) => !i.archived_at));
+  const stateOf = useItemStates();
   const connection = useStore((s) => s.connection);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const peek = searchParams.get("peek");
+  // The composer a row's button opens the peek on (W11 · B.3); a plain row
+  // click opens it on the card's buttons.
+  const [peekCompose, setPeekCompose] = useState<ComposerKind | null>(null);
 
   const [repos, setRepos] = useState<Repo[] | null>(null);
   useEffect(() => {
@@ -253,7 +251,7 @@ export function Board({ onNewWorkItem }: { onNewWorkItem?: () => void } = {}) {
   const matchesRepo = (i: WorkItem) => repo.size === 0 || repo.has(i.repo);
   const matchesTpl = (i: WorkItem) => tpl.size === 0 || tpl.has(i.chain_template);
   const matchesStatus = (i: WorkItem) =>
-    status.size === 0 || STATUS_GROUPS.some((g) => status.has(g.label) && g.test(i));
+    status.size === 0 || STATUS_GROUPS.some((g) => status.has(g.label) && g.test(stateOf(i)));
 
   // Each facet's counts are taken with the *other two* applied, so all three
   // filters read as combining rather than as independent views.
@@ -263,7 +261,7 @@ export function Board({ onNewWorkItem }: { onNewWorkItem?: () => void } = {}) {
   );
   const repoNeedsYou = useMemo(() => {
     const out: Record<string, number> = {};
-    for (const i of items) if (deriveState(i).needsYou) out[i.repo] = (out[i.repo] ?? 0) + 1;
+    for (const i of items) if (stateOf(i).needsYou) out[i.repo] = (out[i.repo] ?? 0) + 1;
     return out;
   }, [items]);
   const [repoSheetOpen, setRepoSheetOpen] = useState(false);
@@ -275,7 +273,7 @@ export function Board({ onNewWorkItem }: { onNewWorkItem?: () => void } = {}) {
   );
   const statusRows = useMemo(() => {
     const base = items.filter((i) => matchesRepo(i) && matchesTpl(i));
-    return STATUS_GROUPS.map((g) => [g.label, base.filter(g.test).length] as [string, number]);
+    return STATUS_GROUPS.map((g) => [g.label, base.filter((i) => g.test(stateOf(i))).length] as [string, number]);
   }, [items, repo, tpl]);
 
   const shown = useMemo(
@@ -288,15 +286,21 @@ export function Board({ onNewWorkItem }: { onNewWorkItem?: () => void } = {}) {
   const visibleStatusGroups =
     status.size === 0 ? STATUS_GROUPS : STATUS_GROUPS.filter((g) => status.has(g.label));
 
+  // Inside Running, escalating items lead: they are the ones most likely to
+  // come back to Needs you (W11 · J.4).
+  const escalatingFirst = (a: WorkItem, b: WorkItem) =>
+    Number(stateOf(b).state === "escalating") - Number(stateOf(a).state === "escalating");
   const groups =
     boardPrefs.group_by === "status"
       ? visibleStatusGroups.map((g) => ({
           id: g.id,
           label: g.label,
           tone: g.id === "needs" ? ("accent" as const) : undefined,
-          items: shown.filter(g.test).sort(SORTS[sort]),
+          items: shown
+            .filter((i) => g.test(stateOf(i)))
+            .sort((a, b) => (g.id === "running" ? escalatingFirst(a, b) : 0) || SORTS[sort](a, b, stateOf)),
         }))
-      : axisGroups(shown, boardPrefs.group_by, sort);
+      : axisGroups(shown, boardPrefs.group_by, sort, stateOf);
 
   const setPeek = (id: string | null) => {
     setSearchParams(
@@ -462,13 +466,20 @@ export function Board({ onNewWorkItem }: { onNewWorkItem?: () => void } = {}) {
                     return next;
                   })
                 }
-                onArchive={() => archiveIds([i.id])}
-                onLongPress={() => setPeek(i.id)}
+                onLongPress={() => {
+                  setPeekCompose(null);
+                  setPeek(i.id);
+                }}
+                onPeek={(compose) => {
+                  setPeekCompose(compose);
+                  setPeek(i.id);
+                }}
                 onSelect={(metaKey) => {
                   if (metaKey || boardPrefs.open_in === "full") {
                     navigate(`/work-items/${i.id}`);
                     return;
                   }
+                  setPeekCompose(null);
                   setPeek(peek === i.id ? null : i.id);
                 }}
               />
@@ -500,7 +511,7 @@ export function Board({ onNewWorkItem }: { onNewWorkItem?: () => void } = {}) {
           </span>
         </div>
       </div>
-      {peek && <PeekPane id={peek} onClose={() => setPeek(null)} />}
+      {peek && <PeekPane id={peek} compose={peekCompose ?? undefined} onClose={() => setPeek(null)} />}
     </div>
   );
 }
@@ -515,15 +526,144 @@ function isPhoneWidth(): boolean {
 
 const LONG_PRESS_MS = 500;
 
+/** The meta line's tail (W11 · B.2): what a needs-you row waits on, in accent,
+ *  or what a running one is doing, in neutral. `plain` is its hover text. */
+function rowReason(
+  item: WorkItem,
+  state: DerivedState["state"],
+  turn: WorkerSession | undefined,
+): { text: ReactNode; plain: string; tone: "accent" | "neutral" } | null {
+  const node = item.chain_definition.nodes.find((n) => n.id === item.current_node_id);
+  const accent = (plain: string) => ({ text: plain, plain, tone: "accent" as const });
+  switch (state) {
+    case "escalating": {
+      // An agent at work, not a stop (W11 · J.2).
+      const plain = turn ? `escalation running · ${elapsedBetween(turn.started_at ?? turn.created_at)}` : "escalation running";
+      return { text: plain, plain, tone: "neutral" };
+    }
+    case "gate":
+      return accent(`approve ${item.pending_gate}`);
+    case "capped": {
+      const judged = judgeReasoning(item.stop_reason);
+      return accent(
+        item.cappedOut
+          ? `${node?.fix_loop ?? item.current_node_id} hit its cap · ${item.cappedOut.attempts} attempts`
+          : judged !== undefined
+            ? "stopped early (judge)"
+            : (item.stop_reason ?? "stopped without finishing"),
+      );
+    }
+    case "question": {
+      const q = item.needs_context_question ?? "";
+      return accent(q ? `agent asks: ${q.length > 60 ? `${q.slice(0, 60)}…` : q}` : "agent asks");
+    }
+    case "budget":
+      return accent("spend cap reached");
+    case "escalated":
+      return accent("escalation waiting for your reply");
+    case "paused":
+      return accent(`paused at ${item.current_node_id}`);
+    case "running": {
+      const p = item.progress;
+      if (!p) return null;
+      return {
+        text: (
+          <>
+            <span className="task-count">Task {p.current}/{p.total}</span> · <span>{p.title}</span>
+          </>
+        ),
+        plain: `Task ${p.current}/${p.total} · ${p.title}`,
+        tone: "neutral",
+      };
+    }
+    case "rate_limited":
+    case "waiting":
+      return item.retry_at ? { text: `retry ${until(item.retry_at)}`, plain: `retry ${until(item.retry_at)}`, tone: "neutral" } : null;
+    default:
+      return null;
+  }
+}
+
+/** The row's one button (W11 · B.3), sized to its state. Approve and Resume act
+ *  from the row and show their pending state there until the row moves group;
+ *  the ones that need words first (a steer, an answer, a reply, an amount) open
+ *  the peek, where their composers live. Running, waiting and done rows have
+ *  none -- the cell stays, so the rows' columns line up. */
+function RowAction({
+  item,
+  state,
+  onPeek,
+}: {
+  item: WorkItem;
+  state: DerivedState["state"];
+  onPeek: (compose: ComposerKind) => void;
+}) {
+  const { busy, pending, err, run } = useActionBar(item.id);
+  const working = busy || pending;
+  const act = (fn: () => Promise<unknown>, toast: string) => () => void run(fn, toast);
+  const button = (label: string, onClick: () => void) => (
+    <button className="btn btn-primary" disabled={working} onClick={onClick}>
+      {working && <CircleNotch size={12} className="btn-spin" aria-hidden />}
+      {label}
+    </button>
+  );
+  let control: ReactNode = null;
+  switch (state) {
+    case "gate":
+      control =
+        item.pending_gate === "human_review_approval" ? (
+          // No blind approve for the merge request: its deferred findings are
+          // only on the item page (spec §2).
+          <Link className="btn btn-secondary" to={`/work-items/${item.id}`}>
+            Review to approve
+          </Link>
+        ) : (
+          button("Approve", act(() => api.approveGate(item.id, item.pending_gate!), "Approved — chain continues"))
+        );
+      break;
+    case "paused":
+      control = button("Resume", act(() => api.resumeWorkItem(item.id), "Resumed"));
+      break;
+    case "capped":
+      control = button("Steer & retry", () => onPeek("steerRetry"));
+      break;
+    case "budget":
+      control = button("Raise budget", () => onPeek("budget"));
+      break;
+    case "question":
+      control = button("Answer", () => onPeek("answer"));
+      break;
+    case "escalated":
+      control = button("Reply", () => onPeek("escalate"));
+      break;
+  }
+  return (
+    // The row's click, long-press and Enter are for the row, not its button.
+    <div
+      className="board-row-action"
+      onClick={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
+      {control}
+      {err && (
+        <span className="form-error" role="alert">
+          {err}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function BoardRow({
   item,
   selected,
   onSelect,
   onLongPress,
+  onPeek,
   selectable = false,
   checked = false,
   onCheck,
-  onArchive,
 }: {
   item: WorkItem;
   selected: boolean;
@@ -531,16 +671,22 @@ function BoardRow({
   /** Phone only (design m03): a long-press lifts the row and opens the peek
    *  sheet, instead of the plain-tap "open the item" default. */
   onLongPress?: () => void;
+  /** The row button's way into a composer: open this row's peek on it. */
+  onPeek: (compose: ComposerKind) => void;
   /** Only the Done group's rows get a leading checkbox (design 06). */
   selectable?: boolean;
   checked?: boolean;
   onCheck?: (checked: boolean) => void;
-  onArchive?: () => void;
 }) {
   const navigate = useNavigate();
-  const gate = item.status === "needs_human" ? (item.pending_gate ?? null) : null;
-  const capped = item.status === "completed" ? null : item.cappedOut;
-  const retryAt = pollerDriven(item) ? item.retry_at : null;
+  const { state } = useItemStates()(item);
+  const turn = useStore((s) => s.sessionsByItem[item.id])
+    ?.filter((s) => s.hook_point === "escalation")
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))
+    .at(-1);
+  const reason = rowReason(item, state, turn);
+  const age = ago(item.updated_at);
+  const metaTitle = [repoName(item.repo), item.bead_id, item.chain_template, age, reason?.plain].filter(Boolean).join(" · ");
   const pressTimer = useRef<ReturnType<typeof setTimeout>>();
   const longPressed = useRef(false);
   const startPress = () => {
@@ -597,84 +743,54 @@ function BoardRow({
           onChange={(e) => onCheck?.(e.target.checked)}
         />
       ) : (
-        <StatusGlyph status={deriveState(item).state} />
+        <StatusGlyph status={state} />
       )}
       <div className="board-row-main">
         {/* Not a link (UI v3 · G1-03): the whole row toggles the peek, and
-            only the peek's "Open →" and a ⌘-click go to the full page. */}
-        <span className="board-row-title" title={item.title}>
+            only the peek's "Open →" and a ⌘-click go to the full page. One
+            line each, cut with the whole text on hover (W11 · B.2; the
+            data-allow-ellipsis allowlist in sweep/README.md). */}
+        <span className="board-row-title" title={item.title} data-allow-ellipsis>
           {item.title}
         </span>
-        <div className="board-row-meta">
+        <div className="board-row-meta" title={metaTitle} data-allow-ellipsis>
           {/* Tablet width (768-1023) drops the node column (50); this is
               hidden by CSS everywhere else and only leads the line there. */}
-          <span className="board-row-meta-current">{item.current_node_id}</span>
-          <span title={item.repo}>{repoName(item.repo)}</span>
-          {item.bead_id && <code>{item.bead_id}</code>}
-          <span>{item.chain_template}</span>
-          {/* Kraft-qqz8, board part: "Task N/M · title" when the implementation
-              node has reported progress — spec §4 order puts this before ago,
-              so the count (never dropped) outlives ago and the task title as
-              the line clips. */}
-          {item.progress && <TaskLine progress={item.progress} form="short" />}
-          <span>{ago(item.updated_at)}</span>
-          {/* Provenance, not status: the right-hand column is a fixed 120px and
-              nowrap, so a chip there pushed the whole row past the viewport. */}
-          {item.attachments?.length ? (
-            <span className="tag tag-outline tag-tight">
-              from {item.attachments.map((a) => a.kind).join("+")}
+          {item.current_node_id && <span className="board-row-meta-current">{item.current_node_id}</span>}
+          <span>{repoName(item.repo)}</span>
+          {/* The phone line is repo · 15h · reason (W11 · C.1). */}
+          {item.bead_id && <code className="board-row-meta-desk">{item.bead_id}</code>}
+          <span className="board-row-meta-desk">{item.chain_template}</span>
+          {age && (
+            <span>
+              {age.replace(/ ago$/, "")}
+              {age.endsWith(" ago") && <span className="board-row-ago-word"> ago</span>}
             </span>
-          ) : null}
+          )}
+          {reason && (
+            <span className="board-row-reason" data-tone={reason.tone}>
+              {reason.text}
+            </span>
+          )}
         </div>
-        {gate && (
-          <div onClick={(e) => e.stopPropagation()}>
-            <Gate item={item} gate={gate} variant="inline" navigateReject />
-          </div>
-        )}
       </div>
       <MiniChain
         nodes={item.chain_definition.nodes}
         currentNodeId={item.current_node_id}
         done={item.completedNodes}
         size="sm"
-        paused={["paused", "capped", "abandoned", "rate_limited", "waiting"].includes(
-          deriveState(item).state,
-        )}
+        paused={["paused", "capped", "abandoned", "rate_limited", "waiting"].includes(state)}
       />
       <div className="board-row-current">
         {/* Tablet (768-1023) drops just this text -- it leads the meta line
-            instead (.board-row-meta-current) -- but keeps the tags and the
-            Archive/overflow buttons below, per spec §1 "buttons hide last". */}
+            instead (.board-row-meta-current). The cap and retry time are the
+            meta line's reason now (W11 · B.2). */}
         <span className="board-row-current-node">{item.current_node_id}</span>
         {item.fixCycle != null && (
           <span className="tag tag-outline tag-tight">fix·{item.fixCycle}</span>
         )}
-        {capped && (
-          <span className="tag tag-outline tag-tight">
-            <Prohibit size={10} />
-            capped {capped.cycles}/{capped.attempts}
-          </span>
-        )}
-        {retryAt && (
-          <span className="tag tag-outline tag-tight">
-            <Clock size={10} />
-            retry {clock(retryAt)}
-          </span>
-        )}
-        {selectable && (
-          <span className="board-row-archive" onClick={(e) => e.stopPropagation()}>
-            <button className="btn btn-ghost" onClick={onArchive}>
-              Archive
-            </button>
-            <OverflowMenu
-              items={[
-                { label: "Archive", onSelect: () => onArchive?.() },
-                { label: "Copy id", onSelect: () => navigator.clipboard.writeText(item.id) },
-              ]}
-            />
-          </span>
-        )}
       </div>
+      <RowAction item={item} state={state} onPeek={onPeek} />
     </div>
   );
 }

@@ -1,14 +1,18 @@
-import { useEffect, useRef, useState } from "react";
-import { Eye, FileText, ListChecks, Notebook, Paperclip } from "@phosphor-icons/react";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { Eye, FileText, ListChecks, Notebook, Paperclip, Robot } from "@phosphor-icons/react";
 import * as api from "../../../api";
-import { shortIds } from "../../../format";
-import type { WorkItemDocument } from "../../../types";
+import { ShortId } from "../../../components/ShortId";
+import { ago, docTitle } from "../../../format";
+import type { ChainNode, WorkItemDocument } from "../../../types";
 import { GATE_DOC_ID } from "../selection";
+import { ScopeChips, type Scope } from "./Tasks";
 
 /**
- * Inspector · Documents (UI v2 · 05, 14): `LinkedDocuments`'s fetch, as a
- * selectable list instead of rows that each open `DocumentModal`. Selecting
- * a row is what `RightPane/Doc.tsx` shows.
+ * Inspector · Documents (UI v2 · 05, 14; W11 · G): the gate's document pinned
+ * first, then what the selected node wrote, then one folded row per other node
+ * with documents -- or every node open, in chain order, under "all". A filter
+ * searches every node whatever the scope. Selecting a row is what
+ * `RightPane/Doc.tsx` shows.
  */
 
 const KIND_ICONS: Record<string, typeof FileText> = {
@@ -18,6 +22,26 @@ const KIND_ICONS: Record<string, typeof FileText> = {
   sessions: Notebook,
 };
 
+const KIND_LABELS: Record<string, string> = { specs: "spec", plans: "plan", reviews: "review", sessions: "session" };
+
+/** One small kind label per row (G.3). */
+function kindLabel(d: WorkItemDocument): string {
+  if (d.hook_point === "escalation") return "escalation";
+  return KIND_LABELS[d.kind ?? ""] ?? d.kind ?? d.source_kind;
+}
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** What a folded node holds: `1 review · 2 sessions`. */
+function kindCounts(docs: WorkItemDocument[]): string {
+  const counts = new Map<string, number>();
+  for (const d of docs) counts.set(kindLabel(d), (counts.get(kindLabel(d)) ?? 0) + 1);
+  return [...counts].map(([kind, n]) => plural(n, kind)).join(" · ");
+}
+
+const OTHER = "other";
+const nodeOf = (d: WorkItemDocument) => d.node_id ?? OTHER;
+
 export function Documents({
   workItemId,
   eventCount,
@@ -26,6 +50,11 @@ export function Documents({
   preselectPath,
   gatePending,
   gateArtifactPending,
+  nodeId = null,
+  nodes = [],
+  scope = "node",
+  onScope,
+  onCount,
 }: {
   workItemId: string;
   eventCount: number;
@@ -33,9 +62,8 @@ export function Documents({
   onSelect: (documentId: string) => void;
   /** The gate card's "Read <doc>" (06) names a specific artifact by repo
    *  path (`item.gate_artifact`) — preferred over "just pick the first
-   *  document" once the list lands with a matching row, and sections the
-   *  list (G5-05): a "Gate document" row above everything else, "not
-   *  written yet" in its own right column when the gate has none. */
+   *  document" once the list lands with a matching row, and pinned above
+   *  everything else (G5-05, G.2), "not written yet" when the gate has none. */
   preselectPath?: string | null;
   /** Whether a gate is pending at all. `item.gate_artifact` is null both when
    *  there is no gate and when the gate's artifact is not yet written to disk
@@ -45,12 +73,22 @@ export function Documents({
   /** Whether a gate is pending and its artifact exists on disk. NOT derivable
    *  from the document list: the index does not ingest a gate's artifact until
    *  approval (`artifacts._ingest_approved_gate_artifact`), so "absent from
-   *  `docs`" is the normal state of a written artifact, and the old
-   *  `preselectMissing` read it as "not written yet" (G5-05). */
+   *  `docs`" is the normal state of a written artifact (G5-05). */
   gateArtifactPending: boolean;
+  /** The stage graph's selected node: "this node" is its documents. */
+  nodeId?: string | null;
+  /** The chain, for the order nodes are listed in. */
+  nodes?: ChainNode[];
+  scope?: Scope;
+  /** The this node · all switch, shared with Tasks and Timeline (W11 · F). */
+  onScope?: (s: Scope) => void;
+  /** The tab's count, which follows the scope (G.4). */
+  onCount?: (n: number) => void;
 }) {
   const [docs, setDocs] = useState<WorkItemDocument[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState("");
+  const [open, setOpen] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let live = true;
@@ -67,22 +105,45 @@ export function Documents({
     };
   }, [workItemId, eventCount]);
 
+  const gateDoc = preselectPath ? (docs?.find((d) => d.path === preselectPath) ?? null) : null;
+  const rest = (docs ?? []).filter((d) => d !== gateDoc);
+  // Chain order, then any node the chain does not name (and documents with none).
+  const order = [...nodes.map((n) => n.id)];
+  for (const d of rest) if (!order.includes(nodeOf(d))) order.push(nodeOf(d));
+  const q = filter.trim().toLowerCase();
+  const shown = q
+    ? rest.filter((d) => [d.title, d.path, d.node_id, d.hook_point].some((f) => f?.toLowerCase().includes(q)))
+    : rest;
+  const groups = order
+    .map((id) => ({ id, docs: shown.filter((d) => nodeOf(d) === id) }))
+    .filter((g) => g.docs.length > 0);
+  const own = groups.find((g) => g.id === nodeId);
+  const others = groups.filter((g) => g !== own);
+  // A filter searches every node, whatever the scope, so all its matches show.
+  // With no node selected there is no "this node" to scope to: everything
+  // shows, the way Tasks does.
+  const allShown = scope === "all" || !nodeId;
+  const expandAll = allShown || !!q;
+
+  const gateRows = gatePending ? 1 : 0;
+  const count = allShown ? rest.length + gateRows : rest.filter((d) => nodeOf(d) === nodeId).length + gateRows;
+  useEffect(() => {
+    if (docs) onCount?.(count);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docs, count]);
+
   // Default the selection once the list lands, so the right pane never sits
   // empty for a tab that has content: the gate's own artifact by path when
-  // one was asked for, the first document otherwise. `autoPickRef` marks a
-  // selection this effect made itself (not a row click) -- a gate's artifact
-  // can land in the index a scan behind the gate appearing, so an earlier
-  // auto-pick (the wrong document, all that existed yet) has to be free to
-  // upgrade once the real match shows up; a person's own click never should.
+  // one was asked for, this node's first document otherwise. `autoPickRef`
+  // marks a selection this effect made itself (not a row click) -- a gate's
+  // artifact can land in the index a scan behind the gate appearing, so an
+  // earlier auto-pick has to be free to upgrade once the real match shows up;
+  // a person's own click never should.
   //
-  // When a preselectPath is given, a miss must not fall back to docs[0]: a
-  // gate's artifact isn't ingested until approval
-  // (artifacts._ingest_approved_gate_artifact), so "no match yet" is the
-  // normal pre-approval state, not a reason to show some unrelated document.
-  // It is a reason to show the artifact itself: on a miss we select
-  // GATE_DOC_ID, and the right pane reads it out of the worktree via
-  // `api.getWorkItemArtifact` (Kraft-8ic7). The selection upgrades to the
-  // real document id once the index catches up.
+  // When a preselectPath is given, a miss must not fall back to another
+  // document: a gate's artifact isn't ingested until approval, so "no match
+  // yet" is the normal pre-approval state. On a miss we select GATE_DOC_ID and
+  // the right pane reads it out of the worktree (Kraft-8ic7).
   const autoPickRef = useRef<string | null>(null);
   useEffect(() => {
     if (!docs) return; // still loading
@@ -90,9 +151,6 @@ export function Documents({
     if (preselectPath) {
       const match = docs.find((d) => d.path === preselectPath);
       if (!match) {
-        // Not a fallback to "some document" — this IS the right document,
-        // just not in the index yet (docs may still be an empty list, since
-        // the index hasn't ingested it). `RightPane` reads it off disk.
         if (gateArtifactPending && selected !== GATE_DOC_ID) {
           autoPickRef.current = GATE_DOC_ID;
           onSelect(GATE_DOC_ID);
@@ -104,51 +162,81 @@ export function Documents({
       onSelect(match.document_id);
       return;
     }
-    if (docs.length === 0) return;
-    const pick = docs[0].document_id;
-    if (pick === selected) return;
+    const pick = (docs.find((d) => d.node_id === nodeId) ?? docs[0])?.document_id;
+    if (!pick || pick === selected) return;
     autoPickRef.current = pick;
     onSelect(pick);
-  }, [docs, selected, onSelect, preselectPath, gateArtifactPending]);
+  }, [docs, selected, onSelect, preselectPath, gateArtifactPending, nodeId]);
 
-  const gateDoc = preselectPath ? (docs?.find((d) => d.path === preselectPath) ?? null) : null;
-  const rest = docs?.filter((d) => d !== gateDoc) ?? [];
+  const toggle = (id: string) =>
+    setOpen((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
-  const row = (d: WorkItemDocument) => {
-    const Icon = KIND_ICONS[d.kind ?? ""] ?? FileText;
+  // G.3: icon · title · `node · hook · time` (+ the session's id for a summary,
+  // a paperclip for an intake attachment) · one kind label. The path is the
+  // row's tooltip and the pane header's, never row text.
+  const row = (d: WorkItemDocument, gate = false) => {
+    const Icon = d.hook_point === "escalation" ? Robot : (KIND_ICONS[d.kind ?? ""] ?? FileText);
+    const sub = [d.node_id, d.hook_point, ago(d.indexed_at)].filter(Boolean).join(" · ");
     return (
       <button
         key={d.document_id}
         className="doc-row"
+        data-gate={gate || undefined}
         data-selected={d.document_id === selected}
+        title={d.path}
         onClick={() => onSelect(d.document_id)}
       >
         <Icon size={16} className="doc-icon" />
-        {/* W10.D: stacked lines, not columns -- the title (2-line clamp) with its
-            chips, then the path on one line cut from the left so the filename
-            survives (the whole path is its title). The chips drop under the
-            path when the row is too narrow to keep them beside the title. */}
         <span className="doc-text">
-          <span className="doc-title" title={d.title}>{shortIds(d.title)}</span>
-          <span className="doc-chips">
-            <span className="tag tag-neutral doc-kind">{d.kind ?? d.source_kind}</span>
+          {/* W11 · H: never a bare id. A list row has no body to read, so a
+              summary titled with an id names its hook. */}
+          <span className="doc-title">{docTitle(d)}</span>
+          <span className="doc-sub">
+            {sub}
+            {d.source_kind === "session_summary" && d.worker_session_id && (
+              <>
+                {sub && " · "}
+                <ShortId id={d.worker_session_id} />
+              </>
+            )}
             {d.attachment_kind && (
-              <span className="tag tag-outline doc-attached" title="attached at intake">
-                <Paperclip size={11} aria-hidden />
-                <span className="doc-attached-text">attached at intake</span>
-              </span>
+              <>
+                {" · "}
+                <span className="doc-attached" title="attached at intake" aria-label="attached at intake" role="img">
+                  <Paperclip size={11} aria-hidden />
+                </span>
+              </>
             )}
           </span>
-          <span className="doc-path path" title={d.path} data-allow-ellipsis>
-            <span dir="ltr">{d.path}</span>
-          </span>
         </span>
+        <span className="tag tag-neutral doc-kind">{kindLabel(d)}</span>
       </button>
     );
   };
 
+  const section = (id: string) => (
+    <p className="section-label">{id === nodeId ? `${id} · written by this node` : id}</p>
+  );
+
   return (
     <div className="inspector-list linked-docs" data-testid="inspector-documents">
+      <p className="section-label">
+        DOCUMENTS · {count}
+        {onScope && <ScopeChips scope={scope} onScope={onScope} nodeId={nodeId} />}
+      </p>
+      <input
+        className="input doc-filter"
+        type="search"
+        aria-label="filter documents"
+        placeholder="filter documents…"
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+      />
       {error && <p className="form-error" role="alert">{error}</p>}
       {!error && docs?.length === 0 && <p className="empty">no linked documents yet</p>}
 
@@ -156,28 +244,59 @@ export function Documents({
         <>
           <p className="section-label">Gate document</p>
           {gateDoc ? (
-            row(gateDoc)
+            row(gateDoc, true)
           ) : (
             <button
               className="doc-row"
+              data-gate
               data-selected={selected === GATE_DOC_ID}
               disabled={!gateArtifactPending}
+              title={preselectPath ?? undefined}
               onClick={() => onSelect(GATE_DOC_ID)}
             >
               <FileText size={16} className="doc-icon" />
               <span className="doc-text">
-                <span className="doc-title path" title={preselectPath ?? undefined}>{preselectPath}</span>
-                <span className="doc-chips">
-                  <span className="row-sub">{gateArtifactPending ? "not indexed yet" : "not written yet"}</span>
-                </span>
+                <span className="doc-title path">{preselectPath}</span>
+                <span className="doc-sub">{gateArtifactPending ? "not indexed yet" : "not written yet"}</span>
               </span>
             </button>
           )}
         </>
       )}
 
-      {!!rest.length && <p className="section-label">Written by this node</p>}
-      {rest.map(row)}
+      {q && shown.length === 0 && docs && docs.length > 0 && <p className="empty">no documents match “{filter.trim()}”</p>}
+
+      {expandAll
+        ? groups.map((g) => (
+            <Fragment key={g.id}>
+              {section(g.id)}
+              {g.docs.map((d) => row(d))}
+            </Fragment>
+          ))
+        : (
+          <>
+            {own && (
+              <>
+                {section(own.id)}
+                {own.docs.map((d) => row(d))}
+              </>
+            )}
+            {others.map((g) => (
+              <Fragment key={g.id}>
+                <button className="doc-row doc-fold" aria-expanded={open.has(g.id)} onClick={() => toggle(g.id)}>
+                  <span className="doc-fold-caret" aria-hidden>
+                    {open.has(g.id) ? "▾" : "▸"}
+                  </span>
+                  <span className="doc-fold-label">
+                    {g.id} · {kindCounts(g.docs)}
+                  </span>
+                  <span className="doc-fold-count">{g.docs.length}</span>
+                </button>
+                {open.has(g.id) && g.docs.map((d) => row(d))}
+              </Fragment>
+            ))}
+          </>
+        )}
 
       {!!docs?.length && (
         <p className="inspector-foot">

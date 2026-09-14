@@ -41,12 +41,12 @@ test("gate: reject offers a way forward", async ({ page }) => {
   // the work item with no control at all.
   // the spec node re-runs with the note and asks for its gate again — the item
   // must never be left with no control at all
-  await expect(page.locator(".attention-title")).toContainText(/approve the spec/i, {
+  await expect(page.locator(".item-card-title")).toContainText(/approve the spec/i, {
     timeout: scaledTimeout(60_000),
   });
   await expect(page.getByRole("button", { name: "Approve" }).first()).toBeEnabled();
   await page.getByRole("button", { name: "Approve" }).first().click();
-  await expect(page.locator(".attention-title")).toContainText(/approve the plan/i, {
+  await expect(page.locator(".item-card-title")).toContainText(/approve the plan/i, {
     timeout: scaledTimeout(60_000),
   });
 });

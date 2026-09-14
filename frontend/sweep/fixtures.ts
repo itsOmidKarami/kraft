@@ -484,26 +484,39 @@ export function documentsFor(item: any, variant: Variant) {
   // Two documents attached at intake in every variant, at the real shape (W10.D):
   // a plan in a Claude worktree, 90+ chars, so the row shows both chips and a path that must cut.
   const wt = `.claude/worktrees/${item.id}/docs/superpowers/plans`;
-  const docs: { kind: string; node: string; hook: string; path: string; title: string; attached?: string }[] = [
+  const docs: { kind: string; node: string; hook: string; path: string; title: string; attached?: string; headingless?: boolean }[] = [
     { kind: "specs", node: "spec", hook: "on.spec.requested", path: `${wt}/2026-09-12-${slug}-design.md`, title: item.title, attached: "spec" },
     { kind: "plans", node: "plan", hook: "on.plan.requested", path: `${wt}/2026-09-12-${slug}.md`, title: `Plan: ${item.title}`, attached: "plan" },
     { kind: "reviews", node: "review", hook: "on.review.requested", path: `.engineering/reviews/2026-09-13-${slug}.md`, title: `Review: ${item.title}` },
     { kind: "sessions", node: "implement", hook: "on.implementation.start", path: `.engineering/sessions/${hex(901)}.md`, title: `Session ${hex(901)}` },
     { kind: "sessions", node: "verify", hook: "on.test.run", path: `.engineering/sessions/${hex(902)}.md`, title: hex(902) },
   ];
+  // W11 · H: summaries from hooks that write no `# ` title, so the indexer titles them with an id.
+  // Ahead of the generated sessions, so they are among the results search returns.
+  if (long) docs.push(
+    { kind: "sessions", node: "review", hook: "on.review.local.run", path: `.engineering/sessions/${hex(990)}.md`, title: hex(990), headingless: true },
+    { kind: "sessions", node: "open_mr", hook: "on.mr.describe", path: `.engineering/sessions/${hex(991)}.md`, title: hex(991), headingless: true },
+  );
   if (long) for (let i = 0; i < 12; i++) docs.push({ kind: "sessions", node: "implement", hook: "on.implementation.start", path: `.engineering/sessions/${hex(910 + i)}.md`, title: `Session ${hex(910 + i)}` });
   return docs.map((d, i) => ({
     document_id: hex(700 + i), work_item_id: item.id,
     repo: item.repo, title: d.title, kind: d.kind, source_kind: d.kind === "sessions" ? "session_summary" : "artifact",
     path: d.path, node_id: d.node, hook_point: d.hook, worker_session_id: hex(item.id.length + i),
     attachment_kind: d.attached ?? null,
+    headingless: d.headingless ?? false,
     indexed_at: t(200 - i * 7),
   }));
 }
 
+/** A heading-less summary's opening, as the hook that wrote it would (W11 · H). */
+const headinglessLead = (hook: string) =>
+  hook === "on.mr.describe"
+    ? "Opened the merge request description from the plan and the three task commits."
+    : "Reviewed the invalidation path against main; the blob_sha check holds across a rebase but not a force-push.";
+
 export function documentDetail(id: string, docs: any[]) {
   const d = docs.find((x) => x.document_id === id) ?? docs[0];
-  const body = `# ${d.title}
+  const body = `${d.headingless ? headinglessLead(d.hook_point) : `# ${d.title}`}
 
 > Status: draft · repo \`${d.repo}\` · path \`${d.path}\`
 
