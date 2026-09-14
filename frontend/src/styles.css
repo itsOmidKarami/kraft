@@ -435,10 +435,11 @@ a[href]:not([class]) { color: var(--color-accent-400); }
   color: var(--color-neutral-500); min-width: 0; white-space: nowrap;
 }
 .app-header-crumb-part { display: flex; align-items: center; gap: 6px; min-width: 0; }
-/* The item title (W5.1): up to two lines, never an ellipsis. */
+/* The item title: one line, an ellipsis, the whole title in `title` (W12.1 --
+   two lines pushed the header taller than the page's other headers). */
 .app-header-crumb-current {
-  color: var(--color-text); min-width: 0; overflow: hidden; white-space: normal;
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 17px;
+  color: var(--color-text); min-width: 0; overflow: hidden;
+  white-space: nowrap; text-overflow: ellipsis; line-height: 17px;
 }
 .app-header-crumb-link { text-decoration: none; color: var(--color-neutral-500); }
 .app-header-crumb-link:hover { color: var(--color-text); }

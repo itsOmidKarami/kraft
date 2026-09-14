@@ -54,8 +54,9 @@ test("create a work item and watch it complete", async ({ page }) => {
   await session.click();
   const viewer = page.getByTestId("right-pane-doc");
   await expect(viewer).toBeVisible();
-  // the pane's meta line carries the document's kind, falling back to its source
-  await expect(viewer.getByText("sessions", { exact: true })).toBeVisible();
+  // W13 · B.4: a session summary's pane header opens with what wrote it -- its
+  // hook and run (`on.implementation.start · attempt 1 · just now`)
+  await expect(viewer.locator(".doc-eyebrow")).toHaveText(/^on\.[\w.]+ · (attempt|round|turn) \d+ · /);
 
   // Back on the Board, this item has moved into the Done group — the redesigned
   // board conveys status by grouping, not by a per-row badge. Scoped by id: the

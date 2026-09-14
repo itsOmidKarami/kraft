@@ -1,18 +1,17 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Eye, FileText, ListChecks, Notebook, Paperclip, Robot } from "@phosphor-icons/react";
 import * as api from "../../../api";
-import { ShortId } from "../../../components/ShortId";
-import { ago, docTitle } from "../../../format";
-import type { ChainNode, WorkItemDocument } from "../../../types";
+import { ago, cleanTitle, docTitle, runLabel } from "../../../format";
+import type { ChainNode, WorkerSession, WorkItemDocument } from "../../../types";
 import { GATE_DOC_ID } from "../selection";
 import { ScopeChips, type Scope } from "./Tasks";
 
 /**
- * Inspector · Documents (UI v2 · 05, 14; W11 · G): the gate's document pinned
- * first, then what the selected node wrote, then one folded row per other node
- * with documents -- or every node open, in chain order, under "all". A filter
- * searches every node whatever the scope. Selecting a row is what
- * `RightPane/Doc.tsx` shows.
+ * Inspector · Documents (UI v2 · 05, 14; W11 · G; W13 · B): the gate's document
+ * pinned first, then what the selected node wrote, then one folded row per
+ * other node with documents -- or every node open, in chain order, under
+ * "all". A filter searches every node whatever the scope. Selecting a row is
+ * what `RightPane/Doc.tsx` shows.
  */
 
 const KIND_ICONS: Record<string, typeof FileText> = {
@@ -41,6 +40,7 @@ function kindCounts(docs: WorkItemDocument[]): string {
 
 const OTHER = "other";
 const nodeOf = (d: WorkItemDocument) => d.node_id ?? OTHER;
+const isRun = (d: WorkItemDocument) => d.source_kind === "session_summary";
 
 export function Documents({
   workItemId,
@@ -55,6 +55,8 @@ export function Documents({
   scope = "node",
   onScope,
   onCount,
+  item = null,
+  sessions = [],
 }: {
   workItemId: string;
   eventCount: number;
@@ -84,6 +86,10 @@ export function Documents({
   onScope?: (s: Scope) => void;
   /** The tab's count, which follows the scope (G.4). */
   onCount?: (n: number) => void;
+  /** Whose documents: its title and bead id come out of a row's title (B.3). */
+  item?: { title?: string | null; bead_id?: string | null } | null;
+  /** The item's sessions, for the newest-run-first order (B.6). */
+  sessions?: WorkerSession[];
 }) {
   const [docs, setDocs] = useState<WorkItemDocument[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -105,14 +111,31 @@ export function Documents({
     };
   }, [workItemId, eventCount]);
 
-  const gateDoc = preselectPath ? (docs?.find((d) => d.path === preselectPath) ?? null) : null;
-  const rest = (docs ?? []).filter((d) => d !== gateDoc);
+  // B.1/B.3: what a row says. A summary leads with its hook and run; its title,
+  // cleaned, is the second line -- dropped when it is only an id (W11 · H: the
+  // hook already names it) or nothing is left once cleaned.
+  const run = (d: WorkItemDocument) => (isRun(d) ? runLabel(d.hook_point, d.attempt, d.round) : null);
+  const secondLine = (d: WorkItemDocument) => {
+    const t = docTitle(d);
+    return t.startsWith("Session · ") ? "" : cleanTitle({ title: t }, item);
+  };
+
+  // B.6: newest run on top -- the session's created_at when the store has it.
+  const createdAt = new Map(sessions.map((s) => [s.id, s.created_at]));
+  const when = (d: WorkItemDocument) => (d.worker_session_id && createdAt.get(d.worker_session_id)) || d.indexed_at;
+  const sorted = [...(docs ?? [])].sort((a, b) => when(b).localeCompare(when(a)));
+
+  const gateDoc = preselectPath ? (sorted.find((d) => d.path === preselectPath) ?? null) : null;
+  const rest = sorted.filter((d) => d !== gateDoc);
   // Chain order, then any node the chain does not name (and documents with none).
   const order = [...nodes.map((n) => n.id)];
   for (const d of rest) if (!order.includes(nodeOf(d))) order.push(nodeOf(d));
   const q = filter.trim().toLowerCase();
+  // B.5: hook, run label, cleaned title, path.
   const shown = q
-    ? rest.filter((d) => [d.title, d.path, d.node_id, d.hook_point].some((f) => f?.toLowerCase().includes(q)))
+    ? rest.filter((d) =>
+        [d.hook_point, run(d), isRun(d) ? secondLine(d) : docTitle(d), d.path].some((f) => f?.toLowerCase().includes(q)),
+      )
     : rest;
   const groups = order
     .map((id) => ({ id, docs: shown.filter((d) => nodeOf(d) === id) }))
@@ -176,44 +199,61 @@ export function Documents({
       return next;
     });
 
-  // G.3: icon · title · `node · hook · time` (+ the session's id for a summary,
-  // a paperclip for an intake attachment) · one kind label. The path is the
-  // row's tooltip and the pane header's, never row text.
+  // B.1/B.2: no node on any row -- the node is the section header. The path is
+  // the row's tooltip and the pane header's; the session id is the pane
+  // header's, never row text.
   const row = (d: WorkItemDocument, gate = false) => {
     const Icon = d.hook_point === "escalation" ? Robot : (KIND_ICONS[d.kind ?? ""] ?? FileText);
-    const sub = [d.node_id, d.hook_point, ago(d.indexed_at)].filter(Boolean).join(" · ");
+    const time = ago(d.indexed_at);
+    const attached = d.attachment_kind && (
+      <span className="doc-attached" title="attached at intake" aria-label="attached at intake" role="img">
+        <Paperclip size={11} aria-hidden />
+      </span>
+    );
+    let text;
+    if (isRun(d)) {
+      const label = run(d);
+      const second = secondLine(d);
+      text = (
+        <span className="doc-text">
+          <span className="doc-title doc-run">
+            {d.hook_point ?? kindLabel(d)}
+            {label && ` · ${label}`}
+            {time && <span className="doc-time"> · {time}</span>}
+          </span>
+          {second && <span className="doc-sub doc-line2">{second}</span>}
+        </span>
+      );
+    } else {
+      const sub = [d.hook_point, time].filter(Boolean).join(" · ");
+      text = (
+        <span className="doc-text">
+          {/* W11 · H: never a bare id. */}
+          <span className="doc-title">{docTitle(d)}</span>
+          <span className="doc-sub">
+            {sub}
+            {attached && (
+              <>
+                {sub && " · "}
+                {attached}
+              </>
+            )}
+          </span>
+        </span>
+      );
+    }
     return (
       <button
         key={d.document_id}
         className="doc-row"
+        data-document-id={d.document_id}
         data-gate={gate || undefined}
         data-selected={d.document_id === selected}
         title={d.path}
         onClick={() => onSelect(d.document_id)}
       >
         <Icon size={16} className="doc-icon" />
-        <span className="doc-text">
-          {/* W11 · H: never a bare id. A list row has no body to read, so a
-              summary titled with an id names its hook. */}
-          <span className="doc-title">{docTitle(d)}</span>
-          <span className="doc-sub">
-            {sub}
-            {d.source_kind === "session_summary" && d.worker_session_id && (
-              <>
-                {sub && " · "}
-                <ShortId id={d.worker_session_id} />
-              </>
-            )}
-            {d.attachment_kind && (
-              <>
-                {" · "}
-                <span className="doc-attached" title="attached at intake" aria-label="attached at intake" role="img">
-                  <Paperclip size={11} aria-hidden />
-                </span>
-              </>
-            )}
-          </span>
-        </span>
+        {text}
         <span className="tag tag-neutral doc-kind">{kindLabel(d)}</span>
       </button>
     );

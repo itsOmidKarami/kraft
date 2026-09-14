@@ -37,13 +37,15 @@ Per shot: `pageOverflowX`, `offscreenRight`, `clippedEllipsis`, `clippedVertical
 
 ### `data-allow-ellipsis` — an allowlist, not a style
 
-`clippedEllipsis` skips an element carrying `data-allow-ellipsis`: a deliberate one-line cut with the whole text in its `title`. Only the element carrying it (W10.D). Do not use this attribute anywhere else — it is allowed on exactly these five, each with its own `checks.spec.ts` case:
+`clippedEllipsis` skips an element carrying `data-allow-ellipsis`: a deliberate one-line cut with the whole text in its `title`. Only the element carrying it (W10.D). Do not use this attribute anywhere else — it is allowed on exactly these seven, each with its own `checks.spec.ts` case:
 
-1. `.doc-path` — the Documents list path (W10.D; unused since W11 · G took the path out of the row)
+1. `.doc-path` — a document's path, cut from the left (W10.D in the Documents list; since W12.2 the document pane header's path line)
 2. `.detail-meta-part` — the item header's meta line (W11 · A.1)
 3. `.board-row-title` — the board row title (W11 · B.2)
 4. `.board-row-meta` — the board row meta line (W11 · B.2)
 5. the peek header's id / meta line (W11 · I)
+6. `.app-header-crumb-current` — the item title crumb in the app header (W12.1)
+7. `.doc-modal-name` — the document pane header's title (W12.2)
 
 The element must carry its full text in `title`. Anything else that ellipsizes still fails the check; a new use needs a decision first.
 

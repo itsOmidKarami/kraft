@@ -19,6 +19,11 @@ export interface WorkItemDocument {
   attachment_kind: "spec" | "plan" | null;
   /** Server-sorted newest first; the only time field every document kind has. */
   indexed_at: string;
+  /** W13 A: the run the linked worker session was — null for artifacts and
+   *  attachments. Optional: an older server does not send them. */
+  attempt?: number | null;
+  round?: number | null;
+  session_status?: string | null;
 }
 
 export interface DiffFile {

@@ -138,7 +138,13 @@ export function Header({ onSearch, onNew }: { onSearch: () => void; onNew: () =>
                 {c.text}
               </Link>
             ) : (
-              <span className={i === crumb.length - 1 ? "app-header-crumb-current" : undefined}>
+              // W12.1: the current crumb (an item's title) is one line, cut with an
+              // ellipsis, whole in `title` -- README's data-allow-ellipsis allowlist.
+              <span
+                className={i === crumb.length - 1 ? "app-header-crumb-current" : undefined}
+                title={i === crumb.length - 1 ? c.text : undefined}
+                data-allow-ellipsis={i === crumb.length - 1 || undefined}
+              >
                 {c.text}
               </span>
             )}
