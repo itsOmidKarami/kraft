@@ -104,7 +104,12 @@ export function PeekPane({
 
   const nodes = item.chain_definition.nodes;
   const rawIndex = item.current_node_id ? nodes.findIndex((n) => n.id === item.current_node_id) : -1;
-  const nodeIndex = rawIndex === -1 ? nodes.length - 1 : rawIndex;
+  // A null current_node_id means two different things: a finished item ran
+  // every node and cleared it (nodes.length - 1, the last one, is right),
+  // but a never-started item hasn't reached node 0 yet -- the same fallback
+  // there would point at the chain's last node instead of its first
+  // (Header.tsx's runLine already special-cases this for the same reason).
+  const nodeIndex = rawIndex === -1 ? (state.state === "not_started" ? 0 : nodes.length - 1) : rawIndex;
   const doneIds = new Set(item.completedNodes ?? []);
   /** Screen 37 compresses eleven stage rows into three: what is finished,
    *  what is running, and what is left. A group with no nodes is dropped. */
