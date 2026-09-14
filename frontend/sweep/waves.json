@@ -118,5 +118,16 @@
       { "kind": "flow-completes", "match": "^flow-" },
       { "kind": "no-flag", "flag": "setup", "match": "." }
     ]
+  },
+  "W11": {
+    "title": "UX wave: gate card, board rows, peek actions, escalating, timeline and documents scope, doc titles, chains editor, analytics",
+    "screens": ["item", "item-*", "el-*", "composer", "board", "board-peek", "settings-chains", "analytics", "flow-gate-*", "flow-pause-steer-resume", "flow-peek-open-close", "flow-board-selection-archive"],
+    "rules": [
+      { "kind": "no-flag", "flag": "offscreen", "match": "." },
+      { "kind": "no-flag", "flag": "clipped-v", "match": "." },
+      { "kind": "no-flag", "flag": "target<44", "match": "@390" },
+      { "kind": "no-console", "match": "^(?!login/)" },
+      { "kind": "flow-completes", "match": "^flow-" }
+    ]
   }
 }

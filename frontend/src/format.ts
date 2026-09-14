@@ -134,6 +134,64 @@ export function shortId(id: string): string {
  *  titled `Session <id>` or the bare id. */
 export const shortIds = (s: string) => s.replace(/\b[0-9a-f]{32}\b/g, shortId);
 
+/** Markdown down to its words (W5.3): drop link targets, heading / quote /
+ *  list markers, bold and code ticks. Single `_` stays -- it is in every
+ *  snake_case identifier. ponytail: regex, not a markdown parser. */
+export const plainMarkdown = (s: string) =>
+  s
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+\.)\s+/gm, "")
+    .replace(/\*\*|__|`|\*/g, "");
+
+/** A title that is only an id: `8cbfe6e2…6357d`, a 32-hex, `Session <id>`. */
+const ID_TITLE = /^[0-9a-f]{8}…?[0-9a-f]{4,}$/;
+
+/** The first line of a body a person would call its opening: past front
+ *  matter, headings, quotes, rules and table rows, as plain text, cut at its
+ *  first sentence end or 90 characters. */
+function openingLine(md: string): string | null {
+  const lines = md.split("\n");
+  let i = 0;
+  while (i < lines.length && !lines[i].trim()) i++;
+  if (lines[i]?.trim() === "---") {
+    i++;
+    while (i < lines.length && lines[i].trim() !== "---") i++;
+    i++;
+  }
+  for (; i < lines.length; i++) {
+    const raw = lines[i].trim();
+    if (!raw || /^#{1,6}(\s|$)/.test(raw) || raw.startsWith(">") || raw.startsWith("|") || /^(-{3,}|\*{3,}|```|~~~)/.test(raw)) continue;
+    const text = plainMarkdown(raw).trim();
+    if (!text) continue;
+    const sentence = text.match(/^(.+?[.!?])(?:\s|$)/)?.[1] ?? text;
+    return sentence.length > 90 ? `${sentence.slice(0, 89).trimEnd()}…` : sentence;
+  }
+  return null;
+}
+
+/** A document's title as a person reads it (W11 · H), one rule for the
+ *  Documents list, the document pane and modal, and search results. A real
+ *  title passes through. An empty one, an id, `Session <id>` or the session's
+ *  own id is replaced by the body's opening line (or a search snippet's),
+ *  prefixed `Session · ` only when that line is under 12 characters; with no
+ *  body to read, `Session · <hook>`. Never a bare id. */
+export function docTitle(d: {
+  title?: string | null;
+  content?: string | null;
+  kind?: string | null;
+  hook_point?: string | null;
+  node_id?: string | null;
+  worker_session_id?: string | null;
+}): string {
+  const title = (d.title ?? "").trim();
+  const bare = title.replace(/^session\s+/i, "");
+  const onlyAnId = !title || ID_TITLE.test(bare) || (!!d.worker_session_id && bare === d.worker_session_id);
+  if (!onlyAnId) return shortIds(title);
+  const line = d.content ? openingLine(d.content) : null;
+  if (line) return line.length < 12 ? `Session · ${line}` : line;
+  return `Session · ${d.hook_point ?? d.node_id ?? d.kind ?? "summary"}`;
+}
+
 /** Wall-clock time of day, for timeline rows and log lines. */
 export function clock(iso: string): string {
   const d = new Date(iso);

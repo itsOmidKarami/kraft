@@ -169,12 +169,12 @@ describe("WorkItemDetail on a phone (m04)", () => {
     expect(screen.getByRole("button", { name: /^Approve$/ })).toBeInTheDocument();
   });
 
-  it("gives the phone action bar its own row for the hint", () => {
+  it("wraps the item card's button row on a phone, its buttons sharing each line (W11 rule 10)", () => {
     // jsdom has no viewport to render a `@media` rule from; pin the source
     // instead, the way styles.order.test.ts does.
     const css = readFileSync(join(here, "work_item.css"), "utf-8");
+    expect(css).toMatch(/\.item-card-actions\s*\{[^}]*flex-wrap:\s*wrap/);
     const phone = css.slice(css.indexOf("@media (max-width: 767px)"));
-    expect(phone).toMatch(/\.control-row\s*\{[^}]*flex-wrap:\s*wrap/);
-    expect(phone).toMatch(/\.control-row\s*>\s*\.btn\s*\{[^}]*flex:\s*1/);
+    expect(phone).toMatch(/\.item-card-actions\s*>\s*\.btn\s*\{[^}]*flex:\s*1/);
   });
 });

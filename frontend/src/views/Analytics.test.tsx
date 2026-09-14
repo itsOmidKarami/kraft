@@ -111,32 +111,38 @@ describe("AnalyticsView", () => {
     expect(screen.queryByText(/last 7 days/i)).toBeNull();
   });
 
-  it("shows eight KPIs", async () => {
+  it("shows exactly three headline tiles, the removed ones folded into their sub-lines (W11 · E)", async () => {
     const { container } = renderView();
     await screen.findAllByText("6");
-    expect(container.querySelectorAll(".kpi")).toHaveLength(8);
-    const labels = [...container.querySelectorAll(".kpi-label")].map((n) => n.textContent);
-    expect(labels).toEqual([
-      "Completed",
-      "Median lead time",
-      "Human wait",
-      "Unplanned touches",
-      "Open MR → green CI",
-      "Fix cycles",
-      "Cost",
-      "Rejected gates",
+    expect(container.querySelectorAll(".kpi")).toHaveLength(3);
+    const text = (sel: string) => [...container.querySelectorAll(sel)].map((n) => n.textContent);
+    expect(text(".kpi-label")).toEqual(["Completed", "Lead time", "Cost"]);
+    expect(text(".kpi-value")).toEqual(["6", elapsed(report.totals.median_lead_ms), usd(18, true)]);
+    expect(text(".kpi-sub")).toEqual([
+      `+2 vs previous · ${usd(3)} each`,
+      "median create → merge · 38% waiting on you",
+      "1.6 fix cycles per verify · 9 capped · 7 rejected gates",
     ]);
-    const values = [...container.querySelectorAll(".kpi-value")].map((n) => n.textContent);
-    expect(values).toEqual([
-      "6",
-      elapsed(report.totals.median_lead_ms),
-      "38%",
-      "0.40",
-      elapsed(report.totals.open_mr_to_green_ci_ms),
-      "1.6",
-      usd(18, true),
-      "7",
-    ]);
+  });
+
+  it("puts unplanned touches and MR → green CI in the stop-reasons footer", async () => {
+    const { container } = renderView();
+    await screen.findByText("Why items stopped for a person");
+    expect(container.querySelector(".stop-reasons .table-foot")).toHaveTextContent(
+      `unplanned touches 0.40 per item · open MR → green CI ${elapsed(report.totals.open_mr_to_green_ci_ms)} median`,
+    );
+  });
+
+  it("W8.4: the chart is empty exactly when the range completed nothing, like the tiles", async () => {
+    vi.spyOn(api, "getAnalytics").mockResolvedValue({
+      ...report,
+      totals: { ...report.totals, completed: 0, completed_prev: 0 },
+    });
+    const { container } = renderView();
+    expect(await screen.findByText("nothing completed in this range")).toBeInTheDocument();
+    expect(container.querySelectorAll(".bar-col")).toHaveLength(0);
+    expect(container.querySelector(".kpi-value")).toHaveTextContent("0");
+    expect(container.querySelector(".kpi-sub")).toHaveTextContent(/^\+0 vs previous$/);
   });
 
   it("draws eight week columns", async () => {

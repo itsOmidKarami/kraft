@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CaretRight, Flag, Shield, ArrowsClockwise, Check } from "@phosphor-icons/react";
+import { ArrowsClockwise, Check, Flag, Shield } from "@phosphor-icons/react";
 import { useSearchParams } from "react-router-dom";
 import * as api from "../../api";
 import { DraftDiff } from "../../components/DraftDiff";
-import { Row, RowText, SectionLabel, StatusGlyph, Tabs } from "../../components/ui";
+import { OverflowMenu, SectionLabel, Tabs, type OverflowItem } from "../../components/ui";
 import { adapterOf } from "../../format";
 import { useStore } from "../../store";
 import type { TemplateNode, TemplateSummary, TemplateValidation } from "../../types";
 import "./templates.css";
-import { PageHead, PhoneHeader, usePhone, useResource } from "./shared";
+import { PhoneHeader, usePhone, useResource } from "./shared";
 
-/* ── 5b chain templates (Chains editor, design 27 / m13) ─────────────────── */
+/* ── 5b chain templates (Chains editor, design 27 / m13; W11 · D) ────────── */
 
 const GATE_NAMES = [
   "spec_approval",
@@ -40,6 +40,12 @@ export function serializeNodes(id: string, nodes: TemplateNode[]): string {
     });
   }
   return lines.join("\n") + "\n";
+}
+
+/** One node's block of `serializeNodes`' output -- the editor card's YAML
+ *  fragment (D.3), without the file's `id:` and `nodes:` lines. */
+export function serializeFragment(node: TemplateNode): string {
+  return serializeNodes("", [node]).split("\n").slice(2).join("\n");
 }
 
 /** The mirror image of `serializeNodes`, used only to prove it round-trips —
@@ -78,7 +84,9 @@ function gatesOf(nodes: TemplateNode[]) {
   return nodes.filter((n) => n.gate_after).length;
 }
 
-function usedByCounts(templates: TemplateSummary[]) {
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+function useUsedByCounts(templates: TemplateSummary[]) {
   const items = useStore((s) => Object.values(s.workItems));
   const counts: Record<string, number> = {};
   for (const t of templates) counts[t.id] = 0;
@@ -172,7 +180,6 @@ function NodeForm({
   loopNames,
   earlierIds,
   onChange,
-  onRemove,
 }: {
   node: TemplateNode;
   index: number;
@@ -180,7 +187,6 @@ function NodeForm({
   loopNames: string[];
   earlierIds: string[];
   onChange: (patch: Partial<TemplateNode>) => void;
-  onRemove: () => void;
 }) {
   const [registry] = useResourceValue(() => api.getRegistry());
   const hooks = registry?.hooks ?? {};
@@ -198,14 +204,9 @@ function NodeForm({
 
   return (
     <div className="chain-node-form">
-      <div className="settings-head">
-        <h3>
-          {node.id || "(unnamed)"} · node {index + 1} of {total}
-        </h3>
-        <button type="button" className="btn btn-ghost btn-danger" onClick={onRemove}>
-          Remove
-        </button>
-      </div>
+      <h3 className="chain-node-title">
+        {node.id || "(unnamed)"} · node {index + 1} of {total}
+      </h3>
       <div className="field">
         <label htmlFor="chain-node-id">id</label>
         <input
@@ -385,6 +386,68 @@ function NodeForm({
   );
 }
 
+/** The selected node's YAML beside its form (D.3): editable, "edits either
+ *  side". A keystroke shows at once; a debounced server parse of just this
+ *  node replaces it in the draft once the text parses to exactly one node.
+ *  Keyed by the node, so switching nodes drops an unparsed draft. */
+function NodeYaml({
+  tplId,
+  node,
+  onReplace,
+}: {
+  tplId: string;
+  node: TemplateNode;
+  onReplace: (next: TemplateNode) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const seq = useRef(0);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
+
+  const onChange = (text: string) => {
+    setDraft(text);
+    if (timer.current) clearTimeout(timer.current);
+    const mine = ++seq.current;
+    timer.current = setTimeout(() => {
+      api
+        .parseTemplateYaml(`id: ${tplId}\nnodes:\n${text}`)
+        .then((r) => {
+          if (mine !== seq.current) return; // a newer keystroke superseded this
+          if (r.error || !r.nodes || r.nodes.length !== 1) {
+            setError(r.error ?? "the fragment has to describe exactly one node");
+            return;
+          }
+          setError(null);
+          setDraft(null);
+          onReplace(r.nodes[0]);
+        })
+        .catch((e) => {
+          if (mine === seq.current) setError(e instanceof Error ? e.message : String(e));
+        });
+    }, 400);
+  };
+
+  return (
+    <div className="chain-fragment">
+      <span className="field-hint">YAML · edits either side</span>
+      <textarea
+        aria-label="node yaml"
+        className="input mono chain-fragment-yaml"
+        spellCheck={false}
+        value={draft ?? serializeFragment(node)}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      {error && <p className="form-error">{error}</p>}
+    </div>
+  );
+}
+
 /** A tiny load-once hook local to this file — `useResource` re-fetches on
  *  every render of its caller since `load` isn't memoized there, which is
  *  fine at page scope but wrong inside `NodeForm` (re-mounted per selection).
@@ -408,7 +471,7 @@ export function TemplatesPage() {
   const { value, reload } = useResource(() => api.getTemplates());
   const { value: policy } = useResource(() => api.getPolicy());
   const templates = useMemo(() => value ?? [], [value]);
-  const usedBy = usedByCounts(templates);
+  const usedBy = useUsedByCounts(templates);
   const phone = usePhone();
   const [params, setParams] = useSearchParams();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -418,7 +481,7 @@ export function TemplatesPage() {
   const nodeId = params.get("node");
 
   const [draftNodes, setDraftNodes] = useState<TemplateNode[] | null>(null);
-  // Raw text of the YAML textarea while it doesn't yet parse cleanly (or a
+  // Raw text of the full-file YAML while it doesn't yet parse cleanly (or a
   // parse is in flight) — kept apart from `draftNodes` so a keystroke is
   // never reverted by an async round trip. `null` once nodes are the source
   // of truth again (parse landed, or the node form/tab/template changed).
@@ -427,7 +490,7 @@ export function TemplatesPage() {
   const yamlParseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [yamlError, setYamlError] = useState<string | null>(null);
   const [tab, setTab] = useState<"yaml" | "diff">("yaml");
-  // The editor pane shows the node form or the template's YAML (W7.4 / Kraft-b9syf).
+  // The YAML toggle swaps the editor card for the whole file (D.4, W7.4).
   const [view, setView] = useState<"form" | "yaml">("form");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -494,19 +557,20 @@ export function TemplatesPage() {
     }, 400);
   };
 
-  const patchNode = (patch: Partial<TemplateNode>) => {
+  const replaceNode = (next: TemplateNode) => {
     if (selectedIndex < 0) return;
-    const next = [...nodes];
-    next[selectedIndex] = { ...next[selectedIndex], ...patch };
-    setDraftNodes(next);
-    setYamlDraftText(null); // node form wins over any unparsed YAML text
-    // `?node=` selects by id, so renaming a node from the form has to carry
-    // the URL along with it — otherwise the very next keystroke leaves the
-    // param pointing at an id that no longer exists and selectedIndex drops
-    // to -1, replacing the form with "select a node".
-    if (patch.id !== undefined && patch.id !== nodeId) {
-      setParams({ tpl: current?.id ?? "", node: patch.id });
-    }
+    const all = [...nodes];
+    all[selectedIndex] = next;
+    setDraftNodes(all);
+    setYamlDraftText(null); // the node wins over any unparsed full-file text
+    // `?node=` selects by id, so renaming a node has to carry the URL along
+    // with it — otherwise the param points at an id that no longer exists and
+    // the card drops back to the summary.
+    if (next.id !== nodeId) setParams({ tpl: current?.id ?? "", node: next.id });
+  };
+
+  const patchNode = (patch: Partial<TemplateNode>) => {
+    if (selectedNode) replaceNode({ ...selectedNode, ...patch });
   };
 
   const insertNode = (index: number) => {
@@ -518,6 +582,17 @@ export function TemplatesPage() {
     // Selected and shown: the new node's form is what the operator fills next.
     setView("form");
     setParams({ tpl: current?.id ?? "", node: blank.id });
+  };
+
+  const duplicateNode = () => {
+    if (!selectedNode) return;
+    let id = `${selectedNode.id}_copy`;
+    for (let k = 2; nodes.some((n) => n.id === id); k++) id = `${selectedNode.id}_copy${k}`;
+    const next = [...nodes];
+    next.splice(selectedIndex + 1, 0, { ...selectedNode, id });
+    setDraftNodes(next);
+    setYamlDraftText(null);
+    setParams({ tpl: current?.id ?? "", node: id });
   };
 
   const removeNode = () => {
@@ -554,187 +629,214 @@ export function TemplatesPage() {
     }
   };
 
-  const createTemplate = async () => {
-    const name = window.prompt("New template name");
+  /** Writes a template under a new, prompted name and opens it. */
+  const saveAs = async (ask: string, nodesFor: (from: TemplateSummary) => TemplateNode[], suggested = "") => {
+    const name = window.prompt(ask, suggested);
     if (!name || !current) return;
     if (templates.some((t) => t.id === name)) {
       setMessage(`"${name}" already exists`);
       return;
     }
     try {
-      await api.putTemplate(name, current.nodes);
+      await api.putTemplate(name, nodesFor(current));
       await reload();
       setParams({ tpl: name });
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e));
     }
   };
+  const newTemplate = () => saveAs("New template name", () => [{ id: "node_1", tasks: [], gate_after: null }]);
+  const duplicateTemplate = () => saveAs("Duplicate as", (from) => from.nodes, current ? `${current.id}-copy` : "");
 
-  // Scroll the YAML textarea to the selected node's block, the "highlight"
-  // this plan settles for over a rendered overlay a plain textarea cannot do.
+  // Scroll the full-file YAML textarea to the selected node's block, the
+  // "highlight" this settles for over a rendered overlay a textarea cannot do.
   useEffect(() => {
     if (!textareaRef.current || selectedIndex < 0) return;
     const before = serializeNodes(current?.id ?? "", nodes.slice(0, selectedIndex));
     const line = before.split("\n").length;
     const lineHeight = 18;
     textareaRef.current.scrollTop = Math.max(0, (line - 2) * lineHeight);
-  }, [selectedIndex, current, nodes]);
+  }, [selectedIndex, current, nodes, view]);
 
   if (!current) {
     return (
-      <>
-        <PageHead title="Chains" note="no chain templates yet" />
-      </>
+      <div className="chain-head">
+        <h2 className="chain-head-name">Chains</h2>
+        <span className="chain-head-counts">no chain templates yet</span>
+      </div>
     );
   }
 
   const loopNames = policy ? Object.keys(policy.loops) : [];
   const earlierIds = selectedIndex > 0 ? nodes.slice(0, selectedIndex).map((n) => n.id) : [];
 
-  /* ── phone: three drill levels, all this one component ─────────────────── */
-  if (phone) {
-    if (!params.get("tpl")) {
-      return (
-        <>
-          <PhoneHeader
-            back="Settings"
-            backTo="/settings"
-            title="Chains"
-            subtitle="~/.kraft/templates"
-            action={
-              <button className="btn btn-primary" onClick={createTemplate}>
-                +
-              </button>
-            }
-          />
-          {templates.map((t) => (
-            <button
-              key={t.id}
-              className="facet-opt"
-              onClick={() => setParams({ tpl: t.id })}
-            >
-              <span className="template-row-name">{t.id}</span>
-              <span className="facet-count">
-                {t.nodes.length} nodes · {gatesOf(t.nodes)} gates · used by {usedBy[t.id] ?? 0}{" "}
-                items
-              </span>
-            </button>
-          ))}
-        </>
-      );
-    }
-    if (!nodeId) {
-      return (
-        <>
-          <PhoneHeader
-            back="Chains"
-            backTo="/settings/chains"
-            title={current.id}
-            subtitle={`${nodes.length} nodes`}
-          />
-          {nodes.map((n, i) => (
-            <Row
-              key={`${n.id}-${i}`}
-              columns="22px 1fr auto 16px"
-              onClick={() => setParams({ tpl: current.id, node: n.id })}
-            >
-              <StatusGlyph status="pending" />
-              <RowText
-                title={
-                  <>
-                    {n.id}
-                    {n.gate_after && <Flag size={11} weight="fill" />}
-                    {n.fix_loop && <ArrowsClockwise size={11} />}
-                    {n.auto_escalate && <Shield size={11} />}
-                  </>
-                }
-              />
-              <span className="row-sub">{(n.tasks ?? []).length} tasks</span>
-              <CaretRight size={14} />
-            </Row>
-          ))}
-          <button
-            type="button"
-            className="btn btn-secondary chain-add-node-row"
-            onClick={() => insertNode(nodes.length)}
-          >
-            + node
-          </button>
-        </>
-      );
-    }
-    if (selectedNode) {
-      return (
-        <>
-          <PhoneHeader
-            back={current.id}
-            backTo={`/settings/chains?tpl=${current.id}`}
-            title={selectedNode.id}
-            subtitle={`${current.id} · node ${selectedIndex + 1} of ${nodes.length}`}
-            action={
-              <button className="btn btn-primary" disabled={!dirty} onClick={save}>
-                Save
-              </button>
-            }
-          />
-          <NodeForm
-            key={selectedNode.id}
-            node={selectedNode}
-            index={selectedIndex}
-            total={nodes.length}
-            loopNames={loopNames}
-            earlierIds={earlierIds}
-            onChange={patchNode}
-            onRemove={removeNode}
-          />
-          <SectionLabel>YAML · read-only here — the node form writes it</SectionLabel>
-          <textarea
-            aria-label="chain yaml"
-            className="input mono template-yaml"
-            value={yamlText}
-            readOnly
-          />
-        </>
-      );
-    }
-  }
+  // D.1: the template dropdown replaces the templates column -- every
+  // template, then what you can do with them. Delete has no API route yet.
+  const templateItems: OverflowItem[] = [
+    ...templates.map((t) => ({
+      label: t.id,
+      icon: <Check size={14} style={{ visibility: t.id === current.id ? "visible" : "hidden" }} aria-hidden />,
+      onSelect: () => setParams({ tpl: t.id }),
+    })),
+    { label: "New…", divider: true, onSelect: newTemplate },
+    { label: "Duplicate", onSelect: duplicateTemplate },
+    { label: "Delete", disabled: true, hint: "no delete route for templates yet (Kraft-lwtco)", onSelect: () => {} },
+  ];
 
-  /* ── desktop ─────────────────────────────────────────────────────────── */
+  const problems =
+    validation && !validation.valid ? (
+      <div className="validation" data-valid={false}>
+        {validation.unresolved?.length ? (
+          // Per node and per task, not per repo (settings.py's own comment on
+          // why: a repo-level "unresolvable" bit told the operator nothing the
+          // node id doesn't already say better).
+          validation.unresolved.map((u) => (
+            <span key={`${u.node}-${u.task}`}>
+              {u.node}: {u.task} has no plugin bound
+            </span>
+          ))
+        ) : (
+          <span>{validation.error}</span>
+        )}
+      </div>
+    ) : null;
+
+  const head = (
+    <div className="chain-head">
+      <h2 className="chain-head-name">{current.id}</h2>
+      {validation?.valid && <span className="tag tag-accent validation-badge">valid</span>}
+      <span className="chain-head-counts">
+        {plural(nodes.length, "node")} · {plural(gatesOf(nodes), "gate")}
+      </span>
+      <span className="chain-head-spacer" />
+      {!phone && <OverflowMenu label="template" text items={templateItems} />}
+      <button
+        className="btn btn-secondary"
+        aria-pressed={view === "yaml"}
+        onClick={() => setView((v) => (v === "yaml" ? "form" : "yaml"))}
+      >
+        YAML
+      </button>
+      <button className="btn btn-ghost" disabled={!dirty} onClick={() => setDraftNodes(null)}>
+        Revert
+      </button>
+      <button className="btn btn-primary" disabled={busy || !dirty || validation?.valid === false} onClick={save}>
+        <Check size={14} />
+        Save
+      </button>
+      {message && <span className="save-hint">{message}</span>}
+    </div>
+  );
+
+  const legend = (
+    <p className="chain-legend">
+      <Flag size={11} weight="fill" /> gate after · <ArrowsClockwise size={11} /> fix loop ·{" "}
+      <Shield size={11} /> auto-escalate · drag to reorder · ⊕ inserts
+    </p>
+  );
+
+  const editor =
+    view === "yaml" ? (
+      <div className="chain-yaml-pane">
+        <div className="field-hint">{current.id}.yaml live · edits either side</div>
+        <Tabs
+          tabs={[
+            { id: "yaml", label: "yaml" },
+            { id: "diff", label: "diff vs saved" },
+          ]}
+          value={tab}
+          onChange={(id) => setTab(id as "yaml" | "diff")}
+        />
+        {tab === "yaml" ? (
+          <>
+            <textarea
+              ref={textareaRef}
+              aria-label="chain yaml"
+              className="input mono template-yaml"
+              value={yamlText}
+              onChange={(e) => onYamlChange(e.target.value)}
+            />
+            {yamlError && <p className="form-error">{yamlError}</p>}
+          </>
+        ) : (
+          <DraftDiff before={serializeNodes(current.id, current.nodes)} after={serializeNodes(current.id, nodes)} />
+        )}
+      </div>
+    ) : (
+      // D.3: one card -- the node's form and its YAML side by side, or, with
+      // nothing selected, what the template is (D.5).
+      <div className="card chain-card" data-testid="chain-card">
+        {selectedNode ? (
+          <div className="chain-card-body">
+            <NodeForm
+              key={selectedNode.id}
+              node={selectedNode}
+              index={selectedIndex}
+              total={nodes.length}
+              loopNames={loopNames}
+              earlierIds={earlierIds}
+              onChange={patchNode}
+            />
+            <NodeYaml key={`yaml:${selectedNode.id}`} tplId={current.id} node={selectedNode} onReplace={replaceNode} />
+          </div>
+        ) : (
+          <div className="chain-summary" data-testid="chain-summary">
+            <p className="chain-summary-line">
+              {plural(nodes.length, "node")} · {plural(gatesOf(nodes), "gate")} · used by{" "}
+              {plural(usedBy[current.id] ?? 0, "item")} · <code>~/.kraft/templates/{current.id}.yaml</code>
+            </p>
+            <p className="field-hint">Select a node to edit it, or ⊕ to insert one.</p>
+          </div>
+        )}
+        <div className="chain-card-foot">
+          {selectedNode && (
+            <>
+              <button type="button" className="btn btn-ghost" aria-label="duplicate node" onClick={duplicateNode}>
+                duplicate
+              </button>
+              <button type="button" className="btn btn-ghost btn-danger" aria-label="remove node" onClick={removeNode}>
+                remove
+              </button>
+            </>
+          )}
+          {legend}
+        </div>
+      </div>
+    );
+
   return (
     <>
-      <PageHead
-        title={current.id}
-        note={
-          <>
-            {`~/.kraft/templates/${current.id}.yaml · ${nodes.length} node${nodes.length === 1 ? "" : "s"} · ${gatesOf(nodes)} gates`}
-            {/* The template's own status, beside what it is (W7/8), not under the New button. */}
-            {validation?.valid && <span className="tag tag-accent validation-badge">valid</span>}
-          </>
-        }
-        action={
-          <div className="save-row">
-            <button
-              className="btn btn-secondary"
-              aria-pressed={view === "yaml"}
-              onClick={() => setView((v) => (v === "yaml" ? "form" : "yaml"))}
-            >
-              YAML
+      {phone && (
+        <PhoneHeader
+          back="Settings"
+          backTo="/settings"
+          title="Chains"
+          subtitle="~/.kraft/templates"
+          action={
+            <button className="btn btn-primary" aria-label="New template" onClick={newTemplate}>
+              +
             </button>
-            <button className="btn btn-ghost" disabled={!dirty} onClick={() => setDraftNodes(null)}>
-              Revert
-            </button>
-            <button className="btn btn-primary" disabled={busy || !dirty || validation?.valid === false} onClick={save}>
-              <Check size={14} />
-              Save
-            </button>
-            <span className="save-hint">{message}</span>
-          </div>
-        }
-      />
+          }
+        />
+      )}
       <div className="chain-page">
-        {/* Full width, above both lower panes (screen 27): 12 node pills
-            wrapped into 8 rows when the graph lived inside the ~700px
-            middle column of the three-column grid below. */}
+        {/* D.6: on a phone the dropdown is a full-width native select. */}
+        {phone && (
+          <select
+            className="input chain-template-select"
+            aria-label="template"
+            value={current.id}
+            onChange={(e) => setParams({ tpl: e.target.value })}
+          >
+            {templates.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.id}
+              </option>
+            ))}
+          </select>
+        )}
+        {head}
+        {/* Full width above the card (screen 27): the pills stay as built. */}
         <div className="chain-graph-row">
           <NodeGraph
             nodes={nodes}
@@ -743,104 +845,9 @@ export function TemplatesPage() {
             onInsert={insertNode}
             onMove={moveNode}
           />
-          <p className="chain-legend">
-            <Flag size={11} weight="fill" /> gate after · <ArrowsClockwise size={11} /> fix loop ·{" "}
-            <Shield size={11} /> auto-escalate · drag to reorder · ⊕ inserts
-          </p>
         </div>
-
-        <div className="template-editor chain-editor">
-          <div className="template-list">
-            <SectionLabel>Templates</SectionLabel>
-            {templates.map((t) => (
-              <button
-                key={t.id}
-                className="facet-opt template-row"
-                aria-pressed={t.id === current.id}
-                onClick={() => setParams({ tpl: t.id })}
-              >
-                <span className="template-row-top">
-                  <span className="template-row-name">{t.id}</span>
-                  <span className="template-row-count">
-                    {t.nodes.length} node{t.nodes.length === 1 ? "" : "s"}
-                  </span>
-                </span>
-                <span className="template-row-meta">
-                  {gatesOf(t.nodes)} gates · used by {usedBy[t.id] ?? 0} items
-                </span>
-              </button>
-            ))}
-            <button className="btn btn-secondary" onClick={createTemplate}>
-              New
-            </button>
-            {/* Valid is a badge in the page head; problems keep their box here. */}
-            {validation &&
-              !validation.valid && (
-              <div className="validation" data-valid={false}>
-                {validation.unresolved?.length ? (
-                  // Per node and per task, not per repo (settings.py's own
-                  // comment on why: a repo-level "unresolvable" bit told the
-                  // operator nothing the node id doesn't already say better).
-                  validation.unresolved.map((u) => (
-                    <span key={`${u.node}-${u.task}`}>
-                      {u.node}: {u.task} has no plugin bound
-                    </span>
-                  ))
-                ) : (
-                  <span>{validation.error}</span>
-                )}
-              </div>
-              )}
-          </div>
-
-          <div className="chain-middle">
-            {view === "form" ? (
-              selectedNode ? (
-                <NodeForm
-                  key={selectedNode.id}
-                  node={selectedNode}
-                  index={selectedIndex}
-                  total={nodes.length}
-                  loopNames={loopNames}
-                  earlierIds={earlierIds}
-                  onChange={patchNode}
-                  onRemove={removeNode}
-                />
-              ) : (
-                <p className="empty">select a node</p>
-              )
-            ) : (
-          <div className="chain-yaml-pane">
-            <div className="field-hint">{current.id}.yaml live · edits either side</div>
-            <Tabs
-              tabs={[
-                { id: "yaml", label: "yaml" },
-                { id: "diff", label: "diff vs saved" },
-              ]}
-              value={tab}
-              onChange={(id) => setTab(id as "yaml" | "diff")}
-            />
-            {tab === "yaml" ? (
-              <>
-                <textarea
-                  ref={textareaRef}
-                  aria-label="chain yaml"
-                  className="input mono template-yaml"
-                  value={yamlText}
-                  onChange={(e) => onYamlChange(e.target.value)}
-                />
-                {yamlError && <p className="form-error">{yamlError}</p>}
-              </>
-            ) : (
-              <DraftDiff
-                before={serializeNodes(current.id, current.nodes)}
-                after={serializeNodes(current.id, nodes)}
-              />
-            )}
-          </div>
-            )}
-          </div>
-        </div>
+        {editor}
+        {problems}
       </div>
     </>
   );

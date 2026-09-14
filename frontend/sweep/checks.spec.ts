@@ -68,6 +68,39 @@ test("checks/ellipsis: data-allow-ellipsis skips a deliberate cut, a plain one s
   expect((await runChecks(page, false, [])).clippedEllipsis.count).toBe(1);
 });
 
+/** Allowlist use (README "data-allow-ellipsis"): the item header's meta line
+ *  (W11 A.1) -- a flex line whose parts each cut their own text, whole in title. */
+test("checks/ellipsis: the item header's .detail-meta-part cuts are allowed, an unmarked part still counts", async ({ page }) => {
+  const line = (attr: string) =>
+    `<div class="detail-meta" style="display:flex;width:160px;overflow:hidden;white-space:nowrap;font:12px sans-serif">` +
+    `<span class="detail-meta-part" ${attr} title="a-repository-with-an-unreasonably-long-name" style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis">a-repository-with-an-unreasonably-long-name</span>` +
+    `<span class="detail-meta-part" ${attr} title="default" style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis">default</span></div>`;
+  await page.setContent(line("data-allow-ellipsis"));
+  expect((await runChecks(page, false, [])).clippedEllipsis.count).toBe(0);
+  await page.setContent(line(""));
+  expect((await runChecks(page, false, [])).clippedEllipsis.count).toBeGreaterThan(0);
+});
+
+/** Allowlist use: the board row's title (W11 B.2), one line cut, whole in title. */
+test("checks/ellipsis: a .board-row-title cut is allowed, an unmarked title still counts", async ({ page }) => {
+  const title = (attr: string) =>
+    `<span class="board-row-title" ${attr} title="Design the caching layer for document search" style="display:block;width:140px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font:14px sans-serif">Design the caching layer for document search</span>`;
+  await page.setContent(title("data-allow-ellipsis"));
+  expect((await runChecks(page, false, [])).clippedEllipsis.count).toBe(0);
+  await page.setContent(title(""));
+  expect((await runChecks(page, false, [])).clippedEllipsis.count).toBe(1);
+});
+
+/** Allowlist use: the board row's meta line (W11 B.2), repo · bead · template · age · reason. */
+test("checks/ellipsis: a .board-row-meta cut is allowed, an unmarked meta line still counts", async ({ page }) => {
+  const meta = (attr: string) =>
+    `<div class="board-row-meta" ${attr} title="kraft · kraft-cb59 · default · 15h ago · approve code_review" style="width:140px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font:11.5px sans-serif"><span>kraft</span> · <code>kraft-cb59</code> · <span>default</span> · <span>15h ago</span> · <span>approve code_review</span></div>`;
+  await page.setContent(meta("data-allow-ellipsis"));
+  expect((await runChecks(page, false, [])).clippedEllipsis.count).toBe(0);
+  await page.setContent(meta(""));
+  expect((await runChecks(page, false, [])).clippedEllipsis.count).toBe(1);
+});
+
 /** The contrast check: muted text still has to clear 4.5:1; only text nobody
  *  has to read (disabled, placeholder, aria-hidden, faded decoration) is exempt. */
 const ground = (body: string) => `<style>body { margin: 0; background: #0f1019; font: 13px sans-serif; }</style>${body}`;

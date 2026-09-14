@@ -5,7 +5,7 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-rou
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../api";
 import { useStore } from "../store";
-import type { WorkItem } from "../types";
+import type { KraftEvent, WorkerSession, WorkItem } from "../types";
 import type { ToastPayload } from "../components/Toast";
 import { Board } from "./Board";
 
@@ -31,7 +31,22 @@ const wi = (over: Partial<WorkItem>): WorkItem =>
   }) as WorkItem;
 
 const setItems = (...items: WorkItem[]) =>
-  useStore.setState({ workItems: Object.fromEntries(items.map((i) => [i.id, i])) } as never);
+  useStore.setState({ workItems: Object.fromEntries(items.map((i) => [i.id, i])), sessionsByItem: {}, eventsByItem: {} } as never);
+
+/** A needs_human item with its escalation turn running, sessions and events in the store (W11 · J). */
+const escalating = (id: string, title: string, startedMinutesAgo: number) => {
+  const started = new Date(Date.now() - startedMinutesAgo * 60_000).toISOString();
+  return {
+    item: wi({ id, title, status: "needs_human", cappedOut: { cycles: 3, attempts: 3 } }),
+    sessions: [
+      { id: `${id}-e1`, work_item_id: id, node_id: "verify", hook_point: "escalation", status: "running", attempt: 1, round: 0, created_at: started, started_at: started, exited_at: null } as WorkerSession,
+    ],
+    events: [
+      { seq: 1, work_item_id: id, type: "work_item_needs_human", payload: {}, created_at: started },
+      { seq: 2, work_item_id: id, type: "escalation_message", payload: { session_id: `${id}-e1`, message: "go" }, created_at: started },
+    ] as KraftEvent[],
+  };
+};
 
 beforeEach(() => {
   localStorage.clear();
@@ -174,23 +189,74 @@ describe("Board", () => {
     expect(within(group("Done")).getAllByTestId("board-card")).toHaveLength(7);
   });
 
-  it("offers the gate inline on a needs-you row, naming the current node's gate", () => {
-    setItems(
-      wi({ id: "w3", status: "needs_human", current_node_id: "plan", pending_gate: "plan_approval" }),
-    );
+  it("a needs-you gate row carries one button, Approve, which acts without opening the peek (W11 · B.3, B.5)", async () => {
+    const approve = vi.spyOn(api, "approveGate").mockResolvedValue(undefined as never);
+    vi.spyOn(useStore.getState(), "hydrateItem").mockResolvedValue();
+    setItems(wi({ id: "w3", status: "needs_human", current_node_id: "plan", pending_gate: "plan_approval" }));
     renderBoard();
     const row = within(group("Needs you")).getByTestId("board-card");
-    expect(within(row).getByText("approve the plan")).toBeInTheDocument();
-    expect(within(row).getByRole("button", { name: /approve/i })).toBeInTheDocument();
+    expect([...row.querySelectorAll(".board-row-action button, .board-row-action a")].map((b) => b.textContent)).toEqual(["Approve"]);
+    expect(row.querySelector(".gate-inline")).toBeNull();
+    await userEvent.click(within(row).getByRole("button", { name: "Approve" }));
+    expect(approve).toHaveBeenCalledWith("w3", "plan_approval");
+    expect(screen.queryByLabelText("peek")).toBeNull();
+    expect(row).not.toHaveAttribute("data-selected");
   });
 
-  it("offers escalate on the inline gate row too", () => {
+  it("puts an escalating item under Running, not Needs you, with a robot glyph, its tail and no button (W11 · J.1, J.2)", () => {
+    const esc = escalating("we", "Escalating one", 3);
+    setItems(esc.item);
+    useStore.setState({ sessionsByItem: { we: esc.sessions }, eventsByItem: { we: esc.events } } as never);
+    renderBoard();
+    expect(within(group("Needs you")).queryByText("Escalating one")).toBeNull();
+    const row = within(group("Running")).getByTestId("board-card");
+    expect(row.querySelector('.glyph[data-status="escalating"]')).toBeTruthy();
+    expect(row.querySelector(".board-row-reason")).toHaveTextContent("escalation running · 3m");
+    expect(row.querySelector(".board-row-reason")).toHaveAttribute("data-tone", "neutral");
+    expect(row.querySelectorAll(".board-row-action button, .board-row-action a")).toHaveLength(0);
+  });
+
+  it("leads Running with escalating items, whatever the sort (W11 · J.4)", () => {
+    const esc = escalating("we", "Escalating one", 3);
+    setItems(wi({ id: "w1", status: "active", title: "Newest running", updated_at: "2030-01-01T00:00:00Z" }), esc.item);
+    useStore.setState({ sessionsByItem: { we: esc.sessions }, eventsByItem: { we: esc.events } } as never);
+    renderBoard();
+    const rows = within(group("Running")).getAllByTestId("board-card");
+    expect(rows.map((r) => r.querySelector(".board-row-title")?.textContent)).toEqual(["Escalating one", "Newest running"]);
+  });
+
+  it("a running row has no button, and keeps the button cell so the columns line up", () => {
+    setItems(wi({ id: "w1", status: "active" }));
+    renderBoard();
+    const row = within(group("Running")).getByTestId("board-card");
+    expect(row.querySelector(".board-row-action")).toBeInTheDocument();
+    expect(row.querySelectorAll("button, a")).toHaveLength(0);
+  });
+
+  it.each<[string, Partial<WorkItem>, RegExp, string | null]>([
+    ["gate", { status: "needs_human", current_node_id: "plan", pending_gate: "plan_approval" }, /approve plan_approval$/, "Approve"],
+    ["capped", { status: "needs_human", cappedOut: { cycles: 3, attempts: 3 } }, /verify hit its cap · 3 attempts$/, "Steer & retry"],
+    ["question", { status: "needs_human", needs_context_question: "x".repeat(80) }, /agent asks: x{60}…$/, "Answer"],
+    ["budget", { status: "needs_human", budget: { scope: "work_item", spent_usd: 5, cap_usd: 5 } }, /spend cap reached$/, "Raise budget"],
+    ["paused", { status: "paused" }, /paused at verify$/, "Resume"],
+    ["running", { status: "active", progress: { current: 3, total: 6, title: "wire the store" } }, /Task 3\/6 · wire the store$/, null],
+    ["rate limited", { status: "rate_limited", retry_at: new Date(Date.now() + 4 * 60_000 + 30_000).toISOString() }, /retry in 4m$/, null],
+  ])("%s: the meta line ends in its reason, and the button matches (W11 · B.2, B.3)", (_, over, reason, button) => {
+    setItems(wi({ id: "w9", ...over }));
+    renderBoard();
+    const row = screen.getByTestId("board-card");
+    expect(row.querySelector(".board-row-meta")?.textContent).toMatch(reason);
+    expect([...row.querySelectorAll(".board-row-action button")].map((b) => b.textContent)).toEqual(button ? [button] : []);
+  });
+
+  it("colours a needs-you reason accent and a running one neutral", () => {
     setItems(
-      wi({ id: "w3", status: "needs_human", current_node_id: "plan", pending_gate: "plan_approval" }),
+      wi({ id: "w3", status: "needs_human", pending_gate: "plan_approval", current_node_id: "plan" }),
+      wi({ id: "w1", status: "active", progress: { current: 1, total: 2, title: "t" } }),
     );
     renderBoard();
-    const row = within(group("Needs you")).getByTestId("board-card");
-    expect(within(row).getByRole("button", { name: /^escalate/i })).toBeInTheDocument();
+    expect(within(group("Needs you")).getByTestId("board-card").querySelector(".board-row-reason")).toHaveAttribute("data-tone", "accent");
+    expect(within(group("Running")).getByTestId("board-card").querySelector(".board-row-reason")).toHaveAttribute("data-tone", "neutral");
   });
 
   it("does not offer a blind Approve for human_review_approval, only a link to the detail view", () => {
@@ -207,14 +273,6 @@ describe("Board", () => {
     expect(within(row).queryByRole("button", { name: /approve/i })).toBeNull();
     const link = within(row).getByRole("link", { name: /review to approve/i });
     expect(link).toHaveAttribute("href", "/work-items/w6");
-  });
-
-  it("spells out the cap on a capped-out row", () => {
-    setItems(
-      wi({ id: "w4", status: "needs_human", cappedOut: { cycles: 3, attempts: 3 } }),
-    );
-    renderBoard();
-    expect(screen.getByText(/capped 3\/3/)).toBeInTheDocument();
   });
 
   it("puts a paused-mid-chain item in Needs you, and a never-started item in Not started", () => {
@@ -304,15 +362,16 @@ describe("Board", () => {
     );
   });
 
-  it("marks an item that started from existing documents", () => {
-    setItems(
-      wi({
-        id: "w1",
-        attachments: [{ kind: "plan", path: ".engineering/plans/p.md" }],
-      }),
-    );
+  it("cuts the title and the repo · bead · template · age meta line to one line each, whole on hover (W11 · B.2)", () => {
+    setItems(wi({ id: "w1", title: "A long title" }));
     renderBoard();
-    expect(screen.getByText("from plan")).toBeInTheDocument();
+    const row = screen.getByTestId("board-card");
+    const title = row.querySelector(".board-row-title")!;
+    expect(title).toHaveAttribute("title", "A long title");
+    expect(title).toHaveAttribute("data-allow-ellipsis");
+    const meta = row.querySelector(".board-row-meta")!;
+    expect(meta).toHaveAttribute("data-allow-ellipsis");
+    expect(meta.getAttribute("title")).toMatch(/^repo-a · B · quick-task/);
   });
 
   it("groups a rate_limited item under Running, not Needs you", () => {
@@ -403,13 +462,12 @@ describe("Board", () => {
     window.removeEventListener("kraft:toast", onToast);
   });
 
-  it("the ⋯ menu offers Archive and Copy id, and never Reopen or Delete worktree", async () => {
+  it("a Done row carries no button; archiving is its checkbox (W11 · B.3, B.6)", () => {
     setItems(wi({ id: "w1", status: "completed" }));
     renderBoard();
-    await userEvent.click(within(group("Done")).getByRole("button", { name: /more/i }));
-    expect(screen.getByRole("menuitem", { name: /^archive$/i })).toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: /reopen/i })).toBeNull();
-    expect(screen.queryByRole("menuitem", { name: /delete worktree/i })).toBeNull();
+    const row = within(group("Done")).getByTestId("board-card");
+    expect(within(row).getByRole("checkbox")).toBeInTheDocument();
+    expect(within(row).queryAllByRole("button")).toHaveLength(0);
   });
 
   it("long-press opens the peek pane instead of navigating (phone)", async () => {
@@ -601,14 +659,15 @@ describe("the .board-row grid contract", () => {
       return hits.length ? hits[hits.length - 1][1] : acc;
     }, null);
 
-  it("renders exactly the four children the tracks are counted against", () => {
+  it("renders exactly the five children the tracks are counted against", () => {
     setItems(wi({ id: "w1", status: "active" }));
     renderBoard();
     const row = screen.getAllByTestId("board-card")[0];
-    expect(row.children).toHaveLength(4);
+    expect(row.children).toHaveLength(5);
     expect(row.children[1].className).toBe("board-row-main");
     expect(row.children[2].className).toContain("chain-bar");
     expect(row.children[3].className).toBe("board-row-current");
+    expect(row.children[4].className).toBe("board-row-action");
   });
 
   it.each([1500, 1300, 1100, 900, 800, 700, 600])("has one track per in-flow child at %ipx", (w) => {
@@ -616,18 +675,11 @@ describe("the .board-row grid contract", () => {
     expect(tracks).not.toBeNull();
     const trackCount = tracks!.trim().split(/\s+(?![^(]*\))/).length;
 
-    const chainHidden = lastMatch(w, /\.board-row\s*>\s*\.chain-bar\.sm\s*\{([^}]*)\}/g);
-    const inFlow = 4 - (chainHidden?.includes("display: none") ? 1 : 0);
-
-    // Fewer tracks than children is only safe when the overflow child is
-    // placed explicitly; otherwise it auto-places into the 22px glyph track.
-    if (trackCount < inFlow) {
-      expect(lastMatch(w, /\.board-row\s*>\s*\.board-row-current\s*\{([^}]*)\}/g)).toMatch(
-        /grid-column:/,
-      );
-      expect(inFlow - trackCount).toBe(1);
-    } else {
-      expect(trackCount).toBe(inFlow);
-    }
+    const hidden = (re: RegExp) => (lastMatch(w, re)?.includes("display: none") ? 1 : 0);
+    const inFlow =
+      5 -
+      hidden(/\.board-row\s*>\s*\.chain-bar\.sm\s*\{([^}]*)\}/g) -
+      hidden(/\.board-row\s*>\s*\.board-row-action\s*\{([^}]*)\}/g);
+    expect(trackCount).toBe(inFlow);
   });
 });

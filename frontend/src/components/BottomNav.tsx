@@ -1,7 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { ChartBar, GearSix, MagnifyingGlass, SquaresFour } from "@phosphor-icons/react";
-import { deriveState } from "../deriveState";
-import { useStore } from "../store";
+import { useItemStates, useStore } from "../store";
 import "./BottomNav.css";
 
 /**
@@ -17,9 +16,10 @@ const TABS: { to: string; label: string; icon: typeof SquaresFour; end?: boolean
 ];
 
 export function BottomNav() {
-  const needsYouCount = useStore((s) =>
-    Object.values(s.workItems).filter((i) => deriveState(i).needsYou).length,
-  );
+  // An escalating item is not waiting on you (W11 · J.3).
+  const items = useStore((s) => s.workItems);
+  const stateOf = useItemStates();
+  const needsYouCount = Object.values(items).filter((i) => stateOf(i).needsYou).length;
   return (
     <nav className="bottom-nav" aria-label="primary">
       {TABS.map(({ to, label, icon: Icon, end }) => (

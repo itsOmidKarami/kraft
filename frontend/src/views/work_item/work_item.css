@@ -2,46 +2,29 @@
  * styles.css; `.detail`, `.card`, `.row*`, `.tag*`, `.btn*`, `.chip`,
  * `.control-row`, `.field`, `.empty`, `.mono` etc. all come from there. */
 
-/* — action bar (11 right side, UI v2 · 06 left side + composers) ────────── */
-.action-bar {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: calc(var(--density-row-pad) + 4px) var(--space-4);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-neutral-800);
-  background: color-mix(in srgb, var(--color-surface) 60%, transparent);
-}
-.action-bar-row {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-6);
-}
-.action-bar-left {
-  flex: 1;
-  min-width: 0;
-}
-.action-bar-mid {
-  font-size: 11px;
-  color: var(--color-neutral-500);
-  align-self: center;
-}
-.action-bar-right {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-}
-.action-bar-usage {
-  font-size: 12px;
-  color: var(--color-neutral-500);
-  white-space: nowrap;
-}
-.mr-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
+/* — item card (W11 · A, design 1e): header · stats, one button row ────────── */
+/* After styles.css in the bundle, so these outrank `.attention-card`'s padding. */
+.item-card { gap: 10px; padding: 14px 16px; }
+/* The stats sit top-right; on a narrow card they wrap under the title rather
+   than push past the edge. */
+.item-card-head { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
+.item-card-text { display: flex; flex-direction: column; gap: 2px; flex: 1 1 240px; min-width: 0; }
+.item-card-title { font-size: 15px; font-weight: 500; }
+.item-card-sub { font-size: 12px; color: var(--color-neutral-500); overflow-wrap: anywhere; }
+.item-card-stats { flex: none; margin-left: auto; font-size: 12px; color: var(--color-text-muted); white-space: nowrap; }
+.item-card-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.item-card-actions .btn { font-size: 13px; }
+/* More actions flush right at the card's inset (rule 6). */
+.item-card-actions > .overflow { margin-left: auto; }
+/* Read document is a text link, the same as "see Timeline". */
+.item-card-link { font-size: 13px; padding-inline: 4px; }
+a.item-card-link { color: var(--color-accent-400); }
+span.item-card-link { color: var(--color-text-muted); cursor: default; }
+.escalating-pill { flex: none; }
+/* The escalated report is the card's body: its markdown blocks keep no outer
+   margins, or a one-line quote sits in an empty band (W8.6). */
+.item-card .attention-sub-md > * { margin-block: 0; }
+.item-card .attention-sub-md blockquote { padding-block: 0; }
 
 /* — stage graph ───────────────────────────────────────────────────────── */
 /* One line to 11 nodes (45). Wrapping mid-chain at 1366 put `merge` on its
@@ -212,6 +195,16 @@
   display: flex;
   gap: var(--space-2);
 }
+/* W11 · F: the one folded row for every other node, under this node's events. */
+/* Not on the ellipsis allowlist: in a 360px inspector it wraps to a second
+   line beside "show all", never an ellipsis (W5). */
+.timeline-fold .row-title {
+  color: var(--color-text-muted); font-size: 12.5px;
+  white-space: normal; text-overflow: clip;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+}
+/* The event the Timeline list picked, marked in the right pane. */
+.event-row[data-selected] { box-shadow: inset 2px 0 0 var(--color-accent); }
 /* `.doc-row`'s grid is Documents' icon/title/kind/date; a change row is
  * path/+/− with no icon, which put the path in the 20px icon column. */
 .doc-row.change-row {
@@ -351,14 +344,7 @@
 .yaml-legend-swatch.yaml-selected { background: color-mix(in srgb, var(--color-accent) 40%, transparent); }
 .config-pane .btn { white-space: nowrap; }
 
-/* — gate card (19): "under the header, above the bar" ───────────────────── */
-.gate-card {
-  box-shadow:
-    0 0 0 1px var(--color-accent-700),
-    0 0 24px rgba(145, 132, 217, 0.18);
-}
-
-/* — composers (17-20, 23): expand inside the action bar ────────────────── */
+/* — composers (17-20, 23): open inside the item card, under its buttons ──── */
 /* W8.1: the agent's question, in full, on its own line above Answer. The item
    page never scrolls, so a long question scrolls inside its own 4 lines. */
 .stop-question { flex-basis: 100%; margin: 0; max-height: 4lh; overflow-y: auto; white-space: pre-wrap; }
@@ -392,7 +378,7 @@
 /* `textarea.composer-input`, not `.composer-input` alone: the element also
    carries `.input` (nocturne.css, font-size: 14px), same specificity --
    qualifying with the tag name is what actually outranks it, same idiom
-   `.gate-reject textarea.input` already uses (styles.css). */
+   `textarea.template-yaml` uses (styles.css). */
 textarea.composer-input {
   min-height: 76px;
   font-size: 13.5px;
@@ -407,8 +393,8 @@ textarea.composer-input {
   margin: 0;
   max-height: 4lh; overflow-y: auto; white-space: pre-wrap;
 }
-/* Under 1280 the action bar wraps to two rows (W2.5), and the page ran 28px
-   past 800px tall with four quoted lines: two, still scrolling inside. */
+/* Under 1280 the page ran 28px past 800px tall with four quoted lines: two,
+   still scrolling inside. */
 @media (max-width: 1279px) {
   .detail .composer-quoted { max-height: 2lh; }
 }
@@ -424,6 +410,7 @@ textarea.composer-input {
 }
 .escalation-thread p {
   margin: 0;
+  font-size: 12px;
 }
 .composer-footnote {
   font-size: 11px;
@@ -461,27 +448,19 @@ textarea.composer-input {
 
 /* Below the breakpoint, `usePhone` swaps `GraphSplit`/`.item-split` out for
  * `Phone.tsx` entirely (index.tsx) — this query only has to reflow the
- * pieces both layouts share (the action bar). */
+ * pieces both layouts share (the item card). */
 @media (max-width: 767px) {
-  .action-bar-row {
-    flex-direction: column;
-  }
   /* README common rules: 44px minimum touch targets. */
-  .action-bar-left .btn,
   .composer .btn {
     width: 100%;
     min-height: 44px;
   }
-  /* Buttons share one row; the hint gets its own line under them (m04).
-     Desktop's nowrap is exactly wrong here -- this is the one width where
-     the bar is allowed a second line, because the buttons are full-width. */
-  .item-page .control-row { flex-wrap: wrap; }
-  .item-page .control-row > .btn { flex: 1; min-height: 44px; }
-  .item-page .control-hint { flex: 1 0 100%; order: 10; }
-  .item-page .control-actions-right { order: 11; margin-left: auto; }
+  /* Rule 10: the button row wraps, its buttons sharing each line. */
+  .item-card-actions > .btn { flex: 1 1 auto; }
+  .item-card-actions > .item-card-link { display: inline-flex; align-items: center; min-height: 44px; }
   /* Under 16px, mobile Safari zooms the viewport on focus and does not zoom
-     back out -- same rule `.gate-reject textarea.input` already has
-     (styles.css:1250), applied to the shared Composer's own textarea. */
+     back out -- the phone input rule (styles.css), applied to the shared
+     Composer's own textarea, which `textarea.input` would otherwise outrank. */
   textarea.composer-input {
     font-size: 16px;
     min-height: 96px;
@@ -637,7 +616,7 @@ textarea.composer-input {
 .detail-progress .task-title::before { content: "· "; color: var(--color-text-muted); }
 .detail-progress .task-bar { width: 100%; }
 
-.detail-submodules { cursor: pointer; border: 0; font-family: inherit; }
+.detail-submodules { font: inherit; color: var(--color-accent-400); background: none; border: 0; padding: 0; cursor: pointer; }
 
 /* Title editor (W0.11): grows with its text to three lines. */
 textarea.detail-title-input {
@@ -645,47 +624,31 @@ textarea.detail-title-input {
   min-height: calc(1.3em + 16px); max-height: calc(3.9em + 16px);
 }
 
-/* Description (W0.1): markdown, two lines until "more". Clamped, every block
-   below the one wrapper flows inline, so the two lines read as the brief's
-   prose rather than a heading and a gap. */
-.detail-description-wrap { display: flex; align-items: flex-end; gap: 6px; min-width: 0; }
+/* Description (W11 rule 3): closed until the "description" link after the
+   title opens it -- then the rendered markdown under the title, scrolling
+   inside past 40vh. */
+.detail-description-link {
+  flex: none; font: inherit; font-size: 12px; color: var(--color-accent-400);
+  background: none; border: 0; padding: 0 2px; cursor: pointer; text-decoration: underline;
+}
 .detail-description {
-  flex: 1; min-width: 0; margin: 0;
+  margin: 0; min-width: 0; max-height: 40vh; overflow-y: auto;
   font-size: var(--density-body-size); line-height: 1.5; color: var(--color-neutral-300);
 }
-.detail-description[data-expanded="false"] {
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
-}
-.detail-description[data-expanded="false"] :is(h1, h2, h3, h4, h5, h6, p, ul, ol, li, blockquote, pre, table, thead, tbody, tr, th, td) {
-  display: inline; margin: 0; padding: 0; font-size: inherit; font-weight: inherit; white-space: normal;
-}
-.detail-description[data-expanded="false"] :is(h1, h2, h3, h4, h5, h6, p, li, pre, tr)::after { content: " "; }
-.detail-description[data-expanded="true"] { max-height: 40vh; overflow-y: auto; }
-.detail-description[data-expanded="true"] :is(h1, h2, h3) { font-size: 14px; font-weight: 600; margin: 10px 0 4px; }
-.detail-description[data-expanded="true"] .detail-description-md > :first-child { margin-top: 0; }
-.detail[data-fit="tighter"] .detail-description[data-expanded="false"],
-.detail[data-fit="tightest"] .detail-description[data-expanded="false"] { -webkit-line-clamp: 1; }
-.detail[data-fit="tighter"] .detail-description[data-expanded="true"],
-.detail[data-fit="tightest"] .detail-description[data-expanded="true"] { max-height: 20vh; }
-.detail-description-more { flex: none; font-size: 12px; padding: 0 2px; }
+.detail-description :is(h1, h2, h3) { font-size: 14px; font-weight: 600; margin: 10px 0 4px; }
+.detail-description > :first-child { margin-top: 0; }
+.detail[data-fit="tighter"] .detail-description,
+.detail[data-fit="tightest"] .detail-description { max-height: 20vh; }
 
-/* Gate card (W0.3): content in a 720px column instead of hugging 200px of a
-   964px card; above 1280 the findings line and the judge note sit side by
-   side. At any fit step each collapses to one line with "+N more". */
-.gate-card > .attention-head,
-.gate-card > .gate-actions,
-.gate-card > .gate-artifacts,
-.gate-card > .composer { max-width: 720px; }
+/* The judge note in the item card (W0.3): at any fit step it collapses to one
+   entry with "+N more". */
 .gate-notes {
-  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px 16px; align-items: start; max-width: 1200px;
+  display: grid; grid-template-columns: minmax(0, 1fr);
+  gap: 10px 16px; align-items: start; max-width: 720px;
 }
-.gate-notes > :only-child { grid-column: 1 / -1; max-width: 720px; }
-.gate-notes .gate-deferred, .gate-notes .gate-judge-note { margin: 0; }
-.gate-actions .gate-artifacts { display: contents; }
+.gate-notes .gate-judge-note { margin: 0; }
 .gate-more { display: none; flex: none; font-size: 11px; color: var(--color-text-muted); }
 /* Two lines, never an ellipsis: the judge note is the reason (W5). */
-.detail[data-fit] .gate-deferred,
 .detail[data-fit] .gate-judge-entry {
   min-width: 0; overflow: hidden;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
@@ -695,21 +658,12 @@ textarea.detail-title-input {
 .detail[data-fit] .gate-judge-entry:not(:first-child) { display: none; }
 .detail[data-fit] .gate-more { display: inline; }
 @media (max-width: 1279px) {
-  .gate-notes { grid-template-columns: minmax(0, 1fr); max-width: 720px; }
-  /* 1024–1279 (W2.5): a 360px inspector, and an action bar that wraps to
-     two rows — buttons + hint, then the secondary actions — instead of
-     ellipsizing the hint to nothing. */
+  /* 1024–1279 (W2.5): a 360px inspector. */
   .item-split { grid-template-columns: 360px minmax(0, 1fr); }
   /* Five tabs in a 360px column broke "Timeline · 42" onto two lines: one
      line, scrolling inside the inspector if it must. */
   .inspector .tabs { flex-wrap: nowrap; overflow-x: auto; }
   .inspector .tab { white-space: nowrap; flex: none; }
-  /* A 360px column cut a session's metrics line ("attempt 1 · 54.3k tokens ·
-     $0.410 · 6m") — it wraps to a second line instead. */
-  .action-bar-row { flex-wrap: wrap; row-gap: var(--space-3); }
-  .action-bar-left, .action-bar-right { flex: 1 1 100%; }
-  .action-bar-right { justify-content: flex-end; }
-  .action-bar-mid:empty { display: none; }
 }
 
 @media (max-width: 1023px) {
@@ -745,21 +699,24 @@ textarea.detail-title-input {
 .event-row { padding-block: calc(var(--density-row-pad) - 1px); }
 
 /* Fit steps close the page's own spacing before anything is hidden: at 800px
-   tall a gate item's three 24px gaps and the card's padding were the last
-   ~70px the split needed. On a short viewport (700px) the last step also
-   takes the title to one line and the description off -- the split's floor
-   outranks the brief's prose there. */
+   tall a gate item's gaps and the card's padding were the last ~70px the
+   split needed. On a short viewport (700px) the last step also takes the
+   title to one line -- the split's floor outranks the title's second line. */
 .detail.item-page[data-fit] { gap: 12px; padding-top: 16px; }
-.detail[data-fit] .gate-card { padding: 10px 14px; gap: 8px; }
-.detail[data-fit] .gate-notes .gate-deferred { border-top: 0; padding-top: 0; }
+.detail[data-fit] .item-card { padding: 10px 14px; gap: 8px; }
 .detail[data-fit] .graph-split-graph { padding-bottom: 0; }
 .detail[data-fit="tightest"] .detail-title { -webkit-line-clamp: 1; }
-.detail[data-fit="tightest"] .detail-description-wrap { display: none; }
 /* A judge entry is a <p>: its default bottom margin padded a one-line note
    into a two-line box. The note's flex gap already spaces entries. */
 .gate-judge-entry { margin: 0; }
 .detail[data-fit] .gate-judge-note { padding: 4px 10px; }
-/* Last step: the hero's fix-cycle / capped tags stack under the node and set
-   the header's height; the Tasks rows still carry the cycle. */
-.detail[data-fit="tightest"] .detail-hero .tag { display: none; }
 .detail.item-page[data-fit="tightest"] { gap: 8px; padding-top: 10px; }
+/* Last step with a composer open in the card: the judge note to one line, the
+   composer's own head (the pressed button and its submit label already name
+   it) off, and the card's padding closed up. */
+.detail[data-fit="tightest"] .gate-judge-entry { -webkit-line-clamp: 1; }
+.detail[data-fit="tightest"] .item-card .composer-head { display: none; }
+.detail[data-fit="tightest"] .item-card { padding-block: 8px; }
+.detail[data-fit="tightest"] .escalation-thread p {
+  overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1;
+}

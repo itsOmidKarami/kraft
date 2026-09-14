@@ -1,6 +1,7 @@
 /* ══ analytics (design 35) ════════════════════════════════════════════════ */
 .analytics-body { padding: 24px 32px 32px; display: flex; flex-direction: column; gap: 30px; }
-.analytics-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.analytics-head { display: flex; align-items: baseline; gap: 12px; }
+.analytics-spacer { flex: 1; }
 .analytics-head h2 { font-size: 20px; margin: 0; }
 .analytics-scope { font-size: 12px; color: var(--color-neutral-500); }
 
@@ -20,16 +21,18 @@ label.chip select {
   color: var(--color-accent-300);
 }
 
-.kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 20px; }
+/* W11 · E: three tiles, no boxes, a hairline between neighbours. */
+.kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .kpi {
-  display: flex; flex-direction: column; gap: 6px;
-  padding-left: 12px; border-left: 1px solid var(--color-accent-700);
+  display: flex; flex-direction: column; gap: 6px; min-width: 0;
+  padding: 0 24px; border-left: 1px solid var(--color-divider);
 }
+.kpi:first-child { padding-left: 0; border-left: 0; }
 .kpi-label {
   font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
   color: var(--color-text-muted);
 }
-.kpi-value { font-size: 26px; line-height: 1; font-weight: 500; letter-spacing: -0.02em; }
+.kpi-value { font-size: 30px; line-height: 1; font-weight: 500; letter-spacing: -0.02em; overflow-wrap: anywhere; }
 .kpi-sub { font-size: 11px; color: var(--color-neutral-500); line-height: 1.4; }
 
 .chart { display: flex; flex-direction: column; gap: 10px; }
@@ -102,12 +105,17 @@ label.chip select {
 .stop-n { text-align: right; color: var(--color-text); }
 
 @media (max-width: 1023px) {
-  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .analytics-tables { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 767px) {
+  /* E.5: one tile per row, 26px, the hairline runs under each instead. */
+  .kpis { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .kpi { padding: 0 0 16px; border-left: 0; border-bottom: 1px solid var(--color-divider); }
+  .kpi:last-child { padding-bottom: 0; border-bottom: 0; }
+  .kpi-value { font-size: 26px; }
   .analytics-head { flex-wrap: wrap; }
+  .analytics-spacer { display: none; }
   .analytics-filters { flex-wrap: wrap; }
   .stop-row { grid-template-columns: 1fr; gap: 4px; }
   .stop-n { text-align: left; }
