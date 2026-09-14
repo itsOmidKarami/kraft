@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   CaretDown,
@@ -9,9 +9,8 @@ import {
   SidebarSimple,
 } from "@phosphor-icons/react";
 import * as api from "../api";
-import { deriveState } from "../deriveState";
 import { SETTINGS_GROUP_LABEL, SETTINGS_NAV } from "../settingsNav";
-import { useStore } from "../store";
+import { useItemStates, useStore } from "../store";
 import { repoName } from "../format";
 import { HealthBadge } from "./HealthBadge";
 import type { Health } from "../types";
@@ -83,16 +82,12 @@ export function AppNav() {
     if (onSettings) setSettingsOpen(true);
   }, [onSettings]);
 
-  const needsYouCount = useMemo(
-    () => items.filter((i) => deriveState(i).needsYou).length,
-    [items],
-  );
-  const runningCount = useMemo(
-    () =>
-      items.filter((i) => ["running", "rate_limited", "waiting"].includes(deriveState(i).state))
-        .length,
-    [items],
-  );
+  // An escalating item is running, not waiting on you (W11 · J.3).
+  const stateOf = useItemStates();
+  const needsYouCount = items.filter((i) => stateOf(i).needsYou).length;
+  const runningCount = items.filter((i) =>
+    ["running", "rate_limited", "waiting", "escalating"].includes(stateOf(i).state),
+  ).length;
 
   const toggle = () => {
     const next = !collapsed;

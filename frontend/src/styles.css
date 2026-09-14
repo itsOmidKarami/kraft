@@ -165,6 +165,9 @@ a[href]:not([class]) { color: var(--color-accent-400); }
 .glyph[data-status="budget"]      { color: var(--color-accent);      border-color: var(--color-status-budget); }
 .glyph[data-status="not_started"] { color: var(--color-neutral-500); border-color: var(--color-neutral-800); }
 .glyph[data-status="abandoned"]   { color: var(--color-neutral-500); border-color: var(--color-neutral-800); }
+/* W11 · J: an agent is on it -- accent, the colour of the controls that start one. */
+.glyph[data-status="escalating"],
+.glyph[data-status="escalated"]  { color: var(--color-accent);      border-color: var(--color-accent-700); }
 /* Prototype gives rate_limited/waiting their own color too, distinct from the
    unstyled-fallback neutral-500/800 they had before (no rule existed for
    either key) -- this improves the existing session-row rendering as well. */
@@ -231,12 +234,19 @@ a[href]:not([class]) { color: var(--color-accent-400); }
   background: var(--color-surface); box-shadow: var(--shadow-md);
 }
 .overflow-menu button {
+  display: flex; align-items: center; gap: 8px;
   text-align: left; font: inherit; font-size: 13px; cursor: pointer;
   padding: 6px 10px; border: 0; border-radius: 6px;
   background: transparent; color: var(--color-text);
 }
 .overflow-menu button:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
 .overflow-menu button[data-danger] { color: var(--color-danger); }
+/* The item card's More actions (W11 rule 8): 280px, right-aligned to its button. */
+.overflow-menu[data-wide] { width: 280px; max-width: calc(100vw - 32px); }
+.overflow-menu button[aria-disabled="true"] { color: var(--color-text-muted); cursor: default; }
+.overflow-menu button[aria-disabled="true"]:hover { background: transparent; }
+.overflow-sep { height: 1px; margin: 4px 6px; background: var(--color-divider); }
+.overflow-text { display: inline-flex; align-items: center; gap: 6px; }
 .overflow-confirm {
   margin: 0; padding: 8px 10px 6px; font-size: 12px; line-height: 1.4;
   color: var(--color-text-muted); max-width: 240px;
@@ -602,7 +612,6 @@ a[href]:not([class]) { color: var(--color-accent-400); }
 .show-all { font-size: 12px; margin-top: 6px; align-self: flex-start; }
 
 /* ══ Done-group archiving (design 06) ═══════════════════════════════════ */
-.board-row-archive { display: flex; align-items: center; gap: 4px; margin-left: auto; }
 .board-floating-bar {
   position: sticky; bottom: 16px; align-self: center;
   display: flex; align-items: center; gap: 12px;
@@ -611,9 +620,11 @@ a[href]:not([class]) { color: var(--color-accent-400); }
   font-size: 13px;
 }
 
+/* W11 · B.1: glyph · title and meta · mini-chain · node · the row's one button.
+   The button column is `auto`; a row with no button keeps the empty cell. */
 .board-row {
-  display: grid; grid-template-columns: 22px minmax(0, 1fr) 200px 150px;
-  gap: 16px; align-items: center;
+  display: grid; grid-template-columns: 22px minmax(0, 1fr) 150px 110px auto;
+  gap: 16px; align-items: center; min-height: 63px; box-sizing: border-box;
   padding: var(--density-row-pad); border-radius: 8px; cursor: pointer;
   /* The same fading hairline every other list row in the interface carries
      (spec §2). Without it a row's own gate actions sit as close to the next
@@ -643,21 +654,38 @@ a[href]:not([class]) { color: var(--color-accent-400); }
 .board-row:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
 /* 14px, first grid column, centred on a one-line row (UI v3 · G1-06). */
 .board-row > input[type="checkbox"] { width: 14px; height: 14px; margin: 0; align-self: center; }
+:root[data-density="comfortable"] .board-row { min-height: 72px; }
 .board-row-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-/* A list title: two lines, never an ellipsis (W5.3). */
+/* W11 · B.2 reverses W5.3 for the board: title and meta are one line each,
+   cut with an ellipsis, the whole text on hover (sweep/README.md allowlist). */
 .board-row-title {
   font-size: 14px; font-weight: 500; color: var(--color-text); text-decoration: none;
-  min-width: 0; overflow: hidden;
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
 .board-row-title:hover { color: var(--color-accent-300); }
+/* The meta line is parts, not one text run: a one-line clamp wraps what does
+   not fit onto a hidden second line inside the box, where text-overflow left
+   the reason's span running past the viewport. Still one line and an "…". */
 .board-row-meta {
-  display: flex; align-items: center; gap: 10px; min-width: 0;
-  font-size: 11.5px; color: var(--color-neutral-500);
-  white-space: nowrap; overflow: hidden;
+  min-width: 0; font-size: 11.5px; color: var(--color-neutral-500);
+  overflow: hidden; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1;
 }
+/* The separator is the line's own text, not its part's: before the bead's
+   <code> it would take the monospace font and its wide spaces. */
+.board-row-meta > * + *::before { content: " · "; color: var(--color-neutral-500); font-family: var(--font-body); }
+.board-row-meta-current + *::before { content: none; }
 .board-row-meta code { font-family: ui-monospace, Menlo, monospace; }
 .board-row-meta-current { display: none; }
+.board-row-reason[data-tone="accent"] { color: var(--color-accent-300); }
+.board-row-reason[data-tone="neutral"] { color: var(--color-neutral-300); }
+.board-row-reason .task-count { white-space: nowrap; }
+.board-row-action { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; min-width: 0; }
+.board-row-action .btn { font-size: 12px; padding: 4px 10px; min-height: 28px; white-space: nowrap; }
+.board-row-action .form-error { margin: 0; font-size: 11px; }
+/* The pending state on the button, until the row moves group (B.5). */
+.btn-spin { animation: btn-spin 900ms linear infinite; }
+@keyframes btn-spin { to { transform: rotate(360deg); } }
 /* flex-start: a `fix·1` / retry pill keeps its own width, not the column's (W4.6). */
 .board-row-current {
   display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0;
@@ -762,27 +790,12 @@ a[href]:not([class]) { color: var(--color-accent-400); }
 .peek-log-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .peek-log-time { color: var(--color-text-muted); margin-right: 6px; }
 
-/* ══ gate (design 2a inline · 4a card) ════════════════════════════════════ */
-.gate-inline {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px;
-}
-.gate-inline .btn { font-size: 12px; padding: 3px 9px; min-height: 24px; }
-.gate-name {
-  display: inline-flex; align-items: center; gap: 5px;
-  font-size: 12px; color: var(--color-accent-300);
-}
+/* ══ gate (design 4a card) ════════════════════════════════════════════════ */
 .gate-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.gate-artifacts { display: flex; gap: 8px; flex-wrap: wrap; }
 .current-node > details > summary { cursor: pointer; padding: 8px 0; }
 .node-group-head { display: inline-flex; align-items: baseline; gap: 10px; }
 .current-node > details[open] > summary .row-title { color: var(--color-text); }
 .gate-actions .btn { font-size: 13px; }
-/* .gate-reject fully replaces its row (Gate.tsx swaps it in via ternary), so
-   width:100% alone was enough. .gate-escalate instead sits alongside a card's
-   own retry/answer/approve button -- flex-basis pushes it onto its own line
-   rather than squeezing into the shared no-wrap-by-default row (Kraft-xhft). */
-.gate-reject, .gate-escalate { display: flex; flex-direction: column; gap: 8px; width: 100%; flex-basis: 100%; }
-.gate-reject textarea.input, .gate-escalate textarea.input { min-height: 68px; font-size: 13px; }
 /* One line, never a list -- Kraft-a4js: an unbounded findings list here had
    no scroller and no max-height, so it pushed the graph and both panes off
    the viewport. The findings themselves live on the Timeline, which already
@@ -792,10 +805,6 @@ a[href]:not([class]) { color: var(--color-accent-400); }
   border-top: 1px solid var(--color-divider);
   font-size: 12px; color: var(--color-neutral-300);
 }
-/* The peek's gate card (Gate.tsx) still lists concerns/deferred findings as a
-   <ul> -- it lives in a pane that scrolls, so it keeps the list. Markers off,
-   rows spaced. */
-ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap: 6px; }
 .gate-judge-note {
   margin: 10px 0 0; padding: 10px 12px;
   border: 1px solid var(--color-accent-700);
@@ -815,9 +824,7 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
     0 0 0 1px var(--color-accent-700),
     0 0 24px color-mix(in srgb, var(--color-accent) 18%, transparent);
 }
-.attention-head { display: flex; align-items: center; gap: 10px; }
 .attention-glyph { color: var(--color-accent); flex: none; }
-.attention-text { display: flex; flex-direction: column; min-width: 0; }
 .attention-title { font-size: 15px; font-weight: 500; }
 .attention-sub { font-size: 12px; color: var(--color-neutral-500); }
 /* Rendered markdown is taller than the plain-text line it replaced -- cap it
@@ -845,28 +852,42 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
   height: 100%; min-height: 0; overflow: hidden;
   padding-bottom: 0;
 }
-/* Meta + title + description left, hero right (11 · 38). */
+/* One meta line with the status run on the same row, the title under both
+   (W11 · A, design 1e). */
 .detail-head {
   display: grid; grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas: "meta hero" "body hero" "progress progress";
-  column-gap: 24px; row-gap: 8px; align-items: start;
+  grid-template-areas: "meta run" "body body" "progress progress";
+  column-gap: 16px; row-gap: 8px; align-items: center;
 }
+/* One line, ending in "…" (rule 1); the whole line is on its title. A one-line
+   clamp, not text-overflow: what does not fit wraps onto a hidden second line
+   inside the box, so a part's span never runs past the viewport, and the line
+   reads whole up to one cut at its end -- per-part cuts turned a long repo
+   into "defa… · kraft-cb… · ·…". Same as the board row's meta line. */
 .detail-meta {
-  grid-area: meta;
-  /* Wraps rather than running under the hero column: a long repo name plus
-     the id (W5.1) no longer fit one line at 1280. */
-  display: flex; align-items: center; gap: 4px 10px; flex-wrap: wrap; min-width: 0;
-  font-size: 12px; color: var(--color-neutral-500); white-space: nowrap;
+  grid-area: meta; min-width: 0;
+  overflow: hidden; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1;
+  font-size: 12px; color: var(--color-neutral-500);
 }
 .detail-meta code { font-family: ui-monospace, Menlo, monospace; }
+/* The separator is the line's own text, not the part's: before the bead's
+   <code> it would take the monospace font. */
+.detail-meta-part + .detail-meta-part::before { content: " · "; font-family: var(--font-body); }
+/* Chip · node · 5/8 · 6m · cycle pill: never wraps, never shrinks (rule 2). */
+.detail-run {
+  grid-area: run; display: flex; align-items: center; gap: 8px;
+  white-space: nowrap; font-size: 12px; color: var(--color-neutral-500);
+}
 .mr-link {
   display: inline-flex; align-items: center; gap: 4px;
   color: var(--color-accent-300); text-decoration: none;
 }
 .mr-link:hover { text-decoration: underline; }
-/* Inline at the end of the meta parts, not floated to the far right (G7-04). */
+/* The run's first word, not floated to the far right (G7-04). */
 .detail-status { margin-left: 0; }
-.detail-meta .overflow { margin-left: auto; }
+/* W11 · J.5: an escalating item's chip. */
+.tag-escalating { display: inline-flex; align-items: center; gap: 4px; background: var(--color-accent-900); color: var(--color-accent-300); }
 /* Title + description: one grid area ("body"), collapsible as a unit
    (Kraft-yx8v) so a wheel over the top block hides both without touching the
    meta line, action bar or stage graph. */
@@ -878,30 +899,18 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
 .detail-head-collapsible[data-collapsed="true"] { max-height: 0; opacity: 0; }
 .detail-head-collapsible > [data-testid="item-title"] { min-width: 0; }
 .detail-head-expand { flex: none; }
-.detail-title-row { display: flex; align-items: center; gap: 8px; }
+.detail-title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .detail-title-pencil { opacity: 0; transition: opacity 120ms; }
 [data-testid="item-title"]:hover .detail-title-pencil { opacity: 1; }
 /* The item's own title is the headline: it is the words the person wrote and
    the only thing that tells two open items apart. The node is where that work
    has got to — strong, but subordinate to what the work is. */
 .detail-title {
-  font-size: 26px; line-height: 1.15; margin: 0; font-weight: 500;
+  font-size: 22px; line-height: 1.2; margin: 0; font-weight: 500; min-width: 0;
   letter-spacing: -0.02em; color: var(--color-text);
   /* Two lines at most (W0.1); the full title is on the `title` attribute. */
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
   overflow: hidden; overflow-wrap: anywhere;
-}
-.detail-hero {
-  grid-area: hero; display: flex; flex-direction: column; align-items: flex-end;
-  gap: 4px; margin-top: 0; text-align: right;
-}
-.hero-node { font-size: 22px; line-height: 1.2; font-weight: 500; color: var(--color-neutral-300); }
-.hero-sub { font-size: 12px; color: var(--color-neutral-500); }
-
-@media (max-width: 1023px) {
-  /* No room for two columns: the hero stacks under the description. */
-  .detail-head { grid-template-columns: minmax(0, 1fr); grid-template-areas: "meta" "body" "hero" "progress"; }
-  .detail-hero { align-items: flex-start; text-align: left; }
 }
 
 .control-row {
@@ -916,9 +925,6 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
   font-size: 11px; color: var(--color-text-muted);
 }
-.capped-hint { margin: 6px 0 0; }
-.control-actions-right { display: flex; align-items: center; gap: 10px; flex: none; margin-left: auto; }
-.control-usage { font-size: 12px; color: var(--color-text-muted); margin-left: 0; white-space: nowrap; }
 
 .tab-body { display: flex; flex-direction: column; gap: 2px; }
 .row-action { font-size: 12px; }
@@ -973,14 +979,12 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
    head or its tail to an ellipsis. */
 .path { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
 
-/* ══ documents tab (design 4e) ════════════════════════════════════════════ */
+/* ══ documents tab (design 4e; W11 · G) ═══════════════════════════════════ */
 .linked-docs { display: flex; flex-direction: column; }
-/* W10.D: icon | stacked text, not columns. Line 1 is the title (2-line clamp)
-   with its chips right-aligned beside it, line 2 the path, cut from the left
-   on one line so the filename survives. Real rows carry 90-char worktree
-   paths and two chips; columns squeezed the title to nothing. */
+/* Icon · title over `node · hook · time` · one kind label. No path in the row:
+   it is the row's tooltip and the pane header's (G.3). */
 .doc-row {
-  display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 12px;
+  display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 12px;
   align-items: start; padding: 11px 4px;
   border: 0; border-radius: 6px; color: inherit; font: inherit;
   text-align: left; cursor: pointer;
@@ -991,64 +995,34 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
 .doc-row:hover { background: color-mix(in srgb, var(--color-text) 4%, transparent); }
 .doc-icon { color: var(--color-accent); }
 .doc-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.linked-docs .doc-text {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas: "title chips" "path path"; gap: 2px 10px;
+/* Two lines, never an ellipsis (W5): node · hook · time and the session's id. */
+.doc-sub {
+  font-size: 12px; color: var(--color-neutral-500); overflow-wrap: anywhere;
+  overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
 }
-.linked-docs .doc-title { grid-area: title; }
-.doc-chips { grid-area: chips; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: flex-start; align-self: start; gap: 4px; }
-/* One line, ellipsis at the start (a deliberate cut, the whole path in title;
-   data-allow-ellipsis tells the sweep). Reverses W5's whole-path rule for this
-   list only. The inner <span dir="ltr"> keeps the leading "." in place. */
-.linked-docs .doc-path {
-  grid-area: path; min-width: 0;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal;
-  direction: rtl; text-align: left;
-}
-/* On a selected row's accent-900 fill the accent itself is 4.43:1 (W10.A). */
-.doc-attached { position: relative; gap: 4px; color: var(--color-accent-400); border-color: var(--color-accent-400); }
-/* The row decides from the inspector's width. ≤ 520px: "attached at intake" is
-   a paperclip, its words kept for assistive tech and in the chip's title. */
-.inspector { container: inspector / inline-size; }
-@container inspector (max-width: 520px) {
-  .doc-attached { padding-inline: 5px; }
-  .doc-attached-text { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); white-space: nowrap; }
-}
-/* Chips sit beside the title only while they fit in 40% of it. Full-text
-   chips (~200px) stop fitting until the inspector is past ~600px, so there
-   they drop to line 3 under the path.
-   ponytail: a width guess for the two known chips, not a measurement; move the
-   bound if a chip's text changes. */
-@container inspector (min-width: 521px) and (max-width: 600px) {
-  .linked-docs .doc-text:has(.doc-attached) { grid-template-areas: "title title" "path path" "chips chips"; }
-  .linked-docs .doc-text:has(.doc-attached) .doc-chips { justify-content: flex-start; }
-}
+/* An intake attachment's paperclip, its words in the tooltip. On a selected
+   row's accent-900 fill the accent itself is 4.43:1 (W10.A). */
+.doc-attached { display: inline-flex; vertical-align: middle; color: var(--color-accent-400); }
+/* The gate's own document, pinned in both scopes (G.2). */
+.linked-docs .doc-row[data-gate] { background-color: color-mix(in srgb, var(--color-accent) 8%, transparent); }
+.doc-filter { margin: 4px 0 8px; font-size: 13px; }
+/* One folded node: `▸ verify · 1 review · 2 sessions` and its count. It wraps
+   rather than ellipsizing (not on the allowlist). */
+.doc-fold { align-items: center; color: var(--color-text-muted); }
+.doc-fold-caret { text-align: center; }
+.doc-fold-label { font-size: 12.5px; min-width: 0; overflow-wrap: anywhere; }
+.doc-fold-count { font-size: 11px; color: var(--color-text-muted); }
 .doc-title { font-size: 14px; }
 /* A list title clamps at two lines (W5.3), Documents pane only: Changes'
    `.change-row .doc-title` wraps long file paths on purpose (Kraft-l9lj). */
 .linked-docs .doc-title:not(.path) {
   overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
 }
-.doc-path {
-  font-size: 11px; color: var(--color-text-muted);
-  font-family: ui-monospace, Menlo, monospace;
-}
-.doc-kind { font-size: 10px; padding: 1px 7px; justify-self: start; }
-.doc-kind, .doc-attached { white-space: nowrap; }
+.doc-kind { font-size: 10px; padding: 1px 7px; justify-self: start; white-space: nowrap; }
 .doc-node { font-size: 12px; color: var(--color-neutral-500); }
 .doc-foot { font-size: 12px; color: var(--color-text-muted); padding: 12px 4px 0; }
 .doc-foot code { font-family: ui-monospace, Menlo, monospace; }
 
-/* ══ capped card (design 4b) ══════════════════════════════════════════════ */
-.cycle-trace {
-  display: grid; grid-template-columns: auto 1fr auto; gap: 6px 12px;
-  font-size: 12px; padding: 8px 10px;
-  border-radius: 6px; border: 1px solid var(--color-divider);
-}
-.cycle-row { display: contents; }
-.cycle-n { color: var(--color-neutral-500); }
-.cycle-failed { color: var(--color-neutral-300); }
-.cycle-log { font-size: 12px; padding: 0 6px; min-height: 24px; min-width: 24px; }
 .capped-actions { align-items: center; }
 .field-hint { color: var(--color-text-muted); }
 
@@ -1141,15 +1115,11 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
   margin: 0; padding: 0 22px 14px;
 }
 
-/* ══ log modal (design 6c) ════════════════════════════════════════════════ */
-.log-modal {
-  width: 880px; max-width: 100%; padding: 0; gap: 0;
-  max-height: calc(100vh - 88px); overflow: hidden;
-}
+/* ══ log header (design 6c) ═══════════════════════════════════════════════ */
 /* One 41px row (12 · 38): Log · session id · hook · attempt · lines · source
    chips · following · Copy · maximize. The Tasks row already says which
    session this is, so the title block above it was saying it twice. */
-/* LogModal's header wraps; the pane's (W5.5) is one row at every width. */
+/* The base header wraps; the pane's (W5.5) is one row at every width. */
 .log-head {
   display: flex; align-items: center; gap: 6px 10px;
   min-height: 41px; box-sizing: border-box; padding: 6px 14px;
@@ -1188,11 +1158,8 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
 }
 .log-count { font-size: 11px; color: var(--color-text-muted); white-space: nowrap; flex: none; }
 
-/* LogModal and Events (RightPane/Events.tsx) predate the one-row pane header
- * above and still render the old two-row anatomy — title block over a
- * filters row. Their shared classes were deleted with that rewrite even
- * though these two callers still mount them, so restore them scoped to
- * `.log-modal` (and unscoped for `.log-filters`, which only they use). */
+/* Events (RightPane/Events.tsx) predates the one-row pane header above and
+ * still renders the old two-row anatomy — title block over a filters row. */
 .log-title { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1; }
 .log-meta {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -1202,13 +1169,6 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
   display: flex; gap: 6px; align-items: center;
   padding: 8px 22px; border-bottom: 1px solid var(--color-divider);
 }
-.log-modal .log-head {
-  align-items: flex-start; gap: 14px;
-  height: auto; padding: 18px 22px 14px; overflow-x: visible;
-}
-.log-modal .log-head .glyph { margin-top: 2px; }
-.log-modal .log-hook { font-family: inherit; font-size: 16px; font-weight: 500; color: var(--color-text); }
-.log-modal .log-count { margin-left: auto; }
 
 /* Kraft-061w: there is no `.pane` rule anywhere, so `.log-body`'s `flex: 1`
    below has no flex parent and no bounded height -- it never becomes a
@@ -1370,10 +1330,6 @@ ul.gate-deferred { list-style: none; display: flex; flex-direction: column; gap:
 }
 .attachment-chip button { border: 0; background: transparent; color: inherit; cursor: pointer; padding: 0; }
 .attachment-hits { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
-
-/* ══ paused card (design 4c) ══════════════════════════════════════════════ */
-.paused-card { padding: 16px 18px; gap: 12px; }
-.paused-card textarea.input { min-height: 70px; font-size: 14px; }
 
 /* ══ login (design 1m) ════════════════════════════════════════════════════ */
 .login {
@@ -1607,7 +1563,9 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; w
 .board-groups { max-width: 1280px; margin: 0 auto; }
 
 @media (max-width: 1279px) {
-  .board-row { grid-template-columns: 22px minmax(0, 1fr) 160px 130px; }
+  /* 1024–1279 drops the mini-chain column (W11 · B.1). */
+  .board-row { grid-template-columns: 22px minmax(0, 1fr) 110px auto; }
+  .board-row > .chain-bar.sm { display: none; }
   /* The item split's 360px lives in work_item.css, after its base rule. */
   /* The pane floats over the rows: dim what it covers (46). */
   .peek-scrim {
@@ -1617,11 +1575,8 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; w
     display: block; position: fixed; inset: 0; z-index: 24;
     background: rgba(0, 0, 0, 0.4);
   }
-  /* Footnotes and usage strings go first (45). The action-bar hint stays:
-     the bar wraps to two rows instead (W2.5, work_item.css). */
+  /* Footnotes go first (45). */
   .group-head-note { display: none; }
-  /* Fold the usage string into its $ figure, the rest on the title attribute. */
-  .control-usage-detail { display: none; }
   /* The item page's document pane is ~560px here: long code lines wrap
      instead of running past the viewport. */
   .doc-modal-body pre { white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -1633,30 +1588,25 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; w
   /* ONE grid contract for .board-row, both sides stated together, because
      the tracks here and the children BoardRow renders are a single fact:
 
-       BoardRow always renders four children, in this order --
+       BoardRow always renders five children, in this order --
          1 StatusGlyph (or the Done group's checkbox)
          2 .board-row-main   (title + meta line)
          3 .chain-bar.sm
-         4 .board-row-current (node text, tags, Archive + overflow)
+         4 .board-row-current (node text, fix-cycle tag)
+         5 .board-row-action  (the row's one button, or an empty cell)
 
-       >= 1440   22 · 1fr · 280 · 170   all four
-       1280-1439 22 · 1fr · 200 · 150   all four
-       1024-1279 22 · 1fr · 160 · 130   all four
-       768-1023  22 · 1fr · 120         child 3 hidden below
-       <= 767    (inherits)             child 3 hidden
-       <= 640    22 · 1fr               child 3 hidden, child 4 placed in
-                                        column 2 on its own row
+       >= 1280   22 · 1fr · 150 · 110 · auto   all five
+       1024-1279 22 · 1fr · 110 · auto         child 3 hidden
+       768-1023  22 · 1fr · 120 · auto         child 3 hidden
+       <= 767    22 · 1fr · auto               children 3 and 5 hidden
 
      Never change a track count without changing what is hidden in the same
-     rule: a fourth in-flow child against three tracks auto-places into an
-     implicit second row in the 22px glyph track and squashes itself there.
+     rule: an in-flow child with no track auto-places into an implicit second
+     row in the 22px glyph track and squashes itself there.
 
-     At 768-1023 the chain bar is what goes, not .board-row-current: the
-     current node moves into the meta line (50, §4), but the Archive button
-     and the Copy-id overflow menu live in child 4 and §1 says buttons hide
-     last. So child 4 keeps the 120px track and the chain is dropped. */
-  .board-row { grid-template-columns: 22px minmax(0, 1fr) 120px; }
-  .board-row > .chain-bar.sm { display: none; }
+     At 768-1023 the current node moves into the meta line (50, §4); child 4
+     keeps its track for the fix-cycle tag. */
+  .board-row { grid-template-columns: 22px minmax(0, 1fr) 120px auto; }
   /* The stacked item split (47) lives in work_item.css: rules here lost to
      its unconditional `.item-split` columns, bundled after this file. */
   /* Only the node text goes -- the Archive button, Copy-id overflow menu
@@ -1664,18 +1614,16 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; w
      text, and stay put (§1: buttons hide last). */
   .board-row-current-node { display: none; }
   .board-row-meta-current { display: inline; color: var(--color-accent-300); font-weight: 500; }
+  .board-row-meta-current::after { content: " · "; color: var(--color-neutral-500); font-weight: 400; }
   .board-groups { padding-left: 16px; padding-right: 16px; }
-  /* Meta lines wrap rather than run under the edge: board rows, the item
-     header's meta line, a document's long code lines and the timeline's
-     filter row. */
-  .board-row-meta { flex-wrap: wrap; white-space: normal; }
-  .detail-meta { flex-wrap: wrap; white-space: normal; row-gap: 4px; }
+  /* A document's long code lines and the timeline's filter row wrap rather
+     than run under the edge. */
   .doc-modal-head, .log-filters { flex-wrap: wrap; }
   /* Dialogs: an 820px width sizes its grid track before max-width can clamp
      it (the phone block's old note) — at 768 New work item ran off the left
      edge. One column, full width, under 1024. */
   .dialog-backdrop { padding: 16px; }
-  .intake, .doc-modal, .diff-modal, .log-modal { width: 100%; }
+  .intake, .doc-modal, .diff-modal { width: 100%; }
   .intake-grid { grid-template-columns: 1fr; }
 
   /* Settings (W2.4): one column, label above its field. */
@@ -1724,18 +1672,22 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; w
   /* the chain bar is already hidden by the <= 1023 rule; the current-node
      column stacks under the title (grid-column: 2), and the glyph keeps its
      own 22px column beside the title -- see the grid contract above. */
-  .board-row { grid-template-columns: 22px minmax(0, 1fr); gap: 10px; padding: 12px 8px; }
-  .board-row > .board-row-current { grid-column: 2; }
-  .board-row-meta { flex-wrap: wrap; white-space: normal; }
-  .gate-inline .btn, .board-row .btn { min-height: 44px; }
+  /* W11 · C.1: 64px rows -- glyph · one-line title over `repo · 15h · reason` ·
+     the node label right. No buttons: a tap opens the item, a long-press the
+     peek sheet, which carries the state's actions. */
+  .board-row { grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; padding: 12px 8px; min-height: 64px; }
+  .board-row > .board-row-action { display: none; }
+  .board-row-current-node { display: inline; }
+  .board-row-meta-current, .board-row-meta-desk, .board-row-ago-word { display: none; }
 
   .detail { padding: 16px 12px 24px; }
-  .detail-title { font-size: 22px; }
+  /* The run takes its own line under the meta line, wrapping if it must. */
+  .detail-head { grid-template-columns: minmax(0, 1fr); grid-template-areas: "meta" "run" "body" "progress"; }
+  .detail-run { flex-wrap: wrap; white-space: normal; }
 
   .row, .doc-row, .event-row, .hook-row, .cap-row, .node-row.node-row, .repo-row.repo-row {
     background: var(--hairline-24);
   }
-  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   /* by-node is 7 columns, by-repo is 5 — no readable width at 390px even
      wrapped. Stack each row into a card; `data-label` (added on the JSX
      spans) supplies the per-field caption via ::before, so this is a CSS-only
@@ -1769,13 +1721,12 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; w
   .template-editor, .access-grid { grid-template-columns: 1fr; }
   .dialog-backdrop { padding: 12px; align-items: flex-start; }
   /* Same trap `.intake` had (styles.css:774, fixed above): a grid item's own
-     declared `width` (820px doc-modal, 880px log-modal) sizes its track
-     before `max-width: 100%` has anything smaller to resolve against, so
-     neither ever actually clamped to the viewport. `.diff-modal` already got
-     this fix in the block below (Kraft-8mu.2); doc-modal and log-modal never
-     did. DocumentModal matters here — it's reachable from the phone Search
-     screen, not desktop-only, unlike the log viewer. */
-  .doc-modal, .diff-modal, .log-modal { max-height: calc(100vh - 24px); width: 100%; }
+     declared `width` (820px doc-modal) sizes its track before
+     `max-width: 100%` has anything smaller to resolve against, so it never
+     actually clamped to the viewport. `.diff-modal` already got this fix in
+     the block below (Kraft-8mu.2). DocumentModal matters here — it's
+     reachable from the phone Search screen, not desktop-only. */
+  .doc-modal, .diff-modal { max-height: calc(100vh - 24px); width: 100%; }
   /* Same bug, missed on the first pass: the global Cmd/Ctrl+K listener
      (App.tsx) isn't width-gated, only the trigger button is .desktop-only —
      so the non-embedded SearchOverlay modal is reachable at any width via a
@@ -1809,10 +1760,7 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; w
      ("spec · node 1 of 10"), and the segments still show progress. */
   .chain-bar.lg .chain-label { display: none; }
 
-  .gate-reject textarea.input, .gate-escalate textarea.input { font-size: 16px; min-height: 96px; }
-  .gate-reject .btn, .gate-escalate .btn { min-height: 44px; }
-
-  /* same zoom-lock as the gate-reject textarea above, on /search's input */
+  /* same zoom-lock as every phone input (below), on /search's input */
   .search-page .search-bar input[type="search"] { font-size: 16px; }
   /* 52vh was sized for the 700px desktop modal; /search is a full page that
      already scrolls, so don't also cap results to half the viewport */
@@ -1824,7 +1772,7 @@ textarea.template-yaml { min-height: 420px; font-size: 12px; line-height: 1.5; w
   .dialog-close, .toast-action, .board-sort > summary, .board-more > summary, .board-sort-menu button,
   button.tag, .chain-preview-node, .repo-pill, .seg-opt, .segmented-opt, .app-header-crumb-link,
   .bottom-nav-tab, .phone-header-back, .hook-row, select, select.input, .rate-limit-row > a,
-  .peek-open, .peek-head .mr-link,
+  .peek-open, .peek-head .mr-link, .detail-description-link,
   /* Kraft-pzf7i: the phone Search page's rows, bead hits and filter controls. */
   .search-row, .search-result, .bead-hit, .search-advanced, .search-filters .input {
     min-height: 44px; min-width: 44px;

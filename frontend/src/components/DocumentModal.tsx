@@ -13,7 +13,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import * as api from "../api";
-import { ago, docBody, shortIds } from "../format";
+import { ago, docBody, docTitle } from "../format";
 import type { DocumentDetail } from "../types";
 import { backdropProps, useModal } from "../useModal";
 
@@ -133,6 +133,8 @@ export function DocumentModal({
   // git entirely) — `absPath` is fabricated for it, so opening it in an
   // editor or copying it as a path would point at a file that does not exist.
   const hasFile = doc?.origin !== "event_ingest";
+  // W11 · H: a summary titled with an id reads its body's opening line.
+  const name = doc ? docTitle({ ...doc, ...doc.links[0] }) : "…";
 
   return (
     <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label="document" {...backdropProps(onClose)}>
@@ -140,7 +142,7 @@ export function DocumentModal({
         <header className="doc-modal-head">
           <Icon size={20} className="doc-modal-icon" />
           <div className="doc-modal-title">
-            <span className="doc-modal-name" title={doc?.title}>{doc ? shortIds(doc.title) : "…"}</span>
+            <span className="doc-modal-name" title={doc ? name : undefined}>{name}</span>
             {doc && (
               <div className="doc-modal-meta">
                 <span className="tag tag-neutral doc-kind">{doc.kind ?? doc.source_kind}</span>

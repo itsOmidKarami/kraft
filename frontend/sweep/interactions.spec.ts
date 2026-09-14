@@ -47,6 +47,11 @@ const FLOWS: Flow[] = [
     { name: "title-click-navigates", run: async (p) => { await p.getByLabel("peek").getByRole("link", { name: /open/i }).first().click().catch(() => {}); } },
     { name: "browser-back", run: async (p) => { await p.goBack(); } },
   ] },
+  // W11 · B.5: Approve from the board row acts without opening the peek; the row moves group.
+  { name: "board-approve", widths: [1280], start: board, steps: [
+    { name: "approve-on-row", run: async (p, S) => { const row = p.locator(`[data-testid="board-card"]:has-text("${S.byState.gate.item.title.slice(0, 24)}")`).first(); await row.getByRole("button", { name: /^Approve$/ }).click(); }, wait: 900 },
+    { name: "row-moved", run: async () => {}, wait: 600 },
+  ] },
   { name: "gate-approve", state: "gate", widths: [1280, 390], start: item("gate"), steps: [
     // The control is an <a class="btn">, not a button.
     { name: "read-document", run: async (p) => { await p.getByRole("link", { name: /read document/i }).or(p.getByRole("button", { name: /read document/i })).first().click(); } },
@@ -137,7 +142,8 @@ const FLOWS: Flow[] = [
     { name: "edit-field", run: async (p) => { const f = p.locator("main input[type=number]").first(); await f.fill("7"); } },
     { name: "dirty-state", run: async () => {} },
     { name: "save", run: btn(/^Save/i), wait: 900 },
-    { name: "chains-editor", run: async (p) => { await p.goto("/settings/chains"); await settle(p, 600); await p.locator("main").getByText(/^default$/).first().click(); await settle(p, 500); } },
+    // W11 · D: no templates column to click "default" in; open the editor card on a node.
+    { name: "chains-editor", run: async (p) => { await p.goto("/settings/chains"); await settle(p, 600); await p.locator(".chain-pill", { hasText: /^verify/ }).first().click(); await settle(p, 500); } },
     { name: "yaml-toggle", run: async (p) => { await p.getByRole("button", { name: /yaml/i }).first().click().catch(() => {}); } },
     { name: "add-node", run: async (p) => { await p.getByRole("button", { name: /add node/i }).first().click().catch(() => {}); } },
   ] },

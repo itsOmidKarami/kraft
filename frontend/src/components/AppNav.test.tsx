@@ -31,7 +31,7 @@ const renderAt = (path: string) =>
 beforeEach(() => {
   localStorage.clear();
   vi.restoreAllMocks();
-  useStore.setState({ workItems: {}, connection: "open" } as never);
+  useStore.setState({ workItems: {}, sessionsByItem: {}, eventsByItem: {}, connection: "open" } as never);
   vi.spyOn(api, "getHealth").mockResolvedValue({
     status: "ok",
     invalid_templates: {},
@@ -47,6 +47,26 @@ describe("AppNav", () => {
     useStore.setState({ workItems: { [ITEM.id]: ITEM } } as never);
     renderAt("/");
     expect(await screen.findByText("1")).toBeInTheDocument();
+  });
+
+  it("leaves an escalating item out of the badge and the need-you count, and counts it running (W11 · J.3)", async () => {
+    useStore.setState({
+      workItems: { [ITEM.id]: ITEM },
+      sessionsByItem: {
+        [ITEM.id]: [
+          { id: "e1", work_item_id: ITEM.id, node_id: "verify", hook_point: "escalation", status: "running", attempt: 1, round: 0, created_at: "t", started_at: "t", exited_at: null },
+        ],
+      },
+      eventsByItem: {
+        [ITEM.id]: [
+          { seq: 1, work_item_id: ITEM.id, type: "gate_requested", payload: {}, created_at: "t" },
+          { seq: 2, work_item_id: ITEM.id, type: "escalation_message", payload: { session_id: "e1", message: "go" }, created_at: "t" },
+        ],
+      },
+    } as never);
+    renderAt("/");
+    expect(await screen.findByText("1 running · 0 need you")).toBeInTheDocument();
+    expect(document.querySelector(".app-sidebar-badge")).toBeNull();
   });
 
   it("collapses to the rail on toggle and persists it across a remount", async () => {

@@ -1,50 +1,15 @@
 import { useEffect, useState } from "react";
-import { Robot } from "@phosphor-icons/react";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import * as api from "../../../api";
 import type { KraftEvent, WorkerSession, WorkItem } from "../../../types";
-import { useActionBar } from "./useActionBar";
 
-/** 06's escalating pill: "● Agent is on it · turn N" + Stop agent, the
- *  Steer & retry / Escalate buttons visibly disabled ("one escalation turn
- *  at a time") -- or, when the turn fired unattended, "● Auto-escalated ·
- *  turn N" with a hint saying why (Kraft-vyk8). `auto` absent or false
- *  renders today's copy unchanged. */
-export function EscalatingPill({
-  turn,
-  auto,
-  onStop,
-  busy,
-  err,
-}: {
-  turn: number;
-  auto?: boolean;
-  onStop: () => void;
-  busy: boolean;
-  err?: string | null;
-}) {
+/** 06's escalating pill: "● Agent is on it · turn N", or "● Auto-escalated ·
+ *  turn N" when the turn fired unattended (Kraft-vyk8). The pill only: Stop
+ *  escalation lives in the card's More actions (W11 · J). */
+export function EscalatingPill({ turn, auto }: { turn: number; auto?: boolean }) {
   return (
-    <div className="control-row escalating-pill" data-testid="escalating-pill">
-      <span className="tag tag-accent">
-        {auto ? `● Auto-escalated · turn ${turn}` : `● Agent is on it · turn ${turn}`}
-      </span>
-      <button className="btn btn-secondary" disabled={busy} onClick={onStop}>
-        Stop agent
-      </button>
-      <button className="btn btn-ghost" disabled>
-        Steer & retry
-      </button>
-      <button className="btn btn-ghost" disabled>
-        Escalate
-      </button>
-      <span className="control-hint">
-        {err ??
-          (auto
-            ? "fired automatically — nobody had acted on it yet"
-            : "one escalation turn at a time")}
-      </span>
-    </div>
+    <span className="tag tag-accent escalating-pill" data-testid="escalating-pill">
+      {auto ? `● Auto-escalated · turn ${turn}` : `● Agent is on it · turn ${turn}`}
+    </span>
   );
 }
 
@@ -77,27 +42,17 @@ function stopReasonText(session: WorkerSession): string | null {
   return null;
 }
 
-/** The escalated proposal card: "Escalation · turn N · reported", the
- *  agent's own summary (off its exit event), Apply as steer & retry ·
- *  Reply · Dismiss. */
-export function EscalatedCard({
-  item,
-  session,
-  events,
-  onOpenReply,
-  onDismiss,
-}: {
-  item: WorkItem;
-  session: WorkerSession;
-  events: KraftEvent[];
-  onOpenReply: () => void;
-  onDismiss: () => void;
-}) {
-  const { busy, err, run } = useActionBar(item.id);
-  const exitEv = events.find(
-    (e) =>
-      e.type === "worker_session_exited" && e.payload.session_id === session.id,
-  );
+/** What an escalated turn reported: `summary` is the agent's own words (safe
+ *  to feed back as a steer), `text` is what the card shows -- the summary, or
+ *  the turn's message and why it stopped. No session, no report. */
+export function useEscalationReport(
+  item: WorkItem,
+  session: WorkerSession | undefined,
+  events: KraftEvent[],
+): { summary: string | null; text: string } {
+  const exitEv = session
+    ? events.find((e) => e.type === "worker_session_exited" && e.payload.session_id === session.id)
+    : undefined;
   const exitSummary =
     (exitEv?.payload.concerns as string | undefined) ??
     (exitEv?.payload.question as string | undefined) ??
@@ -108,14 +63,16 @@ export function EscalatedCard({
   // just via `session_summary_ref` instead. Read that document rather than
   // treating a clean finish as "no summary reported".
   const [docSummary, setDocSummary] = useState<string | null>(null);
+  const sessionId = session?.id;
+  const summaryRef = session?.session_summary_ref;
   useEffect(() => {
     setDocSummary(null);
-    if (exitSummary || !session.session_summary_ref) return;
+    if (!sessionId || exitSummary || !summaryRef) return;
     let live = true;
     api
       .getWorkItemDocuments(item.id)
       .then((res) => {
-        const doc = res.documents.find((d) => d.worker_session_id === session.id);
+        const doc = res.documents.find((d) => d.worker_session_id === sessionId);
         if (!doc) return null;
         return api.getDocument(doc.document_id);
       })
@@ -128,7 +85,8 @@ export function EscalatedCard({
     return () => {
       live = false;
     };
-  }, [item.id, session.id, session.session_summary_ref, exitSummary]);
+  }, [item.id, sessionId, summaryRef, exitSummary]);
+  if (!session) return { summary: null, text: "" };
   // Only an actual summary is safe to feed back in as a steer -- the stop-
   // reason fallback below is our own placeholder text, not something the
   // agent said.
@@ -142,58 +100,5 @@ export function EscalatedCard({
     summary ??
     ([asked && `> ${asked}`, stopReasonText(session)].filter(Boolean).join("\n\n") ||
       "no summary reported");
-  return (
-    <div className="card attention-card" data-testid="escalated-card">
-      <div className="attention-head">
-        <Robot size={18} className="attention-glyph" />
-        <div className="attention-text">
-          <span className="attention-title">
-            Escalation · turn {session.attempt} · reported
-          </span>
-          {/* `attention-sub` used to be a <span>, but markdown emits block
-             elements (react-markdown always does), so it has to be a <div>
-             or React warns about a <p> inside a <span>. Rendering makes the
-             card taller, so it gets a max-height + scroll rather than
-             pushing the buttons below off screen. */}
-          <div className="attention-sub doc-modal-body attention-sub-md">
-            <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
-          </div>
-        </div>
-      </div>
-      <div className="gate-actions">
-        {summary && (
-          <button
-            className="btn btn-primary"
-            disabled={busy}
-            onClick={() =>
-              run(
-                () => api.retryWorkItem(item.id, `From escalation: ${summary}`),
-                "Applied as steer — retrying",
-              )
-            }
-          >
-            Apply as steer & retry
-          </button>
-        )}
-        <button
-          className="btn btn-secondary"
-          disabled={busy}
-          onClick={onOpenReply}
-        >
-          Reply
-        </button>
-        <button
-          className="btn btn-ghost"
-          disabled={busy}
-          onClick={() => {
-            dismissTurn(item.id, session.id);
-            onDismiss();
-          }}
-        >
-          Dismiss
-        </button>
-      </div>
-      {err && <p className="form-error">{err}</p>}
-    </div>
-  );
+  return { summary, text };
 }

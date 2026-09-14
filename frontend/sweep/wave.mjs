@@ -33,7 +33,8 @@ function collect() {
   execSync("node sweep/collect.mjs", { stdio: "inherit" });
   return JSON.parse(fs.readFileSync(path.join(OUT, "manifest.json"), "utf8"));
 }
-const inScope = (e) => !screens || screens.some((s) => e.screen === s || e.screen.startsWith(s + "-") || e.id.startsWith(s));
+// A trailing `*` (W11's "el-*") is a prefix: every screen that starts with what comes before it.
+const inScope = (e) => !screens || screens.some((s) => s.endsWith("*") ? e.screen.startsWith(s.slice(0, -1)) : e.screen === s || e.screen.startsWith(s + "-") || e.id.startsWith(s));
 
 if (BASELINE) {
   const m = collect();
@@ -53,7 +54,7 @@ if (BASELINE) {
 
 // 1. Re-shoot the wave's screens.
 const env = { ...process.env };
-if (screens) env.SWEEP_SCREEN = screens.join(",");
+if (screens) env.SWEEP_SCREEN = screens.map((s) => s.replace(/\*$/, "")).join(",");
 const specs = wave?.specs && wave.specs !== "all" ? wave.specs : ["sweep.spec.ts", "elements.spec.ts", "interactions.spec.ts"];
 for (const spec of specs) {
   try { execSync(`npx playwright test -c sweep/playwright.sweep.config.ts sweep/${spec}`, { stdio: "inherit", env }); }

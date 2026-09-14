@@ -21,9 +21,9 @@ describe("text overflow policy (W5.11)", () => {
     expect(shortIds(ID)).not.toMatch(/[0-9a-f]{32}/);
   });
 
-  // W10.D reversed W5's "whole path" for the Documents list: one line, cut from
-  // the left, the full path in its title and still whole in the DOM.
-  it("a document path is one line in a .path span, its title the full path", async () => {
+  // W11 · G took the path out of the Documents row: it is the row's tooltip and
+  // the pane header's. The row's title still never shows a bare 32-hex id.
+  it("a document row carries its path only as its tooltip, and no bare id in its title", async () => {
     const path = ".engineering/reviews/2026-09-13-caching-layer.md";
     vi.spyOn(api, "getWorkItemDocuments").mockResolvedValue({
       documents: [{ document_id: "d1", title: `Session ${ID}`, path, kind: "sessions" }],
@@ -38,12 +38,12 @@ describe("text overflow policy (W5.11)", () => {
         gateArtifactPending={false}
       />,
     );
-    const el = (await screen.findByText(path)).closest(".path");
-    expect(el).toHaveClass("doc-path");
-    expect(el).toHaveAttribute("title", path);
-    expect(el).toHaveAttribute("data-allow-ellipsis");
-    expect(el?.textContent).toBe(path);
-    expect(screen.getByText("Session 12a7f05a…cf059")).toBeInTheDocument();
+    // W11 · H: an id-titled summary is never shown by its id, not even shortened.
+    const row = (await screen.findByText("Session · sessions")).closest(".doc-row");
+    expect(row).toHaveAttribute("title", path);
+    expect(screen.queryByText(path)).toBeNull();
+    expect(row?.querySelector(".doc-path")).toBeNull();
+    expect(row?.textContent).not.toMatch(/[0-9a-f]{8}…?[0-9a-f]{4,}/);
   });
 
   it("search snippets drop markdown syntax but keep snake_case", () => {

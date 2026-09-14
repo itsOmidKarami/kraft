@@ -78,6 +78,14 @@ async function item(c: Ctx, st: DisplayState, hash = "") {
 }
 async function clickBtn(page: Page, name: RegExp) {
   const b = page.getByRole("button", { name }).first();
+  // W11 · A: a state's rarer actions (Escalate, Skip) are rows under the item card's More actions.
+  const more = page.locator('.item-card [aria-haspopup="menu"]').first();
+  if (!(await b.isVisible().catch(() => false)) && (await more.count())) {
+    await more.click();
+    await page.getByRole("menuitem", { name }).first().click();
+    await settle(page);
+    return;
+  }
   await b.waitFor({ timeout: 4000 });
   await b.click();
   await settle(page);
@@ -115,6 +123,8 @@ const CASES: Case[] = [
   { screen: "board-peek", variant: "escalated-long", data: "long", widths: [...KEY, ...SIDE], run: (c) => peek(c, "escalated") },
   { screen: "board-peek", variant: "capped", data: "default", widths: [...KEY, ...SIDE], run: (c) => peek(c, "capped") },
   { screen: "board-peek", variant: "done", data: "default", widths: [390, 1280], run: (c) => peek(c, "done") },
+  // W11 · J: the escalating item, now under Running.
+  { screen: "board-peek", variant: "escalating", data: "default", widths: [390, 1280], run: (c) => peek(c, "escalating") },
   { screen: "archived", variant: "default", data: "default", widths: KEY, run: async (c) => { await c.page.goto("/archived"); await settle(c.page, 600); } },
   { screen: "archived", variant: "empty", data: "empty", widths: [1280], run: async (c) => { await c.page.goto("/archived"); await settle(c.page, 600); } },
 
@@ -157,7 +167,7 @@ const CASES: Case[] = [
   ]),
   { screen: "composer", variant: "escalating-pill", data: "default", widths: KEY, run: (c) => item(c, "escalating") },
   { screen: "composer", variant: "gate-skip-menu", data: "default", widths: [390, 1280], run: async (c) => { await item(c, "gate"); await clickBtn(c.page, /skip/i).catch(() => {}); } },
-  { screen: "composer", variant: "overflow-menu", data: "default", widths: [390, 1280], run: async (c) => { await item(c, "running"); await c.page.locator('.action-bar [aria-haspopup="menu"]').first().click().catch(() => {}); await settle(c.page); } },
+  { screen: "composer", variant: "overflow-menu", data: "default", widths: [390, 1280], run: async (c) => { await item(c, "running"); await c.page.locator('.item-card [aria-haspopup="menu"]').first().click().catch(() => {}); await settle(c.page); } },
   // The app header's `…` on an item page, found by aria-haspopup rather than a guessed label.
   // Desktop only: a phone item page has PhoneTopBar, and its item menu is composer/overflow-menu@390 (Kraft-92daa).
   { screen: "menu", variant: "header-more", data: "default", widths: [1280], run: async (c) => { await item(c, "running"); await c.page.locator('.app-header [aria-haspopup="menu"]').first().click(); await settle(c.page); } },
@@ -178,8 +188,9 @@ const CASES: Case[] = [
   { screen: "search", variant: "overlay-results", data: "default", widths: KEY, run: async (c) => { await board(c); await c.page.keyboard.press("Meta+k"); await c.page.locator('input[aria-label="search"]').fill("measured"); await settle(c.page, 800); } },
   { screen: "search", variant: "overlay-long", data: "long", widths: KEY, run: async (c) => { await board(c); await c.page.keyboard.press("Meta+k"); await c.page.locator('input[aria-label="search"]').fill("reuse what we measured"); await settle(c.page, 800); } },
   { screen: "search", variant: "overlay-empty", data: "empty", widths: [390, 1280], run: async (c) => { await board(c); await c.page.keyboard.press("Meta+k"); await c.page.locator('input[aria-label="search"]').fill("zzz"); await settle(c.page, 800); } },
-  { screen: "search", variant: "page", data: "long", widths: KEY, run: async (c) => { await c.page.goto("/search?q=measured"); await settle(c.page, 800); } },
-  { screen: "search", variant: "doc-viewer", data: "long", widths: KEY, run: async (c) => { await c.page.goto("/search?q=measured"); await settle(c.page, 800); await c.page.locator("main a, main button, main li").filter({ hasText: /reuse|plan|review/i }).first().click().catch(() => {}); await settle(c.page, 600); } },
+  // /search does not read ?q= -- these cases shot an empty page in every round. Type the query, as the overlay cases do (W11 · H).
+  { screen: "search", variant: "page", data: "long", widths: KEY, run: async (c) => { await c.page.goto("/search"); await c.page.locator('input[aria-label="search"]').fill("measured"); await settle(c.page, 800); } },
+  { screen: "search", variant: "doc-viewer", data: "long", widths: KEY, run: async (c) => { await c.page.goto("/search"); await c.page.locator('input[aria-label="search"]').fill("measured"); await settle(c.page, 800); await c.page.locator(".search-result").filter({ hasText: /reuse|plan|review/i }).first().click().catch(() => {}); await settle(c.page, 600); } },
 
   // Analytics
   { screen: "analytics", variant: "default", data: "default", widths: ALL, run: async (c) => { await c.page.goto("/analytics"); await settle(c.page, 800); } },
@@ -195,8 +206,9 @@ const CASES: Case[] = [
   ]),
   { screen: "settings-repos", variant: "repo-page", data: "long", widths: KEY, run: async (c) => { await settings(c, "repos"); await c.page.locator("main").getByRole("link").or(c.page.locator("main .row, main li, main tr")).filter({ hasText: /kraft/ }).first().click().catch(() => {}); await settle(c.page, 600); } },
   { screen: "settings-repos", variant: "add-repo", data: "default", widths: [390, 1280], run: async (c) => { await settings(c, "repos"); await clickBtn(c.page, /add|connect/i).catch(() => {}); } },
-  { screen: "settings-chains", variant: "editor", data: "long", widths: KEY, run: async (c) => { await settings(c, "chains"); await c.page.locator("main").getByText(/^default$/).first().click().catch(() => {}); await settle(c.page, 600); } },
-  { screen: "settings-chains", variant: "editor-scrolled", data: "long", widths: [390, 1280], run: async (c) => { await settings(c, "chains"); await c.page.locator("main").getByText(/^default$/).first().click().catch(() => {}); await scrollAllToBottom(c.page); } },
+  // W11 · D removed the templates column these clicked "default" in: open the editor card on a node instead.
+  { screen: "settings-chains", variant: "editor", data: "long", widths: KEY, run: async (c) => { await settings(c, "chains"); await c.page.locator(".chain-pill", { hasText: /^verify/ }).first().click().catch(() => {}); await settle(c.page, 600); } },
+  { screen: "settings-chains", variant: "editor-scrolled", data: "long", widths: [390, 1280], run: async (c) => { await settings(c, "chains"); await c.page.locator(".chain-pill", { hasText: /^verify/ }).first().click().catch(() => {}); await scrollAllToBottom(c.page); } },
   { screen: "settings-plugins", variant: "hook-runs", data: "long", widths: [390, 1280], run: async (c) => { await settings(c, "plugins"); await c.page.locator("main").getByText(/on\.implementation\.start/).first().click().catch(() => {}); await settle(c.page, 600); } },
   { screen: "settings-steering", variant: "file-open", data: "long", widths: KEY, run: async (c) => { await settings(c, "steering"); await c.page.locator("main").getByText(/house-style/).first().click().catch(() => {}); await settle(c.page, 600); } },
   { screen: "settings-index", variant: "default", data: "default", widths: [390, 1280], run: async (c) => { await c.page.goto("/settings"); await settle(c.page, 600); } },

@@ -107,7 +107,9 @@ test("the diff viewer wraps a real diff instead of scrolling sideways", async ({
   // thing it is meant to catch is still broken.
   await createItem(page, "phone diff", "quick-task");
   await expect(page.getByText(/completed|needs you/i).first()).toBeVisible({ timeout: scaledTimeout(60_000) });
-  await page.getByRole("button", { name: /review changes/i }).click();
+  // W11: Review changes lives under the item card's More actions.
+  await page.getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: /review changes/i }).click();
   // DiffModal is gone — "Review changes" on a phone opens the m05 node page
   // on the Changes tab instead of a dialog.
   const nodePage = page.getByTestId("phone-node-page");
@@ -255,18 +257,15 @@ test("m11: Access and Notifications fit a phone in one column, allowed-hosts tag
   await page.screenshot({ path: `${SHOTS}/phone-11-notify.png`, fullPage: true });
 });
 
-test("m15: Analytics, Auto-intake and Appearance stack with the KPIs 2-up", async ({ page }) => {
+test("m15: Analytics, Auto-intake and Appearance stack, the three KPIs one per row", async ({ page }) => {
   await createItem(page, "phone m15", "quick-task");
   await page.goto("/analytics");
   await expect(page.locator(".kpi").first()).toBeVisible({ timeout: scaledTimeout(60_000) });
-  const kpiBox = await page.locator(".kpis").boundingBox();
   const firstKpi = await page.locator(".kpi").first().boundingBox();
   const secondKpi = await page.locator(".kpi").nth(1).boundingBox();
-  // 2-up: the second KPI is roughly beside the first, not stacked below it —
-  // its top sits within the first KPI's own height, not a full row down.
-  if (kpiBox && firstKpi && secondKpi) {
-    expect(Math.abs(secondKpi.y - firstKpi.y)).toBeLessThan(firstKpi.height);
-  }
+  // W11 · E.5: one tile per row -- the second starts below the first ends.
+  expect(firstKpi && secondKpi).toBeTruthy();
+  expect(secondKpi!.y).toBeGreaterThanOrEqual(firstKpi!.y + firstKpi!.height);
 
   await page.goto("/settings/intake");
   await expect(page.locator(".settings-section").first()).toBeVisible({ timeout: scaledTimeout(15_000) });
@@ -305,8 +304,8 @@ test("m16: Login renders on a phone and the error state fits without horizontal 
 
 test("Chains and Steering are editable on a phone, not an open-on-desktop notice", async ({ page }) => {
   await page.goto("/settings/chains");
-  await page.getByText("default").click();
-  await page.getByText("verify").click();
+  // W11 · D: one page on a phone, no template drill-down to tap through first.
+  await page.getByRole("button", { name: /^verify\b/ }).click();
   await expect(page.getByLabel("fix_loop")).toBeVisible();
   await expect(page.getByText(/open on desktop/i)).toBeHidden();
 

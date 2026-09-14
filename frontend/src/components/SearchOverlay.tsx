@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { Link, useNavigate } from "react-router-dom";
 import { Check, CirclesThree, MagnifyingGlass } from "@phosphor-icons/react";
 import * as api from "../api";
-import { repoName, shortIds } from "../format";
+import { docTitle, repoName } from "../format";
 import { backdropProps } from "../useModal";
 import { SectionLabel, TaskLine } from "./ui";
 import { useStore } from "../store";
@@ -20,6 +20,11 @@ import { Snippet } from "./Snippet";
  */
 
 const uniq = (xs: string[]) => [...new Set(xs)].sort();
+
+/** A result's title by the Documents list's rule (W11 · H); the snippet, its
+ *  FTS match brackets dropped, stands in for the body. */
+const resultTitle = (r: SearchResult) =>
+  docTitle({ ...r, ...r.links[0], content: r.snippet.replace(/[[\]]/g, "") });
 const MODES = ["hybrid", "fts", "vector"];
 
 const GOTO_PAGES = [
@@ -370,7 +375,7 @@ export function SearchOverlay({
                 data-active={rows[activeIndex] === row || undefined}
                 onClick={() => activate(row)}
               >
-                <span className="search-result-title" title={r.title}>{shortIds(r.title)}</span>
+                <span className="search-result-title" title={resultTitle(r)}>{resultTitle(r)}</span>
                 <span className="search-result-where">
                   <span className="search-result-kind">{r.kind ?? r.source_kind}</span>·
                   <span title={r.repo}>{repoName(r.repo)}</span>

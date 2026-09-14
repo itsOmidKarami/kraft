@@ -65,14 +65,14 @@ test("spec gate: review, reject and re-plan, then approve into the plan gate", a
   await page.getByRole("button", { name: /^Reject$/ }).first().click();
   await page.getByLabel("composer message").fill("the spec misses the error path");
   await page.getByRole("button", { name: /Reject and re-plan/ }).click();
-  await expect(page.locator(".attention-title")).toContainText(/approve the spec/i, {
+  await expect(page.locator(".item-card-title")).toContainText(/approve the spec/i, {
     timeout: scaledTimeout(100_000),
   });
   await expect(page.getByRole("link", { name: "Review spec" })).toBeVisible();
 
   // Approve: advance to the plan gate, which offers its own review button.
   await page.getByRole("button", { name: "Approve" }).first().click();
-  await expect(page.locator(".attention-title")).toContainText(/approve the plan/i, {
+  await expect(page.locator(".item-card-title")).toContainText(/approve the plan/i, {
     timeout: scaledTimeout(100_000),
   });
 

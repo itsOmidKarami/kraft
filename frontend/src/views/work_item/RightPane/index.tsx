@@ -77,12 +77,14 @@ export function RightPane({
     return <Doc source={source} item={item} maximized={maximized} onToggleMaximize={onToggleMaximize} />;
   }
 
-  // timeline
+  // timeline: `node` (a group) or `node:seq` (one event, W11 · F).
+  const tsel = selection.kind === "timeline-node" && selection.id ? selection.id : null;
   return (
     <Events
       events={events}
       sessions={sessions}
-      nodeId={selection.kind === "timeline-node" && selection.id ? selection.id : nodeId}
+      nodeId={tsel ? tsel.split(":")[0] : nodeId}
+      selectedSeq={tsel?.includes(":") ? Number(tsel.split(":")[1]) : null}
       onViewLog={onViewLog}
     />
   );
