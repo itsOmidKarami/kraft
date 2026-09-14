@@ -91,7 +91,15 @@ async def lifespan(app: FastAPI):
         lambda c: c.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()[0]
     )
 
-    summary, adopted = await reattach.reattach(database, run_dirs, registry)
+    summary, adopted = await reattach.reattach(
+        database,
+        run_dirs,
+        registry,
+        policy=policy_obj,
+        launch_factory=lambda repo: deps.launch(app.state, repo),
+        bd_cwd=deps.bd_cwd(),
+        on_approve=deps._on_approve(app.state),
+    )
     # Not `.update(adopted)` alone: unlike `deps.spawn`'s tasks, nothing else
     # ever pops a session_id-keyed entry, so an adopted task would sit in
     # app.state.tasks forever, live or dead (Kraft-mjwz).

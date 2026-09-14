@@ -170,6 +170,10 @@ const CASES: Case[] = [
     { screen: "composer", variant: `${name}`, data: "default", widths: KEY, run: (c) => composer(c, st, btn, false) },
     { screen: "composer", variant: `${name}-filled-long`, data: "long", widths: KEY, run: (c) => composer(c, st, btn, true) },
   ]),
+  // Kraft-dkb6g: a prior thread's composer (folded rows + divider + split
+  // button) and the split button's caret menu open.
+  { screen: "composer", variant: "escalate-prior-thread", data: "long", widths: [390, 1280], run: async (c) => { await item(c, "escalated"); await clickBtn(c.page, /reply/i).catch(() => {}); await settle(c.page); } },
+  { screen: "composer", variant: "reply-caret", data: "long", widths: [1280], run: async (c) => { await item(c, "escalated"); await clickBtn(c.page, /reply/i).catch(() => {}); await c.page.getByRole("button", { name: /reply options/i }).click().catch(() => {}); await settle(c.page); } },
   { screen: "composer", variant: "escalating-pill", data: "default", widths: KEY, run: (c) => item(c, "escalating") },
   { screen: "composer", variant: "gate-skip-menu", data: "default", widths: [390, 1280], run: async (c) => { await item(c, "gate"); await clickBtn(c.page, /skip/i).catch(() => {}); } },
   { screen: "composer", variant: "overflow-menu", data: "default", widths: [390, 1280], run: async (c) => { await item(c, "running"); await c.page.locator('.item-card [aria-haspopup="menu"]').first().click().catch(() => {}); await settle(c.page); } },

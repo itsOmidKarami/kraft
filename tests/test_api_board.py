@@ -246,6 +246,55 @@ def test_deferred_minor_findings_reach_the_detail_payload(tmp_path, monkeypatch)
         assert [f["message"] for f in body["deferred_findings"]] == ["naming nit"]
 
 
+def _seed_escalation_session(client, wid, *, session_id, thread, status="done"):
+    """Write an escalation `worker_sessions` row directly with an explicit
+    `thread` and a terminal status -- same reasoning as `_seed_session`, but
+    this test needs several rows spread across threads, not the one
+    `store.create_session` default `_seed_session` gives."""
+    db_path = Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        store.create_session(
+            conn,
+            id=session_id,
+            work_item_id=wid,
+            node_id="implementation",
+            hook_point="escalation",
+            log_path=f"/tmp/{session_id}.log",
+            result_path=f"/tmp/{session_id}.json",
+            thread=thread,
+        )
+        store.session_exited(conn, session_id, status)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_get_work_item_includes_escalation_threads(tmp_path, monkeypatch):
+    """Kraft-dkb6g: `escalation_threads` projects one entry per thread,
+    oldest first, with the shape the UI reads (`thread`, `session_id`,
+    `turns`, `started_at`, `ended_at`, `status`)."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+        ).json()["id"]
+        _seed_escalation_session(client, wid, session_id="e1", thread=1, status="done")
+        _seed_escalation_session(client, wid, session_id="e2", thread=1, status="done")
+        _seed_escalation_session(client, wid, session_id="e3", thread=2, status="needs_context")
+
+        body = client.get(f"/api/work-items/{wid}").json()
+        threads = body["escalation_threads"]
+        assert [t["thread"] for t in threads] == [1, 2]
+        assert [t["turns"] for t in threads] == [2, 1]
+        assert threads[0]["session_id"] == "e2"
+        assert threads[1]["session_id"] == "e3"
+        assert threads[1]["status"] == "needs_context"
+        assert threads[0]["started_at"] and threads[0]["ended_at"]
+
+
 def test_get_work_item_survives_an_invalid_policy(tmp_path, monkeypatch):
     """startup.py sets app.state.policy to None on a PolicyError; the detail
     route must fall back to NO_BUDGET like every other st.policy reader

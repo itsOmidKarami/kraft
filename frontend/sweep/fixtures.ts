@@ -363,14 +363,23 @@ export function buildItem(state: DisplayState, seed: number, variant: Variant): 
         { severity: "important", message: "broad except", file: "kraft/api.py", line: 512, source_plugin: "ruff" },
       ] }];
       if (state !== "gate") {
-        const e1 = sess(currentNode!, state === "escalating" ? "running" : "done", { attempt: 1 }, "escalation");
-        ev("escalation_message", { session_id: e1.id, node_id: currentNode, auto: state === "escalating", message: long ? "The reviewer flagged the invalidation path as risky. Is the blob_sha check sufficient when a repo is force-pushed, or do we also need to compare the tree hash? Please read the review and decide whether we ship as-is." : "Is the blob_sha check enough after a force-push?" }, 1);
+        const e1 = sess(currentNode!, state === "escalating" ? "running" : "done", { attempt: 1, thread: 1 }, "escalation");
+        ev("escalation_message", { session_id: e1.id, node_id: currentNode, auto: state === "escalating", thread: 1, turn: 1, message: long ? "The reviewer flagged the invalidation path as risky. Is the blob_sha check sufficient when a repo is force-pushed, or do we also need to compare the tree hash? Please read the review and decide whether we ship as-is." : "Is the blob_sha check enough after a force-push?" }, 1);
         if (state === "escalated") {
           ev("worker_session_exited", { session_id: e1.id, node_id: currentNode, status: "done", wall_ms: 190_000 }, 3);
           if (long) {
-            const e2 = sess(currentNode!, "done", { attempt: 2 }, "escalation");
-            ev("escalation_message", { session_id: e2.id, node_id: currentNode, auto: false, message: "Follow-up: what about submodules?" }, 1);
+            // Fixture: escalated `long` item gets 2 threads (3 + 1 turns) --
+            // e1..e3 continue thread 1, e4 starts a fresh thread 2
+            // (ESCALATION_THREADS_SPEC.md §6, Kraft-dkb6g).
+            const e2 = sess(currentNode!, "done", { attempt: 2, thread: 1 }, "escalation");
+            ev("escalation_message", { session_id: e2.id, node_id: currentNode, auto: false, thread: 1, turn: 2, message: "Follow-up: what about submodules?" }, 1);
             ev("worker_session_exited", { session_id: e2.id, node_id: currentNode, status: "done", wall_ms: 120_000 }, 2);
+            const e3 = sess(currentNode!, "done", { attempt: 3, thread: 1 }, "escalation");
+            ev("escalation_message", { session_id: e3.id, node_id: currentNode, auto: false, thread: 1, turn: 3, message: "And the root repo's own submodule pointer?" }, 1);
+            ev("worker_session_exited", { session_id: e3.id, node_id: currentNode, status: "done", wall_ms: 90_000 }, 2);
+            const e4 = sess(currentNode!, "done", { attempt: 4, thread: 2 }, "escalation");
+            ev("escalation_message", { session_id: e4.id, node_id: currentNode, auto: false, thread: 2, turn: 1, message: "New thread: let's start over with just the cache-key question." }, 1);
+            ev("worker_session_exited", { session_id: e4.id, node_id: currentNode, status: "done", wall_ms: 100_000 }, 2);
           }
         }
       }

@@ -34,7 +34,7 @@ const item = (over: Partial<WorkItem> = {}): WorkItem =>
 const session = (over: Partial<WorkerSession> = {}): WorkerSession =>
   ({
     id: "s1", work_item_id: "w1", node_id: "verify", hook_point: "on.test.run",
-    status: "running", attempt: 1, round: 0, created_at: "t", started_at: "t", exited_at: null,
+    status: "running", attempt: 1, thread: 1, round: 0, created_at: "t", started_at: "t", exited_at: null,
     tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, model: null, head_sha: null,
     ...over,
   }) as WorkerSession;
@@ -337,6 +337,36 @@ describe("WorkItemDetail (item page)", () => {
     await user.click(within(screen.getByTestId("inspector-timeline")).getByRole("button", { name: "all" }));
     await user.click(screen.getByRole("tab", { name: /tasks/i }));
     expect(within(screen.getByTestId("inspector-tasks")).getByRole("button", { name: "all" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("two escalation threads on a node fold to one row each, expanding on click (Kraft-dkb6g)", async () => {
+    const user = userEvent.setup();
+    setup({ status: "needs_human", current_node_id: "verify" }, [
+      session({ id: "e1", node_id: "verify", hook_point: "escalation", thread: 1, status: "done", exited_at: "2026-01-01T00:01:00Z" }),
+      session({ id: "e2", node_id: "verify", hook_point: "escalation", thread: 2, status: "done", exited_at: "2026-01-01T00:03:00Z" }),
+    ]);
+    useStore.setState({
+      eventsByItem: {
+        w1: [
+          { seq: 1, work_item_id: "w1", type: "node_started", payload: { node_id: "verify" }, created_at: "2026-01-01T00:00:00Z" },
+          { seq: 2, work_item_id: "w1", type: "escalation_message", payload: { session_id: "e1", message: "first", thread: 1, turn: 1 }, created_at: "2026-01-01T00:00:30Z" },
+          { seq: 3, work_item_id: "w1", type: "escalation_message", payload: { session_id: "e2", message: "second", thread: 2, turn: 1 }, created_at: "2026-01-01T00:02:30Z" },
+        ],
+      },
+    } as never);
+    renderDetail();
+    await user.click(screen.getByRole("tab", { name: /timeline/i }));
+    const list = screen.getByTestId("inspector-timeline");
+    const t1 = within(list).getByTestId("timeline-escalation-thread-1");
+    const t2 = within(list).getByTestId("timeline-escalation-thread-2");
+    expect(t1).toBeInTheDocument();
+    expect(t2).toBeInTheDocument();
+    // Collapsed by default (neither is the "current" -- newest -- thread's
+    // own row, or both/either may default open per roundBody's own rule;
+    // pin only that a session row is not shown before expanding).
+    expect(within(list).queryByTestId("timeline-session-e1")).toBeNull();
+    await user.click(t1);
+    expect(within(list).getByTestId("timeline-session-e1")).toBeInTheDocument();
   });
 
   it("disables Review spec with 'not written yet' when the artifact is absent", () => {

@@ -69,11 +69,22 @@ test("settings: steering is editable and diffable", async ({ page }) => {
   await page.getByRole("button", { name: "New", exact: true }).click({ timeout: scaledTimeout(15_000) });
   const body = page.getByLabel("steering body");
   await expect(body).toBeVisible();
+  // A new file's body effect fires a doomed GET for the not-yet-saved name
+  // (404, caught, resets draft/loaded to ""). Under load that GET can still
+  // be in flight when Save lands; its stale catch then wipes the just-saved
+  // draft back to empty. Let it settle before typing.
+  await page.waitForLoadState("networkidle");
   await body.fill("edited by e2e\n");
   await page.getByRole("tab", { name: /diff vs saved/i }).click();
   await expect(page.getByTestId("draft-diff")).toBeVisible();
   await page.getByRole("tab", { name: "edit" }).click();
   await page.getByRole("button", { name: "Save" }).click();
+  // Save is async (PUT, then a list reload) -- wait for it to actually land
+  // before the hard reload below, or a slow save's request gets cancelled
+  // mid-flight and the file never persists.
+  await expect(page.getByRole("button", { name: "Save" })).toBeDisabled({
+    timeout: scaledTimeout(15_000),
+  });
   await page.reload();
   await page.locator(".facet-opt", { hasText: "e2e-steering" }).click();
   await expect(page.getByLabel("steering body")).toHaveValue("edited by e2e\n");
@@ -114,11 +125,23 @@ test("settings: notify send a test reports a result", async ({ page }) => {
 
 test("settings: appearance density and board prefs persist after reload", async ({ page }) => {
   await page.goto("/settings/appearance");
+  // The radios' checked state and their onChange handlers are both gated on
+  // the theme GET having landed (`theme && preview(...)`). Under load that
+  // GET can still be in flight right after goto() resolves (goto only waits
+  // for `load`, not for in-page fetches); a click before then is a silent
+  // no-op forever, and Save never leaves disabled=true. Let it settle first.
+  await page.waitForLoadState("networkidle");
   // By label text, not getByRole("radio"): the input is visually hidden behind
   // the segmented control, so a real browser won't click it.
   await page.getByRole("radiogroup", { name: "density" }).getByText("Comfortable", { exact: true }).click();
   await page.getByRole("radiogroup", { name: "group by" }).getByText("repo", { exact: true }).click();
   await page.getByRole("button", { name: "Save" }).click();
+  // Same race as the steering test above: wait for the async save (PUT, then
+  // a theme reload) to finish before the hard reload, or a slow save gets
+  // cancelled mid-flight and nothing persists.
+  await expect(page.getByRole("button", { name: "Save" })).toBeDisabled({
+    timeout: scaledTimeout(15_000),
+  });
   await page.reload();
   await expect(page.getByRole("radio", { name: "Comfortable" })).toBeChecked();
   await expect(page.getByRole("radio", { name: "repo" })).toBeChecked();

@@ -277,6 +277,7 @@ export function OverflowMenu({
   label = "More",
   text = false,
   wide = false,
+  trigger = "dots",
 }: {
   items: OverflowItem[];
   label?: string;
@@ -284,6 +285,10 @@ export function OverflowMenu({
   text?: boolean;
   /** The item card's 280px menu. */
   wide?: boolean;
+  /** "caret": a bare `▾` trigger with no visible label -- `SplitButton`'s own
+   *  menu half (Kraft-dkb6g), reusing this component's open/outside-click/
+   *  keyboard-nav machinery instead of a second popover implementation. */
+  trigger?: "dots" | "caret";
 }) {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState<OverflowItem | null>(null);
@@ -332,13 +337,21 @@ export function OverflowMenu({
     <div className="overflow" ref={ref}>
       <button
         ref={button}
-        className={text ? "btn btn-secondary overflow-text" : "btn btn-ghost overflow-btn"}
-        aria-label={text ? undefined : label}
+        className={
+          trigger === "caret"
+            ? "btn btn-ghost overflow-btn overflow-btn-caret"
+            : text
+              ? "btn btn-secondary overflow-text"
+              : "btn btn-ghost overflow-btn"
+        }
+        aria-label={trigger === "caret" ? label || "more" : text ? undefined : label}
         aria-expanded={open}
         aria-haspopup="menu"
         onClick={() => setOpen((v) => !v)}
       >
-        {text ? (
+        {trigger === "caret" ? (
+          <CaretDown size={12} />
+        ) : text ? (
           <>
             {label}
             <CaretDown size={12} />

@@ -63,6 +63,72 @@ def test_escalate_refuses_an_item_that_is_not_needs_human(tmp_path, monkeypatch)
         assert r.status_code == 409
 
 
+def _set_status(tmp_path, wid, status):
+    """Direct SQL, matching `_seed_running_escalation`'s style below -- driving
+    a real item to `paused` through the full pause machinery needs a live
+    session to signal, more than this route's own status check is worth
+    exercising for."""
+    conn = sqlite3.connect(tmp_path / "run" / "orchestrator.db")
+    conn.execute("UPDATE work_items SET status = ? WHERE id = ?", (status, wid))
+    conn.commit()
+    conn.close()
+
+
+def test_escalate_succeeds_from_paused(tmp_path, monkeypatch):
+    """Kraft-k5ol: `escalate_work_item` used to refuse anything but
+    `needs_human` -- the paused-state Escalate button had to be removed
+    rather than shipped against a 409. Widened to accept `paused` too."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={"repo": str(repo), "title": "fine so far", "chain_template": "quick-task"},
+        ).json()["id"]
+        _set_status(tmp_path, wid, "paused")
+        r = client.post(f"/api/work-items/{wid}/escalate", json={"message": "help"})
+        assert r.status_code == 200
+        assert r.json()["status"] == "escalating"
+
+
+def test_escalate_still_409s_from_a_never_started_paused_item(tmp_path, monkeypatch):
+    """A `paused` item with no `current_node_id` (the `autostart: false`
+    default `client.create_work_item` uses -- "it lands paused: an agent
+    files work, a human starts it") has no node/context to escalate about.
+    Widening the status check to admit `paused` (Kraft-k5ol) must not also
+    admit this -- there is nothing yet for an agent to be escalated onto."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={
+                "repo": str(repo),
+                "title": "not started",
+                "chain_template": "quick-task",
+                "autostart": False,
+            },
+        ).json()["id"]
+        item = client.get(f"/api/work-items/{wid}").json()
+        assert item["status"] == "paused"
+        assert item["current_node_id"] is None
+        r = client.post(f"/api/work-items/{wid}/escalate", json={"message": "help"})
+        assert r.status_code == 409
+
+
+def test_escalate_still_409s_from_active(tmp_path, monkeypatch):
+    """Pins the widening at exactly `{needs_human, paused}` -- an `active`
+    item must still 409, not silently start accepting escalation from
+    anywhere."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={"repo": str(repo), "title": "fine so far", "chain_template": "quick-task"},
+        ).json()["id"]
+        _set_status(tmp_path, wid, "active")
+        r = client.post(f"/api/work-items/{wid}/escalate", json={"message": "help"})
+        assert r.status_code == 409
+
+
 def test_escalate_requires_a_nonempty_message(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
@@ -167,6 +233,35 @@ def test_stop_escalation_refuses_when_none_is_running(tmp_path, monkeypatch):
         assert r.status_code == 409
 
 
+def test_escalate_route_forwards_new_thread(tmp_path, monkeypatch):
+    """Kraft-dkb6g: `new_thread` on the request body must reach
+    `escalate.dispatch` -- pinned via a spy rather than the real dispatch
+    path, since this route test only cares that the flag is threaded
+    through, not that a thread actually gets dispatched (that's
+    test_escalate.py's job)."""
+    import kraft.escalate as escalate_mod
+
+    seen = {}
+
+    async def fake_dispatch(database, run_dirs, *, work_item_id, message, launch, **kw):
+        seen["new_thread"] = kw.get("new_thread")
+        return "done"
+
+    monkeypatch.setattr(escalate_mod, "dispatch", fake_dispatch)
+
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _needs_human_item(client, repo)
+        r = client.post(
+            f"/api/work-items/{wid}/escalate", json={"message": "please look", "new_thread": True}
+        )
+        assert r.status_code == 200, r.text
+        deadline = time.monotonic() + 10
+        while "new_thread" not in seen and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert seen.get("new_thread") is True
+
+
 def _poll_events(client, wid, want, timeout=30):
     deadline = time.monotonic() + timeout
     seen = []
@@ -190,7 +285,15 @@ def test_escalate_consumes_a_self_retry_left_by_a_human_escalated_agent(tmp_path
 
     def fake_dispatch(node_id):
         async def _fake(
-            database, run_dirs, *, work_item_id, message, launch, auto=False, evts=None
+            database,
+            run_dirs,
+            *,
+            work_item_id,
+            message,
+            launch,
+            auto=False,
+            new_thread=False,
+            evts=None,
         ):
             await database.write(
                 lambda c: events.append(

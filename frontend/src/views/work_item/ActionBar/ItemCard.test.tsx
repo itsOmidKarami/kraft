@@ -282,6 +282,17 @@ describe("ItemCard (W11 · A)", () => {
     expect(rowNames()).toEqual(["Resume"]);
   });
 
+  it("paused: Escalate is offered from More actions and posts through (Kraft-k5ol)", async () => {
+    const spy = vi.spyOn(api, "escalateWorkItem").mockResolvedValue({ id: "w1", status: "escalating" });
+    renderCard(item({ status: "paused" }));
+    await openMore();
+    expect(menuLabels()).toContain("Escalate");
+    await userEvent.click(screen.getByRole("menuitem", { name: "Escalate" }));
+    await userEvent.type(screen.getByLabelText(/composer message/i), "please look at this");
+    await userEvent.click(screen.getByRole("button", { name: /^escalate$/i }));
+    expect(spy).toHaveBeenCalledWith("w1", "please look at this");
+  });
+
   it("shows a failed Cancel work item", async () => {
     vi.spyOn(api, "abandonWorkItem").mockRejectedValue(new Error("409 busy"));
     renderCard(item({ status: "paused" }));
@@ -473,5 +484,44 @@ describe("ItemCard (W11 · A)", () => {
     );
     expect(screen.getByTestId("escalated-card")).toHaveTextContent("what about submodules?");
     expect(screen.queryByText(/no summary reported/i)).toBeNull();
+  });
+
+  it("escalated with two threads: composer shows a folded row for thread 1 and thread 2's turns above the split button (Kraft-dkb6g)", async () => {
+    const t1 = escSession({ id: "s1", thread: 1, status: "done", exited_at: "2026-09-13T10:00:00Z" });
+    const t2a = escSession({ id: "s2", thread: 2, status: "done", exited_at: "2026-09-13T10:30:00Z" });
+    renderCard(
+      item(capped),
+      [t1, t2a],
+      [
+        NEEDS_HUMAN_EVENT,
+        escMessage({ seq: 2, payload: { session_id: "s1", message: "first turn", thread: 1, turn: 1 } }),
+        escMessage({ seq: 3, payload: { session_id: "s2", message: "second thread", thread: 2, turn: 1 } }),
+      ],
+    );
+    await userEvent.click(screen.getByRole("button", { name: /reply/i }));
+    expect(screen.getByTestId("escalation-thread-fold-1")).toHaveTextContent(/thread 1 · 1 turn/);
+    expect(screen.getByTestId("escalation-thread-divider")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reply options" })).toBeInTheDocument();
+  });
+
+  it("escalate composer: picking 'in new thread' from the split menu posts new_thread true (Kraft-dkb6g)", async () => {
+    const spy = vi.spyOn(api, "escalateWorkItem").mockResolvedValue({ id: "w1", status: "escalating" });
+    renderCard(
+      item(capped),
+      [escSession({ thread: 1, status: "done", exited_at: "t" })],
+      [NEEDS_HUMAN_EVENT, escMessage({ payload: { session_id: "e1", message: "go", thread: 1, turn: 1 } })],
+    );
+    await userEvent.click(screen.getByRole("button", { name: /reply/i }));
+    await userEvent.type(screen.getByLabelText(/composer message/i), "follow-up");
+    await userEvent.click(screen.getByRole("button", { name: /reply options/i }));
+    await userEvent.click(screen.getByRole("menuitem", { name: /reply in new thread/i }));
+    expect(spy).toHaveBeenCalledWith("w1", "follow-up", true);
+  });
+
+  it("first-ever escalation: no split menu, no fold rows, no divider (Kraft-dkb6g)", async () => {
+    renderCard(item(capped));
+    await userEvent.click(screen.getByRole("button", { name: /^escalate$/i }));
+    expect(screen.queryByRole("button", { name: /escalate options/i })).toBeNull();
+    expect(screen.queryByTestId("escalation-thread-divider")).toBeNull();
   });
 });
