@@ -282,6 +282,18 @@ describe("PeekPane", () => {
     expect(screen.getByRole("button", { name: /start/i })).toBeInTheDocument();
   });
 
+  it("shows the first node, not the last, in the hero for a created-but-never-started item", () => {
+    // A null current_node_id also means "finished" for a done/archived item,
+    // where the last node is the right fallback -- but for a paused item
+    // that never ran, null means "hasn't reached node 1 yet", not "ran off
+    // the end of the chain" (Kraft-3j02r).
+    setOneItem({ status: "paused", current_node_id: null });
+    renderPeek();
+    const hero = document.querySelector(".peek-hero") as HTMLElement;
+    expect(within(hero).getByText("plan")).toBeTruthy();
+    expect(within(hero).getByText(/node 1 of 2/)).toBeTruthy();
+  });
+
   it("renders the capped card, not a refusal, for a stranded needs_human stop", () => {
     setOneItem({ status: "needs_human" });
     renderPeek();
