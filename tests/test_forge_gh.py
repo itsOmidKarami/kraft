@@ -24,6 +24,13 @@ GH_PR_VIEW_CONFLICT = (
 )
 
 
+GH_PR_VIEW_NEEDS_APPROVAL = (
+    '{"number":7,"url":"https://github.com/o/r/pull/7","mergeable":"UNKNOWN",'
+    '"mergeStateStatus":"BLOCKED","reviewDecision":"REVIEW_REQUIRED",'
+    '"statusCheckRollup":[{"name":"build","conclusion":"SUCCESS"}]}'
+)
+
+
 def test_gh_open_mr_parses_the_number_and_url(tmp_path, monkeypatch):
     _stub(tmp_path, monkeypatch, "gh", GH_PR_VIEW)
     _stub(tmp_path, monkeypatch, "git", "")
@@ -32,6 +39,25 @@ def test_gh_open_mr_parses_the_number_and_url(tmp_path, monkeypatch):
 
     assert mr.number == 7
     assert mr.url == "https://github.com/o/r/pull/7"
+
+
+def test_gh_open_mr_creates_as_draft(tmp_path, monkeypatch):
+    _stub(tmp_path, monkeypatch, "gh", GH_PR_VIEW)
+    _stub(tmp_path, monkeypatch, "git", "")
+
+    asyncio.run(forge.GhCli().open_mr(repo=tmp_path, branch="kraft/abc", title="t", body="b"))
+
+    assert "--draft" in _argv(tmp_path, "gh")
+
+
+def test_gh_mark_ready_unsets_draft(tmp_path, monkeypatch):
+    _stub(tmp_path, monkeypatch, "gh", "")
+
+    asyncio.run(
+        forge.GhCli().mark_ready(repo=tmp_path, branch="kraft/abc", mr=forge.MR(7, "http://x/7"))
+    )
+
+    assert _argv(tmp_path, "gh") == ["pr", "ready", "7"]
 
 
 def test_open_mr_passes_the_authored_metadata(tmp_path, monkeypatch):
@@ -181,6 +207,28 @@ def test_gh_ci_status_reads_mergeable_from_the_same_pr_view(tmp_path, monkeypatc
     assert argv.count("--json") == 1, "a second round trip for a fact one call already carries"
     assert (status.state, status.mergeable) == ("success", False)
     assert "CONFLICTING" in status.merge_detail
+
+
+def test_gh_ci_status_names_a_missing_approval_distinctly_from_blocked(tmp_path, monkeypatch):
+    """`mergeStateStatus: BLOCKED` alone doesn't say why -- `reviewDecision`
+    is the field that tells a pending-approval BLOCKED apart from any
+    other kind, so it has to ride along on the same `gh pr view` call."""
+    _stub(tmp_path, monkeypatch, "gh", GH_PR_VIEW_NEEDS_APPROVAL)
+
+    status = asyncio.run(forge.GhCli().ci_status(repo=tmp_path, mr=forge.MR(0, "")))
+
+    argv = _argv(tmp_path, "gh")
+    fields = argv[argv.index("--json") + 1]
+    assert "reviewDecision" in fields
+    assert status.block_reason == "not_approved"
+
+
+def test_gh_ci_status_names_a_conflict_as_a_conflict(tmp_path, monkeypatch):
+    _stub(tmp_path, monkeypatch, "gh", GH_PR_VIEW_CONFLICT)
+
+    status = asyncio.run(forge.GhCli().ci_status(repo=tmp_path, mr=forge.MR(0, "")))
+
+    assert status.block_reason == "conflict"
 
 
 def test_gh_set_labels_edits_the_pull_request(tmp_path, monkeypatch):

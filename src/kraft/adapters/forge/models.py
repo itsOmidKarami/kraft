@@ -74,6 +74,13 @@ class CIStatus:
     mergeable: bool | None = None
     #: The raw state the forge gave, for the log line a human reads.
     merge_detail: str = ""
+    #: Why `mergeable` is anything but `True`, when something here
+    #: recognises the state -- distinct problems with distinct fixes
+    #: (`mr.classify_block_reason`). `None` same as `mergeable`'s own
+    #: `None`: nothing here recognised the state, or there was nothing to
+    #: recognise. Defaulted so FakeForge and every existing caller are
+    #: unaffected.
+    block_reason: Literal["draft", "conflict", "not_approved"] | None = None
     #: The commit this pipeline/check-run answered for. "" means the backend
     #: could not tell — an old FakeForge literal, or a call this field
     #: predates — so `ci_poll`'s sha guard (Kraft-bjjm) has nothing to
@@ -90,6 +97,7 @@ class Forge(Protocol):
     async def open_mr(
         self, *, repo: Path, branch: str, title: str, body: str, meta: MRMeta | None = None
     ) -> MR: ...
+    async def mark_ready(self, *, repo: Path, branch: str, mr: MR) -> None: ...
     async def push(self, *, repo: Path, branch: str) -> None: ...
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None: ...
     async def ci_status(
@@ -149,6 +157,10 @@ class FakeForge:
     #: this are unaffected.
     mergeable: bool | None = None
     merge_detail: str = ""
+    #: What `ci_status` says is blocking the merge request, alongside
+    #: `mergeable`/`merge_detail`. `None` (nothing blocking) is the
+    #: default, so tests that predate this are unaffected.
+    block_reason: Literal["draft", "conflict", "not_approved"] | None = None
     #: Labels `set_labels` put on the merge request, in call order.
     labels: list[str] = field(default_factory=list)
     #: repo each `opened` number belongs to (Kraft-qlsf). The real CLIs
@@ -160,6 +172,10 @@ class FakeForge:
     #: so a test can assert the authored title reached the forge without a
     #: network.
     opened_titles: dict[int, str] = field(default_factory=dict)
+    #: Draft state per MR number, keyed the same way as `opened_titles`.
+    #: `open_mr` always sets this True now (draft-MR workflow spec);
+    #: `mark_ready` (Task 2) is the only thing that flips it.
+    opened_draft: dict[int, bool] = field(default_factory=dict)
     #: `meta` each `open_mr` call was given, same keying as `opened_titles` --
     #: so a test can assert labels/assignees/reviewers reached the forge.
     opened_meta: dict[int, MRMeta] = field(default_factory=dict)
@@ -176,9 +192,13 @@ class FakeForge:
         self.opened[number] = branch
         self._opened_repo[number] = str(repo)
         self.opened_titles[number] = title
+        self.opened_draft[number] = True
         self.opened_meta[number] = meta or MRMeta()
         self.opened_bodies[number] = body
         return MR(number=number, url=f"http://fake.forge/{number}")
+
+    async def mark_ready(self, *, repo: Path, branch: str, mr: MR) -> None:
+        self.opened_draft[mr.number] = False
 
     async def push(self, *, repo: Path, branch: str) -> None:
         self.pushed.append(branch)
@@ -206,6 +226,7 @@ class FakeForge:
             jobs=(f"fake-job: {state}",),
             mergeable=self.mergeable,
             merge_detail=self.merge_detail,
+            block_reason=self.block_reason,
             sha=sha,
             failed_jobs=failed_jobs,
             pipeline_ref=pipeline_ref,
