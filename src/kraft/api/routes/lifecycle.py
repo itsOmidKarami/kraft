@@ -54,6 +54,7 @@ class Resume(BaseModel):
 
 class Escalate(BaseModel):
     message: str
+    new_thread: bool = False
 
 
 def _terminate(pid: int | None) -> None:
@@ -894,8 +895,16 @@ async def escalate_work_item(wid: str, body: Escalate, request: Request):
     """
     st = request.app.state
     row = deps._work_item_row(st, wid)
-    if row["status"] != "needs_human":
-        raise HTTPException(409, "work item is not needs_human")
+    if row["status"] not in ("needs_human", "paused"):
+        raise HTTPException(409, "work item is not needs_human or paused")
+    # A `paused` item that has never started (current_node_id is NULL, per
+    # /work-items' "it lands paused" default) has no node/context to
+    # escalate about -- dispatch reads row["current_node_id"] straight into
+    # the session it creates, which is NOT NULL (Kraft-k5ol widened this
+    # check to admit `paused`; a never-started item is `paused` too, and
+    # was never the case that widening was meant to cover).
+    if row["current_node_id"] is None:
+        raise HTTPException(409, "work item has not started")
     message = body.message.strip()
     if not message:
         raise HTTPException(400, "message is required")
@@ -912,6 +921,7 @@ async def escalate_work_item(wid: str, body: Escalate, request: Request):
             work_item_id=wid,
             message=message,
             launch=deps.launch(st, row["repo"]),
+            new_thread=body.new_thread,
         )
         # The agent may have called `kraft item retry` on itself mid-turn
         # (lifecycle.py's `work_item_self_retry_requested` deferral above) --

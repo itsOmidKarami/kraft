@@ -221,17 +221,20 @@ async def report_progress(task: int, work_item_id: str | None = None) -> dict:
     return await transport._act(f"/work-items/{target}/progress", {"task": task})
 
 
-async def escalate(message: str, work_item_id: str | None = None) -> dict:
+async def escalate(message: str, work_item_id: str | None = None, new_thread: bool = False) -> dict:
     """Send `message` into a work item's escalation thread, starting one if
-    none exists yet. Only a `needs_human` item has this door — retry/resume
-    cover every other stop.
+    none exists yet. Only a `needs_human` or `paused` item has this door —
+    retry/resume cover every other stop.
 
     Resumes the same underlying agent session on every later call for the
     same item, so whatever it already tried carries forward, kept bounded by
-    the CLI's own `--autocompact` rather than anything Kraft does.
+    the CLI's own `--autocompact` rather than anything Kraft does -- unless
+    `new_thread` starts a fresh one instead (Kraft-dkb6g).
     """
     target = context._forbid_self_action(work_item_id)
-    return await transport._act(f"/work-items/{target}/escalate", {"message": message})
+    return await transport._act(
+        f"/work-items/{target}/escalate", {"message": message, "new_thread": new_thread}
+    )
 
 
 async def open_worktree(work_item_id: str | None = None, editor: str | None = None) -> dict:

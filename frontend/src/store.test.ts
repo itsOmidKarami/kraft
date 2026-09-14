@@ -97,6 +97,19 @@ describe("applyEvent", () => {
     expect(rows.find((r) => r.id === "s8")!.attempt).toBe(1);
   });
 
+  it("worker_session_created and _started carry thread onto the row", () => {
+    // Both events default to blankSession's thread: 1 unless the payload says
+    // otherwise -- without `thread` on the wire, a new escalation thread's
+    // session was grouped under thread 1 until the next hydrate, and
+    // worker_session_started's upsert reset an already-hydrated thread 2 back
+    // to 1 (Kraft-atdbw).
+    const st = useStore.getState();
+    st.applyEvent(ev({ seq: 2, type: "worker_session_created", payload: { session_id: "s7", node_id: "escalation", hook_point: "escalation", thread: 2 } }));
+    expect(useStore.getState().sessionsByItem.w1[0].thread).toBe(2);
+    st.applyEvent(ev({ seq: 3, type: "worker_session_started", payload: { session_id: "s7", node_id: "escalation", hook_point: "escalation", thread: 2 } }));
+    expect(useStore.getState().sessionsByItem.w1[0].thread).toBe(2);
+  });
+
   it("session_unknown sets the session row status to unknown", () => {
     const st = useStore.getState();
     st.applyEvent(ev({ seq: 2, type: "worker_session_started", payload: { session_id: "s1", node_id: "env_setup", hook_point: "on.env.prepare" } }));

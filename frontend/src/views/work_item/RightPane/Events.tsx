@@ -140,7 +140,11 @@ function scopeOf(
         : own.filter((e) => sessionOf(e) === sel.id || (e.type === "task_progress" && e.created_at >= from && (!to || e.created_at <= to)));
     const bits = [
       s?.hook_point ?? "session",
-      s?.hook_point === "escalation" ? `turn ${s.attempt ?? 1}` : rounds.length > 1 && r ? `round ${r.n + 1}` : null,
+      s?.hook_point === "escalation"
+        ? `thread ${s.thread} · turn ${sessions.filter((x) => x.hook_point === "escalation" && x.thread === s.thread && x.created_at <= s.created_at).length}`
+        : rounds.length > 1 && r
+          ? `round ${r.n + 1}`
+          : null,
       s ? statusWord(s.status) : null,
       s ? elapsedBetween(s.started_at ?? s.created_at, s.exited_at) : null,
     ].filter(Boolean);

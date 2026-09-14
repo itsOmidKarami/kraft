@@ -146,6 +146,7 @@ export const useStore = create<State>((set, get) => ({
             status: "pending",
             round: p.round ?? 0,
             attempt: p.attempt ?? 1,
+            thread: p.thread ?? 1,
           };
           return { ...base, sessionsByItem: { ...s.sessionsByItem, [id]: upsert(rows, row) } };
         }
@@ -159,6 +160,7 @@ export const useStore = create<State>((set, get) => ({
             status: "running",
             round: p.round ?? 0,
             attempt: p.attempt ?? 1,
+            thread: p.thread ?? 1,
             started_at: ev.created_at,
           };
           // upsert merges this over the created row; `round` is carried on both
@@ -351,6 +353,7 @@ function blankSession(workItemId: string, createdAt: string): WorkerSession {
     hook_point: "",
     status: "pending",
     attempt: 1,
+    thread: 1,
     round: 0,
     created_at: createdAt,
     started_at: null,

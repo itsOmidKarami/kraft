@@ -175,7 +175,7 @@ export interface Round {
  *  node-level event (gates, node and item lifecycle, a run of task_progress). */
 export type TimelineEntry =
   | { kind: "round"; at: string; round: Round }
-  | { kind: "escalation"; at: string; session: WorkerSession; turn: number }
+  | { kind: "escalationThread"; at: string; thread: number; sessions: WorkerSession[] }
   | { kind: "event"; at: string; event: KraftEvent; label: string; last?: KraftEvent };
 
 export interface NodeRounds {
@@ -255,8 +255,17 @@ export function nodeRounds(node: string, events: KraftEvent[], sessions: WorkerS
   const nodeSessions = sessions.filter((s) => s.node_id === node);
   const rounds = roundsOf(own, nodeSessions);
   const entries: TimelineEntry[] = rounds.map((r) => ({ kind: "round", at: r.startedAt, round: r }));
-  for (const s of nodeSessions.filter((x) => x.hook_point === "escalation")) {
-    entries.push({ kind: "escalation", at: s.created_at, session: s, turn: s.attempt ?? 1 });
+  const escalationSessions = nodeSessions
+    .filter((x) => x.hook_point === "escalation")
+    .sort((a, b) => a.created_at.localeCompare(b.created_at));
+  const byThread = new Map<number, WorkerSession[]>();
+  for (const s of escalationSessions) {
+    const list = byThread.get(s.thread) ?? [];
+    list.push(s);
+    byThread.set(s.thread, list);
+  }
+  for (const [thread, threadSessions] of [...byThread.entries()].sort((a, b) => a[0] - b[0])) {
+    entries.push({ kind: "escalationThread", at: threadSessions[0].created_at, thread, sessions: threadSessions });
   }
   // W14 · A: a round is one row, so what happened inside it is not; and a
   // node_started / node_completed within a minute of a round's edge is that edge.

@@ -73,10 +73,20 @@ const FLOWS: Flow[] = [
     { name: "type", run: async (p) => { await p.keyboard.type(NOTE); } },
     { name: "submit", run: btn(/resume with this steer/i), wait: 800 },
   ] },
-  { name: "escalate-thread", state: "escalated", widths: [1280, 390], start: item("escalated"), steps: [
+  // Kraft-dkb6g: `data: "long"` so this item has two escalation threads --
+  // the caret/new-thread/timeline steps below need a prior thread to act
+  // on. Existing steps' indices (00-02) are kept as they were; the new
+  // steps append after them rather than renumbering (the spec's own literal
+  // 02/03/04 numbering assumed `dismiss` was dropped or moved -- it isn't,
+  // so this flow's steps land at 03-05 instead. Flagging here rather than
+  // silently matching the spec text, per its own instruction).
+  { name: "escalate-thread", state: "escalated", data: "long", widths: [1280, 390], start: item("escalated"), steps: [
     { name: "reply-open", run: btn(/^Reply/) },
     { name: "thread-scroll", run: async (p) => { await p.locator('[data-testid="escalation-thread"]').evaluate((el) => { el.scrollTop = el.scrollHeight; }).catch(() => {}); } },
     { name: "dismiss", run: async (p) => { await p.getByRole("button", { name: /cancel/i }).first().click().catch(() => {}); await p.getByRole("button", { name: /dismiss/i }).first().click().catch(() => {}); }, wait: 600 },
+    { name: "caret-open", run: async (p) => { await p.getByRole("button", { name: /^Reply$/ }).first().click().catch(() => {}); await p.getByRole("button", { name: /reply options/i }).click().catch(() => {}); } },
+    { name: "new-thread-submit", run: async (p) => { await p.getByRole("menuitem", { name: /reply in new thread/i }).click().catch(() => {}); }, wait: 800 },
+    { name: "timeline-two-threads", run: async (p) => { await p.getByRole("tab", { name: /timeline/i }).click().catch(() => {}); await p.getByTestId("timeline-escalation-thread-2").click().catch(() => {}); } },
   ] },
   { name: "item-tabs-keyboard", state: "gate", data: "long", widths: [1280], keyboard: true, start: item("gate"), steps: [
     { name: "tab-x5", run: key("Tab", 5) },

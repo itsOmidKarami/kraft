@@ -78,6 +78,15 @@ export interface WorkItemAttachment {
   path: string;
 }
 
+export interface EscalationThread {
+  thread: number;
+  session_id: string;
+  turns: number;
+  started_at: string;
+  ended_at: string | null;
+  status: SessionStatus;
+}
+
 export interface WorkItem {
   id: string;
   title: string;
@@ -122,6 +131,9 @@ export interface WorkItem {
   /** Documents attached at intake; the gates they satisfy are absent from the chain. */
   attachments?: WorkItemAttachment[];
   root_merge_policy?: string | null;
+  /** One entry per escalation thread this item has had, oldest first
+   *  (Kraft-dkb6g). Only on the detail endpoint. */
+  escalation_threads?: EscalationThread[];
   worktree_path?: string;
   /** The worktree's current HEAD (Kraft-lu2), so the gate can tell a
    *  measurement taken on this commit from one taken before it. Only on the
@@ -201,6 +213,9 @@ export interface WorkerSession {
   hook_point: string;
   status: SessionStatus;
   attempt: number;
+  /** 1-based; restarts only across a `new_thread` escalation (Kraft-dkb6g).
+   *  Every non-escalation session is implicitly thread 1 for its whole life. */
+  thread: number;
   /** Fix-cycle index this session was dispatched in; 0 on the first pass. */
   round: number;
   created_at: string;

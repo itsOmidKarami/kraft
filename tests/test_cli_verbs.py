@@ -383,14 +383,26 @@ def test_skip_passes_the_id_and_note_through(app, monkeypatch, capsys):
 def test_escalate_passes_the_id_and_message_through(app, monkeypatch, capsys):
     seen = {}
 
-    async def fake_escalate(message=None, work_item_id=None):
-        seen.update(message=message, work_item_id=work_item_id)
+    async def fake_escalate(message=None, work_item_id=None, new_thread=False):
+        seen.update(message=message, work_item_id=work_item_id, new_thread=new_thread)
         return {"id": work_item_id, "status": "escalating"}
 
     monkeypatch.setattr(client, "escalate", fake_escalate)
     cli.main(["item", "escalate", "w1", "--message", "please look at this"])
-    assert seen == {"message": "please look at this", "work_item_id": "w1"}
+    assert seen == {"message": "please look at this", "work_item_id": "w1", "new_thread": False}
     assert "w1" in capsys.readouterr().out
+
+
+def test_escalate_passes_new_thread_through(app, monkeypatch, capsys):
+    seen = {}
+
+    async def fake_escalate(message=None, work_item_id=None, new_thread=False):
+        seen.update(message=message, work_item_id=work_item_id, new_thread=new_thread)
+        return {"id": work_item_id, "status": "escalating"}
+
+    monkeypatch.setattr(client, "escalate", fake_escalate)
+    cli.main(["item", "escalate", "w1", "--message", "please look at this", "--new-thread"])
+    assert seen["new_thread"] is True
 
 
 def test_reject_passes_the_node_through(app, monkeypatch, capsys):

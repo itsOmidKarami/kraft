@@ -3,12 +3,23 @@ import * as api from "../../../api";
 import type { KraftEvent, WorkerSession, WorkItem } from "../../../types";
 
 /** 06's escalating pill: "● Agent is on it · turn N", or "● Auto-escalated ·
- *  turn N" when the turn fired unattended (Kraft-vyk8). The pill only: Stop
- *  escalation lives in the card's More actions (W11 · J). */
-export function EscalatingPill({ turn, auto }: { turn: number; auto?: boolean }) {
+ *  turn N" when the turn fired unattended (Kraft-vyk8). `thread` only shows
+ *  once there is more than one (Kraft-dkb6g) -- the common case, a single
+ *  thread, reads exactly as it always has. The pill only: Stop escalation
+ *  lives in the card's More actions (W11 · J). */
+export function EscalatingPill({
+  turn,
+  auto,
+  thread,
+}: {
+  turn: number;
+  auto?: boolean;
+  thread?: number;
+}) {
+  const threadPart = thread && thread > 1 ? `thread ${thread} · ` : "";
   return (
     <span className="tag tag-accent escalating-pill" data-testid="escalating-pill">
-      {auto ? `● Auto-escalated · turn ${turn}` : `● Agent is on it · turn ${turn}`}
+      {auto ? `● Auto-escalated · ${threadPart}turn ${turn}` : `● Agent is on it · ${threadPart}turn ${turn}`}
     </span>
   );
 }

@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 28
+SCHEMA_VERSION = 29
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -126,6 +126,7 @@ CREATE TABLE worker_sessions (
                     'done_with_concerns', 'needs_context', 'rate_limited', 'config_error',
                     'waiting', 'conflict', 'infra', 'infra_stop')),
   attempt        INTEGER NOT NULL DEFAULT 1,
+  thread         INTEGER NOT NULL DEFAULT 1,
   session_summary_ref TEXT,
   created_at     TEXT NOT NULL,
   -- usage capture (handoff spec §8): stamped when the session starts and ends
@@ -657,6 +658,10 @@ FROM worker_sessions""",
     # Pin `on.ci.poll` to the pipeline it already saw pending, instead of
     # re-resolving "latest on branch" every re-entry (Kraft-ivh1).
     27: ["ALTER TABLE work_items ADD COLUMN ci_pipeline_ref TEXT"],
+    # Escalation worker sessions get a thread number (design:
+    # ESCALATION_THREADS_SPEC.md, reproduced in the Kraft-dkb6g spec) --
+    # every other hook_point's sessions stay implicitly thread 1.
+    28: ["ALTER TABLE worker_sessions ADD COLUMN thread INTEGER NOT NULL DEFAULT 1"],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins

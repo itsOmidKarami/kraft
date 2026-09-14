@@ -20,6 +20,11 @@ def create_session(
     round: int = 0,
     head_sha: str | None = None,
     reuse_if_waiting: bool = False,
+    #: 1-based, restarts only when the caller explicitly starts a new
+    #: escalation thread (`escalate.dispatch(new_thread=True)`, Kraft-dkb6g)
+    #: -- every non-escalation hook leaves this at the default, one implicit
+    #: thread for its whole life.
+    thread: int = 1,
 ) -> tuple[str, str, str]:
     """`round` is the fix-cycle index this session was dispatched in (0 = first pass).
 
@@ -52,10 +57,10 @@ def create_session(
     conn.execute(
         "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, pid, "
         "pid_start_time, log_path, result_path, status, attempt, created_at, exited_at, "
-        "round, head_sha) "
+        "round, head_sha, thread) "
         "VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, 'pending', "
         "(SELECT COUNT(*) + 1 FROM worker_sessions "
-        "WHERE work_item_id = ? AND node_id = ? AND hook_point = ?), ?, NULL, ?, ?)",
+        "WHERE work_item_id = ? AND node_id = ? AND hook_point = ?), ?, NULL, ?, ?, ?)",
         (
             id,
             work_item_id,
@@ -69,6 +74,7 @@ def create_session(
             _now(),
             round,
             head_sha,
+            thread,
         ),
     )
     (attempt,) = conn.execute("SELECT attempt FROM worker_sessions WHERE id = ?", (id,)).fetchone()
@@ -88,9 +94,60 @@ def create_session(
             "hook_point": hook_point,
             "round": round,
             "attempt": attempt,
+            "thread": thread,
         },
     )
     return id, log_path, result_path
+
+
+def latest_escalation_thread(conn: sqlite3.Connection, work_item_id: str) -> int:
+    """The highest `thread` number among `work_item_id`'s escalation
+    sessions, or 0 if it has never been escalated -- `escalate.dispatch`'s
+    "what thread does a continuing turn belong to, what does a fresh one
+    become" (Kraft-dkb6g)."""
+    row = conn.execute(
+        "SELECT COALESCE(MAX(thread), 0) AS t FROM worker_sessions "
+        "WHERE work_item_id = ? AND hook_point = 'escalation'",
+        (work_item_id,),
+    ).fetchone()
+    return row["t"]
+
+
+def escalation_thread_turn_count(conn: sqlite3.Connection, work_item_id: str, thread: int) -> int:
+    """How many escalation sessions already exist in this thread -- the next
+    one dispatched into it is turn `this + 1` (1-based, restarts per thread,
+    ESCALATION_THREADS_SPEC.md §2)."""
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM worker_sessions "
+        "WHERE work_item_id = ? AND hook_point = 'escalation' AND thread = ?",
+        (work_item_id, thread),
+    ).fetchone()
+    return row["n"]
+
+
+def escalation_threads(conn: sqlite3.Connection, work_item_id: str) -> list[dict]:
+    """One entry per escalation thread this item has had, oldest first --
+    `WorkItem.escalation_threads` (ESCALATION_THREADS_SPEC.md §2), so the UI
+    can render thread headers without scanning every session/event itself."""
+    rows = conn.execute(
+        "SELECT * FROM worker_sessions WHERE work_item_id = ? AND hook_point = 'escalation' "
+        "ORDER BY thread, created_at",
+        (work_item_id,),
+    ).fetchall()
+    threads: dict[int, list[sqlite3.Row]] = {}
+    for r in rows:
+        threads.setdefault(r["thread"], []).append(r)
+    return [
+        {
+            "thread": t,
+            "session_id": sessions[-1]["id"],
+            "turns": len(sessions),
+            "started_at": sessions[0]["created_at"],
+            "ended_at": sessions[-1]["exited_at"],
+            "status": sessions[-1]["status"],
+        }
+        for t, sessions in sorted(threads.items())
+    ]
 
 
 def sessions_for_round(
@@ -295,7 +352,7 @@ def session_running(conn: sqlite3.Connection, session_id, pid, pid_start_time) -
         (pid, pid_start_time, _now(), session_id),
     )
     row = conn.execute(
-        "SELECT work_item_id, node_id, hook_point, round, attempt FROM worker_sessions "
+        "SELECT work_item_id, node_id, hook_point, round, attempt, thread FROM worker_sessions "
         "WHERE id = ?",
         (session_id,),
     ).fetchone()
@@ -309,6 +366,7 @@ def session_running(conn: sqlite3.Connection, session_id, pid, pid_start_time) -
             "hook_point": row["hook_point"],
             "round": row["round"],
             "attempt": row["attempt"],
+            "thread": row["thread"],
             "pid": pid,
         },
     )

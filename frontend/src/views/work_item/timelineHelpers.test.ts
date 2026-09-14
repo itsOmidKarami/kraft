@@ -105,9 +105,45 @@ describe("roundsOf (W13 · E)", () => {
   it("groups escalation sessions on their own, never inside a round", () => {
     const { events, sessions } = buildItem("escalated", 3, "long");
     const nr = nodeRounds("review", events as KraftEvent[], sessions as WorkerSession[]);
-    const turns = nr.entries.filter((e) => e.kind === "escalation");
-    expect(turns.map((e) => (e.kind === "escalation" ? e.turn : 0))).toEqual([1, 2]);
+    const threads = nr.entries.filter((e) => e.kind === "escalationThread");
+    // The `long` fixture: thread 1 (3 turns), thread 2 (1 turn) -- Kraft-dkb6g.
+    expect(threads).toHaveLength(2);
+    expect(threads.map((t) => (t.kind === "escalationThread" ? t.sessions.length : 0))).toEqual([3, 1]);
     expect(nr.rounds.flatMap((r) => r.sessions).some((s) => s.hook_point === "escalation")).toBe(false);
+  });
+
+  it("nodeRounds groups escalation sessions by thread, not one entry per turn (Kraft-dkb6g)", () => {
+    const s = (over: Partial<WorkerSession>): WorkerSession =>
+      ({
+        id: "s",
+        work_item_id: "w1",
+        node_id: "n",
+        hook_point: "escalation",
+        status: "done",
+        attempt: 1,
+        thread: 1,
+        round: 0,
+        created_at: "t",
+        started_at: null,
+        exited_at: null,
+        tokens_in: null,
+        tokens_out: null,
+        cost_usd: null,
+        wall_ms: null,
+        model: null,
+        head_sha: null,
+        ...over,
+      }) as WorkerSession;
+    const sessions = [
+      s({ id: "s1", thread: 1, created_at: "2026-01-01T00:00:00Z" }),
+      s({ id: "s2", thread: 1, created_at: "2026-01-01T00:05:00Z" }),
+      s({ id: "s3", thread: 2, created_at: "2026-01-01T00:10:00Z" }),
+    ];
+    const nr = nodeRounds("n", [], sessions);
+    const threads = nr.entries.filter((e) => e.kind === "escalationThread");
+    expect(threads).toHaveLength(2);
+    expect(threads[0]).toMatchObject({ thread: 1, sessions: [sessions[0], sessions[1]] });
+    expect(threads[1]).toMatchObject({ thread: 2, sessions: [sessions[2]] });
   });
 
   it("reads every stop… verdict as stop", () => {
