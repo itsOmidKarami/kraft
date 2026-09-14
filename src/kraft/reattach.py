@@ -3,14 +3,19 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import psutil
 
-from kraft import store
+from kraft import events, store
+from kraft import policy as _policy
 from kraft import usage as _usage
 from kraft.adapters.subprocess import _progress_usage, _resolve_result_file, read_result_fields
+from kraft.executor import gates
+from kraft.executor.context import LaunchContext, OnApprove
+from kraft.templates import Registry
 
 logger = logging.getLogger(__name__)
 
@@ -74,13 +79,135 @@ async def _exit_from_file(
     )
 
 
+async def _resume_adopted_escalation(
+    db,
+    run_dirs,
+    *,
+    work_item_id: str,
+    session_id: str,
+    registry: Registry | None,
+    policy: _policy.Policy | None,
+    launch_factory: Callable[[str], LaunchContext] | None,
+    bd_cwd: str | None,
+    on_approve: OnApprove | None,
+) -> None:
+    """`_adopt` just recorded this escalation session's exit, but a deferred
+    self-retry request it may have left on the timeline
+    (`work_item_self_retry_requested`, lifecycle.py) still needs
+    `gates.resume_after_escalation` to consume it (Kraft-atdbw) -- the frame
+    that would have called it live (`auto_escalate_stuck` or the manual
+    `/escalate` route, both awaiting inside `escalate.dispatch`) is gone: the
+    restart that orphaned this session also dropped it.
+
+    Reconstructs the same "seq right before dispatch" cursor those live
+    callers compute themselves, from this session's own `escalation_message`
+    event -- `session_id` there is this session's own `worker_sessions.id`
+    (`escalate.dispatch` mints one `uuid.uuid4().hex` and uses it as both).
+    `events.read_after` is exclusive of its own `after_seq`, so using this
+    event's own `seq` as the cursor correctly excludes it while including
+    everything the turn produced after it -- the same events a live caller's
+    pre-dispatch cursor would also have excluded.
+
+    Called from `_adopt`'s tail (the live-pid branch of `reattach()`,
+    already running inside a backgrounded `asyncio.Task`) and, via
+    `_guarded_resume_adopted_escalation`, from the resolved-from-file branch
+    too: a session whose pid was already dead or absent at reattach time
+    discovers the same shape of exit, but the `auto_escalate_delay` poller
+    fires before any human runs `kraft item retry` -- it dispatches a new
+    paid turn on the already-fixed stop, whose cursor lands past the stale
+    request and never consumes it (Kraft-atdbw). `resume_after_escalation`
+    awaits `walk.run(...)` when there's a request to consume, which can run
+    for as long as a full agent turn, so both call sites run it as a
+    backgrounded task rather than blocking `reattach()` -- and so the whole
+    server's startup -- for that long.
+    """
+    evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
+    sent = next(
+        (
+            e
+            for e in evts
+            if e["type"] == "escalation_message" and e["payload"].get("session_id") == session_id
+        ),
+        None,
+    )
+    if sent is None:
+        return  # not an escalation turn this item's timeline knows about
+    row = db.read(
+        lambda c: c.execute("SELECT repo FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+    )
+    launch = launch_factory(row["repo"]) if launch_factory and row else None
+    await gates.resume_after_escalation(
+        db,
+        run_dirs,
+        work_item_id=work_item_id,
+        cursor=sent["seq"],
+        registry=registry,
+        policy=policy,
+        launch=launch,
+        bd_cwd=bd_cwd,
+        on_approve=on_approve,
+    )
+
+
+async def _guarded_resume_adopted_escalation(
+    db,
+    run_dirs,
+    *,
+    work_item_id: str,
+    node_id: str,
+    session_id: str,
+    registry: Registry | None,
+    policy: _policy.Policy | None,
+    launch_factory: Callable[[str], LaunchContext] | None,
+    bd_cwd: str | None,
+    on_approve: OnApprove | None,
+) -> None:
+    """`_resume_adopted_escalation`, guarded like `_guarded_adopt` guards
+    `_adopt`: this runs as a backgrounded task off `reattach`'s own loop
+    (Kraft-atdbw), so an uncaught exception here would otherwise vanish into
+    asyncio's default handler instead of reaching anything that watches the
+    work item."""
+    try:
+        await _resume_adopted_escalation(
+            db,
+            run_dirs,
+            work_item_id=work_item_id,
+            session_id=session_id,
+            registry=registry,
+            policy=policy,
+            launch_factory=launch_factory,
+            bd_cwd=bd_cwd,
+            on_approve=on_approve,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "resume_after_escalation crashed for resolved-from-file session %s", session_id
+        )
+        reason = f"resume_after_escalation crashed: {exc!r}"
+        try:
+            await db.write(lambda c: store.mark_needs_human(c, work_item_id, node_id, reason))
+        except Exception:  # noqa: BLE001
+            logger.exception("could not mark %s needs_human after resume crash", work_item_id)
+
+
 async def _adopt(
-    db, session_id: str, pid: int, poll_s: float = 0.1, progress_s: float = 5.0
+    db,
+    session_id: str,
+    pid: int,
+    poll_s: float = 0.1,
+    progress_s: float = 5.0,
+    *,
+    run_dirs=None,
+    registry: Registry | None = None,
+    policy: _policy.Policy | None = None,
+    launch_factory: Callable[[str], LaunchContext] | None = None,
+    bd_cwd: str | None = None,
+    on_approve: OnApprove | None = None,
 ) -> None:
     row = db.read(
-        lambda c: c.execute(
-            "SELECT log_path, result_path FROM worker_sessions WHERE id = ?", (session_id,)
-        ).fetchone()
+        lambda c: c.execute("SELECT * FROM worker_sessions WHERE id = ?", (session_id,)).fetchone()
     )
     log_path = Path(row["log_path"])
     result_path = Path(row["result_path"])
@@ -110,9 +237,34 @@ async def _adopt(
         result_path,
         _resolve_file(result_path) or "failed",
     )
+    if row["hook_point"] == "escalation" and run_dirs is not None:
+        await _resume_adopted_escalation(
+            db,
+            run_dirs,
+            work_item_id=row["work_item_id"],
+            session_id=session_id,
+            registry=registry,
+            policy=policy,
+            launch_factory=launch_factory,
+            bd_cwd=bd_cwd,
+            on_approve=on_approve,
+        )
 
 
-async def _guarded_adopt(db, session_id: str, work_item_id: str, node_id: str, pid: int) -> None:
+async def _guarded_adopt(
+    db,
+    session_id: str,
+    work_item_id: str,
+    node_id: str,
+    pid: int,
+    *,
+    run_dirs=None,
+    registry: Registry | None = None,
+    policy: _policy.Policy | None = None,
+    launch_factory: Callable[[str], LaunchContext] | None = None,
+    bd_cwd: str | None = None,
+    on_approve: OnApprove | None = None,
+) -> None:
     """`_adopt`, but a crash marks the work item needs_human instead of
     vanishing. `reattach` hands its tasks to the caller directly rather than
     through `api.deps.spawn`, which is what every other executor task goes
@@ -123,7 +275,17 @@ async def _guarded_adopt(db, session_id: str, work_item_id: str, node_id: str, p
     `app.state.tasks` forever, since nothing keyed by session_id ever pops it
     (Kraft-mjwz)."""
     try:
-        await _adopt(db, session_id, pid)
+        await _adopt(
+            db,
+            session_id,
+            pid,
+            run_dirs=run_dirs,
+            registry=registry,
+            policy=policy,
+            launch_factory=launch_factory,
+            bd_cwd=bd_cwd,
+            on_approve=on_approve,
+        )
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001
@@ -135,7 +297,16 @@ async def _guarded_adopt(db, session_id: str, work_item_id: str, node_id: str, p
             logger.exception("could not mark %s needs_human after adopt crash", work_item_id)
 
 
-async def reattach(db, run_dirs, registry) -> tuple[ReattachSummary, dict[str, asyncio.Task]]:
+async def reattach(
+    db,
+    run_dirs,
+    registry,
+    *,
+    policy: _policy.Policy | None = None,
+    launch_factory: Callable[[str], LaunchContext] | None = None,
+    bd_cwd: str | None = None,
+    on_approve: OnApprove | None = None,
+) -> tuple[ReattachSummary, dict[str, asyncio.Task]]:
     rows = db.read(
         lambda c: c.execute(
             "SELECT * FROM worker_sessions WHERE status IN ('pending', 'running')"
@@ -143,6 +314,7 @@ async def reattach(db, run_dirs, registry) -> tuple[ReattachSummary, dict[str, a
     )
     summary = ReattachSummary(scanned=len(rows))
     adopted_tasks: dict[str, asyncio.Task] = {}
+    pending_escalation_resumes: list[dict] = []
 
     for r in rows:
         sid = r["id"]
@@ -163,7 +335,19 @@ async def reattach(db, run_dirs, registry) -> tuple[ReattachSummary, dict[str, a
         if pid is not None and _identity_ok(pid, r["pid_start_time"]):
             await db.write(lambda c, sid=sid: store.session_reattached(c, sid))
             adopted_tasks[sid] = asyncio.create_task(
-                _guarded_adopt(db, sid, r["work_item_id"], r["node_id"], pid)
+                _guarded_adopt(
+                    db,
+                    sid,
+                    r["work_item_id"],
+                    r["node_id"],
+                    pid,
+                    run_dirs=run_dirs,
+                    registry=registry,
+                    policy=policy,
+                    launch_factory=launch_factory,
+                    bd_cwd=bd_cwd,
+                    on_approve=on_approve,
+                )
             )
             summary.adopted.append(sid)
             continue
@@ -173,6 +357,14 @@ async def reattach(db, run_dirs, registry) -> tuple[ReattachSummary, dict[str, a
             await db.write(lambda c, sid=sid: store.session_reattached(c, sid))
             await _exit_from_file(db, sid, Path(r["log_path"]), Path(r["result_path"]), status)
             summary.resolved_from_file.append(sid)
+            if r["hook_point"] == "escalation" and run_dirs is not None:
+                # Deferred: starting this task now would let its own
+                # claim_for_run race the closing active-items scan below,
+                # so it lands in summary.resumed_work_items and startup.py
+                # spawns a second, concurrent walk for the same item.
+                pending_escalation_resumes.append(
+                    {"work_item_id": r["work_item_id"], "node_id": r["node_id"], "session_id": sid}
+                )
         else:
             await db.write(lambda c, sid=sid: store.session_unknown(c, sid))
             await db.write(
@@ -189,4 +381,22 @@ async def reattach(db, run_dirs, registry) -> tuple[ReattachSummary, dict[str, a
         lambda c: c.execute("SELECT id FROM work_items WHERE status = 'active'").fetchall()
     )
     summary.resumed_work_items = [row["id"] for row in active]
+
+    for pending in pending_escalation_resumes:
+        sid = pending["session_id"]
+        adopted_tasks[sid] = asyncio.create_task(
+            _guarded_resume_adopted_escalation(
+                db,
+                run_dirs,
+                work_item_id=pending["work_item_id"],
+                node_id=pending["node_id"],
+                session_id=sid,
+                registry=registry,
+                policy=policy,
+                launch_factory=launch_factory,
+                bd_cwd=bd_cwd,
+                on_approve=on_approve,
+            )
+        )
+
     return summary, adopted_tasks

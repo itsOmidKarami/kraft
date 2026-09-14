@@ -212,6 +212,8 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
             "ci_pipeline_ref  TEXT,",
             "-- GitLab pipeline pinned by the last `on.ci.poll` read",
         )
+    if version < 29:
+        drop_lines = (*drop_lines, "thread         INTEGER NOT NULL DEFAULT 1,")
     schema = "\n".join(
         rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
     )
@@ -510,6 +512,31 @@ def test_migrate_v27_to_v28_adds_ci_pipeline_ref(tmp_path):
 
     cols = {r[1] for r in conn.execute("PRAGMA table_info(work_items)").fetchall()}
     assert "ci_pipeline_ref" in cols
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+
+
+def test_migrate_v28_to_v29_adds_worker_sessions_thread(tmp_path):
+    """A v28 database migrates forward and gains worker_sessions.thread,
+    defaulted to 1 for every pre-existing row (Kraft-dkb6g)."""
+    conn = db._connect(tmp_path / "orchestrator.db")
+    _build_old_db(conn, 28)
+    conn.execute(
+        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
+        "'active','now','now')"
+    )
+    conn.execute(
+        "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, log_path, "
+        "result_path, status, attempt, created_at) VALUES "
+        "('s1','w1','implementation','escalation','l','r','done',1,'now')"
+    )
+    conn.commit()
+
+    db.migrate(conn)
+
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(worker_sessions)").fetchall()}
+    assert "thread" in cols
+    assert conn.execute("SELECT thread FROM worker_sessions WHERE id = 's1'").fetchone()[0] == 1
     assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
 
 

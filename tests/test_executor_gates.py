@@ -192,14 +192,45 @@ def test_auto_escalate_stuck_skips_a_non_needs_human_status(tmp_path):
     async def scenario():
         database = await db.Database.open(tmp_path / "k.db")
         try:
+            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
             status = await gates_module.auto_escalate_stuck(
-                "completed", database, None, work_item_id="w1", registry=None
+                "completed", database, None, work_item_id="w1", registry=None, launch=launch
             )
             return status
         finally:
             await database.close()
 
     assert asyncio.run(scenario()) == "completed"
+
+
+def test_auto_escalate_stuck_returns_status_unchanged_when_launch_is_none(tmp_path):
+    """`startup.py`'s reattach path called this with `launch=None` when a
+    resumed item's `repo_row` was falsy -- before Kraft-atdbw removed that
+    call site, it crashed into `deps.guard`, overwriting the item's real
+    stop reason with "executor crashed: ...". This guard is defense in
+    depth against any future `launch=None` caller (Kraft-9046)."""
+    from kraft.paths import RunDirs
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = "w1"
+            await _seed_stuck(database, wid, reason="budget exhausted")
+            status = await gates_module.auto_escalate_stuck(
+                "needs_human", database, rd, work_item_id=wid, registry=None, launch=None
+            )
+            assert status == "needs_human"
+            evs = database.read(lambda c: events.read_after(c, 0, wid))
+            assert not any(
+                e["type"] == "work_item_needs_human"
+                and "executor crashed" in (e["payload"].get("reason") or "")
+                for e in evs
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
 
 
 def test_auto_escalate_stuck_skips_a_pending_gate(tmp_path):
@@ -227,8 +258,15 @@ def test_auto_escalate_stuck_skips_a_pending_gate(tmp_path):
             from kraft import policy as _policy
 
             pol = _policy.Policy(loops={}, default=_policy.Cap(1, 1))
+            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
             status = await gates_module.auto_escalate_stuck(
-                "needs_human", database, rd, work_item_id=wid, registry=None, policy=pol
+                "needs_human",
+                database,
+                rd,
+                work_item_id=wid,
+                registry=None,
+                policy=pol,
+                launch=launch,
             )
             return status
         finally:
@@ -280,15 +318,224 @@ def test_auto_escalate_stuck_skips_a_needs_context_reason(tmp_path):
             from kraft import policy as _policy
 
             pol = _policy.Policy(loops={}, default=_policy.Cap(1, 1))
+            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
 
             return await gates_module.auto_escalate_stuck(
-                "needs_human", database, rd, work_item_id=wid, registry=None, policy=pol
+                "needs_human",
+                database,
+                rd,
+                work_item_id=wid,
+                registry=None,
+                policy=pol,
+                launch=launch,
             )
         finally:
             await database.close()
 
     status = asyncio.run(scenario())
     assert status == "needs_human"
+
+
+def test_auto_escalate_stuck_skips_when_last_escalation_asked_a_question(tmp_path):
+    """The *escalation session's own* exit status, not just a chain node's
+    needs_human reason, can be `needs_context` -- the agent asked the human a
+    direct question mid-turn. Dispatching another auto-escalation turn onto
+    it just asks again (Kraft-b52cm)."""
+    from kraft.paths import RunDirs
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = "w1"
+            await _seed_stuck(database, wid, reason="budget exhausted")
+            # `escalate.dispatch` always appends `escalation_message` before
+            # the session it names exists; the scoped scan
+            # (`gates._current_run_escalation_session_id`) keys off that
+            # event, not the session row alone.
+            await database.write(
+                lambda c: events.append(
+                    c,
+                    wid,
+                    "escalation_message",
+                    {"session_id": "e1", "message": "hi", "auto": True},
+                )
+            )
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="e1",
+                    work_item_id=wid,
+                    node_id="implementation",
+                    hook_point="escalation",
+                    log_path=str(rd.logs / "e1.log"),
+                    result_path=str(rd.logs / "e1.json"),
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "e1", "needs_context"))
+            from kraft import policy as _policy
+
+            pol = _policy.Policy(loops={}, default=_policy.Cap(1, 1))
+            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+            status = await gates_module.auto_escalate_stuck(
+                "needs_human",
+                database,
+                rd,
+                work_item_id=wid,
+                registry=None,
+                policy=pol,
+                launch=launch,
+            )
+            evs = database.read(lambda c: events.read_after(c, 0, wid))
+            return status, evs
+        finally:
+            await database.close()
+
+    status, evs = asyncio.run(scenario())
+    assert status == "needs_human"
+    skips = [e for e in evs if e["type"] == "work_item_auto_escalate_skipped"]
+    assert skips and skips[-1]["payload"]["reason"] == "needs_context"
+
+
+def test_auto_escalate_stuck_ignores_a_needs_context_escalation_from_a_prior_run(
+    tmp_path, monkeypatch
+):
+    """A `needs_context` escalation session belongs to a *previous* run of
+    needs_human stuckness (a human retried instead of answering it, and the
+    item stopped again for something else) must not suppress this run's
+    auto-escalation forever -- the exact regression the unscoped
+    `last_escalation_status` read caused (Kraft-b52cm code-review finding)."""
+    from kraft.paths import RunDirs
+
+    calls = []
+
+    async def fake_dispatch(database, run_dirs, *, work_item_id, message, launch, auto, evts=None):
+        calls.append(1)
+        return "done"
+
+    monkeypatch.setattr("kraft.executor.gates.escalate.dispatch", fake_dispatch)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = "w1"
+            await _seed_stuck(database, wid, reason="budget exhausted")
+            await database.write(
+                lambda c: events.append(
+                    c,
+                    wid,
+                    "escalation_message",
+                    {"session_id": "e1", "message": "hi", "auto": True},
+                )
+            )
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="e1",
+                    work_item_id=wid,
+                    node_id="implementation",
+                    hook_point="escalation",
+                    log_path=str(rd.logs / "e1.log"),
+                    result_path=str(rd.logs / "e1.json"),
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "e1", "needs_context"))
+            # A human retried instead of answering -- a `_RUN_BOUNDARY` event --
+            # and the item stopped again for something unrelated. This is a
+            # new run; "e1" belongs to the one before it.
+            await database.write(lambda c: events.append(c, wid, "work_item_retried", {}))
+            await database.write(
+                lambda c: store.mark_needs_human(c, wid, "implementation", "again")
+            )
+
+            from kraft import policy as _policy
+
+            pol = _policy.Policy(loops={}, default=_policy.Cap(1, 1))
+            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+            status = await gates_module.auto_escalate_stuck(
+                "needs_human",
+                database,
+                rd,
+                work_item_id=wid,
+                registry=None,
+                policy=pol,
+                launch=launch,
+            )
+            evs = database.read(lambda c: events.read_after(c, 0, wid))
+            return status, evs
+        finally:
+            await database.close()
+
+    status, evs = asyncio.run(scenario())
+    assert status == "needs_human"
+    assert calls == [1]
+    skips = [e for e in evs if e["type"] == "work_item_auto_escalate_skipped"]
+    assert not skips
+
+
+def test_auto_escalate_stuck_does_not_skip_when_last_escalation_finished_clean(
+    tmp_path, monkeypatch
+):
+    """The mirror case: the last escalation session finished `done`, not
+    `needs_context` -- the new guard must not fire, and (with `dispatch`
+    faked out) the function proceeds to actually dispatch."""
+    from kraft.paths import RunDirs
+
+    calls = []
+
+    async def fake_dispatch(database, run_dirs, *, work_item_id, message, launch, auto, evts=None):
+        calls.append(1)
+        return "done"
+
+    monkeypatch.setattr("kraft.executor.gates.escalate.dispatch", fake_dispatch)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = "w1"
+            await _seed_stuck(database, wid, reason="budget exhausted")
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="e1",
+                    work_item_id=wid,
+                    node_id="implementation",
+                    hook_point="escalation",
+                    log_path=str(rd.logs / "e1.log"),
+                    result_path=str(rd.logs / "e1.json"),
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "e1", "done"))
+            from kraft import policy as _policy
+
+            pol = _policy.Policy(loops={}, default=_policy.Cap(1, 1))
+            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+            status = await gates_module.auto_escalate_stuck(
+                "needs_human",
+                database,
+                rd,
+                work_item_id=wid,
+                registry=None,
+                policy=pol,
+                launch=launch,
+            )
+            evs = database.read(lambda c: events.read_after(c, 0, wid))
+            return status, evs
+        finally:
+            await database.close()
+
+    status, evs = asyncio.run(scenario())
+    assert status == "needs_human"
+    assert len(calls) == 1  # dispatch actually fired -- the guard did not skip
+    skips = [
+        e
+        for e in evs
+        if e["type"] == "work_item_auto_escalate_skipped"
+        and e["payload"]["reason"] == "needs_context"
+    ]
+    assert not skips
 
 
 def test_auto_escalate_stuck_skips_when_disabled_by_policy(tmp_path):
@@ -303,8 +550,15 @@ def test_auto_escalate_stuck_skips_when_disabled_by_policy(tmp_path):
             from kraft import policy as _policy
 
             pol = _policy.Policy(loops={}, default=_policy.Cap(1, 1), auto_escalate_stuck=False)
+            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
             return await gates_module.auto_escalate_stuck(
-                "needs_human", database, rd, work_item_id=wid, registry=None, policy=pol
+                "needs_human",
+                database,
+                rd,
+                work_item_id=wid,
+                registry=None,
+                policy=pol,
+                launch=launch,
             )
         finally:
             await database.close()
@@ -324,8 +578,15 @@ def test_auto_escalate_stuck_skips_before_its_delay_has_elapsed(tmp_path):
             from kraft import policy as _policy
 
             pol = _policy.Policy(loops={}, default=_policy.Cap(1, 1), auto_escalate_delay_s=600)
+            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
             return await gates_module.auto_escalate_stuck(
-                "needs_human", database, rd, work_item_id=wid, registry=None, policy=pol
+                "needs_human",
+                database,
+                rd,
+                work_item_id=wid,
+                registry=None,
+                policy=pol,
+                launch=launch,
             )
         finally:
             await database.close()
@@ -355,8 +616,15 @@ def test_auto_escalate_stuck_fires_once_its_delay_has_elapsed(tmp_path, monkeypa
             # A delay of 0 must behave exactly like no delay at all -- the
             # zero-regression guarantee.
             pol = _policy.Policy(loops={}, default=_policy.Cap(1, 1), auto_escalate_delay_s=0)
+            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
             return await gates_module.auto_escalate_stuck(
-                "needs_human", database, rd, work_item_id=wid, registry=None, policy=pol
+                "needs_human",
+                database,
+                rd,
+                work_item_id=wid,
+                registry=None,
+                policy=pol,
+                launch=launch,
             )
         finally:
             await database.close()
@@ -386,8 +654,15 @@ def test_auto_escalate_stuck_dispatches_when_eligible(tmp_path, monkeypatch):
             from kraft import policy as _policy
 
             pol = _policy.Policy(loops={}, default=_policy.Cap(1, 1))
+            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
             return await gates_module.auto_escalate_stuck(
-                "needs_human", database, rd, work_item_id=wid, registry=None, policy=pol
+                "needs_human",
+                database,
+                rd,
+                work_item_id=wid,
+                registry=None,
+                policy=pol,
+                launch=launch,
             )
         finally:
             await database.close()
@@ -454,13 +729,26 @@ def test_auto_escalate_stuck_caps_out_and_emits_an_event(tmp_path, monkeypatch):
             from kraft import policy as _policy
 
             pol = _policy.Policy(loops={}, default=_policy.Cap(1, 1), auto_escalate_stuck_cap=2)
+            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
             for _ in range(2):
                 await gates_module.auto_escalate_stuck(
-                    "needs_human", database, rd, work_item_id=wid, registry=None, policy=pol
+                    "needs_human",
+                    database,
+                    rd,
+                    work_item_id=wid,
+                    registry=None,
+                    policy=pol,
+                    launch=launch,
                 )
             # A third call is over the cap: no further dispatch, a capped event instead.
             await gates_module.auto_escalate_stuck(
-                "needs_human", database, rd, work_item_id=wid, registry=None, policy=pol
+                "needs_human",
+                database,
+                rd,
+                work_item_id=wid,
+                registry=None,
+                policy=pol,
+                launch=launch,
             )
             evs = database.read(lambda c: events.read_after(c, 0, wid))
             return [e["type"] for e in evs]
@@ -500,8 +788,15 @@ def test_auto_escalate_stuck_skips_while_an_escalation_is_already_running(tmp_pa
             from kraft import policy as _policy
 
             pol = _policy.Policy(loops={}, default=_policy.Cap(1, 1))
+            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
             return await gates_module.auto_escalate_stuck(
-                "needs_human", database, rd, work_item_id=wid, registry=None, policy=pol
+                "needs_human",
+                database,
+                rd,
+                work_item_id=wid,
+                registry=None,
+                policy=pol,
+                launch=launch,
             )
         finally:
             await database.close()
@@ -560,8 +855,15 @@ def test_auto_escalate_stuck_consumes_a_self_retry_after_the_session_exits(tmp_p
             from kraft import policy as _policy
 
             pol = _policy.Policy(loops={}, default=_policy.Cap(1, 1))
+            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
             status = await gates_module.auto_escalate_stuck(
-                "needs_human", database, rd, work_item_id=wid, registry=None, policy=pol
+                "needs_human",
+                database,
+                rd,
+                work_item_id=wid,
+                registry=None,
+                policy=pol,
+                launch=launch,
             )
             evs = database.read(lambda c: events.read_after(c, 0, wid))
             return status, [e["type"] for e in evs], evs
@@ -681,8 +983,15 @@ def test_auto_escalate_stuck_skips_a_budget_breached_stop(tmp_path, monkeypatch)
                 default=_policy.Cap(1, 1),
                 budget=_policy.Budget(work_item_usd=10.0, daily_usd=None),
             )
+            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
             status = await gates_module.auto_escalate_stuck(
-                "needs_human", database, rd, work_item_id=wid, registry=None, policy=pol
+                "needs_human",
+                database,
+                rd,
+                work_item_id=wid,
+                registry=None,
+                policy=pol,
+                launch=launch,
             )
             evs = database.read(lambda c: events.read_after(c, 0, wid))
             return status, [e["type"] for e in evs]

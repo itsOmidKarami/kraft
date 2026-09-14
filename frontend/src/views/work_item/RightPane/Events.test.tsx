@@ -83,6 +83,27 @@ describe("Events (W13 · D)", () => {
     expect(pane.querySelector('[data-srow="s2"]')).toHaveFocus();
   });
 
+  it("names an escalation session's header by its own position within its thread, not a global attempt (Kraft-dkb6g)", () => {
+    const sessions = [
+      { id: "e1", node_id: "verify", hook_point: "escalation", status: "done", attempt: 1, thread: 1, round: 0, created_at: "2024-01-01T00:00:00Z", started_at: "2024-01-01T00:00:00Z", exited_at: "2024-01-01T00:01:00Z" } as WorkerSession,
+      { id: "e2", node_id: "verify", hook_point: "escalation", status: "done", attempt: 2, thread: 2, round: 0, created_at: "2024-01-01T00:02:00Z", started_at: "2024-01-01T00:02:00Z", exited_at: "2024-01-01T00:03:00Z" } as WorkerSession,
+    ];
+    const events = [ev(1, "node_started", "2024-01-01T00:00:00Z")];
+    render(
+      <Events
+        events={events}
+        sessions={sessions}
+        nodeId="verify"
+        selection={{ kind: "session", id: "e2" }}
+        onViewLog={() => {}}
+      />,
+    );
+    const head = screen.getByTestId("right-pane-events").querySelector("header")!;
+    // e2 is the first (only) session in thread 2 -- "turn 1" there, not
+    // "turn 2" (its global attempt across every thread).
+    expect(head.querySelector(".stream-head")).toHaveTextContent("escalation · thread 2 · turn 1");
+  });
+
   it("names a round in its header: duration, sessions, findings and the verdict", () => {
     const events = [
       ev(1, "node_started", "2024-01-01T00:00:00Z"),

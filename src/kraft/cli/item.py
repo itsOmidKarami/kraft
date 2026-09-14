@@ -76,7 +76,11 @@ def _cmd_progress(ns: argparse.Namespace) -> None:
 
 
 def _cmd_escalate(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.escalate(ns.message, ns.id)), common._render_action, ns.json)
+    common.emit(
+        asyncio.run(client.escalate(ns.message, ns.id, new_thread=ns.new_thread)),
+        common._render_action,
+        ns.json,
+    )
 
 
 def _cmd_mr_label(ns: argparse.Namespace) -> None:
@@ -190,6 +194,11 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     )
     escalate.add_argument("id", nargs="?")
     escalate.add_argument("--message", required=True, help="what to tell the agent")
+    escalate.add_argument(
+        "--new-thread",
+        action="store_true",
+        help="start a fresh agent session instead of continuing the latest escalation thread",
+    )
     escalate.set_defaults(func=_cmd_escalate)
 
     set_chain = subs.add_parser(
