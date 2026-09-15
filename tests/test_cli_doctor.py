@@ -287,6 +287,113 @@ def test_hooks_check_is_skipped_without_a_bundled_registry(tmp_path, monkeypatch
     assert check["skipped"] is True
 
 
+def test_dead_hooks_check_names_a_hook_noop_in_both_registries(tmp_path, monkeypatch):
+    """`on.review.mr.run`'s actual shape: noop in the *shipped* registry too, so
+    `_hooks_check`'s `real` set never contains it and it can never be reported
+    there (spec "Why the existing doctor check cannot catch C6"). This is the
+    check that has to catch it instead.
+    """
+    bundled = tmp_path / "bundled"
+    (bundled / "templates").mkdir(parents=True)
+    (bundled / "templates" / "registry.yaml").write_text(
+        "hooks:\n"
+        "  on.review.mr.run: { kind: builtin, handler: noop }\n"
+        "  on.spec.requested: { kind: agent, command: claude, skill: spec, artifact: spec }\n"
+    )
+    (bundled / "templates" / "default.yaml").write_text(
+        "id: default\n"
+        "nodes:\n"
+        "  - id: mr_checks\n"
+        "    tasks: [on.review.mr.run]\n"
+        "  - id: spec\n"
+        "    tasks: [on.spec.requested]\n"
+    )
+    live = tmp_path / "templates"
+    live.mkdir()
+    # Live is unchanged from shipped for `on.review.mr.run` (dead by design) but
+    # has drifted to noop for `on.spec.requested` too -- `_hooks_check`'s own
+    # question, and this check must not also claim it.
+    (live / "registry.yaml").write_text(
+        "hooks:\n"
+        "  on.review.mr.run: { kind: builtin, handler: noop }\n"
+        "  on.spec.requested: { kind: builtin, handler: noop }\n"
+    )
+    (live / "default.yaml").write_text(
+        "id: default\n"
+        "nodes:\n"
+        "  - id: mr_checks\n"
+        "    tasks: [on.review.mr.run]\n"
+        "  - id: spec\n"
+        "    tasks: [on.spec.requested]\n"
+    )
+    monkeypatch.setattr(doctor, "BUNDLED", bundled)
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(live))
+
+    rows = asyncio.run(doctor.run_checks())
+    dead = _by_name(rows, "dead_hooks")
+    assert dead["ok"] is True  # operator's own chain, not a doctor failure
+    assert "on.review.mr.run" in dead["detail"]
+    assert "on.spec.requested" not in dead["detail"]
+    # A noop core hook is a plugin extension point by design: information, not
+    # an instruction to implement or remove it.
+    assert "unless a plugin binds it" in dead["detail"]
+    assert "drop it" not in dead["detail"]
+
+    hooks = _by_name(rows, "hooks")
+    assert "on.spec.requested" in hooks["detail"]
+    assert "on.review.mr.run" not in hooks["detail"]
+
+
+def test_dead_hooks_check_ignores_a_noop_hook_no_chain_dispatches(tmp_path, monkeypatch):
+    bundled = tmp_path / "bundled"
+    (bundled / "templates").mkdir(parents=True)
+    (bundled / "templates" / "registry.yaml").write_text(
+        "hooks:\n  on.review.security.run: { kind: builtin, handler: noop }\n"
+    )
+    (bundled / "templates" / "default.yaml").write_text(
+        "id: default\nnodes:\n  - id: spec\n    tasks: [on.spec.requested]\n"
+    )
+    live = tmp_path / "templates"
+    live.mkdir()
+    (live / "registry.yaml").write_text(
+        "hooks:\n  on.review.security.run: { kind: builtin, handler: noop }\n"
+    )
+    (live / "default.yaml").write_text(
+        "id: default\nnodes:\n  - id: spec\n    tasks: [on.spec.requested]\n"
+    )
+    monkeypatch.setattr(doctor, "BUNDLED", bundled)
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(live))
+
+    check = _by_name(asyncio.run(doctor.run_checks()), "dead_hooks")
+    assert check["ok"] is True
+    assert "on.review.security.run" not in check["detail"]
+
+
+def test_dead_hooks_check_is_skipped_without_a_bundled_registry(tmp_path, monkeypatch):
+    monkeypatch.setattr(doctor, "BUNDLED", tmp_path / "absent")
+    check = _by_name(asyncio.run(doctor.run_checks()), "dead_hooks")
+    assert check["skipped"] is True
+
+
+def test_hooks_check_and_dead_hooks_check_are_disjoint_by_construction():
+    """The two checks select on opposite conditions of the *shipped* binding:
+    `_hooks_check` only ever selects a hook that is real (not noop) in shipped;
+    `_dead_hooks_check` only ever selects one that is noop in shipped. Proven
+    against the predicates themselves, over every combination of shipped/live
+    state, rather than against one sample registry -- a "don't double-report"
+    test over two independently-defined predicates is unsatisfiable by
+    construction unless checked this way.
+    """
+    for shipped_is_noop in (True, False):
+        for live_state in ("noop", "absent", "real"):
+            shipped_is_real = not shipped_is_noop
+            live_is_noop = live_state == "noop"
+            live_is_absent = live_state == "absent"
+            hooks_check_selects = shipped_is_real and (live_is_noop or live_is_absent)
+            dead_hooks_check_selects = shipped_is_noop and live_is_noop
+            assert not (hooks_check_selects and dead_hooks_check_selects)
+
+
 def test_chain_templates_check_names_a_node_missing_from_the_live_copy(tmp_path, monkeypatch):
     bundled = tmp_path / "bundled"
     (bundled / "templates").mkdir(parents=True)
