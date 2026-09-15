@@ -861,3 +861,39 @@ def test_an_adopted_session_kills_its_container_when_it_ends(tmp_path, monkeypat
 
     asyncio.run(scenario())
     assert rm_log.read_text().split() == ["kraft-s1"]
+
+
+def test_adopted_subprocess_with_zero_exit_file_is_done(tmp_path):
+    """A green adopted run must not be recorded failed (b5afe84c: 28 min lost)."""
+    result_path = tmp_path / "s.json"
+    (tmp_path / "s.exit").write_text("0")
+    assert reattach._adopted_status(result_path, is_agent=False) == "done"
+
+
+def test_adopted_subprocess_with_nonzero_exit_file_is_failed(tmp_path):
+    result_path = tmp_path / "s.json"
+    (tmp_path / "s.exit").write_text("3")
+    assert reattach._adopted_status(result_path, is_agent=False) == "failed"
+
+
+def test_adopted_subprocess_with_no_evidence_is_unknown(tmp_path):
+    """Never fabricate a failure. `unknown` is a real status and surfaces
+    as an orphaned session in doctor/render."""
+    assert reattach._adopted_status(tmp_path / "s.json", is_agent=False) == "unknown"
+
+
+def test_adopted_agent_with_no_result_file_is_still_failed(tmp_path):
+    """require_result_file survives: a clean exit without the file is a
+    broken contract, not a success (adapters/agent.py:487)."""
+    (tmp_path / "s.exit").write_text("0")
+    assert reattach._adopted_status(tmp_path / "s.json", is_agent=True) == "failed"
+
+
+def test_adopted_agent_result_file_still_wins(tmp_path):
+    result_path = tmp_path / "s.json"
+    result_path.write_text(json.dumps({"status": "done_with_concerns"}))
+    (tmp_path / "s.exit").write_text("1")
+    assert reattach._adopted_status(result_path, is_agent=False) == "done_with_concerns"
+    # The spec pins the agent half of this too: an adopted agent session with
+    # a result file must be unaffected by any of it.
+    assert reattach._adopted_status(result_path, is_agent=True) == "done_with_concerns"

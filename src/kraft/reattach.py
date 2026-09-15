@@ -13,9 +13,15 @@ from kraft import events, store
 from kraft import policy as _policy
 from kraft import sandbox as _sandbox
 from kraft import usage as _usage
-from kraft.adapters.subprocess import _progress_usage, _resolve_result_file, read_result_fields
+from kraft.adapters.subprocess import (
+    _progress_usage,
+    _resolve_exit_file,
+    _resolve_result_file,
+    read_result_fields,
+)
 from kraft.executor import gates
 from kraft.executor.context import LaunchContext, OnApprove
+from kraft.executor.dispatch import ESCALATION_HOOK
 from kraft.templates import Registry
 
 logger = logging.getLogger(__name__)
@@ -193,6 +199,42 @@ async def _guarded_resume_adopted_escalation(
             logger.exception("could not mark %s needs_human after resume crash", work_item_id)
 
 
+def _is_agent_hook(registry: Registry | None, hook_point: str) -> bool:
+    """Whether this hook is `kind: agent`, defaulting to yes when unknown.
+
+    Only `_adopted_status` asks, and its unknown-hook direction has to be the
+    conservative one: calling an agent a subprocess would let its exit code
+    override the `require_result_file` contract.
+    """
+    if registry is None:
+        return True
+    return registry.hooks.get(hook_point, {}).get("kind", "agent") == "agent"
+
+
+def _adopted_status(result_path, *, is_agent: bool) -> str:
+    """Result file, else the task's own recorded exit code, else `unknown`.
+
+    Never `failed` on absent evidence: an adopted process cannot be reaped, so
+    `_resolve_file(...) or "failed"` recorded every green subprocess run as a
+    failure and fed the fix loop a defect that was not there (b5afe84c: two
+    green 14-minute `just ci-test` runs, 28 minutes re-fixing passing tests).
+
+    The exit file is NOT consulted for an agent hook. `run_task` applies
+    `require_result_file` for those (`adapters/agent.py`): an agent that exits
+    clean without writing its result file broke its contract and is `failed`.
+    Letting a 0 exit code speak for it would record a real failure as `done`,
+    which is the one direction that must never happen -- so an unresolvable
+    hook (no registry, or a binding this Kraft no longer ships) is treated as
+    an agent too.
+    """
+    file_status = _resolve_result_file(result_path)
+    if file_status is not None:
+        return file_status
+    if is_agent:
+        return "failed"
+    return _resolve_exit_file(Path(result_path).with_suffix(".exit")) or "unknown"
+
+
 async def _adopt(
     db,
     session_id: str,
@@ -236,9 +278,9 @@ async def _adopt(
         session_id,
         log_path,
         result_path,
-        _resolve_file(result_path) or "failed",
+        _adopted_status(result_path, is_agent=_is_agent_hook(registry, row["hook_point"])),
     )
-    if row["hook_point"] == "escalation" and run_dirs is not None:
+    if row["hook_point"] == ESCALATION_HOOK and run_dirs is not None:
         await _resume_adopted_escalation(
             db,
             run_dirs,
@@ -379,7 +421,7 @@ async def reattach(
             await db.write(lambda c, sid=sid: store.session_reattached(c, sid))
             await _exit_from_file(db, sid, Path(r["log_path"]), Path(r["result_path"]), status)
             summary.resolved_from_file.append(sid)
-            if r["hook_point"] == "escalation" and run_dirs is not None:
+            if r["hook_point"] == ESCALATION_HOOK and run_dirs is not None:
                 # Deferred: starting this task now would let its own
                 # claim_for_run race the closing active-items scan below,
                 # so it lands in summary.resumed_work_items and startup.py

@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from support.harness import _git, fake_docker_bin, fake_registry, isolated_bd, make_repo
+from support.store_fixtures import mk_item, open_db
 
 from kraft import db, events, executor, store
 from kraft.config import git_read
@@ -1353,3 +1354,114 @@ def test_node_override_escalate_model_beats_item_override_beats_binding(tmp_path
         escalate=True,
     )
     assert argv[argv.index("--model") + 1] == "node-escalate"
+
+
+def test_resolved_escalation_does_not_restop_the_node(tmp_path):
+    """An escalation that exited needs_context must not stop the node again.
+
+    Kraft-7itv follow-up: the judge is already excluded for this reason;
+    escalation is a conversation with a human, not a measurement, and its
+    question re-fires forever once answered.
+    """
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database, "wi")
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="esc",
+                    work_item_id="wi",
+                    node_id="verify",
+                    hook_point="escalation",
+                    log_path=str(tmp_path / "esc.log"),
+                    result_path=str(tmp_path / "esc.json"),
+                    round=0,
+                )
+            )
+            (tmp_path / "esc.json").write_text(
+                json.dumps({"status": "needs_context", "question": "which base image?"})
+            )
+            await database.write(lambda c: store.session_exited(c, "esc", "needs_context"))
+            node = {"id": "verify", "tasks": ["on.test.run"]}
+            assert dispatch.needs_context_question(database, "wi", node, 0) is None
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_measurement_needs_context_still_stops_the_node(tmp_path):
+    """The negative case: a real measurement question must still stop."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database, "wi")
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="meas",
+                    work_item_id="wi",
+                    node_id="verify",
+                    hook_point="on.test.run",
+                    log_path=str(tmp_path / "meas.log"),
+                    result_path=str(tmp_path / "meas.json"),
+                    round=0,
+                )
+            )
+            (tmp_path / "meas.json").write_text(
+                json.dumps({"status": "needs_context", "question": "which python?"})
+            )
+            await database.write(lambda c: store.session_exited(c, "meas", "needs_context"))
+            node = {"id": "verify", "tasks": ["on.test.run"]}
+            assert dispatch.needs_context_question(database, "wi", node, 0) == "which python?"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_reentry_is_not_stopped_by_the_previous_passs_fix_question(tmp_path):
+    """A gate rejection or ci_wait poll re-entering a fix_loop node must not
+    inherit the last pass's fix-task needs_context (review finding 5).
+
+    walk_node now seeds `round` from the persisted counter, and the counter
+    survives a non-resume re-entry -- so the previous pass's round-N fix row is
+    still the latest for its hook point when the new pass takes its first
+    measurement, and nothing this pass writes can displace it until it bumps to
+    N+1. The unflagged call must still return the question: surfacing a fix
+    task's own needs_context one iteration later is deliberate.
+    """
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database, "wi")
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="fix2",
+                    work_item_id="wi",
+                    node_id="verify",
+                    hook_point="on.implementation.start",
+                    log_path=str(tmp_path / "fix2.log"),
+                    result_path=str(tmp_path / "fix2.json"),
+                    round=2,
+                )
+            )
+            (tmp_path / "fix2.json").write_text(
+                json.dumps({"status": "needs_context", "question": "which migration?"})
+            )
+            await database.write(lambda c: store.session_exited(c, "fix2", "needs_context"))
+            node = {"id": "verify", "tasks": ["on.test.run"]}
+            assert (
+                dispatch.needs_context_question(database, "wi", node, 2, first_iteration=True)
+                is None
+            )
+            assert dispatch.needs_context_question(database, "wi", node, 2) == "which migration?"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())

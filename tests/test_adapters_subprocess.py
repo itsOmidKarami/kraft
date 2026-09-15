@@ -4,6 +4,7 @@ import os
 import shlex
 import signal
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -1216,6 +1217,78 @@ def test_run_task_group_kill_does_not_delay_a_session_with_no_survivors(tmp_path
             elapsed = time.monotonic() - start
             assert status == "done"
             assert elapsed < 2.0
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_exit_wrapper_preserves_argv_exactly(tmp_path):
+    """The wrapper must replay argv byte-for-byte, spaces and quotes included."""
+    out = tmp_path / "argv.txt"
+    weird = ["a b", "c'd", 'e"f', "g*h", "--flag=i j"]
+    cmd = [
+        sys.executable,
+        "-c",
+        "import sys,pathlib; pathlib.Path(sys.argv[1]).write_text(repr(sys.argv[2:]))",
+        str(out),
+        *weird,
+    ]
+    wrapped = sp._wrap_with_exit_file(cmd, tmp_path / "s.exit")
+    subprocess.run(wrapped, check=True)
+    assert eval(out.read_text()) == weird
+
+
+def test_exit_wrapper_records_zero(tmp_path):
+    exit_path = tmp_path / "s.exit"
+    wrapped = sp._wrap_with_exit_file([sys.executable, "-c", "raise SystemExit(0)"], exit_path)
+    rc = subprocess.run(wrapped).returncode
+    assert rc == 0
+    assert sp._resolve_exit_file(exit_path) == "done"
+
+
+def test_exit_wrapper_records_nonzero_and_propagates_it(tmp_path):
+    exit_path = tmp_path / "s.exit"
+    wrapped = sp._wrap_with_exit_file([sys.executable, "-c", "raise SystemExit(7)"], exit_path)
+    rc = subprocess.run(wrapped).returncode
+    assert rc == 7, "the wrapper must not swallow the child's exit code"
+    assert sp._resolve_exit_file(exit_path) == "failed"
+
+
+def test_resolve_exit_file_missing_or_garbage_is_none(tmp_path):
+    assert sp._resolve_exit_file(tmp_path / "nope.exit") is None
+    junk = tmp_path / "junk.exit"
+    junk.write_text("not a number")
+    assert sp._resolve_exit_file(junk) is None
+
+
+def test_run_task_leaves_the_exit_file_beside_the_result(tmp_path):
+    """The wiring, not just the helpers: a real launch must record its code.
+
+    Everything above tests `_wrap_with_exit_file` in isolation; this is the
+    only check that `run_task` actually passes the wrapped argv to `Popen`,
+    which is what `reattach._adopted_status` depends on existing.
+    """
+
+    async def scenario():
+        rd = RunDirs(tmp_path).ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database)
+            status = await sp.run_task(
+                database,
+                rd,
+                session_id="s-exit",
+                work_item_id="w1",
+                node_id="verify",
+                hook_point="on.test.run",
+                cmd=[sys.executable, "-c", "raise SystemExit(4)"],
+                cwd=tmp_path,
+            )
+            assert status == "failed"
+            # And no result file: the Kraft-avpe "no contract" signal survives.
+            assert not (rd.results / "s-exit.json").exists()
+            assert (rd.results / "s-exit.exit").read_text() == "4"
         finally:
             await database.close()
 

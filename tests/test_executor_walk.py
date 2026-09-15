@@ -1418,3 +1418,135 @@ def test_an_unblocked_bead_dispatches_exactly_as_before(tmp_path, monkeypatch):
             await database.close()
 
     asyncio.run(scenario())
+
+
+_LOOP_NODE = {
+    "id": "verify",
+    "tasks": ["on.test.run"],
+    "gate_after": None,
+    "fix_loop": "verify_fix_loop",
+}
+
+
+class _StopMeasuring(Exception):
+    """Sentinel: unwinds `walk_node` the instant it dispatches its first measure."""
+
+
+def _first_measured_round(tmp_path, monkeypatch, *, seeded_count, node=None, on_measure=None):
+    """The `round` `walk_node` stamps its first `dispatch.measure_node` with.
+
+    Drives the real `walk_node` with the counter pre-seeded to `seeded_count`
+    (None = no `retry_counters` row at all, i.e. a first-ever entry), and stops
+    at the first measure rather than running a whole paid loop -- the weaker of
+    the two shapes the plan offers, chosen because it pins the defect directly:
+    the bug *is* the value of that kwarg.
+    """
+    from kraft import policy
+    from kraft.executor import dispatch
+
+    node = node or _LOOP_NODE
+    seen: list[int] = []
+    pol_path = tmp_path / "policy.yaml"
+    pol_path.write_text(
+        "loops:\n  verify_fix_loop: { attempts: 9, wall_clock_s: 3600 }\n"
+        "default: { attempts: 9, wall_clock_s: 3600 }\n"
+    )
+    pol = policy.load_policy(pol_path)
+
+    async def fake_measure(*args, round=0, **kwargs):
+        seen.append(round)
+        if on_measure is not None:
+            return on_measure
+        raise _StopMeasuring
+
+    monkeypatch.setattr(dispatch, "measure_node", fake_measure)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="wi",
+                    bead_id="B",
+                    title="t",
+                    repo=str(tmp_path),
+                    chain_template="quick-task",
+                    chain_definition=json.dumps({"template_id": "quick-task", "nodes": [node]}),
+                )
+            )
+            if seeded_count is not None:
+                cap = policy.Cap(attempts=9, wall_clock_s=3600)
+                for _ in range(seeded_count):
+                    await database.write(
+                        lambda c: store.bump_counter(c, "wi", "verify_fix_loop", cap)
+                    )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = 'wi'").fetchone()
+            )
+            try:
+                await executor.walk.walk_node(
+                    database,
+                    rd,
+                    "wi",
+                    node,
+                    row,
+                    Registry(hooks={}),
+                    tmp_path,
+                    policy=pol,
+                )
+            except _StopMeasuring:
+                pass
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    return seen
+
+
+def test_resumed_fix_loop_reuses_the_round_it_was_interrupted_on(tmp_path, monkeypatch):
+    """A resume mid-loop must not re-buy a measurement of an unchanged tree.
+
+    7ced80e6: the counter read 3, the resumed entry measured at round 0, the
+    round-3 session could not match on `round`, and $5.85 / 823s bought a
+    byte-identical answer -- charged to the wall cap the judge then stopped on.
+
+    Asserts on the `round` kwarg of the first `measure_node` rather than on a
+    reused session row: `reusable_session`'s `round = ?` filter is what the
+    kwarg feeds, and the kwarg is the defect itself.
+    """
+    assert _first_measured_round(tmp_path, monkeypatch, seeded_count=3) == [3]
+
+
+def test_first_ever_entry_still_measures_at_round_zero(tmp_path, monkeypatch):
+    """No `retry_counters` row yet -- nothing to continue from, so round 0."""
+    assert _first_measured_round(tmp_path, monkeypatch, seeded_count=None) == [0]
+
+
+def test_on_failure_repair_still_fires_on_a_resumed_entry(tmp_path, monkeypatch):
+    """`round == 0` used to mean "first iteration of this entry".
+
+    Once `round` seeds from the counter the two part company, and a resumed
+    entry -- exactly the case where a loop is already in trouble -- would
+    silently stop running its `on_failure` repair.
+    """
+    from kraft.executor import walk
+
+    repaired = []
+
+    async def fake_recover(*args, **kwargs):
+        repaired.append(kwargs.get("round"))
+        raise _StopMeasuring
+
+    monkeypatch.setattr(walk, "recover_node", fake_recover)
+    node = {**_LOOP_NODE, "on_failure": ["on.repair.start"]}
+    rounds = _first_measured_round(
+        tmp_path,
+        monkeypatch,
+        seeded_count=4,
+        node=node,
+        on_measure=("failed", ["on.test.run"], []),
+    )
+    assert rounds == [4]
+    assert repaired == [walk._REPAIR_ROUND], "on_failure repair did not run on the resumed entry"
