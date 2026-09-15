@@ -48,7 +48,7 @@ describe("Settings · steering (5c-bis, design 30)", () => {
 
   it("shows who uses each steering file", async () => {
     vi.spyOn(api, "getRepos").mockResolvedValue({
-      repos: [{ ...repo, steering: ["house-style"] }],
+      repos: [repo({ steering: ["house-style"] })],
     });
     renderAt("/settings/steering");
     expect(await screen.findByText(/repo-a/)).toBeInTheDocument();

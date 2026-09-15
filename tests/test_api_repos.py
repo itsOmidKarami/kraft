@@ -13,7 +13,7 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 from support.api_settings import _client
-from support.harness import fake_templates_dir, isolated_bd, make_repo
+from support.harness import fake_templates_dir, isolated_bd, make_repo, make_repo_with_submodule
 
 from kraft import config, events, store, templates
 from kraft import db as kdb
@@ -156,6 +156,58 @@ def test_patch_repo_with_a_missing_steering_name_is_refused(tmp_path, client, te
 
     (entry,) = client.get("/api/repos").json()["repos"]
     assert entry["steering"] == []
+
+
+def test_connecting_a_workspace_auto_connects_its_submodules_disabled(tmp_path, client):
+    root, _sub = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
+    client.post("/api/repos", json={"path": str(root)})
+
+    repos = {r["path"]: r for r in client.get("/api/repos").json()["repos"]}
+    child = repos[str(root / "libs/a")]
+    assert child["enabled"] is False
+    # detected, nobody has looked at it yet
+    assert child["managed"] is False
+    # the human typed the workspace path, so it is a decision from the start
+    assert repos[str(root)]["managed"] is True
+
+
+def test_a_hand_added_repo_is_managed_even_when_left_disabled(tmp_path, client):
+    repo = make_repo(tmp_path)
+    body = client.post("/api/repos", json={"path": str(repo), "enabled": False}).json()
+    assert body["enabled"] is False
+    assert body["managed"] is True
+
+
+def test_auto_connect_never_overwrites_an_existing_entry(tmp_path, client):
+    root, _sub = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
+    child = str(root / "libs/a")
+    client.post("/api/repos", json={"path": child, "test_command": "cargo test"})
+    client.post("/api/repos", json={"path": str(root)})
+
+    repos = {r["path"]: r for r in client.get("/api/repos").json()["repos"]}
+    # the hand-connected child keeps its command and its latch
+    assert repos[child]["test_command"] == "cargo test"
+    assert repos[child]["managed"] is True
+
+
+def test_patching_a_detected_child_latches_it_managed(tmp_path, client):
+    root, _sub = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
+    client.post("/api/repos", json={"path": str(root)})
+    child = str(root / "libs/a")
+
+    # editing a field without enabling is still a touch
+    client.patch(f"/api/repos?path={child}", json={"test_command": "cargo test"})
+    repos = {r["path"]: r for r in client.get("/api/repos").json()["repos"]}
+    assert repos[child]["managed"] is True
+    assert repos[child]["enabled"] is False
+
+
+def test_managed_never_returns_to_false(tmp_path, client):
+    repo = make_repo(tmp_path)
+    client.post("/api/repos", json={"path": str(repo)})
+    client.patch(f"/api/repos?path={repo}", json={"enabled": False})
+    repos = {r["path"]: r for r in client.get("/api/repos").json()["repos"]}
+    assert repos[str(repo)]["managed"] is True
 
 
 def test_add_repo_stores_probed_forge(client, tmp_path):
@@ -674,38 +726,142 @@ def test_probe_of_a_submodule_stays_the_submodule(tmp_path):
     )
 
 
-def test_load_repos_defaults_submodule_fields(tmp_path):
+def test_load_repos_defaults_root_merge_policy(tmp_path):
     path = tmp_path / "repos.yaml"
     config.write_yaml(path, {"repos": [{"path": "/r"}]})
     (repo,) = config.load_repos(path)
-    assert repo["allow_cross_repo"] is False
     assert repo["default_root_merge_policy"] == "bump"
-    assert repo["submodules"] == []
 
 
-def test_load_repos_round_trips_submodule_table(tmp_path):
+def test_load_repos_defaults_managed_true_for_pre_existing_entries(tmp_path):
+    # Anything already in a repos.yaml was connected by a human -- auto-connect
+    # did not exist when it was written. Defaulting to False here would hide
+    # every repo a user has behind the Detected section on first load.
     path = tmp_path / "repos.yaml"
-    config.write_yaml(
-        path,
-        {
-            "repos": [
-                {
-                    "path": "/r",
-                    "allow_cross_repo": True,
-                    "default_root_merge_policy": "skip",
-                    "submodules": [
-                        {"path": "libs/a", "enabled": True, "test_command": "pytest libs/a"},
-                    ],
-                }
-            ]
-        },
+    path.write_text(yaml.safe_dump({"repos": [{"path": "/a"}]}))
+    assert config.load_repos(path)[0]["managed"] is True
+
+
+def test_load_repos_keeps_an_explicit_managed_false(tmp_path):
+    path = tmp_path / "repos.yaml"
+    path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "managed": False}]}))
+    assert config.load_repos(path)[0]["managed"] is False
+
+
+def test_load_repos_rejects_a_non_boolean_managed(tmp_path):
+    path = tmp_path / "repos.yaml"
+    path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "managed": "yes"}]}))
+    with pytest.raises(config.ConfigError, match="'managed' must be a boolean"):
+        config.load_repos(path)
+
+
+def test_a_configured_submodule_edge_becomes_a_child_repo_entry(tmp_path):
+    path = tmp_path / "repos.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "repos": [
+                    {
+                        "path": "/ws",
+                        "name": "ws",
+                        "submodules": [
+                            {
+                                "path": "libs/a",
+                                "enabled": True,
+                                "test_command": "cargo test",
+                                "chain_override": "quick",
+                            },
+                        ],
+                    }
+                ]
+            }
+        )
     )
-    (repo,) = config.load_repos(path)
-    assert repo["allow_cross_repo"] is True
-    assert repo["default_root_merge_policy"] == "skip"
-    assert repo["submodules"] == [
-        {"path": "libs/a", "enabled": True, "test_command": "pytest libs/a", "chain_override": None}
-    ]
+    repos = config.load_repos(path)
+    assert [r["path"] for r in repos] == ["/ws", "/ws/libs/a"]
+    child = repos[1]
+    assert child["name"] == "a"
+    assert child["enabled"] is True
+    assert child["test_command"] == "cargo test"
+    assert child["default_chain_template"] == "quick"
+    # a human had set these values, so the child is a decision, not noise
+    assert child["managed"] is True
+
+
+def test_an_all_default_submodule_edge_is_dropped(tmp_path):
+    # Carries no human decision, so there is nothing to preserve. Task 3's
+    # auto-connect re-creates it as managed: false.
+    path = tmp_path / "repos.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "repos": [
+                    {
+                        "path": "/ws",
+                        "submodules": [{"path": "libs/a", "enabled": False}],
+                    }
+                ]
+            }
+        )
+    )
+    repos = config.load_repos(path)
+    assert [r["path"] for r in repos] == ["/ws"]
+
+
+def test_an_existing_child_entry_wins_over_a_legacy_edge(tmp_path):
+    path = tmp_path / "repos.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "repos": [
+                    {"path": "/ws", "submodules": [{"path": "libs/a", "test_command": "stale"}]},
+                    {"path": "/ws/libs/a", "test_command": "real"},
+                ]
+            }
+        )
+    )
+    repos = config.load_repos(path)
+    assert [r["path"] for r in repos] == ["/ws", "/ws/libs/a"]
+    assert repos[1]["test_command"] == "real"
+
+
+def test_migration_drops_submodules_and_allow_cross_repo_keys(tmp_path):
+    path = tmp_path / "repos.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "repos": [
+                    {
+                        "path": "/ws",
+                        "allow_cross_repo": True,
+                        "submodules": [{"path": "libs/a", "enabled": True}],
+                    }
+                ]
+            }
+        )
+    )
+    for entry in config.load_repos(path):
+        assert "submodules" not in entry
+        assert "allow_cross_repo" not in entry
+
+
+def test_migration_is_idempotent(tmp_path):
+    path = tmp_path / "repos.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "repos": [
+                    {
+                        "path": "/ws",
+                        "submodules": [{"path": "libs/a", "enabled": True}],
+                    }
+                ]
+            }
+        )
+    )
+    once = config.load_repos(path)
+    config.save_repos(path, once)
+    assert config.load_repos(path) == once
 
 
 def test_load_repos_rejects_unknown_root_merge_policy(tmp_path):

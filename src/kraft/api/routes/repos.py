@@ -30,13 +30,54 @@ class RepoBody(BaseModel):
     default_model: str | None = None
     deny_tools: list[str] | None = None
     steering: list[str] | None = None
-    allow_cross_repo: bool | None = None
     default_root_merge_policy: str | None = None
-    submodules: list[dict] | None = None
 
 
 class ProbeBody(BaseModel):
     path: str
+
+
+def _auto_connect_children(repos: list[dict], parent: dict, submodule_paths: list[str]) -> None:
+    """One disabled entry per `.gitmodules` path, appended to `repos` in place.
+
+    `managed: False` -- detected, nobody has looked. Each child is probed on
+    its own, so a Rust submodule under a Python workspace gets `cargo test`
+    rather than inheriting its parent's command.
+
+    Never touches an entry that already exists: re-connecting a workspace, or
+    connecting one whose child an operator already added by hand, must not
+    reset that child's latch.
+    """
+    known = {r["path"] for r in repos}
+    for rel in submodule_paths:
+        child_path = Path(parent["path"]) / rel
+        try:
+            probed = config_mod.probe_repo(child_path)
+        except config_mod.ConfigError:
+            # An uninitialized submodule is an empty directory, not a repo.
+            # It reappears as a candidate the next time the parent is
+            # connected, so skipping is the whole recovery.
+            continue
+        if probed["path"] in known:
+            continue
+        known.add(probed["path"])
+        repos.append(
+            {
+                "path": probed["path"],
+                "name": probed["name"],
+                "default_chain_template": "default",
+                "test_command": probed["test_command"],
+                "test_scopes": None,
+                "forge": probed["forge"],
+                "project": probed["project"],
+                "enabled": False,
+                "managed": False,
+                "default_model": None,
+                "deny_tools": [],
+                "steering": [],
+                "default_root_merge_policy": "bump",
+            }
+        )
 
 
 def _validate_repos(st, repos: list[dict]) -> None:
@@ -115,11 +156,14 @@ async def add_repo(body: RepoBody, request: Request):
         "default_model": body.default_model,
         "deny_tools": body.deny_tools or [],
         "steering": body.steering or [],
-        "allow_cross_repo": body.allow_cross_repo if body.allow_cross_repo is not None else False,
         "default_root_merge_policy": body.default_root_merge_policy or "bump",
-        "submodules": body.submodules or [],
+        # A human typed this path. Set here rather than defaulted in the
+        # loader, because `_auto_connect_children` below writes entries
+        # through the same file and must NOT get this value.
+        "managed": True,
     }
     repos.append(entry)
+    _auto_connect_children(repos, entry, probed["submodules"])
     _refuse_enable_without_test_command(st, entry)
     _validate_repos(st, repos)
     config_mod.save_repos(deps.repos_path(st), repos)
@@ -145,9 +189,7 @@ class RepoPatch(BaseModel):
     default_model: str | None = None
     deny_tools: list[str] | None = None
     steering: list[str] | None = None
-    allow_cross_repo: bool | None = None
     default_root_merge_policy: str | None = None
-    submodules: list[dict] | None = None
 
 
 def _refuse_enable_without_test_command(st, entry: dict) -> None:
@@ -183,6 +225,10 @@ async def update_repo(body: RepoPatch, request: Request, path: str):
     # RepoDetail draft round-trips the whole Repo, nulls included) has to
     # actually take effect rather than being silently dropped.
     entry.update(body.model_dump(exclude_unset=True))
+    # Any save is a touch -- editing a detected child's test command without
+    # enabling it still promotes it out of the Detected section. One-way: a
+    # later disable leaves this True, so the row reads as deliberately off.
+    entry["managed"] = True
     _refuse_enable_without_test_command(st, entry)
     _validate_repos(st, repos)
     config_mod.save_repos(deps.repos_path(st), repos)
