@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from support.harness import make_repo
+from support.harness import make_repo, make_repo_with_submodule
 
 from kraft import cli, client
 
@@ -193,6 +193,48 @@ def test_repos_says_disabled_in_words_not_only_in_colour(app, tmp_path, monkeypa
     lines = capsys.readouterr().out.splitlines()
     assert "disabled" in next(line for line in lines if str(off) in line)
     assert "enabled" in next(line for line in lines if str(on) in line)
+
+
+def test_repos_hides_auto_connected_children_by_default(app, tmp_path, monkeypatch, capsys):
+    """Kraft-jknn0: the CLI's answer to Settings' collapsed Detected section
+    -- connecting a superproject must not dump every auto-connected,
+    never-touched child into the plain table."""
+    monkeypatch.setenv("COLUMNS", "300")
+    root, _sub = make_repo_with_submodule(tmp_path)
+    child = root / "repos" / "pkg"
+    asyncio.run(client.ensure_repo(str(root)))
+
+    cli.main(["repo", "list"])
+    out = capsys.readouterr().out
+    assert str(root) in out
+    assert str(child) not in out
+    assert "1 more detected, not managed" in out
+    assert "--all" in out
+
+
+def test_repos_all_shows_the_detected_children(app, tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("COLUMNS", "300")
+    root, _sub = make_repo_with_submodule(tmp_path)
+    child = root / "repos" / "pkg"
+    asyncio.run(client.ensure_repo(str(root)))
+
+    cli.main(["repo", "list", "--all"])
+    out = capsys.readouterr().out
+    assert str(root) in out
+    assert str(child) in out
+    assert "detected" not in out
+
+
+def test_repos_json_ignores_the_managed_filter(app, tmp_path, capsys):
+    """`--json` is the raw API payload contract (common.emit's docstring) --
+    it must not silently drop rows `--all` would otherwise be needed for."""
+    root, _sub = make_repo_with_submodule(tmp_path)
+    child = root / "repos" / "pkg"
+    asyncio.run(client.ensure_repo(str(root)))
+
+    cli.main(["repo", "list", "--json"])
+    paths = {entry["path"] for entry in json.loads(capsys.readouterr().out)}
+    assert paths == {str(root), str(child)}
 
 
 def test_disconnect_removes_the_connected_repo(app, tmp_path, capsys):

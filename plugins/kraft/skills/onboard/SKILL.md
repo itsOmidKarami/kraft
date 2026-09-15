@@ -14,8 +14,8 @@ Three mechanical steps, each followed by a check against the repo itself — a
 zero exit code says the command ran, not that what it did was right.
 
 1. **Connect.** `ensure_repo()` (or `kraft repo connect [PATH]` from a
-   terminal) - files the repo and probes it: test command, submodules, forge.
-   Read back the probed `test_command`.
+   terminal) - files the repo and probes it: test command, forge. Read back
+   the probed `test_command`.
 
    Check it against what the repo actually runs: is there a `Justfile` or
    `justfile` at the repo root with a `test` recipe? If so, and it differs
@@ -31,6 +31,14 @@ zero exit code says the command ran, not that what it did was right.
    setting `test_command` to the right command, and say what you changed —
    the running server reads that file fresh on each request, no restart
    needed.
+
+   If the repo has submodules, connect writes each `.gitmodules` path as its
+   own repo entry, not a sub-field of this one — run `kraft repo list --all`
+   (they're `managed: false` until touched, so plain `kraft repo list` won't
+   show them) and say how many landed. Each is a real, disabled repo of its
+   own: it needs its own probed `test_command` checked the same way as the
+   parent's, and its own `enabled: true` (`PATCH /repos`) before any item can
+   be scoped to it — connecting the parent does not turn any of them on.
 
 2. **Register.** `kraft admin init --repo` - registers Kraft's MCP server and
    skills for this repo's agent. It prints every path it wrote
