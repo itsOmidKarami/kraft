@@ -11,8 +11,14 @@ Two ranges, not one. `read_change(wt, base)` is the working tree against `base`
 -- an agent that wrote files without committing them is the normal mid-chain
 state, and a committed-only diff would show an empty change set while the work
 sat on disk. `read_change(wt, base, head="HEAD")` is `base..HEAD`, what earlier
-nodes finished and committed. The gate viewer shows both, apart (Kraft-nceo);
-`write_package` still hands a review agent the one combined range.
+nodes finished and committed. The gate viewer shows both, apart (Kraft-nceo).
+
+`write_package` hands a review agent one range, and from the second round of a
+fix loop onward that range starts at the head the previous review was taken at
+rather than at `base` (`since`, Kraft-s7c04.1). Re-reading the whole branch
+every round is what made `verify` half of all Kraft spend: 43717ee6 measured
+the same 38-file diff seven times. The package says which range it is showing
+and names the git command for the rest, so nothing is hidden -- only unpasted.
 """
 
 from __future__ import annotations
@@ -80,10 +86,32 @@ def read_change(
     return Change(commits=log.splitlines(), files=files, diff=body, untracked=untracked)
 
 
-def render_package(change: Change, base: str) -> str:
+#: What a narrowed package tells the reviewer, in place of the plain header.
+#: Both halves matter: which range it is looking at, and that the rest of the
+#: branch is still reachable. Without the second half a reviewer that obeys
+#: "read that file first" has been quietly cut off from the change as a whole,
+#: which is the failure this narrowing must not cause (Kraft-s7c04.1).
+_SINCE_HEADER = (
+    "# Review package for {since}..working tree\n\n"
+    "This is the change **since your last review of this branch**, not the whole "
+    "branch. Everything before {since} was reviewed in an earlier round, and the "
+    "findings that review left are listed in your instruction.\n\n"
+    "For the full branch diff, run `git diff {base}...HEAD` in this worktree. Do "
+    "that when you need to judge the change as a whole -- whether it does what "
+    "the work item asked, whether it breaks a caller outside these hunks -- and "
+    "not otherwise.\n"
+)
+
+
+def render_package(change: Change, base: str, *, since: str | None = None) -> str:
     stat = "\n".join(f"{f['path']} | +{f['insertions']} -{f['deletions']}" for f in change.files)
+    header = (
+        _SINCE_HEADER.format(since=since, base=base)
+        if since
+        else f"# Review package for {base}..working tree\n"
+    )
     return (
-        f"# Review package for {base}..working tree\n\n"
+        f"{header}\n"
         f"## Commits\n{chr(10).join(change.commits) or '(none yet — uncommitted work)'}\n\n"
         f"## Files changed\n{stat or '(none)'}\n\n"
         f"## Untracked\n{chr(10).join(change.untracked) or '(none)'}\n\n"
@@ -91,8 +119,16 @@ def render_package(change: Change, base: str) -> str:
     )
 
 
-def write_package(results_dir: Path, worktree: Path, base: str, session_id: str) -> Path | None:
+def write_package(
+    results_dir: Path, worktree: Path, base: str, session_id: str, *, since: str | None = None
+) -> Path | None:
     """Write the package into `results_dir` and return its path, or None.
+
+    `since`, when given, narrows the range to `since..working tree` -- the head
+    the previous review of this hook was taken at (Kraft-s7c04.1). `Commits` and
+    `Files changed` narrow with it: a package describing one range and listing
+    another is a trap for whoever reads it next. `None` is the whole branch,
+    exactly as before, and is what round 0 of every work item gets.
 
     Named by the session, the way the result file beside it already is.
     Naming it by the `base..HEAD` range instead looks like it distinguishes
@@ -103,9 +139,9 @@ def write_package(results_dir: Path, worktree: Path, base: str, session_id: str)
     id is unique per dispatch, so a re-measure after a fix cycle also keeps the
     evidence the previous cycle was reviewed against.
     """
-    change = read_change(worktree, base, context=PACKAGE_CONTEXT)
+    change = read_change(worktree, since or base, context=PACKAGE_CONTEXT)
     if change is None:
         return None
     path = results_dir / f"{session_id}.review.md"
-    path.write_text(render_package(change, base))
+    path.write_text(render_package(change, base, since=since))
     return path

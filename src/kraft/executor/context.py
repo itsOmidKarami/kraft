@@ -69,20 +69,54 @@ class Steer:
     start" — so it is carried down the walk and consumed by whichever dispatch
     gets there first, rather than each caller guessing which task that will be.
 
-    `human` is True unless the caller says otherwise -- every existing
-    constructor call (a typed `/retry --steer`, a `/resume --steer`, the
-    rebase-drift note Kraft writes for itself mid-bounce) keeps meaning what
-    it already means. The flag exists for exactly one reader,
-    `kraft.executor.walk.walk_node`'s `judge_due`: a carried-in steer is meant
-    to be the human's own answer to the trend the fix-loop judge might stop
-    on, so it is exempted from that judge -- a *seeded* steer (Kraft's own
-    recap of the last review's unresolved findings, Kraft-7sec second half)
-    is not that answer, and must not silently claim to be one.
+    `source` says who wrote it, and two different readers ask two different
+    questions of it. It replaced a `human` boolean that was answering both at
+    once, which is why a gate reviewer's verdict could not be fixed without
+    breaking something else (Kraft-s7c04.6).
+
+    * `"human"` -- a typed `/retry --steer` or `/resume --steer`.
+    * `"seeded"` -- Kraft's own recap of the last review's unresolved findings
+      (Kraft-7sec second half), and the rebase-drift note it writes for itself
+      mid-bounce. Nobody typed these, and a prompt that says a person did is
+      the misattribution this field exists to keep out.
+    * `"gate_review"` -- an automated gate review's own verdict, carried into
+      the re-run it triggered. Not a human's, and not Kraft's own recap either:
+      an agent's judgement about this artifact, which may have committed in the
+      worktree itself.
     """
 
-    def __init__(self, text: str | None = None, *, human: bool = True) -> None:
+    #: Sources whose note reaches a dispatch without the fix-loop judge getting
+    #: a say. See `exempts_judge`.
+    _JUDGE_EXEMPT = ("human", "gate_review")
+
+    def __init__(self, text: str | None = None, *, source: str = "human") -> None:
         self._text = text or None
-        self.human = human
+        self.source = source
+
+    @property
+    def human(self) -> bool:
+        """Whether a prompt may say a person wrote this. `prompts.steer_prefix`
+        picks its template from `source` directly; this stays for readers that
+        only need the yes/no."""
+        return self.source == "human"
+
+    @property
+    def exempts_judge(self) -> bool:
+        """Whether this steer reaches a dispatch without the fix-loop judge
+        getting a say (`walk.walk_node`'s `judge_due`).
+
+        The note lives only in this object -- `take()` empties it and nothing
+        re-delivers it -- so a `stop_needs_human` before it is delivered
+        discards it and re-strands the item on the very trend the steer was the
+        answer to. That is why a human's steer is exempt, and it is just as true
+        of a gate reviewer's verdict, whose `concerns` is the entire content of
+        a `fixed`/`reject` decision.
+
+        `seeded` is the exception, and keeps today's behaviour: it is Kraft's
+        own recap of findings the next measurement will re-report anyway, so
+        nothing is lost by letting the judge stop first.
+        """
+        return self.source in self._JUDGE_EXEMPT
 
     def take(self) -> str | None:
         text, self._text = self._text, None

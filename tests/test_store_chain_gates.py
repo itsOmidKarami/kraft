@@ -100,7 +100,70 @@ def test_last_rejection_reads_the_note_and_the_target_back(tmp_path):
                 "note": "task 4 has no test",
                 "node": "plan",
                 "by": "human",
+                # Kraft-s7c04.16: additive, and None for a caller that names no
+                # verdict -- the key is always present so a reader never has to
+                # tell "no verdict" from "event predates the field".
+                "verdict": None,
             }
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_reject_gate_records_the_verdict_that_produced_it(tmp_path):
+    """Kraft-s7c04.16: without this a reviewer that rejected and a reviewer that
+    fixed-and-committed are the same row, so the oscillation Kraft-s7c04.6 is
+    about is invisible in every aggregate -- the investigation that found it had
+    to read session logs in sequence."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            await database.write(
+                lambda c: store.reject_gate(
+                    c,
+                    "w1",
+                    "human_review_approval",
+                    "repaired the swallowed OSError",
+                    reopen=True,
+                    node="human_review",
+                    by="agent",
+                    verdict="fixed",
+                )
+            )
+            got = database.read(lambda c: store.last_rejection(c, "w1"))
+            assert got["verdict"] == "fixed"
+            assert got["by"] == "agent"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_fixed_verdicts_are_countable_without_opening_a_log(tmp_path):
+    """The whole point of Kraft-s7c04.16: one query over `events`, no session
+    logs, no ordering reconstruction."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            for verdict in ("fixed", "reject", "fixed"):
+                await database.write(
+                    lambda c, v=verdict: store.reject_gate(
+                        c, "w1", "g", "n", reopen=True, node="x", by="agent", verdict=v
+                    )
+                )
+            n = database.read(
+                lambda c: c.execute(
+                    "SELECT COUNT(*) FROM events WHERE work_item_id = 'w1' "
+                    "AND type = 'gate_rejected' "
+                    "AND json_extract(payload, '$.verdict') = 'fixed'"
+                ).fetchone()[0]
+            )
+            assert n == 2
         finally:
             await database.close()
 

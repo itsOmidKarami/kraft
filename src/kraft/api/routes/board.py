@@ -5,7 +5,7 @@ import json
 from fastapi import Request
 
 from kraft import config as config_mod
-from kraft import events, executor, findings, store
+from kraft import events, executor, store
 from kraft import policy as policy_mod
 from kraft import progress as progress_mod
 from kraft.api import api_router, deps
@@ -134,18 +134,13 @@ def _deferred_findings(st, wid: str) -> list[dict]:
     """Findings that never entered the loop, for the human at the gate.
 
     A roll-up nobody reads is a silent discard, so these are rendered at the
-    gate rather than merely recorded.
+    gate rather than merely recorded. The computation lives in
+    `executor.deferred_findings` because the review brief needs the same list
+    (Kraft-s7c04.4) and the gate and the brief must not be able to disagree
+    about what was deferred.
     """
     loop_severities = getattr(st.policy, "loop_severities", policy_mod.DEFAULT_LOOP_SEVERITIES)
-    seen: dict[str, dict] = {}
-    for e in st.db.read(lambda c: events.read_after(c, 0, wid)):
-        if e["type"] != "findings_measured":
-            continue
-        for raw in e["payload"].get("findings", []):
-            if raw.get("severity") in loop_severities:
-                continue
-            seen.setdefault(findings.from_payload(raw).fingerprint, raw)
-    return list(seen.values())
+    return executor.deferred_findings(st.db, wid, loop_severities)
 
 
 def _judge_stop_notes(st, wid: str) -> list[dict]:

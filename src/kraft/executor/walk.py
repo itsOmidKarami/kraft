@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import asdict
+from dataclasses import asdict, replace
+from pathlib import Path
 
 from kraft import builtins as _builtins
+from kraft import config as _config
 from kraft import events, store
+from kraft import findings as _findings
 from kraft import policy as _policy
 from kraft.adapters import beads
 from kraft.executor import dispatch, entry, gates, prompts, stops
@@ -122,6 +125,50 @@ _REPAIR_ROUND = -1
 _FINGERPRINT_STREAK_LIMIT = 3
 
 
+def _carry_severity(
+    found: list[_findings.Finding], previous: list[_findings.Finding], *, unchanged_tree: bool
+) -> list[_findings.Finding]:
+    """`found` with each repeat's severity floored at its previous rating, but
+    only when no fix cycle ran between the two measurements (Kraft-s7c04.3).
+
+    `policy.loop_severities` is a hard cliff: below it a finding is dropped from
+    the loop entirely, so one inconsistent re-rating ends a loop that has not
+    converged. 43717ee6 priced the same forge/run.py defect minor -> absent ->
+    important across three reviews of a byte-identical tree, and the round that
+    said `minor` is what let the loop believe it was converging.
+
+    `unchanged_tree` is the gate: this round's head is the head the previous
+    measurement was taken at, so nothing the reviewer is looking at has moved
+    and a different answer is the reviewer disagreeing with itself. Flooring
+    unconditionally would turn a genuine partial fix -- `important` reduced to
+    `minor` *because the fix worked* -- into `prints == previous_prints` and
+    park the item at "stuck: 1 finding(s) unchanged", reporting real progress as
+    being stuck.
+
+    Deliberately the head and not `fix_ran`: a fix cycle *starting* says nothing
+    about whether it changed anything, and in a normal loop one always does, so
+    `fix_ran` would disable this entirely. `dispatch_node` commits stragglers
+    after every agent task (Kraft-7fip), so a fix that wrote anything has moved
+    the head by the time the next measurement is dispatched.
+
+    An upgrade is always taken as given. A severity neither side's payload
+    validated (`from_payload` accepts whatever it is handed) floors nothing
+    rather than raising inside the loop.
+    """
+    if not unchanged_tree or not previous:
+        return found
+    rank = {s: i for i, s in enumerate(_findings.SEVERITIES)}  # critical = 0
+    unknown = len(_findings.SEVERITIES)
+    was = {f.fingerprint: f.severity for f in previous}
+    return [
+        replace(f, severity=was[f.fingerprint])
+        if f.fingerprint in was
+        and rank.get(was[f.fingerprint], unknown) < rank.get(f.severity, unknown)
+        else f
+        for f in found
+    ]
+
+
 async def recover_node(
     db,
     run_dirs,
@@ -136,6 +183,7 @@ async def recover_node(
     launch: LaunchContext | None,
     budget: _policy.Budget,
     round: int = 1,
+    loop_severities: frozenset[str] = _policy.DEFAULT_LOOP_SEVERITIES,
 ) -> tuple[str, list[str], list[BaseException]]:
     """One repair pass over a node whose tasks failed (Kraft-rv6i).
 
@@ -183,6 +231,7 @@ async def recover_node(
         steer=steer,
         launch=launch,
         budget=budget,
+        loop_severities=loop_severities,
     )
     if verdict != "ok":
         return verdict, r_failed, r_excs
@@ -198,6 +247,7 @@ async def recover_node(
         steer=steer,
         launch=launch,
         budget=budget,
+        loop_severities=loop_severities,
     )
 
 
@@ -215,6 +265,14 @@ async def walk_node(
     launch: LaunchContext | None = None,
 ) -> str:
     key = node.get("fix_loop")
+    # Which severities open a fix cycle -- and therefore, by subtraction, which
+    # findings are "deferred" and owed to the human at the review gate
+    # (Kraft-s7c04.4). Threaded down to `dispatch_node` rather than defaulted
+    # there: a repo that sets `findings.loop_severities` in its own policy.yaml
+    # would otherwise get a board card and a review brief computed from
+    # different sets, which is exactly the disagreement one shared function was
+    # meant to prevent. `policy` is None on a chain built without one.
+    loop_severities = policy.loop_severities if policy else _policy.DEFAULT_LOOP_SEVERITIES
     # Derived here rather than passed in: every caller already hands us the
     # policy, so no call site can forget the cap and silently lose it. Folded
     # through the item's own cap (UI v2 · 04 point 4) -- re-read fresh from
@@ -241,6 +299,7 @@ async def walk_node(
             steer=steer,
             launch=launch,
             budget=budget,
+            loop_severities=loop_severities,
         )
         if verdict == "paused":
             return "paused"
@@ -278,6 +337,7 @@ async def walk_node(
                     steer=steer,
                     launch=launch,
                     budget=budget,
+                    loop_severities=loop_severities,
                 )
                 if verdict == "paused":
                     return "paused"
@@ -348,6 +408,7 @@ async def walk_node(
             steer=steer,
             launch=launch,
             budget=budget,
+            loop_severities=loop_severities,
         )
         if verdict == "paused":
             return "paused"
@@ -394,6 +455,7 @@ async def walk_node(
                 launch=launch,
                 budget=budget,
                 round=_REPAIR_ROUND,
+                loop_severities=loop_severities,
             )
             if r_verdict == "paused":
                 return "paused"
@@ -444,7 +506,21 @@ async def walk_node(
             # the fresher re-measure this repair just produced.
             verdict, failed, round = r_verdict, r_failed, _REPAIR_ROUND
 
-        previous_prints, fix_ran = dispatch.last_measurement(db, work_item_id, node["id"])
+        previous_found, fix_ran, previous_head = dispatch.last_measurement(
+            db, work_item_id, node["id"]
+        )
+        head_sha = _config.git_read(Path(worktree), "rev-parse", "HEAD")
+        # The tags this loop's own checks already meant: the *eligible* subset of
+        # the last measurement. `last_measurement` returns whole findings now
+        # (the reviewer is handed their messages, and a repeat's severity is
+        # floored against theirs), so the narrowing that used to live in the
+        # event payload's `fingerprints` key happens here instead -- identically,
+        # so `prints == previous_prints` and `repeats` below are unchanged.
+        previous_prints = (
+            sorted({f.fingerprint for f in previous_found if f.severity in policy.loop_severities})
+            if previous_found is not None
+            else None
+        )
         # `_previous_fix_session` is history-wide, not scoped to this
         # `walk_node` entry -- a `/retry` or an auto-escalation retry clears
         # the loop counter (`retry_counters` row deleted) but leaves the old
@@ -461,15 +537,42 @@ async def walk_node(
         # item on the trend `/retry` was supposed to escape.
         previous_fix = _previous_fix_session(db, work_item_id, node["id"])
         counter_row = db.read(lambda c: store.read_counter(c, work_item_id, key))
-        # Only a *human*-authored steer gets the free pass the comment above
-        # describes. A seeded one (Kraft's own recap of findings the last
-        # review already left, Kraft-7sec second half) is not a person's
-        # deliberate answer to the trend this judge exists to brake, so it
-        # must not silently stand in for one (review finding on this plan).
-        judge_due = (
-            previous_fix is not None and counter_row is not None and not (steer and steer.human)
+        # Which steers get the free pass the comment above describes is
+        # `Steer.exempts_judge`'s call, not a `human` test. A *seeded* steer
+        # (Kraft's own recap of findings the last review already left,
+        # Kraft-7sec second half) is not a person's deliberate answer to the
+        # trend this judge exists to brake and must not stand in for one. A gate
+        # reviewer's verdict is not a person's either, but it is the entire
+        # content of a `fixed`/`reject` decision and exists nowhere else, so
+        # discarding it before delivery is the data loss this comment warns
+        # about rather than the misattribution (Kraft-s7c04.6).
+        exempt = steer is not None and bool(steer) and steer.exempts_judge
+        judge_due = previous_fix is not None and counter_row is not None and not exempt
+        # `reported_hooks`, not `reported`: it is the set of hook points that
+        # wrote a parseable result file, and `blind_failures` below is computed
+        # from it. Named for what it holds so nothing else in this function can
+        # quietly shadow it -- a draft of Kraft-s7c04.3 did, which turned every
+        # failing hook into a blind failure and put the loop beyond the reach of
+        # the stuck detector.
+        found, reported_hooks = dispatch.collect_findings(db, work_item_id, node, round, registry)
+        # A `same_as` is only believable for a tag this round's reviewer was
+        # actually shown, and `carried_findings_note` is what showed it. An
+        # invented or stale tag would collapse two distinct defects onto one
+        # identity and fire the stuck detector on a fiction (Kraft-s7c04.2).
+        found = _findings.resolve_identity(
+            found, known={f.fingerprint for f in previous_found or []}
         )
-        found, reported = dispatch.collect_findings(db, work_item_id, node, round, registry)
+        # Parallel to `found`, never a dict keyed on fingerprint: two findings in
+        # one round can share a tag if the reviewer pointed both at the same
+        # `same_as`, and a dict would silently drop one of them.
+        as_reported = [f.severity for f in found]
+        found = _carry_severity(
+            found,
+            previous_found or [],
+            # Both known and equal, never "both None": a pair of unreadable heads
+            # is not evidence that nothing moved.
+            unchanged_tree=head_sha is not None and head_sha == previous_head,
+        )
         eligible = [f for f in found if f.severity in policy.loop_severities]
         prints = sorted({f.fingerprint for f in eligible})
         # A task on `builtin: noop` exits 'done' in milliseconds having done
@@ -483,24 +586,37 @@ async def walk_node(
             if registry.hooks.get(t, {}).get("kind") == "builtin"
             and registry.hooks.get(t, {}).get("handler") == "noop"
         ]
+        # Built here rather than inside the lambda, the same way `judge_payload`
+        # below is: every name a deferred lambda reads out of this loop has to be
+        # bound at definition time or it sees the next iteration's value.
+        #
+        # `reported_severity` rides along only where the floor overrode the
+        # reviewer (Kraft-s7c04.3). Refusing a downgrade silently would make a
+        # reviewer inconsistency indistinguishable from a reviewer agreeing.
+        # `findings.from_payload` reads key-by-key and ignores the extra key --
+        # exactly the case its docstring exists for.
+        measured_payload = {
+            "node_id": node["id"],
+            "cycle": round,
+            # The commit this measurement is about, so the next round can tell a
+            # re-rating of an untouched tree from a real change.
+            "head_sha": head_sha,
+            "findings": [
+                {**asdict(f), **({"reported_severity": s} if s != f.severity else {})}
+                for f, s in zip(found, as_reported, strict=True)
+            ],
+            "fingerprints": prints,
+            "noop_hooks": noop_hooks,
+        }
         await db.write(
-            lambda c, r=round, found=found, prints=prints, noop_hooks=noop_hooks: events.append(
-                c,
-                work_item_id,
-                "findings_measured",
-                {
-                    "node_id": node["id"],
-                    "cycle": r,
-                    "findings": [asdict(f) for f in found],
-                    "fingerprints": prints,
-                    "noop_hooks": noop_hooks,
-                },
+            lambda c, payload=measured_payload: events.append(
+                c, work_item_id, "findings_measured", payload
             )
         )
 
         # A failed task that produced no findings at all is still non-clean: the
         # findings list refines *why* a task failed, it does not define failure.
-        blind_failures = [t for t in failed if t not in reported]
+        blind_failures = [t for t in failed if t not in reported_hooks]
         enters_loop = bool(eligible) or bool(blind_failures)
 
         if not enters_loop:
@@ -540,7 +656,13 @@ async def walk_node(
         # the judge itself cannot be trusted on already fell open to
         # "continue" inside `dispatch.judge_verdict`; the cap/stuck checks
         # below run exactly as they do today regardless of what runs here.
+        # Re-initialised every iteration, inside the loop: bound above it, a
+        # later round where `judge_due` is False would re-serve the previous
+        # round's reasoning and tell the fixer the judge had just said it.
+        reasoning = ""
+        judge_ran = False
         if judge_due:
+            judge_ran = True
             verdict, reasoning = await dispatch.judge_verdict(
                 db,
                 run_dirs,
@@ -663,6 +785,21 @@ async def walk_node(
             # fix_cycle_started.
             if fix_ran and repeats & set(prints):
                 instruction += prompts.FIX_REPEAT_NOTE
+        # Only a `continue` reaches here at all -- both stop verdicts return
+        # above -- but `verdict` is reassigned by the judge and shadows the
+        # measure verdict from the top of the loop, so this is gated on the
+        # judge having actually run rather than on the name's current value.
+        if judge_ran:
+            instruction += prompts.judge_note(reasoning)
+        # Every round, not just the last one (Kraft-s7c04.7). `last_measurement`
+        # gives the fixer one round of memory, which is why round N+2 reverted
+        # the security property round N established on e983d85c -- the loop had
+        # the information and could not see two rounds back. Read here rather
+        # than hoisted: this is the uncommon path (a fix is about to be
+        # dispatched), and the stuck check above is deliberately lazy about the
+        # same history so the common path pays nothing.
+        history = dispatch.judge_history(db, work_item_id, node["id"], policy.loop_severities)
+        instruction += prompts.round_history_note(history, dispatch.regressed_fingerprints(history))
         instruction += prompts.previous_attempt_note(previous_fix)
         fix = await dispatch.dispatch_node(
             db,
@@ -722,11 +859,11 @@ async def run_once(
     start_index: int = 0,
     policy: _policy.Policy | None = None,
     steer: str | None = None,
-    steer_seeded: bool = False,
+    steer_source: str = "human",
     launch: LaunchContext | None = None,
 ) -> str:
     # the note is good for one agent launch, whichever task gets there first
-    carried = Steer(steer, human=not steer_seeded)
+    carried = Steer(steer, source=steer_source)
     row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
     )
@@ -854,7 +991,11 @@ async def run_once(
                     return "needs_human"
                 target = next(j for j, n in enumerate(nodes) if n["id"] == bounce_to)
                 carried = Steer(
-                    prompts.rebase_drift_note(worktree, store.branch_for(row), pre_base, new_base)
+                    prompts.rebase_drift_note(worktree, store.branch_for(row), pre_base, new_base),
+                    # Kraft wrote this one, not a person (the `_REBASE_PROMPT`
+                    # template already says so); it must not claim the judge
+                    # exemption a human's own answer gets.
+                    source="seeded",
                 )
                 i = target
                 continue
@@ -877,7 +1018,7 @@ async def run(
     start_index: int = 0,
     policy: _policy.Policy | None = None,
     steer: str | None = None,
-    steer_seeded: bool = False,
+    steer_source: str = "human",
     launch: LaunchContext | None = None,
     on_approve: OnApprove | None = None,
 ) -> str:
@@ -890,7 +1031,7 @@ async def run(
         start_index=start_index,
         policy=policy,
         steer=steer,
-        steer_seeded=steer_seeded,
+        steer_source=steer_source,
         launch=launch,
     )
     status = await gates.review_gates(

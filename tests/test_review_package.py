@@ -253,6 +253,68 @@ def test_read_change_with_head_excludes_uncommitted_work(tmp_path):
     assert len(landed.commits) == 1 and "land the doc" in landed.commits[0]
 
 
+def _commit(repo, message):
+    config.git_read(repo, "add", "-A")
+    subprocess.run(["git", "commit", "-m", message], cwd=repo, capture_output=True, check=True)
+    return _head(repo)
+
+
+def test_the_package_diffs_from_the_given_head_when_one_is_known(tmp_path):
+    """Kraft-s7c04.1: 43717ee6 re-measured the same 38-file / +2216-line diff
+    seven times. From round 1 the reviewer needs the round's own change; the
+    rest of the branch is one git command away."""
+    repo = make_repo(tmp_path)
+    base = _head(repo)
+    # Two files: one only round 0 touched, one only round 1 touches. Both
+    # tracked, so both would land in a whole-branch diff.
+    (repo / "round0.py").write_text("reviewed already\n")
+    (repo / "round1.py").write_text("untouched so far\n")
+    reviewed = _commit(repo, "round 0")
+    (repo / "round1.py").write_text("the new fix\n")
+    results = tmp_path / "results"
+    results.mkdir()
+
+    path = review.write_package(results, repo, base, "sess-since", since=reviewed)
+    body = path.read_text()
+    assert "the new fix" in body
+    assert "reviewed already" not in body, "round 0's work must not be re-read every round"
+    assert [f["path"] for f in review.read_change(repo, reviewed).files] == ["round1.py"]
+
+    # ... and the whole-branch package, for contrast, still carries both
+    whole = review.write_package(results, repo, base, "sess-whole").read_text()
+    assert "reviewed already" in whole and "the new fix" in whole
+
+
+def test_the_package_says_where_the_range_starts_and_how_to_widen_it(tmp_path):
+    """A narrowed package that does not say it is narrowed is a package that
+    lies about being the whole change."""
+    repo = make_repo(tmp_path)
+    base = _head(repo)
+    (repo / "a.py").write_text("x\n")
+    reviewed = _commit(repo, "round 0")
+    (repo / "b.py").write_text("y\n")
+    results = tmp_path / "results"
+    results.mkdir()
+
+    body = review.write_package(results, repo, base, "sess-hdr", since=reviewed).read_text()
+    assert reviewed[:12] in body, "the reviewer has to know where the range starts"
+    assert f"git diff {base}...HEAD" in body, "and how to see the rest of the branch"
+
+
+def test_no_since_is_the_whole_branch(tmp_path):
+    """Round 0, and any hook that has never run: unchanged from today."""
+    repo = make_repo(tmp_path)
+    base = _head(repo)
+    (repo / "a.py").write_text("x\n")
+    _commit(repo, "round 0")
+    (repo / "b.py").write_text("y\n")
+    results = tmp_path / "results"
+    results.mkdir()
+
+    body = review.write_package(results, repo, base, "sess-full").read_text()
+    assert "git diff" not in body, "nothing to widen to: this IS the whole branch"
+
+
 def test_write_package_still_spans_base_to_working_tree(tmp_path):
     """The split is for the human at the gate. A review agent reading a file
     has no collapse to be defeated by, so its package keeps the one combined

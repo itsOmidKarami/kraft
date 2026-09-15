@@ -361,11 +361,13 @@ def _judge_policy(tmp_path, *, attempts):
     return policy.load_policy(p)
 
 
-def _run_judge_loop(tmp_path, monkeypatch, plan, *, attempts, registry=None):
+def _run_judge_loop(tmp_path, monkeypatch, plan, *, attempts, registry=None, prompt_log=None):
     plan_path = tmp_path / "plan.json"
     plan_path.write_text(json.dumps(plan))
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
     monkeypatch.setenv("KRAFT_FAKE_AGENT_PLAN", str(plan_path))
+    if prompt_log is not None:
+        monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompt_log))
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
 
@@ -782,7 +784,7 @@ def test_judge_fires_on_a_kraft_seeded_steer_at_the_re_entry_it_exists_to_brake(
     result, types = _seeded_judge_scenario(
         tmp_path,
         monkeypatch,
-        steer=executor.Steer("findings the last review left unresolved", human=False),
+        steer=executor.Steer("findings the last review left unresolved", source="seeded"),
     )
     assert result == "needs_human"  # cap (1) still breaches regardless
     assert "judge_verdict" in types
@@ -794,7 +796,45 @@ def test_human_steer_still_suppresses_the_judge_in_the_same_shape(tmp_path, monk
     result, types = _seeded_judge_scenario(
         tmp_path,
         monkeypatch,
-        steer=executor.Steer("fix the timeout, not the retry logic", human=True),
+        steer=executor.Steer("fix the timeout, not the retry logic", source="human"),
     )
     assert result == "needs_human"  # cap (1) still breaches regardless
     assert "judge_verdict" not in types
+
+
+def _prompts(log):
+    return [p for p in log.read_text().split("\n\x00\n") if p.strip()]
+
+
+def test_a_continue_verdicts_reasoning_reaches_the_next_fix_task(tmp_path, monkeypatch):
+    """Kraft-s7c04.5. On e983d85c the judge correctly diagnosed "you are chasing
+    variants, root-cause this" TWICE and the loop restarted unchanged both
+    times, at $31.65. This is the cheapest signal in the system -- already
+    computed, already paid for, already correct -- and no prompt read it."""
+    log = tmp_path / "prompts.txt"
+    _run_judge_loop(
+        tmp_path,
+        monkeypatch,
+        plan=[{"verdict": "continue", "concerns": "you are chasing variants; root-cause it"}],
+        attempts=3,
+        prompt_log=log,
+    )
+    fixes = [p for p in _prompts(log) if "Fix the code" in p]
+    assert fixes, "no fix task was dispatched at all"
+    assert any("you are chasing variants; root-cause it" in p for p in fixes)
+
+
+def test_the_first_fix_carries_no_judge_note(tmp_path, monkeypatch):
+    """Round 1 fixes freely with no judge call, so there is no reasoning to
+    carry and nothing must claim otherwise."""
+    log = tmp_path / "prompts.txt"
+    _run_judge_loop(
+        tmp_path,
+        monkeypatch,
+        plan=[{"verdict": "continue", "concerns": "later rounds only"}],
+        attempts=1,
+        prompt_log=log,
+    )
+    fixes = [p for p in _prompts(log) if "Fix the code" in p]
+    assert len(fixes) == 1
+    assert "The fix-loop judge reviewed the trend" not in fixes[0]

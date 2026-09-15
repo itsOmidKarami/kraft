@@ -114,8 +114,14 @@ install: bundle
 # COVERAGE_CORE=ctrace: coverage's default sysmon core on 3.14 can't record
 # testmon's per-test contexts and silently under-selects. Drop it once
 # coverage supports dynamic contexts under sysmon.
+# [positional-arguments] + "$@": `{{ARGS}}` interpolates a variadic parameter as
+# plain recipe text joined by spaces, so the shell re-splits it and
+# `just test -k "a or b"` reached pytest as three words (Kraft-s7c04.37). The
+# attribute is per-recipe on purpose -- file-level `set positional-arguments`
+# would change $0/$@ for every recipe here.
+[positional-arguments]
 test *ARGS:
-    COVERAGE_CORE=ctrace uv run pytest --testmon {{ARGS}}
+    COVERAGE_CORE=ctrace uv run pytest --testmon "$@"
 
 # Check the intent tree: every enforced-by pin resolves, and list what nothing pins.
 intent:

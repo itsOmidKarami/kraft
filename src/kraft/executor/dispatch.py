@@ -90,6 +90,7 @@ async def dispatch_node(
     launch: LaunchContext | None = None,
     budget: _policy.Budget = _policy.NO_BUDGET,
     escalate: bool = False,
+    loop_severities: frozenset[str] = _policy.DEFAULT_LOOP_SEVERITIES,
 ) -> str:
     binding = registry.hooks[task_hook]
     session_id = uuid.uuid4().hex
@@ -146,7 +147,7 @@ async def dispatch_node(
         # the fix-loop judge). Read before `take()`, and on `is not None`, not
         # truthiness: `Steer.__bool__` is about having text left, and `take()`
         # has just emptied it.
-        note_by_human = steer.human if steer is not None else True
+        note_source = steer.source if steer is not None else "human"
         note = steer.take() if steer else None
         attachment_note = prompts.attachment_note(entry.attachments_of(work_item_row))
         instruction = (
@@ -157,6 +158,27 @@ async def dispatch_node(
                 + prompts.progress_note(task_hook, work_item_row, worktree)
             )
         ) + prompts.BEAD_NOTE
+        # What this reviewer said last round, with the tags that let it say
+        # "this is that one again" (Kraft-s7c04.1 + .2). Before this, every
+        # round was measured cold: on 6c712ea8 findings went 3 -> 2 -> 3 -> 4,
+        # all new fingerprints, and the loop exited only because one round
+        # happened to grade everything minor. "" on round 0, so a work item's
+        # first review is unchanged.
+        if task_hook in prompts.REVIEW_HOOKS:
+            previous, _, _ = last_measurement(db, work_item_row["id"], node["id"])
+            instruction += prompts.carried_findings_note(previous or [])
+        # The findings that never entered the fix loop, for the brief the human
+        # actually reads (Kraft-s7c04.4). `skills/review-brief/SKILL.md` already
+        # promises them -- "the local review findings, including the ones ruled
+        # minor" -- and the dispatch gave the agent no way to know them, so on
+        # 6c712ea8 four real minor defects never reached the brief and a human
+        # later hand-filed three different ones. Keyed on the artifact rather
+        # than the hook name, like `chain_review` below, so a chain that binds a
+        # different hook to the brief still gets them.
+        if binding.get("artifact") == "review_brief":
+            instruction += prompts.deferred_findings_note(
+                deferred_findings(db, work_item_row["id"], loop_severities)
+            )
         if binding.get("artifact") == "chain_review":
             chain_nodes = json.loads(work_item_row["chain_definition"])["nodes"]
             at = next((i for i, n in enumerate(chain_nodes) if n["id"] == node["id"]), None)
@@ -199,7 +221,7 @@ async def dispatch_node(
             method_text=inv.method_text,
             title=work_item_row["title"],
             task_instruction=(
-                prompts.steer_prefix(binding, work_item_row, worktree, note, human=note_by_human)
+                prompts.steer_prefix(binding, work_item_row, worktree, note, source=note_source)
                 if note
                 else ""
             )
@@ -355,6 +377,7 @@ async def measure_node(
     steer: Steer | None = None,
     launch: LaunchContext | None = None,
     budget: _policy.Budget = _policy.NO_BUDGET,
+    loop_severities: frozenset[str] = _policy.DEFAULT_LOOP_SEVERITIES,
 ) -> tuple[str, list[str], list[BaseException]]:
     await db.write(lambda c, node=node: store.enter_node(c, work_item_id, node["id"]))
     tasks = node["tasks"]
@@ -388,6 +411,7 @@ async def measure_node(
             row,
             registry,
             worktree,
+            loop_severities=loop_severities,
             round=round,
             steer=steer,
             launch=launch,
@@ -543,9 +567,35 @@ def needs_context_question(
     return None
 
 
-def last_measurement(db, work_item_id: str, node_id: str) -> tuple[list[str] | None, bool]:
-    """This node's most recent `findings_measured` fingerprints, and whether a
-    `fix_cycle_started` for the node followed it.
+def last_measurement(
+    db, work_item_id: str, node_id: str
+) -> tuple[list[_findings.Finding] | None, bool, str | None]:
+    """This node's most recent `findings_measured` findings, whether a
+    `fix_cycle_started` for the node followed it, and the head it was taken at.
+
+    Three answers to three different questions, which is why they are not
+    collapsed. The findings are what the next reviewer is handed
+    (Kraft-s7c04.1); `fix_ran` is no-progress escalation's extra condition; the
+    head is how `walk._carry_severity` tells a re-rating of an untouched tree
+    from a genuine reduction (Kraft-s7c04.3). `None` for the head on any event
+    written before that field existed, which floors nothing rather than
+    guessing.
+
+    The whole findings, not their fingerprints: the caller derives the tags it
+    used to get, and the messages and severities are what `prompts.
+    carried_findings_note` hands the next reviewer (Kraft-s7c04.1) and what
+    `walk._carry_severity` floors a repeat's rating against (Kraft-s7c04.3).
+    Returning both would make this the second reader of `findings_measured` in
+    this module, which `unresolved_findings_steer`'s docstring forbids for good
+    reason -- three readers of one event is three things to keep in step.
+
+    Deliberately **not** bounded at a `work_item_retried`/`gate_*` boundary, the
+    way `store.last_rejection` is. A `/retry` does not change the tree, and
+    Kraft-m2q exists precisely because the first fix cycle after a steered retry
+    lost the REPEAT tag on the very finding that caused the stop -- "the part
+    that matters more than the findings themselves". Only the *most recent*
+    measurement is ever returned, so nothing older than one round can leak into
+    `resolve_identity`'s `known` however long the item's history is.
 
     Read from the event log rather than carried in a local: `kraft.executor.
     resuming.reconcile_current_node` re-enters `kraft.executor.walk.walk_node`
@@ -553,8 +603,7 @@ def last_measurement(db, work_item_id: str, node_id: str) -> tuple[list[str] | N
     history in the stack frame forgets everything it has seen — on exactly the
     path that motivates escalation.
 
-    The two return values answer two different questions, which is why they are
-    not collapsed into one. REPEAT marking asks only "was this finding in the
+    REPEAT marking asks only "was this finding in the
     last measurement", so it uses the fingerprints unconditionally. No-progress
     escalation additionally requires the fix flag: spec §4's "no progress" means
     a fix cycle ran and changed nothing — not merely that the same code was
@@ -571,8 +620,12 @@ def last_measurement(db, work_item_id: str, node_id: str) -> tuple[list[str] | N
         if e["type"] == "fix_cycle_started" and e["payload"].get("node_id") == node_id:
             fix_seen = True
         elif e["type"] == "findings_measured" and e["payload"].get("node_id") == node_id:
-            return e["payload"].get("fingerprints"), fix_seen
-    return None, False
+            return (
+                [_findings.from_payload(f) for f in e["payload"].get("findings", [])],
+                fix_seen,
+                e["payload"].get("head_sha"),
+            )
+    return None, False, None
 
 
 #: The fix loop's judge hook (2026-09-12-verify-fix-loop-judge-design):
@@ -610,7 +663,11 @@ def _judge_result(status: str, verdict: str | None) -> str:
 
 
 def judge_history(
-    db, work_item_id: str, node_id: str, loop_severities: frozenset[str]
+    db,
+    work_item_id: str,
+    node_id: str,
+    loop_severities: frozenset[str],
+    evts: list | None = None,
 ) -> list[dict]:
     """Every round measured so far for this node, oldest first: the judge's
     cross-round view (spec's "cheap pointers, not full transcripts" input) --
@@ -636,8 +693,11 @@ def judge_history(
     # not remove it, so this stays a list.
     # _REPAIR_ROUND (-1) is a repair pass, not a paid fix cycle -- it has
     # nothing to do with the budget the judge is weighing.
+    #: `evts`, when given, is a timeline the caller already fetched -- the same
+    #: shape `escalate._reason` accepts. Read fresh when nothing is handed in,
+    #: which is every existing caller including the judge's own.
     measured: list[tuple[int, list[_findings.Finding]]] = []
-    for e in db.read(lambda c: events.read_after(c, 0, work_item_id)):
+    for e in evts if evts is not None else db.read(lambda c: events.read_after(c, 0, work_item_id)):
         if e["type"] == "findings_measured" and e["payload"].get("node_id") == node_id:
             cycle = e["payload"]["cycle"]
             if cycle < 0:
@@ -689,6 +749,64 @@ def stuck_fingerprint(history: list[dict], min_repeats: int) -> str | None:
         fix_ran = round_["fix_result_path"] is not None
         streaks = {fp: streaks.get(fp, 0) + 1 if fix_ran and fp in streaks else 1 for fp in prints}
     return next((fp for fp, n in streaks.items() if n >= min_repeats), None)
+
+
+def deferred_findings(db, work_item_id: str, loop_severities: frozenset[str]) -> list[dict]:
+    """Every finding this item measured that never entered the fix loop, as raw
+    payload dicts, deduped by fingerprint and oldest-first.
+
+    Two readers, one computation: the human at the gate
+    (`api.routes.board._deferred_findings`) and the review brief written for
+    them (`prompts.deferred_findings_note`, Kraft-s7c04.4). A brief that listed
+    a different set from the card above it would be worse than one that listed
+    nothing.
+
+    Payload dicts rather than `Finding`s, because the board serialises these
+    straight to JSON and has since they existed.
+    """
+    seen: dict[str, dict] = {}
+    for e in db.read(lambda c: events.read_after(c, 0, work_item_id)):
+        if e["type"] != "findings_measured":
+            continue
+        for raw in e["payload"].get("findings", []):
+            if raw.get("severity") in loop_severities:
+                continue
+            seen.setdefault(_findings.from_payload(raw).fingerprint, raw)
+    return list(seen.values())
+
+
+def regressed_fingerprints(history: list[dict]) -> list[str]:
+    """Tags in the latest round that an earlier round had and a round between
+    them did not -- a fix in this loop undoing a fix from earlier in the same
+    loop (Kraft-s7c04.7).
+
+    Distinct from `stuck_fingerprint`, which finds what was never fixed. This
+    finds what was fixed and then broken again, and the two need opposite
+    instructions: stop repeating an approach, versus stop alternating between
+    two and root-cause the conflict.
+
+    Every round in the gap must carry a `fix_result_path` -- the same guard
+    `stuck_fingerprint` applies, for the same reason. A finding that vanished
+    because a round crashed or a resume re-measured never had a chance to be
+    fixed, so its reappearance reverts nothing, and telling a fixer otherwise
+    would steer it away from the correct fix on a loop that is converging.
+
+    Only a fingerprint comparison, so none of this was visible before
+    Kraft-s7c04.2 made a reworded repeat carry the same tag: seven reports of
+    one oscillating defect read as seven unrelated findings.
+    """
+    if len(history) < 3:
+        return []
+    per_round = [{f.fingerprint for f in r["findings"]} for r in history]
+    out = []
+    for fp in sorted(per_round[-1]):
+        seen = [i for i, prints in enumerate(per_round) if fp in prints]
+        if len(seen) < 2 or seen[-1] - seen[0] == len(seen) - 1:
+            continue  # never absent in between: persistent, not regressed
+        gap = [i for i in range(seen[0] + 1, seen[-1]) if fp not in per_round[i]]
+        if all(history[i]["fix_result_path"] is not None for i in gap):
+            out.append(fp)
+    return out
 
 
 def unresolved_findings_steer(
