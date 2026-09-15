@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 import sys
 import time
@@ -463,6 +464,37 @@ def test_load_repos_passes_through_new_shape(tmp_path):
     (repo,) = config.load_repos(path)
     assert repo["forge"] == "github"
     assert repo["project"] == "o/r"
+
+
+def test_load_repos_sandbox_defaults_to_none(tmp_path):
+    path = tmp_path / "repos.yaml"
+    config.write_yaml(path, {"repos": [{"path": "/r"}]})
+    (repo,) = config.load_repos(path)
+    assert repo["sandbox"] is None
+
+
+def test_load_repos_passes_through_a_well_formed_sandbox(tmp_path):
+    path = tmp_path / "repos.yaml"
+    config.write_yaml(
+        path,
+        {"repos": [{"path": "/r", "sandbox": {"kind": "docker", "image": "kraft-worker:node"}}]},
+    )
+    (repo,) = config.load_repos(path)
+    assert repo["sandbox"] == {"kind": "docker", "image": "kraft-worker:node"}
+
+
+def test_load_repos_passes_through_an_explicit_sandbox_off(tmp_path):
+    path = tmp_path / "repos.yaml"
+    config.write_yaml(path, {"repos": [{"path": "/r", "sandbox": False}]})
+    (repo,) = config.load_repos(path)
+    assert repo["sandbox"] is False
+
+
+def test_load_repos_rejects_a_malformed_sandbox(tmp_path):
+    path = tmp_path / "repos.yaml"
+    config.write_yaml(path, {"repos": [{"path": "/r", "sandbox": {"kind": "docker"}}]})
+    with pytest.raises(config.ConfigError, match="image"):
+        config.load_repos(path)
 
 
 def test_load_repos_new_shape_wins_over_legacy(tmp_path):
@@ -935,3 +967,26 @@ def test_packaged_registry_wires_the_never_signal_steering_rule():
     )
     binding = registry.hooks["on.implementation.start"]
     assert "never-signal-processes-you-didnt-start" in binding.get("steering", [])
+
+
+def test_startup_hardens_the_git_env_for_everything_the_server_spawns(tmp_path, monkeypatch):
+    """Kraft-rki: the sandbox's guarantee is that a hook a worker plants in
+    the gitdir it must be able to write cannot execute on the host. That holds
+    only if the pin is on the server process itself -- every git Kraft runs,
+    and every git those spawn, inherits it from here, so no call site has to
+    remember."""
+    templates_dir = fake_templates_dir(tmp_path, "claude")
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates_dir))
+    monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "no-dist"))
+    monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
+    import kraft.api as api
+
+    with TestClient(api.app, client=("127.0.0.1", 54321)):
+        count = int(os.environ["GIT_CONFIG_COUNT"])
+        pinned = {
+            os.environ[f"GIT_CONFIG_KEY_{i}"]: os.environ[f"GIT_CONFIG_VALUE_{i}"]
+            for i in range(count)
+        }
+    assert pinned["core.hooksPath"] == os.devnull

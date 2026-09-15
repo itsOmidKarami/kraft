@@ -8,20 +8,25 @@ import asyncio
 import subprocess
 from pathlib import Path
 
+from kraft import sandbox
 from kraft.adapters.forge.models import ForgeError
 from kraft.config import git_read, main_ignore_args
 
 
-async def run_git(repo: Path, args: list[str]) -> str:
+async def run_git(repo: Path, args: list[str], *, env: dict[str, str] | None = None) -> str:
     """One forge CLI call.
 
     FileNotFoundError becomes ForgeError so a binary that is missing, or a
     backend name that was never installed, reads as the configuration problem it
     is rather than as a traceback from three frames up.
+
+    `env` defaults to `None`, meaning inherit the process env unchanged --
+    which carries `sandbox.harden_host_git_env`'s pinned `core.hooksPath`.
+    `push` is the one caller that overrides it.
     """
     try:
         done = await asyncio.to_thread(
-            subprocess.run, args, cwd=repo, capture_output=True, text=True
+            subprocess.run, args, cwd=repo, capture_output=True, text=True, env=env
         )
     except FileNotFoundError as exc:
         raise ForgeError(f"{args[0]} is not installed or not on PATH") from exc
@@ -190,6 +195,13 @@ async def push(repo: Path, branch: str) -> None:
     No local remote-tracking ref at all -- the branch has never been pushed
     from here -- needs no lease: origin has nothing yet for a lease to
     protect, and a plain push already does the right thing.
+
+    Run with `sandbox.unhardened_git_env()`, not the inherited, pinned
+    process env: by push time the commit is already made, so the pinned
+    `core.hooksPath=/dev/null` no longer stops a worker from planting
+    anything -- it only stops a real pre-push hook a human installed, like
+    git-lfs's, from uploading the objects this push's pointers reference
+    (Kraft-rki).
     """
     remote_sha = git_read(
         repo,
@@ -203,7 +215,7 @@ async def push(repo: Path, branch: str) -> None:
     if remote_sha:
         args.append(f"--force-with-lease={branch}:{remote_sha}")
     args += ["-u", "origin", branch]
-    await run_git(repo, args)
+    await run_git(repo, args, env=sandbox.unhardened_git_env())
 
 
 async def _assert_pushed(repo: Path, branch: str) -> None:

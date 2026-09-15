@@ -472,6 +472,47 @@ def test_dispatch_auto_tags_the_event(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
+def test_dispatch_forwards_the_repo_s_resolved_sandbox(tmp_path, monkeypatch):
+    """Kraft-rki: `resolve_invocation` folds a repo's `sandbox:` into `inv`,
+    but a dispatch that builds `inv` and then forgets to pass it on is the
+    silent 'sometimes not actually sandboxed' case the spec rules out.
+    """
+    seen = {}
+
+    async def fake_run_agent_task(db, run_dirs, *, session_id, sandbox, **kw):
+        seen["sandbox"] = sandbox
+        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(
+            json.dumps({"type": "system", "subtype": "init", "session_id": "cli-abc"}) + "\n"
+        )
+        return "done"
+
+    monkeypatch.setattr("kraft.escalate._agent.run_agent_task", fake_run_agent_task)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await Database.open(rd.db)
+        try:
+            wid = "w1"
+            await _seed_needs_human(database, rd, wid)
+            launch = executor.LaunchContext(
+                repo_entry={"sandbox": {"kind": "docker", "image": "kraft-worker:py"}},
+                steering_dir=None,
+                skills_dir=None,
+            )
+            return await escalate.dispatch(
+                database, rd, work_item_id=wid, message="msg", launch=launch
+            )
+        finally:
+            await database.close()
+
+    import asyncio
+
+    asyncio.run(scenario())
+    assert seen["sandbox"] == {"kind": "docker", "image": "kraft-worker:py"}
+
+
 def test_escalation_running_reports_a_pending_or_running_session(tmp_path):
     async def scenario():
         rd = RunDirs(tmp_path / "run").ensure()

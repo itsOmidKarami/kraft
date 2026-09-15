@@ -23,6 +23,7 @@ from pathlib import Path
 
 import yaml
 
+from kraft import sandbox as _sandbox
 from kraft import steering as _steering
 from kraft.store.repos import ROOT_MERGE_POLICIES
 
@@ -227,6 +228,12 @@ def load_repos(
                 f"repos.yaml: 'default_root_merge_policy' must be one of "
                 f"{sorted(ROOT_MERGE_POLICIES)}"
             )
+        r.setdefault("sandbox", None)
+        if r["sandbox"] not in (None, False):
+            try:
+                _sandbox.validate(r["sandbox"], where="repos.yaml")
+            except _sandbox.SandboxError as exc:
+                raise ConfigError(str(exc)) from exc
         if validate_steering:
             try:
                 _steering.validate(steering_dir, r.get("steering", []), where="repos.yaml")

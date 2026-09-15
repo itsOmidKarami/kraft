@@ -25,6 +25,20 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture(autouse=True)
+def _contain_hardened_git_env():
+    """`sandbox.harden_host_git_env` pins `GIT_CONFIG_*` on the server's own
+    environment on purpose -- that is how every git Kraft spawns inherits it.
+    Under pytest the "server process" is the test process, so any test that
+    starts a lifespan would otherwise leave those vars set for every test
+    after it, silently disabling hooks in suites that assert on them."""
+    before = {k: v for k, v in os.environ.items() if k.startswith("GIT_CONFIG_")}
+    yield
+    for key in [k for k in os.environ if k.startswith("GIT_CONFIG_")]:
+        del os.environ[key]
+    os.environ.update(before)
+
+
+@pytest.fixture(autouse=True)
 def _isolated_kraft_home(tmp_path, monkeypatch):
     """No test may reach the operator's real `~/.kraft`.
 
