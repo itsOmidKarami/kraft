@@ -7,6 +7,7 @@ from pathlib import Path
 
 import yaml
 
+from kraft import sandbox as _sandbox
 from kraft import skill as _skill
 from kraft import steering as _steering
 from kraft.paths import default_skills_dir
@@ -327,6 +328,17 @@ def load_registry(
                         "a string or list of strings"
                     )
 
+        if "sandbox" in binding:
+            if kind not in ("agent", "subprocess"):
+                raise RegistryError(
+                    f"{path.name}: hook {hook!r} is kind {kind!r}; 'sandbox' applies only to "
+                    "a subprocess or agent hook"
+                )
+            try:
+                _sandbox.validate(binding["sandbox"], where=f"{path.name}: hook {hook!r}")
+            except _sandbox.SandboxError as exc:
+                raise RegistryError(str(exc)) from exc
+
         # Last, so the agent-only keys keep their own sharper message above: a
         # key nobody reads is a setting that silently does nothing — a
         # `deny_tool:` typo denies no tool and fails nowhere, the same failure
@@ -342,7 +354,7 @@ def load_registry(
         # Settings today, ahead of the screen/executor that will read them.
         # `timeout` is rejected for `builtin` above, so this stays a plain
         # superset with no behaviour change for `builtin`.
-        known |= {"interactive", "timeout", "repos"}
+        known |= {"interactive", "timeout", "repos", "sandbox"}
         if kind == "agent":
             known |= set(agent_only)
         if "interactive" in binding and not isinstance(binding["interactive"], bool):

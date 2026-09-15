@@ -8,6 +8,8 @@ import threading
 import time
 from pathlib import Path
 
+from support.harness import fake_docker_bin
+
 from kraft import db, events, logs, store
 from kraft.adapters import subprocess as sp
 from kraft.paths import RunDirs
@@ -267,6 +269,169 @@ def test_run_task_stamps_concerns_and_question_onto_the_exit_event(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_run_task_wraps_in_docker_when_sandbox_is_set(tmp_path, monkeypatch):
+    async def scenario():
+        bin_dir = fake_docker_bin(tmp_path)
+        monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+        called = tmp_path / "docker-was-called"
+        monkeypatch.setenv("FAKE_DOCKER_CALLED", str(called))
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database)
+            status = await sp.run_task(
+                database,
+                rd,
+                session_id="s-sandbox",
+                work_item_id="w1",
+                node_id="verify",
+                hook_point="on.test.run",
+                cmd=["sh", "-c", 'printf \'{"status":"done"}\' > "$KRAFT_RESULT_PATH"; exit 0'],
+                cwd=tmp_path,
+                sandbox={"kind": "docker", "image": "kraft-worker:py"},
+            )
+            assert status == "done"
+            # Not just "the command ran" (it would have, unwrapped, too) --
+            # that it ran *through docker*.
+            assert called.exists()
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_run_task_tears_down_the_container_by_name_when_sandboxed(tmp_path, monkeypatch):
+    """Kraft-rki: the pid Kraft tracks and signals is `docker run`'s own
+    client, not the container -- it survives a SIGKILLed client because it's
+    parented by the docker daemon, not Kraft's process group. `run_task` has
+    to reach it a second way, by the name `docker_argv` gave it.
+    """
+
+    async def scenario():
+        bin_dir = fake_docker_bin(tmp_path)
+        monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+        rm_log = tmp_path / "docker-rm-log"
+        monkeypatch.setenv("FAKE_DOCKER_RM_LOG", str(rm_log))
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database)
+            status = await sp.run_task(
+                database,
+                rd,
+                session_id="s-sandbox-teardown",
+                work_item_id="w1",
+                node_id="verify",
+                hook_point="on.test.run",
+                cmd=["sh", "-c", 'printf \'{"status":"done"}\' > "$KRAFT_RESULT_PATH"; exit 0'],
+                cwd=tmp_path,
+                sandbox={"kind": "docker", "image": "kraft-worker:py"},
+            )
+            assert status == "done"
+            assert rm_log.read_text().splitlines() == ["kraft-s-sandbox-teardown"]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_run_task_tears_down_the_container_on_cancel(tmp_path, monkeypatch):
+    """Kraft-rki: a pause or skip cancels `run_task` from inside the poll
+    loop (deps.cancel -> CancelledError), which used to propagate straight
+    past the container teardown that only ever sat after the `try/finally`.
+    A container is parented by the docker daemon, not Kraft's process
+    group, so that teardown is its only kill switch -- it has to run on the
+    cancellation path too, not just the clean-exit one.
+    """
+
+    async def scenario():
+        bin_dir = fake_docker_bin(tmp_path)
+        monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+        rm_log = tmp_path / "docker-rm-log"
+        monkeypatch.setenv("FAKE_DOCKER_RM_LOG", str(rm_log))
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database)
+            task = asyncio.create_task(
+                sp.run_task(
+                    database,
+                    rd,
+                    session_id="s-sandbox-cancel",
+                    work_item_id="w1",
+                    node_id="verify",
+                    hook_point="on.test.run",
+                    cmd=["sleep", "5"],
+                    cwd=tmp_path,
+                    sandbox={"kind": "docker", "image": "kraft-worker:py"},
+                )
+            )
+            for _ in range(200):
+                row = database.read(
+                    lambda c: c.execute(
+                        "SELECT status FROM worker_sessions WHERE id='s-sandbox-cancel'"
+                    ).fetchone()
+                )
+                if row and row["status"] == "running":
+                    break
+                await asyncio.sleep(0.02)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            assert rm_log.read_text().splitlines() == ["kraft-s-sandbox-cancel"]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_run_task_passes_env_through_to_docker_argv(tmp_path, monkeypatch):
+    """Kraft-rki: `env=` is otherwise silently dropped once `sandbox` is set
+    -- only `FORWARDED_ENV` crosses into the container bare. Concretely,
+    `dispatch.py` passes `PYTHONDONTWRITEBYTECODE=1` for `on.test.run` so a
+    fix-loop re-measure cannot import a stale `.pyc`. `docker_argv` itself
+    (`test_sandbox.py`) covers turning `env=` into literal `-e NAME=VALUE`
+    flags; this only checks `run_task` actually forwards its own `env=` arg
+    into that call rather than dropping it on the sandboxed path.
+    """
+    seen = {}
+    real_docker_argv = sp._sandbox.docker_argv
+
+    def fake_docker_argv(cmd, cwd, sandbox, results_dir, **kw):
+        seen["env"] = kw.get("env")
+        return real_docker_argv(cmd, cwd, sandbox, results_dir, **kw)
+
+    monkeypatch.setattr(sp._sandbox, "docker_argv", fake_docker_argv)
+
+    async def scenario():
+        bin_dir = fake_docker_bin(tmp_path)
+        monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database)
+            status = await sp.run_task(
+                database,
+                rd,
+                session_id="s-sandbox-env",
+                work_item_id="w1",
+                node_id="verify",
+                hook_point="on.test.run",
+                cmd=["sh", "-c", 'printf \'{"status":"done"}\' > "$KRAFT_RESULT_PATH"; exit 0'],
+                cwd=tmp_path,
+                sandbox={"kind": "docker", "image": "kraft-worker:py"},
+                env={"PYTHONDONTWRITEBYTECODE": "1"},
+            )
+            assert status == "done"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    assert seen["env"] == {"PYTHONDONTWRITEBYTECODE": "1"}
 
 
 def test_run_task_exit_code_fallback(tmp_path):
@@ -961,6 +1126,67 @@ def test_run_task_escalates_to_sigkill_when_the_group_ignores_sigterm(tmp_path):
                     break
                 await asyncio.sleep(0.02)
             assert not alive
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_cancelling_run_task_reaps_the_leader_instead_of_paying_the_grace(tmp_path):
+    """Kraft-rki: a pause or skip cancels `run_task` mid-poll, so its
+    `finally` SIGTERMs a leader that is still alive and that nothing then
+    reaps. Linux counts an unreaped zombie as a live group member, so
+    `_kill_group` used to wait out the whole grace before SIGKILL -- 10s per
+    cancel in CI, which failed pause/resume, SIGTERM shutdown and the e2e
+    pause flow there while macOS (which reports a zombie-only group as gone)
+    passed. Both halves are asserted so this fails for the real reason on
+    either platform: the timing on Linux, the unreaped leader on macOS."""
+    import psutil
+
+    async def scenario():
+        rd = RunDirs(tmp_path).ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database)
+            task = asyncio.create_task(
+                sp.run_task(
+                    database,
+                    rd,
+                    session_id="s-cancel",
+                    work_item_id="w1",
+                    node_id="verify",
+                    hook_point="on.test.run",
+                    cmd=["sleep", "30"],
+                    cwd=tmp_path,
+                    group_kill_grace=5.0,
+                )
+            )
+            pid = None
+            deadline = time.monotonic() + 5.0
+            while pid is None and time.monotonic() < deadline:
+                await asyncio.sleep(0.05)
+                row = database.read(
+                    lambda c: c.execute(
+                        "SELECT pid FROM worker_sessions WHERE id = 's-cancel'"
+                    ).fetchone()
+                )
+                pid = row["pid"] if row else None
+            assert pid is not None, "session never started"
+
+            start = time.monotonic()
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            elapsed = time.monotonic() - start
+
+            assert elapsed < 2.0, f"cancel paid the group-kill grace ({elapsed:.1f}s)"
+            try:
+                leftover = psutil.Process(pid).status()
+            except psutil.NoSuchProcess:
+                leftover = None
+            assert leftover is None, f"leader {pid} left unreaped ({leftover})"
         finally:
             await database.close()
 

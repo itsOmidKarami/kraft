@@ -8,7 +8,15 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
-from kraft import archive, auto_escalate_delay, ci_wait, executor, rate_limit_retry, reattach
+from kraft import (
+    archive,
+    auto_escalate_delay,
+    ci_wait,
+    executor,
+    rate_limit_retry,
+    reattach,
+    sandbox,
+)
 from kraft import auth as auth_mod
 from kraft import config as config_mod
 from kraft import intake as intake_mod
@@ -30,6 +38,12 @@ DEFAULT_FRONTEND_DIST = BUNDLED / "web"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Before anything can run git: every git Kraft (or a worker it spawns)
+    # runs is launched with hooks and the other program-valued config keys
+    # pinned, so a hook or `core.hooksPath` a worker plants in the one gitdir
+    # it must be able to write cannot execute as the invoking host user
+    # (Kraft-rki).
+    sandbox.harden_host_git_env()
     app.state.tasks = {}
     # deps.skip_lock() lazily stashes a per-work-item Lock here; reset it with
     # everything else per-lifespan so it neither grows forever in a live

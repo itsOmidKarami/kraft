@@ -17,6 +17,51 @@ def _app():
     return SimpleNamespace(state=SimpleNamespace(tasks={}))
 
 
+def _st(tmp_path):
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+    return SimpleNamespace(templates_dir=templates_dir, skills_dir=None)
+
+
+def test_launch_returns_the_matching_repo_entry(tmp_path):
+    st = _st(tmp_path)
+    (st.templates_dir / "repos.yaml").write_text(
+        "repos:\n  - path: /work/repo\n    default_model: opus\n"
+    )
+    ctx = deps.launch(st, "/work/repo")
+    assert ctx.repo_entry["default_model"] == "opus"
+
+
+def test_launch_on_a_malformed_repos_yaml_does_not_raise(tmp_path):
+    """Reattach (`startup.py`) calls this outside any `guard` -- a malformed
+    `repos.yaml` must not crash it."""
+    st = _st(tmp_path)
+    (st.templates_dir / "repos.yaml").write_text(
+        "repos:\n  - path: /work/repo\n    sandbox:\n      kind: podman\n      image: x\n"
+    )
+    ctx = deps.launch(st, "/work/repo")
+    assert ctx.repo_entry is not None  # poisoned, not silently None
+
+
+def test_launch_on_a_malformed_repos_yaml_fails_the_dispatch_that_reads_it(tmp_path):
+    """The bare-metal fallback this closes: a broken `repos.yaml` must not let
+    a dispatch quietly resolve `repo_entry` to `{}` and run unsandboxed --
+    every real reader hits `.get(...)`, which is where this raises."""
+    from kraft import config as config_mod
+
+    st = _st(tmp_path)
+    (st.templates_dir / "repos.yaml").write_text(
+        "repos:\n  - path: /work/repo\n    sandbox:\n      kind: podman\n      image: x\n"
+    )
+    ctx = deps.launch(st, "/work/repo")
+    with pytest.raises(config_mod.ConfigError):
+        ctx.repo_entry.get("sandbox")
+    # Falsy fallbacks (`launch.repo_entry or {}`) must not discard the
+    # poisoned entry for a harmless empty dict before that `.get` runs.
+    assert bool(ctx.repo_entry)
+    assert (ctx.repo_entry or {}) is ctx.repo_entry
+
+
 async def _never_returning():
     await asyncio.Event().wait()
 

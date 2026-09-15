@@ -1,10 +1,11 @@
 import asyncio
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
-from support.harness import _git, fake_registry, isolated_bd, make_repo
+from support.harness import _git, fake_docker_bin, fake_registry, isolated_bd, make_repo
 
 from kraft import db, events, executor, store
 from kraft.config import git_read
@@ -455,6 +456,110 @@ def test_a_subprocess_hook_prefers_the_repos_test_command(tmp_path, monkeypatch)
 
     asyncio.run(scenario())
     assert marker.read_text() == "repo", "the registry's hardcoded command won"
+
+
+def test_a_sandboxed_subprocess_hook_actually_runs_through_docker(tmp_path, monkeypatch):
+    """`on.test.run` with `sandbox` on its binding wraps into `docker run` --
+    proven by pointing PATH at a fake `docker` that unwraps back to the real
+    command, one layer further out than
+    `test_a_subprocess_hook_prefers_the_repos_test_command` proves which
+    command ran. The marker file alone would not prove this: the real
+    command writes it whether or not anything wrapped it, so this also
+    checks the sentinel only the fake `docker` itself touches."""
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    monkeypatch.setenv("PATH", f"{fake_docker_bin(tmp_path)}:{os.environ['PATH']}")
+    called = tmp_path / "docker-was-called"
+    monkeypatch.setenv("FAKE_DOCKER_CALLED", str(called))
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    marker = tmp_path / "ran.txt"
+
+    registry_base = fake_registry(sys.executable, _FAKE_AGENT)
+    registry = Registry(
+        hooks={
+            **registry_base.hooks,
+            "on.test.run": {
+                "kind": "subprocess",
+                "command": [sys.executable, "-c", f"open({str(marker)!r}, 'w').write('ran')"],
+                "sandbox": {"kind": "docker", "image": "kraft-worker:py"},
+            },
+        }
+    )
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry={}, steering_dir=None),
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    assert marker.read_text() == "ran"
+    assert called.exists()
+
+
+def test_a_repo_can_turn_off_a_binding_that_turned_sandboxing_on(tmp_path, monkeypatch):
+    """No fake `docker` anywhere on PATH -- if the repo's `sandbox: false`
+    didn't win over the binding's, this would config_error on a missing
+    `docker` binary instead of running the real command directly."""
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    marker = tmp_path / "ran.txt"
+
+    registry_base = fake_registry(sys.executable, _FAKE_AGENT)
+    registry = Registry(
+        hooks={
+            **registry_base.hooks,
+            "on.test.run": {
+                "kind": "subprocess",
+                "command": [sys.executable, "-c", f"open({str(marker)!r}, 'w').write('ran')"],
+                "sandbox": {"kind": "docker", "image": "kraft-worker:py"},
+            },
+        }
+    )
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry={"sandbox": False}, steering_dir=None),
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    assert marker.read_text() == "ran"
 
 
 def test_a_subprocess_hook_falls_back_to_the_registry_command(tmp_path, monkeypatch):

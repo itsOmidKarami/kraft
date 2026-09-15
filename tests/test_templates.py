@@ -1281,3 +1281,49 @@ def test_the_security_review_hook_is_registered_and_its_skill_resolves():
         chain = yaml.safe_load((TEMPLATES_DIR / template).read_text())
         tasks = [t for node in chain["nodes"] for t in node.get("tasks", [])]
         assert "on.review.security.run" not in tasks
+
+
+def test_load_registry_accepts_sandbox_on_an_agent_hook(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n"
+        "  on.x: { kind: agent, command: claude, sandbox: {kind: docker, image: kraft-worker} }\n"
+    )
+    reg = templates.load_registry(tmp_path / "registry.yaml")
+    assert reg.hooks["on.x"]["sandbox"] == {"kind": "docker", "image": "kraft-worker"}
+
+
+def test_load_registry_accepts_sandbox_on_a_subprocess_hook(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n"
+        "  on.x: { kind: subprocess, command: [pytest], "
+        "sandbox: {kind: docker, image: kraft-worker} }\n"
+    )
+    reg = templates.load_registry(tmp_path / "registry.yaml")
+    assert reg.hooks["on.x"]["sandbox"]["image"] == "kraft-worker"
+
+
+def test_load_registry_rejects_sandbox_on_a_builtin_hook(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n"
+        "  on.x: { kind: builtin, handler: noop, sandbox: {kind: docker, image: kraft-worker} }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="only to a subprocess or agent hook"):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_load_registry_rejects_sandbox_on_a_forge_hook(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n"
+        "  on.x: { kind: forge, handler: merge, backend: auto, "
+        "sandbox: {kind: docker, image: kraft-worker} }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="only to a subprocess or agent hook"):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_load_registry_rejects_a_malformed_sandbox(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.x: { kind: agent, command: claude, sandbox: {kind: podman, image: x} }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="podman"):
+        templates.load_registry(tmp_path / "registry.yaml")

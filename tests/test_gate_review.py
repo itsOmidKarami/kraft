@@ -158,6 +158,43 @@ def test_item_override_reaches_the_gate_review_dispatch(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
+def test_review_forwards_the_repo_s_resolved_sandbox(tmp_path, monkeypatch):
+    """Kraft-rki: same drop as `escalate.dispatch` -- `inv.sandbox` is
+    resolved but has to actually reach `run_agent_task`, or a repo's
+    `sandbox:` silently does nothing for its gate reviews.
+    """
+    seen = {}
+    monkeypatch.setattr(
+        "kraft.gate_review._agent.run_agent_task",
+        _fake_agent({"status": "done", "verdict": "approve"}, seen),
+    )
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await Database.open(rd.db)
+        try:
+            await _seed(database, rd, "w1")
+            launch = executor.LaunchContext(
+                repo_entry={"sandbox": {"kind": "docker", "image": "kraft-worker:py"}},
+                steering_dir=None,
+                skills_dir=None,
+            )
+            await gate_review.review(
+                database,
+                rd,
+                work_item_id="w1",
+                gate="spec_approval",
+                node=CHAIN["nodes"][0],
+                registry=_registry(),
+                launch=launch,
+            )
+            assert seen["kwargs"]["sandbox"] == {"kind": "docker", "image": "kraft-worker:py"}
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 def test_dispatch_is_a_worker_with_no_resume(tmp_path, monkeypatch):
     seen = {}
     monkeypatch.setattr(

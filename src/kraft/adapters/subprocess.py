@@ -15,6 +15,7 @@ from pathlib import Path
 import psutil
 
 from kraft import events, logs, store
+from kraft import sandbox as _sandbox
 from kraft import usage as _usage
 
 logger = logging.getLogger(__name__)
@@ -226,7 +227,7 @@ def _rate_limit_rejection(log_path: Path) -> dict | None:
     return None
 
 
-async def _kill_group(pgid: int, grace: float) -> None:
+async def _kill_group(pgid: int, grace: float, reap: Callable[[], object] | None = None) -> None:
     """SIGTERM `pgid`, then SIGKILL whatever is still there after `grace`
     seconds. `serve.py`'s `_terminate` is the model this copies.
 
@@ -237,6 +238,17 @@ async def _kill_group(pgid: int, grace: float) -> None:
     (Kraft-1nye). `os.killpg` raises `ProcessLookupError` the moment the group
     has no members left, so the common case (nothing backgrounded) returns
     almost immediately rather than paying `grace`.
+
+    `reap` is the leader's own `Popen.poll`, called before every liveness
+    check. On a pause or skip this runs from `run_task`'s `finally` while the
+    leader is still alive, so the SIGTERM above kills it but nothing reaps it
+    -- the poll loop that normally would was cancelled out from under it. On
+    Linux an unreaped zombie still counts as a group member, so `killpg(pgid,
+    0)` kept succeeding and every cancel paid the full `grace` (10s by
+    default) before falling through to SIGKILL. macOS raises
+    `PermissionError` for a zombie-only group instead, which is why this
+    passed locally and failed pause/resume, SIGTERM shutdown and the e2e
+    pause flow in CI (Kraft-rki).
     """
     try:
         os.killpg(pgid, signal.SIGTERM)
@@ -245,9 +257,11 @@ async def _kill_group(pgid: int, grace: float) -> None:
     deadline = time.monotonic() + grace
     while time.monotonic() < deadline:
         await asyncio.sleep(0.2)
+        if reap is not None:
+            reap()
         try:
             os.killpg(pgid, 0)
-        except ProcessLookupError:
+        except ProcessLookupError, PermissionError:
             return
     try:
         os.killpg(pgid, signal.SIGKILL)
@@ -279,6 +293,7 @@ async def run_task(
     round: int = 0,
     head_sha: str | None = None,
     thread: int = 1,
+    sandbox: dict | None = None,
     #: Every agent hook is told by `_CTX` to write $KRAFT_RESULT_PATH,
     #: regardless of whether it also declares `artifact:` -- this holds it to
     #: that half of the contract on its own (Kraft-avpe). Only run_agent_task
@@ -305,6 +320,21 @@ async def run_task(
     )
 
     full_env = {**os.environ, **(env or {}), "KRAFT_RESULT_PATH": str(result_path)}
+    if sandbox:
+        # The container writes its result here, and `result_path` is mounted
+        # read-write into it by name -- docker can only bind-mount a file
+        # that already exists, so create it now (empty) rather than letting
+        # docker invent a directory at that path.
+        result_path.touch(exist_ok=True)
+        cmd = _sandbox.docker_argv(
+            cmd,
+            cwd,
+            sandbox,
+            run_dirs.results,
+            env=env,
+            name=_sandbox.container_name(session_id),
+            result_path=result_path,
+        )
     # Kraft-qx1q: `create_session` above inserts this row 'pending' with no
     # pid yet. `pause_work_item`, `chain.skip_node`, and
     # `stop_escalation_session` can all mark a row stopped in the window
@@ -410,7 +440,19 @@ async def run_task(
         # this function leaves the loop.
         stop.set()
         watcher.join(timeout=2)
-    await _kill_group(pgid, group_kill_grace)
+        # Same cancellation as above: without this inside `finally`, a pause
+        # or skip propagates CancelledError past the kill calls entirely, and
+        # a sandboxed session's container -- parented by the docker daemon,
+        # not `pgid`'s process group -- keeps running against the bind-mounted
+        # worktree with nothing left to stop it (Kraft-rki). The container
+        # kill gets its own nested `finally` so a `_kill_group` failure (a
+        # dead pgid can still raise -- PermissionError, not just
+        # ProcessLookupError, once its last member is gone) can't shadow it.
+        try:
+            await _kill_group(pgid, group_kill_grace, reap=proc.poll)
+        finally:
+            if sandbox:
+                await _sandbox.teardown(session_id)
     returncode = proc.returncode
     status = _resolve(result_path, returncode)
     # A session that exits clean with no result file at all never reached the
