@@ -214,6 +214,11 @@ def test_reject_records_the_note_and_reopen_flips_the_row(tmp_path):
                         "note": "not specific enough",
                         "node": None,
                         "by": "human",
+                        # Kraft-s7c04.16. None, not "reject": this test drives
+                        # `store.reject_gate` directly and names no verdict. The
+                        # key is always present so a reader never has to tell
+                        # "no verdict given" from "event predates the field".
+                        "verdict": None,
                     }
                 ]
                 * 2

@@ -735,7 +735,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                     start_index=start,
                     policy=st.policy,
                     steer=steer,
-                    steer_seeded=seeded,
+                    steer_source="seeded" if seeded else "human",
                     launch=deps.launch(st, row["repo"]),
                     on_approve=deps._on_approve(st),
                 ),

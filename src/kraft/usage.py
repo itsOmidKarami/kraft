@@ -61,6 +61,35 @@ def _from_usage_block(block: object, model: object) -> Usage | None:
     return Usage(tokens_in, tokens_out, None, model if isinstance(model, str) else None)
 
 
+#: The per-model token counts `modelUsage` carries, in the agent CLI's own
+#: spelling. Summed to decide which model actually did a session's work.
+_MODEL_TOKEN_KEYS = (
+    "inputTokens",
+    "outputTokens",
+    "cacheReadInputTokens",
+    "cacheCreationInputTokens",
+)
+
+
+def _dominant(by_model: dict) -> str | None:
+    """The `modelUsage` entry with the most tokens against it, or None.
+
+    Strictly greater, so a tie keeps the first key and this stays deterministic
+    -- and so a mapping whose values are not the shape expected (every entry
+    scoring 0) degrades to the first key rather than to nothing.
+    """
+    best, best_tokens = None, -1
+    for name, stats in by_model.items():
+        if not isinstance(name, str) or not name:
+            continue
+        tokens = (
+            sum(_int(stats.get(k)) for k in _MODEL_TOKEN_KEYS) if isinstance(stats, dict) else 0
+        )
+        if tokens > best_tokens:
+            best, best_tokens = name, tokens
+    return best
+
+
 def _model_of(envelope: dict) -> str | None:
     """The model an agent reported, in either shape it reports it.
 
@@ -69,16 +98,18 @@ def _model_of(envelope: dict) -> str | None:
     `model` is why `worker_sessions.model` was NULL on every row ever written
     (Kraft-2r8s). A stated `model` still wins -- a result file written by a
     non-agent adapter names its model directly.
+
+    *Which* key is the second half of that bug. `modelUsage` is keyed in order
+    of first use, and the first use is Claude Code's own haiku warm-up -- so
+    taking the first key named haiku on every agent row ever written, and made
+    any cost-by-model reading of `worker_sessions` invalid (Kraft-s7c04.15).
+    The model that did the work is the one the tokens are against.
     """
     model = envelope.get("model")
     if isinstance(model, str) and model:
         return model
     by_model = envelope.get("modelUsage")
-    if isinstance(by_model, dict):
-        for name in by_model:
-            if isinstance(name, str) and name:
-                return name
-    return None
+    return _dominant(by_model) if isinstance(by_model, dict) else None
 
 
 def from_envelope(envelope: object) -> Usage | None:
@@ -152,6 +183,11 @@ def from_stream(lines: Iterable[str], seen: dict[str, Usage]) -> Usage | None:
         sum(u.tokens_in for u in seen.values()),
         sum(u.tokens_out for u in seen.values()),
         None,
+        # The FIRST model seen, deliberately -- not `_model_of`'s dominant-by-
+        # tokens read (Kraft-s7c04.15). `_INIT_KEY` is seeded from the
+        # `system`/`init` line above and inserted before any `assistant` line,
+        # and that line names the session's real model. This is already right
+        # and must not be "fixed" to match the envelope path.
         next((u.model for u in seen.values() if u.model), None),
     )
 

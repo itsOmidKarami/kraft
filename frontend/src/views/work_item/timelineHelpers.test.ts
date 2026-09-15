@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildItem } from "../../../sweep/fixtures";
 import { streamRows } from "./RightPane/Events";
-import { detailOf, groupByNode, nodeRounds, roundsOf, taskRunLabel, titleOf, verdictWord } from "./timelineHelpers";
+import { detailOf, findingsOf, groupByNode, nodeRounds, roundsOf, taskRunLabel, titleOf, verdictWord } from "./timelineHelpers";
 import type { KraftEvent, WorkerSession } from "../../types";
 
 const ev = (over: Partial<KraftEvent>): KraftEvent =>
@@ -202,5 +202,37 @@ describe("streamRows (W13 · E)", () => {
     expect(rows.map((r) => r.kind)).toEqual(["event", "gate", "gap", "gate"]);
     const gap = rows[2];
     expect(gap.kind === "gap" && gap.ms).toBe(4.5 * 60_000);
+  });
+});
+
+describe("timelineHelpers: findingsOf and an overridden severity", () => {
+  const measured = (findings: unknown[]) =>
+    ev({ type: "findings_measured", payload: { node_id: "verify", cycle: 1, findings } });
+
+  it("carries reported_severity when the fix loop overrode the reviewer", () => {
+    // Kraft-s7c04.3: a repeat cannot be re-rated down on a tree nobody
+    // touched, and the reviewer's own answer is kept rather than erased -- a
+    // record only reachable by SQL is the silent refusal this rejects.
+    const [f] = findingsOf(
+      measured([
+        {
+          severity: "important",
+          message: "swallowed OSError",
+          file: "a.py",
+          line: 1,
+          source_plugin: "code-review",
+          reported_severity: "minor",
+        },
+      ]),
+    );
+    expect(f.severity).toBe("important");
+    expect(f.reported_severity).toBe("minor");
+  });
+
+  it("leaves reported_severity undefined when the reviewer was not overridden", () => {
+    const [f] = findingsOf(
+      measured([{ severity: "minor", message: "m", file: null, line: null, source_plugin: "p" }]),
+    );
+    expect(f.reported_severity).toBeUndefined();
   });
 });

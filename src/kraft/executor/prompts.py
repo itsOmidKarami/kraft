@@ -33,6 +33,26 @@ FIX_REPEAT_NOTE = (
     "still reports it. Do not repeat the same approach."
 )
 
+#: The judge's own read of why the findings are not going down, handed to the
+#: fix task it has just let through (Kraft-s7c04.5). On `continue` only -- a
+#: stop verdict dispatches no fix task at all.
+#:
+#: The judge is already asked to explain itself, its `concerns` is already paid
+#: for, and on e983d85c it twice diagnosed the loop correctly ("you are chasing
+#: variants, root-cause this") while the loop restarted unchanged both times,
+#: because nothing interpolated it anywhere.
+_JUDGE_NOTE = (
+    "\n\nThe fix-loop judge reviewed the trend across every round so far before "
+    "letting this cycle run, and said:\n\n{reasoning}\n\nThat is the most "
+    "informed read available of why the previous rounds did not resolve this. "
+    "Take it seriously before repeating an approach it has already judged."
+)
+
+
+def judge_note(reasoning: str) -> str:
+    return _JUDGE_NOTE.format(reasoning=reasoning.strip()) if reasoning.strip() else ""
+
+
 #: Handed to fix cycle N > 1: cycle N-1's own result file, by path, not by
 #: content -- pasting the file costs tokens on every cycle of every work item,
 #: and the agent can already read a path itself (spec §4).
@@ -40,12 +60,20 @@ _FIX_PREVIOUS_RESULT = "\n\nYour previous attempt's result file is at {result_pa
 _FIX_PREVIOUS_SUMMARY = " Its session summary is at {summary_ref}."
 
 
-def format_findings(found: list[_findings.Finding], repeats: set[str]) -> str:
+def format_findings(
+    found: list[_findings.Finding], repeats: set[str], *, tags: bool = False
+) -> str:
+    """One bullet per finding. `tags` prefixes each with its stable identity,
+    for the two readers that have to refer back to a specific finding across
+    rounds -- the reviewer being asked "is this one still there?"
+    (`carried_findings_note`) and the fixer reading a round history
+    (`format_judge_history` already shows a tag for the same reason)."""
     lines = []
     for f in found:
         where = f"{f.file}:{f.line}" if f.file and f.line else (f.file or "—")
         tag = "REPEAT " if f.fingerprint in repeats else ""
-        lines.append(f"- {tag}[{f.severity}] {where} — {f.message} ({f.source_plugin})")
+        ident = f"[{f.fingerprint}] " if tags else ""
+        lines.append(f"- {ident}{tag}[{f.severity}] {where} — {f.message} ({f.source_plugin})")
     return "\n".join(lines)
 
 
@@ -112,22 +140,43 @@ _REVISE_PROMPT = (
 #: and telling an agent a human typed Kraft's own recap is the misattribution
 #: `Steer.human` exists to keep out of the prompt as well as out of the judge.
 _SEEDED_PROMPT = (
-    "Kraft carried this forward from the last review of this node; no human typed it:\n\n{note}\n\n"
+    "Kraft carried this forward from an automated review; no human typed it:\n\n{note}\n\n"
 )
 
+#: An automated gate review's own verdict, carried into the re-run it triggered
+#: (Kraft-s7c04.6). Neither `_STEER_PROMPT`, which names a human as the author,
+#: nor `_SEEDED_PROMPT`, which is Kraft's own recap of findings: this is an
+#: agent's judgement about this artifact, and on a `fixed` verdict it has
+#: already committed in this worktree. The re-running node could not tell those
+#: commits from a human's, so the brief it wrote told the human they had fixed
+#: it themselves.
+_GATE_REVIEW_PROMPT = (
+    "An automated review of this work item's gate reported the following, and "
+    "may have committed changes in this worktree itself. No human wrote it, and "
+    "any commit it describes is the reviewer's, not a person's:\n\n{note}\n\n"
+)
 
-def steer_prefix(binding: dict, work_item_row, worktree, note: str, *, human: bool = True) -> str:
+#: Which lead-in each `Steer.source` gets. `human` is absent deliberately: it is
+#: the only one that depends on whether an artifact is on disk, so it is decided
+#: below rather than by a lookup.
+_SOURCE_PROMPTS = {"seeded": _SEEDED_PROMPT, "gate_review": _GATE_REVIEW_PROMPT}
+
+
+def steer_prefix(
+    binding: dict, work_item_row, worktree, note: str, *, source: str = "human"
+) -> str:
     """What a steered agent launch leads with.
 
     Keys on the artifact being on disk rather than on which gate was rejected,
     so it covers the spec gate and any future `artifact:` binding for free.
 
-    `human=False` is Kraft's own seeded note: it gets neither template that
-    claims an author, and no revision framing either -- the note is about
-    findings in the code, not about a document a human read.
+    Anything but `"human"` gets neither template that claims a person as the
+    author, and no revision framing either -- those notes are about findings or
+    repairs in the code, not about a document a human read.
     """
-    if not human:
-        return _SEEDED_PROMPT.format(note=note)
+    template = _SOURCE_PROMPTS.get(source)
+    if template is not None:
+        return template.format(note=note)
     artifact_kind = binding.get("artifact")
     rel = _agent.artifact_path(artifact_kind, work_item_row["id"]) if artifact_kind else None
     if rel and (Path(worktree) / rel).is_file():
@@ -199,8 +248,84 @@ def progress_note(task_hook: str, work_item_row, worktree) -> str:
 
 
 #: The hooks whose job is to judge a change rather than make one. They are the
-#: only ones handed a review package: everything else is working *in* the diff.
-REVIEW_HOOKS = frozenset({"on.review.local.run", "on.review.mr.run"})
+#: only ones handed a review package and the previous round's findings:
+#: everything else is working *in* the diff.
+#:
+#: `on.review.security.run` belongs here and was missing (Kraft-s7c04.2 review).
+#: It is a real agent hook -- `chain_review` adds it to `verify` whenever a plan
+#: touches auth, sessions, tokens, secrets or permission checks -- so leaving it
+#: out meant a security review was dispatched with no diff by any route at all.
+REVIEW_HOOKS = frozenset({"on.review.local.run", "on.review.mr.run", "on.review.security.run"})
+
+
+#: What the reviewer said last round, handed back to it (Kraft-s7c04.1). The
+#: tags are the load-bearing part: without a way to say "this is that one", a
+#: reworded repeat reads downstream as a defect that was fixed and a new one
+#: that appeared, which is how findings went 3 -> 2 -> 3 -> 4 on 6c712ea8
+#: without ever converging.
+_CARRIED_FINDINGS = (
+    "\n\nThe last review of this node reported the findings below. Each carries a "
+    "stable tag in the first bracket.\n\n{findings}\n\n"
+    "For each one, decide whether it is still present in the code as it stands "
+    "now:\n"
+    "- Still present: report it again and set `same_as` to its tag, even if you "
+    "would word it differently now. Reusing the tag is what tells the loop this "
+    "is the same defect rather than a new one.\n"
+    "- Fixed: do not report it. Its absence is how the loop learns the fix "
+    "worked.\n\n"
+    "Do not lower a finding's severity below what is shown above unless the code "
+    "that caused it has changed; if you do, say why in the message. These are "
+    "not a checklist to work from -- review the change on its own terms as well, "
+    "and report anything new you find."
+)
+
+
+def carried_findings_note(previous: list[_findings.Finding]) -> str:
+    """The previous round's findings, for the reviewer about to measure again.
+
+    "" when there is no previous round, so a work item's first and most
+    important review is byte-identical to what it is today.
+    """
+    if not previous:
+        return ""
+    return _CARRIED_FINDINGS.format(findings=format_findings(previous, repeats=set(), tags=True))
+
+
+#: A review session that did not finish is not a head anything was reviewed at.
+#: Same "was this a real judgement" allowlist `dispatch._JUDGE_TRUSTED_STATUS`
+#: and `gate_review._UNTRUSTWORTHY` apply, for the same reason.
+_REVIEWED_STATUS = ("done", "done_with_concerns")
+
+
+def _last_reviewed_head(db, work_item_id: str, task_hook: str) -> str | None:
+    """The head the previous *completed* session on this hook was dispatched at,
+    or None (Kraft-s7c04.1).
+
+    `worker_sessions.head_sha` is stamped by `dispatch.dispatch_node` at
+    dispatch, so it is the commit that review was actually about. Read from the
+    table rather than carried in a local, for the reason `last_measurement`'s
+    docstring gives: `resuming.reconcile_current_node` re-enters `walk_node`
+    after a crash and a loop holding its history in a stack frame forgets
+    everything it has seen.
+
+    The row for the session now being dispatched does not exist yet -- this runs
+    as an argument to `run_agent_task`, before it writes one -- so there is no
+    self-match to exclude.
+
+    The status filter is load-bearing. A session that failed, hit a config
+    error, or was killed mid-run still carries a `head_sha`, and taking it would
+    narrow the next review past code **no reviewer has ever seen** -- the one
+    outcome worse than re-reading the whole branch.
+    """
+    row = db.read(
+        lambda c: c.execute(
+            "SELECT head_sha FROM worker_sessions WHERE work_item_id = ? AND hook_point = ? "
+            f"AND head_sha IS NOT NULL AND status IN ({','.join('?' * len(_REVIEWED_STATUS))}) "
+            "ORDER BY created_at DESC LIMIT 1",
+            (work_item_id, task_hook, *_REVIEWED_STATUS),
+        ).fetchone()
+    )
+    return row["head_sha"] if row else None
 
 
 def review_package(
@@ -215,6 +340,19 @@ def review_package(
     `base_ref` is read fresh rather than off the `work_items` row `run` opened
     with: `env_setup` stamps it during the chain's first node, so that row is
     always the pre-stamp one.
+
+    From the second round of a fix loop onward the range starts at the head this
+    hook's last completed session was dispatched at, not at `base_ref`
+    (Kraft-s7c04.1): re-reading the whole branch every round is what made
+    `verify` half of all Kraft spend. Two fallbacks, both to the whole branch --
+    no such session (round 0, or a hook that has never run), and a sha git no
+    longer knows, which makes the range meaningless.
+
+    Deliberately *not* guarded: a `since` that is no longer an ancestor of HEAD,
+    which is what a `pre_mr_rebase` bounce produces. `git diff <old_sha>` then
+    shows a superset of the round's change -- the upstream commits included --
+    which is noisy but never hides anything, and a bounce is exactly the case
+    where a wider look is wanted (`rebase_bounce_to: verify` exists for it).
     """
     if task_hook not in REVIEW_HOOKS:
         return None
@@ -225,7 +363,12 @@ def review_package(
     )
     if row is None or not row["base_ref"]:
         return None
-    path = _review.write_package(run_dirs.results, worktree, row["base_ref"], session_id)
+    since = _last_reviewed_head(db, work_item_id, task_hook)
+    if since and git_read(worktree, "rev-parse", "--verify", f"{since}^{{commit}}") is None:
+        since = None
+    path = _review.write_package(
+        run_dirs.results, worktree, row["base_ref"], session_id, since=since
+    )
     return str(path) if path else None
 
 
@@ -306,6 +449,77 @@ def chain_review_context(
             "targets, alongside the nodes of your own tail): " + ", ".join(preceding_ids)
         )
     return "\n".join(lines)
+
+
+#: What the review brief is told about findings that never entered the fix loop
+#: (Kraft-s7c04.4). `skills/review-brief/SKILL.md` already promises the human
+#: "the local review findings, including the ones ruled minor" and "a minor
+#: finding nobody is shown is a silent discard" -- and nothing supplied them, so
+#: on 6c712ea8 four real defects, a spec-phasing violation and an empty sweep
+#: board among them, were detected, recorded and never reached the brief.
+_DEFERRED_FINDINGS = (
+    "\n\nReviews of this work item reported the findings below and the fix loop "
+    "did not act on them: they were rated below the severity that opens a fix "
+    "cycle. Nobody has fixed them and nobody has decided not to.\n\n{findings}"
+    "\n\nName every one of them in the brief, with enough detail for the reader "
+    "to judge it. They are the reason this section of the brief exists: a "
+    "defect that was found and then quietly dropped is the one thing the person "
+    "approving this merge cannot discover for themselves."
+)
+
+
+def deferred_findings_note(found: list[dict]) -> str:
+    """The sub-threshold findings, for the agent writing the human's brief.
+
+    Takes raw payload dicts, which is what `dispatch.deferred_findings` returns
+    for the board -- one shape, so the gate and the brief cannot disagree.
+    """
+    if not found:
+        return ""
+    parsed = [_findings.from_payload(f) for f in found]
+    return _DEFERRED_FINDINGS.format(findings=format_findings(parsed, repeats=set()))
+
+
+#: The fixer's cross-round view (Kraft-s7c04.7). `last_measurement` gives it one
+#: round; two rounds back was invisible, which is how round N+2 reverted the
+#: security property round N established on e983d85c.
+_FIX_ROUND_HISTORY = (
+    "\n\nEvery round of this fix loop so far, oldest first. A finding's short "
+    "hex tag is its identity across rounds -- the same tag reappearing is the "
+    "same finding, not a new one:\n{history}"
+)
+
+#: What a tag that came back means, worded as a check rather than an
+#: instruction. A false positive here would steer the fixer away from the
+#: correct fix on a loop that is converging, which is worse than not flagging at
+#: all -- hence `regressed_fingerprints`' two guards, and hence this wording.
+_FIX_REGRESSION = (
+    "\n\nWatch out: {tags} was reported in an earlier round, absent in a later "
+    "one, and is back now. That usually means a fix in this loop undid an "
+    "earlier one. Before changing anything, work out what the earlier fix "
+    "established and whether the later one removed it. If two properties are "
+    "genuinely in conflict, say so rather than alternating between them."
+)
+
+
+def round_history_note(history: list[dict], regressed: list[str]) -> str:
+    """The fixer's view of every round so far, plus a warning for any finding
+    that was fixed and came back (Kraft-s7c04.7).
+
+    Renders with `format_judge_history`, the judge's own rendering, rather than
+    a second format to keep in sync -- it already shows tags and each round's
+    fix result path, which is exactly what a fixer needs to look two rounds
+    back.
+
+    "" for fewer than two rounds: there is nothing to say, and the first cycle
+    is the one this batch must not make more expensive.
+    """
+    if len(history) < 2:
+        return ""
+    note = _FIX_ROUND_HISTORY.format(history=format_judge_history(history))
+    if regressed:
+        note += _FIX_REGRESSION.format(tags=", ".join(regressed))
+    return note
 
 
 #: The fix-loop judge's task instruction (2026-09-12-verify-fix-loop-judge-

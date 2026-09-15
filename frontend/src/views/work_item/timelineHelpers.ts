@@ -91,6 +91,7 @@ export function findingsOf(e: KraftEvent): Finding[] {
     file: typeof f.file === "string" ? f.file : null,
     line: typeof f.line === "number" ? f.line : null,
     source_plugin: typeof f.source_plugin === "string" ? f.source_plugin : "",
+    reported_severity: typeof f.reported_severity === "string" ? f.reported_severity : undefined,
   }));
 }
 

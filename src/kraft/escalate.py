@@ -67,6 +67,7 @@ _STATE = (
     "Status: {status}\n"
     "Current node: {node_id}\n"
     "{reason_line}"
+    "{judge_line}"
     "{description_line}"
     "\n"
     "{action_line}"
@@ -103,6 +104,42 @@ def _reason_line(db, work_item_id: str, status: str, evts: list | None = None) -
     if status != "needs_human":
         return ""
     return f"Why it is stopped: {_reason(db, work_item_id, evts=evts)}\n"
+
+
+#: Events that close an episode, so a judge verdict before one of them describes
+#: a trend that is over. Modelled on `kraft.store.gates`' `_REJECTION_SPENT` --
+#: deliberately NOT on `_reason` above, which has no boundary at all.
+#: `node_started` stays out because `dispatch.measure_node` fires one per
+#: measurement round.
+_JUDGE_SPENT = ("work_item_retried", "gate_approved", "gate_rejected")
+
+
+def _judge_line(db, work_item_id: str, node_id: str | None, evts: list | None = None) -> str:
+    """The `{judge_line}` slot: the fix-loop judge's own read of why this node's
+    rounds were not converging, or "" (Kraft-s7c04.5).
+
+    The judge is asked to explain every verdict, its reasoning is already paid
+    for, and nothing downstream read it -- so on 43717ee6 the escalation
+    re-derived the root cause the judge had already named, 17 minutes and $3.72
+    later.
+
+    Bounded on two axes. `_JUDGE_SPENT`, because a verdict from a closed episode
+    is stale rather than context; and on `node_id`, because `judge_verdict`
+    payloads name their node and an earlier node's fix-loop trend says nothing
+    about the node this escalation is actually about.
+    """
+    if node_id is None:
+        return ""
+    evts = evts if evts is not None else db.read(lambda c: events.read_after(c, 0, work_item_id))
+    for e in reversed(evts):
+        if e["type"] in _JUDGE_SPENT:
+            return ""
+        if e["type"] == "judge_verdict" and e["payload"].get("node_id") == node_id:
+            reasoning = (e["payload"].get("reasoning") or "").strip()
+            if not reasoning:
+                return ""
+            return f"What the fix-loop judge made of it: {reasoning}\n"
+    return ""
 
 
 def _extract_cli_session_id(log_path: Path) -> str | None:
@@ -258,6 +295,7 @@ async def dispatch(
         status=row["status"],
         node_id=row["current_node_id"],
         reason_line=_reason_line(db, work_item_id, row["status"], evts=evts),
+        judge_line=_judge_line(db, work_item_id, row["current_node_id"], evts=evts),
         description_line=_description_line(row),
         action_line=_NEEDS_HUMAN_ACTION if row["status"] == "needs_human" else _PAUSED_ACTION,
         message=message,
