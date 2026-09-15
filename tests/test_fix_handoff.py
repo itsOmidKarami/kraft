@@ -47,6 +47,17 @@ def _registry():
         "kind": "subprocess",
         "command": [sys.executable, "-c", _VARYING_FAILING_SUBPROCESS],
     }
+    # No fix-loop judge in this suite. It is bound to the same fake agent as the
+    # fix task and therefore writes the same `KRAFT_FAKE_AGENT_CONCERNS` text,
+    # which `prompts.judge_note` now carries into the next fix prompt
+    # (Kraft-s7c04.5) -- so the marker `test_the_path_is_passed_not_the_contents`
+    # looks for becomes ambiguous between "the previous fix's contents were
+    # pasted" (the bug it guards) and "the judge said the same words" (fine).
+    # The judge's own handoff is covered by tests/test_fix_loop_judge.py;
+    # `judge_verdict` fails open to "continue" with no reasoning when the hook
+    # is absent, which is exactly the pre-judge behaviour this suite was
+    # written against.
+    hooks.pop(executor.JUDGE_HOOK, None)
     return Registry(hooks=hooks)
 
 

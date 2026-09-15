@@ -31,6 +31,7 @@ def reject_gate(
     reopen: bool,
     node: str | None = None,
     by: str = "human",
+    verdict: str | None = None,
 ) -> None:
     """Record the rejection. `reopen` flips the item back to active for the
     backward-motion re-run (02 §7.2); a rejection that breached the gate's
@@ -43,6 +44,15 @@ def reject_gate(
     `by` records who decided (Kraft-zr3s) -- a gate cleared by an agent and a
     gate cleared by a person have to be tellable apart in the timeline forever
     after.
+
+    `verdict` records *what* was decided, for the same reason and one level
+    down: `by: agent` alone cannot tell a reviewer that rejected from one that
+    repaired the worktree and committed (`gate_review.VERDICTS`' `fixed`), and
+    those two have very different consequences -- a `fixed` re-enters at the
+    gate's own node and regenerates the artifact the gate is about. Without it
+    that cycle is invisible in every aggregate and only readable by putting
+    session logs in order by hand (Kraft-s7c04.16). Rides the event alongside
+    `note` and `node` for the reason those do.
     """
     status = "'active'" if reopen else "status"
     conn.execute(
@@ -50,7 +60,10 @@ def reject_gate(
         (_now(), work_item_id),
     )
     events.append(
-        conn, work_item_id, "gate_rejected", {"gate": gate, "note": note, "node": node, "by": by}
+        conn,
+        work_item_id,
+        "gate_rejected",
+        {"gate": gate, "note": note, "node": node, "by": by, "verdict": verdict},
     )
 
 

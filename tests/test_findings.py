@@ -1,6 +1,13 @@
+import dataclasses
 import json
 
-from kraft.findings import Finding, from_blind_failure, from_payload, parse
+from kraft.findings import (
+    Finding,
+    from_blind_failure,
+    from_payload,
+    parse,
+    resolve_identity,
+)
 
 
 def _write(tmp_path, data):
@@ -88,6 +95,90 @@ def test_fingerprint_ignores_severity(tmp_path):
     a = Finding("important", "m", "a.py", 1, "p")
     b = Finding("critical", "m", "a.py", 1, "p")
     assert a.fingerprint == b.fingerprint
+
+
+def test_same_as_overrides_the_prose_hash():
+    """The same defect reworded is the same defect. The hash cannot see that
+    -- `message` is LLM prose -- but the reviewer that read both can, and this
+    is how it says so (Kraft-s7c04.2). On 49c0cefd one reattach.py defect was
+    reported in FIVE consecutive measurements under five distinct
+    fingerprints, so `stuck_fingerprint`'s streak never exceeded 1."""
+    first = Finding("important", "Swallows the OSError", "a.py", 10, "p")
+    reworded = Finding(
+        "important",
+        "the OSError is caught and dropped",
+        "a.py",
+        41,
+        "p",
+        same_as=first.fingerprint,
+    )
+    assert reworded.fingerprint == first.fingerprint
+
+
+def test_a_new_defect_in_the_same_file_still_gets_its_own_identity():
+    a = Finding("important", "Swallows the OSError", "a.py", 10, "p")
+    b = Finding("important", "off-by-one in the retry cap", "a.py", 10, "p")
+    assert a.fingerprint != b.fingerprint
+
+
+def test_same_as_is_dropped_unless_it_looks_like_a_fingerprint(tmp_path):
+    """A model asked for a tag will sometimes write a sentence."""
+    p = _write(
+        tmp_path,
+        {
+            "findings": [
+                {
+                    "severity": "minor",
+                    "message": "m",
+                    "source_plugin": "p",
+                    "same_as": "the one about the OSError",
+                }
+            ]
+        },
+    )
+    (f,) = parse(p)
+    assert f.same_as is None
+
+
+def test_same_as_survives_the_result_file(tmp_path):
+    tag = "0123456789abcdef"
+    p = _write(
+        tmp_path,
+        {"findings": [{"severity": "minor", "message": "m", "source_plugin": "p", "same_as": tag}]},
+    )
+    (f,) = parse(p)
+    assert f.fingerprint == tag
+
+
+def test_same_as_round_trips_through_the_event_payload():
+    """walk.py writes `asdict(f)` into findings_measured and judge_history reads
+    it back with from_payload; identity has to survive that or every cross-round
+    comparison reads the wrong thing."""
+    f = Finding("important", "m", "a.py", 1, "p", same_as="0123456789abcdef")
+    assert from_payload(dataclasses.asdict(f)).fingerprint == "0123456789abcdef"
+
+
+def test_resolve_identity_strips_a_tag_that_was_never_shown():
+    """A hallucinated or stale tag must not mint an identity: it would collapse
+    two distinct defects onto one, or resurrect one from five rounds back, and
+    the stuck detector would then fire on a fiction (Kraft-s7c04.2)."""
+    shown = Finding("important", "real one", "a.py", 1, "p")
+    invented = Finding("minor", "m", "b.py", 2, "p", same_as="ffffffffffffffff")
+    (out,) = resolve_identity([invented], known={shown.fingerprint})
+    assert out.same_as is None
+    assert out.fingerprint == Finding("minor", "m", "b.py", 2, "p").fingerprint
+
+
+def test_resolve_identity_keeps_a_tag_that_was_shown():
+    shown = Finding("important", "real one", "a.py", 1, "p")
+    repeat = Finding("important", "reworded", "a.py", 9, "p", same_as=shown.fingerprint)
+    (out,) = resolve_identity([repeat], known={shown.fingerprint})
+    assert out.fingerprint == shown.fingerprint
+
+
+def test_resolve_identity_leaves_an_untagged_finding_alone():
+    plain = Finding("minor", "m", "a.py", 1, "p")
+    assert resolve_identity([plain], known=set()) == [plain]
 
 
 def test_fingerprint_normalizes_whitespace_and_case(tmp_path):

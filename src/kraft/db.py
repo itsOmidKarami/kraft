@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 29
+SCHEMA_VERSION = 30
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -662,6 +662,15 @@ FROM worker_sessions""",
     # ESCALATION_THREADS_SPEC.md, reproduced in the Kraft-dkb6g spec) --
     # every other hook_point's sessions stay implicitly thread 1.
     28: ["ALTER TABLE worker_sessions ADD COLUMN thread INTEGER NOT NULL DEFAULT 1"],
+    # Every `model` in this table was written by `usage._model_of` reading the
+    # FIRST `modelUsage` key, which is Claude Code's own haiku warm-up rather
+    # than the model that did the work (Kraft-s7c04.15). NULL already means "no
+    # model reported" to every reader, so the column is emptied rather than left
+    # asserting something false: a wrong value that looks like a right one is
+    # what made every cost-by-model reading of this table invalid without
+    # anyone noticing. Rows written from here on are correct; a before/after
+    # comparison across this line must exclude NULL, not average it in.
+    29: ["UPDATE worker_sessions SET model = NULL"],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins

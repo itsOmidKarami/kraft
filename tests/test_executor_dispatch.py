@@ -1170,7 +1170,7 @@ def test_unresolved_findings_steer_drops_a_finding_resolved_in_a_later_cycle(tmp
 
 def test_a_seeded_note_is_not_attributed_to_a_human(tmp_path):
     """Kraft's own recap of the last review's unresolved findings (Kraft-7sec
-    second half) travels as a `Steer` with `human=False`. Both human templates
+    second half) travels as a `Steer` with `source="seeded"`. Both human templates
     name an author it does not have -- `_STEER_PROMPT` says "A human has
     steered this run", and over an existing artifact `_REVISE_PROMPT` says "A
     human read ... and sent it back with this note"."""
@@ -1179,7 +1179,7 @@ def test_a_seeded_note_is_not_attributed_to_a_human(tmp_path):
     binding = {"kind": "agent", "command": "claude", "skill": "plan", "artifact": "plan"}
     note = "Findings the last review of this node left unresolved:\n- [important] a.py:1 — x (cr)"
 
-    seeded = executor.steer_prefix(binding, {"id": "w1"}, tmp_path, note, human=False)
+    seeded = executor.steer_prefix(binding, {"id": "w1"}, tmp_path, note, source="seeded")
 
     assert note in seeded
     assert "no human" in seeded
@@ -1190,9 +1190,9 @@ def test_a_seeded_note_is_not_attributed_to_a_human(tmp_path):
 
 
 def test_dispatch_carries_the_notes_authorship_into_the_prompt(tmp_path, monkeypatch):
-    """The wiring behind the test above: `dispatch_node` reads `Steer.human`
+    """The wiring behind the test above: `dispatch_node` reads `Steer.source`
     off the note it takes, so a seeded steer reaches the agent framed as
-    Kraft's. Without it the flag exists but never reaches the prompt."""
+    Kraft's. Without it the field exists but never reaches the prompt."""
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
@@ -1204,7 +1204,7 @@ def test_dispatch_carries_the_notes_authorship_into_the_prompt(tmp_path, monkeyp
 
     monkeypatch.setattr("kraft.executor.dispatch._agent.run_agent_task", fake_run_agent_task)
 
-    async def scenario(human):
+    async def scenario(source):
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
@@ -1228,17 +1228,17 @@ def test_dispatch_carries_the_notes_authorship_into_the_prompt(tmp_path, monkeyp
                 row,
                 registry,
                 repo,
-                steer=executor.Steer("findings left unresolved: x", human=human),
+                steer=executor.Steer("findings left unresolved: x", source=source),
             )
         finally:
             await database.close()
         return seen["instruction"]
 
-    seeded = asyncio.run(scenario(False))
+    seeded = asyncio.run(scenario("seeded"))
     assert "no human" in seeded
     assert "A human has steered" not in seeded
 
-    typed = asyncio.run(scenario(True))
+    typed = asyncio.run(scenario("human"))
     assert typed.startswith("A human has steered this run:")
 
 
@@ -1465,3 +1465,71 @@ def test_reentry_is_not_stopped_by_the_previous_passs_fix_question(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def _f(message, severity="critical"):
+    from kraft.findings import Finding
+
+    return Finding(severity, message, "a.py", 1, "p")
+
+
+def _round(n, findings, *, fixed=True):
+    return {"round": n, "findings": findings, "fix_result_path": f"/r/{n}.json" if fixed else None}
+
+
+def test_regressed_fingerprints_finds_a_finding_that_came_back():
+    """Kraft-s7c04.7, the dataset's one true X<->Y oscillation (e983d85c):
+    f37b90d3 pinned core.hooksPath=/dev/null to close a container escape;
+    verify flagged that it broke git-lfs pre-push; 7381755f unpinned it; the
+    next round found the CRITICAL escape reopened. The loop had everything it
+    needed to see that and could only ever look one round back."""
+    history = [_round(0, [_f("escape")]), _round(1, [_f("lfs")]), _round(2, [_f("escape")])]
+    assert dispatch.regressed_fingerprints(history) == [_f("escape").fingerprint]
+
+
+def test_a_finding_that_merely_persisted_is_not_a_regression():
+    """That is `stuck_fingerprint`'s job and it means something different:
+    never fixed, rather than fixed and then broken again."""
+    history = [_round(n, [_f("escape")]) for n in range(3)]
+    assert dispatch.regressed_fingerprints(history) == []
+
+
+def test_a_finding_that_is_gone_now_is_not_a_regression():
+    """Only the latest round's findings can be one -- the question this answers
+    is what the fixer is about to work on."""
+    history = [_round(0, [_f("escape")]), _round(1, []), _round(2, [_f("other")])]
+    assert dispatch.regressed_fingerprints(history) == []
+
+
+def test_a_gap_with_no_fix_in_it_is_not_a_regression():
+    """The finding vanished because a round crashed or a resume re-measured,
+    not because anything fixed it -- so nothing was reverted. Same guard
+    `stuck_fingerprint` applies, for the same reason."""
+    history = [_round(0, [_f("escape")]), _round(1, [], fixed=False), _round(2, [_f("escape")])]
+    assert dispatch.regressed_fingerprints(history) == []
+
+
+def test_two_rounds_cannot_contain_a_regression():
+    history = [_round(0, [_f("escape")]), _round(1, [_f("escape")])]
+    assert dispatch.regressed_fingerprints(history) == []
+
+
+def test_a_gate_reviewers_verdict_names_an_automated_review_as_its_author(tmp_path):
+    """Kraft-s7c04.6: `review_gates` re-entered `run_once(steer=note)` with no
+    source at all, so `steer_prefix` led the re-run with "A human has steered
+    this run" over a note an agent wrote -- and on a `fixed` verdict, over
+    commits the agent had just made in that worktree. The node re-running could
+    not tell those commits from a human's, so the brief it produced told the
+    human they had fixed it themselves."""
+    binding = {"kind": "agent", "command": "claude", "skill": "plan", "artifact": "plan"}
+    (tmp_path / ".engineering" / "plans").mkdir(parents=True)
+    (tmp_path / ".engineering" / "plans" / "w1.md").write_text("# the plan\n")
+    note = "tidied the swallowed OSError and committed it"
+
+    out = executor.steer_prefix(binding, {"id": "w1"}, tmp_path, note, source="gate_review")
+
+    assert note in out
+    assert "No human wrote it" in out
+    assert "may have committed changes in this worktree itself" in out
+    assert "A human has steered" not in out
+    assert "A human read" not in out

@@ -11,7 +11,7 @@ import hashlib
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from kraft.render import strip_ansi
@@ -38,6 +38,11 @@ _MARKER = re.compile(r"✘|FAILED|Error:|Traceback")
 #: structured test-name diffing if a real framework ever needs it.`
 _NOISE = re.compile(r"\(\d+(?:\.\d+)?\s*(?:ms|s|m)\)|\b\d{2}:\d{2}:\d{2}\b")
 
+#: What a `same_as` must look like to be believed: the shape `fingerprint`
+#: itself produces. A model asked to echo a tag will sometimes write a sentence
+#: instead, and a sentence accepted as an identity is worse than no identity.
+_TAG = re.compile(r"^[0-9a-f]{16}$")
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -46,6 +51,10 @@ class Finding:
     file: str | None
     line: int | None
     source_plugin: str
+    #: The tag of a finding from an earlier round that this one restates, as the
+    #: reviewer that was shown both says so. Optional and last, so every
+    #: positional construction keeps working.
+    same_as: str | None = None
 
     @property
     def fingerprint(self) -> str:
@@ -56,7 +65,21 @@ class Finding:
         look new after any fix — exactly the blindness this exists to remove.
         Severity is excluded too: the same defect re-reported at a different
         severity is the same defect.
+
+        Those two exclusions are right and stay. What the original design did
+        not anticipate is **rewording** — `message` is LLM prose, so the same
+        defect restated in new words hashed differently, `stuck_fingerprint`'s
+        streak never exceeded 1, and the stuck detector could never fire
+        (Kraft-s7c04.2: one reattach.py defect reported in five consecutive
+        measurements under five distinct fingerprints, then shipped).
+
+        No hash can see that two sentences describe one defect. The reviewer
+        that read both can, so it is asked, and `same_as` is its answer —
+        honoured over the hash. It is only ever believed for a tag the reviewer
+        was actually shown; see `resolve_identity`.
         """
+        if self.same_as:
+            return self.same_as
         norm = _WS.sub(" ", self.message).strip().lower()
         raw = "\0".join((self.source_plugin, self.file or "", norm))
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
@@ -76,12 +99,14 @@ def _one(raw: object) -> Finding | None:
         return None
     file = raw.get("file")
     line = raw.get("line")
+    same_as = raw.get("same_as")
     return Finding(
         severity=severity,
         message=message,
         file=file if isinstance(file, str) and file else None,
         line=line if isinstance(line, int) and not isinstance(line, bool) else None,
         source_plugin=source_plugin,
+        same_as=same_as if isinstance(same_as, str) and _TAG.match(same_as) else None,
     )
 
 
@@ -111,7 +136,27 @@ def from_payload(raw: dict) -> Finding:
         file=raw.get("file"),
         line=raw.get("line"),
         source_plugin=raw.get("source_plugin", ""),
+        # No shape check here, unlike `_one`: a payload was written by `asdict`
+        # over a Finding that already passed one.
+        same_as=raw.get("same_as"),
     )
+
+
+def resolve_identity(found: list[Finding], known: frozenset[str] | set[str]) -> list[Finding]:
+    """`found` with every `same_as` that names a tag nobody was shown stripped.
+
+    A reviewer claims identity with a previous finding by echoing its tag
+    (Kraft-s7c04.2). Trusting that unchecked lets one hallucinated or stale tag
+    collapse two distinct defects onto a single identity, or resurrect one from
+    an episode that is over -- and the stuck detector would then fire on a
+    fiction, stopping a loop that is converging.
+
+    `known` is the set of tags this round's reviewer was actually handed, which
+    is exactly what `prompts.carried_findings_note` listed for it. A finding
+    whose claim fails falls back to its own prose hash, which is what it would
+    have had before it claimed anything.
+    """
+    return [f if not f.same_as or f.same_as in known else replace(f, same_as=None) for f in found]
 
 
 def _tail_text(log_path: str | Path) -> str | None:

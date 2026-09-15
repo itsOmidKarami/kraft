@@ -421,6 +421,37 @@ def test_a_human_decision_taken_during_the_review_wins(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
+def test_an_agent_fixed_verdict_is_recorded_as_fixed(tmp_path, monkeypatch):
+    """Kraft-s7c04.16. `by: agent` alone cannot tell a reviewer that rejected
+    from one that repaired the worktree and committed -- and those differ: a
+    `fixed` re-enters at the gate's own node and regenerates the artifact the
+    gate is about. The 7ced80e6 investigation could only find that cycle by
+    putting session logs in order by hand."""
+    _stub_review(monkeypatch, "fixed", note="tidied the spec")
+
+    async def fake_run_once(db, run_dirs, *, work_item_id, **kw):
+        return "needs_human"
+
+    monkeypatch.setattr("kraft.executor.walk.run_once", fake_run_once)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await Database.open(rd.db)
+        try:
+            await _review_from_gate(database, rd, CHAIN2, auto_gate=True)
+            [rej] = [
+                e
+                for e in database.read(lambda c: events.read_after(c, 0, "w1"))
+                if e["type"] == "gate_rejected"
+            ]
+            assert rej["payload"]["verdict"] == "fixed"
+            assert rej["payload"]["by"] == "agent"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 def test_repeated_fixed_verdicts_breach_the_reject_loop(tmp_path, monkeypatch):
     """A reviewer that keeps repairing and re-measuring is bounded by the same
     counter a human's rejections are bounded by, and ends at a person."""
@@ -630,3 +661,43 @@ def test_resume_calls_auto_escalate_stuck_after_review_gates(tmp_path, monkeypat
     status = asyncio.run(scenario())
     assert status == "sentinel_status"
     assert calls == [("needs_human", "w1")]
+
+
+def test_an_agent_gate_verdict_re_enters_without_claiming_a_human_wrote_it(tmp_path, monkeypatch):
+    """Kraft-s7c04.6. `review_gates` re-entered `run_once(steer=note)` with no
+    source, so the re-run's prompt led with "A human has steered this run" over
+    a note an agent wrote -- the exact misattribution `Steer.source` exists to
+    prevent, on the one path nobody wired it into."""
+    _stub_review(monkeypatch, "fixed", note="tidied the spec")
+    seen = {}
+
+    async def fake_run_once(db, run_dirs, *, work_item_id, **kw):
+        seen.update(kw)
+        return "needs_human"
+
+    monkeypatch.setattr("kraft.executor.walk.run_once", fake_run_once)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await Database.open(rd.db)
+        try:
+            await _review_from_gate(database, rd, CHAIN2, auto_gate=True)
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    assert seen["steer"] == "tidied the spec"
+    assert seen["steer_source"] == "gate_review"
+
+
+def test_a_gate_reviewers_note_still_reaches_a_dispatch(tmp_path, monkeypatch):
+    """The other half, and why this is not simply `steer_source="seeded"`. The
+    note lives only in the `Steer` -- `take()` empties it and nothing
+    re-delivers it -- so a judge stop before delivery would discard the entire
+    content of a `fixed`/`reject` verdict and park the item having paid for a
+    gate-review agent and a judge call and used neither."""
+    from kraft.executor.context import Steer
+
+    assert Steer("x", source="gate_review").exempts_judge is True
+    assert Steer("x", source="human").exempts_judge is True
+    assert Steer("x", source="seeded").exempts_judge is False

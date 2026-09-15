@@ -564,6 +564,9 @@ def test_gate_reject_requires_note_and_re_runs_the_producer(tmp_path, monkeypatc
             "note": "too vague",
             "node": "spec",
             "by": "human",
+            # A person only ever rejects; `fixed` is a gate-reviewer verdict and
+            # has no door through this endpoint (Kraft-s7c04.16).
+            "verdict": "reject",
         }
 
         # the spec node runs again and asks for its gate a second time

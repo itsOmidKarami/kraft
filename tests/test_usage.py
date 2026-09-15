@@ -70,6 +70,50 @@ def test_a_top_level_model_still_wins_over_model_usage():
     assert u.model == "stated"
 
 
+def test_model_is_the_one_that_did_the_work_not_the_warm_up():
+    """`_model_of` took the FIRST `modelUsage` key, which is the haiku warm-up
+    Claude Code makes before the session's real model runs -- so every agent row
+    in orchestrator.db named haiku and every cost-by-model reading of that table
+    was invalid (Kraft-s7c04.15)."""
+    u = usage.from_envelope(
+        {
+            "usage": {"input_tokens": 100, "output_tokens": 10},
+            "modelUsage": {
+                "claude-haiku-4-5-20251001": {"inputTokens": 12, "outputTokens": 3},
+                "claude-opus-5": {
+                    "inputTokens": 40_000,
+                    "outputTokens": 9_000,
+                    "cacheReadInputTokens": 1_200_000,
+                    "cacheCreationInputTokens": 30_000,
+                },
+            },
+        }
+    )
+    assert u.model == "claude-opus-5"
+
+
+def test_a_tie_keeps_the_first_key_so_the_read_is_deterministic():
+    u = usage.from_envelope(
+        {
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+            "modelUsage": {"a-model": {"inputTokens": 5}, "b-model": {"inputTokens": 5}},
+        }
+    )
+    assert u.model == "a-model"
+
+
+def test_model_usage_with_unexpected_value_shapes_does_not_raise():
+    """Every reader in this module is best-effort: a shape it has never seen
+    costs the model, never the session."""
+    u = usage.from_envelope(
+        {
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+            "modelUsage": {"a-model": "not a dict", "b-model": None},
+        }
+    )
+    assert u.model == "a-model"
+
+
 def _assistant(request_id: str, tokens_in: int, tokens_out: int) -> str:
     return json.dumps(
         {
