@@ -235,20 +235,25 @@ def reusable_session(
     that same still-open pass, so this never costs the reuse Kraft-gl9d is
     for.
 
-    Also excluded: a session with a still-open sibling. `dispatch_node`'s
-    subprocess branch mints one session per matching `test_scope`, all
-    sharing this exact (node, hook point, round, head_sha) -- a crash
-    partway through that per-scope loop leaves the scopes that already ran
-    `done` and the scope it was mid-run on stuck `pending`/`running`
-    (`create_session` inserts each scope's row before that scope runs).
-    Without this check, the query above -- filtered to `status = 'done'` --
-    simply skips that stuck sibling and hands back the last scope that *did*
-    finish, so the caller reads "done" for a hook whose remaining scopes
-    never ran at all. A sibling still `pending`/`running` proves this exact
-    (round, head_sha) attempt never finished dispatching every scope; a
-    sibling that is merely `failed`/`rate_limited`/etc. is a distinct,
-    already-closed-out attempt (Kraft-s15p0's same shape) and must not block
-    reuse of a later one that succeeded.
+    Also excluded: a session with a sibling that is not itself `done`.
+    `dispatch_node`'s subprocess branch mints one session per matching
+    `test_scope`, all sharing this exact (node, hook point, round, head_sha)
+    -- and, since Batch C·MR1 (Kraft-s7c04.9) removed the scope loop's
+    short-circuit, every scope runs to completion regardless of an earlier
+    one's outcome. Without this check, the query above -- filtered to
+    `status = 'done'` -- would hand back whichever scope finished `done`,
+    whether that was the whole attempt (nothing else ran) or just one scope
+    of several, with an earlier sibling sitting there genuinely `failed`. A
+    crash/resume would then read the *whole task* as reusable-and-passing
+    off a single passing scope, skipping the failure entirely. A stuck
+    `pending`/`running` sibling is the same shape one step earlier -- a crash
+    partway through the per-scope loop, before that scope even finished
+    (`create_session` inserts each scope's row before that scope runs) -- so
+    one clause now covers both: this exact attempt is reusable only once
+    every scope in it is itself `done`. A sibling from a distinct,
+    already-closed-out attempt (Kraft-s15p0's same shape, a stale `failed`
+    row a later `done` one supersedes) does not share this (round, head_sha)
+    at all and is unaffected.
     """
     if head_sha is None:
         return None
@@ -289,7 +294,7 @@ def reusable_session(
         "  AND sibling.hook_point = worker_sessions.hook_point "
         "  AND sibling.round = worker_sessions.round "
         "  AND sibling.head_sha = worker_sessions.head_sha "
-        "  AND sibling.status IN ('pending', 'running')"
+        "  AND sibling.status != 'done'"
         ") "
         "ORDER BY created_at DESC LIMIT 1",
         (work_item_id, node_id, hook_point, round, head_sha),

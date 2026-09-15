@@ -75,6 +75,136 @@ def _matched_scopes(scopes: list[dict], changed_paths: list[str]) -> list[dict]:
     return [scopes[i] for i in sorted(hit)] if hit else list(scopes)
 
 
+#: Statuses a scope-loop iteration can return that say nothing about the code
+#: under test -- a human paused the item, the scope's own command could not
+#: launch, or a rate limit was hit. C2 (Kraft-s7c04.9) stops the scope loop
+#: from short-circuiting on a genuine test failure, but these three still end
+#: it early: none of them are evidence a later scope would tell us anything
+#: about, and for `paused`/`CONFIG_ERROR` running more subprocesses after one
+#: would be actively wrong (a human asked everything to stop; the next
+#: scope's binary may be missing too).
+_SCOPE_STOP_STATUSES = frozenset({"paused", CONFIG_ERROR, RATE_LIMITED})
+
+
+def _last_own_round_head(
+    db, work_item_id: str, node_id: str, task_hook: str, round: int
+) -> str | None:
+    """The head `round - 1`'s dispatch of `task_hook` on this exact `node_id`
+    ran at, if every scope in that dispatch finished `done` -- otherwise
+    `None` (C7 review fix, Kraft-s7c04.14).
+
+    `prompts._last_reviewed_head` is the wrong source for this: it is keyed
+    on `(work_item_id, hook_point)` alone, not `node_id`, and takes the
+    latest `done` row regardless of its siblings. `GATE_HOOK` ("on.test.run")
+    is dispatched by both `implementation` (C1) and `verify` under that one
+    hook_point, with one session row per scope -- so that query lets one
+    node's head stand in for the other's (verify's round 0 would read C1's
+    head and see an empty diff, breaking the spec's "first round selects
+    from the full branch diff"), and lets one passing scope's row stand in
+    for a dispatch whose sibling scope failed (the `retry_after_cap` path:
+    scope A failed, scope B passed, the counter reset wipes the round, and a
+    later HEAD move would otherwise be missed because a passing B's row
+    still reads as "reviewed"). Scoping to this node's own previous round,
+    and requiring every row in it to be `done` with the same `head_sha`,
+    closes both. Coarser than tracking exactly which scope(s) failed:
+    precise per-scope identity would need scope identity persisted on the
+    session row, which this batch does not add. Treating *any* failure (or
+    an inconsistent head across siblings) as "not clean" can only
+    over-select, matching `_matched_scopes`' own fail-open posture.
+    """
+    rows = [
+        r
+        for r in db.read(lambda c: store.sessions_for_round(c, work_item_id, node_id, round - 1))
+        if r["hook_point"] == task_hook
+    ]
+    if not rows or any(r["status"] != "done" for r in rows):
+        return None
+    heads = {r["head_sha"] for r in rows}
+    return heads.pop() if len(heads) == 1 else None
+
+
+def _select_scopes(
+    db,
+    work_item_id: str,
+    worktree,
+    node_id: str,
+    task_hook: str,
+    round: int,
+    binding: dict,
+    repo_entry: dict,
+) -> tuple[list[dict], dict | None]:
+    """The scopes a `kind: subprocess` `on.test.run`-style dispatch should
+    run, and the sandbox to run them under (test-scope design §3.2-3.3, C7
+    Kraft-s7c04.14).
+
+    Pulled out of `dispatch_node`'s subprocess branch (batch-c1 spec Task 3)
+    so C1's implementation-time gate and verify's own `on.test.run` dispatch
+    -- both `dispatch_node` calls, just with a different `node` -- compute
+    scopes the exact same way by construction, rather than by two call sites
+    agreeing to stay in sync (spec: "the selection implementation makes must
+    be the same selection verify makes").
+
+    The repo's own command(s) win over the registry's. The registry is per
+    install and one command for every repo on it; test_scopes is a property
+    of the repo, and a hardcoded single command is how verify ends up running
+    something CI does not, or the wrong stack's suite entirely (Kraft-579,
+    Kraft-9wzy). `config.load_repos` already wraps a legacy `test_command`
+    into a single `["**"]` scope, so this is one shape regardless of which
+    field an operator set.
+
+    C7: round 0 (and a round-0 re-entry, e.g. after `retry_after_cap` wipes
+    the round counter) always selects from the whole branch diff since
+    `base_ref` -- the spec's first acceptance criterion, and the only choice
+    that can't mistake a different node's gate dispatch, or a still-open
+    round, for "already reviewed". Only a round that follows this exact
+    `(node_id, task_hook)`'s own fully clean previous round (`done`, every
+    sibling scope, one shared `head_sha` -- `_last_own_round_head`) narrows
+    the diff to what changed since then, because `6c712ea8` ran a
+    13-minute `just ci-test` for a frontend-only fix. That alone would
+    under-test once C2 lets a round go red on more than one scope: a round
+    following any failure at this hook does not trust the incremental diff
+    at all and falls back to the whole-branch diff (`_last_own_round_head`
+    itself returns `None` for an unclean round, which collapses to
+    `base_ref` below), unioning in every scope from that round rather than
+    only the one(s) that failed. Selecting less is only ever safe for a
+    scope that passed.
+    """
+    sandbox = _sandbox.resolve(binding, repo_entry)
+    repo_scopes = repo_entry.get("test_scopes")
+    if not repo_scopes and repo_entry.get("test_command"):
+        # `config.load_repos` already wraps a bare `test_command` into a
+        # `test_scopes` entry for any repo it reads off disk -- this mirrors
+        # that for a `LaunchContext` built by hand (tests, or any future
+        # caller that skips the yaml round-trip).
+        repo_scopes = [{"paths": ["**"], "command": repo_entry["test_command"]}]
+    scopes = (
+        [{"paths": s["paths"], "cmd": shlex.split(s["command"])} for s in repo_scopes]
+        if repo_scopes
+        else [{"paths": ["**"], "cmd": list(binding["command"])}]
+    )
+    base_ref = _current_base_ref(db, work_item_id)
+    # `since` is the diff's lower bound: round <= 0 always measures the whole
+    # branch (never reads another round or another node's head), and only a
+    # round that follows this exact node's own fully clean previous round at
+    # this hook narrows it -- everything else (an unclean previous round, a
+    # `since` `git` no longer knows about, no previous round at all) falls
+    # through to the whole branch.
+    since = _last_own_round_head(db, work_item_id, node_id, task_hook, round) if round > 0 else None
+    if (
+        since
+        and _config.git_read(Path(worktree), "rev-parse", "--verify", f"{since}^{{commit}}") is None
+    ):
+        since = None
+    since = since or base_ref
+    diff = (
+        _config.git_read(Path(worktree), "diff", "--name-only", f"{since}...HEAD")
+        if since
+        else None
+    )
+    to_run = scopes if diff is None else _matched_scopes(scopes, diff.splitlines())
+    return to_run, sandbox
+
+
 async def dispatch_node(
     db,
     run_dirs,
@@ -271,44 +401,26 @@ async def dispatch_node(
             )
         return status
     if kind == "subprocess":
-        # The repo's own command(s) win over the registry's. The registry is
-        # per install and one command for every repo on it; test_scopes is a
-        # property of the repo, and a hardcoded single command is how verify
-        # ends up running something CI does not, or the wrong stack's suite
-        # entirely (Kraft-579, Kraft-9wzy). Same source the forge branch below
-        # reads for `forge`. `config.load_repos` already wraps a legacy
-        # `test_command` into a single `["**"]` scope, so this is one shape
-        # regardless of which field an operator set.
         repo_entry = (launch.repo_entry or {}) if launch else {}
-        sandbox = _sandbox.resolve(binding, repo_entry)
-        repo_scopes = repo_entry.get("test_scopes")
-        if not repo_scopes and repo_entry.get("test_command"):
-            # `config.load_repos` already wraps a bare `test_command` into a
-            # `test_scopes` entry for any repo it reads off disk -- this
-            # mirrors that for a `LaunchContext` built by hand (tests, or any
-            # future caller that skips the yaml round-trip).
-            repo_scopes = [{"paths": ["**"], "command": repo_entry["test_command"]}]
-        scopes = (
-            [{"paths": s["paths"], "cmd": shlex.split(s["command"])} for s in repo_scopes]
-            if repo_scopes
-            else [{"paths": ["**"], "cmd": list(binding["command"])}]
+        to_run, sandbox = _select_scopes(
+            db, work_item_row["id"], worktree, node["id"], task_hook, round, binding, repo_entry
         )
-        # test-scope design §3.2-3.3: the diff since base_ref decides which of
-        # those scopes actually apply. Re-queried fresh rather than trusting
-        # `work_item_row`, matching `prompts.review_package`'s base_ref read
-        # above -- `work_item_row` can predate `env_setup`'s stamp. `git_read`
-        # never raises; a git failure or missing base_ref means "cannot tell",
-        # which fails open to every scope rather than guessing at fewer.
-        base_ref = _current_base_ref(db, work_item_row["id"])
-        diff = (
-            _config.git_read(Path(worktree), "diff", "--name-only", f"{base_ref}...HEAD")
-            if base_ref
-            else None
-        )
-        to_run = scopes if diff is None else _matched_scopes(scopes, diff.splitlines())
+        # C2 (Kraft-s7c04.9): every matched scope runs, not just the ones
+        # before the first failure. On 49c0cefd the third scope (just
+        # ci-test -- ruff + 2,294 tests + intent) never ran until 5h49m into
+        # verify because an earlier scope's failure short-circuited it, and
+        # every commit before that point was silently unverified. The
+        # aggregate below still fails the node on any scope's failure -- it
+        # just no longer costs a whole extra round to find out about a
+        # second, unrelated failure a first scope's break used to hide.
+        #
+        # Infra-level statuses are the one exception: they say nothing about
+        # the code, and running further scopes after one can't be trusted
+        # either (a human paused the item; the next scope's own binary might
+        # be missing too; a rate limit applies to every scope alike).
         status = "done"
         for scope in to_run:
-            status = await _subprocess.run_task(
+            scope_status = await _subprocess.run_task(
                 db,
                 run_dirs,
                 hook_point=task_hook,
@@ -323,8 +435,10 @@ async def dispatch_node(
                 sandbox=sandbox,
                 **{**common, "session_id": uuid.uuid4().hex},
             )
-            if status != "done":
-                break
+            if scope_status in _SCOPE_STOP_STATUSES:
+                return scope_status
+            if status == "done":
+                status = scope_status  # the first failure wins; later scopes still run
         return status
     if kind == "forge":
         # Only what the binding actually sets, so the adapter's constants stay
@@ -485,31 +599,60 @@ def collect_findings(db, work_item_id: str, node: dict, round: int, registry: Re
     finding does not change -- `walk.py`'s `blind_failures` still computes the
     same way and still forces the loop open, now redundantly with `eligible`,
     which is harmless.
+
+    One hook_point can carry more than one row in a single round --
+    `on.test.run`'s scope loop mints one session per matching scope, all under
+    this same hook_point (the identity problem, batch-c1 spec's "The identity
+    problem underneath all three"). A bare "last wins" read would let a later
+    scope's pass silently overwrite an earlier scope's real failure once C2
+    stops the loop from short-circuiting on it. Every row for the *latest*
+    `head_sha` this hook_point dispatched at is read instead of just the last
+    one -- every scope from one dispatch shares that head_sha (stamped once,
+    before the loop, in `dispatch_node`'s subprocess branch), so this still
+    collapses to the single most recent row for a hook that only ever mints
+    one (a re-entry at a *different* head still keeps last-wins there).
+
+    That multi-row read is scoped to `kind: subprocess` hooks -- the only
+    ones a scope loop mints more than one session for -- and not to an agent
+    reviewer. A reviewer that exits `needs_context` stops before
+    `bump_counter`, so a resume re-enters the same round at the same head:
+    without this filter, the stale `needs_context` row (no findings file)
+    would still share the latest head_sha, hit the `_FAILING_STATUSES` branch
+    below, and mint a bogus `from_blind_failure` critical finding alongside
+    the real, later row. An agent hook keeps a plain last-wins read instead.
     """
     rows = db.read(lambda c: store.sessions_for_round(c, work_item_id, node["id"], round))
-    latest: dict[str, sqlite3.Row] = {}
+    by_hook: dict[str, list[sqlite3.Row]] = {}
     for row in rows:
         if row["hook_point"] in node["tasks"]:
-            latest[row["hook_point"]] = row  # ordered by created_at, so last wins
+            by_hook.setdefault(row["hook_point"], []).append(row)  # ordered by created_at
     found: list[_findings.Finding] = []
     reported: set[str] = set()
-    for hook, row in latest.items():
-        parsed = _findings.parse(row["result_path"])
-        if parsed:
-            reported.add(hook)
-            found.extend(parsed)
-        elif row["status"] in _FAILING_STATUSES:
-            binding = registry.hooks.get(hook, {})
-            reproduce = (
-                shlex.join(binding["command"])
-                if binding.get("kind") == "subprocess" and binding.get("command")
-                else None
-            )
-            found.append(
-                _findings.from_blind_failure(
-                    hook, row["log_path"], work_item_id, row["id"], reproduce=reproduce
+    for hook, hook_rows in by_hook.items():
+        is_scope_loop = registry.hooks.get(hook, {}).get("kind") == "subprocess"
+        latest_head = hook_rows[-1]["head_sha"]
+        rows_to_read = (
+            [row for row in hook_rows if row["head_sha"] == latest_head]
+            if is_scope_loop
+            else hook_rows[-1:]
+        )
+        for row in rows_to_read:
+            parsed = _findings.parse(row["result_path"])
+            if parsed:
+                reported.add(hook)
+                found.extend(parsed)
+            elif row["status"] in _FAILING_STATUSES:
+                binding = registry.hooks.get(hook, {})
+                reproduce = (
+                    shlex.join(binding["command"])
+                    if binding.get("kind") == "subprocess" and binding.get("command")
+                    else None
                 )
-            )
+                found.append(
+                    _findings.from_blind_failure(
+                        hook, row["log_path"], work_item_id, row["id"], reproduce=reproduce
+                    )
+                )
     return found, reported
 
 
@@ -642,6 +785,14 @@ JUDGE_HOOK = "on.fix_loop.judge"
 #: `needs_context_question` reads and must be skipped there. Named rather than
 #: spelled out at each site because `reattach` compares against it too.
 ESCALATION_HOOK = "escalation"
+
+#: The test-scope hook that gates `verify` (`templates/default.yaml`'s
+#: `on.test.run`), also dispatched directly by `walk.walk_node` at the end of
+#: the `implementation` node -- C1 (Kraft-s7c04.8, batch-c1 spec). Named
+#: rather than spelled out at that call site so it stays the one place this
+#: coupling is declared; `_select_scopes` and `_last_own_round_head` key off
+#: the hook_point string either way, not off this constant.
+GATE_HOOK = "on.test.run"
 
 #: Statuses that mean the judge session actually finished thinking -- the
 #: same "was this a real judgement" gate `gate_review._UNTRUSTWORTHY`
