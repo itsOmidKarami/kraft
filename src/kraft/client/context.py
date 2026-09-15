@@ -49,15 +49,23 @@ async def resolve_repo(cwd: Path | None = None) -> str | None:
     superproject. `config.normalized_repo_root`, not a bare `--show-toplevel`,
     so a linked worktree ($KRAFT_HOME worktree or any other) resolves to its
     main checkout instead of having no connected ancestor at all (Kraft-tc33).
+
+    Auto-connected child repos (`managed: false`, from `_auto_connect_children`)
+    are skipped rather than returned: Phase 1 registers submodules as disabled
+    entries for the Settings screen, but does not change item routing, so
+    walking outward past a nearer disabled child still lands on the nearest
+    *managed* ancestor, not the outermost one (Kraft, review of repos.py:173,
+    context.py:60).
     """
     here = cwd or Path.cwd()
     root = config.normalized_repo_root(here)
     if root is None:
         return None
     payload = await transport._get("/repos")
-    connected = {entry["path"] for entry in payload["repos"]}
+    connected = {entry["path"]: entry for entry in payload["repos"]}
     for candidate in (root, *root.parents):
-        if str(candidate) in connected:
+        entry = connected.get(str(candidate))
+        if entry is not None and entry.get("managed", True):
             return str(candidate)
     return None
 

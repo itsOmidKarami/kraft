@@ -17,9 +17,8 @@ const REPO_A = {
   default_model: null,
   deny_tools: [],
   steering: [],
-  allow_cross_repo: false,
   default_root_merge_policy: "bump" as const,
-  submodules: [],
+  managed: true,
 };
 
 function renderModal(onClose: () => void = () => {}) {

@@ -6,10 +6,11 @@ import asyncio
 import os
 import subprocess
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 import pytest
-from support.harness import fake_templates_dir, isolated_bd, make_repo
+from support.harness import fake_templates_dir, isolated_bd, make_repo, make_repo_with_submodule
 
 from kraft import client
 
@@ -108,6 +109,41 @@ def test_resolve_repo_maps_a_linked_worktree_to_its_connected_repo(wired, tmp_pa
         return await client.resolve_repo(worktree)
 
     assert run_with_app(wired, scenario) == str(repo)
+
+
+def test_resolve_repo_skips_an_auto_connected_disabled_child(wired, tmp_path):
+    """Connecting a workspace auto-registers its submodule as a disabled
+    `managed: false` child (repos.py `_auto_connect_children`). Phase 1 does
+    not change item routing, so a cwd inside that submodule must still
+    resolve to the workspace, not the nearer disabled child."""
+    root, sub = make_repo_with_submodule(tmp_path)
+
+    async def scenario():
+        await client.ensure_repo(str(root))
+        return await client.resolve_repo(root / "repos" / "pkg")
+
+    assert run_with_app(wired, scenario) == str(root)
+
+
+def test_resolve_repo_prefers_a_nested_managed_repo_over_its_ancestor(wired, tmp_path):
+    """A hand-connected child inside a connected parent (an operator flipping
+    an auto-connected submodule's `managed` flag on via `PATCH /repos`, the
+    same edit the Settings screen makes) must resolve to the nearer managed
+    repo, not the outermost one — Phase 1 leaves routing unchanged for
+    anything the operator connected themselves."""
+    root, sub = make_repo_with_submodule(tmp_path)
+    child = str(root / "repos" / "pkg")
+
+    async def scenario():
+        await client.ensure_repo(str(root))
+        # Any PATCH flips `managed` to True (repos.py `update_repo`) — this is
+        # the edit the Settings screen makes when an operator connects a
+        # detected child by hand. Re-setting the probed name is a no-op
+        # otherwise, so it doesn't also need a test_command to pass validation.
+        await client.transport._patch(f"/repos?path={quote(child)}", {"name": "pkg"})
+        return await client.resolve_repo(root / "repos" / "pkg")
+
+    assert run_with_app(wired, scenario) == child
 
 
 def test_resolve_repo_is_none_for_an_unconnected_repo(wired, tmp_path):
