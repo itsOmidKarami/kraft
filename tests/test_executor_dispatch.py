@@ -465,6 +465,87 @@ def test_a_review_hook_with_no_base_ref_yet_still_runs(tmp_path, monkeypatch):
     assert prompt_log.exists()  # ran unchanged, no config_error
 
 
+def test_a_hook_with_its_own_skill_is_not_told_to_implement(tmp_path, monkeypatch):
+    """`on.review.local.run` carries skill `code-review`. It must not be handed
+    the implementer's "follow the plan, do not re-plan" -- that framing is why
+    `on.mr.describe` ran the full test suite in the MR-description node
+    (Kraft-s7c04.52)."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    spec_doc = repo / ".engineering" / "specs" / "a.md"
+    spec_doc.parent.mkdir(parents=True, exist_ok=True)
+    spec_doc.write_text("# a\n")
+    plan_doc = repo / ".engineering" / "plans" / "a.md"
+    plan_doc.parent.mkdir(parents=True, exist_ok=True)
+    plan_doc.write_text("# p\n")
+    prompt_log = tmp_path / "prompts.txt"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompt_log))
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(repo),
+                template=_default_template(),
+                bd_cwd=str(tracker),
+                attachments=[
+                    {"kind": "spec", "path": ".engineering/specs/a.md"},
+                    {"kind": "plan", "path": ".engineering/plans/a.md"},
+                ],
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+            chain = json.loads(row["chain_definition"])
+            launch = executor.LaunchContext(
+                repo_entry=None, steering_dir=_REPO_ROOT / "templates" / "steering"
+            )
+            impl_node = next(n for n in chain["nodes"] if n["id"] == "implementation")
+            await dispatch.dispatch_node(
+                database,
+                rd,
+                "on.implementation.start",
+                impl_node,
+                row,
+                registry,
+                repo,
+                launch=launch,
+            )
+            verify_node = next(n for n in chain["nodes"] if n["id"] == "verify")
+            await dispatch.dispatch_node(
+                database,
+                rd,
+                "on.review.local.run",
+                verify_node,
+                row,
+                registry,
+                repo,
+                launch=launch,
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+    sent = [p for p in prompt_log.read_text().split("\n\x00\n") if p.strip()]
+    assert len(sent) == 2
+    impl_prompt, review_prompt = sent
+
+    assert "Do not re-plan." in impl_prompt
+    assert "Implementing this work item is a different node's job" not in impl_prompt
+
+    assert "Do not re-plan" not in review_prompt
+    assert "Follow the documents above" not in review_prompt
+    assert "Implementing this work item is a different node's job" in review_prompt
+    assert "Judge the change against them." in review_prompt
+
+
 def test_run_gathers_multi_task_node(tmp_path):
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
@@ -2228,3 +2309,11 @@ def test_a_gate_reviewers_verdict_names_an_automated_review_as_its_author(tmp_pa
     assert "may have committed changes in this worktree itself" in out
     assert "A human has steered" not in out
     assert "A human read" not in out
+
+
+def test_the_implementer_has_no_skill_so_its_brief_stays_the_task():
+    """Task 2 keys off `skill:`. If someone gives the implementation hook a
+    skill, every fix round silently becomes "implementing is another node's
+    job" -- addressed to the node that implements."""
+    hooks = load_registry(_REPO_ROOT / "templates" / "registry.yaml").hooks
+    assert "skill" not in hooks["on.implementation.start"]

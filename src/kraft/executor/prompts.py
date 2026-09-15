@@ -191,6 +191,25 @@ _ATTACHMENT_PROMPT = (
     "for this work item. Do not re-plan."
 )
 
+# For a hook whose method is its own skill: the spec and plan state what the
+# change was agreed to do, and the agent judges the change against them. The
+# imperative above is addressed to an implementer -- `on.mr.describe` was given
+# it and responded by running the full test suite in the node that writes an MR
+# description (Kraft-s7c04.52).
+_ATTACHMENT_REFERENCE = (
+    "\n\n{lines}\nThose are the agreed spec and plan for this work item: they "
+    "state what this change was agreed to do. Judge the change against them."
+)
+
+#: Appended for a binding that carries a `skill:`. Says only that *implementing*
+#: is another node's job -- deliberately silent about verifying and judging,
+#: which `carried_findings_note` asks every review hook to do.
+METHOD_NOTE = (
+    "\n\nImplementing this work item is a different node's job. Your own task is "
+    "the `## Method` section of your system prompt; the brief above is the "
+    "context that task runs in."
+)
+
 # A repo's own tracking-issue guidance (e.g. CLAUDE.md's beads workflow) tells
 # any agent to close a bead once it judges the work done. That is right for a
 # human session and wrong here: at implementation time, verify, review and
@@ -221,11 +240,19 @@ def brief(work_item_row) -> str:
     return f"{work_item_row['title']}\n\n{description}"
 
 
-def attachment_note(attachments: list[dict]) -> str:
+def attachment_note(attachments: list[dict], *, method_is_own: bool = False) -> str:
+    """Documents attached at intake, as an agent is told about them.
+
+    The implementer (`method_is_own=False`, the default) gets the imperative:
+    follow the documents, do not re-plan. A hook with its own skill
+    (`method_is_own=True`) gets the same paths but is told to judge the change
+    against them, not to build from them.
+    """
     if not attachments:
         return ""
     lines = "\n".join(f"{a['kind'].capitalize()}: {a['path']}" for a in attachments)
-    return _ATTACHMENT_PROMPT.format(lines=lines)
+    template = _ATTACHMENT_REFERENCE if method_is_own else _ATTACHMENT_PROMPT
+    return template.format(lines=lines)
 
 
 # How the implementer reports where it is in the plan, so the board can say
