@@ -279,12 +279,24 @@ async def dispatch_node(
         # has just emptied it.
         note_source = steer.source if steer is not None else "human"
         note = steer.take() if steer else None
-        attachment_note = prompts.attachment_note(entry.attachments_of(work_item_row))
+        # A binding with a `skill:` already states its own job, so it must not
+        # also be told to implement the work item from the plan.
+        # `on.implementation.start` is the one agent hook with no skill,
+        # because for it the brief IS the method; it gets today's wording
+        # unchanged. Selected from the binding rather than a list of hook
+        # names so a plugin's own agent hook is classified by what it
+        # declares (Kraft-s7c04.52). The brief itself is untouched for every
+        # hook: `skills/spec` tells that agent the description is its
+        # requirement.
+        method_is_own = bool(binding.get("skill"))
         instruction = (
             instruction_override
             or (
                 prompts.brief(work_item_row)
-                + attachment_note
+                + prompts.attachment_note(
+                    entry.attachments_of(work_item_row), method_is_own=method_is_own
+                )
+                + (prompts.METHOD_NOTE if method_is_own else "")
                 + prompts.progress_note(task_hook, work_item_row, worktree)
             )
         ) + prompts.BEAD_NOTE
