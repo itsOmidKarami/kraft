@@ -362,6 +362,109 @@ def test_chain_review_dispatch_prompt_carries_resolved_hook_bindings(tmp_path, m
     assert "spec, plan, chain_review" in prompt
 
 
+def test_a_review_hook_with_no_package_does_not_launch_the_agent(tmp_path, monkeypatch):
+    """.40: a hook in `REVIEW_HOOKS` dispatched with nothing to review must not
+    silently launch a paid agent to review nothing. `base_ref` is set (this is
+    the "should have a package but doesn't" case -- a git failure, or a
+    genuinely missing package -- not the legitimate no-`base_ref` one), and
+    `review_package` is forced to `None` to exercise it without needing to
+    fabricate the exact git state that produces it for real."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    prompt_log = tmp_path / "prompts.txt"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompt_log))
+    monkeypatch.setattr(dispatch.prompts, "review_package", lambda *a, **k: None)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(repo),
+                template=_default_template(),
+                bd_cwd=str(tracker),
+            )
+            base_sha = git_read(repo, "rev-parse", "HEAD")
+            await database.write(lambda c: store.set_base_ref(c, wid, base_sha))
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+            chain = json.loads(row["chain_definition"])
+            node = next(n for n in chain["nodes"] if n["id"] == "verify")
+            return await dispatch.dispatch_node(
+                database,
+                rd,
+                "on.review.local.run",
+                node,
+                row,
+                registry,
+                repo,
+                launch=executor.LaunchContext(
+                    repo_entry=None, steering_dir=_REPO_ROOT / "templates" / "steering"
+                ),
+            )
+        finally:
+            await database.close()
+
+    result = asyncio.run(scenario())
+    assert result == dispatch.CONFIG_ERROR
+    assert not prompt_log.exists()  # the fake agent never ran
+
+
+def test_a_review_hook_with_no_base_ref_yet_still_runs(tmp_path, monkeypatch):
+    """`review_package` legitimately returns `None` for an item with no
+    `base_ref` yet -- pre-migration items, and any template with no
+    `env_setup` node. That case must keep working unchanged: the new guard is
+    "a review hook dispatched with nothing to review", not "package is None"."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    prompt_log = tmp_path / "prompts.txt"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompt_log))
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(repo),
+                template=_default_template(),
+                bd_cwd=str(tracker),
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+            assert row["base_ref"] is None  # env_setup never ran
+            chain = json.loads(row["chain_definition"])
+            node = next(n for n in chain["nodes"] if n["id"] == "verify")
+            return await dispatch.dispatch_node(
+                database,
+                rd,
+                "on.review.local.run",
+                node,
+                row,
+                registry,
+                repo,
+                launch=executor.LaunchContext(
+                    repo_entry=None, steering_dir=_REPO_ROOT / "templates" / "steering"
+                ),
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    assert prompt_log.exists()  # ran unchanged, no config_error
+
+
 def test_run_gathers_multi_task_node(tmp_path):
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)

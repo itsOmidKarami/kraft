@@ -323,6 +323,35 @@ async def dispatch_node(
             k: v for k, v in node_override.items() if k in ("model", "escalate_model", "effort")
         }
         merged_override = {**item_override, **model_effort}
+        pkg = prompts.review_package(
+            db, run_dirs, work_item_row["id"], worktree, task_hook, session_id
+        )
+        # A review hook with nothing to review is a configuration problem no
+        # agent can fix by writing code (Kraft-579's posture), not a task to
+        # launch anyway and let read an empty package. `review_package`
+        # returns None for three reasons -- a non-review hook (excluded by the
+        # `REVIEW_HOOKS` check itself), an item legitimately with no
+        # `base_ref` yet (pre-migration, or a template with no `env_setup`
+        # node -- must still run unchanged), and a git failure. The last two
+        # are not distinguished here and collapse into the same stop: telling
+        # them apart needs `review_package` to say why it returned None, which
+        # is more than this fix needs.
+        if (
+            task_hook in prompts.REVIEW_HOOKS
+            and pkg is None
+            and _current_base_ref(db, work_item_row["id"]) is not None
+        ):
+            _, log_path, result_path = await _builtins.start_session(
+                db, run_dirs, hook_point=task_hook, **common
+            )
+            return await _builtins.finish_session(
+                db,
+                log_path,
+                result_path,
+                session_id=session_id,
+                status=CONFIG_ERROR,
+                log=f"could not build a review package for {task_hook} — no diff to review\n",
+            )
         inv = _agent.resolve_invocation(
             binding,
             launch.repo_entry if launch else None,
@@ -335,9 +364,7 @@ async def dispatch_node(
             db,
             run_dirs,
             hook_point=task_hook,
-            review_package=prompts.review_package(
-                db, run_dirs, work_item_row["id"], worktree, task_hook, session_id
-            ),
+            review_package=pkg,
             command=inv.command,
             profile=inv.profile,
             model=inv.model,
