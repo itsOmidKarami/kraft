@@ -197,6 +197,18 @@ async def _run_one(
                 )
             )
         case "ci_poll":
+            # An MR merged outside Kraft -- a human merging by hand, or an
+            # auto-merge racing this node's own poll -- usually has its
+            # source branch deleted with it (`force_remove_source_branch`),
+            # and the push below then dies `! [rejected] ... (stale info)`
+            # against a remote ref that no longer exists (Kraft-7itv): the
+            # lease targets the sha origin last showed us, and origin has no
+            # ref at all to compare it to. Same shortcut `sync_mr` and
+            # `merge` already take for the identical race -- nothing here is
+            # left to check once the forge itself says merged.
+            existing = await forge.find_mr(repo=repo, branch=branch)
+            if existing is not None and existing.state == "merged":
+                return f"already merged (!{existing.number}); nothing to check\n", "done", findings
             # The worker commits in the worktree and is told not to push
             # (adapters/agent.py:45), and only open_mr and sync_mr ever
             # pushed — sync_mr *after* human review. Without this, a commit

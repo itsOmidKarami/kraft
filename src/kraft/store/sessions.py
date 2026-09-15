@@ -186,8 +186,11 @@ def reusable_session(
     absent provenance is not matching provenance.
 
     Also excluded: a session whose node was *completed* since it ran. `round`
-    resets to 0 on every fresh `walk_node` entry -- not just a crash/resume,
-    also a gate rejection that walks back to an already-finished node -- and
+    does not tell a fresh `walk_node` entry from the pass before it: for a node
+    with no `fix_loop` it is 0 on every entry, and for one with a fix_loop it
+    seeds from the persisted `retry_counters` row, which a gate rejection
+    walking back to an already-finished node leaves untouched -- so either way
+    a new pass can measure at a number an old pass already used. And
     an agent task that makes no further change leaves `head_sha` exactly
     where a genuinely stale session left it too (confirmed against
     `test_rejecting_the_final_gate_re_enters_at_implementation`, whose second
@@ -201,7 +204,9 @@ def reusable_session(
     (Kraft-gbt / Kraft-126) -- a second and later pass's own completion is a
     silent no-op, so the check above only ever catches the FIRST time a node
     closes out. A gate rejected a second time (`reject_to` with no
-    `fix_loop`, so `round` stays 0 across every pass) leaves the second
+    `fix_loop`, which is the case where `round` really does stay 0 across
+    every pass -- the counter seeding only happens in `walk_node`'s fix_loop
+    branch) leaves the second
     pass's session with no newer `node_completed` to exclude against, and it
     would otherwise be reused right back -- the agent that should carry the
     human's new rejection note never runs.
