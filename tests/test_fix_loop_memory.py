@@ -553,6 +553,29 @@ def test_a_fix_task_after_two_rounds_carries_the_whole_history(tmp_path, monkeyp
     assert "round 0" in fixes[-1] and "round 1" in fixes[-1]
 
 
+def test_the_fix_round_is_unaffected_by_the_method_note(tmp_path, monkeypatch):
+    """The fix round's instruction is an `instruction_override` (walk.py:870),
+    which keeps absolute precedence over Task 2's skill-based selection. It
+    must carry neither `prompts.METHOD_NOTE` nor the reference-style
+    attachment wording -- both are for a hook with its own skill, and the fix
+    round dispatches `on.implementation.start`, which has none."""
+    log = tmp_path / "prompts.txt"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(log))
+    _run_loop(
+        tmp_path,
+        monkeypatch,
+        [
+            {"status": "done", "findings": [_finding(_FIRST)]},
+            {"status": "done", "findings": [_finding("a second defect")]},
+        ],
+    )
+    fixes = [p for p in log.read_text().split("\n\x00\n") if "Fix the code" in p]
+    assert fixes
+    for fix in fixes:
+        assert prompts.METHOD_NOTE not in fix
+        assert "Judge the change against them." not in fix
+
+
 def test_the_first_fix_gets_no_history_block(tmp_path, monkeypatch):
     """Nothing to say, and the first cycle is the one this batch must not make
     more expensive."""
