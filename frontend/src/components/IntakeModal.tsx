@@ -12,14 +12,17 @@ import type {
 import { SectionLabel, Switch } from "./ui";
 import { showToast } from "./Toast";
 import { backdropProps, useModal } from "../useModal";
+import { parentOf } from "../views/settings/ReposPage";
 
 /**
  * New work item (design 10, mobile m09). Two columns: the form on the left,
  * "OVERRIDES FOR THIS ITEM" + "Will happen on start" pinned to a 280px right
  * rail. The "Advanced · cross-repo" disclosure is collapsed by default and
- * only has anything in it when the repo actually has submodules — they come
- * from probing the repo's own .gitmodules, never from a list Kraft keeps of
- * its own.
+ * only has anything in it when the repo actually has connected, enabled
+ * child repos — those are Kraft's own registry entries (§1), not a raw
+ * `.gitmodules` probe, so a child that's connected but left disabled in
+ * Settings correctly stays off this list rather than being pickable with no
+ * config behind it (Kraft-z6qb4).
  */
 
 const MERGE_POLICIES = [
@@ -64,7 +67,6 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
   const [advanced, setAdvanced] = useState(false);
   // Phone (W3.8): the overrides panel sits behind its own disclosure.
   const [overridesOpen, setOverridesOpen] = useState(false);
-  const [available, setAvailable] = useState<string[]>([]);
   const [picked, setPicked] = useState<string[]>([]);
   const [mergePolicy, setMergePolicy] = useState("bump");
   // Intake from existing artifacts (design §4): kind -> the path once
@@ -116,20 +118,19 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
     setSkipped(new Set());
   }, [tpl]);
 
-  // Probing is read-only, so it can follow the repo field as it is typed.
+  // Connected, enabled children of the picked repo — Kraft's own registry,
+  // not a `.gitmodules` probe, so `enabled` here actually controls what's
+  // pickable (Kraft-z6qb4). Root-relative paths: `work_items.submodules`
+  // expects the same shape `probe.submodules` used to produce.
+  const available = repo
+    ? allRepos
+        .filter((r) => r.enabled && parentOf(r, allRepos)?.path === repo)
+        .map((r) => r.path.slice(repo.length + 1))
+    : [];
+
+  // Switching repos invalidates any picks made against the previous one.
   useEffect(() => {
-    if (!repo.trim()) {
-      setAvailable([]);
-      setPicked([]);
-      return;
-    }
-    const t = setTimeout(() => {
-      api
-        .probeRepo(repo)
-        .then((p) => setAvailable(p.submodules))
-        .catch(() => setAvailable([]));
-    }, 300);
-    return () => clearTimeout(t);
+    setPicked([]);
   }, [repo]);
 
   // Type-to-search per kind: GET /search requires a non-empty q, so this only
@@ -531,7 +532,9 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
                     <div className="field">
                       <label>
                         Submodules{" "}
-                        <span className="field-hint">· from .gitmodules</span>
+                        <span className="field-hint">
+                          · connected, enabled child repos
+                        </span>
                       </label>
                       <div className="submodules">
                         {available.map((path) => {

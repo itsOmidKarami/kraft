@@ -48,7 +48,19 @@ def _cmd_repos(ns: argparse.Namespace) -> None:
         return await client.repos(), await client.resolve_repo()
 
     rows, here = asyncio.run(run())
-    common.emit(rows, lambda value: _render_repos(value, here), ns.json)
+    if ns.json or ns.all:
+        common.emit(rows, lambda value: _render_repos(value, here), ns.json)
+        return
+    # Default to managed rows only — the CLI's answer to Settings' collapsed
+    # "Detected" section (Kraft-jknn0). Without this, connecting a
+    # superproject with thirty submodules dumps thirty auto-connected,
+    # never-touched rows into this table alongside the repos a human
+    # actually set up.
+    visible = [r for r in rows if r.get("managed", True)]
+    print(_render_repos(visible, here))
+    hidden = len(rows) - len(visible)
+    if hidden:
+        print(f"\n{hidden} more detected, not managed — kraft repo list --all")
 
 
 def _cmd_connect(ns: argparse.Namespace) -> None:
@@ -89,6 +101,11 @@ def _cmd_open(ns: argparse.Namespace) -> None:
 def _add_repo(subs, common: argparse.ArgumentParser) -> None:
     """Connected repositories, and getting into their worktrees."""
     repos = subs.add_parser("list", parents=[common], help="connected repositories")
+    repos.add_argument(
+        "--all",
+        action="store_true",
+        help="also list auto-connected repos nobody has touched yet",
+    )
     repos.set_defaults(func=_cmd_repos)
 
     connect = subs.add_parser("connect", parents=[common], help="connect a repo (idempotent)")

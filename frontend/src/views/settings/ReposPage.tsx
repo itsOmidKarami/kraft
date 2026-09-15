@@ -27,8 +27,9 @@ export const sortRepos = (repos: Repo[]): Repo[] =>
 
 /** The connected repo this one sits inside, or undefined when it is a root.
  *  Longest match wins, so a grandchild names its immediate parent rather than
- *  the outermost workspace. */
-const parentOf = (r: Repo, all: Repo[]): Repo | undefined =>
+ *  the outermost workspace. Exported for IntakeModal, which needs the same
+ *  "whose child is this" test to build its submodule picker (Kraft-z6qb4). */
+export const parentOf = (r: Repo, all: Repo[]): Repo | undefined =>
   all
     .filter((p) => p.path !== r.path && r.path.startsWith(`${p.path}/`))
     .sort((a, b) => b.path.length - a.path.length)[0];
