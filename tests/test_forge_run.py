@@ -164,6 +164,24 @@ def test_ci_poll_records_done_when_the_pipeline_is_green(tmp_path, monkeypatch):
     assert recorded == "done"
 
 
+def test_ci_poll_treats_an_already_merged_mr_as_done(tmp_path, monkeypatch):
+    """Kraft-7itv's twin, caught live on work item b5afe84c: an MR merged
+    out-of-band while `ci_poll` was still polling has its source branch
+    deleted with it (`force_remove_source_branch`), and the push `ci_poll`
+    makes on every entry (Kraft-bxj8) then died `! [rejected] ... (stale
+    info)` against a remote ref that no longer existed -- the item never
+    reached `sync_mr`'s own guard for the identical race."""
+    fake = forge.FakeForge()
+    mr = asyncio.run(fake.open_mr(repo=tmp_path, branch="kraft/w1", title="t", body="b"))
+    asyncio.run(fake.merge(repo=tmp_path, branch="kraft/w1", mr=mr))
+    fake.pushed.clear()
+
+    returned, recorded = _forge_session(tmp_path, monkeypatch, fake, "ci_poll", "s11")
+
+    assert (returned, recorded) == ("done", "done")
+    assert fake.pushed == [], "it pushed to a branch the forge has already merged and deleted"
+
+
 def test_sync_mr_pushes_before_it_rewrites_the_description(tmp_path, monkeypatch):
     """Kraft-nh5m. `open_mr` pushed once and nothing after it ever pushed
     again, so every commit verify, mr_checks and the review brief added was

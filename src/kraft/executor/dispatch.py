@@ -446,8 +446,11 @@ def collect_findings(db, work_item_id: str, node: dict, round: int, registry: Re
     Only the node's own measuring tasks: the fix task is dispatched with
     `round=count` and the next measuring pass runs at that same round, so an
     unfiltered query folds the fix agent's result file into the cycle. Only the
-    most recent row per hook point, because a resume can re-enter this node with
-    `round` reset while stale rows sit at the same number.
+    most recent row per hook point, because a re-entry can measure at a round a
+    previous pass already used -- `round` seeds from the persisted fix-loop
+    counter, which a gate rejection or a `ci_wait` poll does not clear, and a
+    `/retry` deletes the counter row so the next pass restarts at 1 instead.
+    Either way stale rows sit at the same number.
 
     A hook that failed without writing a findings file at all -- `on.test.run`
     is the common case, `kind: subprocess` with no findings schema to write to
@@ -486,16 +489,29 @@ def collect_findings(db, work_item_id: str, node: dict, round: int, registry: Re
     return found, reported
 
 
-def needs_context_question(db, work_item_id: str, node: dict, round: int) -> str | None:
+def needs_context_question(
+    db, work_item_id: str, node: dict, round: int, *, first_iteration: bool = False
+) -> str | None:
     """The question from a `needs_context` row in this round, or None.
 
     Same latest-row-per-hook-point read as `collect_findings` (a resume or
-    `/retry` re-enters at round 0 with stale rows still sitting there, so a
-    first-match scan could re-stop the item on a historical row forever) but
-    deliberately NOT its `row["hook_point"] in node["tasks"]` filter: the fix
-    task (`on.implementation.start`) is dispatched with this same round, and
+    `/retry` re-enters with stale rows still sitting there, so a first-match
+    scan could re-stop the item on a historical row forever) but deliberately
+    NOT its `row["hook_point"] in node["tasks"]` filter: the fix task
+    (`on.implementation.start`) is dispatched with this same round, and
     including it is exactly how a fix task's own `needs_context` is meant to
     surface, one iteration later.
+
+    `first_iteration` is the exception to that, and only that: on the entry's
+    very first pass there is by definition no fix from *this* entry yet, so
+    any fix row at this round belongs to a bygone one. It matters because
+    `walk_node` now seeds `round` from the persisted counter, and it is also
+    re-entered on paths that are not resumes -- a gate rejection walking back
+    to a fix_loop node, and the `ci_wait` poller -- where the `retry_counters`
+    row survives (only `retry_after_cap` deletes it). Without this, the last
+    pass's fix question would stop the new pass before it ran a single cycle:
+    the same stranding `ESCALATION_HOOK` below closes, through a third door.
+    Defaults off so every other caller keeps today's behaviour.
 
     `JUDGE_HOOK` is the one exception. The judge is a brake bolted onto the
     cap and never a second way to get stuck (`_judge_result` fails open
@@ -503,11 +519,22 @@ def needs_context_question(db, work_item_id: str, node: dict, round: int) -> str
     judge that exited `needs_context` would strand the item on the judge's
     own question at the next re-entry, which is exactly the design's
     forbidden case arriving one iteration late.
+
+    `ESCALATION_HOOK` is excluded for the same reason, through a different
+    door. An escalation is a conversation with a human, not a measurement:
+    its `needs_context` *is* the question that opened the conversation, so
+    re-reading it once the human has answered re-stops the node on a question
+    that has already been settled -- forever, because nothing ever rewrites
+    that row. On e983d85c that cost $4.86 and 38 minutes, the human's answer
+    reviewed and discarded twice with no code changed, and the item was then
+    skipped with a CRITICAL finding still open (Kraft-7itv follow-up).
     """
     rows = db.read(lambda c: store.sessions_for_round(c, work_item_id, node["id"], round))
     latest: dict[str, sqlite3.Row] = {}
     for row in rows:
-        if row["hook_point"] == JUDGE_HOOK:
+        if row["hook_point"] in (JUDGE_HOOK, ESCALATION_HOOK):
+            continue
+        if first_iteration and row["hook_point"] == "on.implementation.start":
             continue
         latest[row["hook_point"]] = row  # ordered by created_at, so last wins
     for row in latest.values():
@@ -556,6 +583,13 @@ def last_measurement(db, work_item_id: str, node_id: str) -> tuple[list[str] | N
 #: decision 4: no new policy field).
 JUDGE_HOOK = "on.fix_loop.judge"
 
+#: The escalation hook's own `hook_point`. Not a node task and not dispatched
+#: from a `tasks` list -- `escalate.dispatch` writes it directly -- so, like
+#: `JUDGE_HOOK`, its session rows sit in the same `(node, round)` scan that
+#: `needs_context_question` reads and must be skipped there. Named rather than
+#: spelled out at each site because `reattach` compares against it too.
+ESCALATION_HOOK = "escalation"
+
 #: Statuses that mean the judge session actually finished thinking -- the
 #: same "was this a real judgement" gate `gate_review._UNTRUSTWORTHY`
 #: applies, phrased as the allowlist its own `VERDICTS` check mirrors.
@@ -590,12 +624,16 @@ def judge_history(
     instead of a stack frame.
     """
     # Kept in event order in a list, never keyed by the event's own `cycle`:
-    # `walk_node` resets `round` to 0 on every re-entry (ci_wait poller, crash
-    # resume, /retry) while the loop counter persists, so two entries' first
-    # measurements both land on cycle 0. A dict keyed on that number silently
-    # dropped the older one and then `sorted()` re-labelled the *newest*
-    # measurement as round 0, the oldest -- handing the judge a truncated
-    # trend pointing the wrong way, on mr_checks/on.ci.poll every time.
+    # `walk_node` seeds `round` from the loop counter on every re-entry
+    # (ci_wait poller, crash resume, /retry), and that counter persists across
+    # the re-entries that are not resumes -- so a new entry's first measurement
+    # lands on a cycle number the previous entry already measured at, and a
+    # /retry that cleared the counter lands back on 0 where the first entry
+    # was. A dict keyed on that number silently dropped the older one and then
+    # `sorted()` re-labelled the *newest* measurement as the oldest -- handing
+    # the judge a truncated trend pointing the wrong way, on
+    # mr_checks/on.ci.poll every time. Seeding narrowed the collision; it did
+    # not remove it, so this stays a list.
     # _REPAIR_ROUND (-1) is a repair pass, not a paid fix cycle -- it has
     # nothing to do with the budget the judge is weighing.
     measured: list[tuple[int, list[_findings.Finding]]] = []
