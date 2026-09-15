@@ -20,6 +20,7 @@ import pytest
 from support.harness import make_repo
 
 from kraft import builtins as kraft_builtins
+from kraft import sandbox
 from kraft.adapters import forge
 
 BRANCH = "kraft/abc"
@@ -31,8 +32,17 @@ GLAB_MR_VIEW = (
 
 
 def _git(repo: Path, *args: str) -> str:
+    """Runs with `sandbox.unhardened_git_env()`, not the inherited process
+    env: a test session started under Kraft is itself a child of a process
+    that already called `harden_host_git_env` (Kraft-rki), and this helper
+    sets up the real repos and hook paths these tests assert against."""
     return subprocess.run(
-        ["git", *args], cwd=repo, capture_output=True, text=True, check=True
+        ["git", *args],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+        env=sandbox.unhardened_git_env(),
     ).stdout
 
 

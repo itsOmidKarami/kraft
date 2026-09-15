@@ -6,10 +6,12 @@ import asyncio
 import json
 import os
 import sqlite3
+import sys
 from pathlib import Path
 
 import httpx
 import pytest
+import yaml
 from support.api import (
     _FAKE_CLAUDE,
     _approve_gate,
@@ -21,6 +23,8 @@ from support.api import (
     _wait_for_status,
 )
 from support.harness import fake_templates_dir, make_repo
+
+_FAKE_REVIEWER = Path(__file__).parent / "support" / "fake_reviewer.py"
 
 
 def _chain_review_path(client, wid):
@@ -53,15 +57,49 @@ def _create_running_session(wid: str, session_id: str, node_id: str, *, pid: int
 
 
 def test_default_chain_fix_loop_breach_over_http(tmp_path, monkeypatch):
+    """C1 (Kraft-s7c04.8) now dispatches `on.test.run` at `implementation`
+    too, so a repo whose test suite is broken from intake no longer reaches
+    `verify`'s fix loop at all -- it stops at `implementation` on the very
+    first pass instead (that node has no `fix_loop` to cap-breach). This
+    test's target is specifically `verify`'s cap-breach machinery over HTTP,
+    so `on.test.run` is noop'd everywhere (`noop_verify=True`, which C1's
+    gate reads the same as any other dispatch) and the fix loop is driven by
+    `on.review.local.run`'s own findings instead -- the same scripted-
+    reviewer approach `test_findings_loop.py` uses."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "noop")
     repo = make_repo(tmp_path)
     # Own policy fixture — do not gate on the shipped attempts value.
-    tdir = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
-    # attempts=1, not 2: on.test.run's blind failure is now a stable
-    # synthesized Finding (Kraft: findings.from_blind_failure), so with a
-    # noop fix agent the identical fingerprint recurring at round 1 now
-    # correctly trips the stuck-detector before a 2-attempt cap would ever
-    # be reached. attempts=1 breaches the cap on the second bump, strictly
+    tdir = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE), noop_verify=True)
+    registry_path = tdir / "registry.yaml"
+    registry = yaml.safe_load(registry_path.read_text())
+    plan_path = tmp_path / "review-plan.json"
+    plan_path.write_text(
+        json.dumps(
+            [
+                {
+                    "status": "failed",
+                    "findings": [
+                        {
+                            "severity": "critical",
+                            "message": "needs a fix",
+                            "file": "a.py",
+                            "line": 1,
+                            "source_plugin": "fake",
+                        }
+                    ],
+                }
+            ]
+        )
+    )
+    monkeypatch.setenv("KRAFT_FAKE_REVIEW_PLAN", str(plan_path))
+    registry["hooks"]["on.review.local.run"] = {
+        "kind": "subprocess",
+        "command": [sys.executable, str(_FAKE_REVIEWER)],
+    }
+    registry_path.write_text(yaml.safe_dump(registry))
+    # attempts=1, not 2: an identical fingerprint recurring at round 1
+    # correctly trips the stuck-detector before a 2-attempt cap would ever be
+    # reached. attempts=1 breaches the cap on the second bump, strictly
     # before the stuck-check runs, so this test still exercises the
     # cap-breach path specifically.
     (tdir / "policy.yaml").write_text(
