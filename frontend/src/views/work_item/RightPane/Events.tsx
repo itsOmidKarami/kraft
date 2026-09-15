@@ -272,7 +272,17 @@ export function Events({
                   const where = f.file ? `${f.file}:${f.line ?? "?"}` : "—";
                   return (
                     <li key={`${f.source_plugin}:${f.file}:${i}`}>
-                      <span className="tag tag-neutral stream-severity">{f.severity || "—"}</span>
+                      <span
+                        className="tag tag-neutral stream-severity"
+                        title={
+                          f.reported_severity
+                            ? `this review rated it ${f.reported_severity}; held at ${f.severity} because the code it flagged had not changed`
+                            : undefined
+                        }
+                      >
+                        {f.severity || "—"}
+                        {f.reported_severity ? ` (was rated ${f.reported_severity})` : ""}
+                      </span>
                       <span className="doc-path stream-where" data-allow-ellipsis title={where}>
                         <span dir="ltr">{where}</span>
                       </span>

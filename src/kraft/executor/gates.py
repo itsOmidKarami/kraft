@@ -106,6 +106,7 @@ async def apply_rejection(
     note: str,
     node: str | None = None,
     by: str = "human",
+    verdict: str | None = None,
 ) -> int | None:
     """Record a gate rejection and return the node index the chain re-enters at,
     or None when the reject loop's cap breached and the item is now parked.
@@ -130,7 +131,7 @@ async def apply_rejection(
     target_id = chain["nodes"][target]["id"]
     await db.write(
         lambda c: store.reject_gate(
-            c, work_item_id, gate, note, reopen=replan, node=target_id, by=by
+            c, work_item_id, gate, note, reopen=replan, node=target_id, by=by, verdict=verdict
         )
     )
     if replan:
@@ -300,6 +301,7 @@ async def review_gates(
                 note=note,
                 node=node["id"] if verdict == "fixed" else None,
                 by="agent",
+                verdict=verdict,
             )
             if target is None:
                 return "needs_human"
@@ -315,6 +317,13 @@ async def review_gates(
             bd_cwd=bd_cwd,
             start_index=start,
             steer=steer,
+            # An agent's verdict is not a human's steer (Kraft-s7c04.6). Without
+            # this the re-run's prompt led with "A human has steered this run"
+            # over a note an agent wrote -- and on a `fixed` verdict, over
+            # commits the agent had just made -- which is how a review brief
+            # came to tell the human they had fixed it themselves. `steer` is
+            # None on the approve path, where `source` is never read.
+            steer_source="gate_review",
         )
     return status
 
@@ -820,7 +829,7 @@ async def resume_after_escalation(
         start_index=start,
         policy=policy,
         steer=steer,
-        steer_seeded=seeded,
+        steer_source="seeded" if seeded else "human",
         launch=launch,
         on_approve=on_approve,
     )

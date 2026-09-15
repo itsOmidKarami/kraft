@@ -737,7 +737,11 @@ def test_migrate_v9_to_v10_widens_worker_sessions_status(tmp_path):
     assert row["created_at"] == "now"
     assert row["started_at"] == "started"
     assert row["round"] == 3
-    assert row["model"] == "claude"
+    # migration 29 (Kraft-s7c04.15) empties `model` rather than carry the
+    # fixture's value forward: every value ever written to this column came from
+    # `usage._model_of` reading the first `modelUsage` key, which is the haiku
+    # warm-up. The measured columns beside it are untouched.
+    assert row["model"] is None
     assert row["tokens_in"] == 10
     assert row["tokens_out"] == 20
     assert row["cost_usd"] == 0.5
@@ -1041,6 +1045,41 @@ def test_migration_14_backfills_worker_session_attempts(tmp_path):
     assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
     got = {r["id"]: r["attempt"] for r in conn2.execute("SELECT id, attempt FROM worker_sessions")}
     assert got == {"s1": 1, "s2": 2, "s3": 3, "s4": 1}
+
+
+def test_migration_29_clears_the_unreliable_model_column(tmp_path):
+    """Every `model` ever written came from `usage._model_of` reading the FIRST
+    `modelUsage` key, which is Claude Code's haiku warm-up rather than the model
+    that did the work (Kraft-s7c04.15). NULL already means "no model reported"
+    to every reader, so the column is emptied rather than left asserting
+    something false -- a cost-by-model comparison across this migration has to
+    exclude NULL rows, and cannot if a wrong value looks like a right one."""
+    path = tmp_path / "orchestrator.db"
+    conn = db._connect(path)
+    _build_old_db(conn, 29)
+    conn.execute("PRAGMA user_version = 29")
+    conn.execute(
+        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
+        "'active','now','now')"
+    )
+    conn.execute(
+        "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, log_path, "
+        "result_path, status, created_at, model, cost_usd) VALUES "
+        "('s1','w1','verify','on.review.local.run','/l','/r','done','now',"
+        "'claude-haiku-4-5-20251001', 1.25)"
+    )
+    conn.commit()
+    conn.close()
+
+    conn2 = db._connect(path)
+    db.migrate(conn2)
+    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    row = conn2.execute("SELECT model, cost_usd, status FROM worker_sessions").fetchone()
+    assert row["model"] is None
+    # only the model is unreliable; everything measured alongside it survives
+    assert row["cost_usd"] == 1.25
+    assert row["status"] == "done"
 
 
 def test_migrate_v16_to_v17_rebuilds_for_rate_limited(tmp_path):

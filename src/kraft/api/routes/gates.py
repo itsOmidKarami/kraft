@@ -290,6 +290,9 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
             gate=gate,
             note=body.note,
             node=body.node,
+            # A person only ever rejects; `fixed` is a gate-reviewer verdict and
+            # has no door here (Kraft-s7c04.16).
+            verdict="reject",
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

@@ -48,7 +48,10 @@ _PROMPT = (
     "discarded.\n"
     '  "verdict": "fixed"     -- you repaired something in this worktree. You '
     "may edit and commit here, but you may not then approve your own edit: the "
-    "node re-runs and is measured again. `concerns` says what you changed.\n"
+    "node re-runs and is measured again. `concerns` says what you changed. Note "
+    "what that costs: the whole node runs again and is reviewed again, so this "
+    "is the right call for a defect you would otherwise have rejected for, and "
+    "the wrong one for a nit you could have let through.\n"
     '  "verdict": "undecided" -- anything else. A person looks at it, with your '
     "`concerns` in front of them.\n"
     "\n"

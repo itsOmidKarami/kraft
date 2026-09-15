@@ -188,6 +188,12 @@ export interface Finding {
   file: string | null;
   line: number | null;
   source_plugin: string;
+  /** What the reviewer itself rated this, when the fix loop overrode it.
+   *  A repeat finding cannot be re-rated downwards on a tree nobody touched
+   *  (Kraft-s7c04.3); the reviewer's own answer is kept rather than erased, so
+   *  a reviewer disagreeing with itself stays visible rather than becoming
+   *  indistinguishable from a reviewer agreeing. Absent when they match. */
+  reported_severity?: string;
 }
 
 export type SessionStatus =

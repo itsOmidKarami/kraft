@@ -414,7 +414,17 @@ async def run_agent_task(
             "$KRAFT_REVIEW_PACKAGE: commit list, files changed, and the diff "
             "with ten lines of context per hunk. Read that file first. Its "
             "context lines ARE the changed files -- do not read a changed file "
-            "separately unless a hunk you must judge is cut off mid-function.\n"
+            "separately unless a hunk you must judge is cut off mid-function. "
+            # From round 1 of a fix loop the package is narrowed to the change
+            # since the last review (Kraft-s7c04.1), and its own header says so
+            # and names the command for the rest. Without this clause the
+            # sentence above forbids the escape hatch that makes narrowing safe,
+            # and a compliant agent reviews one round's edit believing it has
+            # seen the whole change.
+            "If the package's header says its range is narrowed to the change "
+            "since an earlier round, the rest of the branch is still yours to "
+            "read with the git command that header names -- use it when you "
+            "need to judge the change as a whole.\n"
         )
     if method_text:
         # After the contract, before steering: the agent reads what it must

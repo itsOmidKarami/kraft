@@ -55,39 +55,95 @@ def _seed(tmp_path, seq):
     return asyncio.run(scenario())
 
 
-_MEASURED = ("findings_measured", {"node_id": "verify", "cycle": 0, "fingerprints": ["fp1"]})
+def _payload(message="boom", severity="critical", **extra):
+    return {
+        "severity": severity,
+        "message": message,
+        "file": "a.py",
+        "line": 1,
+        "source_plugin": "p",
+        **extra,
+    }
+
+
+_MEASURED = (
+    "findings_measured",
+    {"node_id": "verify", "cycle": 0, "fingerprints": ["fp1"], "findings": [_payload()]},
+)
 _FIXED = ("fix_cycle_started", {"node_id": "verify", "cycle": 1})
 
 
-def test_a_measurement_with_no_fix_after_it_still_yields_its_fingerprints(tmp_path):
+def _messages(previous):
+    return [f.message for f in previous]
+
+
+def test_a_measurement_with_no_fix_after_it_still_yields_its_findings(tmp_path):
     """The REPEAT half. Pre-fix this returned None, so the first fix cycle after
     a steered retry lost the tag on the very finding that caused the stop."""
-    prints, fix_ran = _seed(tmp_path, [_MEASURED])
-    assert prints == ["fp1"]
+    previous, fix_ran, _ = _seed(tmp_path, [_MEASURED])
+    assert _messages(previous) == ["boom"]
     assert fix_ran is False
 
 
 def test_a_fix_after_the_measurement_is_reported(tmp_path):
-    prints, fix_ran = _seed(tmp_path, [_MEASURED, _FIXED])
-    assert prints == ["fp1"]
+    previous, fix_ran, _ = _seed(tmp_path, [_MEASURED, _FIXED])
+    assert _messages(previous) == ["boom"]
     assert fix_ran is True
 
 
 def test_a_fix_before_the_measurement_does_not_count(tmp_path):
     """Order matters: escalation needs a fix that ran *since* the measurement."""
-    prints, fix_ran = _seed(tmp_path, [_FIXED, _MEASURED])
-    assert prints == ["fp1"]
+    previous, fix_ran, _ = _seed(tmp_path, [_FIXED, _MEASURED])
+    assert _messages(previous) == ["boom"]
     assert fix_ran is False
 
 
 def test_another_node_s_events_are_ignored(tmp_path):
-    other = ("findings_measured", {"node_id": "elsewhere", "fingerprints": ["nope"]})
-    prints, fix_ran = _seed(tmp_path, [_MEASURED, other])
-    assert prints == ["fp1"]
+    other = ("findings_measured", {"node_id": "elsewhere", "findings": [_payload("nope")]})
+    previous, _, _ = _seed(tmp_path, [_MEASURED, other])
+    assert _messages(previous) == ["boom"]
 
 
 def test_nothing_measured_yet(tmp_path):
-    assert _seed(tmp_path, []) == (None, False)
+    assert _seed(tmp_path, []) == (None, False, None)
+
+
+def test_the_whole_finding_comes_back_not_just_its_tag(tmp_path):
+    """Kraft-s7c04.1 needs the messages to hand the reviewer back what it said,
+    and Kraft-s7c04.3 needs the severities so a repeat cannot be re-rated down
+    on a tree nobody touched. The fingerprints alone answer neither."""
+    previous, _, _ = _seed(tmp_path, [_MEASURED])
+    (f,) = previous
+    assert (f.severity, f.file, f.source_plugin) == ("critical", "a.py", "p")
+
+
+def test_a_same_as_tag_survives_the_round_trip(tmp_path):
+    """The carry is only worth anything if identity comes back with it."""
+    tagged = (
+        "findings_measured",
+        {"node_id": "verify", "cycle": 0, "findings": [_payload(same_as="0123456789abcdef")]},
+    )
+    previous, _, _ = _seed(tmp_path, [tagged])
+    assert previous[0].fingerprint == "0123456789abcdef"
+
+
+def test_a_measurement_survives_a_retry(tmp_path):
+    """Deliberately NOT bounded the way `store.last_rejection` is. A review of
+    this plan argued for a `work_item_retried` boundary by analogy with it; the
+    analogy is wrong, because a retry does not change the tree and Kraft-m2q
+    exists precisely because the first fix cycle after a steered retry lost the
+    REPEAT tag on the finding that caused the stop."""
+    previous, _, _ = _seed(tmp_path, [_MEASURED, ("work_item_retried", {})])
+    assert _messages(previous) == ["boom"]
+
+
+def test_only_the_most_recent_measurement_is_ever_returned(tmp_path):
+    """What keeps an unbounded scan safe: however long the history, at most one
+    round's tags can reach `resolve_identity`'s `known`, so nothing can claim
+    identity with a finding from five rounds back."""
+    older = ("findings_measured", {"node_id": "verify", "findings": [_payload("ancient")]})
+    previous, _, _ = _seed(tmp_path, [older, _MEASURED])
+    assert _messages(previous) == ["boom"]
 
 
 # --- the behavioural half: REPEAT on the first fix cycle after a steered retry ---
