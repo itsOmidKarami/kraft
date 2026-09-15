@@ -15,6 +15,7 @@ from kraft import config as _config
 from kraft import events, store
 from kraft import findings as _findings
 from kraft import policy as _policy
+from kraft import sandbox as _sandbox
 from kraft.adapters import agent as _agent
 from kraft.adapters import forge as _forge
 from kraft.adapters import subprocess as _subprocess
@@ -192,6 +193,7 @@ async def dispatch_node(
             effort=inv.effort,
             allowed_tools=inv.allowed_tools,
             permission_mode=inv.permission_mode,
+            sandbox=inv.sandbox,
             steering_texts=inv.steering_texts,
             artifact=binding.get("artifact"),
             method_text=inv.method_text,
@@ -256,6 +258,7 @@ async def dispatch_node(
         # `test_command` into a single `["**"]` scope, so this is one shape
         # regardless of which field an operator set.
         repo_entry = (launch.repo_entry or {}) if launch else {}
+        sandbox = _sandbox.resolve(binding, repo_entry)
         repo_scopes = repo_entry.get("test_scopes")
         if not repo_scopes and repo_entry.get("test_command"):
             # `config.load_repos` already wraps a bare `test_command` into a
@@ -295,6 +298,7 @@ async def dispatch_node(
                 # CPython would import the stale bytecode and the re-measure would
                 # never see the fix. Never writing bytecode keeps every cycle honest.
                 env={"PYTHONDONTWRITEBYTECODE": "1"},
+                sandbox=sandbox,
                 **{**common, "session_id": uuid.uuid4().hex},
             )
             if status != "done":

@@ -11,6 +11,7 @@ import psutil
 
 from kraft import events, store
 from kraft import policy as _policy
+from kraft import sandbox as _sandbox
 from kraft import usage as _usage
 from kraft.adapters.subprocess import _progress_usage, _resolve_result_file, read_result_fields
 from kraft.executor import gates
@@ -295,6 +296,15 @@ async def _guarded_adopt(
             await db.write(lambda c: store.mark_needs_human(c, work_item_id, node_id, reason))
         except Exception:  # noqa: BLE001
             logger.exception("could not mark %s needs_human after adopt crash", work_item_id)
+    finally:
+        # However this adopted session ends -- its client pid exiting, a
+        # crash, or a shutdown cancelling this task -- its container is
+        # parented by the docker daemon and outlives all three unless
+        # something says so (Kraft-rki). `teardown` is a no-op for a session
+        # that was never sandboxed, which is why this does not first work out
+        # whether this one was: deciding that per call path is how the third
+        # path got missed twice.
+        await asyncio.shield(_sandbox.teardown(session_id))
 
 
 async def reattach(
@@ -318,6 +328,18 @@ async def reattach(
 
     for r in rows:
         sid = r["id"]
+        # Only an adopted session still has something running to tear down
+        # later (`_guarded_adopt`'s `finally`). For every other row the
+        # session is over as far as Kraft is concerned, while its container --
+        # daemon-parented, so it survived the restart that orphaned this row
+        # exactly as the client pid could have -- is not (Kraft-rki).
+        adopting = (
+            r["status"] != "pending"
+            and r["pid"] is not None
+            and _identity_ok(r["pid"], r["pid_start_time"])
+        )
+        if not adopting:
+            await _sandbox.teardown(sid)
         if r["status"] == "pending":
             await db.write(lambda c, sid=sid: store.session_unknown(c, sid))
             await db.write(
@@ -332,7 +354,7 @@ async def reattach(
             continue
 
         pid = r["pid"]
-        if pid is not None and _identity_ok(pid, r["pid_start_time"]):
+        if adopting:
             await db.write(lambda c, sid=sid: store.session_reattached(c, sid))
             adopted_tasks[sid] = asyncio.create_task(
                 _guarded_adopt(

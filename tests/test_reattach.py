@@ -7,6 +7,8 @@ import signal
 import subprocess
 import sys
 
+from support.harness import fake_docker_bin
+
 from kraft import db, events, reattach, store
 from kraft.paths import RunDirs
 from kraft.templates import Registry
@@ -779,3 +781,83 @@ def test_adopting_a_session_leaves_its_backgrounded_child_alone(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_reattach_kills_the_container_of_a_session_it_does_not_adopt(tmp_path, monkeypatch):
+    """Kraft-rki: a container is parented by the docker daemon, so it survived
+    the restart that orphaned this row exactly as the client pid could have.
+    Reattach is the only thing left that knows the session is over, so it is
+    where the teardown belongs -- not at the one call path that first showed
+    the leak."""
+    monkeypatch.setenv("PATH", f"{fake_docker_bin(tmp_path)}{os.pathsep}{os.environ['PATH']}")
+    rm_log = tmp_path / "docker-rm-log"
+    monkeypatch.setenv("FAKE_DOCKER_RM_LOG", str(rm_log))
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed_item(database)
+            (rd.results / "s1.json").write_text('{"status": "done"}')
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="implementation",
+                    hook_point="on.implementation.start",
+                    log_path=str(rd.logs / "s1.log"),
+                    result_path=str(rd.results / "s1.json"),
+                )
+            )
+            await database.write(lambda c: store.session_running(c, "s1", 2_000_000_000, 123.0))
+            summary, _ = await reattach.reattach(database, rd, _REG)
+            assert summary.resolved_from_file == ["s1"]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    assert rm_log.read_text().split() == ["kraft-s1"]
+
+
+def test_an_adopted_session_kills_its_container_when_it_ends(tmp_path, monkeypatch):
+    """The third call path into the same teardown (Kraft-rki): a session
+    adopted after a restart ends inside `_guarded_adopt`, not inside
+    `run_task`'s `finally`, so its container needs the same one hook there."""
+    monkeypatch.setenv("PATH", f"{fake_docker_bin(tmp_path)}{os.pathsep}{os.environ['PATH']}")
+    rm_log = tmp_path / "docker-rm-log"
+    monkeypatch.setenv("FAKE_DOCKER_RM_LOG", str(rm_log))
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        proc = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(0.2)"], start_new_session=True
+        )
+        try:
+            import psutil
+
+            pst = psutil.Process(proc.pid).create_time()
+            await _seed_item(database)
+            (rd.results / "s1.json").write_text('{"status": "done"}')
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="implementation",
+                    hook_point="on.implementation.start",
+                    log_path=str(rd.logs / "s1.log"),
+                    result_path=str(rd.results / "s1.json"),
+                )
+            )
+            await database.write(lambda c: store.session_running(c, "s1", proc.pid, pst))
+            _, adopted = await reattach.reattach(database, rd, _REG)
+            assert rm_log.exists() is False  # still running: nothing to tear down yet
+            await adopted["s1"]
+        finally:
+            proc.wait()
+            await database.close()
+
+    asyncio.run(scenario())
+    assert rm_log.read_text().split() == ["kraft-s1"]

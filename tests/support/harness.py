@@ -115,6 +115,62 @@ def isolated_bd(tmp_path: Path, name: str = "tracker") -> Path:
     return repo
 
 
+def fake_docker_bin(tmp_path: Path) -> Path:
+    """A directory holding a `docker` that unwraps `docker run [OPTIONS] IMAGE
+    CMD...` back to `CMD...` and execs it — proves the wrap shape a real
+    sandbox launch produces without a real daemon. `-u`/`-v`/`-w`/`-e`/`--name`
+    each consume exactly one following argument in what `sandbox.docker_argv`
+    emits, so skipping flag+value pairs generically finds the image (the
+    first survivor) and the real command (everything after it), regardless
+    of exact flag count or order. `--security-opt=...`/`--cap-drop=...` carry
+    their value in the same token (`=`-joined), so they are dropped outright
+    rather than skip-one'd.
+
+    Also answers `docker rm -f NAME` -- the container teardown
+    `sandbox.teardown` issues once a sandboxed session's client side is down
+    -- by appending `NAME` to `$FAKE_DOCKER_RM_LOG` when that env var is set,
+    so a test can tell the real teardown call happened without a daemon to
+    actually ask.
+    """
+    bin_dir = tmp_path / "fake-docker-bin"
+    bin_dir.mkdir(exist_ok=True)
+    docker = bin_dir / "docker"
+    docker.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -eu\n"
+        '# Test seam: touch a sentinel if asked, so a test can tell "the real\n'
+        '# command ran because it went through this fake docker" apart from\n'
+        '# "the real command ran because nothing wrapped it at all" -- the two\n'
+        "# look identical from the marker file the real command itself writes.\n"
+        'if [ -n "${FAKE_DOCKER_CALLED:-}" ]; then : > "$FAKE_DOCKER_CALLED"; fi\n'
+        'if [ "$1" = "rm" ]; then\n'
+        "  shift\n"
+        '  for arg in "$@"; do\n'
+        '    [ "$arg" = "-f" ] && continue\n'
+        '    if [ -n "${FAKE_DOCKER_RM_LOG:-}" ]; then echo "$arg" >> "$FAKE_DOCKER_RM_LOG"; fi\n'
+        "  done\n"
+        "  exit 0\n"
+        "fi\n"
+        'shift # drop "run"\n'
+        'image=""\n'
+        "cmd=()\n"
+        "skip=0\n"
+        'for arg in "$@"; do\n'
+        '  if [ "$skip" = 1 ]; then skip=0; continue; fi\n'
+        '  case "$arg" in\n'
+        "    --rm|--security-opt=*|--cap-drop=*) continue ;;\n"
+        "    -u|-v|-w|-e|--name) skip=1; continue ;;\n"
+        "    *)\n"
+        '      if [ -z "$image" ]; then image="$arg"; else cmd+=("$arg"); fi\n'
+        "      ;;\n"
+        "  esac\n"
+        "done\n"
+        'exec "${cmd[@]}"\n'
+    )
+    docker.chmod(0o755)
+    return bin_dir
+
+
 def fake_registry(python_exe: str, fake_agent_path: Path) -> Registry:
     base = load_registry(_REPO_ROOT / "templates" / "registry.yaml")
     hooks = dict(base.hooks)
