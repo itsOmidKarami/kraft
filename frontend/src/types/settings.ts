@@ -1,12 +1,5 @@
 /* ── settings (design 5a–5e) ─────────────────────────────────────────────── */
 
-export interface RepoSubmodule {
-  path: string;
-  enabled: boolean;
-  test_command: string | null;
-  chain_override: string | null;
-}
-
 export interface TestScope {
   paths: string[];
   command: string;
@@ -24,9 +17,10 @@ export interface Repo {
   default_model: string | null;
   deny_tools: string[];
   steering: string[];
-  allow_cross_repo: boolean;
   default_root_merge_policy: "bump" | "skip" | "bump_no_mr";
-  submodules: RepoSubmodule[];
+  /** A human has touched this entry — not "this has run". One-way: never
+   *  returns to false. Drives the Detected section in ReposPage. */
+  managed: boolean;
 }
 
 export interface RepoProbe {

@@ -2,25 +2,27 @@ import { render } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { vi } from "vitest";
 import * as api from "../../api";
-import type { Theme } from "../../types";
+import type { Repo, Theme } from "../../types";
 import { Settings } from "./index";
 
-export const repo = {
+/** A full `Repo`, defaults overridden per test. Called with no args it is the
+ *  same fixture every earlier test relied on as a plain object. */
+export const repo = (overrides: Partial<Repo> = {}): Repo => ({
   path: "/repo-a",
   name: "repo-a",
   default_chain_template: "default",
   test_command: "uv run pytest -q",
-  test_scopes: null as { paths: string[]; command: string }[] | null,
+  test_scopes: null,
   forge: "github",
   project: "acme/repo-a",
   enabled: true,
   default_model: null,
   deny_tools: [],
   steering: [],
-  allow_cross_repo: false,
-  default_root_merge_policy: "bump" as const,
-  submodules: [],
-};
+  default_root_merge_policy: "bump",
+  managed: true,
+  ...overrides,
+});
 
 export const hooks = {
   "on.env.prepare": { kind: "builtin" as const, handler: "env_setup" },
@@ -60,7 +62,7 @@ export const access = {
  *  per test as needed. */
 export function setupSettingsMocks() {
   vi.restoreAllMocks();
-  vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [repo] });
+  vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [repo()] });
   vi.spyOn(api, "getTemplates").mockResolvedValue([
     {
       id: "quick-task",

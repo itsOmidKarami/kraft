@@ -128,42 +128,48 @@ def _normalize_test_scopes(scopes: object) -> list[dict] | None:
     return scopes
 
 
-def _normalize_submodules(raw: object) -> list[dict]:
-    """Per-submodule settings a repo entry carries alongside the paths its own
-    `.gitmodules` names at probe time (design 25 "SUBMODULES"): whether the
-    submodule is declarable on a work item, its own test command override, and
-    its own chain override. Never populated from a probe — an operator turns
-    these on by hand, one row per submodule path they choose to manage here.
+def _migrate_submodule_edges(repos: list[dict]) -> list[dict]:
+    """Legacy `submodules[]` edges become ordinary child repo entries (§5).
+
+    A pure transform, deliberately: doing it on read keeps a write out of a
+    read path, and the migrated shape persists the next time any route calls
+    `save_repos`. Idempotent -- once the field is gone there is nothing left
+    to migrate.
+
+    Only an edge a human actually configured survives. An all-default edge
+    records no decision, so it is dropped and auto-connect re-creates it as
+    `managed: false`.
     """
-    if raw is None:
-        return []
-    if not isinstance(raw, list):
-        raise ConfigError("repos.yaml: 'submodules' must be a list of mappings")
-    out = []
-    for s in raw:
-        if not isinstance(s, dict) or not isinstance(s.get("path"), str) or not s["path"]:
-            raise ConfigError("repos.yaml: every 'submodules' entry needs a string 'path'")
-        enabled = s.get("enabled", False)
-        if not isinstance(enabled, bool):
-            raise ConfigError(f"repos.yaml: submodule {s['path']!r} 'enabled' must be a boolean")
-        test_command = s.get("test_command")
-        if test_command is not None and not isinstance(test_command, str):
-            raise ConfigError(
-                f"repos.yaml: submodule {s['path']!r} 'test_command' must be a string"
+    seen = {r["path"] for r in repos if isinstance(r.get("path"), str)}
+    out: list[dict] = []
+    for r in repos:
+        edges = r.pop("submodules", None) or []
+        r.pop("allow_cross_repo", None)
+        out.append(r)
+        if not isinstance(edges, list):
+            continue
+        for e in edges:
+            if not isinstance(e, dict) or not isinstance(e.get("path"), str) or not e["path"]:
+                continue
+            if not (e.get("enabled") or e.get("test_command") or e.get("chain_override")):
+                continue
+            child = str(Path(r["path"]) / e["path"])
+            # A hand-connected child already holds the operator's real intent;
+            # the edge beside it is the stale copy, so it loses.
+            if child in seen:
+                continue
+            seen.add(child)
+            out.append(
+                {
+                    "path": child,
+                    "name": Path(child).name,
+                    "enabled": bool(e.get("enabled")),
+                    # the edge carried a human decision -- that is the touch
+                    "managed": True,
+                    "test_command": e.get("test_command"),
+                    "default_chain_template": e.get("chain_override") or "default",
+                }
             )
-        chain_override = s.get("chain_override")
-        if chain_override is not None and not isinstance(chain_override, str):
-            raise ConfigError(
-                f"repos.yaml: submodule {s['path']!r} 'chain_override' must be a string"
-            )
-        out.append(
-            {
-                "path": s["path"],
-                "enabled": enabled,
-                "test_command": test_command,
-                "chain_override": chain_override,
-            }
-        )
     return out
 
 
@@ -188,10 +194,18 @@ def load_repos(
     repos = data.get("repos") or []
     if not isinstance(repos, list) or not all(isinstance(r, dict) for r in repos):
         raise ConfigError("repos.yaml: 'repos' must be a list of mappings")
+    repos = _migrate_submodule_edges(repos)
     for r in repos:
         if not isinstance(r.get("path"), str) or not r["path"]:
             raise ConfigError("repos.yaml: every repo needs a string 'path'")
         _normalize_forge(r)
+        # True, not False: every entry that predates this field was connected
+        # by a human, and `managed` is what keeps a human-connected repo out of
+        # Settings' "Detected" section. Auto-connected children are written
+        # with an explicit `managed: false` instead of relying on a default.
+        r.setdefault("managed", True)
+        if not isinstance(r["managed"], bool):
+            raise ConfigError("repos.yaml: 'managed' must be a boolean")
         r.setdefault("default_model", None)
         if r.get("default_model") is not None and not isinstance(r["default_model"], str):
             raise ConfigError("repos.yaml: 'default_model' must be a string")
@@ -207,16 +221,12 @@ def load_repos(
             v = r.setdefault(key, [])
             if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
                 raise ConfigError(f"repos.yaml: {key!r} must be a list of strings")
-        r.setdefault("allow_cross_repo", False)
-        if not isinstance(r["allow_cross_repo"], bool):
-            raise ConfigError("repos.yaml: 'allow_cross_repo' must be a boolean")
         r.setdefault("default_root_merge_policy", "bump")
         if r["default_root_merge_policy"] not in ROOT_MERGE_POLICIES:
             raise ConfigError(
                 f"repos.yaml: 'default_root_merge_policy' must be one of "
                 f"{sorted(ROOT_MERGE_POLICIES)}"
             )
-        r["submodules"] = _normalize_submodules(r.get("submodules"))
         if validate_steering:
             try:
                 _steering.validate(steering_dir, r.get("steering", []), where="repos.yaml")

@@ -4,11 +4,34 @@ import { useSearchParams } from "react-router-dom";
 import * as api from "../../api";
 import { OverflowMenu, Row, RowText, SectionLabel, Switch } from "../../components/ui";
 import { backdropProps, useModal } from "../../useModal";
-import type { Repo, RepoProbe, RepoSubmodule, TemplateSummary } from "../../types";
+import type { Repo, RepoProbe, TemplateSummary } from "../../types";
 import "./repos.css";
 import { PageHead, PhoneHeader, usePhone, useResource } from "./shared";
 
 /* ── 5a repos ─────────────────────────────────────────────────────────────── */
+
+/** Parent-then-children ordering. Plain path sort does exactly this: a child's
+ *  path is its parent's path plus a separator, so it always sorts immediately
+ *  after it and before any sibling of the parent. Sorting, not grouping — no
+ *  second mental model, no new component. */
+export const sortRepos = (repos: Repo[]): Repo[] =>
+  [...repos].sort((a, b) => {
+    const as = a.path.split("/");
+    const bs = b.path.split("/");
+    for (let i = 0; i < Math.min(as.length, bs.length); i++) {
+      if (as[i] !== bs[i]) return as[i].localeCompare(bs[i]);
+    }
+    // One path is a prefix of the other: the shorter (the parent) sorts first.
+    return as.length - bs.length;
+  });
+
+/** The connected repo this one sits inside, or undefined when it is a root.
+ *  Longest match wins, so a grandchild names its immediate parent rather than
+ *  the outermost workspace. */
+const parentOf = (r: Repo, all: Repo[]): Repo | undefined =>
+  all
+    .filter((p) => p.path !== r.path && r.path.startsWith(`${p.path}/`))
+    .sort((a, b) => b.path.length - a.path.length)[0];
 
 function AddRepo({
   templates,
@@ -22,7 +45,6 @@ function AddRepo({
   const [path, setPath] = useState("");
   const [probe, setProbe] = useState<RepoProbe | null>(null);
   const [tpl, setTpl] = useState("default");
-  const [crossRepo, setCrossRepo] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const ref = useModal<HTMLFormElement>(onClose);
@@ -57,7 +79,7 @@ function AddRepo({
     setBusy(true);
     setError(null);
     try {
-      await api.addRepo({ path, default_chain_template: tpl, allow_cross_repo: crossRepo });
+      await api.addRepo({ path, default_chain_template: tpl });
       if (probe) onAdded(probe);
       onClose();
     } catch (err) {
@@ -146,15 +168,6 @@ function AddRepo({
                 : probe.forge
               : "no forge remote detected"}
           </div>
-        </div>
-
-        <div className="field repo-cross">
-          <Switch checked={crossRepo} onChange={setCrossRepo} label="allow cross-repo items" />
-          <span className="field-hint">
-            {probe && probe.submodules.length === 0
-              ? "off — no submodules to cross"
-              : "allow cross-repo items"}
-          </span>
         </div>
 
         {error && <p className="form-error">{error}</p>}
@@ -248,23 +261,6 @@ function RepoDetail({
       setMessage(e instanceof Error ? e.message : String(e));
       setBusy(false);
     }
-  };
-
-  const probedSubmodulePaths =
-    lastProbe?.path === path ? lastProbe.probe.submodules : [];
-  const savedPaths = new Set(current.submodules.map((s) => s.path));
-  const submoduleRows: RepoSubmodule[] = [
-    ...current.submodules,
-    ...probedSubmodulePaths
-      .filter((p) => !savedPaths.has(p))
-      .map((p) => ({ path: p, enabled: false, test_command: null, chain_override: null })),
-  ];
-
-  const setSubmodule = (subPath: string, patch: Partial<RepoSubmodule>) => {
-    const existing = submoduleRows.find((s) => s.path === subPath);
-    const next = { ...(existing ?? { path: subPath, enabled: false, test_command: null, chain_override: null }), ...patch };
-    const rest = current.submodules.filter((s) => s.path !== subPath);
-    set({ submodules: [...rest, next] });
   };
 
   const body = (
@@ -441,14 +437,7 @@ function RepoDetail({
         />
       </div>
 
-      <SectionLabel>Submodules</SectionLabel>
-      <div className="field">
-        <Switch
-          checked={current.allow_cross_repo}
-          onChange={(next) => set({ allow_cross_repo: next })}
-          label="allow cross-repo items"
-        />
-      </div>
+      <SectionLabel>Cross-repo</SectionLabel>
       <div className="field">
         <label>root merge policy</label>
         <div className="seg" role="radiogroup" aria-label="default root merge policy">
@@ -465,48 +454,6 @@ function RepoDetail({
           ))}
         </div>
       </div>
-      {submoduleRows.length > 0 && (
-        <div className="submodule-table">
-          <div className="submodule-row submodule-head">
-            <span>ON</span>
-            <span>SUBMODULE</span>
-            <span>TEST COMMAND</span>
-            <span>CHAIN OVERRIDE</span>
-          </div>
-          {submoduleRows.map((s) => (
-            <div key={s.path} className="submodule-row">
-              <Switch
-                checked={s.enabled}
-                onChange={(next) => setSubmodule(s.path, { enabled: next })}
-                label={s.path}
-              />
-              <span className="mono">{s.path}</span>
-              <input
-                className="input mono"
-                value={s.test_command ?? ""}
-                onChange={(e) => setSubmodule(s.path, { test_command: e.target.value || null })}
-              />
-              <select
-                className="input"
-                value={s.chain_override ?? ""}
-                onChange={(e) => setSubmodule(s.path, { chain_override: e.target.value || null })}
-              >
-                <option value="">inherit</option>
-                {templates.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.id}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ))}
-        </div>
-      )}
-      <p className="settings-note">
-        Off = the item can't declare it and on.repos.scan flags any edit to it. A submodule that
-        is itself a connected repo (libs/repo-a → repo-a) takes that repo's settings unless
-        overridden here.
-      </p>
 
       <SectionLabel>Agent</SectionLabel>
       <div className="field">
@@ -624,9 +571,19 @@ export function ReposPage() {
   const [adding, setAdding] = useState(false);
   const [lastProbe, setLastProbe] = useState<{ path: string; probe: RepoProbe } | null>(null);
   const [params, setParams] = useSearchParams();
+  const [detectedOpen, setDetectedOpen] = useState(false);
   const phone = usePhone();
   const repos = value?.repos ?? [];
   const selected = params.get("repo");
+  const [filter, setFilter] = useState("");
+  const q = filter.trim().toLowerCase();
+  const matches = (r: Repo) =>
+    !q || r.name.toLowerCase().includes(q) || r.path.toLowerCase().includes(q);
+  // `managed` is the split, not `enabled`: a repo a human disabled is a
+  // decision and stays in the main list reading as deliberately off. Only
+  // auto-detected-and-never-touched rows are noise.
+  const visible = sortRepos(repos.filter((r) => r.managed && matches(r)));
+  const detected = sortRepos(repos.filter((r) => !r.managed && matches(r)));
 
   useEffect(() => {
     api.getTemplates().then(setTemplates).catch(() => {});
@@ -670,10 +627,20 @@ export function ReposPage() {
           )}
           {error && <p className="form-error">{error}</p>}
           {repos.length === 0 && !error && <p className="empty">no repos connected yet</p>}
+          {repos.length > 0 && (
+            <input
+              type="search"
+              className="input"
+              aria-label="filter repos"
+              placeholder="Filter repos…"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            />
+          )}
           {/* m12: a phone row is name, one sub-line and a chevron; the path,
               switch and menu live on the repo page */}
           {phone &&
-            repos.map((r: Repo) => (
+            visible.map((r: Repo) => (
               <Row
                 key={r.path}
                 columns="minmax(0, 1fr) auto"
@@ -687,8 +654,8 @@ export function ReposPage() {
                   sub={[
                     r.default_chain_template,
                     r.forge && `${r.forge} ${r.project ?? ""}`.trim(),
-                    r.submodules.length > 0 && `${r.submodules.length} submodules`,
                     !r.enabled && "disabled",
+                    parentOf(r, repos) && `in ${parentOf(r, repos)!.name}`,
                   ]
                     .filter(Boolean)
                     .join(" · ")}
@@ -706,7 +673,7 @@ export function ReposPage() {
               <span />
             </Row>
           )}
-          {!phone && repos.map((r: Repo) => (
+          {!phone && visible.map((r: Repo) => (
             <Row
               key={r.path}
               columns="1fr 110px 160px 160px 110px auto"
@@ -721,7 +688,7 @@ export function ReposPage() {
                 sub={
                   <>
                     <code>{r.path}</code>
-                    {r.submodules.length > 0 && ` · ${r.submodules.length} submodules`}
+                    {parentOf(r, repos) && <span className="tag"> in {parentOf(r, repos)!.name}</span>}
                   </>
                 }
               />
@@ -759,6 +726,47 @@ export function ReposPage() {
               </span>
             </Row>
           ))}
+          {detected.length > 0 && (
+            <div className="detected-repos">
+              <button
+                type="button"
+                className="detected-summary"
+                onClick={() => setDetectedOpen((o) => !o)}
+              >
+                Detected · {detected.length} · not managed
+              </button>
+              {detectedOpen && detected.map((r: Repo) => (
+                <Row
+                  key={r.path}
+                  columns="1fr 110px 160px 160px 110px auto"
+                  data-repo={r.path}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setParams({ repo: r.path })}
+                >
+                  <RowText title={r.name} sub={<code>{r.path}</code>} />
+                  <span className="row-sub">{r.default_chain_template}</span>
+                  <span className="row-sub">
+                    {r.forge ? `${r.forge} · ${r.project ?? ""}` : "—"}
+                  </span>
+                  <span className="row-sub mono">{r.test_command ?? "not detected"}</span>
+                  <span className="repo-row-state" onClick={(e) => e.stopPropagation()}>
+                    <Switch
+                      checked={r.enabled}
+                      onChange={(next) =>
+                        api
+                          .patchRepo(r.path, { enabled: next })
+                          .then(reload)
+                          .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+                      }
+                      label={`enable ${r.name}`}
+                    />
+                  </span>
+                  <span />
+                </Row>
+              ))}
+            </div>
+          )}
           {lastProbe && (
             <p className="settings-note">
               {lastProbe.path} · probe, just now · {lastProbe.probe.submodules.length} submodules
