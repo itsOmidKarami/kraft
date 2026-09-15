@@ -30,7 +30,9 @@ def test_happy_path_via_api(tmp_path, monkeypatch):
 
         item = client.get(f"/api/work-items/{wid}").json()
         assert item["status"] == "completed"
-        assert len(item["worker_sessions"]) == 3
+        # env_setup, implementation's own agent task, C1's on.test.run gate at
+        # implementation (Kraft-s7c04.8), and verify's own on.test.run.
+        assert len(item["worker_sessions"]) == 4
 
         run_dir = Path(client.app.state.run_dirs.base)
         assert "a + b" in (run_dir / "worktrees" / wid / "calc.py").read_text()

@@ -1035,6 +1035,56 @@ def test_reusable_session_ignores_a_stuck_pending_sibling(tmp_path):
     asyncio.run(scenario())
 
 
+def test_reusable_session_ignores_a_failed_sibling(tmp_path):
+    """Batch C·MR1 Task 1 (Kraft-s7c04.9/.8/.14): once C2 stops short-circuiting
+    the scope loop on the first failure, a crash/resume at the same round and
+    head must not hand back the *last* scope's row as if the whole
+    `on.test.run` task passed -- an earlier sibling scope that genuinely
+    failed makes this attempt not reusable, the same way a still-open
+    (pending/running) sibling already does above."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s-scope-a",
+                    work_item_id="w1",
+                    node_id="verify",
+                    hook_point="on.test.run",
+                    log_path="/l1",
+                    result_path="/r1",
+                    round=0,
+                    head_sha="sha-a",
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "s-scope-a", "failed"))
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s-scope-b",
+                    work_item_id="w1",
+                    node_id="verify",
+                    hook_point="on.test.run",
+                    log_path="/l2",
+                    result_path="/r2",
+                    round=0,
+                    head_sha="sha-a",
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "s-scope-b", "done"))
+            got = database.read(
+                lambda c: store.reusable_session(c, "w1", "verify", "on.test.run", 0, "sha-a")
+            )
+            assert got is None
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 def test_latest_session_per_task_drops_a_failed_earlier_attempt(tmp_path):
     """Kraft-s15p0: an earlier attempt's failed row for the same hook_point
     must not survive alongside the current attempt's own row."""

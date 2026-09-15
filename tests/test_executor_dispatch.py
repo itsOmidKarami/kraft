@@ -666,6 +666,109 @@ def test_a_plan_without_task_headings_gets_no_progress_note(tmp_path, monkeypatc
     assert "kraft item progress" not in prompt
 
 
+# ── per-scope result identity (Batch C·MR1 Task 1, Kraft-s7c04.9/.8/.14) ────
+
+
+def test_collect_findings_reports_an_early_scope_failure_even_when_a_later_scope_passes(
+    tmp_path,
+):
+    """`on.test.run`'s scope loop mints one session per scope under one
+    hook_point (dispatch.py's identity problem, spec 2026-09-15-batch-c1-design
+    §"The identity problem"). A last-wins read of the round's sessions would
+    let scope 3's pass erase scope 1's real failure -- exactly the blind
+    failure gap 65f3ed90 closed, and C2 regresses it without this fix."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            node = {"id": "verify", "tasks": ["on.test.run"]}
+            registry = Registry(
+                hooks={"on.test.run": {"kind": "subprocess", "command": ["just", "ci-test"]}}
+            )
+            failing_log = tmp_path / "scope1.log"
+            failing_log.write_text("2 tests failed\n")
+            rows = [
+                ("s-scope-1", str(failing_log), "failed"),
+                ("s-scope-2", "/dev/null", "done"),
+                ("s-scope-3", "/dev/null", "done"),
+            ]
+            for sid, log_path, status in rows:
+                await database.write(
+                    lambda c, sid=sid, log_path=log_path: store.create_session(
+                        c,
+                        id=sid,
+                        work_item_id="w1",
+                        node_id="verify",
+                        hook_point="on.test.run",
+                        log_path=log_path,
+                        result_path=str(tmp_path / f"{sid}.json"),
+                        round=0,
+                        head_sha="sha-a",
+                    )
+                )
+                await database.write(
+                    lambda c, sid=sid, status=status: store.session_exited(c, sid, status)
+                )
+            found, reported = dispatch.collect_findings(database, "w1", node, 0, registry)
+            return found, reported
+        finally:
+            await database.close()
+
+    found, reported = asyncio.run(scenario())
+    assert len(found) == 1, f"expected exactly scope 1's blind failure, got {found}"
+    assert "2 tests failed" in found[0].message
+    assert "just ci-test" in found[0].message
+    assert reported == set()
+
+
+def test_collect_findings_ignores_a_stale_needs_context_row_from_a_reviewer(tmp_path):
+    """A reviewer that exits `needs_context` stops before `bump_counter`, so a
+    resume re-enters at the same round and the same head_sha -- the stale
+    `needs_context` row (no result file) now sits alongside the real row from
+    the resumed pass. Unlike `on.test.run`'s subprocess scope loop, an agent
+    hook only ever mints one *real* session per pass, so this must stay
+    last-wins: reading every same-head row here would hit `_FAILING_STATUSES`
+    on the stale row and mint a bogus `from_blind_failure` critical finding
+    for a failure that never happened."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            node = {"id": "verify", "tasks": ["on.review.x"]}
+            registry = Registry(hooks={"on.review.x": {"kind": "agent", "command": "claude"}})
+            rows = [
+                ("s-stale", "/dev/null", "needs_context"),
+                ("s-resumed", "/dev/null", "done"),
+            ]
+            for sid, log_path, status in rows:
+                await database.write(
+                    lambda c, sid=sid, log_path=log_path: store.create_session(
+                        c,
+                        id=sid,
+                        work_item_id="w1",
+                        node_id="verify",
+                        hook_point="on.review.x",
+                        log_path=log_path,
+                        result_path=str(tmp_path / f"{sid}.json"),
+                        round=0,
+                        head_sha="sha-a",
+                    )
+                )
+                await database.write(
+                    lambda c, sid=sid, status=status: store.session_exited(c, sid, status)
+                )
+            found, reported = dispatch.collect_findings(database, "w1", node, 0, registry)
+            return found, reported
+        finally:
+            await database.close()
+
+    found, reported = asyncio.run(scenario())
+    assert found == []
+    assert reported == set()
+
+
 # ── test-scope selection (Kraft-9wzy) ───────────────────────────────────────
 
 
@@ -717,12 +820,287 @@ def test_matched_scopes_honours_the_exclusion_form():
     assert dispatch._matched_scopes([root, frontend], ["src/x.py"]) == [root]
 
 
-def test_dispatch_runs_matched_scopes_in_order_and_stops_at_the_first_failure(
-    tmp_path, monkeypatch
+# ── C7: incremental scope selection that cannot under-test (Kraft-s7c04.14) ─
+
+_FRONTEND_SCOPE = {"paths": ["frontend/**"], "command": "frontend-cmd"}
+_BACKEND_SCOPE = {"paths": ["backend/**"], "command": "backend-cmd"}
+
+
+def _cmds(to_run: list[dict]) -> set[tuple[str, ...]]:
+    return {tuple(s["cmd"]) for s in to_run}
+
+
+def test_select_scopes_on_the_first_round_uses_the_whole_branch_diff(tmp_path):
+    """No prior measurement for this hook -- the first round always selects
+    from the full branch diff, same as before C7."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            repo = make_repo(tmp_path)
+            base_sha = git_read(repo, "rev-parse", "HEAD")
+            await database.write(lambda c: store.set_base_ref(c, "w1", base_sha))
+            (repo / "frontend").mkdir()
+            (repo / "frontend" / "x.txt").write_text("a")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "touch frontend")
+            binding = {"kind": "subprocess", "command": ["true"]}
+            repo_entry = {"test_scopes": [_FRONTEND_SCOPE, _BACKEND_SCOPE]}
+            return dispatch._select_scopes(
+                database, "w1", repo, "verify", "on.test.run", 0, binding, repo_entry
+            )
+        finally:
+            await database.close()
+
+    to_run, _sandbox = asyncio.run(scenario())
+    assert _cmds(to_run) == {("frontend-cmd",)}
+
+
+def test_select_scopes_stays_incremental_after_a_clean_round(tmp_path):
+    """Round 0 ran both scopes and both passed; round 1's fix touches only
+    frontend. The efficiency half of C7: nothing red from last round, so
+    only the scope the new diff actually touches runs (6c712ea8 ran a
+    13-minute `just ci-test` for a frontend-only fix)."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            repo = make_repo(tmp_path)
+            base_sha = git_read(repo, "rev-parse", "HEAD")
+            await database.write(lambda c: store.set_base_ref(c, "w1", base_sha))
+
+            (repo / "frontend").mkdir()
+            (repo / "frontend" / "x.txt").write_text("a")
+            (repo / "backend").mkdir()
+            (repo / "backend" / "y.txt").write_text("a")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "round0 touches both")
+            round0_head = git_read(repo, "rev-parse", "HEAD")
+
+            for sid in ("r0-frontend", "r0-backend"):
+                await database.write(
+                    lambda c, sid=sid: store.create_session(
+                        c,
+                        id=sid,
+                        work_item_id="w1",
+                        node_id="verify",
+                        hook_point="on.test.run",
+                        log_path="/l",
+                        result_path="/r",
+                        round=0,
+                        head_sha=round0_head,
+                    )
+                )
+                await database.write(lambda c, sid=sid: store.session_exited(c, sid, "done"))
+
+            (repo / "frontend" / "x.txt").write_text("b")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "round1 fix, frontend only")
+
+            binding = {"kind": "subprocess", "command": ["true"]}
+            repo_entry = {"test_scopes": [_FRONTEND_SCOPE, _BACKEND_SCOPE]}
+            return dispatch._select_scopes(
+                database, "w1", repo, "verify", "on.test.run", 1, binding, repo_entry
+            )
+        finally:
+            await database.close()
+
+    to_run, _sandbox = asyncio.run(scenario())
+    assert _cmds(to_run) == {("frontend-cmd",)}
+
+
+def test_select_scopes_reruns_everything_after_any_scope_failed_last_round(tmp_path):
+    """The C2/C7 interaction the spec calls out by name: round 0 fails
+    backend and passes frontend, with frontend's row created *last* -- the
+    same per-scope identity problem Task 1 fixed in `collect_findings`/
+    `reusable_session`, now showing up in `prompts._last_reviewed_head`'s own
+    "most recent row" query once C7 reuses it for a multi-session hook. Round
+    1's fix touches only frontend. Naive incremental selection would let a
+    passing last-created row mark round 0 as fully reviewed and pick only
+    frontend for round 1, leaving the backend failure unverified and
+    un-reported forever. The union rule: a round following any failure at
+    this hook does not trust the incremental diff and runs the full scope
+    set again."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            repo = make_repo(tmp_path)
+            base_sha = git_read(repo, "rev-parse", "HEAD")
+            await database.write(lambda c: store.set_base_ref(c, "w1", base_sha))
+
+            (repo / "frontend").mkdir()
+            (repo / "frontend" / "x.txt").write_text("a")
+            (repo / "backend").mkdir()
+            (repo / "backend" / "y.txt").write_text("a")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "round0 touches both")
+            round0_head = git_read(repo, "rev-parse", "HEAD")
+
+            # backend's row is created first and fails; frontend's is created
+            # last and passes -- the mixed shape a bare "last row wins" read
+            # gets wrong.
+            for sid, status in (("r0-backend", "failed"), ("r0-frontend", "done")):
+                await database.write(
+                    lambda c, sid=sid: store.create_session(
+                        c,
+                        id=sid,
+                        work_item_id="w1",
+                        node_id="verify",
+                        hook_point="on.test.run",
+                        log_path="/l",
+                        result_path="/r",
+                        round=0,
+                        head_sha=round0_head,
+                    )
+                )
+                await database.write(
+                    lambda c, sid=sid, status=status: store.session_exited(c, sid, status)
+                )
+
+            (repo / "frontend" / "x.txt").write_text("b")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "round1 fix, frontend only")
+
+            binding = {"kind": "subprocess", "command": ["true"]}
+            repo_entry = {"test_scopes": [_FRONTEND_SCOPE, _BACKEND_SCOPE]}
+            return dispatch._select_scopes(
+                database, "w1", repo, "verify", "on.test.run", 1, binding, repo_entry
+            )
+        finally:
+            await database.close()
+
+    to_run, _sandbox = asyncio.run(scenario())
+    assert _cmds(to_run) == {("frontend-cmd",), ("backend-cmd",)}
+
+
+def test_select_scopes_verify_round_0_ignores_a_same_head_c1_gate_dispatch(tmp_path):
+    """C1 (`implementation`) and verify both dispatch `on.test.run` under the
+    same hook_point. Before the review fix, verify's round 0 read the latest
+    `done` row for that hook_point via `prompts._last_reviewed_head` --
+    node-blind -- and found C1's own clean gate dispatch at the same HEAD,
+    so the diff since it was empty and `_matched_scopes` failed open to
+    *every* scope. That is not the spec's first acceptance criterion ("the
+    first round still selects from the full branch diff"): round 0 must
+    ignore any other node's dispatch and always measure since `base_ref`,
+    which here touches only frontend."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            repo = make_repo(tmp_path)
+            base_sha = git_read(repo, "rev-parse", "HEAD")
+            await database.write(lambda c: store.set_base_ref(c, "w1", base_sha))
+
+            (repo / "frontend").mkdir()
+            (repo / "frontend" / "x.txt").write_text("a")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "implementation touches frontend only")
+            head = git_read(repo, "rev-parse", "HEAD")
+
+            # C1's own gate dispatch at `implementation`, round 0, clean, at
+            # the same head verify is about to measure from.
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="c1-gate",
+                    work_item_id="w1",
+                    node_id="implementation",
+                    hook_point="on.test.run",
+                    log_path="/l",
+                    result_path="/r",
+                    round=0,
+                    head_sha=head,
+                )
+            )
+            await database.write(lambda c: store.session_exited(c, "c1-gate", "done"))
+
+            binding = {"kind": "subprocess", "command": ["true"]}
+            repo_entry = {"test_scopes": [_FRONTEND_SCOPE, _BACKEND_SCOPE]}
+            return dispatch._select_scopes(
+                database, "w1", repo, "verify", "on.test.run", 0, binding, repo_entry
+            )
+        finally:
+            await database.close()
+
+    to_run, _sandbox = asyncio.run(scenario())
+    assert _cmds(to_run) == {("frontend-cmd",)}
+
+
+def test_select_scopes_round_0_reentry_after_a_partial_failure_still_runs_the_failed_scope(
+    tmp_path,
 ):
-    """Two overlapping scopes; the changed path matches both, both run, in
-    declaration order, and a first-command failure short-circuits the
-    second (test-scope design §3.6)."""
+    """The `retry_after_cap` shape the review flagged: a prior dispatch at an
+    older head failed backend and passed frontend, and the retried dispatch
+    re-enters at round 0 with HEAD having since moved (a fix commit landed,
+    or a human commit). Before the fix, round 0 read the latest `done` row
+    for this hook_point -- frontend's, since the read never looks at its
+    failed backend sibling -- and diffed only from there, so a fix touching
+    only frontend's paths selected only frontend and would have gone green
+    with backend still broken. Round 0 must measure the whole branch diff
+    instead, which still covers backend's files."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            repo = make_repo(tmp_path)
+            base_sha = git_read(repo, "rev-parse", "HEAD")
+            await database.write(lambda c: store.set_base_ref(c, "w1", base_sha))
+
+            (repo / "frontend").mkdir()
+            (repo / "frontend" / "x.txt").write_text("a")
+            (repo / "backend").mkdir()
+            (repo / "backend" / "y.txt").write_text("a")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "touches both")
+            h1 = git_read(repo, "rev-parse", "HEAD")
+
+            for sid, status in (("backend-fail", "failed"), ("frontend-pass", "done")):
+                await database.write(
+                    lambda c, sid=sid: store.create_session(
+                        c,
+                        id=sid,
+                        work_item_id="w1",
+                        node_id="verify",
+                        hook_point="on.test.run",
+                        log_path="/l",
+                        result_path="/r",
+                        round=0,
+                        head_sha=h1,
+                    )
+                )
+                await database.write(
+                    lambda c, sid=sid, status=status: store.session_exited(c, sid, status)
+                )
+
+            # A fix commit lands touching only frontend before the cap's
+            # counter reset re-enters at round 0.
+            (repo / "frontend" / "x.txt").write_text("b")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "fix, frontend only")
+
+            binding = {"kind": "subprocess", "command": ["true"]}
+            repo_entry = {"test_scopes": [_FRONTEND_SCOPE, _BACKEND_SCOPE]}
+            return dispatch._select_scopes(
+                database, "w1", repo, "verify", "on.test.run", 0, binding, repo_entry
+            )
+        finally:
+            await database.close()
+
+    to_run, _sandbox = asyncio.run(scenario())
+    assert _cmds(to_run) == {("frontend-cmd",), ("backend-cmd",)}
+
+
+def test_dispatch_runs_every_matched_scope_even_after_an_earlier_failure(tmp_path, monkeypatch):
+    """C2 (Kraft-s7c04.9): two overlapping scopes, the changed path matches
+    both -- an earlier scope's failure must not stop a later one from
+    running at all. `_FAKE_AGENT`-less, so this is real subprocess dispatch,
+    not the fake agent's own status."""
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
@@ -785,7 +1163,221 @@ def test_dispatch_runs_matched_scopes_in_order_and_stops_at_the_first_failure(
     status = asyncio.run(scenario())
     assert status == "failed"
     assert marker1.read_text() == "ran"
-    assert not marker2.exists(), "the first scope's failure must short-circuit the second"
+    assert marker2.read_text() == "ran", "a later scope must still run after an earlier failure"
+
+
+def test_dispatch_aggregates_three_scopes_the_first_of_which_fails(tmp_path, monkeypatch):
+    """C2 (Kraft-s7c04.9): three scopes, the first failing. All three must
+    run -- the second and third are the defect this closes, "did not run"
+    silently reading as a pass -- and the aggregate status still fails the
+    node even though the last scope run was a pass."""
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    ran = [tmp_path / f"scope{i}-ran.txt" for i in range(3)]
+
+    def _script(path: Path, marker: Path, exit_code: int) -> None:
+        path.write_text(
+            f"import pathlib, sys\n"
+            f"pathlib.Path({str(marker)!r}).write_text('ran')\n"
+            f"sys.exit({exit_code})\n"
+        )
+
+    fail_script = tmp_path / "fail.py"
+    _script(fail_script, ran[0], 1)
+    ok_script_a = tmp_path / "ok_a.py"
+    _script(ok_script_a, ran[1], 0)
+    ok_script_b = tmp_path / "ok_b.py"
+    _script(ok_script_b, ran[2], 0)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            base_sha = git_read(repo, "rev-parse", "HEAD")
+            (repo / "frontend").mkdir()
+            (repo / "frontend" / "x.txt").write_text("hi")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "touch frontend")
+            await database.write(lambda c: store.set_base_ref(c, wid, base_sha))
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+            registry = Registry(hooks={"on.test.run": {"kind": "subprocess"}})
+            return await dispatch.dispatch_node(
+                database,
+                rd,
+                "on.test.run",
+                {"id": "verify"},
+                row,
+                registry,
+                repo,
+                launch=executor.LaunchContext(
+                    repo_entry={
+                        "test_scopes": [
+                            {"paths": ["**"], "command": f"{sys.executable} {fail_script}"},
+                            {"paths": ["**"], "command": f"{sys.executable} {ok_script_a}"},
+                            {"paths": ["**"], "command": f"{sys.executable} {ok_script_b}"},
+                        ]
+                    },
+                    steering_dir=None,
+                ),
+            )
+        finally:
+            await database.close()
+
+    status = asyncio.run(scenario())
+    assert status == "failed", "the last scope's pass must not overwrite the aggregate"
+    assert all(m.read_text() == "ran" for m in ran), "every scope must run, not just the first"
+
+
+# ── C1: implementation runs the scope that gates it (Kraft-s7c04.8) ────────
+
+
+def _walk_implementation(
+    tmp_path, monkeypatch, *, changed_subdir: str, test_scopes: list[dict], fail: bool = False
+):
+    """Drive `walk.walk_node` over a bare `implementation` node (tasks:
+    [on.implementation.start], no fix_loop) with `on.test.run` bound to a real
+    subprocess. `dispatch_node`'s own agent branch already covers the fake
+    agent half of this node; this isolates C1's direct-dispatch gate, the way
+    `walk.py:803` already dispatches `on.implementation.start` itself outside
+    a node's own task list."""
+    from kraft.executor import walk
+
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    repo = make_repo(tmp_path)
+    registry = fake_registry(sys.executable, _FAKE_AGENT)
+    hooks = dict(registry.hooks)
+    fail_script = tmp_path / "gate_fail.py"
+    fail_script.write_text("import sys\nsys.exit(1)\n")
+    hooks["on.test.run"] = {
+        "kind": "subprocess",
+        "command": [sys.executable, str(fail_script)] if fail else ["true"],
+    }
+    registry = Registry(hooks=hooks)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = "w1"
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id=wid,
+                    bead_id=None,
+                    title="t",
+                    repo=str(repo),
+                    chain_template="default",
+                    chain_definition="{}",
+                )
+            )
+            base_sha = git_read(repo, "rev-parse", "HEAD")
+            (repo / changed_subdir).mkdir(parents=True, exist_ok=True)
+            (repo / changed_subdir / "x.txt").write_text("hi")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", f"touch {changed_subdir}")
+            await database.write(lambda c: store.set_base_ref(c, wid, base_sha))
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+            node = {
+                "id": "implementation",
+                "tasks": ["on.implementation.start"],
+                "gate_after": None,
+            }
+            result = await walk.walk_node(
+                database,
+                rd,
+                wid,
+                node,
+                row,
+                registry,
+                repo,
+                launch=executor.LaunchContext(
+                    repo_entry={"test_scopes": test_scopes}, steering_dir=None
+                ),
+            )
+            all_events = database.read(lambda c: events.read_after(c, 0, wid))
+            sessions = database.read(
+                lambda c: list(
+                    c.execute("SELECT * FROM worker_sessions WHERE work_item_id = ?", (wid,))
+                )
+            )
+            return result, all_events, sessions
+        finally:
+            await database.close()
+
+    return asyncio.run(scenario())
+
+
+def test_implementation_runs_the_matched_gate_scope_before_reporting_done(tmp_path, monkeypatch):
+    """49c0cefd changed 21 frontend files and never ran `just e2e-ci` at
+    implementation time -- the flake it shipped cost $17.41 and ~3h in the
+    verify fix loop, reachable for five minutes of subprocess time at
+    implementation instead."""
+    marker = tmp_path / "gate-ran.txt"
+    ok_script = tmp_path / "gate_ok.py"
+    ok_script.write_text(f"import pathlib\npathlib.Path({str(marker)!r}).write_text('ran')\n")
+    result, _events, sessions = _walk_implementation(
+        tmp_path,
+        monkeypatch,
+        changed_subdir="frontend",
+        test_scopes=[
+            {"paths": ["frontend/**"], "command": f"{sys.executable} {ok_script}"},
+        ],
+    )
+    assert result == "ok"
+    assert marker.read_text() == "ran"
+    assert any(s["hook_point"] == "on.test.run" for s in sessions)
+
+
+def test_implementation_skips_a_scope_the_change_does_not_touch(tmp_path, monkeypatch):
+    """A backend-only change must not run the frontend scope -- the same
+    selection verify would make against this diff (spec's "the selection
+    implementation makes must be the same selection verify makes")."""
+    marker = tmp_path / "gate-ran.txt"
+    frontend_script = tmp_path / "gate_frontend.py"
+    frontend_script.write_text(f"import pathlib\npathlib.Path({str(marker)!r}).write_text('ran')\n")
+    result, _events, _sessions = _walk_implementation(
+        tmp_path,
+        monkeypatch,
+        changed_subdir="backend",
+        test_scopes=[
+            {"paths": ["frontend/**"], "command": f"{sys.executable} {frontend_script}"},
+            {"paths": ["backend/**"], "command": "true"},
+        ],
+    )
+    assert result == "ok"
+    assert not marker.exists(), "a scope the change never touched must not run"
+
+
+def test_implementation_gate_failure_routes_to_needs_human(tmp_path, monkeypatch):
+    """`implementation` has no `fix_loop` (bead .26/E7, not in this batch), so
+    a gate failure here goes straight to needs_human rather than a repair
+    this node has no machinery for -- the routing decision the spec calls
+    out as open and requires be made and recorded."""
+    result, all_events, _sessions = _walk_implementation(
+        tmp_path,
+        monkeypatch,
+        changed_subdir="frontend",
+        test_scopes=[{"paths": ["frontend/**"], "command": "irrelevant"}],
+        fail=True,
+    )
+    assert result == "needs_human"
+    reason = next(
+        e["payload"]["reason"] for e in reversed(all_events) if e["type"] == "work_item_needs_human"
+    )
+    assert "on.test.run" in reason
 
 
 def test_a_steered_rerun_over_an_existing_artifact_is_framed_as_a_revision(tmp_path):
