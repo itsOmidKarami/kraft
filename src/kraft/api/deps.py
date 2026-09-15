@@ -218,12 +218,41 @@ def _on_approve(st) -> executor.OnApprove:
     return functools.partial(gates.apply_approval, st)
 
 
+class _PoisonedRepoEntry(dict):
+    """Stand-in `repo_entry` for a `repos.yaml` that failed to load.
+
+    Every real reader of `repo_entry` -- `sandbox.resolve`,
+    `adapters.agent.resolve_invocation`, `dispatch`'s own test-scope fallback
+    -- reads it with `.get(...)`. Raising from that `.get` surfaces the
+    original `ConfigError` from *inside* the dispatch this entry was actually
+    needed for, which is already wrapped in `guard`'s blanket `except
+    Exception` -- the same needs_human treatment a `SteeringError` raised
+    deep in a dispatch already gets. Non-empty (the `_poisoned` key), so
+    `launch.repo_entry or {}` never discards it for a fresh, harmless `{}`
+    before that `.get` runs -- a repo config a caller can't parse must not
+    quietly resolve to "no sandbox, no deny_tools, no steering" instead."""
+
+    def __init__(self, exc: config_mod.ConfigError) -> None:
+        super().__init__(_poisoned=True)
+        self._exc = exc
+
+    def get(self, *_args, **_kwargs):
+        raise self._exc
+
+
 def launch(st, repo: str) -> executor.LaunchContext:
-    """The repo config for one agent dispatch, degrading like `invalid_policy`
-    rather than raising: a malformed `repos.yaml` must not crash `lifespan` on
-    reattach (locking an operator out of the Settings UI that would let them
-    fix it) or 500 the approve/reject/resume/retry routes — the agent launches
-    without repo-level model/steering, which is today's behaviour anyway.
+    """The repo config for one agent dispatch.
+
+    A malformed `repos.yaml` must not crash `lifespan` on reattach (locking
+    an operator out of the Settings UI that would let them fix it) or 500 the
+    approve/reject/resume/retry routes, so this itself never raises. But a
+    repo entry can carry `sandbox:` now, so silently degrading to
+    `repo_entry=None` would run that dispatch's worker unsandboxed on the
+    host with nothing but a log line nobody reads -- the exact bare-metal
+    fallback the sandbox design rules out. Instead the failure is carried in
+    a `_PoisonedRepoEntry` that raises the instant the dispatch that actually
+    needed this repo's config reads it, landing in `guard` as needs_human
+    the same way a bad `sandbox:` value would if it were only caught then.
 
     Steering is deliberately *not* validated here (`validate_steering=False`):
     a name whose file has since been deleted must still let the repo entry
@@ -236,9 +265,9 @@ def launch(st, repo: str) -> executor.LaunchContext:
     try:
         repos = config_mod.load_repos(repos_path(st), validate_steering=False)
     except config_mod.ConfigError as exc:
-        logger.warning("repo config invalid, launching without it: %s", exc)
+        logger.warning("repo config invalid, failing dispatch that reads it: %s", exc)
         return executor.LaunchContext(
-            repo_entry=None, steering_dir=steering_dir, skills_dir=st.skills_dir
+            repo_entry=_PoisonedRepoEntry(exc), steering_dir=steering_dir, skills_dir=st.skills_dir
         )
     return executor.LaunchContext(
         repo_entry=_connected(repos, repo),

@@ -284,6 +284,7 @@ async def dispatch(
         model=inv.model,
         deny_tools=inv.deny_tools,
         steering_texts=inv.steering_texts,
+        sandbox=inv.sandbox,
         task_instruction=task_instruction,
         title=row["title"],
         repo_path=row["repo"],

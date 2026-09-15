@@ -168,6 +168,35 @@ def test_push_publishes_a_rebased_branch_against_real_git(tmp_path, monkeypatch)
     assert remote_head == _git(repo, "rev-parse", "HEAD").strip()
 
 
+def test_push_still_runs_pre_push_under_harden_host_git_env(tmp_path, monkeypatch):
+    """Kraft-rki. `harden_host_git_env` pins `core.hooksPath=/dev/null` on
+    the process env so a worker's own commits can't fire a planted hook --
+    but by push time the commit is already made, and a real pre-push hook
+    (git-lfs's) uploading the objects a push's pointers reference must still
+    run. A pinned `core.hooksPath` that survives into `forge.push` would
+    silently drop those uploads."""
+    from kraft import sandbox
+
+    repo = _repo_with_origin(tmp_path)
+    hooks_dir = _git(repo, "rev-parse", "--git-path", "hooks").strip()
+    marker = tmp_path / "pre-push-ran"
+    pre_push = Path(repo) / hooks_dir / "pre-push"
+    pre_push.write_text(f"#!/bin/sh\ntouch {marker}\n")
+    pre_push.chmod(0o755)
+    # A push with nothing new to send never invokes pre-push at all.
+    (repo / "more-work.txt").write_text("more work\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "more work")
+
+    sandbox.harden_host_git_env(os.environ)
+    try:
+        asyncio.run(forge.push(repo, BRANCH))
+    finally:
+        os.environ.pop("GIT_CONFIG_COUNT", None)
+
+    assert marker.exists()
+
+
 def test_push_refuses_when_the_remote_moved_under_the_lease(tmp_path):
     """The other half of Kraft-z6i8's fix: a genuine concurrent writer --
     someone else pushing to the same branch between this worktree's last

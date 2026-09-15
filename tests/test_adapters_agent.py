@@ -902,6 +902,47 @@ def test_resolve_invocation_without_a_skill_carries_no_method(tmp_path):
     assert inv.method_text is None
 
 
+def test_resolve_invocation_carries_the_binding_sandbox():
+    binding = {"command": "claude", "sandbox": {"kind": "docker", "image": "kraft-worker"}}
+    inv = agent.resolve_invocation(binding, {}, None)
+    assert inv.sandbox == {"kind": "docker", "image": "kraft-worker"}
+
+
+def test_resolve_invocation_repo_sandbox_overrides_the_binding():
+    binding = {"command": "claude", "sandbox": {"kind": "docker", "image": "kraft-worker"}}
+    inv = agent.resolve_invocation(binding, {"sandbox": False}, None)
+    assert inv.sandbox is None
+
+
+def test_resolve_invocation_sandbox_defaults_to_none():
+    inv = agent.resolve_invocation({"command": "claude"}, {}, None)
+    assert inv.sandbox is None
+
+
+def test_run_agent_task_forwards_sandbox_to_run_task(monkeypatch):
+    seen = {}
+
+    async def fake_run_task(db, run_dirs, *, sandbox=None, **kw):
+        seen["sandbox"] = sandbox
+        return "done"
+
+    monkeypatch.setattr("kraft.adapters.agent._subprocess.run_task", fake_run_task)
+    _run(sandbox={"kind": "docker", "image": "kraft-worker"})
+    assert seen["sandbox"] == {"kind": "docker", "image": "kraft-worker"}
+
+
+def test_run_agent_task_sandbox_defaults_to_none(monkeypatch):
+    seen = {}
+
+    async def fake_run_task(db, run_dirs, *, sandbox=None, **kw):
+        seen["sandbox"] = sandbox
+        return "done"
+
+    monkeypatch.setattr("kraft.adapters.agent._subprocess.run_task", fake_run_task)
+    _run()
+    assert seen["sandbox"] is None
+
+
 def test_artifact_path_is_the_kind_pluralised():
     assert agent.artifact_path("spec", "w1") == ".engineering/specs/w1.md"
     assert agent.artifact_path("plan", "w1") == ".engineering/plans/w1.md"

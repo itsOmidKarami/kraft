@@ -5,6 +5,7 @@ import shlex
 from pathlib import Path
 from typing import NamedTuple
 
+from kraft import sandbox as _sandbox
 from kraft import skill as _skill
 from kraft import steering as _steering
 from kraft.adapters import subprocess as _subprocess
@@ -200,6 +201,7 @@ class Invocation(NamedTuple):
     effort: str | None = None
     allowed_tools: tuple[str, ...] = ()
     permission_mode: str | None = None
+    sandbox: dict | None = None
 
 
 def resolve_invocation(
@@ -289,6 +291,7 @@ def resolve_invocation(
         # narrows, which is why that one unions.
         allowed_tools=tuple(binding.get("allowed_tools", ())),
         permission_mode=binding.get("permission_mode"),
+        sandbox=_sandbox.resolve(binding, repo),
     )
 
 
@@ -354,6 +357,7 @@ async def run_agent_task(
     effort: str | None = None,
     allowed_tools: tuple[str, ...] = (),
     permission_mode: str | None = None,
+    sandbox: dict | None = None,
     steering_texts: tuple[str, ...] = (),
     review_package: str | None = None,
     artifact: str | None = None,
@@ -484,5 +488,6 @@ async def run_agent_task(
         round=round,
         head_sha=head_sha,
         thread=thread,
+        sandbox=sandbox,
         require_result_file=True,
     )
