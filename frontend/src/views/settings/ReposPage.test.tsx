@@ -2,7 +2,16 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
+import { sortRepos } from "./ReposPage";
 import { renderAt, repo, setupSettingsMocks } from "./testing";
+
+describe("sortRepos", () => {
+  it("keeps a child directly beneath its parent, ahead of siblings whose name merely extends it", () => {
+    const paths = ["/p/kraft", "/p/kraft-lite", "/p/kraft.bak", "/p/kraft/libs/a"];
+    const sorted = sortRepos(paths.map((path) => repo({ path }))).map((r) => r.path);
+    expect(sorted).toEqual(["/p/kraft", "/p/kraft/libs/a", "/p/kraft-lite", "/p/kraft.bak"]);
+  });
+});
 
 const probeFixture = {
   path: "/repo-b",
@@ -66,7 +75,7 @@ describe("Settings · repos (5a)", () => {
       project: "acme/repo-b",
       has_engineering: false,
     });
-    const add = vi.spyOn(api, "addRepo").mockResolvedValue({ ...repo, path: "/repo-b" });
+    const add = vi.spyOn(api, "addRepo").mockResolvedValue(repo({ path: "/repo-b" }));
     renderAt("/settings/repos");
     await userEvent.click(await screen.findByRole("button", { name: /add repo/i }));
 
@@ -83,18 +92,6 @@ describe("Settings · repos (5a)", () => {
     expect(add).toHaveBeenCalledWith(
       expect.objectContaining({ path: "/repo-b", default_chain_template: "default" }),
     );
-  });
-
-  it("Add repo's cross-repo toggle defaults off and is sent on connect", async () => {
-    const add = vi.spyOn(api, "addRepo").mockResolvedValue({ ...repo, path: "/repo-b" });
-    vi.spyOn(api, "probeRepo").mockResolvedValue({ ...probeFixture, submodules: ["libs/a"] });
-    renderAt("/settings/repos");
-    await userEvent.click(await screen.findByRole("button", { name: /add repo/i }));
-    const dialog = screen.getByRole("dialog", { name: "Add repo" });
-    await userEvent.type(within(dialog).getByLabelText("Path"), "/repo-b");
-    await screen.findByText(/1 submodule/);
-    await userEvent.click(within(dialog).getByRole("button", { name: /connect/i }));
-    expect(add).toHaveBeenCalledWith(expect.objectContaining({ allow_cross_repo: false }));
   });
 
   const renderProbe = async (probeFields: { forge: string | null; project: string | null }) => {
@@ -126,19 +123,92 @@ describe("Settings · repos (5a)", () => {
     expect(await screen.findByText("How work runs")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Repos" })).toBeNull();
   });
+
+  it("sorts children directly beneath their parent", async () => {
+    vi.spyOn(api, "getRepos").mockResolvedValue({
+      repos: [
+        repo({ path: "/zz", name: "zz" }),
+        repo({ path: "/ws/libs/a", name: "a" }),
+        repo({ path: "/ws", name: "ws" }),
+      ],
+    });
+    renderAt("/settings/repos");
+    await screen.findByText("ws");
+    const names = screen
+      .getAllByRole("button")
+      .map((el) => el.getAttribute("data-repo"))
+      .filter(Boolean);
+    expect(names).toEqual(["/ws", "/ws/libs/a", "/zz"]);
+  });
+
+  it("filters the list by name and by path", async () => {
+    vi.spyOn(api, "getRepos").mockResolvedValue({
+      repos: [repo({ path: "/repo-a", name: "repo-a" }), repo({ path: "/repo-b", name: "repo-b" })],
+    });
+    renderAt("/settings/repos");
+    await screen.findByText("repo-a");
+    await userEvent.type(screen.getByRole("searchbox", { name: /filter repos/i }), "repo-b");
+    expect(screen.queryByText("repo-a")).toBeNull();
+    expect(screen.getByText("repo-b")).toBeInTheDocument();
+  });
+
+  it("marks a child row with the workspace it belongs to", async () => {
+    vi.spyOn(api, "getRepos").mockResolvedValue({
+      repos: [repo({ path: "/ws", name: "ws" }), repo({ path: "/ws/libs/a", name: "a" })],
+    });
+    renderAt("/settings/repos");
+    await screen.findByText("ws");
+    const child = screen.getByText("a").closest("[data-repo]")!;
+    expect(within(child as HTMLElement).getByText("in ws")).toBeInTheDocument();
+  });
+
+  it("collapses detected-but-untouched repos into their own section", async () => {
+    vi.spyOn(api, "getRepos").mockResolvedValue({
+      repos: [
+        repo({ path: "/ws", name: "ws", managed: true }),
+        repo({ path: "/ws/libs/a", name: "a", managed: false, enabled: false }),
+        repo({ path: "/ws/libs/b", name: "b", managed: false, enabled: false }),
+      ],
+    });
+    renderAt("/settings/repos");
+    expect(await screen.findByText("ws")).toBeInTheDocument();
+    // the two detected children are behind one row, not two in the main list
+    expect(screen.queryByText("a")).toBeNull();
+    expect(screen.getByText(/Detected · 2 · not managed/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByText(/Detected · 2 · not managed/));
+    expect(screen.getByText("a")).toBeInTheDocument();
+  });
+
+  it("keeps a disabled but managed repo in the main list", async () => {
+    // "a human turned this off" is a decision, and must not read as noise
+    vi.spyOn(api, "getRepos").mockResolvedValue({
+      repos: [repo({ path: "/ws", name: "ws", managed: true, enabled: false })],
+    });
+    renderAt("/settings/repos");
+    expect(await screen.findByText("ws")).toBeInTheDocument();
+    expect(screen.queryByText(/Detected/)).toBeNull();
+  });
 });
 
 describe("Settings · repo detail (5b)", () => {
-  it("opens the repo detail with GENERAL/TESTING/FORGE/SUBMODULES/AGENT sections", async () => {
+  it("opens the repo detail with GENERAL/TESTING/FORGE/CROSS-REPO/AGENT sections", async () => {
     renderAt("/settings/repos?repo=/repo-a");
     expect(await screen.findByRole("heading", { name: "repo-a" })).toBeInTheDocument();
-    for (const label of ["General", "Testing", "Forge", "Submodules", "Agent"]) {
+    for (const label of ["General", "Testing", "Forge", "Cross-repo", "Agent"]) {
       expect(screen.getByText(label, { exact: false })).toBeInTheDocument();
     }
   });
 
+  it("no longer offers a per-submodule config table", async () => {
+    renderAt("/settings/repos");
+    await userEvent.click(await screen.findByText("repo-a"));
+    expect(screen.queryByText("CHAIN OVERRIDE")).toBeNull();
+    expect(screen.queryByLabelText("allow cross-repo items")).toBeNull();
+  });
+
   it("Save is disabled until something changes, and writes on click", async () => {
-    const patch = vi.spyOn(api, "patchRepo").mockResolvedValue(repo);
+    const patch = vi.spyOn(api, "patchRepo").mockResolvedValue(repo());
     renderAt("/settings/repos?repo=/repo-a");
     const save = await screen.findByRole("button", { name: "Save" });
     expect(save).toBeDisabled();
@@ -157,36 +227,13 @@ describe("Settings · repo detail (5b)", () => {
     expect(del).toHaveBeenCalled();
   });
 
-  it("submodule table rows are editable and round-trip through patchRepo", async () => {
-    const repoC = {
-      ...repo,
-      path: "/repo-c",
-      name: "repo-c",
-      submodules: [{ path: "libs/a", enabled: false, test_command: null, chain_override: null }],
-    };
-    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [repo, repoC] });
-    const patch = vi.spyOn(api, "patchRepo").mockResolvedValue(repoC);
-    renderAt("/settings/repos?repo=/repo-c");
-    await userEvent.click(await screen.findByRole("switch", { name: /libs\/a/i }));
-    await userEvent.click(await screen.findByRole("button", { name: "Save" }));
-    expect(patch).toHaveBeenCalledWith(
-      "/repo-c",
-      expect.objectContaining({
-        submodules: expect.arrayContaining([
-          expect.objectContaining({ path: "libs/a", enabled: true }),
-        ]),
-      }),
-    );
-  });
-
   it("test scopes are editable and round-trip through patchRepo", async () => {
-    const repoC = {
-      ...repo,
+    const repoC = repo({
       path: "/repo-c",
       name: "repo-c",
       test_scopes: [{ paths: ["frontend/**"], command: "just test-ui" }],
-    };
-    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [repo, repoC] });
+    });
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [repo(), repoC] });
     const patch = vi.spyOn(api, "patchRepo").mockResolvedValue(repoC);
     renderAt("/settings/repos?repo=/repo-c");
 
@@ -222,7 +269,7 @@ describe("Settings · repo detail (5b)", () => {
       forge: "github",
       project: "acme/repo-a",
     });
-    const patch = vi.spyOn(api, "patchRepo").mockResolvedValue(repo);
+    const patch = vi.spyOn(api, "patchRepo").mockResolvedValue(repo());
     renderAt("/settings/repos?repo=/repo-a");
 
     await userEvent.click(await screen.findByRole("button", { name: /re-probe/i }));
