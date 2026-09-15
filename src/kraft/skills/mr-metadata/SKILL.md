@@ -16,10 +16,14 @@ rewrites this after you -- write it for the reviewer, not for Kraft.
   (and `.github/PULL_REQUEST_TEMPLATE/*.md`): if the project ships a template,
   fill *that*, section for section, rather than this skill's own headings
   below.
-- `CONTRIBUTING.md` for stated title and description rules.
+- `CONTRIBUTING.md` for stated title and description rules, **and for the
+  label taxonomy CI enforces**. In this repo that file defines the
+  `release::` scoped labels (`major` / `minor` / `patch` / `none`) and the
+  job that fails a merge request carrying none of them -- you must pick one,
+  and that file is where the choices are written down.
 - `CODEOWNERS` for who reviews the paths this diff touches.
 - What the project already does: `git log --oneline -30` for the title
-  pattern (Conventional Commits or not), `glab mr list --state merged` / `gh
+  pattern (Conventional Commits or not), `glab mr list --merged` / `gh
   pr list --state merged` for how merged MRs are titled and labelled, and the
   project's existing label set (`glab label list`) -- a label that does not
   exist is a failed API call, not a new label.

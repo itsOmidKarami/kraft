@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
 import logging
 import os
+import shutil
 import signal
 import subprocess
 import threading
@@ -190,6 +192,68 @@ def _resolve(result_path: Path, returncode: int) -> str:
     return "done" if returncode == 0 else "failed"
 
 
+def _resolve_exit_file(path: Path) -> str | None:
+    """Status from a task's own recorded exit code, or None if absent/garbage.
+
+    `reattach` adopts a process Kraft never forked (only pid + create_time,
+    `reattach.py:38-49`), and a process you did not spawn cannot be reaped --
+    its exit status is unrecoverable after the fact. So the task records it
+    on the way out and adoption reads it here (Kraft-7itv follow-up).
+
+    Deliberately NOT `result_path`: "exited clean with no result file at all"
+    is a load-bearing signal (Kraft-avpe) telling a plain subprocess hook,
+    which has no result-file contract, apart from an agent hook that broke
+    one. Writing a result file for every subprocess task would erase it.
+    """
+    try:
+        raw = path.read_text().strip()
+    except OSError, UnicodeDecodeError:
+        return None
+    if not raw.lstrip("-").isdigit():
+        return None
+    return "done" if int(raw) == 0 else "failed"
+
+
+def _missing_executable(cmd0: str, cwd: Path, env: dict[str, str]) -> bool:
+    """True when `cmd[0]` names nothing runnable -- the check `Popen` used to do.
+
+    `_wrap_with_exit_file` puts `/bin/sh` at argv[0], which always exists, so
+    `Popen` stopped raising `FileNotFoundError` for a missing binary and `sh`
+    merely exited 127 -- turning a `config_error` into a `failed` and opening
+    a fix cycle no agent can win by editing source (Kraft-579). Resolved here
+    instead, the same two ways `execvp` resolves it: a name containing a
+    separator is a path relative to the child's cwd, anything else is a PATH
+    lookup against the child's own env.
+    """
+    if os.sep in cmd0:
+        candidate = Path(cwd) / cmd0
+        return not (candidate.is_file() and os.access(candidate, os.X_OK))
+    return shutil.which(cmd0, path=env.get("PATH")) is None
+
+
+def _wrap_with_exit_file(cmd: list[str], exit_path: Path) -> list[str]:
+    """`cmd`, wrapped so it writes its own exit code to `exit_path`.
+
+    `"$@"` replays argv byte-for-byte -- no re-quoting, so an argument with a
+    space or a glob survives. `$0` carries the exit path. The child's real
+    code is propagated, so every existing caller of `proc.returncode` is
+    unaffected.
+
+    Not `exec "$@"`: exec would replace the shell and skip the write on the
+    success path, which is the whole point. Keeping `sh` alive costs nothing
+    that matters -- `start_new_session=True` makes `sh` the group leader,
+    `sh -c` runs with job control off so the real child stays in the same
+    pgid, and `_kill_group`'s `os.killpg` still reaches both.
+    """
+    return [
+        "/bin/sh",
+        "-c",
+        'RC=0; "$@" || RC=$?; printf %s "$RC" > "$0"; exit $RC',
+        str(exit_path),
+        *cmd,
+    ]
+
+
 def _rate_limit_rejection(log_path: Path) -> dict | None:
     """The rejected `rate_limit_info` from a stream-json log, or None.
 
@@ -303,6 +367,9 @@ async def run_task(
 ) -> str:
     log_path = run_dirs.logs / f"{session_id}.log"
     result_path = run_dirs.results / f"{session_id}.json"
+    # The task's own exit code, written by the launch wrapper on the way out.
+    # A sidecar, never `result_path` itself -- see `_resolve_exit_file`.
+    exit_path = result_path.with_suffix(".exit")
 
     await db.write(
         lambda c: store.create_session(
@@ -349,12 +416,18 @@ async def run_task(
     log = open(log_path, "w")
     try:
         try:
+            # A missing cwd still raises from `Popen` below and is unaffected;
+            # only the missing-binary half has to move up here, because the
+            # wrapper puts `/bin/sh` at argv[0] and that always exists.
+            # Checked inside the `try` so both halves land in the one handler.
+            if Path(cwd).is_dir() and _missing_executable(cmd[0], cwd, full_env):
+                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), cmd[0])
             # stdin is DEVNULL for every task, not just agents: a CLI in
             # stream-json mode waits on stdin before it starts (measured: a 3s
             # "no stdin data received" stall), and no hook has any business
             # reading the server's own stdin.
             proc = subprocess.Popen(
-                cmd,
+                _wrap_with_exit_file(cmd, exit_path),
                 cwd=str(cwd),
                 stdout=log,
                 stderr=subprocess.STDOUT,

@@ -29,18 +29,21 @@ def _previous_fix_session(db, work_item_id: str, node_id: str) -> sqlite3.Row | 
     has run yet.
 
     Deliberately NOT scoped to a `round` passed in by the caller: `round` is
-    `walk_node`'s own local counter, reset to 0 on every fresh entry into that
-    function -- a resume/crash-recovery re-entry, or a `/retry` that deletes
-    the `retry_counters` row so the next `bump_counter` restarts at 1 -- while
-    the persisted `worker_sessions` rows from before that re-entry are still in
-    the table. A lookup keyed on the caller's local round can collide with an
-    abandoned attempt that happens to land on the same round number after a
-    retry (worse than nothing: it hands over a plausible-looking file from a
-    cycle that was already exhausted), or, on a fresh round-0 re-entry, miss
-    every previous attempt outright. Ordering by `created_at` and taking the
-    last row sidesteps both: whichever fix task actually ran most recently for
-    this node is always the right one to hand forward, regardless of what
-    round it or the caller's local counter think they're at.
+    `walk_node`'s own local counter, and on a fresh entry into that function it
+    seeds from the persisted `retry_counters` row -- so it lands back on a
+    number a *previous* pass over this node already used (a gate rejection
+    walking back here, or the `ci_wait` poller, neither of which clears the
+    counter), or on 0 after a `/retry` that deleted the row so the next
+    `bump_counter` restarts at 1. Either way the `worker_sessions` rows from
+    before that re-entry are still in the table. A lookup keyed on the caller's
+    local round can therefore collide with an abandoned attempt that happens to
+    land on the same round number (worse than nothing: it hands over a
+    plausible-looking file from a cycle that was already exhausted), or, after
+    a retry reset, miss every previous attempt outright. Ordering by
+    `created_at` and taking the last row sidesteps both: whichever fix task
+    actually ran most recently for this node is always the right one to hand
+    forward, regardless of what round it or the caller's local counter think
+    they're at.
     """
     rows = db.read(
         lambda c: c.execute(
@@ -314,11 +317,24 @@ async def walk_node(
     cap = _policy.resolve_cap(policy, key, store.node_overrides_of(override_row).get(node["id"]))
     # `round` is the fix-cycle index every session in this pass is stamped with,
     # so per-round usage can be read back without joining against the events.
-    round = 0
+    #
+    # Seeded from the counter, not 0: `round` already tracks this same counter
+    # from the first completed cycle onward (`round = count` at the bottom of
+    # the loop), and the entry point was the one place the two diverged. A
+    # resumed entry therefore measured at round 0 while the counter read N, so
+    # `reusable_session`'s `round = ?` filter could not match a still-valid
+    # measurement of a byte-identical tree -- 7ced80e6 re-bought one for $5.85
+    # and 823s of a 3600s wall cap the judge then stopped the loop over.
+    counter_row = db.read(lambda c: store.read_counter(c, work_item_id, key))
+    round = counter_row["count"] if counter_row is not None else 0
     # One repair per call to `walk_node` -- exactly one per entry into the
     # node (a fresh call on every re-entry via `run_once`'s loop, a crash
     # resume, or the `ci_wait` poller).
     _repair_tried = False
+    # "First iteration of this entry" used to be spelled `round == 0`. Since
+    # `round` now seeds from the counter the two are different questions, and
+    # every site that meant the former needs saying so out loud.
+    _first_iteration = True
     while True:
         verdict, failed, _excs = await dispatch.measure_node(
             db,
@@ -353,7 +369,12 @@ async def walk_node(
         if verdict == BUDGET:
             return await stops.stop_for_budget(db, work_item_id, node, budget)
 
-        if verdict == "failed" and node.get("on_failure") and round == 0 and not _repair_tried:
+        if (
+            verdict == "failed"
+            and node.get("on_failure")
+            and _first_iteration
+            and not _repair_tried
+        ):
             # Once per entry into this node, and only ahead of the very first
             # cycle: `recover_node` re-measures for real (on.ci.poll going
             # green), so a repair that resolved things costs nothing further
@@ -491,7 +512,9 @@ async def walk_node(
         # land here without ever consuming a cycle. A needs_context from the
         # fix task itself surfaces on the next iteration's measure, at which
         # point the cycle it belongs to has already been bumped.
-        question = dispatch.needs_context_question(db, work_item_id, node, round)
+        question = dispatch.needs_context_question(
+            db, work_item_id, node, round, first_iteration=_first_iteration
+        )
         if question is not None:
             reason = f"needs_context: {question}"
             await db.write(
@@ -664,6 +687,7 @@ async def walk_node(
         if fix == BUDGET:
             return await stops.stop_for_budget(db, work_item_id, node, budget)
         round = count
+        _first_iteration = False
         # fix task status is not branched on; loop re-measures
 
 
