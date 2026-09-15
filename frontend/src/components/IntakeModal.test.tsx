@@ -387,28 +387,28 @@ describe("IntakeModal", () => {
     );
   });
 
-  it("offers the cross-repo disclosure only when the repo actually has submodules", async () => {
+  it("offers the cross-repo disclosure only when the repo has connected, enabled children", async () => {
     vi.spyOn(api, "getTemplates").mockResolvedValue([
       { id: "default", nodes: [], gates: 0 },
     ]);
     vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
-    const probe = vi.spyOn(api, "probeRepo").mockResolvedValue({
-      path: "/a",
-      name: "repo-a",
-      branch: "main",
-      submodules: [],
-      has_beads: true,
-      beads_export_auto: true,
-      beads_export_git_add: true,
-      has_engineering: true,
-      test_command: null,
-      test_scopes: null,
-      forge: null,
-      project: null,
+    renderModal();
+    await selectRepo();
+    expect(screen.queryByRole("button", { name: /cross-repo/ })).toBeNull();
+  });
+
+  it("does not offer a connected but disabled child", async () => {
+    vi.spyOn(api, "getTemplates").mockResolvedValue([
+      { id: "default", nodes: [], gates: 0 },
+    ]);
+    vi.spyOn(api, "getRepos").mockResolvedValue({
+      repos: [
+        REPO_A,
+        { ...REPO_A, path: "/a/libs/a", name: "libs-a", enabled: false },
+      ],
     });
     renderModal();
     await selectRepo();
-    await waitFor(() => expect(probe).toHaveBeenCalled());
     expect(screen.queryByRole("button", { name: /cross-repo/ })).toBeNull();
   });
 
@@ -416,20 +416,12 @@ describe("IntakeModal", () => {
     vi.spyOn(api, "getTemplates").mockResolvedValue([
       { id: "default", nodes: [], gates: 0 },
     ]);
-    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
-    vi.spyOn(api, "probeRepo").mockResolvedValue({
-      path: "/a",
-      name: "repo-a",
-      branch: "main",
-      submodules: ["libs/a", "libs/b"],
-      has_beads: true,
-      beads_export_auto: true,
-      beads_export_git_add: true,
-      has_engineering: true,
-      test_command: null,
-      test_scopes: null,
-      forge: null,
-      project: null,
+    vi.spyOn(api, "getRepos").mockResolvedValue({
+      repos: [
+        REPO_A,
+        { ...REPO_A, path: "/a/libs/a", name: "libs-a" },
+        { ...REPO_A, path: "/a/libs/b", name: "libs-b" },
+      ],
     });
     const create = vi
       .spyOn(api, "createWorkItem")
