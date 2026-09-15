@@ -115,6 +115,7 @@ def _config_checks() -> list[dict]:
                 "templates", False, f"{templates} does not exist — start `kraft` once to seed it"
             ),
             _hooks_check(),
+            _dead_hooks_check(),
             _chain_templates_check(),
             _token_check(),
         ]
@@ -125,6 +126,7 @@ def _config_checks() -> list[dict]:
     except config.ConfigError as exc:
         checks.append(_check("access.yaml", False, str(exc)))
     checks.append(_hooks_check())
+    checks.append(_dead_hooks_check())
     checks.append(_chain_templates_check())
     checks.append(_token_check())
     return checks
@@ -205,6 +207,80 @@ def _hooks_check() -> dict:
         True,
         f"{'; '.join(parts)} in {live_path}, but bound in this version's "
         "defaults — Settings → Hooks, or edit that file",
+    )
+
+
+def _chain_template_hooks(directory: Path) -> set[str]:
+    """Every hook named in any chain template's node `tasks`, across every YAML
+    file in `directory` with a `nodes` list -- the same file shape
+    `_chain_template_files` walks, read for hook names instead of node ids.
+    """
+    hooks: set[str] = set()
+    if not directory.is_dir():
+        return hooks
+    for path in sorted(directory.glob("*.yaml")):
+        try:
+            data = yaml.safe_load(path.read_text())
+        except OSError, ValueError, yaml.YAMLError:
+            continue
+        if not isinstance(data, dict) or not isinstance(data.get("nodes"), list):
+            continue
+        for node in data["nodes"]:
+            if isinstance(node, dict) and isinstance(node.get("tasks"), list):
+                hooks.update(t for t in node["tasks"] if isinstance(t, str))
+    return hooks
+
+
+def _dead_hooks_check() -> dict:
+    """Hooks a chain template actually dispatches, bound to `builtin: noop` in
+    the live registry, and either `builtin: noop` or absent entirely in this
+    version's shipped registry — dead by design, not by staleness.
+
+    A different question from `_hooks_check`, which reports a hook real (not
+    noop) in the shipped registry but noop-or-absent in the live one: a
+    registry that has fallen behind what this version ships. `on.review.mr.run`
+    is `builtin: noop` in the *shipped* registry too, so it never enters
+    `_hooks_check`'s `real` set and can never be reported there (spec "Why the
+    existing doctor check cannot catch C6").
+
+    Reported as information, not a defect. A core noop is a plugin extension
+    point by design: `on.review.mr.run` ships noop so a plugin can fill it
+    (kraft-lite does). A plugin fills it by rebinding it in the live registry,
+    so a hook still noop in live is one that no plugin binds on this install.
+    The operator should know that tier does nothing here. It is not broken.
+
+    Scoped to noop-or-absent in shipped so the two checks are disjoint by
+    construction: `_hooks_check` only ever selects a hook that is real (not
+    noop) in shipped, this one only ever selects one that is noop or absent
+    in shipped, so no hook can satisfy both and be reported twice for two
+    different reasons.
+
+    Always `ok`, like `_hooks_check`: which hooks a chain names is the
+    operator's own template, not a fault doctor should fail the exit code over.
+    """
+    shipped_path = BUNDLED / "templates" / "registry.yaml"
+    if not shipped_path.is_file():
+        return _check("dead_hooks", True, "skipped: not an installed Kraft", skipped=True)
+    live_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    live_path = live_dir / "registry.yaml"
+    try:
+        shipped = yaml.safe_load(shipped_path.read_text())["hooks"]
+        live = yaml.safe_load(live_path.read_text())["hooks"]
+    except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as exc:
+        return _check("dead_hooks", True, f"skipped: cannot compare ({exc})", skipped=True)
+    dispatched = _chain_template_hooks(live_dir)
+    dead = sorted(
+        h
+        for h in dispatched
+        if (h not in shipped or _is_noop(shipped.get(h))) and _is_noop(live.get(h))
+    )
+    if not dead:
+        return _check("dead_hooks", True, f"{len(dispatched)} hook(s) dispatched, none dead")
+    return _check(
+        "dead_hooks",
+        True,
+        f"{', '.join(dead)} named in a chain's tasks but builtin:noop in shipped and "
+        "live registries — this tier does nothing on this install unless a plugin binds it",
     )
 
 
