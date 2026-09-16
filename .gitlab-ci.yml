@@ -369,16 +369,6 @@ auto-tag:
     - git push -o ci.skip origin "HEAD:$CI_COMMIT_BRANCH"
     - 'git -c user.email=ci@kraft.invalid -c user.name="Kraft CI" tag -a "$TAG" -m "$TAG"'
     - git push origin "$TAG"
-    # GitHub only sees plugins/: the marketplace listing must not carry src/,
-    # tests/, docs/ or any of this repo's other history. `git subtree split`
-    # extracts just that directory's history as a standalone branch; pushing
-    # it to `main` on the mirror is what "publishing a release" actually
-    # means for the plugins. GITHUB_TOKEN is a GitHub PAT with push access to
-    # itsOmidKarami/kraft, added as a masked CI/CD variable -- RELEASE_TOKEN
-    # has no authority outside gitlab.com.
-    - git subtree split --prefix=plugins -b publish-tmp
-    - git push "https://x-access-token:${GITHUB_TOKEN}@github.com/itsOmidKarami/kraft.git" publish-tmp:main
-    - git branch -D publish-tmp
     - echo "tagged $TAG"
 
 # Creates the Release object and nothing else. Its image is the only one in this
