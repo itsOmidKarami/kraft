@@ -10,13 +10,13 @@
     {
       "name": "kraft",
       "description": "Drive Kraft from an agent session: file work, read the board, act on gates.",
-      "source": "./kraft",
+      "source": "./plugins/kraft",
       "category": "productivity"
     },
     {
       "name": "kraft-lite",
       "description": "Run a Kraft chain in this session: ordered nodes, human gates, capped fix loops. No orchestrator.",
-      "source": "./kraft-lite",
+      "source": "./plugins/kraft-lite",
       "category": "productivity"
     }
   ]

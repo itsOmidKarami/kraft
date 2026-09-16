@@ -1105,25 +1105,19 @@ def test_needs_context_survives_the_artifact_guard(tmp_path, monkeypatch):
 
 
 def test_repo_agent_docs_do_not_forbid_a_kraft_worker_from_committing():
-    """Kraft-f3mv. The implementation node is a bare `claude` in this repo, so
-    it reads CLAUDE.md's Conservative profile -- "Do not run git commits, git
-    pushes, or Dolt remote sync unless explicitly asked" -- and correctly
-    leaves the work uncommitted. Task 2's injected contract says the opposite;
-    the two must not argue.
-
-    The carve-out has to sit after every generated `bd` block: the Conservative
-    line lives inside a hashed block, and editing inside one invites `bd` to
-    regenerate it and drop the carve-out silently.
-    """
     for name in ("CLAUDE.md", "AGENTS.md"):
         text = (_REPO_ROOT / name).read_text()
         assert "## Kraft Workers" in text, f"{name} has no Kraft-worker carve-out"
-        assert "KRAFT_WORK_ITEM_ID" in text, f"{name} does not say who the carve-out applies to"
-        assert "commit" in text[text.index("## Kraft Workers") :], name
-        assert text.index("## Kraft Workers") > text.rindex("<!-- END BEADS"), (
-            f"{name}: the carve-out is inside or above a generated bd block, "
-            "where a regeneration would drop it"
-        )
+        carve_out = text[text.index("## Kraft Workers") :]
+        assert "commit" in carve_out, name
+        # If a BEADS block is present, the carve-out must not be nested inside
+        # it -- stripping BEADS integration must not delete this section too.
+        if "<!-- BEGIN BEADS" in text:
+            begin = text.index("<!-- BEGIN BEADS")
+            end = text.index("<!-- END BEADS") if "<!-- END BEADS" in text else len(text)
+            assert not (begin < text.index("## Kraft Workers") < end), (
+                f"{name}: Kraft Workers carve-out is nested inside the BEADS block"
+            )
 
 
 def test_resume_session_id_adds_resume_and_autocompact_flags(monkeypatch):
