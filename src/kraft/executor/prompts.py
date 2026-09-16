@@ -274,6 +274,43 @@ def progress_note(task_hook: str, work_item_row, worktree) -> str:
     return _PROGRESS_NOTE.format(total=len(tasks)) if tasks else ""
 
 
+#: What verify will run, shown to the node that can still act on it. 49c0cefd
+#: changed 21 frontend files, read the justfile, and never ran `just e2e-ci`
+#: (`grep -c e2e-ci` in its implementation log = 0); the flake that reached
+#: verify instead cost $17.41 and ~3h there. The agent had the capability and
+#: not the mapping (Kraft-s7c04.8).
+#:
+#: The scope TABLE, not a resolved selection: at implementation dispatch the
+#: agent has written nothing, so the diff is empty and `_matched_scopes` fails
+#: open to every scope. Printing "all of them" would teach it nothing. verify's
+#: own selection is unchanged -- this hands the agent the same mapping so it
+#: applies the same rule to what it actually changed.
+_SCOPE_NOTE = (
+    "\n\nBefore you finish, run the checks that gate the paths you changed. "
+    "verify runs exactly these against your diff, and a failure there costs a "
+    "full review round:\n{rows}\n"
+    "A changed path matching no scope runs every scope."
+)
+
+
+def scope_note(task_hook: str, repo_entry: dict | None) -> str:
+    """The repo's path->command test mapping, on the implementation hook only.
+
+    Keyed on the hook, like `progress_note`, never on a node id: a chain whose
+    implementing node is called `build` must still get this (Kraft-s7c04.45).
+    """
+    if task_hook != _progress.IMPLEMENTATION_HOOK:
+        return ""
+    repo = repo_entry or {}
+    scopes = repo.get("test_scopes")
+    if not scopes and repo.get("test_command"):
+        scopes = [{"paths": ["**"], "command": repo["test_command"]}]
+    if not scopes:
+        return ""
+    rows = "\n".join(f"  {', '.join(s['paths'])}\n      {s['command']}" for s in scopes)
+    return _SCOPE_NOTE.format(rows=rows)
+
+
 #: The hooks whose job is to judge a change rather than make one. They are the
 #: only ones handed a review package and the previous round's findings:
 #: everything else is working *in* the diff.

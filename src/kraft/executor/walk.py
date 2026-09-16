@@ -367,64 +367,6 @@ async def walk_node(
                     lambda c: store.mark_needs_human(c, work_item_id, node["id"], reason)
                 )
                 return "needs_human"
-        # C1 (Kraft-s7c04.8): `implementation` runs the same test scope that
-        # gates `verify`, before it hands the branch off -- 49c0cefd changed
-        # 21 frontend files and `grep -c e2e-ci` in its implementation log was
-        # 0; the flake that reached verify instead cost $17.41 and ~3h there.
-        # Dispatched directly here rather than added to the node's own
-        # `tasks`, the same way `JUDGE_HOOK` is: `measure_node` runs a node's
-        # tasks in `asyncio.gather` (dispatch.py), so a test task on this
-        # node's own list would race the agent against an uncommitted tree
-        # and the `commit_stragglers` sweep above -- this line only runs
-        # after `measure_node` (and that sweep) have already returned.
-        # `_select_scopes` is the same function `verify`'s own `on.test.run`
-        # dispatch calls, so the two make the same selection against the same
-        # diff by construction (spec's "the selection implementation makes
-        # must be the same selection verify makes").
-        #
-        # Routing decision (spec "C1"): `implementation` has no `fix_loop`,
-        # so a failure here has no fix-cycle machinery to route into (bead
-        # .26/E7, seeding a fix loop's failure context, is out of this
-        # batch). Rather than build a narrow one-off repair path this node
-        # cannot yet use well, a gate failure here is treated exactly like
-        # any other failed task in this branch: straight to needs_human.
-        if node["id"] == "implementation" and dispatch.GATE_HOOK in registry.hooks:
-            gate_status = await dispatch.dispatch_node(
-                db,
-                run_dirs,
-                dispatch.GATE_HOOK,
-                node,
-                row,
-                registry,
-                worktree,
-                steer=steer,
-                launch=launch,
-                budget=budget,
-            )
-            if gate_status == "paused":
-                return "paused"
-            if gate_status == BUDGET:
-                return await stops.stop_for_budget(db, work_item_id, node, budget)
-            if gate_status == RATE_LIMITED:
-                return await stops.stop_for_rate_limit(db, work_item_id, node)
-            if gate_status == CONFIG_ERROR:
-                reason = (
-                    f"could not start {dispatch.GATE_HOOK} in node {node['id']} — "
-                    "see the session log"
-                )
-                await db.write(
-                    lambda c: store.mark_needs_human(c, work_item_id, node["id"], reason)
-                )
-                return "needs_human"
-            if gate_status != "done":
-                reason = (
-                    f"{dispatch.GATE_HOOK} failed at the {node['id']} gate "
-                    f"(status={gate_status}) — see the session log"
-                )
-                await db.write(
-                    lambda c: store.mark_needs_human(c, work_item_id, node["id"], reason)
-                )
-                return "needs_human"
         await db.write(lambda c: store.complete_node(c, work_item_id, node["id"]))
         return "ok"
 
