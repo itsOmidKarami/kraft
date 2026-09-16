@@ -4,6 +4,7 @@ import json
 from kraft.findings import (
     Finding,
     JobRef,
+    _extract_message,
     from_blind_failure,
     from_payload,
     parse,
@@ -308,6 +309,45 @@ def _log(tmp_path, text):
     p = tmp_path / "s.log"
     p.write_text(text)
     return p
+
+
+def test_ordinal_after_any_marker_is_stripped_not_just_after_x():
+    """The evidence was Playwright's ✘, but `_extract_message` already
+    treats ✘|FAILED|Error:|Traceback as the same kind of marker -- the fix
+    must not only cover the one tool that happened to produce the evidence."""
+    assert "3" not in _extract_message("FAILED 3 tests::test_thing - AssertionError\n")
+    assert "AssertionError" in _extract_message("FAILED 3 tests::test_thing - AssertionError\n")
+
+
+def test_ordinal_at_end_of_line_is_still_stripped():
+    """Regression guard for the lookahead itself: `_extract_message` already
+    strips trailing whitespace off every line before this regex runs, so an
+    ordinal with nothing after it has no trailing `\\s` for a bare
+    `(?=\\s)` to match -- needs `(?=\\s|$)`. (The marker character itself
+    is consumed by the same match as the ordinal, since the pattern starts
+    at the marker -- asserting on "27" rather than exact equality avoids
+    coupling this test to that incidental detail.)"""
+    assert "27" not in _extract_message("✘ 27\n")
+
+
+def test_pipeline_url_noise_is_stripped():
+    """on.ci.poll's own log opens with a pipeline URL carrying a numeric id
+    that changes every rerun (adapters/forge/ci.py:111) -- confirmed live,
+    not theoretical, on Kraft-s7c04.34."""
+    a = _extract_message("pipeline failed: https://gitlab.example.com/x/-/pipelines/111\n")
+    b = _extract_message("pipeline failed: https://gitlab.example.com/x/-/pipelines/222\n")
+    assert a == b
+
+
+def test_marker_selection_survives_noise_stripping_its_own_marker():
+    """Regression guard for the ordering bug: stripping an ordinal that sits
+    right after ✘ must not remove the ✘ before marker-selection ever runs,
+    or the line silently vanishes from the message instead of being cleaned."""
+    text = _extract_message(
+        "some setup noise\n  ✘  27 e2e/regression.spec.ts:65:1 › a flaky test (2.0m)\n"
+    )
+    assert "e2e/regression.spec.ts:65:1" in text
+    assert "27" not in text
 
 
 def test_from_blind_failure_extracts_marker_lines(tmp_path):

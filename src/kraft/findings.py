@@ -32,11 +32,21 @@ _MESSAGE_CAP = 400
 #: Lines worth keeping from a failed task's output.
 _MARKER = re.compile(r"✘|FAILED|Error:|Traceback")
 
-#: Wall-clock noise that must not affect a finding's fingerprint: an
-#: identical failure at a different duration or timestamp is still the same
-#: failure. `# ponytail: heuristic, not framework-aware; upgrade to
-#: structured test-name diffing if a real framework ever needs it.`
-_NOISE = re.compile(r"\(\d+(?:\.\d+)?\s*(?:ms|s|m)\)|\b\d{2}:\d{2}:\d{2}\b")
+#: Wall-clock noise, and any other per-run varying token, that must not
+#: affect a finding's fingerprint: an identical failure at a different
+#: duration, timestamp, run ordinal, or reported-via URL is still the same
+#: failure. `_MARKER.pattern` is reused rather than re-listing the four
+#: markers, so a run ordinal is stripped after *any* of them, not only the
+#: `✘` the original evidence happened to show (Kraft-s7c04.34).
+#: `# ponytail: heuristic, not framework-aware; upgrade to structured
+#: per-source reporting (JUnit for test runners, CI artifacts/reports for
+#: pipelines) if this ever proves insufficient in practice.`
+_NOISE = re.compile(
+    r"\(\d+(?:\.\d+)?\s*(?:ms|s|m)\)"
+    r"|\b\d{2}:\d{2}:\d{2}\b"
+    rf"|(?:{_MARKER.pattern})\s*\d+(?=\s|$)"
+    r"|https?://\S+"
+)
 
 #: What a `same_as` must look like to be believed: the shape `fingerprint`
 #: itself produces. A model asked to echo a tag will sometimes write a sentence
@@ -211,11 +221,12 @@ def _tail_text(log_path: str | Path) -> str | None:
 
 
 def _extract_message(text: str) -> str:
-    text = _NOISE.sub("", strip_ansi(text))
+    text = strip_ansi(text)
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     marked = [ln for ln in lines if _MARKER.search(ln)]
     chosen = marked[:5] if marked else lines[-5:]
-    return "\n".join(chosen)[:_MESSAGE_CAP]
+    cleaned = [_NOISE.sub("", ln) for ln in chosen]
+    return "\n".join(cleaned)[:_MESSAGE_CAP]
 
 
 def from_blind_failure(
