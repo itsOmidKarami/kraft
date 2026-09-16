@@ -348,6 +348,104 @@ def test_needs_human_reason_names_a_failed_forge_task_s_kind(tmp_path, monkeypat
     assert "on.ci.poll [forge]" in reason
 
 
+def test_a_steer_with_no_agent_dispatch_to_land_in_is_reported_undelivered(tmp_path, monkeypatch):
+    """Kraft-s7c04.50: `Steer` is good for one agent launch, whichever
+    dispatch gets there first -- but if this run_once call's only task is
+    `kind: forge` (no prompt for a steer to land in at all), it ends
+    `needs_human` having never had anywhere to deliver it. That must be
+    visible as an event, not just quietly lost (the same shape as the live
+    incident on acf59aafa6bb4512bd68049705414fc7, where a steer given at a
+    subprocess-only round vanished with the restart that followed)."""
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    fake = _forge.FakeForge(
+        ci_states=["failed"],
+        ci_failed_jobs=[(_forge.FailedJob("test", "failed", "script_failure"),)],
+    )
+    monkeypatch.setattr(_forge.run, "resolve", lambda name: fake)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = Registry(
+                hooks={"on.ci.poll": {"kind": "forge", "handler": "ci_poll", "backend": "fake"}}
+            )
+            tmpl = Template(
+                id="mr-checks-only",
+                nodes=[
+                    {
+                        "id": "mr_checks",
+                        "tasks": ["on.ci.poll"],
+                        "gate_after": None,
+                        "fix_loop": None,
+                    }
+                ],
+            )
+            wid = await executor.intake(
+                database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
+            )
+            result = await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                steer="please look at the flaky pipeline",
+            )
+            assert result == "needs_human"
+            return [
+                e["payload"]
+                for e in database.read(lambda c: events.read_after(c, 0, wid))
+                if e["type"] == "steer_undelivered"
+            ]
+        finally:
+            await database.close()
+
+    fired = asyncio.run(scenario())
+    assert len(fired) == 1
+    assert fired[0]["steer"] == "please look at the flaky pipeline"
+
+
+def test_a_steer_taken_by_a_real_agent_is_not_reported_undelivered(tmp_path, monkeypatch):
+    """Control for the test above: a steer that reaches an actual agent
+    dispatch must not also fire `steer_undelivered` -- the delivery path
+    itself works (verified live); this only guards the surfacing check
+    against false positives on the common, healthy case."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="make the failing test pass",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            result = await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                steer="a note for whichever agent runs first",
+            )
+            assert result == "completed"
+            return _events(database, wid)
+        finally:
+            await database.close()
+
+    types = asyncio.run(scenario())
+    assert "steer_undelivered" not in types
+
+
 def test_dispatch_routes_on_mr_rebase_to_the_mr_rebase_builtin(tmp_path, monkeypatch):
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)

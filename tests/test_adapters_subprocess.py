@@ -37,6 +37,11 @@ def _resolve_cases(tmp_path):
     assert _resolve(empty, 0) == "done"  # empty == absent -> fall through to rc
 
 
+def test_result_path_for_matches_the_convention_run_task_uses(tmp_path):
+    rd = RunDirs(tmp_path / "run").ensure()
+    assert sp.result_path_for(rd, "abc123") == rd.results / "abc123.json"
+
+
 def test_resolve_result_file_over_exit_code(tmp_path):
     _resolve_cases(tmp_path)
 

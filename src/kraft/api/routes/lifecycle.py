@@ -911,6 +911,14 @@ async def escalate_work_item(wid: str, body: Escalate, request: Request):
     running = escalate.escalation_running(st.db, wid)
     if running is not None:
         raise HTTPException(409, f"an escalation turn ({running}) is already running")
+    # Kraft-s7c04.20: `escalation_running` only catches another *escalation*.
+    # A gate's own auto-review (`gates.review_gates`) is a live walk task
+    # under this same `wid`, holds the worktree, and is invisible to that
+    # check -- this is the guard `/retry` (line ~654) and `/resume` (line
+    # ~392) already have and this route was missing, which is how 43717ee6
+    # got two agents committing to one worktree.
+    if deps.task_is_live(request.app, wid):
+        raise HTTPException(409, "a walk is already running for this work item")
 
     async def _run_escalation() -> None:
         cursor_evts = st.db.read(lambda c: events.read_after(c, 0, wid))
@@ -941,13 +949,19 @@ async def escalate_work_item(wid: str, body: Escalate, request: Request):
         )
 
     try:
+        # Registered under `wid`, not a separate `f"{wid}:escalate"` key
+        # (Kraft-s7c04.20): sharing the walk's own task-registry slot is what
+        # lets `task_is_live` above -- and `/retry`'s existing
+        # `deps.cancel(request.app, wid)` preemption -- actually see this
+        # turn. `stop_escalation` (below) doesn't use this registry at all,
+        # so nothing else depended on the old key.
         deps.spawn(
             request.app,
-            f"{wid}:escalate",
+            wid,
             deps.guard(st.db, wid, _run_escalation()),
         )
     except deps.AlreadyRunning:
-        raise HTTPException(409, "an escalation turn is already running") from None
+        raise HTTPException(409, "a walk is already running for this work item") from None
     return {"id": wid, "status": "escalating"}
 
 

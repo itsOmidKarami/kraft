@@ -185,6 +185,81 @@ def test_dispatch_resumes_an_existing_thread(tmp_path, monkeypatch):
     assert seen["resume_session_id"] == "cli-existing"
 
 
+def test_dispatch_resumed_turn_restates_this_turns_result_and_summary_paths(tmp_path, monkeypatch):
+    """Kraft-s7c04.21: a `--resume`d conversation carries forward its own
+    memory of an earlier turn's literal result/summary path. The prompt for
+    turn > 1 must spell out *this* turn's own paths, or a model that trusts
+    its memory over the fresh instruction writes to the wrong turn's file
+    and gets recorded `failed` despite finishing cleanly."""
+    seen = {}
+
+    async def fake_run_agent_task(db, run_dirs, *, session_id, task_instruction, **kw):
+        seen["session_id"] = session_id
+        seen["task_instruction"] = task_instruction
+        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("")
+        return "done"
+
+    monkeypatch.setattr("kraft.escalate._agent.run_agent_task", fake_run_agent_task)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await Database.open(rd.db)
+        try:
+            wid = "w1"
+            await _seed_needs_human(database, rd, wid)
+            await database.write(lambda c: store.set_escalation_session(c, wid, "cli-existing"))
+            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+            await escalate.dispatch(
+                database, rd, work_item_id=wid, message="try again", launch=launch
+            )
+        finally:
+            await database.close()
+
+    import asyncio
+
+    asyncio.run(scenario())
+    session_id = seen["session_id"]
+    instruction = seen["task_instruction"]
+    assert f"results/{session_id}.json" in instruction
+    assert f".engineering/sessions/{session_id}.md" in instruction
+    assert "NEW, not the ones from earlier in this conversation" in instruction
+
+
+def test_dispatch_first_turn_has_no_resume_note(tmp_path, monkeypatch):
+    """Turn 1 has no earlier turn to be confused with, so the restatement
+    the resumed-turn test above checks for must not appear here."""
+    seen = {}
+
+    async def fake_run_agent_task(db, run_dirs, *, session_id, task_instruction, **kw):
+        seen["task_instruction"] = task_instruction
+        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("")
+        return "done"
+
+    monkeypatch.setattr("kraft.escalate._agent.run_agent_task", fake_run_agent_task)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await Database.open(rd.db)
+        try:
+            wid = "w1"
+            await _seed_needs_human(database, rd, wid)
+            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+            await escalate.dispatch(
+                database, rd, work_item_id=wid, message="first look", launch=launch
+            )
+        finally:
+            await database.close()
+
+    import asyncio
+
+    asyncio.run(scenario())
+    assert "NEW, not the ones from earlier in this conversation" not in seen["task_instruction"]
+
+
 def test_dispatch_default_continues_the_latest_thread(tmp_path, monkeypatch):
     seen = {}
 

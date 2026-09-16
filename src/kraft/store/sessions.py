@@ -476,7 +476,11 @@ def stop_escalation_session(conn: sqlite3.Connection, work_item_id: str, session
     events.append(conn, work_item_id, "worker_session_paused", {"session_id": session_id})
 
 
-def session_unknown(conn: sqlite3.Connection, session_id) -> None:
+def session_unknown(conn: sqlite3.Connection, session_id, *, reason: str | None = None) -> None:
+    """`reason`, when given, is why reattach's own identity check failed
+    (Kraft-s7c04.51) -- distinct from the `work_item_needs_human` reason a
+    caller writes right after this, which explains the *stop* rather than
+    the identity check itself."""
     conn.execute(
         "UPDATE worker_sessions SET status = 'unknown', exited_at = ? WHERE id = ?",
         (_now(), session_id),
@@ -484,7 +488,8 @@ def session_unknown(conn: sqlite3.Connection, session_id) -> None:
     row = conn.execute(
         "SELECT work_item_id FROM worker_sessions WHERE id = ?", (session_id,)
     ).fetchone()
-    events.append(conn, row["work_item_id"], "session_unknown", {"session_id": session_id})
+    payload = {"session_id": session_id, **({"reason": reason} if reason else {})}
+    events.append(conn, row["work_item_id"], "session_unknown", payload)
 
 
 def session_reattached(conn: sqlite3.Connection, session_id) -> None:
