@@ -466,7 +466,10 @@ _AUTO_ESCALATE_MESSAGE = (
 #: loop never hits the cap (Kraft code-review finding 2). The same reason
 #: the scan skips a `work_item_retried` tagged `{"escalated": true}` and a
 #: `gate_approved`/`gate_rejected` decided `by: "agent"`: those are the
-#: machinery unblocking itself, not a person looking at the item.
+#: machinery unblocking itself, not a person looking at the item. `by:
+#: "assistant"` (Kraft-s7c04.43) is deliberately NOT skipped alongside
+#: "agent": a person told the assistant to clear the gate, so a person was
+#: paged and the run really did end.
 #:
 #: The boundaries themselves:
 #:
@@ -551,6 +554,10 @@ def _auto_dispatch_count(evts) -> int:
     for e in reversed(evts):
         if e["type"] == "work_item_retried" and e["payload"].get("escalated"):
             continue
+        # Not `in ("agent", "assistant")` (Kraft-s7c04.43): see the
+        # `_RUN_BOUNDARY` docstring. `agent` is skipped because it is the
+        # machinery unblocking itself; an assistant clearing a gate is a person
+        # looking at the item, and this run of stuckness really did end.
         if e["type"] in ("gate_approved", "gate_rejected") and e["payload"].get("by") == "agent":
             continue
         if e["type"] in _RUN_BOUNDARY:

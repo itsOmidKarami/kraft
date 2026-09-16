@@ -90,6 +90,39 @@ def _dominant(by_model: dict) -> str | None:
     return best
 
 
+def _from_model_usage(by_model: object, model: str | None) -> Usage | None:
+    """Tokens from `modelUsage`, for an envelope whose `usage` block is empty.
+
+    An agent interrupted mid-turn flushes a result envelope whose `usage` block
+    is all zeroes -- there is no completed request for it to describe -- with
+    the session's real counts only under `modelUsage` (measured against claude
+    2.1.273). `_from_usage_block` returns None for that, and `from_envelope`
+    returns before it ever reaches `total_cost_usd`, so the one cost figure
+    Kraft will ever have for a paused session was thrown away with it
+    (Kraft-s7c04.18).
+
+    Sums across models rather than picking one: this is "what did this session
+    spend", not "which model did the work" -- that second question is
+    `_model_of`/`_dominant`'s and is deliberately left alone (Kraft-s7c04.15).
+
+    Cache reads and writes count as input for the same reason they do in
+    `_from_usage_block`: they were billed that way.
+    """
+    if not isinstance(by_model, dict):
+        return None
+    tokens_in = tokens_out = 0
+    for stats in by_model.values():
+        if not isinstance(stats, dict):
+            continue
+        tokens_in += _int(stats.get("inputTokens"))
+        tokens_in += _int(stats.get("cacheReadInputTokens"))
+        tokens_in += _int(stats.get("cacheCreationInputTokens"))
+        tokens_out += _int(stats.get("outputTokens"))
+    if not tokens_in and not tokens_out:
+        return None
+    return Usage(tokens_in, tokens_out, None, model)
+
+
 def _model_of(envelope: dict) -> str | None:
     """The model an agent reported, in either shape it reports it.
 
@@ -117,6 +150,12 @@ def from_envelope(envelope: object) -> Usage | None:
     if not isinstance(envelope, dict):
         return None
     u = _from_usage_block(envelope.get("usage"), _model_of(envelope))
+    if u is None:
+        # An interrupted envelope zeroes `usage` and reports only in
+        # `modelUsage` (Kraft-s7c04.18). Tried second, never first: a normal
+        # envelope's `usage` block is the authority and this must not change
+        # what it produces.
+        u = _from_model_usage(envelope.get("modelUsage"), _model_of(envelope))
     if u is None:
         return None
     cost = envelope.get("total_cost_usd", envelope.get("cost_usd"))

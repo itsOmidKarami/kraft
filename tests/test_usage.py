@@ -358,3 +358,102 @@ def test_a_session_with_tokens_and_no_cost_marks_the_rollup_incomplete(tmp_path)
     assert verify["tokens_in"] == 1000  # tokens are still fully counted
     assert env["cost_complete"] is True  # a task with no tokens owes nothing
     assert rollup["total"]["cost_complete"] is False
+
+
+def test_rollup_counts_a_paused_session_s_real_span(tmp_path):
+    """Kraft-s7c04.18: `wall_ms or 0` erased the time of every session that
+    never reached `session_exited`. The stamps to answer with are on the row.
+
+    The still-running case is Task 1's unit test, not this one: derived against
+    `now`, it would make this assertion a moving target."""
+
+    async def scenario():
+        database = await db.Database.open(tmp_path / "orchestrator.db")
+        try:
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at) VALUES "
+                    "('w','t','/r','quick-task','{}','active','now','now')"
+                )
+            )
+            # exited: 1000 ms, recorded on the row by session_exited
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, "
+                    "log_path, result_path, status, attempt, created_at, started_at, "
+                    "exited_at, round, wall_ms) VALUES ('s1','w','verify','on.test.run',"
+                    "'l','r','done',1,'2026-09-15T10:00:00+00:00','2026-09-15T10:00:00+00:00',"
+                    "'2026-09-15T10:00:01+00:00',0,1000)"
+                )
+            )
+            # paused: NULL wall_ms, 90 s between its own stamps
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, "
+                    "log_path, result_path, status, attempt, created_at, started_at, "
+                    "exited_at, round, wall_ms) VALUES ('s2','w','verify','on.review.local.run',"
+                    "'l','r','paused',1,'2026-09-15T10:00:00+00:00','2026-09-15T10:00:00+00:00',"
+                    "'2026-09-15T10:01:30+00:00',0,NULL)"
+                )
+            )
+            return database.read(lambda c: store.usage_rollup(c, "w"))
+        finally:
+            await database.close()
+
+    rollup = asyncio.run(scenario())
+    verify = next(n for n in rollup["by_node"] if n["node"] == "verify")
+    assert verify["wall_ms"] == 91_000
+    assert rollup["total"]["wall_ms"] == 91_000
+
+
+def test_an_interrupted_envelope_reports_through_model_usage():
+    """Kraft-s7c04.18: a SIGINT'd agent flushes a result envelope whose `usage`
+    block is all zeroes, with the session's real counts only under
+    `modelUsage`. Measured against claude 2.1.273. Without this the envelope
+    parses to None and its total_cost_usd -- the only cost figure Kraft will
+    ever have for that session -- goes with it."""
+    u = usage.from_envelope(
+        {
+            "stop_reason": None,
+            "total_cost_usd": 0.000983,
+            "usage": {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0},
+            "modelUsage": {
+                "claude-haiku-4-5-20251001": {
+                    "inputTokens": 918,
+                    "outputTokens": 13,
+                    "cacheReadInputTokens": 0,
+                    "cacheCreationInputTokens": 0,
+                }
+            },
+        }
+    )
+    assert u is not None
+    assert (u.tokens_in, u.tokens_out) == (918, 13)
+    assert u.cost_usd == pytest.approx(0.000983)
+    assert u.model == "claude-haiku-4-5-20251001"
+
+
+def test_model_usage_cache_tokens_count_as_input_in_the_fallback_too():
+    """Same rule as `_from_usage_block`: cache reads and writes were billed as
+    input, and leaving them out under-reports a long run by most of its input."""
+    u = usage.from_envelope(
+        {
+            "usage": {},
+            "modelUsage": {
+                "claude-opus-5": {
+                    "inputTokens": 100,
+                    "outputTokens": 10,
+                    "cacheReadInputTokens": 900,
+                    "cacheCreationInputTokens": 50,
+                }
+            },
+        }
+    )
+    assert (u.tokens_in, u.tokens_out) == (1050, 10)
+
+
+def test_the_fallback_does_not_invent_usage_from_an_empty_model_usage():
+    """A task that reports nothing is still None, not a zero-token run."""
+    assert usage.from_envelope({"usage": {}, "modelUsage": {}}) is None
+    assert usage.from_envelope({"usage": {}, "modelUsage": {"m": "not a dict"}}) is None

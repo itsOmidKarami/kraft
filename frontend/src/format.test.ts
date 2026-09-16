@@ -79,6 +79,29 @@ describe("elapsedBetween + nodeRunSpan (W0.4)", () => {
     const s = nodeRunSpan("verify", [ev(1, "node_started", "verify", 3_600_000), ev(2, "node_completed", "verify", 1_800_000)], [])!;
     expect(elapsedBetween(s.from, s.to, now)).toBe("30m");
   });
+
+  it("keeps counting when a fast builtin was created after the live agent", () => {
+    // Kraft-s7c04.47: `implementation` creates on.repos.scan 0.5 ms after
+    // on.implementation.start and it exits in 61 ms. Taking the last-CREATED
+    // session froze a 75-minute node at "0s".
+    expect(
+      span([
+        ses({ id: "agent", hook_point: "on.implementation.start", status: "running", created_at: at(3_500_000) }),
+        ses({ id: "scan", hook_point: "on.repos.scan", status: "done", created_at: at(3_499_999), exited_at: at(3_499_000) }),
+      ]),
+    ).toBe("1h");
+  });
+
+  it("ends a finished node at the latest exit, not the last-created session's", () => {
+    // The same bug backwards: a completed node whose fast hook was created
+    // last used to end at the builtin's exit rather than the agent's.
+    expect(
+      span([
+        ses({ id: "agent", hook_point: "on.implementation.start", status: "done", created_at: at(3_500_000), exited_at: at(600_000) }),
+        ses({ id: "scan", hook_point: "on.repos.scan", status: "done", created_at: at(3_499_999), exited_at: at(3_499_000) }),
+      ]),
+    ).toBe("50m");
+  });
 });
 
 describe("tokens / usd", () => {

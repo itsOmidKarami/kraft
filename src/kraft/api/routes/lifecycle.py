@@ -58,16 +58,28 @@ class Escalate(BaseModel):
 
 
 def _terminate(pid: int | None) -> None:
-    """SIGTERM the session's whole process group.
+    """SIGINT the session's whole process group.
 
     Sessions are launched with `start_new_session=True`, so the child is its own
     group leader — signalling the group reaches an agent CLI's own children too,
     which a bare kill(pid) would orphan.
+
+    SIGINT, not SIGTERM (Kraft-s7c04.18). An agent CLI treats SIGINT as "stop
+    this turn" and flushes its result envelope on the way out; SIGTERM kills it
+    without a word. That envelope carries `total_cost_usd`, and it is the only
+    cost figure Kraft will ever have for a session a human interrupted -- with
+    SIGTERM, 71 of 71 paused sessions recorded NULL cost. Measured against
+    claude 2.1.273: SIGTERM mid-turn produced no further output at all, SIGINT
+    produced `[Request interrupted by user]` and a complete result line.
+
+    Still only the first rung. `adapters.subprocess.run_task` waits for the
+    flush and then `_kill_group` runs the existing SIGTERM -> SIGKILL ladder, so
+    a hook that ignores SIGINT dies exactly as promptly as it did before.
     """
     if pid is None:
         return
     try:
-        os.killpg(os.getpgid(pid), signal.SIGTERM)
+        os.killpg(os.getpgid(pid), signal.SIGINT)
     except ProcessLookupError, PermissionError:
         pass  # already gone, or not ours — the row still moves to paused
 

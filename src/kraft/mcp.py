@@ -10,6 +10,8 @@ something, so they are written for that reader, not for a maintainer.
 
 from __future__ import annotations
 
+import os
+
 from mcp.server.mcpserver import MCPServer
 
 from kraft import client
@@ -221,4 +223,8 @@ def build() -> MCPServer:
 
 
 def serve_stdio() -> None:
+    # Tag every call this process makes through `kraft.client` as MCP's
+    # (Kraft-s7c04.43). `setdefault`, so an embedder that has already named
+    # itself keeps its own answer.
+    os.environ.setdefault("KRAFT_CLIENT", "mcp")
     build().run(transport="stdio")
