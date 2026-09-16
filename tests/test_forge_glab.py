@@ -793,9 +793,9 @@ def test_glab_set_labels_replaces_an_existing_same_scope_label(tmp_path, monkeyp
     """GitLab's free tier does not enforce a scoped label's exclusivity
     server-side (Kraft-zfdu8): `glab mr update --label` only adds, so a second
     repair pass leaves both `release::minor` and `release::patch` on the MR,
-    and `next_tag.py`'s "first match wins" then depends on GitLab's list
-    order instead of the repair's intent. The existing same-scope label must
-    be dropped in the same call that adds the new one."""
+    and `next_tag.py` now raises on more than one `release::` label rather
+    than picking one. The existing same-scope label must be dropped in the
+    same call that adds the new one."""
     mr_view_with_labels = (
         '{"iid":54,"target_branch":"main","source_branch":"kraft/abc","state":"opened",'
         '"labels":["release::minor","bug"],'
