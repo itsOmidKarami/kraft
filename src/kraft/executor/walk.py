@@ -849,6 +849,22 @@ async def bounce(db, work_item_id: str, node: dict, target: str, policy) -> str:
     return "ok"
 
 
+async def _report_if_undelivered(db, work_item_id: str, carried: Steer) -> None:
+    """Kraft-s7c04.50: `carried` is good for one agent launch, whichever
+    dispatch gets there first (Steer's own docstring) -- but a walk that
+    stops, or a rebase-bounce that replaces `carried` with its own seeded
+    note, before any dispatch ever calls `.take()` loses the original text
+    with nothing to show for it. The steer mechanism itself works (verified
+    live against acf59aafa6bb4512bd68049705414fc7's actual session logs);
+    this only makes the *failure to deliver* case visible instead of silent.
+    `.take()` both reads the leftover text and empties it, defensive against
+    a future call path invoking this twice on the same `carried`."""
+    if carried:
+        await db.write(
+            lambda c: events.append(c, work_item_id, "steer_undelivered", {"steer": carried.take()})
+        )
+
+
 async def run_once(
     db,
     run_dirs,
@@ -975,6 +991,13 @@ async def run_once(
             steer=carried,
             launch=launch,
         )
+        if result in ("paused", "needs_human", RATE_LIMITED, WAITING):
+            # This call is ending without giving `node` -- or any later node
+            # in this same run_once, since none of these statuses continue
+            # the loop -- a chance to consume `carried` beyond what it just
+            # got. Report it here, once, rather than duplicating this check
+            # at each of the four returns below (Kraft-s7c04.50).
+            await _report_if_undelivered(db, work_item_id, carried)
         if result == "paused":
             return "paused"
         if result == "needs_human":
@@ -990,6 +1013,11 @@ async def run_once(
                 if bounced == "needs_human":
                     return "needs_human"
                 target = next(j for j, n in enumerate(nodes) if n["id"] == bounce_to)
+                # `carried` is about to be replaced by Kraft's own rebase note
+                # -- if the original steer (human or seeded) survived this
+                # far untaken, report it before it's overwritten, or it is
+                # lost with no trace (Kraft-s7c04.50, found in spec review).
+                await _report_if_undelivered(db, work_item_id, carried)
                 carried = Steer(
                     prompts.rebase_drift_note(worktree, store.branch_for(row), pre_base, new_base),
                     # Kraft wrote this one, not a person (the `_REBASE_PROMPT`
@@ -1000,9 +1028,14 @@ async def run_once(
                 i = target
                 continue
         if await gates.maybe_gate(db, work_item_id, node):
+            await _report_if_undelivered(db, work_item_id, carried)
             return "awaiting_gate"
         i += 1
 
+    # The whole chain ran to completion without any node's dispatch ever
+    # taking `carried` -- e.g. every remaining node was builtin/subprocess
+    # only. Report it the same as every other exit (Kraft-s7c04.50).
+    await _report_if_undelivered(db, work_item_id, carried)
     await db.write(lambda c: store.mark_completed(c, work_item_id))
     await entry.close_beads(db, row, bd_cwd)
     return "completed"

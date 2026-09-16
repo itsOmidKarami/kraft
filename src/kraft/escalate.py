@@ -17,6 +17,7 @@ from pathlib import Path
 
 from kraft import events, store
 from kraft.adapters import agent as _agent
+from kraft.adapters.subprocess import result_path_for
 from kraft.executor import LaunchContext
 
 #: Prepended to every turn's prompt, regenerated fresh each call rather than
@@ -62,8 +63,26 @@ _PAUSED_ACTION = (
     "clearly whether you think it's ready to resume, and let a human run "
     "`kraft item resume` themselves.\n"
 )
+#: `{resume_note}` on a turn > 1 in a thread (`resume_session_id` set) --
+#: b5afe84c: a `--resume`d conversation carries forward its own memory of the
+#: literal path an earlier turn wrote its result/summary to, and a model
+#: that recalls "I know where to write" from that memory instead of
+#: re-reading this turn's fresh instruction writes to the wrong turn's file,
+#: which `require_result_file` then downgrades to `failed` despite the turn
+#: having finished cleanly. Empty on turn 1, where no earlier-turn memory
+#: exists to be confused with.
+_RESUME_NOTE = (
+    "This turn's own files are NEW, not the ones from earlier in this "
+    "conversation -- if you recall writing to a path from an earlier turn, "
+    "that path belongs to that turn, not this one:\n"
+    "  - Result file: {result_path}\n"
+    "  - Session summary: {summary_path}\n"
+    "Write to these exact paths for this turn, even if they differ from "
+    "what you wrote before.\n"
+)
 _STATE = (
     "{opening}"
+    "{resume_note}"
     "Status: {status}\n"
     "Current node: {node_id}\n"
     "{reason_line}"
@@ -290,8 +309,17 @@ async def dispatch(
     )
     worktree = run_dirs.worktrees / work_item_id
 
+    resume_note = (
+        _RESUME_NOTE.format(
+            result_path=result_path_for(run_dirs, session_id),
+            summary_path=f".engineering/sessions/{session_id}.md",
+        )
+        if resume_session_id
+        else ""
+    )
     task_instruction = _STATE.format(
         opening=_AUTO_OPENING if auto else _MANUAL_OPENING,
+        resume_note=resume_note,
         status=row["status"],
         node_id=row["current_node_id"],
         reason_line=_reason_line(db, work_item_id, row["status"], evts=evts),

@@ -4,6 +4,7 @@ docs/superpowers/specs/2026-09-10-escalate-to-kraft-agent-design.md).
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 import time
 from pathlib import Path
@@ -84,6 +85,18 @@ def test_escalate_succeeds_from_paused(tmp_path, monkeypatch):
             "/api/work-items",
             json={"repo": str(repo), "title": "fine so far", "chain_template": "quick-task"},
         ).json()["id"]
+        # Kraft-s7c04.20 added a task_is_live check to this route: the walk
+        # this create spawned has to actually finish -- not just move the
+        # DB row off `active`, which can land a beat before the task itself
+        # is popped from the registry -- or `_set_status` fakes `paused`
+        # while the guard still (correctly) sees a live task under `wid`.
+        import kraft.api as api
+        from kraft.api import deps
+
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline and deps.task_is_live(api.app, wid):
+            time.sleep(0.05)
+        assert not deps.task_is_live(api.app, wid), "work item's walk never settled"
         _set_status(tmp_path, wid, "paused")
         r = client.post(f"/api/work-items/{wid}/escalate", json={"message": "help"})
         assert r.status_code == 200
@@ -181,6 +194,48 @@ def test_retry_kills_a_running_escalation_turn_and_proceeds(tmp_path, monkeypatc
 
         r = client.post(f"/api/work-items/{wid}/retry", json={})
         assert r.status_code == 200, r.text
+
+
+def test_a_strangers_retry_cancels_the_escalation_task_not_just_its_pid(tmp_path, monkeypatch):
+    """Kraft-s7c04.20: `/escalate` used to spawn under a separate
+    `f"{wid}:escalate"` task-registry key, invisible to `/retry`'s own
+    `deps.cancel(request.app, wid)` preemption -- which could therefore only
+    ever kill the pid (`_stop_live_sessions`), never the coroutine. Sharing
+    `wid` means that same preemption now actually cancels it."""
+    repo = make_repo(tmp_path)
+    terminated = []
+    monkeypatch.setattr("kraft.api.routes.lifecycle._terminate", lambda pid: terminated.append(pid))
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _needs_human_item(client, repo)
+        node_id = client.get(f"/api/work-items/{wid}").json()["current_node_id"]
+        _seed_running_escalation(tmp_path, wid, node_id)
+
+        # Stand in for the live escalation coroutine `/escalate` would have
+        # spawned under this same key -- registered directly rather than
+        # driven through a real dispatch, the same seam
+        # test_api_lifecycle.py's task_is_live tests already use.
+        import kraft.api as api
+
+        async def _never_returning():
+            await asyncio.Event().wait()
+
+        async def inject():
+            api.deps.spawn(api.app, wid, _never_returning())
+
+        client.portal.call(inject)
+
+        r = client.post(f"/api/work-items/{wid}/retry", json={})
+        assert r.status_code == 200, r.text
+        assert terminated == [None]  # _seed_running_escalation's row has no pid
+
+        async def task_gone():
+            task = api.app.state.tasks.get(wid)
+            return task is None or task.done()
+
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and not client.portal.call(task_gone):
+            time.sleep(0.05)
+        assert client.portal.call(task_gone), "the old escalation task was never cancelled"
 
 
 def test_resume_refuses_while_an_escalation_turn_is_running(tmp_path, monkeypatch):
