@@ -229,34 +229,55 @@ def _extract_message(text: str) -> str:
     return "\n".join(cleaned)[:_MESSAGE_CAP]
 
 
-def from_blind_failure(
-    hook: str,
-    log_path: str | Path | None,
-    work_item_id: str,
-    session_id: str,
-    reproduce: str | None = None,
-) -> Finding:
-    """A `Finding` for a task that failed without writing its own findings
-    file -- most commonly a `kind: subprocess` measuring task like
-    `on.test.run`. Without this, the task's failure never reaches the fix
-    prompt's content, the judge, or the fingerprint-based stuck-detector; it
-    is only ever named, never shown (traced live on a work item that spun
-    for 7 cycles on the identical test failure because of exactly that gap).
+def from_blind_failure(hook: str, work_item_id: str, jobs: list[BlindJob]) -> Finding:
+    """A `Finding` for one or more tasks under `hook` that failed without
+    writing their own findings file -- most commonly `kind: subprocess`
+    measuring tasks like `on.test.run`'s scope loop (test_scopes can fan one
+    hook out to several commands in a round; C2 runs every one rather than
+    stopping at the first failure, so more than one can fail together).
+    Without this, a blind failure never reaches the fix prompt's content,
+    the judge, or the fingerprint-based stuck-detector; it is only ever
+    named, never shown (traced live on a work item that spun for 7 cycles on
+    the identical, invisible test failure).
 
-    `reproduce`, when given, must be a fixed string that does not vary
-    between rounds (e.g. the hook's own registry-bound command) -- it goes
-    into `message`, which `Finding.fingerprint` hashes whole, so anything
-    round-specific here (a session id, a log path) would fingerprint an
-    unchanged failure differently every cycle and defeat the point of this
-    function.
+    The message contains only what's stable across rounds: the hook name,
+    each job's command (when known) and a noise-stripped extract of its own
+    output. Precise-but-round-varying access -- which exact session to read
+    the full log from -- lives in `Finding.jobs`, never in `message`, so
+    fingerprint stability and log-pointer precision don't trade off against
+    each other (Kraft-s7c04.34/.35 brainstorm).
+
+    Deliberately doesn't tell the agent to re-run anything to *discover* the
+    failure -- the log already exists. The "Confirm the fix with" line is
+    for *after* a fix, not instead of reading `jobs`' pointers.
     """
-    if reproduce:
-        pointer = f"Reproduce with: {reproduce}"
-    else:
-        pointer = f"Full log: kraft view logs {work_item_id} --session {session_id}"
-    text = _tail_text(log_path) if log_path else None
-    if not text or not text.strip():
-        message = f"{hook} failed; no output captured.\n\n{pointer}"
-    else:
-        message = f"{_extract_message(text)}\n\n{pointer}"
-    return Finding(severity="critical", message=message, file=None, line=None, source_plugin=hook)
+    lines: list[str] = []
+    job_refs: list[JobRef] = []
+    commands: list[str] = []
+    for job in jobs:
+        text = _tail_text(job.log_path) if job.log_path else None
+        extract = _extract_message(text) if text and text.strip() else None
+        body = extract or "no output captured"
+        if job.command:
+            lines.append(f"- {job.command}: {body}")
+            commands.append(job.command)
+        else:
+            lines.append(f"- {body}")
+        job_refs.append(
+            JobRef(
+                label=job.command or hook,
+                log_ref=session_log_ref(work_item_id, job.session_id),
+            )
+        )
+    header = f"{hook} failed" + (f": {len(jobs)} job(s)" if len(jobs) > 1 else "")
+    message = header + "\n" + "\n".join(lines)
+    if commands:
+        message += "\n\nConfirm the fix with: " + "; ".join(commands)
+    return Finding(
+        severity="critical",
+        message=message,
+        file=None,
+        line=None,
+        source_plugin=hook,
+        jobs=tuple(job_refs),
+    )

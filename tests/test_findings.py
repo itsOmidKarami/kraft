@@ -1,7 +1,9 @@
 import dataclasses
 import json
+import uuid
 
 from kraft.findings import (
+    BlindJob,
     Finding,
     JobRef,
     _extract_message,
@@ -306,7 +308,12 @@ def test_parse_line_bool_yields_none(tmp_path):
 
 
 def _log(tmp_path, text):
-    p = tmp_path / "s.log"
+    # A fixed filename here would let a second call in the same test silently
+    # overwrite the first's file -- every subsequent read of "the first log"
+    # would actually see the second's content (caught by
+    # test_from_blind_failure_different_content_is_a_different_fingerprint,
+    # which needs two calls in one test to genuinely stay distinct).
+    p = tmp_path / f"s{uuid.uuid4().hex}.log"
     p.write_text(text)
     return p
 
@@ -357,7 +364,7 @@ def test_from_blind_failure_extracts_marker_lines(tmp_path):
         "  ✘  27 e2e/regression.spec.ts:65:1 › a flaky test (2.0m)\n"
         "    Error: locator.click: Test timeout of 120000ms exceeded.\n",
     )
-    f = from_blind_failure("on.test.run", log, "wid1", "sess1")
+    f = from_blind_failure("on.test.run", "wid1", [BlindJob("sess1", log, None)])
     assert f.severity == "critical"
     assert f.source_plugin == "on.test.run"
     assert f.file is None
@@ -370,51 +377,135 @@ def test_from_blind_failure_strips_duration_and_timestamp_noise(tmp_path):
     the same -- that's the entire point of this feature."""
     a = _log(tmp_path, "✘ 1 e2e/x.spec.ts:1:1 › t (2.0m)\n14:03:11 done\n")
     b = _log(tmp_path, "✘ 1 e2e/x.spec.ts:1:1 › t (2.3m)\n14:09:58 done\n")
-    # Same session id on purpose: isolating noise-stripping in the extracted
-    # content from the (separately tested, and by design volatile) log
-    # pointer's own session id.
-    fa = from_blind_failure("on.test.run", a, "wid1", "sess1")
-    fb = from_blind_failure("on.test.run", b, "wid1", "sess1")
+    fa = from_blind_failure("on.test.run", "wid1", [BlindJob("sess1", a, None)])
+    fb = from_blind_failure("on.test.run", "wid1", [BlindJob("sess2", b, None)])
     assert fa.fingerprint == fb.fingerprint
 
 
 def test_from_blind_failure_falls_back_to_tail_when_no_marker_matches(tmp_path):
     log = _log(tmp_path, "line one\nline two\nline three\n")
-    f = from_blind_failure("on.test.run", log, "wid1", "sess1")
+    f = from_blind_failure("on.test.run", "wid1", [BlindJob("sess1", log, None)])
     assert "line three" in f.message
 
 
 def test_from_blind_failure_caps_message_length(tmp_path):
     log = _log(tmp_path, "Error: " + ("x" * 5000) + "\n")
-    f = from_blind_failure("on.test.run", log, "wid1", "sess1")
-    assert len(f.message) <= 500  # 400 cap + short pointer line
+    f = from_blind_failure("on.test.run", "wid1", [BlindJob("sess1", log, None)])
+    assert len(f.message) <= 500
 
 
 def test_from_blind_failure_missing_log_is_not_an_error(tmp_path):
-    f = from_blind_failure("on.test.run", tmp_path / "absent.log", "wid1", "sess1")
+    f = from_blind_failure(
+        "on.test.run", "wid1", [BlindJob("sess1", tmp_path / "absent.log", None)]
+    )
     assert "no output captured" in f.message
     assert f.severity == "critical"
 
 
 def test_from_blind_failure_missing_log_fingerprints_the_same_every_time(tmp_path):
-    # Same session id: isolating the fixed "no output captured" fallback
-    # string from the (separately tested) log pointer's own session id.
-    f1 = from_blind_failure("on.test.run", tmp_path / "absent.log", "wid1", "sess1")
-    f2 = from_blind_failure("on.test.run", tmp_path / "still-absent.log", "wid1", "sess1")
+    f1 = from_blind_failure(
+        "on.test.run", "wid1", [BlindJob("sess1", tmp_path / "absent.log", None)]
+    )
+    f2 = from_blind_failure(
+        "on.test.run", "wid1", [BlindJob("sess2", tmp_path / "still-absent.log", None)]
+    )
     assert f1.fingerprint == f2.fingerprint
 
 
-def test_from_blind_failure_prefers_a_reproduce_command_over_a_log_pointer(tmp_path):
-    """`reproduce` (Task 2 passes it for kind: subprocess hooks) must not
-    embed anything round-specific -- it's what keeps a subprocess hook's
-    fingerprint stable, which the plain log-pointer fallback cannot."""
-    log = _log(tmp_path, "✘ 1 e2e/x.spec.ts:1:1 › t (2.0m)\n")
-    f = from_blind_failure("on.test.run", log, "wid1", "sess1", reproduce="uv run pytest -q")
-    assert "Reproduce with: uv run pytest -q" in f.message
+def test_from_blind_failure_names_the_command_that_ran(tmp_path):
+    """G2 (Kraft-s7c04.35): the command in the message is the one that
+    actually ran (BlindJob.command), never a generic reproduce string
+    plugged in from elsewhere."""
+    log = _log(tmp_path, "✘ 1 e2e/x.spec.ts:1:1 › t\n")
+    f = from_blind_failure("on.test.run", "wid1", [BlindJob("sess1", log, "just e2e-ci")])
+    assert "just e2e-ci" in f.message
     assert "sess1" not in f.message
 
 
-def test_from_blind_failure_without_reproduce_points_at_the_session_log(tmp_path):
+def test_from_blind_failure_without_command_names_only_the_hook(tmp_path):
+    log = _log(tmp_path, "pipeline failed: https://gitlab.example.com/x/-/pipelines/1\n")
+    f = from_blind_failure("on.ci.poll", "wid1", [BlindJob("sess1", log, None)])
+    assert "on.ci.poll" in f.message
+    assert "sess1" not in f.message
+
+
+def test_from_blind_failure_carries_a_log_ref_per_job(tmp_path):
     log = _log(tmp_path, "✘ 1 e2e/x.spec.ts:1:1 › t\n")
-    f = from_blind_failure("on.test.run", log, "wid1", "sess1")
-    assert "kraft view logs wid1 --session sess1" in f.message
+    f = from_blind_failure("on.test.run", "wid1", [BlindJob("sess1", log, "just e2e-ci")])
+    assert f.jobs == (JobRef(label="just e2e-ci", log_ref="kraft view logs wid1 --session sess1"),)
+
+
+def test_from_blind_failure_aggregates_multiple_jobs_into_one_finding(tmp_path):
+    """G1 brainstorm: test_scopes fans on.test.run out to several commands in
+    one round (C2 runs every scope, not just the first failure) -- all of a
+    hook's failing rows in one round become one Finding, not several."""
+    a = _log(tmp_path, "✘ 1 e2e/a.spec.ts:1:1 › t\n")
+    b = _log(tmp_path, "✘ 1 e2e/b.spec.ts:9:1 › u\n")
+    f = from_blind_failure(
+        "on.test.run",
+        "wid1",
+        [
+            BlindJob("sess1", a, "just test-ui"),
+            BlindJob("sess2", b, "just e2e-ci"),
+        ],
+    )
+    assert "just test-ui" in f.message
+    assert "just e2e-ci" in f.message
+    assert len(f.jobs) == 2
+    assert {j.label for j in f.jobs} == {"just test-ui", "just e2e-ci"}
+
+
+def test_from_blind_failure_confirm_line_lists_every_job_command(tmp_path):
+    a = _log(tmp_path, "x\n")
+    b = _log(tmp_path, "y\n")
+    f = from_blind_failure(
+        "on.test.run",
+        "wid1",
+        [BlindJob("sess1", a, "just test-ui"), BlindJob("sess2", b, "just e2e-ci")],
+    )
+    assert "just test-ui" in f.message.rsplit("\n\n", 1)[-1]
+    assert "just e2e-ci" in f.message.rsplit("\n\n", 1)[-1]
+
+
+def test_from_blind_failure_no_confirm_line_without_any_command(tmp_path):
+    log = _log(tmp_path, "pipeline failed\n")
+    f = from_blind_failure("on.ci.poll", "wid1", [BlindJob("sess1", log, None)])
+    assert "Confirm the fix with" not in f.message
+
+
+def test_from_blind_failure_different_content_is_a_different_fingerprint(tmp_path):
+    """Granularity check: this bundle must not collapse two genuinely
+    different failures under the same command into one identity."""
+    a = _log(tmp_path, "✘ 1 e2e/a.spec.ts:1:1 › test A\n")
+    b = _log(tmp_path, "✘ 1 e2e/b.spec.ts:9:1 › test B\n")
+    fa = from_blind_failure("on.test.run", "wid1", [BlindJob("sess1", a, "just e2e-ci")])
+    fb = from_blind_failure("on.test.run", "wid1", [BlindJob("sess2", b, "just e2e-ci")])
+    assert fa.fingerprint != fb.fingerprint
+
+
+def test_from_blind_failure_playwright_ordinal_shift_is_stable(tmp_path):
+    """End-to-end G1: the same failure, reported with a different Playwright
+    run ordinal (the evidence's own shape), must fingerprint the same."""
+    a = _log(tmp_path, "  ✘  27 e2e/regression.spec.ts:65:1 › a flaky test (2.0m)\n")
+    b = _log(tmp_path, "  ✘  25 e2e/regression.spec.ts:65:1 › a flaky test (2.3m)\n")
+    fa = from_blind_failure("on.test.run", "wid1", [BlindJob("sess1", a, "just e2e-ci")])
+    fb = from_blind_failure("on.test.run", "wid1", [BlindJob("sess2", b, "just e2e-ci")])
+    assert fa.fingerprint == fb.fingerprint
+
+
+def test_from_blind_failure_ci_poll_pipeline_url_shift_is_stable(tmp_path):
+    """End-to-end G1: on.ci.poll's own log (adapters/forge/ci.py:111) opens
+    with a pipeline URL carrying a numeric id that changes every rerun --
+    same failure, different id, must fingerprint the same. No command here
+    (forge has none), so this also exercises the no-reproduce message shape."""
+    a = _log(
+        tmp_path,
+        "pipeline failed: https://gitlab.example.com/x/-/pipelines/111\n  job lint: failed\n",
+    )
+    b = _log(
+        tmp_path,
+        "pipeline failed: https://gitlab.example.com/x/-/pipelines/222\n  job lint: failed\n",
+    )
+    fa = from_blind_failure("on.ci.poll", "wid1", [BlindJob("sess1", a, None)])
+    fb = from_blind_failure("on.ci.poll", "wid1", [BlindJob("sess2", b, None)])
+    assert fa.fingerprint == fb.fingerprint
