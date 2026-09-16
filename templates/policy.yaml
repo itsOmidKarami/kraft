@@ -11,6 +11,12 @@ loops:
   # verify forever: a clean verify pass doesn't spend a fix cycle of its own
   # (Kraft-4bgg), so without this cap nothing else would ever stop it.
   rebase_bounce:     { attempts: 2, wall_clock_s: 3600 }
+  # A conflict-resolving agent dispatched by /resume, /retry, or
+  # pre_mr_rebase (Kraft-s7c04.23). New installs only -- templates/ is
+  # seeded once and never overwritten, so an existing install falls back to
+  # `default:` below with the same numbers; the code does not depend on
+  # this key being present.
+  rebase_conflict:   { attempts: 3, wall_clock_s: 3600 }
 default:             { attempts: 3, wall_clock_s: 3600 }
 
 # Which finding severities burn a fix cycle. Minor findings are recorded and

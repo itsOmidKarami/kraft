@@ -16,6 +16,14 @@ from kraft.config import git_read, main_ignore_args
 logger = logging.getLogger(__name__)
 
 
+class RebaseConflict(RuntimeError):
+    """`refresh_worktree_base` could not replay this branch onto its new
+    base. A `RuntimeError` subclass so every existing `except RuntimeError`
+    around this call keeps behaving as it did (Kraft-s7c04.23); the type
+    exists so the three callers that can now *act* on a conflict can tell
+    one apart from any other git failure without matching on message text."""
+
+
 def _commit_paths(worktree: Path, paths: list[str], message: str) -> None:
     """Commit exactly `paths` in `worktree`, or commit nothing.
 
@@ -497,9 +505,12 @@ async def refresh_worktree_base(
     nothing committed yet, and `git rebase` itself refuses a dirty tree; the
     pushed-branch case is covered below.
 
-    Raises RuntimeError, with the rebase already aborted (`git rebase
-    --abort`), on a conflict -- that is for a human to resolve, not to
-    dispatch an agent into.
+    Raises `RebaseConflict` (a `RuntimeError` subclass), with the rebase
+    already aborted (`git rebase --abort`), on a conflict -- the worktree is
+    left clean and consistent either way; what happens next is the caller's
+    call (Kraft-s7c04.23 reverses the "not to dispatch an agent into" stance
+    this docstring used to take here, by the human's own call at the design
+    gate).
 
     `force=True` (only `mr_checks`'s conflict-triggered rebase passes this,
     via `mr_rebase_forced` below) skips the "already pushed, don't touch it"
@@ -558,7 +569,7 @@ async def refresh_worktree_base(
         # the conflicting file's name survives into the raised message and the
         # needs_human reason a human reads.
         detail = "\n".join(filter(None, [done.stdout.strip(), done.stderr.strip()]))
-        raise RuntimeError(f"git rebase failed for {worktree}: {detail}")
+        raise RebaseConflict(f"git rebase failed for {worktree}: {detail}")
     return head
 
 

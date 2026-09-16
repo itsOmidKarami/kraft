@@ -46,6 +46,25 @@ def bump_counter(
     )
 
 
+def clear_loop_counters(
+    conn: sqlite3.Connection, work_item_id: str, node_id: str, key: str | None
+) -> None:
+    """Delete the loop clocks a fresh pass over `node_id` must not inherit.
+
+    `key` is the node's `fix_loop`, None for a node without one. The
+    `ci_wait:`/`ci_infra:` keys are built from `node_id` here rather than
+    threaded in, the same way `retry_after_cap` already does -- see its
+    docstring for why that duplication with `ci_wait.py` is contained
+    rather than spread.
+    """
+    for counter in (key, f"ci_wait:{node_id}", f"ci_infra:{node_id}"):
+        if counter is not None:
+            conn.execute(
+                "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?",
+                (work_item_id, counter),
+            )
+
+
 def retry_after_cap(
     conn: sqlite3.Connection,
     work_item_id: str,
@@ -107,13 +126,19 @@ def retry_after_cap(
     not this function's -- called before the awaited worktree rebase
     (Kraft-11e0), so this only clears counters and narrates the retry.
     """
-    counters = (key, gate_key, f"ci_wait:{node_id}", f"ci_infra:{node_id}")
-    for counter in counters:
-        if counter is not None:
-            conn.execute(
-                "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?",
-                (work_item_id, counter),
-            )
+    clear_loop_counters(conn, work_item_id, node_id, key)
+    if gate_key is not None:
+        conn.execute(
+            "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?",
+            (work_item_id, gate_key),
+        )
+    # Item-wide, not node-scoped -- a human's `/retry` is the same explicit
+    # "give this a fresh budget" for the rebase-conflict resolver
+    # (Kraft-s7c04.23) that it already is for every other loop cap here.
+    conn.execute(
+        "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?",
+        (work_item_id, "rebase_conflict"),
+    )
     # A stale pinned pipeline must not survive a manual retry any more than
     # the exhausted ci_wait/ci_infra counters above do (Kraft-ivh1).
     conn.execute("UPDATE work_items SET ci_pipeline_ref = NULL WHERE id = ?", (work_item_id,))

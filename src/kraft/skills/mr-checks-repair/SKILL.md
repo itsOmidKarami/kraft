@@ -6,9 +6,9 @@ description: Read why a merge request's pipeline just failed, and repair what is
 # Repairing a red mr_checks pipeline
 
 `on.ci.poll` just failed. Its diagnosis — the failed job's name and the tail
-of its trace — is in that task's own worker log, in this same round; read it
-before doing anything else. You get one pass: `on.ci.poll` re-runs after you
-exit and decides whether it worked, so there is no point guessing twice.
+of its trace — is already in the prompt above. You get one pass: `on.ci.poll`
+re-runs after you exit and decides whether it worked, so there is no point
+guessing twice.
 
 ## When the trace names a missing or wrong label
 

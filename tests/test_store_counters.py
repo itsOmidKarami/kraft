@@ -127,6 +127,58 @@ def test_done_with_concerns_is_not_capped_out_by_a_sibling_breach(tmp_path):
     asyncio.run(scenario())
 
 
+def test_clear_loop_counters_deletes_key_and_ci_counters_leaves_gate(tmp_path):
+    """.25: `clear_loop_counters` is the piece `retry_after_cap` extracts --
+    it must clear `key`, `ci_wait:<node_id>` and `ci_infra:<node_id>`, and
+    leave any gate-reject counter alone (that is `.22`'s question, not this
+    one's -- spec §2)."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            cap = Cap(attempts=9, wall_clock_s=3600)
+            for key in (
+                "verify_fix_loop",
+                "ci_wait:verify",
+                "ci_infra:verify",
+                "spec_approval_reject_loop",
+            ):
+                await database.write(lambda c, key=key: store.bump_counter(c, "w1", key, cap))
+            await database.write(
+                lambda c: store.clear_loop_counters(c, "w1", "verify", "verify_fix_loop")
+            )
+            assert database.read(lambda c: store.read_counter(c, "w1", "verify_fix_loop")) is None
+            assert database.read(lambda c: store.read_counter(c, "w1", "ci_wait:verify")) is None
+            assert database.read(lambda c: store.read_counter(c, "w1", "ci_infra:verify")) is None
+            assert (
+                database.read(lambda c: store.read_counter(c, "w1", "spec_approval_reject_loop"))
+                is not None
+            ), "clear_loop_counters must not touch a gate-reject counter"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_clear_loop_counters_with_no_key_still_clears_ci_counters(tmp_path):
+    """A node with no fix_loop (`key=None`) still has ci_wait/ci_infra rows
+    that a bounce must clear."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            cap = Cap(attempts=9, wall_clock_s=3600)
+            await database.write(lambda c: store.bump_counter(c, "w1", "ci_wait:mr_checks", cap))
+            await database.write(lambda c: store.clear_loop_counters(c, "w1", "mr_checks", None))
+            assert database.read(lambda c: store.read_counter(c, "w1", "ci_wait:mr_checks")) is None
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 def test_retry_after_cap_clears_the_gate_reject_counter_too(tmp_path):
     """Kraft-ko7j §A4: without this the cap becomes a dead end one step out —
     the counter is spent, the gate re-opens after every retry, and every

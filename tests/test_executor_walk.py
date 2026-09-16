@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -348,6 +349,313 @@ def test_needs_human_reason_names_a_failed_forge_task_s_kind(tmp_path, monkeypat
     assert "on.ci.poll [forge]" in reason
 
 
+class _RaisingForge:
+    """A forge whose `open_mr` fails with no findings to report -- the shape
+    `ForgeError` takes in `run.py`: `findings = None`, so `finish_session`
+    writes no result file at all (Kraft-s7c04.24's blind in-process
+    failure). Every other method a test below might touch on is left
+    unimplemented; nothing here reaches them."""
+
+    async def find_mr(self, **kwargs):
+        return None
+
+    async def open_mr(self, **kwargs):
+        raise _forge.ForgeError("boom: no capacity")
+
+
+def _in_process_policy(tmp_path):
+    from kraft import policy
+
+    pol_path = tmp_path / "policy.yaml"
+    pol_path.write_text("default: { attempts: 9, wall_clock_s: 3600 }\n")
+    return policy.load_policy(pol_path)
+
+
+def test_an_in_process_blind_failure_stops_without_opening_a_fix_cycle(tmp_path, monkeypatch):
+    """.24: `on.mr.open` (`kind: forge`) fails with nothing a worker commit
+    could ever change -- the handler runs in the orchestrator process, not
+    the worktree. The node must stop for a human without spending a fix
+    cycle: no `retry_counters` row for its loop key, no `fix_cycle_started`
+    event, and a reason naming the in-process cause."""
+    monkeypatch.setattr(_forge.run, "resolve", lambda name: _RaisingForge())
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    pol = _in_process_policy(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = Registry(
+                hooks={
+                    "on.mr.open": {"kind": "forge", "handler": "open_mr", "backend": "fake"},
+                    "on.implementation.start": {
+                        "kind": "agent",
+                        "command": f"{sys.executable} {_FAKE_AGENT}",
+                    },
+                }
+            )
+            tmpl = Template(
+                id="mr-open-only",
+                nodes=[
+                    {
+                        "id": "open_mr",
+                        "tasks": ["on.mr.open"],
+                        "gate_after": None,
+                        "fix_loop": "open_mr_fix_loop",
+                    }
+                ],
+            )
+            wid = await executor.intake(
+                database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
+            )
+            result = await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+            )
+            assert result == "needs_human"
+            evts = database.read(lambda c: events.read_after(c, 0, wid))
+            reason = next(
+                e["payload"]["reason"] for e in evts if e["type"] == "work_item_needs_human"
+            )
+            assert "fix_cycle_started" not in [e["type"] for e in evts]
+            counter = database.read(lambda c: store.read_counter(c, wid, "open_mr_fix_loop"))
+            return reason, counter
+        finally:
+            await database.close()
+
+    reason, counter = asyncio.run(scenario())
+    assert "on.mr.open [forge]" in reason
+    assert "Reinstall" in reason
+    assert counter is None, "the unwinnable check must not have bumped the loop counter"
+
+
+def test_a_red_pipeline_with_failed_jobs_opens_its_fix_cycle_as_before(tmp_path, monkeypatch):
+    """The healthy control -- the point of this task. A `kind: forge` task
+    that fails *with* findings (a real red pipeline) is worker-fixable and
+    must open its fix cycle exactly as before this change. Without this
+    test the change is indistinguishable from the bead's wrong version,
+    which would have refused every red-pipeline fix loop too."""
+    fake = _forge.FakeForge(
+        ci_states=["failed"],
+        ci_failed_jobs=[(_forge.FailedJob("test", "failed", "script_failure"),)],
+    )
+    monkeypatch.setattr(_forge.run, "resolve", lambda name: fake)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    from kraft import policy
+
+    pol_path = tmp_path / "policy.yaml"
+    # attempts=1 and a FakeForge that reports red forever: the loop must
+    # cap out after exactly one fix cycle, so the counter this test reads
+    # is unambiguous rather than however many cycles a longer run buys.
+    pol_path.write_text("default: { attempts: 1, wall_clock_s: 3600 }\n")
+    pol = policy.load_policy(pol_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = Registry(
+                hooks={
+                    "on.ci.poll": {"kind": "forge", "handler": "ci_poll", "backend": "fake"},
+                    "on.implementation.start": {
+                        "kind": "agent",
+                        "command": f"{sys.executable} {_FAKE_AGENT}",
+                    },
+                }
+            )
+            tmpl = Template(
+                id="mr-checks-only",
+                nodes=[
+                    {
+                        "id": "mr_checks",
+                        "tasks": ["on.ci.poll"],
+                        "gate_after": None,
+                        "fix_loop": "ci_fix_loop",
+                    }
+                ],
+            )
+            wid = await executor.intake(
+                database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
+            )
+            result = await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+            )
+            evts = database.read(lambda c: events.read_after(c, 0, wid))
+            counter = database.read(lambda c: store.read_counter(c, wid, "ci_fix_loop"))
+            return result, [e["type"] for e in evts], counter
+        finally:
+            await database.close()
+
+    result, types, counter = asyncio.run(scenario())
+    assert "fix_cycle_started" in types, "a real red pipeline must still open a fix cycle"
+    # attempts=1: one fix cycle runs, the re-measure is still red (FakeForge
+    # repeats its last state forever), and the next bump (count=2) breaches --
+    # the counter existing and having bumped past 1 is what proves the loop
+    # ran through the ordinary bump_counter path rather than being refused.
+    assert counter is not None and counter["count"] == 2
+    assert result == "needs_human"  # capped after its one allotted cycle -- not refused outright
+
+
+def test_a_co_failing_subprocess_task_keeps_the_loop_open(tmp_path, monkeypatch):
+    """A blind in-process failure alongside a co-failing `kind: subprocess`
+    task (worker-fixable) must not be waved off as unwinnable -- the
+    subprocess task alone justifies the cycle."""
+    monkeypatch.setattr(_forge.run, "resolve", lambda name: _RaisingForge())
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    pol = _in_process_policy(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = Registry(
+                hooks={
+                    "on.mr.open": {"kind": "forge", "handler": "open_mr", "backend": "fake"},
+                    "on.test.run": {
+                        "kind": "subprocess",
+                        "command": [sys.executable, "-c", "import sys; sys.exit(1)"],
+                    },
+                    "on.implementation.start": {
+                        "kind": "agent",
+                        "command": f"{sys.executable} {_FAKE_AGENT}",
+                    },
+                }
+            )
+            tmpl = Template(
+                id="co-failure",
+                nodes=[
+                    {
+                        "id": "checks",
+                        "tasks": ["on.mr.open", "on.test.run"],
+                        "gate_after": None,
+                        "fix_loop": "checks_fix_loop",
+                    }
+                ],
+            )
+            wid = await executor.intake(
+                database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
+            )
+            await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+            )
+            evts = database.read(lambda c: events.read_after(c, 0, wid))
+            return [e["type"] for e in evts]
+        finally:
+            await database.close()
+
+    types = asyncio.run(scenario())
+    assert "fix_cycle_started" in types, "a co-failing worker-fixable task must keep the loop open"
+
+
+def test_a_co_tasks_findings_keep_the_loop_open(tmp_path, monkeypatch):
+    """A blind in-process failure alongside a co-task that reported real
+    findings (a review, or the same node's own red pipeline) must not
+    discard those findings by refusing the cycle."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_FINDING", "a real defect a worker can fix")
+    monkeypatch.setattr(_forge.run, "resolve", lambda name: _RaisingForge())
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    pol = _in_process_policy(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = Registry(
+                hooks={
+                    "on.mr.open": {"kind": "forge", "handler": "open_mr", "backend": "fake"},
+                    "on.review.local.run": {
+                        "kind": "agent",
+                        "command": f"{sys.executable} {_FAKE_AGENT}",
+                    },
+                    "on.implementation.start": {
+                        "kind": "agent",
+                        "command": f"{sys.executable} {_FAKE_AGENT}",
+                    },
+                }
+            )
+            tmpl = Template(
+                id="co-finding",
+                nodes=[
+                    {
+                        "id": "checks",
+                        "tasks": ["on.mr.open", "on.review.local.run"],
+                        "gate_after": None,
+                        "fix_loop": "checks_fix_loop",
+                    }
+                ],
+            )
+            wid = await executor.intake(
+                database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
+            )
+            await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+            )
+            evts = database.read(lambda c: events.read_after(c, 0, wid))
+            return [e["type"] for e in evts]
+        finally:
+            await database.close()
+
+    types = asyncio.run(scenario())
+    assert "fix_cycle_started" in types, "a co-task's real findings must keep the loop open"
+
+
+def test_a_pending_needs_context_question_outranks_the_unwinnable_stop(tmp_path, monkeypatch):
+    """Ordering control (review finding): a question a fix agent has already
+    asked must reach the human, even on a round where the *re-measure*
+    looks unwinnable on its own. Placed after `needs_context_question` in
+    `walk_node` for exactly this -- moved back above it, this test fails."""
+    from kraft.executor import dispatch
+
+    monkeypatch.setattr(_forge.run, "resolve", lambda name: _RaisingForge())
+    monkeypatch.setattr(
+        dispatch, "needs_context_question", lambda *a, **k: "should I use library X or Y?"
+    )
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    pol = _in_process_policy(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = Registry(
+                hooks={"on.mr.open": {"kind": "forge", "handler": "open_mr", "backend": "fake"}}
+            )
+            tmpl = Template(
+                id="mr-open-only",
+                nodes=[
+                    {
+                        "id": "open_mr",
+                        "tasks": ["on.mr.open"],
+                        "gate_after": None,
+                        "fix_loop": "open_mr_fix_loop",
+                    }
+                ],
+            )
+            wid = await executor.intake(
+                database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
+            )
+            result = await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+            )
+            assert result == "needs_human"
+            evts = database.read(lambda c: events.read_after(c, 0, wid))
+            reason = next(
+                e["payload"]["reason"] for e in evts if e["type"] == "work_item_needs_human"
+            )
+            return reason
+        finally:
+            await database.close()
+
+    reason = asyncio.run(scenario())
+    assert "needs_context: should I use library X or Y?" in reason
+    assert "Reinstall" not in reason
+
+
 def test_a_steer_with_no_agent_dispatch_to_land_in_is_reported_undelivered(tmp_path, monkeypatch):
     """Kraft-s7c04.50: `Steer` is good for one agent launch, whichever
     dispatch gets there first -- but if this run_once call's only task is
@@ -667,25 +975,31 @@ def _rebase_chain_registry(tmp_path):
     return registry, argv_log
 
 
-def _rebase_chain_template():
-    return Template(
-        id="rebase_drift",
-        nodes=[
-            {
-                "id": "verify",
-                "tasks": ["on.test.run", "on.review.local.run"],
-                "gate_after": None,
-                "fix_loop": None,
-            },
-            {
-                "id": "pre_mr_rebase",
-                "tasks": ["on.mr.rebase"],
-                "gate_after": None,
-                "rebase_bounce_to": "verify",
-            },
-            {"id": "open_mr", "tasks": ["on.mr.open"], "gate_after": None},
-        ],
+def _rebase_chain_template(*, verify_fix_loop=False, extra_node=None):
+    """`extra_node`, when given, sits between `verify` and `pre_mr_rebase` --
+    an intervening node (e.g. `mr_checks`) that also declares
+    `rebase_bounce_to: verify`, so a bounce from `pre_mr_rebase` must clear
+    its counter too, not just `verify`'s (Kraft-s7c04.25 spec §2)."""
+    nodes = [
+        {
+            "id": "verify",
+            "tasks": ["on.test.run", "on.review.local.run"],
+            "gate_after": None,
+            "fix_loop": "verify_fix_loop" if verify_fix_loop else None,
+        },
+    ]
+    if extra_node is not None:
+        nodes.append(extra_node)
+    nodes.append(
+        {
+            "id": "pre_mr_rebase",
+            "tasks": ["on.mr.rebase"],
+            "gate_after": None,
+            "rebase_bounce_to": "verify",
+        }
     )
+    nodes.append({"id": "open_mr", "tasks": ["on.mr.open"], "gate_after": None})
+    return Template(id="rebase_drift", nodes=nodes)
 
 
 def _gitignore_engineering(repo):
@@ -785,6 +1099,231 @@ def test_a_moved_base_bounces_back_to_verify_with_a_drift_note(tmp_path, monkeyp
     assert "moved on upstream" not in first_instruction
     assert "moved on upstream" in second_instruction
     assert "moved.txt" in second_instruction
+
+
+def test_a_bounce_clears_the_targets_fix_loop_counter(tmp_path, monkeypatch):
+    """.25: a bounce back to `verify` must not leave `verify`'s own
+    `verify_fix_loop` counter pointing at a clock from before the bounce --
+    43717ee6 priced a judge stop at "3858s of a 3600s wall-clock cap" 3
+    seconds after a bounce that had spent none of it. Asserted on the
+    counter row's absence, not a recomputed elapsed time, which would pass
+    trivially on a fast test machine whether or not the row was cleared."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    _gitignore_engineering(repo)
+    registry, argv_log = _rebase_chain_registry(tmp_path)
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_ARGV_LOG", str(argv_log))
+
+    from kraft import policy
+
+    pol_path = tmp_path / "policy.yaml"
+    pol_path.write_text(
+        "loops:\n  rebase_bounce: { attempts: 2, wall_clock_s: 3600 }\n"
+        "  verify_fix_loop: { attempts: 3, wall_clock_s: 3600 }\n"
+        "default: { attempts: 3, wall_clock_s: 3600 }\n"
+    )
+    pol = policy.load_policy(pol_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="bounce clears counters",
+                repo=str(repo),
+                template=_rebase_chain_template(verify_fix_loop=True),
+                bd_cwd=str(tracker),
+            )
+            from kraft import builtins as kraft_builtins
+
+            await kraft_builtins.ensure_worktree(database, rd, repo=str(repo), work_item_id=wid)
+
+            # A stale counter left over from an earlier, unrelated pass over
+            # `verify` -- what a bounce must not let the re-entered loop inherit.
+            cap = policy.Cap(attempts=3, wall_clock_s=3600)
+            await database.write(lambda c: store.bump_counter(c, wid, "verify_fix_loop", cap))
+            assert (
+                database.read(lambda c: store.read_counter(c, wid, "verify_fix_loop")) is not None
+            )
+
+            (repo / "moved.txt").write_text("moved on\n")
+            subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-m", "moved on upstream"], cwd=repo, check=True)
+
+            result = await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+            )
+            assert result == "completed"
+            assert database.read(lambda c: store.read_counter(c, wid, "verify_fix_loop")) is None, (
+                "verify_fix_loop counter survived the bounce"
+            )
+            reset = next(
+                e
+                for e in database.read(lambda c: events.read_after(c, 0, wid))
+                if e["type"] == "loop_counters_reset"
+            )
+            assert "verify" in reset["payload"]["nodes"]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_a_bounce_clears_an_intervening_nodes_fix_loop_too(tmp_path, monkeypatch):
+    """The span, not just the target (human's call at the design gate): a
+    bounce from `pre_mr_rebase` back to `verify` re-runs every node between
+    them too, and an intervening node's own fix-loop counter (e.g.
+    `mr_checks`' `ci_fix_loop`) is exactly as stale as `verify`'s."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    _gitignore_engineering(repo)
+    registry, argv_log = _rebase_chain_registry(tmp_path)
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_ARGV_LOG", str(argv_log))
+
+    from kraft import policy
+
+    pol_path = tmp_path / "policy.yaml"
+    pol_path.write_text(
+        "loops:\n  rebase_bounce: { attempts: 2, wall_clock_s: 3600 }\n"
+        "  verify_fix_loop: { attempts: 3, wall_clock_s: 3600 }\n"
+        "  ci_fix_loop: { attempts: 3, wall_clock_s: 3600 }\n"
+        "default: { attempts: 3, wall_clock_s: 3600 }\n"
+    )
+    pol = policy.load_policy(pol_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="bounce clears the span",
+                repo=str(repo),
+                template=_rebase_chain_template(
+                    verify_fix_loop=True,
+                    extra_node={
+                        "id": "mr_checks",
+                        "tasks": ["on.ci.poll"],
+                        "gate_after": None,
+                        "fix_loop": "ci_fix_loop",
+                    },
+                ),
+                bd_cwd=str(tracker),
+            )
+            from kraft import builtins as kraft_builtins
+
+            await kraft_builtins.ensure_worktree(database, rd, repo=str(repo), work_item_id=wid)
+
+            cap = policy.Cap(attempts=3, wall_clock_s=3600)
+            await database.write(lambda c: store.bump_counter(c, wid, "verify_fix_loop", cap))
+            await database.write(lambda c: store.bump_counter(c, wid, "ci_fix_loop", cap))
+
+            (repo / "moved.txt").write_text("moved on\n")
+            subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-m", "moved on upstream"], cwd=repo, check=True)
+
+            result = await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+            )
+            assert result == "completed"
+            assert database.read(lambda c: store.read_counter(c, wid, "verify_fix_loop")) is None
+            assert database.read(lambda c: store.read_counter(c, wid, "ci_fix_loop")) is None, (
+                "the intervening node's fix-loop counter survived the bounce"
+            )
+            reset = next(
+                e
+                for e in database.read(lambda c: events.read_after(c, 0, wid))
+                if e["type"] == "loop_counters_reset"
+            )
+            assert set(reset["payload"]["nodes"]) >= {"verify", "mr_checks"}
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_pre_mr_rebase_conflict_dispatches_resolver_and_bounces_to_verify(tmp_path, monkeypatch):
+    """.23's node door: `on.mr.rebase` raising `RebaseConflict` inside
+    `walk_node`'s no-fix_loop branch must dispatch the resolver rather than
+    stopping outright -- and on a resolving verdict, `run_once`'s existing
+    `rebase_bounce_to` machinery carries the walk back to `verify` with no
+    special casing (design §4.8's whole point for this door)."""
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "rebase")
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    _gitignore_engineering(repo)
+    registry, argv_log = _rebase_chain_registry(tmp_path)
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_ARGV_LOG", str(argv_log))
+
+    from kraft import policy
+
+    pol_path = tmp_path / "policy.yaml"
+    pol_path.write_text(
+        "loops:\n  rebase_bounce: { attempts: 2, wall_clock_s: 3600 }\n"
+        "  rebase_conflict: { attempts: 3, wall_clock_s: 3600 }\n"
+        "default: { attempts: 3, wall_clock_s: 3600 }\n"
+    )
+    pol = policy.load_policy(pol_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            from kraft import builtins as kraft_builtins
+
+            wid = await executor.intake(
+                database,
+                rd,
+                title="conflict at pre_mr_rebase",
+                repo=str(repo),
+                template=_rebase_chain_template(),
+                bd_cwd=str(tracker),
+            )
+            worktree = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id=wid
+            )
+
+            # A real conflict: the worktree and the (now-upstream) repo both
+            # touch the same line, mirroring test_builtins.py's fixture.
+            (worktree / "calc.py").write_text(
+                "def add(a, b):\n    return a - b - 1  # bug: should be +\n"
+            )
+            _git(worktree, "add", "-A")
+            _git(worktree, "commit", "-m", "worktree edit")
+            (repo / "calc.py").write_text(
+                "def add(a, b):\n    return a - b - 2  # bug: should be +\n"
+            )
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "conflicting edit upstream")
+
+            result = await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+            )
+            evts = database.read(lambda c: events.read_after(c, 0, wid))
+            starts = [e["payload"]["node_id"] for e in evts if e["type"] == "node_started"]
+            return result, starts
+        finally:
+            await database.close()
+
+    result, starts = asyncio.run(scenario())
+    assert result == "completed"
+    assert starts.count("verify") == 2, "did not bounce back to verify after the resolver"
+    assert starts[-1] in ("pre_mr_rebase", "open_mr")
 
 
 def test_no_movement_skips_the_bounce(tmp_path, monkeypatch):
@@ -1183,6 +1722,459 @@ def test_a_node_dict_lacking_on_failure_never_triggers_recovery(tmp_path):
     assert not [e for e in evts if e["type"] == "node_recovery_started"], (
         "recover_node ran even though the stored node dict has no on_failure"
     )
+
+
+async def _call_recover_node(tmp_path, monkeypatch, *, measured_round, steer, collect_at):
+    """Drives the real `recover_node` with `dispatch.measure_node` and
+    `dispatch.collect_findings` stubbed out, so the test pins exactly what
+    `recover_node` builds and hands to the repair hook's `Steer` -- without
+    paying for a real agent invocation. `collect_at` maps round -> findings
+    list, modelling `dispatch.collect_findings`'s real signature.
+
+    Returns the `steer` kwarg the repair hook's `measure_node` call received.
+    """
+    from kraft import policy
+    from kraft.executor import dispatch, walk
+
+    calls: list = []
+
+    async def fake_measure(*args, steer=None, **kwargs):
+        calls.append(steer)
+        return "ok", [], []
+
+    def fake_collect(db, wid, node, round, registry):
+        return collect_at.get(round, []), set()
+
+    monkeypatch.setattr(dispatch, "measure_node", fake_measure)
+    monkeypatch.setattr(dispatch, "collect_findings", fake_collect)
+
+    node = {"id": "checks", "tasks": ["on.ci.poll"], "on_failure": ["on.mr.sync"]}
+    rd = RunDirs(tmp_path / "run").ensure()
+    database = await db.Database.open(rd.db)
+    try:
+        await database.write(
+            lambda c: store.create_work_item(
+                c,
+                id="wi",
+                bead_id="B",
+                title="t",
+                repo=str(tmp_path),
+                chain_template="t",
+                chain_definition=json.dumps({"template_id": "t", "nodes": [node]}),
+            )
+        )
+        row = database.read(
+            lambda c: c.execute("SELECT * FROM work_items WHERE id = 'wi'").fetchone()
+        )
+        await walk.recover_node(
+            database,
+            rd,
+            "wi",
+            node,
+            row,
+            Registry(hooks={}),
+            tmp_path,
+            failed=["on.ci.poll"],
+            steer=steer,
+            launch=None,
+            budget=policy.NO_BUDGET,
+            measured_round=measured_round,
+        )
+    finally:
+        await database.close()
+    return calls[0]
+
+
+def test_recover_node_seeds_the_repair_with_the_measured_rounds_findings(tmp_path, monkeypatch):
+    """.26: the repair agent used to be handed nothing but 'this failed' --
+    the diagnosis lived only in the failed session's own log, with no path
+    given to it (6c712ea8: 4 of its 16 tool calls were spent hunting for
+    one). `recover_node` must read `measured_round`'s findings via
+    `dispatch.collect_findings` and seed them into the repair hook's prompt."""
+    from kraft import findings as _findings
+
+    finding = _findings.Finding(
+        severity="critical",
+        message="on.ci.poll failed; no output captured.\n\nReproduce with: pytest -k x",
+        file=None,
+        line=None,
+        source_plugin="on.ci.poll",
+    )
+
+    repair_steer = asyncio.run(
+        _call_recover_node(
+            tmp_path, monkeypatch, measured_round=3, steer=None, collect_at={3: [finding]}
+        )
+    )
+
+    assert repair_steer is not None and repair_steer, "no seeded note reached the repair hook"
+    text = repair_steer.take()
+    assert "Reproduce with: pytest -k x" in text
+    assert finding.message.split("\n")[0] in text
+
+
+def test_recover_node_reads_findings_from_the_round_the_failure_measured_at(tmp_path, monkeypatch):
+    """The round `recover_node` must read is the round the *failing*
+    measurement ran at, not `recover_node`'s own dispatch round -- passing
+    the wrong one reads a stale or empty round and seeds nothing (or seeds
+    a previous round's stale findings). Pinned by giving round 2 findings
+    and round 5 none, and asking `recover_node` for round 5: an
+    implementation that read the wrong round would still find round 2's
+    findings and pass this test's sibling above for the wrong reason."""
+    from kraft import findings as _findings
+
+    stale = _findings.Finding(
+        severity="critical",
+        message="stale round 2 finding",
+        file=None,
+        line=None,
+        source_plugin="on.ci.poll",
+    )
+
+    repair_steer = asyncio.run(
+        _call_recover_node(
+            tmp_path, monkeypatch, measured_round=5, steer=None, collect_at={2: [stale]}
+        )
+    )
+
+    assert not repair_steer, "recover_node seeded a finding from the wrong round"
+
+
+def test_recover_node_merges_an_incoming_human_steer_ahead_of_the_seeded_note(
+    tmp_path, monkeypatch
+):
+    """A person's own instruction leads and keeps its own `source`, so a
+    fix-loop judge exemption and the human prompt template both survive the
+    merge -- the seeded half is self-labelling text, not a relabelling of
+    the human's."""
+    from kraft import findings as _findings
+    from kraft.executor.context import Steer
+
+    finding = _findings.Finding(
+        severity="critical",
+        message="the ci failure",
+        file=None,
+        line=None,
+        source_plugin="on.ci.poll",
+    )
+    incoming = Steer("focus on the auth module", source="human")
+
+    repair_steer = asyncio.run(
+        _call_recover_node(
+            tmp_path, monkeypatch, measured_round=1, steer=incoming, collect_at={1: [finding]}
+        )
+    )
+
+    assert repair_steer.source == "human"
+    text = repair_steer.take()
+    assert "focus on the auth module" in text
+    assert "the ci failure" in text
+
+
+def test_recover_node_with_no_findings_for_the_round_passes_the_steer_through(
+    tmp_path, monkeypatch
+):
+    """A node with no findings for this round dispatches exactly as today --
+    no seeded note invented out of nothing."""
+    repair_steer = asyncio.run(
+        _call_recover_node(tmp_path, monkeypatch, measured_round=0, steer=None, collect_at={})
+    )
+
+    assert not repair_steer
+
+
+async def _resolver_scenario(tmp_path, tracker, agent_env, call_resolver):
+    """Sets up a real conflicted worktree, runs `call_resolver(database, rd,
+    wid, row, worktree, conflict)`, and returns whatever it returns. Shared
+    by the resolver's status-mapping tests below -- only the fake agent's
+    env and the assertions differ between them.
+    """
+    from kraft import builtins as kraft_builtins
+
+    repo = make_repo(tmp_path)
+    rd = RunDirs(tmp_path / "run").ensure()
+    database = await db.Database.open(rd.db)
+    try:
+        wid = await executor.intake(
+            database,
+            rd,
+            title="t",
+            repo=str(repo),
+            template=_quick_task(),
+            bd_cwd=str(tracker),
+        )
+        worktree = await kraft_builtins.ensure_worktree(
+            database, rd, repo=str(repo), work_item_id=wid
+        )
+        row = database.read(
+            lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+        )
+        branch = store.branch_for(row)
+
+        (worktree / "calc.py").write_text(
+            "def add(a, b):\n    return a - b - 1  # bug: should be +\n"
+        )
+        _git(worktree, "add", "-A")
+        _git(worktree, "commit", "-m", "worktree edit")
+
+        (repo / "calc.py").write_text("def add(a, b):\n    return a - b - 2  # bug: should be +\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-m", "conflicting edit")
+
+        try:
+            await kraft_builtins.refresh_worktree_base(worktree, repo, branch)
+            raise AssertionError("expected a RebaseConflict from the fixture")
+        except kraft_builtins.RebaseConflict as exc:
+            conflict = str(exc)
+
+        for k, v in agent_env.items():
+            os.environ[k] = v
+        try:
+            return await call_resolver(database, rd, wid, row, worktree, conflict)
+        finally:
+            for k in agent_env:
+                os.environ.pop(k, None)
+    finally:
+        await database.close()
+
+
+def test_resolve_rebase_conflict_resolves_and_moves_base_ref(tmp_path, monkeypatch):
+    """.23's success path, end to end: the fake agent's `rebase` mode
+    actually re-runs and completes the rebase (the only way to test this
+    honestly -- a mocked dispatch could report `done` without moving
+    anything), and `resolve_rebase_conflict` must persist the new base and
+    report `"ok"`."""
+    from kraft.executor import walk
+
+    tracker = isolated_bd(tmp_path)
+
+    async def call(database, rd, wid, row, worktree, conflict):
+        registry = fake_registry(sys.executable, _FAKE_AGENT)
+        node = {"id": "pre_mr_rebase", "tasks": ["on.mr.rebase"]}
+        status, steer_text, new_base = await walk.resolve_rebase_conflict(
+            database,
+            rd,
+            work_item_id=wid,
+            node=node,
+            row=row,
+            registry=registry,
+            worktree=worktree,
+            policy=None,
+            launch=None,
+            conflict=conflict,
+        )
+        stored = database.read(
+            lambda c: c.execute("SELECT base_ref FROM work_items WHERE id = ?", (wid,)).fetchone()
+        )
+        return status, steer_text, new_base, stored["base_ref"]
+
+    status, steer_text, new_base, stored_base_ref = asyncio.run(
+        _resolver_scenario(tmp_path, tracker, {"KRAFT_FAKE_AGENT": "rebase"}, call)
+    )
+    assert status == "ok"
+    assert steer_text is None
+    assert new_base is not None and new_base == stored_base_ref
+
+
+def test_resolve_rebase_conflict_downgrades_a_done_that_never_moved(tmp_path, monkeypatch):
+    """An agent that reports `done` without completing the rebase (the
+    default `fix` mode does no git work at all) is downgraded to the
+    failure path -- believing the report would leave the branch still
+    conflicted while everything downstream assumes it is resolved."""
+    from kraft.executor import walk
+
+    tracker = isolated_bd(tmp_path)
+
+    async def call(database, rd, wid, row, worktree, conflict):
+        registry = fake_registry(sys.executable, _FAKE_AGENT)
+        node = {"id": "pre_mr_rebase", "tasks": ["on.mr.rebase"]}
+        return await walk.resolve_rebase_conflict(
+            database,
+            rd,
+            work_item_id=wid,
+            node=node,
+            row=row,
+            registry=registry,
+            worktree=worktree,
+            policy=None,
+            launch=None,
+            conflict=conflict,
+        )
+
+    status, steer_text, new_base = asyncio.run(
+        _resolver_scenario(tmp_path, tracker, {}, call)  # default KRAFT_FAKE_AGENT="fix"
+    )
+    assert status == "needs_human"
+    assert steer_text is None and new_base is None
+
+
+def test_resolve_rebase_conflict_done_with_concerns_carries_them_forward(tmp_path, monkeypatch):
+    """`done_with_concerns` resolves the rebase, same as `done`, but the
+    resolver's own relevance judgement -- the point of §4.1 -- must reach
+    the caller so it can seed the next reviewer with it."""
+    from kraft.executor import walk
+
+    tracker = isolated_bd(tmp_path)
+
+    async def call(database, rd, wid, row, worktree, conflict):
+        registry = fake_registry(sys.executable, _FAKE_AGENT)
+        node = {"id": "pre_mr_rebase", "tasks": ["on.mr.rebase"]}
+        return await walk.resolve_rebase_conflict(
+            database,
+            rd,
+            work_item_id=wid,
+            node=node,
+            row=row,
+            registry=registry,
+            worktree=worktree,
+            policy=None,
+            launch=None,
+            conflict=conflict,
+        )
+
+    status, steer_text, new_base = asyncio.run(
+        _resolver_scenario(
+            tmp_path,
+            tracker,
+            {
+                "KRAFT_FAKE_AGENT": "rebase",
+                "KRAFT_FAKE_AGENT_STATUS": "done_with_concerns",
+                "KRAFT_FAKE_AGENT_CONCERNS": "upstream renamed the function this calls",
+            },
+            call,
+        )
+    )
+    assert status == "ok"
+    assert steer_text == "upstream renamed the function this calls"
+    assert new_base is not None
+
+
+def test_resolve_rebase_conflict_needs_context_stops_with_the_question(tmp_path, monkeypatch):
+    """The load-bearing verdict (design §4.5): the upstream change invalidates
+    the agreed spec or plan, and Kraft cannot re-plan itself mid-chain."""
+    from kraft.executor import walk
+
+    tracker = isolated_bd(tmp_path)
+
+    async def call(database, rd, wid, row, worktree, conflict):
+        registry = fake_registry(sys.executable, _FAKE_AGENT)
+        node = {"id": "pre_mr_rebase", "tasks": ["on.mr.rebase"]}
+        status, steer_text, new_base = await walk.resolve_rebase_conflict(
+            database,
+            rd,
+            work_item_id=wid,
+            node=node,
+            row=row,
+            registry=registry,
+            worktree=worktree,
+            policy=None,
+            launch=None,
+            conflict=conflict,
+        )
+        reason = next(
+            e["payload"]["reason"]
+            for e in database.read(lambda c: events.read_after(c, 0, wid))
+            if e["type"] == "work_item_needs_human"
+        )
+        return status, steer_text, new_base, reason
+
+    status, steer_text, new_base, reason = asyncio.run(
+        _resolver_scenario(
+            tmp_path,
+            tracker,
+            {
+                "KRAFT_FAKE_AGENT_STATUS": "needs_context",
+                "KRAFT_FAKE_AGENT_QUESTION": "does the renamed API change the plan?",
+            },
+            call,
+        )
+    )
+    assert status == "needs_human"
+    assert steer_text is None and new_base is None
+    assert "needs_context: does the renamed API change the plan?" in reason
+
+
+def test_resolve_rebase_conflict_failed_stops_with_the_conflict(tmp_path, monkeypatch):
+    from kraft.executor import walk
+
+    tracker = isolated_bd(tmp_path)
+
+    async def call(database, rd, wid, row, worktree, conflict):
+        registry = fake_registry(sys.executable, _FAKE_AGENT)
+        node = {"id": "pre_mr_rebase", "tasks": ["on.mr.rebase"]}
+        status, steer_text, new_base = await walk.resolve_rebase_conflict(
+            database,
+            rd,
+            work_item_id=wid,
+            node=node,
+            row=row,
+            registry=registry,
+            worktree=worktree,
+            policy=None,
+            launch=None,
+            conflict=conflict,
+        )
+        reason = next(
+            e["payload"]["reason"]
+            for e in database.read(lambda c: events.read_after(c, 0, wid))
+            if e["type"] == "work_item_needs_human"
+        )
+        return status, reason
+
+    status, reason = asyncio.run(
+        _resolver_scenario(tmp_path, tracker, {"KRAFT_FAKE_AGENT_STATUS": "failed"}, call)
+    )
+    assert status == "needs_human"
+    assert "could not resolve" in reason
+
+
+def test_resolve_rebase_conflict_cap_breach_stops_without_dispatching(tmp_path, monkeypatch):
+    """A third conflict on one item must not dispatch a fourth resolver."""
+    from kraft import policy
+    from kraft.executor import walk
+
+    tracker = isolated_bd(tmp_path)
+    pol_path = tmp_path / "policy.yaml"
+    pol_path.write_text(
+        "loops:\n  rebase_conflict: { attempts: 1, wall_clock_s: 3600 }\n"
+        "default: { attempts: 9, wall_clock_s: 3600 }\n"
+    )
+    pol = policy.load_policy(pol_path)
+
+    async def call(database, rd, wid, row, worktree, conflict):
+        registry = fake_registry(sys.executable, _FAKE_AGENT)
+        node = {"id": "pre_mr_rebase", "tasks": ["on.mr.rebase"]}
+        first = await walk.resolve_rebase_conflict(
+            database,
+            rd,
+            work_item_id=wid,
+            node=node,
+            row=row,
+            registry=registry,
+            worktree=worktree,
+            policy=pol,
+            launch=None,
+            conflict=conflict,
+        )
+        second = await walk.resolve_rebase_conflict(
+            database,
+            rd,
+            work_item_id=wid,
+            node=node,
+            row=row,
+            registry=registry,
+            worktree=worktree,
+            policy=pol,
+            launch=None,
+            conflict=conflict,
+        )
+        return first, second
+
+    (first_status, _, _), (second_status, _, _) = asyncio.run(
+        _resolver_scenario(tmp_path, tracker, {"KRAFT_FAKE_AGENT_STATUS": "failed"}, call)
+    )
+    assert first_status == "needs_human"  # the agent's own "failed"
+    assert second_status == "needs_human"  # the cap, not a second dispatch
 
 
 def test_pausing_between_nodes_stops_the_walk_before_the_next_one_starts(tmp_path, monkeypatch):
