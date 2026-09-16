@@ -505,6 +505,43 @@ def test_resume_refuses_and_writes_nothing_when_a_walk_is_still_live(tmp_path, m
         client.portal.call(cleanup)
 
 
+def test_escalate_refuses_and_writes_nothing_when_a_walk_is_still_live(tmp_path, monkeypatch):
+    """Kraft-s7c04.20: same race as `/retry` and `/resume`, reached through
+    `/escalate` -- a gate's own auto-review is a live walk task under this
+    same `wid`, invisible to `escalation_running`'s check (that only sees
+    another *escalation*), and until this guard existed a human could
+    escalate straight into a worktree that live review agent was still
+    writing to (43717ee6: two agents, one worktree, both committed)."""
+    from kraft.api import deps
+
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+        _force_node(wid, "verify", "needs_human")
+
+        async def _never_returning():
+            await asyncio.Event().wait()
+
+        async def inject():
+            deps.spawn(client.app, wid, _never_returning())
+
+        client.portal.call(inject)
+
+        r = client.post(f"/api/work-items/{wid}/escalate", json={"message": "help"})
+
+        assert r.status_code == 409, r.text
+        item = client.get(f"/api/work-items/{wid}").json()
+        assert item["status"] == "needs_human"
+
+        async def cleanup():
+            task = client.app.state.tasks.pop(wid)
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+        client.portal.call(cleanup)
+
+
 def test_abandon_sets_terminal_status_and_removes_the_worktree(tmp_path, monkeypatch):
     """A rejected or dead item stayed on the board forever, worktree and all."""
     repo = make_repo(tmp_path)
