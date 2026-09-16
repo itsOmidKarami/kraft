@@ -10,9 +10,7 @@ here blocks for longer than its timeout. A failure is `None`, which reads as
 from __future__ import annotations
 
 import json
-import os
 import re
-import shutil
 import subprocess
 import time
 from dataclasses import dataclass
@@ -24,7 +22,7 @@ from kraft.paths import default_run_dir
 #: The project's releases, newest first. Hard-coded rather than configurable:
 #: an install pointed at somebody else's release feed is a way to be handed a
 #: different program, not a feature anyone asked for.
-RELEASES_URL = "https://gitlab.com/api/v4/projects/itsOmidKarami%2Fkraft/releases"
+RELEASES_URL = "https://api.github.com/repos/itsOmidKarami/kraft/releases"
 
 #: One check a day. The thing being watched moves on the order of weeks, and the
 #: cost of being a day late is a notice that appears tomorrow instead of today.
@@ -57,47 +55,16 @@ def _cache_path():
     return default_run_dir() / "update-check.json"
 
 
-def _api_path(url: str) -> str:
-    """`url` relative to the API root, for `glab api`."""
-    root = RELEASES_URL.split("/projects/", 1)[0]
-    return url[len(root) + 1 :] if url.startswith(root + "/") else url
-
-
 def _request(url: str, timeout: float) -> bytes:
-    """One authenticated GET, shared by the releases list and the wheel
-    download - same auth story install.sh has: the project is private, so an
-    anonymous request 404s. An explicit token first (works anywhere,
-    including a headless machine); an already-authenticated `glab` next (the
-    common case on a dev box); plain last, for the day this project goes
-    public and neither is needed.
+    """One plain GET, shared by the releases list and the wheel download.
+
+    The project is public, so no authentication needed.
     """
-    token = os.environ.get("GITLAB_TOKEN")
-    if token:
-        import httpx
-
-        response = httpx.get(
-            url, timeout=timeout, headers={"PRIVATE-TOKEN": token}, follow_redirects=True
-        )
-        response.raise_for_status()
-        return response.content
-
-    if shutil.which("glab") and _glab_authed(timeout):
-        return subprocess.run(
-            ["glab", "api", _api_path(url)], capture_output=True, timeout=timeout, check=True
-        ).stdout
-
     import httpx
 
     response = httpx.get(url, timeout=timeout, follow_redirects=True)
     response.raise_for_status()
     return response.content
-
-
-def _glab_authed(timeout: float) -> bool:
-    return (
-        subprocess.run(["glab", "auth", "status"], capture_output=True, timeout=timeout).returncode
-        == 0
-    )
 
 
 def _fetch(url: str, timeout: float):
@@ -106,24 +73,34 @@ def _fetch(url: str, timeout: float):
 
 
 def _parse(payload) -> Release | None:
-    """The newest release that actually has a wheel attached.
+    """The newest published release that actually has a wheel attached.
 
-    A release with no wheel is not installable, so it is not an update - a tag
-    pushed by hand, or a release job that failed after creating one.
+    Three things disqualify an entry, and the feed is walked rather than
+    indexed at [0] because any of them can be newest: a draft (visible only to
+    people with push access, and never installable), a prerelease, and a
+    release with no wheel — a tag pushed by hand, or a release job that failed
+    after creating one.
     """
-    if not isinstance(payload, list) or not payload:
+    if not isinstance(payload, list):
         return None
-    newest = payload[0]
-    if not isinstance(newest, dict):
-        return None
-    tag = newest.get("tag_name")
-    links = ((newest.get("assets") or {}).get("links")) or []
-    wheel = next(
-        (link.get("url") for link in links if str(link.get("name", "")).endswith(".whl")), None
-    )
-    if not tag or not wheel:
-        return None
-    return Release(tag=tag, wheel_url=wheel)
+    for entry in payload:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("draft") or entry.get("prerelease"):
+            continue
+        tag = entry.get("tag_name")
+        assets = entry.get("assets") or []
+        wheel = next(
+            (
+                asset.get("browser_download_url")
+                for asset in assets
+                if isinstance(asset, dict) and str(asset.get("name", "")).endswith(".whl")
+            ),
+            None,
+        )
+        if tag and wheel:
+            return Release(tag=tag, wheel_url=wheel)
+    return None
 
 
 def _read_cache(now: float) -> Release | None:
@@ -194,9 +171,8 @@ def perform(release: Release, *, run=None) -> int:
     an updated Kraft is byte-identical to a freshly installed one rather than
     something only this path can produce.
 
-    `release.wheel_url` is unauthenticated from `uv`'s side, so handing it over
-    bare 401s the same way install.sh's did: fetch it here (with the same
-    auth `_fetch` uses) and give `uv` the local file instead.
+    `release.wheel_url` is a plain public URL now, but it is still fetched here
+    rather than handed to `uv`, so that one code path downloads every wheel.
     """
     import tempfile
     from pathlib import Path
