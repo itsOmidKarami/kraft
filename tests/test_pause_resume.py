@@ -389,6 +389,22 @@ def test_resume_skips_rebase_when_worktree_is_dirty(tmp_path, monkeypatch):
 
 
 def test_resume_marks_needs_human_on_a_rebase_conflict(tmp_path, monkeypatch):
+    """Kraft-s7c04.23 changed what a rebase conflict at `/resume` does: it
+    now dispatches a resolver agent first (a cheaper first attempt at what
+    escalation already does), and only escalates once the resolver itself
+    fails to resolve anything -- the fake agent here does no git work at
+    all, so the resolver reports `done` without moving the branch and is
+    downgraded to `failed` (`walk.resolve_rebase_conflict`'s ancestor-check
+    downgrade). Pinned by `hook_point`/`round` rather than a bare session
+    count, which the resolver's own dispatch changed once already (review
+    finding 3) and would silently change again the next time a dispatch is
+    added or removed on this path.
+
+    The status assertion is now a poll, not the `/resume` response's own
+    body: the whole resolve-or-escalate sequence is the item's own spawned
+    task (review findings 1 & 2), so the route returns before the stop is
+    recorded.
+    """
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "30")
     repo = make_repo(tmp_path)
@@ -420,11 +436,21 @@ def test_resume_marks_needs_human_on_a_rebase_conflict(tmp_path, monkeypatch):
         _git(repo, "add", "-A")
         _git(repo, "commit", "-m", "conflicting edit")
 
-        before_sessions = len(client.get(f"/api/work-items/{wid}").json()["worker_sessions"])
+        # The initial running-agent setup needed the 30s "slow" mode so pause
+        # had something real to interrupt; the resolver and the escalation
+        # this test drives through next don't, and paying it twice more
+        # would triple this test's wall-clock cost for nothing.
+        monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "0")
 
         r = client.post(f"/api/work-items/{wid}/resume", json={})
         assert r.status_code == 200
-        assert r.json()["status"] == "needs_human"
+
+        item = _wait(
+            lambda: (lambda b: b if b["status"] == "needs_human" else None)(
+                client.get(f"/api/work-items/{wid}").json()
+            ),
+            "the item to read needs_human",
+        )
 
         needs_human = [
             e
@@ -434,16 +460,28 @@ def test_resume_marks_needs_human_on_a_rebase_conflict(tmp_path, monkeypatch):
         # Not "conflict": git's own wording for a failed rebase varies by
         # version (Kraft-3a8m saw "could not apply ..." with no "conflict"
         # substring at all on some runners). "rebase failed for" is
-        # builtins.py's own literal, version-independent of git's message.
+        # builtins.py's own literal, version-independent of git's message,
+        # and it survives inside the resolver's own "could not resolve"
+        # reason too, since that reason embeds the original conflict text.
         assert needs_human and "rebase failed for" in needs_human[-1]["payload"]["reason"].lower()
 
-        # auto_escalate_stuck now fires here too, spawning one escalation
-        # session (Kraft-h48r's fix for this call site) -- not the zero
-        # this asserted before that fix existed.
-        after = client.get(f"/api/work-items/{wid}").json()
-        assert len(after["worker_sessions"]) == before_sessions + 1
-        assert after["worker_sessions"][-1]["hook_point"] == "escalation"
-        assert git_read(worktree, "status", "--porcelain") == ""
+        sessions = client.get(f"/api/work-items/{wid}").json()["worker_sessions"]
+        resolver_sessions = [
+            s for s in sessions if s["hook_point"] == "on.implementation.start" and s["round"] == -2
+        ]
+        escalation_sessions = [s for s in sessions if s["hook_point"] == "escalation"]
+        assert len(resolver_sessions) == 1, "the resolver did not dispatch exactly once"
+        assert len(escalation_sessions) == 1, "escalation did not follow the resolver's failure"
+        # The resolver is a real agent session now, and fake-claude.sh writes
+        # its own session summary under `.engineering/sessions/` same as any
+        # other -- an untracked directory left behind by that, not evidence
+        # of anything the resolver (which does no git work) left uncommitted.
+        dirty = [
+            line
+            for line in (git_read(worktree, "status", "--porcelain") or "").splitlines()
+            if ".engineering" not in line
+        ]
+        assert not dirty, dirty
 
 
 def test_resume_skips_rebase_when_branch_already_pushed(tmp_path, monkeypatch):

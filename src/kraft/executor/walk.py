@@ -11,6 +11,7 @@ from kraft import events, store
 from kraft import findings as _findings
 from kraft import policy as _policy
 from kraft.adapters import beads
+from kraft.adapters import subprocess as _subprocess
 from kraft.executor import dispatch, entry, gates, prompts, stops
 from kraft.executor.context import (
     BUDGET,
@@ -115,6 +116,12 @@ async def _diagnosis_bundle(db, work_item_id: str, node: dict, worktree) -> dict
 #: measurement after the *first* paid cycle uses.
 _REPAIR_ROUND = -1
 
+#: Hook kinds whose handler runs inside the orchestrator process, so no
+#: commit a fix agent makes in its worktree can change what executes
+#: (Kraft-s7c04.24). `subprocess` is deliberately absent: it runs the
+#: worktree's own command, which is exactly what a fix commit changes.
+_IN_PROCESS_KINDS = ("forge", "builtin")
+
 #: Kraft-0i6z4: rounds a single fingerprint must survive fix attempts
 #: unchanged before it alone (not the whole set) counts as stuck. Must be
 #: higher than the whole-set check's effective bar of 2 (previous round ==
@@ -182,6 +189,7 @@ async def recover_node(
     steer: Steer | None,
     launch: LaunchContext | None,
     budget: _policy.Budget,
+    measured_round: int,
     round: int = 1,
     loop_severities: frozenset[str] = _policy.DEFAULT_LOOP_SEVERITIES,
 ) -> tuple[str, list[str], list[BaseException]]:
@@ -219,6 +227,21 @@ async def recover_node(
             {"node_id": node["id"], "failed_tasks": failed, "tasks": hooks},
         )
     )
+    found, _reported = dispatch.collect_findings(db, work_item_id, node, measured_round, registry)
+    seeded = prompts.seeded_findings_note(found) if found else None
+    if seeded and steer is not None and steer:
+        # A person's own instruction leads and keeps its own template;
+        # `_SEEDED_FINDINGS_STEER`'s lead-in sentence ("Findings the last
+        # review of this node left unresolved:") is what stops the bullets
+        # below it reading as something that person wrote. `.take()` because
+        # the incoming note is folded into the one replacing it -- leaving it
+        # undelivered here would deliver it twice (Kraft-s7c04.58 covers the
+        # two-hook case this single Steer cannot serve).
+        repair_steer = Steer(f"{steer.take()}\n\n{seeded}", source=steer.source)
+    elif seeded:
+        repair_steer = Steer(seeded, source="seeded")
+    else:
+        repair_steer = steer
     verdict, r_failed, r_excs = await dispatch.measure_node(
         db,
         run_dirs,
@@ -228,7 +251,7 @@ async def recover_node(
         registry,
         worktree,
         round=round,
-        steer=steer,
+        steer=repair_steer,
         launch=launch,
         budget=budget,
         loop_severities=loop_severities,
@@ -337,6 +360,7 @@ async def walk_node(
                     steer=steer,
                     launch=launch,
                     budget=budget,
+                    measured_round=0,
                     loop_severities=loop_severities,
                 )
                 if verdict == "paused":
@@ -347,6 +371,42 @@ async def walk_node(
                 if not recovered:
                     question = dispatch.needs_context_question(db, work_item_id, node, round=1)
             if not recovered:
+                # A rebase conflict raised by `on.mr.rebase` (`pre_mr_rebase`)
+                # is not "for a human to resolve, not to dispatch an agent
+                # into" any more (Kraft-s7c04.23, by the human's own call at
+                # the design gate) -- the resolver re-creates the conflict and
+                # judges whether the upstream commits it rebased onto change
+                # what this work item is supposed to do. Gated on the same
+                # `auto_escalate_stuck` switch route-door dispatch uses: a
+                # resolver is a different mechanism but the same unprompted
+                # spend.
+                conflict = next((e for e in excs if isinstance(e, _builtins.RebaseConflict)), None)
+                if conflict is not None and (policy is None or policy.auto_escalate_stuck):
+                    r_status, _steer_text, _new_base = await resolve_rebase_conflict(
+                        db,
+                        run_dirs,
+                        work_item_id=work_item_id,
+                        node=node,
+                        row=row,
+                        registry=registry,
+                        worktree=worktree,
+                        policy=policy,
+                        launch=launch,
+                        conflict=str(conflict),
+                    )
+                    if r_status == "paused":
+                        return "paused"
+                    if r_status == BUDGET:
+                        return await stops.stop_for_budget(db, work_item_id, node, budget)
+                    if r_status == "ok":
+                        # base_ref moved; `run_once`'s own `rebase_bounce_to`
+                        # check sees the movement and bounces this node back
+                        # to `verify` with no special casing, picking up
+                        # Task 2's counter clearing for free.
+                        await db.write(lambda c: store.complete_node(c, work_item_id, node["id"]))
+                        return "ok"
+                    # "needs_human": the resolver already recorded the stop.
+                    return "needs_human"
                 if question is not None:
                     reason = f"needs_context: {question}"
                 else:
@@ -455,6 +515,7 @@ async def walk_node(
                 launch=launch,
                 budget=budget,
                 round=_REPAIR_ROUND,
+                measured_round=round,
                 loop_severities=loop_severities,
             )
             if r_verdict == "paused":
@@ -633,6 +694,41 @@ async def walk_node(
         )
         if question is not None:
             reason = f"needs_context: {question}"
+            await db.write(
+                lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node["id"], reason)
+            )
+            return "needs_human"
+
+        # A cycle no worker commit could ever win: every blind failure traces
+        # to a hook that runs inside this process, and no co-task either
+        # failed in a worker-fixable way or reported a finding of its own
+        # (Kraft-s7c04.24). Refusing it here, ahead of the budget check, the
+        # judge and `bump_counter`, is the same posture as the `CONFIG_ERROR`
+        # stop just below: a cycle that cannot be won must not spend an
+        # attempt or buy a judge session to tell us what we already know.
+        #
+        # After `needs_context_question`, not before (ordering correction,
+        # found reviewing the plan): a question a fix agent has already asked
+        # is addressed to a human and outranks a stop that only says
+        # "reinstall the daemon" -- reachable on the shipped default chain
+        # when a fix agent's own `needs_context` is followed, one round
+        # later, by a re-measure where the in-process hook blind-fails alone.
+        in_process_blind = {
+            t for t in blind_failures if registry.hooks.get(t, {}).get("kind") in _IN_PROCESS_KINDS
+        }
+        if (
+            in_process_blind
+            and set(blind_failures) == in_process_blind
+            and all(f.source_plugin in in_process_blind for f in eligible)
+        ):
+            named = ", ".join(
+                prompts.named_with_kind(t, registry) for t in sorted(in_process_blind)
+            )
+            reason = (
+                f"{named} failed in node {node['id']}, and those tasks are executed by "
+                "the running Kraft daemon — a worker commit cannot change them. "
+                "Reinstall and restart, or skip the node."
+            )
             await db.write(
                 lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node["id"], reason)
             )
@@ -828,6 +924,138 @@ async def walk_node(
         # fix task status is not branched on; loop re-measures
 
 
+#: The round the rebase-conflict resolver writes its session under
+#: (Kraft-s7c04.23). Distinct from `_REPAIR_ROUND` because one node can
+#: reach both -- `mr_checks` declares `on_failure` (which writes at
+#: `_REPAIR_ROUND`) *and* is a legitimate resolver target from the
+#: `/resume`/`/retry` route doors, so both would otherwise write sessions at
+#: the same round on the same node, and `needs_context_question` does not
+#: filter by task (`dispatch.py:713-716`) -- it would read the resolver's row
+#: as the repair's.
+_RESOLVE_ROUND = -2
+
+
+async def resolve_rebase_conflict(
+    db,
+    run_dirs,
+    *,
+    work_item_id: str,
+    node: dict,
+    row,
+    registry: Registry,
+    worktree,
+    policy: _policy.Policy | None,
+    launch: LaunchContext | None,
+    conflict: str,
+) -> tuple[str, str | None, str | None]:
+    """Dispatch `on.implementation.start` to resolve a rebase conflict and
+    judge whether the commits it rebased onto change what this work item is
+    supposed to do (design §4.1 -- the second job is the point, not a
+    formality).
+
+    Returns `(status, steer_text, new_base)`:
+    * `"ok"` -- resolved (`done`/`done_with_concerns`); `new_base` is the sha
+      to persist, `steer_text` is the resolver's own concerns, carried
+      forward as a `seeded` `Steer`, when it reported `done_with_concerns`.
+    * `"needs_human"` -- `needs_context`, `failed`, or a cap breach; the stop
+      has already been recorded via `store.mark_needs_human`.
+    * `"paused"` / `BUDGET` -- propagate exactly as any other dispatch.
+    """
+    key = "rebase_conflict"
+    cap = (
+        _policy.resolve_cap(policy, key)
+        if policy is not None
+        else _policy.Cap(attempts=3, wall_clock_s=3600)
+    )
+    count, started_at, cap = await db.write(lambda c: store.bump_counter(c, work_item_id, key, cap))
+    if _policy.check(count=count, started_at=started_at, cap=cap, now=_now()) == "breached":
+        reason = f"{key} exhausted after {count - 1} attempt(s): {conflict}"
+        await db.write(
+            lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node["id"], reason)
+        )
+        return "needs_human", None, None
+
+    branch = store.branch_for(row)
+    old_base = _current_base_ref(db, work_item_id)
+    new_base = await _builtins.upstream_head(Path(row["repo"]))
+    instruction = prompts.rebase_resolve_note(
+        worktree,
+        branch,
+        old_base or "(unknown)",
+        new_base or "(unknown)",
+        conflict,
+        entry.attachments_of(row),
+    )
+    status = await dispatch.dispatch_node(
+        db,
+        run_dirs,
+        "on.implementation.start",
+        node,
+        row,
+        registry,
+        worktree,
+        instruction_override=instruction,
+        round=_RESOLVE_ROUND,
+        launch=launch,
+    )
+    if status in ("paused", BUDGET):
+        return status, None, None
+    session = db.read(
+        lambda c: c.execute(
+            "SELECT result_path FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
+            "AND hook_point = 'on.implementation.start' AND round = ? ORDER BY created_at DESC "
+            "LIMIT 1",
+            (work_item_id, node["id"], _RESOLVE_ROUND),
+        ).fetchone()
+    )
+    if status in ("done", "done_with_concerns"):
+        # An agent that reported success without actually completing the
+        # rebase is downgraded to the failure path -- `refresh_worktree_base`
+        # cannot be reused here, since it returns None both for "already up
+        # to date" and for "nothing to do", which every caller reads as "no
+        # movement" and skips `set_base_ref` (design §4.4).
+        moved = new_base is not None and (
+            _config.git_read(
+                Path(worktree),
+                "merge-base",
+                "--is-ancestor",
+                new_base,
+                "HEAD",
+                expected_failure=True,
+            )
+            is not None
+        )
+        if not moved:
+            reason = (
+                f"rebase-conflict resolver reported {status!r} without completing "
+                f"the rebase: {conflict}"
+            )
+            await db.write(
+                lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node["id"], reason)
+            )
+            return "needs_human", None, None
+        await db.write(lambda c, new_base=new_base: store.set_base_ref(c, work_item_id, new_base))
+        steer_text = None
+        if status == "done_with_concerns" and session is not None:
+            steer_text = _subprocess.read_concerns(Path(session["result_path"]))
+        return "ok", steer_text, new_base
+    if status == "needs_context":
+        question = (
+            _subprocess.read_question(Path(session["result_path"])) if session is not None else None
+        )
+        reason = f"needs_context: {question or '(no question given)'}"
+        await db.write(
+            lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node["id"], reason)
+        )
+        return "needs_human", None, None
+    # "failed", or any other status dispatch_node can report for an agent task.
+    reason = f"rebase-conflict resolver could not resolve the conflict: {conflict}"
+    await db.write(
+        lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node["id"], reason)
+    )
+    return "needs_human", None, None
+
+
 async def bounce(db, work_item_id: str, node: dict, target: str, policy) -> str:
     """Bump the `rebase_bounce` cap and decide whether another bounce to
     `target` is still allowed (Kraft-4bgg). Same `Cap`/`retry_counters`
@@ -1013,6 +1241,27 @@ async def run_once(
                 if bounced == "needs_human":
                     return "needs_human"
                 target = next(j for j, n in enumerate(nodes) if n["id"] == bounce_to)
+                # A bounce is a fresh pass over every node in the span it
+                # re-enters, not just the target -- an intervening node's own
+                # fix-loop counter (e.g. `mr_checks`' `ci_fix_loop` on a bounce
+                # from `merge`) is exactly as stale as the target's
+                # (Kraft-s7c04.25 spec §2). Inclusive of the bouncing node
+                # itself: bouncing from `merge` re-runs `merge` too.
+                cleared = [n["id"] for n in nodes[target : i + 1]]
+                for n in nodes[target : i + 1]:
+                    await db.write(
+                        lambda c, n=n: store.clear_loop_counters(
+                            c, work_item_id, n["id"], n.get("fix_loop")
+                        )
+                    )
+                await db.write(
+                    lambda c, cleared=cleared, bounce_to=bounce_to: events.append(
+                        c,
+                        work_item_id,
+                        "loop_counters_reset",
+                        {"nodes": cleared, "reason": "rebase_bounce", "bounce_to": bounce_to},
+                    )
+                )
                 # `carried` is about to be replaced by Kraft's own rebase note
                 # -- if the original steer (human or seeded) survived this
                 # far untaken, report it before it's overwritten, or it is

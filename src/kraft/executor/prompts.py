@@ -123,6 +123,65 @@ def rebase_drift_note(worktree, branch: str, old_base: str, new_base: str) -> st
     return _REBASE_PROMPT.format(branch=branch, body=body)
 
 
+#: What the rebase-conflict resolver (`walk.resolve_rebase_conflict`,
+#: Kraft-s7c04.23) is dispatched with. Two jobs, not one -- resolving the
+#: conflict is mechanical; judging whether the upstream commits it rebased
+#: onto change what this work item is supposed to do is the reason an agent
+#: is doing this rather than a script (design §4.1). A real diff, not a
+#: `--stat`: that relevance judgement cannot be made from file names alone.
+_REBASE_RESOLVE_PROMPT = (
+    "A rebase conflict stopped this work item. Branch {branch} could not be "
+    "replayed onto {new_base} (it was based on {old_base}); the rebase has "
+    "already been aborted and the worktree is clean. git reported:\n\n"
+    "{conflict}\n\n"
+    "What landed upstream, {old_base}..{new_base}:\n\n{diff}\n\n"
+    "{attachments}"
+    "You have two jobs:\n"
+    "1. Re-run the rebase (`git rebase {new_base}`) and resolve the conflict "
+    "yourself, then finish it (`git rebase --continue`).\n"
+    "2. Judge whether the commits that landed upstream change what this work "
+    "item is supposed to do -- not just whether the text merges cleanly. A "
+    "clean rebase can still invalidate the plan; a conflict can be "
+    "irrelevant to it.\n\n"
+    "Report through the normal result file:\n"
+    "- status: done -- resolved, and upstream does not affect what this "
+    "item does.\n"
+    "- status: done_with_concerns -- resolved, but upstream touches what "
+    "this item does; say what in `concerns`.\n"
+    "- status: needs_context -- upstream invalidates the agreed spec or "
+    "plan; ask in `question`.\n"
+    "- status: failed -- could not resolve the conflict.\n"
+)
+
+#: Same posture as `_REBASE_NOTE_MAX`, but larger: the resolver's whole job
+#: is judging this diff's relevance, unlike the drift note's reviewer, who
+#: only needs a pointer at what to go re-look at.
+_REBASE_RESOLVE_DIFF_MAX = 6000
+
+
+def rebase_resolve_note(
+    worktree,
+    branch: str,
+    old_base: str,
+    new_base: str,
+    conflict: str,
+    attachments: list[dict],
+) -> str:
+    log = git_read(worktree, "log", "--oneline", f"{old_base}..{new_base}") or "(no log)"
+    diff = git_read(worktree, "diff", f"{old_base}..{new_base}") or "(no changes)"
+    body = f"Commits:\n{log}\n\nDiff:\n{diff}"
+    if len(body) > _REBASE_RESOLVE_DIFF_MAX:
+        body = body[:_REBASE_RESOLVE_DIFF_MAX] + "\n... (truncated)"
+    return _REBASE_RESOLVE_PROMPT.format(
+        branch=branch,
+        old_base=old_base,
+        new_base=new_base,
+        conflict=conflict.strip(),
+        diff=body,
+        attachments=attachment_note(attachments, method_is_own=False),
+    )
+
+
 #: The same note, over a document this node has already written. A bare steer
 #: made a rejected plan cost a full re-plan: nothing in the dispatch said the
 #: file existed or that the human objected to one paragraph of it (Kraft-bol).
