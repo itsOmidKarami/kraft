@@ -1,5 +1,5 @@
 [project]
-name = "kraft"
+name = "kraft-sdlc"
 dynamic = ["version"]
 description = "A local orchestrator for semi-autonomous agentic SDLC"
 readme = "README.md"

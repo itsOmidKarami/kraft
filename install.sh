@@ -9,8 +9,8 @@
 # than something from a mutable location. What does not reduce them is arguing
 # the pattern is fine.
 #
-# `uv tool install kraft` from PyPI is the other supported door, and needs none
-# of this.
+# `uv tool install kraft-sdlc` from PyPI is the other supported door, and needs
+# none of this.
 set -eu
 
 # /releases/latest, not /releases: this endpoint already excludes drafts and
@@ -27,7 +27,7 @@ fi
 wheel=$(curl -fsSL "$API" | grep -o 'https://[^"]*\.whl' | head -n 1)
 if [ -z "$wheel" ]; then
     echo "no released wheel found at $API" >&2
-    echo "if this persists, install from PyPI instead: uv tool install kraft" >&2
+    echo "if this persists, install from PyPI instead: uv tool install kraft-sdlc" >&2
     exit 1
 fi
 
@@ -38,7 +38,7 @@ trap 'rm -rf "$tmpdir"' EXIT
 wheel_file="$tmpdir/$(basename "$wheel")"
 curl -fsSL "$wheel" > "$wheel_file"
 
-uv tool install --force --from "$wheel_file" kraft
+uv tool install --force --from "$wheel_file" kraft-sdlc
 
 echo
 echo "$(kraft --version) installed."
