@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 30
+SCHEMA_VERSION = 31
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -140,7 +140,11 @@ CREATE TABLE worker_sessions (
   exited_at      TEXT,
   -- the worktree HEAD at the moment this measuring task ran (Kraft-lu2) -- NULL
   -- for a builtin/agent task that stamps nothing, and for every historical row
-  head_sha       TEXT
+  head_sha       TEXT,
+  -- the exact command a subprocess session ran (Kraft-s7c04.35) -- NULL for
+  -- every non-subprocess kind and for every row written before this column
+  -- existed
+  command        TEXT
 );
 
 CREATE INDEX idx_worker_sessions_status ON worker_sessions(status);
@@ -671,6 +675,7 @@ FROM worker_sessions""",
     # anyone noticing. Rows written from here on are correct; a before/after
     # comparison across this line must exclude NULL, not average it in.
     29: ["UPDATE worker_sessions SET model = NULL"],
+    30: ["ALTER TABLE worker_sessions ADD COLUMN command TEXT"],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins

@@ -77,6 +77,59 @@ def test_session_lifecycle(tmp_path):
     asyncio.run(scenario())
 
 
+def test_create_session_records_the_command(tmp_path):
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="verify",
+                    hook_point="on.test.run",
+                    log_path="/l",
+                    result_path="/r",
+                    command="just e2e-ci",
+                )
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT command FROM worker_sessions WHERE id='s1'").fetchone()
+            )
+            return row["command"]
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario()) == "just e2e-ci"
+
+
+def test_create_session_command_defaults_null(tmp_path):
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="env_setup",
+                    hook_point="on.env.prepare",
+                    log_path="/l",
+                    result_path="/r",
+                )
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT command FROM worker_sessions WHERE id='s1'").fetchone()
+            )
+            return row["command"]
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario()) is None
+
+
 def test_create_session_defaults_thread_to_one(tmp_path):
     async def scenario():
         database = await open_db(tmp_path)
