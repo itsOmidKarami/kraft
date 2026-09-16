@@ -21,16 +21,20 @@ FIRST = {"major": (1, 0, 0), "minor": (0, 1, 0), "patch": (0, 0, 1)}
 
 
 def impact_from_labels(labels: str) -> str | None:
-    """The declared impact, or `None` when the MR did not declare one.
+    """The declared impact, or `None` when the pull request did not declare one.
 
-    GitLab's scoped labels guarantee at most one `release::` label per MR, so
-    the first match is the only match.
+    GitHub has no scoped labels: nothing stops two `release::` labels from
+    being applied at once. That is not a tie to break by picking the first or
+    the larger one — it is a declaration nobody actually made, so it raises.
     """
+    found = []
     for label in labels.split(","):
         name = label.strip()
         if name.startswith(PREFIX) and name[len(PREFIX) :] in IMPACTS:
-            return name[len(PREFIX) :]
-    return None
+            found.append(name[len(PREFIX) :])
+    if len(found) > 1:
+        raise ValueError(f"more than one {PREFIX} label: {', '.join(found)}")
+    return found[0] if found else None
 
 
 def next_tag(previous: str | None, impact: str) -> str | None:
@@ -63,7 +67,10 @@ if __name__ == "__main__":
     if len(sys.argv) != 3:
         raise SystemExit(__doc__)
     previous, labels = sys.argv[1] or None, sys.argv[2]
-    impact = impact_from_labels(labels)
+    try:
+        impact = impact_from_labels(labels)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
     if impact is None:
         raise SystemExit(f"no {PREFIX} label; expected one of {IMPACTS}")
     tag = next_tag(previous, impact)
