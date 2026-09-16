@@ -7,17 +7,21 @@ agent, a subprocess, a builtin). Every retry loop is capped; hitting a cap escal
 to you with the full trace. Gates stop the chain where a human decision belongs.
 
 Runs on your machine, binds loopback by default, and edits your repos through git
-worktrees. Design docs: [`docs/consolidated/`](docs/consolidated/00_overview.md).
+worktrees. How it fits together: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Install and run
 
-No clone needed. This fetches the wheel from the newest tagged release, and
-installs `uv` first if you do not have it:
-
 ```bash
-curl -fsSL https://gitlab.com/itsOmidKarami/kraft/-/raw/main/install.sh | sh
+uv tool install kraft
 kraft admin init   # register the MCP server and skills with your agent
 kraft              # http://127.0.0.1:8765
+```
+
+No `uv`? The install script fetches the newest release and installs `uv` first
+if you do not have it:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/itsOmidKarami/kraft/main/install.sh | sh
 ```
 
 [`install.sh`](install.sh) is short and worth reading before you pipe it to a
@@ -32,7 +36,7 @@ just install    # build the SPA, install the `kraft` command
 kraft           # http://127.0.0.1:8765
 ```
 
-Releasing, and the labels a merge request needs: [CONTRIBUTING.md](CONTRIBUTING.md).
+Releasing, and the labels a pull request needs: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 State lives in `$KRAFT_HOME` (default `~/.kraft`):
 
@@ -75,7 +79,7 @@ tree under `.claude/skills/kraft/` with a `.claude-plugin/plugin.json` — nothi
 is registered in Claude Code's managed state, and uninstalling is `rm -rf` on the
 directory. It works the same at user and repo scope.
 
-Nine tools, over the same local HTTP API the browser uses:
+The tools you'll reach for most, over the same local HTTP API the browser uses:
 
 | | |
 |---|---|
@@ -95,8 +99,7 @@ work item running that session is refused before a request is sent. A gate is
 where a human decides; an agent approving its own would make the gate decorative.
 
 `kraft admin mcp` runs the server on stdio, and every tool is also a `kraft` subcommand,
-so hooks and non-MCP agents get the same surface. Design:
-[`docs/superpowers/specs/2026-09-05-agent-integration-design.md`](docs/superpowers/specs/2026-09-05-agent-integration-design.md).
+so hooks and non-MCP agents get the same surface.
 
 ## Remote access
 
@@ -163,7 +166,7 @@ node list, same gates, same caps, no service. It is the attended half of Kraft:
 one chain, in front of you, resumable across sessions but not outliving your
 terminal. Chain and policy come from `templates/`, rendered by `just lite-build`.
 
-That directory is published as a standalone repo by `just lite-publish`, so it
+That directory is published as a standalone repo, so it
 must stay self-contained: no import above `plugins/kraft-lite/`, no dependency
 beyond the standard library. `dev/build_lite_chain.py` and
 `tests/kraft_lite_artifact_test.py` are the two pieces that deliberately live

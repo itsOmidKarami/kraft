@@ -7,7 +7,7 @@ description: Use when you need to know what Kraft is doing - what work is runnin
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
 plugin has been installed without the program it drives: say so and point at
-https://gitlab.com/itsOmidKarami/kraft#install rather than reporting a
+https://github.com/itsOmidKarami/kraft#install rather than reporting a
 connection error.
 
 # Reading Kraft

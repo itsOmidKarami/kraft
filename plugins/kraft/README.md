@@ -1,11 +1,11 @@
 # kraft
 
-Four skills for driving [Kraft](https://gitlab.com/itsOmidKarami/kraft) from an
+Four skills for driving [Kraft](https://github.com/itsOmidKarami/kraft) from an
 agent session: file work onto the board, read what is running, act on the gates
 waiting on a person, and report where a work item has got to.
 
 These skills call Kraft's MCP server, so they need the `kraft` program itself:
-`curl -fsSL https://gitlab.com/itsOmidKarami/kraft/-/raw/main/install.sh | sh`,
+`curl -fsSL https://raw.githubusercontent.com/itsOmidKarami/kraft/main/install.sh | sh`,
 then `kraft admin init`.
 
 ## Install

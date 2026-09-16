@@ -60,3 +60,26 @@ src/kraft/_bundled/
 # scooping them up because only sessions/ was ignored here.
 .engineering/
 docs/superpowers/
+
+# The maintainer's half of the agent instructions: bd workflow, session
+# protocol. `## Kraft Workers` is NOT in here -- it stays in the public
+# CLAUDE.md/AGENTS.md, see Task 6's note above. CLAUDE.md imports the first
+# with `@`; AGENTS.md points at the second in prose.
+CLAUDE.local.md
+AGENTS.local.md
+
+# Agent worktrees. This was covered only by .git/info/exclude, which is local to
+# one clone and never travels -- so a fresh clone, or anyone else's, had nothing
+# stopping `git add -A` from committing an entire worktree.
+.claude/worktrees/
+
+# Design-time material, kept private when the repo went public: the Claude
+# Design canvases and sweep frames, and the historical design record the
+# intent tree was backfilled from. Both live in the private GitLab archive.
+design/
+docs/consolidated/
+
+# Beads' interaction log: issue ids, status transitions and the reasons written
+# on them. The issue database itself is not in git at all -- it lives in
+# .beads/embeddeddolt/ and syncs over refs/dolt/data to a private remote.
+.beads/interactions.jsonl
