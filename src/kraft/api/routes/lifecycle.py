@@ -21,7 +21,7 @@ from kraft.api import api_router, deps
 from kraft.api.routes import board, search
 from kraft.api.routes.search import OpenDocument
 from kraft.config import git_read
-from kraft.executor import gates
+from kraft.executor import gates, walk
 from kraft.templates import Registry
 
 logger = logging.getLogger(__name__)
@@ -354,6 +354,147 @@ async def steer_work_item(wid: str, body: Steer, request: Request):
     return {"id": wid, "steer": text}
 
 
+def _bounce_target_index(nodes: list[dict]) -> int | None:
+    """Earliest-indexed node any `rebase_bounce_to` in the chain names, or
+    None when the chain declares none (Kraft-s7c04.23 design §4.6). `min`
+    against the current node happens at the call site -- an item stopped at
+    `spec` is before `verify` and must not skip implementation."""
+    targets = {n["rebase_bounce_to"] for n in nodes if n.get("rebase_bounce_to")}
+    if not targets:
+        return None
+    indices = [i for i, n in enumerate(nodes) if n["id"] in targets]
+    return min(indices) if indices else None
+
+
+async def _resolve_conflict_task(
+    st,
+    wid: str,
+    row,
+    node_id: str,
+    chain: dict,
+    steer_text: str | None,
+    reason: str,
+) -> None:
+    """The whole restore-steer -> resolve -> continue-or-escalate sequence
+    for a rebase conflict at `/resume` or `/retry` (Kraft-s7c04.23), run as
+    the item's own spawned task rather than awaited inline in the route.
+
+    Awaiting the resolver agent inside the HTTP handler blocked the response
+    for the length of that session *and* left it invisible to
+    `deps.task_is_live` -- nothing under `wid` in `app.state.tasks` -- so a
+    concurrent `/retry` sailed past `task_is_live` and `claim_for_run`
+    (`from_statuses=["needs_human"]`, which a status the route had already
+    set matched) and started a second walk in the same worktree. That is
+    exactly the collision Kraft-s7c04.20 closed (!241); this route was
+    reopening it. Registering this whole sequence as the item's task via
+    `deps.spawn` closes it the same way every other route does: `spawn`
+    itself refuses a second task for the same `wid` for as long as this one
+    is still running.
+
+    The item is left `active` (however `claim_for_run` set it before the
+    rebase attempt) for the duration -- no `mark_needs_human` up front. On a
+    resolving verdict the walk continues with no status flip needed; on
+    every other verdict this function marks the stop itself, the same
+    `needs_human` the caller would have seen synchronously before this
+    fix, just recorded a little later.
+    """
+    if steer_text:
+        await st.db.write(lambda c: store.set_steer(c, wid, steer_text))
+    node = next((n for n in chain["nodes"] if n["id"] == node_id), None)
+    if node is not None and (st.policy is None or st.policy.auto_escalate_stuck):
+        worktree = st.run_dirs.worktrees / wid
+        r_status, r_steer, _new_base = await walk.resolve_rebase_conflict(
+            st.db,
+            st.run_dirs,
+            work_item_id=wid,
+            node=node,
+            row=row,
+            registry=st.registry,
+            worktree=worktree,
+            policy=st.policy,
+            launch=deps.launch(st, row["repo"]),
+            conflict=reason,
+        )
+        if r_status == "ok":
+            nodes = chain["nodes"]
+            current = next(i for i, n in enumerate(nodes) if n["id"] == node_id)
+            bounce_idx = _bounce_target_index(nodes)
+            start = min(current, bounce_idx) if bounce_idx is not None else current
+            for n in nodes[start : current + 1]:
+                await st.db.write(
+                    lambda c, n=n: store.clear_loop_counters(c, wid, n["id"], n.get("fix_loop"))
+                )
+            # The human's own steer, restored above, is delivered now rather
+            # than left for a second /resume or /retry to take -- this call
+            # is already relaunching the walk. Leads ahead of the resolver's
+            # own concerns, same merge `recover_node` uses (Kraft-s7c04.26):
+            # a person's instruction keeps its own template and source.
+            took = await st.db.write(lambda c: store.take_steer(c, wid))
+            resume_steer, resume_source = None, "human"
+            if took and r_steer:
+                resume_steer, resume_source = f"{took}\n\n{r_steer}", "human"
+            elif took:
+                resume_steer, resume_source = took, "human"
+            elif r_steer:
+                resume_steer, resume_source = r_steer, "seeded"
+            # Awaited directly, not spawned again: this coroutine already
+            # *is* `wid`'s registered task, and a second `deps.spawn` for the
+            # same key would raise `AlreadyRunning` against itself.
+            await executor.run(
+                st.db,
+                st.run_dirs,
+                work_item_id=wid,
+                registry=st.registry,
+                bd_cwd=deps.bd_cwd(),
+                start_index=start,
+                policy=st.policy,
+                steer=resume_steer,
+                steer_source=resume_source,
+                launch=deps.launch(st, row["repo"]),
+                on_approve=deps._on_approve(st),
+            )
+            return
+        # A non-resolving verdict ("needs_human") already recorded its own
+        # stop reason inside `resolve_rebase_conflict`; fall through to the
+        # same escalate path "not armed" takes below.
+    else:
+        # Disarmed, or the node vanished from the chain: nothing else has
+        # recorded a stop reason yet, so this is it.
+        await st.db.write(lambda c: store.mark_needs_human(c, wid, node_id, reason))
+    await gates.auto_escalate_stuck(
+        "needs_human",
+        st.db,
+        st.run_dirs,
+        work_item_id=wid,
+        registry=st.registry,
+        policy=st.policy,
+        launch=deps.launch(st, row["repo"]),
+        bd_cwd=deps.bd_cwd(),
+        on_approve=deps._on_approve(st),
+    )
+
+
+def _spawn_conflict_resolution(
+    st, request: Request, wid: str, row, node_id: str, chain: dict, steer_text: str | None, exc
+) -> dict:
+    """Registers `_resolve_conflict_task` as `wid`'s task and returns the
+    item's current row immediately -- the route itself does not wait on it
+    (design §4.8: "the route returns immediately either way")."""
+    try:
+        deps.spawn(
+            request.app,
+            wid,
+            deps.guard(
+                st.db,
+                wid,
+                _resolve_conflict_task(st, wid, row, node_id, chain, steer_text, str(exc)),
+            ),
+        )
+    except deps.AlreadyRunning:
+        raise HTTPException(409, "a walk is already running for this work item") from None
+    return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+
+
 @api_router.post("/work-items/{wid}/resume")
 async def resume_work_item(wid: str, body: Resume, request: Request):
     """Relaunch the paused node, carrying the steer into the next agent launch."""
@@ -416,6 +557,13 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
     try:
         new_base = await builtins_mod.refresh_worktree_base(
             worktree, Path(row["repo"]), store.branch_for(row)
+        )
+    except builtins_mod.RebaseConflict as exc:
+        # `steer` here is already the taken local (line 414, above the
+        # rebase) -- the helper must not re-read `pending_steer_context`,
+        # which this call already emptied.
+        return _spawn_conflict_resolution(
+            st, request, wid, row, row["current_node_id"], chain, steer, exc
         )
     except RuntimeError as exc:
         # The claim already flipped this item to 'active'; a failed rebase
@@ -675,6 +823,10 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         new_base = await builtins_mod.refresh_worktree_base(
             worktree, Path(row["repo"]), store.branch_for(row)
         )
+    except builtins_mod.RebaseConflict as exc:
+        # `/retry` never persists `steer` ahead of the rebase the way
+        # `/resume` does -- the helper is the first thing to write it.
+        return _spawn_conflict_resolution(st, request, wid, row, node_id, chain, steer, exc)
     except RuntimeError as exc:
         reason = str(exc)
         await st.db.write(lambda c: store.mark_needs_human(c, wid, node_id, reason))
