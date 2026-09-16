@@ -3,6 +3,7 @@ import json
 
 from kraft.findings import (
     Finding,
+    JobRef,
     from_blind_failure,
     from_payload,
     parse,
@@ -94,6 +95,26 @@ def test_fingerprint_ignores_severity(tmp_path):
     """The same defect re-reported at a different severity is the same defect."""
     a = Finding("important", "m", "a.py", 1, "p")
     b = Finding("critical", "m", "a.py", 1, "p")
+    assert a.fingerprint == b.fingerprint
+
+
+def test_jobs_field_never_affects_fingerprint(tmp_path):
+    a = Finding(
+        severity="critical",
+        message="m",
+        file=None,
+        line=None,
+        source_plugin="on.test.run",
+        jobs=(JobRef(label="just e2e-ci", log_ref="kraft view logs w1 --session s1"),),
+    )
+    b = Finding(
+        severity="critical",
+        message="m",
+        file=None,
+        line=None,
+        source_plugin="on.test.run",
+        jobs=(JobRef(label="just e2e-ci", log_ref="kraft view logs w1 --session s2"),),
+    )
     assert a.fingerprint == b.fingerprint
 
 

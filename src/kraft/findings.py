@@ -55,6 +55,13 @@ class Finding:
     #: reviewer that was shown both says so. Optional and last, so every
     #: positional construction keeps working.
     same_as: str | None = None
+    #: Where each job that produced this finding actually ran, for a fix
+    #: agent to pull the full session output from directly -- never part of
+    #: `fingerprint`'s hash input, the same treatment `same_as`/`line` below
+    #: already get. A resumed/re-dispatched job gets a new session every
+    #: round; that must change what's readable, never what this finding *is*
+    #: (Kraft-s7c04.34/.35 brainstorm).
+    jobs: tuple[JobRef, ...] = ()
 
     @property
     def fingerprint(self) -> str:
@@ -83,6 +90,36 @@ class Finding:
         norm = _WS.sub(" ", self.message).strip().lower()
         raw = "\0".join((self.source_plugin, self.file or "", norm))
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+@dataclass(frozen=True)
+class JobRef:
+    """One job that ran as part of a finding's own measuring round, and
+    where its full session output lives. Presentation/access only --
+    deliberately excluded from `Finding.fingerprint`."""
+
+    label: str
+    log_ref: str
+
+
+@dataclass(frozen=True)
+class BlindJob:
+    """One failing row `collect_findings` found for a hook with no parsed
+    result file -- `from_blind_failure`'s own input, one per job it should
+    report. `command`, when known, is the exact command that ran (Kraft-
+    s7c04.35), not the registry binding's default."""
+
+    session_id: str
+    log_path: str | Path | None
+    command: str | None = None
+
+
+def session_log_ref(work_item_id: str, session_id: str) -> str:
+    """The CLI invocation that shows exactly this session's own log.
+    `--session`, never "most recent": other sessions can dispatch under the
+    same work item before anyone reads this pointer, and "most recent" would
+    silently drift to the wrong one (Kraft-s7c04.34/.35 brainstorm)."""
+    return f"kraft view logs {work_item_id} --session {session_id}"
 
 
 def _one(raw: object) -> Finding | None:
