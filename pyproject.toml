@@ -1,7 +1,11 @@
 [project]
 name = "kraft"
 dynamic = ["version"]
-description = "Kraft orchestrator walking skeleton"
+description = "A local orchestrator for semi-autonomous agentic SDLC"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Omid Karami", email = "itsomidkarami@gmail.com" }]
 requires-python = ">=3.14"
 dependencies = [
     "pyyaml>=6",
@@ -37,7 +41,7 @@ dev = [
 kraft = "kraft.cli:main"
 
 [build-system]
-requires = ["setuptools>=68", "setuptools-scm>=8"]
+requires = ["setuptools>=77", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 # The version is the git tag, so a release cannot ship a number nobody bumped.
@@ -67,3 +71,8 @@ extend-exclude = ["docs"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
+
+[project.urls]
+Homepage = "https://github.com/itsOmidKarami/kraft"
+Source = "https://github.com/itsOmidKarami/kraft"
+Issues = "https://github.com/itsOmidKarami/kraft/issues"
