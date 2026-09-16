@@ -25,6 +25,13 @@ logger = logging.getLogger(__name__)
 _AGENT_STATUSES = ("done", "failed", "done_with_concerns", "needs_context")
 
 
+def result_path_for(run_dirs, session_id: str) -> Path:
+    """Where a session's $KRAFT_RESULT_PATH lives -- the one formula every
+    caller that needs to predict it ahead of dispatch (`escalate.dispatch`'s
+    resumed-turn note) must use, rather than reimplementing it."""
+    return run_dirs.results / f"{session_id}.json"
+
+
 def _resolve_result_file(path: Path) -> str | None:
     """Status from a result file alone, or None if it's missing/empty."""
     if not path.exists():
@@ -366,7 +373,7 @@ async def run_task(
     require_result_file: bool = False,
 ) -> str:
     log_path = run_dirs.logs / f"{session_id}.log"
-    result_path = run_dirs.results / f"{session_id}.json"
+    result_path = result_path_for(run_dirs, session_id)
     # The task's own exit code, written by the launch wrapper on the way out.
     # A sidecar, never `result_path` itself -- see `_resolve_exit_file`.
     exit_path = result_path.with_suffix(".exit")

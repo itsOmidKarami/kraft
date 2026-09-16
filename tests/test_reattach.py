@@ -67,6 +67,24 @@ def _types(database, wid):
     return [e["type"] for e in database.read(lambda c: events.read_after(c, 0, wid))]
 
 
+def test_identity_mismatch_reason_no_start_time():
+    assert reattach._identity_mismatch_reason(os.getpid(), None) == "no pid_start_time recorded"
+
+
+def test_identity_mismatch_reason_dead_pid():
+    reason = reattach._identity_mismatch_reason(2_000_000_000, 123.0)
+    assert reason == "pid 2000000000 is not alive"
+
+
+def test_identity_mismatch_reason_create_time_mismatch():
+    import psutil
+
+    real_start = psutil.Process(os.getpid()).create_time()
+    reason = reattach._identity_mismatch_reason(os.getpid(), real_start - 10_000)
+    assert "create_time mismatch" in reason
+    assert str(real_start) in reason
+
+
 def test_pending_session_becomes_unknown_and_needs_human(tmp_path):
     async def scenario():
         rd = RunDirs(tmp_path / "run").ensure()
@@ -121,7 +139,10 @@ def test_running_dead_pid_resolves_from_result_file(tmp_path):
             )
             # mark it running against a definitely-dead pid with a start time
             await database.write(lambda c: store.session_running(c, "s1", 2_000_000_000, 123.0))
-            summary, adopted = await reattach.reattach(database, rd, _REG)
+            # grace_retry_delay_s=0: this test seeds a fresh (young) session
+            # and isn't exercising Kraft-s7c04.51's retry, just the ordinary
+            # resolve-from-file path -- no reason to pay the real delay.
+            summary, adopted = await reattach.reattach(database, rd, _REG, grace_retry_delay_s=0)
             assert adopted == {}
             assert summary.resolved_from_file == ["s1"]
             row = database.read(
@@ -161,7 +182,7 @@ def test_running_dead_pid_no_file_is_unknown(tmp_path):
                 )
             )
             await database.write(lambda c: store.session_running(c, "s1", 2_000_000_000, 123.0))
-            summary, adopted = await reattach.reattach(database, rd, _REG)
+            summary, adopted = await reattach.reattach(database, rd, _REG, grace_retry_delay_s=0)
             assert summary.unknown == ["s1"]
             row = database.read(
                 lambda c: c.execute("SELECT status FROM work_items WHERE id='w1'").fetchone()
@@ -171,6 +192,172 @@ def test_running_dead_pid_no_file_is_unknown(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_unconfirmed_identity_records_which_check_failed(tmp_path):
+    """Kraft-s7c04.51: the event used to say only "unconfirmed" -- the human
+    diagnosing the live incident had to reverse-engineer a restart timestamp
+    from commit history to learn the pid had simply died. The reason should
+    be on the event itself."""
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="implementation",
+                    hook_point="on.implementation.start",
+                    log_path=str(rd.logs / "s1.log"),
+                    result_path=str(rd.results / "s1.json"),
+                )
+            )
+            await database.write(lambda c: store.session_running(c, "s1", 2_000_000_000, 123.0))
+            await reattach.reattach(database, rd, _REG, grace_retry_delay_s=0)
+            evts = [
+                e
+                for e in database.read(lambda c: events.read_after(c, 0, "w1"))
+                if e["type"] == "session_unknown"
+            ]
+            assert len(evts) == 1
+            assert "not alive" in evts[0]["payload"]["reason"]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_a_young_ambiguous_session_gets_one_retry_before_declared_unknown(tmp_path, monkeypatch):
+    """A session started moments before this exact scan gets one recheck
+    before being declared unconfirmed -- but a recheck that still fails
+    still ends up unknown, with a reason."""
+    calls = {"n": 0}
+
+    def fake_identity_ok(pid, pid_start_time):
+        calls["n"] += 1
+        return False
+
+    monkeypatch.setattr(reattach, "_identity_ok", fake_identity_ok)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="implementation",
+                    hook_point="on.implementation.start",
+                    log_path=str(rd.logs / "s1.log"),
+                    result_path=str(rd.results / "s1.json"),
+                )
+            )
+            # started_at defaults to "now" -- young by construction.
+            await database.write(lambda c: store.session_running(c, "s1", 99999, 123.0))
+            summary, _ = await reattach.reattach(database, rd, _REG, grace_retry_delay_s=0)
+            assert summary.unknown == ["s1"]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    assert calls["n"] == 2  # the initial check, plus the one grace retry
+
+
+def test_a_young_session_that_resolves_on_retry_is_adopted(tmp_path, monkeypatch):
+    """The retry's whole point: a session that looked unconfirmed on the
+    first look and confirmed on the second must be adopted, not orphaned."""
+    calls = {"n": 0}
+
+    def fake_identity_ok(pid, pid_start_time):
+        calls["n"] += 1
+        return calls["n"] > 1  # unconfirmed once, then confirmed
+
+    monkeypatch.setattr(reattach, "_identity_ok", fake_identity_ok)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        proc = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(2)"],
+            start_new_session=True,
+        )
+        try:
+            await _seed_item(database)
+            (rd.results / "s1.json").write_text('{"status": "done"}')
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="implementation",
+                    hook_point="on.implementation.start",
+                    log_path=str(rd.logs / "s1.log"),
+                    result_path=str(rd.results / "s1.json"),
+                )
+            )
+            await database.write(lambda c: store.session_running(c, "s1", proc.pid, 0.0))
+            summary, adopted = await reattach.reattach(database, rd, _REG, grace_retry_delay_s=0)
+            assert summary.adopted == ["s1"]
+            await asyncio.gather(*adopted.values(), return_exceptions=True)
+        finally:
+            proc.wait()
+            await database.close()
+
+    asyncio.run(scenario())
+    assert calls["n"] == 2
+
+
+def test_an_old_ambiguous_session_skips_the_retry(tmp_path, monkeypatch):
+    """A session well past the grace window is declared unconfirmed on the
+    first look -- an old, genuinely-dead session shouldn't pay (or benefit
+    from) a retry that only exists for the just-dispatched case."""
+    calls = {"n": 0}
+
+    def fake_identity_ok(pid, pid_start_time):
+        calls["n"] += 1
+        return False
+
+    monkeypatch.setattr(reattach, "_identity_ok", fake_identity_ok)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="implementation",
+                    hook_point="on.implementation.start",
+                    log_path=str(rd.logs / "s1.log"),
+                    result_path=str(rd.results / "s1.json"),
+                )
+            )
+            await database.write(lambda c: store.session_running(c, "s1", 99999, 123.0))
+            # Push started_at well outside the grace window -- this session
+            # is old, not young, so the retry must not fire for it.
+            await database.write(
+                lambda c: c.execute(
+                    "UPDATE worker_sessions SET started_at = ? WHERE id = 's1'",
+                    ("2020-01-01T00:00:00+00:00",),
+                )
+            )
+            summary, _ = await reattach.reattach(database, rd, _REG, grace_retry_delay_s=0)
+            assert summary.unknown == ["s1"]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    assert calls["n"] == 1  # no retry -- too old for the grace window
 
 
 def test_live_pid_matching_identity_is_adopted(tmp_path):
@@ -897,3 +1084,68 @@ def test_adopted_agent_result_file_still_wins(tmp_path):
     # The spec pins the agent half of this too: an adopted agent session with
     # a result file must be unaffected by any of it.
     assert reattach._adopted_status(result_path, is_agent=True) == "done_with_concerns"
+
+
+def test_many_young_sessions_share_one_grace_sleep(tmp_path, monkeypatch):
+    """The grace retry waits once for the whole scan, not once per row.
+
+    `rows` is every pending/running session, so a restart moments after
+    several started -- `kraft admin stop` immediately followed by a start --
+    puts all of them inside the age window at once. A sleep per row would
+    serialise that into `grace_retry_delay_s` x N of added startup, in the
+    one scenario where those sessions are most likely genuinely dead.
+    """
+    sleeps: list[float] = []
+    real_sleep = asyncio.sleep
+
+    async def counting_sleep(delay, *a, **kw):
+        sleeps.append(delay)
+        return await real_sleep(0, *a, **kw)
+
+    monkeypatch.setattr(reattach, "_identity_ok", lambda pid, pst: False)
+    monkeypatch.setattr(reattach.asyncio, "sleep", counting_sleep)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed_item(database)
+            for n in range(5):
+                sid = f"s{n}"
+                await database.write(
+                    lambda c, sid=sid: store.create_session(
+                        c,
+                        id=sid,
+                        work_item_id="w1",
+                        node_id="implementation",
+                        hook_point="on.implementation.start",
+                        log_path=str(rd.logs / f"{sid}.log"),
+                        result_path=str(rd.results / f"{sid}.json"),
+                    )
+                )
+                # started_at defaults to "now" -- all five are young.
+                await database.write(
+                    lambda c, sid=sid, n=n: store.session_running(c, sid, 90000 + n, 123.0)
+                )
+            summary, _ = await reattach.reattach(database, rd, _REG, grace_retry_delay_s=0.01)
+            assert sorted(summary.unknown) == ["s0", "s1", "s2", "s3", "s4"]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    assert sleeps == [0.01], f"expected one shared grace sleep, got {len(sleeps)}"
+
+
+def test_identity_mismatch_reason_never_reports_this_process(monkeypatch):
+    """`psutil.Process(None)` is not an error -- it is *this* process. Without
+    the explicit guard, a row with no pid reports Kraft's own create_time as
+    the session's `observed=`, inside the one diagnostic Kraft-s7c04.51 adds
+    to make that answer trustworthy."""
+
+    def boom(*a, **kw):  # nothing should reach psutil for a pid-less row
+        raise AssertionError("psutil must not be consulted for a None pid")
+
+    monkeypatch.setattr(reattach, "_pid_alive", boom)
+    assert reattach._identity_mismatch_reason(None, 123.0) == "no pid recorded"
+    # The pid-less case wins over the start-time case, and neither touches psutil.
+    assert reattach._identity_mismatch_reason(None, None) == "no pid recorded"

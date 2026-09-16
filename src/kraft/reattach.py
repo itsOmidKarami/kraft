@@ -22,9 +22,21 @@ from kraft.adapters.subprocess import (
 from kraft.executor import gates
 from kraft.executor.context import LaunchContext, OnApprove
 from kraft.executor.dispatch import ESCALATION_HOOK
+from kraft.store._common import _now, _span_ms
 from kraft.templates import Registry
 
 logger = logging.getLogger(__name__)
+
+#: Only a session started this recently gets the grace retry below --
+#: Kraft-s7c04.51. The live incident this fixes was 13.6s old
+#: (worker_session_started -> session_unknown) when it was declared
+#: unconfirmed; this threshold needs comfortable margin above that, not just
+#: above zero, or the fix does not even cover the case that motivated it.
+#: Not a policy knob: no evidence yet that anyone would want to tune it, and
+#: the campaign's own standing lesson is not to build configurability ahead
+#: of a need for it.
+_REATTACH_GRACE_AGE_MS = 30_000
+_REATTACH_GRACE_RETRY_DELAY_S = 2.0
 
 
 @dataclass
@@ -56,6 +68,41 @@ def _identity_ok(pid: int, pid_start_time) -> bool:
         return abs(psutil.Process(pid).create_time() - pid_start_time) < 1e-6
     except psutil.Error:
         return False
+
+
+def _is_young(started_at) -> bool:
+    """Within `_REATTACH_GRACE_AGE_MS` of now -- young enough that
+    `_identity_ok`'s answer may not have settled (Kraft-s7c04.51). A row with
+    no usable `started_at` is not young: without an age there is no evidence
+    the identity check was premature, and guessing "young" would hand a grace
+    retry to every such row.
+    """
+    age_ms = _span_ms(started_at, _now())
+    return age_ms is not None and age_ms < _REATTACH_GRACE_AGE_MS
+
+
+def _identity_mismatch_reason(pid: int | None, pid_start_time) -> str:
+    """Which specific check `_identity_ok` failed, for the `session_unknown`
+    event a caller writes right after -- Kraft-s7c04.51: a session reattach
+    called unconfirmed 13 seconds after it started, and answering "was it
+    dead, or a mismatch, or never recorded a start time at all" took a live
+    agent minutes of reverse-engineering from a restart timestamp. Recording
+    it here means the next occurrence doesn't need that."""
+    if pid is None:
+        # Before any other check: `psutil.Process(None)` is not an error, it
+        # is *this* process -- so falling through would report Kraft's own
+        # create_time as the session's `observed=`, inside the one diagnostic
+        # this exists to make trustworthy.
+        return "no pid recorded"
+    if pid_start_time is None:
+        return "no pid_start_time recorded"
+    if not _pid_alive(pid):
+        return f"pid {pid} is not alive"
+    try:
+        observed = psutil.Process(pid).create_time()
+    except psutil.Error:
+        return f"pid {pid} could not be inspected"
+    return f"pid {pid} create_time mismatch: stored={pid_start_time!r} observed={observed!r}"
 
 
 async def _exit_from_file(
@@ -358,6 +405,11 @@ async def reattach(
     launch_factory: Callable[[str], LaunchContext] | None = None,
     bd_cwd: str | None = None,
     on_approve: OnApprove | None = None,
+    #: Overridable so a test exercising the retry *logic* doesn't also pay
+    #: the real delay -- every dead-pid test seeds its session moments
+    #: before calling this, so it is always "young" by construction and
+    #: would otherwise eat this sleep for behavior it isn't testing.
+    grace_retry_delay_s: float = _REATTACH_GRACE_RETRY_DELAY_S,
 ) -> tuple[ReattachSummary, dict[str, asyncio.Task]]:
     rows = db.read(
         lambda c: c.execute(
@@ -368,18 +420,57 @@ async def reattach(
     adopted_tasks: dict[str, asyncio.Task] = {}
     pending_escalation_resumes: list[dict] = []
 
-    for r in rows:
-        sid = r["id"]
-        # Only an adopted session still has something running to tear down
-        # later (`_guarded_adopt`'s `finally`). For every other row the
-        # session is over as far as Kraft is concerned, while its container --
-        # daemon-parented, so it survived the restart that orphaned this row
-        # exactly as the client pid could have -- is not (Kraft-rki).
-        adopting = (
+    # Only an adopted session still has something running to tear down later
+    # (`_guarded_adopt`'s `finally`). For every other row the session is over
+    # as far as Kraft is concerned, while its container -- daemon-parented, so
+    # it survived the restart that orphaned this row exactly as the client pid
+    # could have -- is not (Kraft-rki).
+    #
+    # Resolved for every row up front, once each, so the grace retry below can
+    # be a single sleep for the whole scan.
+    adopt = {
+        r["id"]: (
             r["status"] != "pending"
             and r["pid"] is not None
             and _identity_ok(r["pid"], r["pid_start_time"])
         )
+        for r in rows
+    }
+    # Kraft-s7c04.51: a session started 13 seconds before this exact scan was
+    # declared unconfirmed on the very first look -- "cannot have lost its PID
+    # identity" that young. Those get one retry, in case `_identity_ok`'s
+    # answer had not settled yet.
+    #
+    # ONE sleep for the whole scan, not one per row. `rows` is every
+    # `pending`/`running` session, and a restart moments after several started
+    # -- `kraft admin stop` immediately followed by a start, the common case
+    # here -- puts all of them inside the age window at once. Sleeping per row
+    # would serialise that into `grace_retry_delay_s` x N of added startup, in
+    # the one scenario where those sessions are most likely genuinely dead.
+    # Waiting once and re-checking the whole set costs a single delay whatever
+    # N is, and every row still gets at least the settling time it would have
+    # had.
+    #
+    # Resolved before the loop so it lands before that row's
+    # `_sandbox.teardown`: flipping a row back to adopted after tearing its
+    # sandbox down would tear down a container for a session about to be
+    # treated as still-live.
+    grace = [
+        r
+        for r in rows
+        if not adopt[r["id"]]
+        and r["status"] != "pending"
+        and r["pid"] is not None
+        and _is_young(r["started_at"])
+    ]
+    if grace:
+        await asyncio.sleep(grace_retry_delay_s)
+        for r in grace:
+            adopt[r["id"]] = _identity_ok(r["pid"], r["pid_start_time"])
+
+    for r in rows:
+        sid = r["id"]
+        adopting = adopt[sid]
         if not adopting:
             await _sandbox.teardown(sid)
         if r["status"] == "pending":
@@ -430,7 +521,10 @@ async def reattach(
                     {"work_item_id": r["work_item_id"], "node_id": r["node_id"], "session_id": sid}
                 )
         else:
-            await db.write(lambda c, sid=sid: store.session_unknown(c, sid))
+            reason = _identity_mismatch_reason(pid, r["pid_start_time"])
+            await db.write(
+                lambda c, sid=sid, reason=reason: store.session_unknown(c, sid, reason=reason)
+            )
             await db.write(
                 lambda c, r=r: store.mark_needs_human(
                     c,
