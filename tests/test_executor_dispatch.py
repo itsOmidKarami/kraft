@@ -850,6 +850,79 @@ def test_a_plan_without_task_headings_gets_no_progress_note(tmp_path, monkeypatc
     assert "kraft item progress" not in prompt
 
 
+def test_the_implementer_is_told_which_commands_gate_its_paths(tmp_path, monkeypatch):
+    """49c0cefd's agent could run `just e2e-ci` and was never told it existed
+    (Kraft-s7c04.8). The implementation prompt now carries the repo's
+    path->command mapping. `on.mr.describe` -- a different `kind: agent` hook
+    dispatched in the same run -- must not get it (Kraft-s7c04.45: keyed on
+    the hook, not the node id)."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    prompt_log = tmp_path / "prompts.txt"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompt_log))
+    fake = f"{sys.executable} {_FAKE_AGENT}"
+    launch = executor.LaunchContext(
+        repo_entry={
+            "test_scopes": [
+                {"paths": ["frontend/**"], "command": "just test-ui"},
+                {"paths": ["frontend/**"], "command": "just e2e-ci"},
+                {"paths": ["src/**", "tests/**"], "command": "just ci-test"},
+            ]
+        },
+        steering_dir=None,
+    )
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry_base = fake_registry(sys.executable, _FAKE_AGENT)
+            registry = Registry(
+                hooks={
+                    **registry_base.hooks,
+                    "on.mr.describe": {"kind": "agent", "command": fake},
+                }
+            )
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(repo),
+                template=_default_template(),
+                bd_cwd=str(tracker),
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+            chain = json.loads(row["chain_definition"])
+            impl_node = next(n for n in chain["nodes"] if n["id"] == "implementation")
+            await dispatch.dispatch_node(
+                database,
+                rd,
+                "on.implementation.start",
+                impl_node,
+                row,
+                registry,
+                repo,
+                launch=launch,
+            )
+            mr_node = next(n for n in chain["nodes"] if n["id"] == "mr_meta")
+            await dispatch.dispatch_node(
+                database, rd, "on.mr.describe", mr_node, row, registry, repo, launch=launch
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    sent = [p for p in prompt_log.read_text().split("\n\x00\n") if p.strip()]
+    assert len(sent) == 2
+    impl_prompt, other_prompt = sent
+    for cmd in ("just test-ui", "just e2e-ci", "just ci-test"):
+        assert cmd in impl_prompt
+        assert cmd not in other_prompt
+
+
 # ── per-scope result identity (Batch C·MR1 Task 1, Kraft-s7c04.9/.8/.14) ────
 
 
@@ -1421,147 +1494,6 @@ def test_dispatch_aggregates_three_scopes_the_first_of_which_fails(tmp_path, mon
     status = asyncio.run(scenario())
     assert status == "failed", "the last scope's pass must not overwrite the aggregate"
     assert all(m.read_text() == "ran" for m in ran), "every scope must run, not just the first"
-
-
-# ── C1: implementation runs the scope that gates it (Kraft-s7c04.8) ────────
-
-
-def _walk_implementation(
-    tmp_path, monkeypatch, *, changed_subdir: str, test_scopes: list[dict], fail: bool = False
-):
-    """Drive `walk.walk_node` over a bare `implementation` node (tasks:
-    [on.implementation.start], no fix_loop) with `on.test.run` bound to a real
-    subprocess. `dispatch_node`'s own agent branch already covers the fake
-    agent half of this node; this isolates C1's direct-dispatch gate, the way
-    `walk.py:803` already dispatches `on.implementation.start` itself outside
-    a node's own task list."""
-    from kraft.executor import walk
-
-    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    repo = make_repo(tmp_path)
-    registry = fake_registry(sys.executable, _FAKE_AGENT)
-    hooks = dict(registry.hooks)
-    fail_script = tmp_path / "gate_fail.py"
-    fail_script.write_text("import sys\nsys.exit(1)\n")
-    hooks["on.test.run"] = {
-        "kind": "subprocess",
-        "command": [sys.executable, str(fail_script)] if fail else ["true"],
-    }
-    registry = Registry(hooks=hooks)
-
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            wid = "w1"
-            await database.write(
-                lambda c: store.create_work_item(
-                    c,
-                    id=wid,
-                    bead_id=None,
-                    title="t",
-                    repo=str(repo),
-                    chain_template="default",
-                    chain_definition="{}",
-                )
-            )
-            base_sha = git_read(repo, "rev-parse", "HEAD")
-            (repo / changed_subdir).mkdir(parents=True, exist_ok=True)
-            (repo / changed_subdir / "x.txt").write_text("hi")
-            _git(repo, "add", "-A")
-            _git(repo, "commit", "-m", f"touch {changed_subdir}")
-            await database.write(lambda c: store.set_base_ref(c, wid, base_sha))
-            row = database.read(
-                lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
-            )
-            node = {
-                "id": "implementation",
-                "tasks": ["on.implementation.start"],
-                "gate_after": None,
-            }
-            result = await walk.walk_node(
-                database,
-                rd,
-                wid,
-                node,
-                row,
-                registry,
-                repo,
-                launch=executor.LaunchContext(
-                    repo_entry={"test_scopes": test_scopes}, steering_dir=None
-                ),
-            )
-            all_events = database.read(lambda c: events.read_after(c, 0, wid))
-            sessions = database.read(
-                lambda c: list(
-                    c.execute("SELECT * FROM worker_sessions WHERE work_item_id = ?", (wid,))
-                )
-            )
-            return result, all_events, sessions
-        finally:
-            await database.close()
-
-    return asyncio.run(scenario())
-
-
-def test_implementation_runs_the_matched_gate_scope_before_reporting_done(tmp_path, monkeypatch):
-    """49c0cefd changed 21 frontend files and never ran `just e2e-ci` at
-    implementation time -- the flake it shipped cost $17.41 and ~3h in the
-    verify fix loop, reachable for five minutes of subprocess time at
-    implementation instead."""
-    marker = tmp_path / "gate-ran.txt"
-    ok_script = tmp_path / "gate_ok.py"
-    ok_script.write_text(f"import pathlib\npathlib.Path({str(marker)!r}).write_text('ran')\n")
-    result, _events, sessions = _walk_implementation(
-        tmp_path,
-        monkeypatch,
-        changed_subdir="frontend",
-        test_scopes=[
-            {"paths": ["frontend/**"], "command": f"{sys.executable} {ok_script}"},
-        ],
-    )
-    assert result == "ok"
-    assert marker.read_text() == "ran"
-    assert any(s["hook_point"] == "on.test.run" for s in sessions)
-
-
-def test_implementation_skips_a_scope_the_change_does_not_touch(tmp_path, monkeypatch):
-    """A backend-only change must not run the frontend scope -- the same
-    selection verify would make against this diff (spec's "the selection
-    implementation makes must be the same selection verify makes")."""
-    marker = tmp_path / "gate-ran.txt"
-    frontend_script = tmp_path / "gate_frontend.py"
-    frontend_script.write_text(f"import pathlib\npathlib.Path({str(marker)!r}).write_text('ran')\n")
-    result, _events, _sessions = _walk_implementation(
-        tmp_path,
-        monkeypatch,
-        changed_subdir="backend",
-        test_scopes=[
-            {"paths": ["frontend/**"], "command": f"{sys.executable} {frontend_script}"},
-            {"paths": ["backend/**"], "command": "true"},
-        ],
-    )
-    assert result == "ok"
-    assert not marker.exists(), "a scope the change never touched must not run"
-
-
-def test_implementation_gate_failure_routes_to_needs_human(tmp_path, monkeypatch):
-    """`implementation` has no `fix_loop` (bead .26/E7, not in this batch), so
-    a gate failure here goes straight to needs_human rather than a repair
-    this node has no machinery for -- the routing decision the spec calls
-    out as open and requires be made and recorded."""
-    result, all_events, _sessions = _walk_implementation(
-        tmp_path,
-        monkeypatch,
-        changed_subdir="frontend",
-        test_scopes=[{"paths": ["frontend/**"], "command": "irrelevant"}],
-        fail=True,
-    )
-    assert result == "needs_human"
-    reason = next(
-        e["payload"]["reason"] for e in reversed(all_events) if e["type"] == "work_item_needs_human"
-    )
-    assert "on.test.run" in reason
 
 
 def test_a_steered_rerun_over_an_existing_artifact_is_framed_as_a_revision(tmp_path):

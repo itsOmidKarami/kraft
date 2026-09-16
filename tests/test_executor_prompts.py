@@ -32,3 +32,36 @@ def test_method_note_does_not_forbid_verifying():
     # finding is still present, which is verification.
     lowered = prompts.METHOD_NOTE.lower()
     assert "verify" not in lowered and "judge" not in lowered
+
+
+_SCOPES = {
+    "test_scopes": [
+        {"paths": ["frontend/**"], "command": "just test-ui"},
+        {"paths": ["frontend/**"], "command": "just e2e-ci"},
+        {"paths": ["src/**", "tests/**"], "command": "just ci-test"},
+    ]
+}
+
+
+def test_scope_note_lists_every_scope_command_for_the_implementer():
+    out = prompts.scope_note("on.implementation.start", _SCOPES)
+    for cmd in ("just test-ui", "just e2e-ci", "just ci-test"):
+        assert cmd in out
+    assert "frontend/**" in out
+
+
+def test_scope_note_is_empty_for_any_other_hook():
+    for hook in ("on.mr.describe", "on.review.local.run", "on.test.run"):
+        assert prompts.scope_note(hook, _SCOPES) == ""
+
+
+def test_scope_note_is_empty_with_no_scopes_configured():
+    assert prompts.scope_note("on.implementation.start", {}) == ""
+    assert prompts.scope_note("on.implementation.start", None) == ""
+
+
+def test_scope_note_handles_a_legacy_bare_test_command():
+    # config.load_repos wraps a bare test_command into a ["**"] scope, but a
+    # LaunchContext built by hand may not have been through that.
+    out = prompts.scope_note("on.implementation.start", {"test_command": "just test"})
+    assert "just test" in out

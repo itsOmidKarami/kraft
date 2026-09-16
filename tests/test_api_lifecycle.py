@@ -30,9 +30,11 @@ def test_happy_path_via_api(tmp_path, monkeypatch):
 
         item = client.get(f"/api/work-items/{wid}").json()
         assert item["status"] == "completed"
-        # env_setup, implementation's own agent task, C1's on.test.run gate at
-        # implementation (Kraft-s7c04.8), and verify's own on.test.run.
-        assert len(item["worker_sessions"]) == 4
+        # env_setup, implementation's own agent task, and verify's on.test.run.
+        # C1's implementation-time on.test.run gate (Kraft-s7c04.8) was
+        # reverted 2026-09-16 -- see test_executor_walk.py's
+        # test_run_verify_failure_stops_at_verify.
+        assert len(item["worker_sessions"]) == 3
 
         run_dir = Path(client.app.state.run_dirs.base)
         assert "a + b" in (run_dir / "worktrees" / wid / "calc.py").read_text()
