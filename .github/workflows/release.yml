@@ -1,0 +1,138 @@
+# The merge landed. Read the label off the pull request that produced this
+# commit, compute the tag, build the wheel, and publish it.
+#
+# One workflow, not two. The GitLab shape was `auto-tag` pushes a tag -> a tag
+# pipeline builds and releases. That cannot work here: a tag pushed with the
+# default GITHUB_TOKEN deliberately does not trigger other workflows, so the
+# release half would never run. Keeping it in one job also means no stored PAT,
+# which is the credential you least want in a public repository.
+#
+# Order matters. The tag is created locally first (setuptools-scm reads the
+# version from it, so the wheel cannot be built before it exists), and pushed
+# only after the wheel has built and passed its smoke test. A failed build
+# therefore leaves no tag behind to clean up.
+name: release
+
+# Triggered by test.yml completing, not by the push itself: two workflows both
+# triggered by `push: branches: [main]` run in parallel, which would let a tag
+# get created, a GitHub Release published, and a wheel pushed to PyPI from a
+# commit whose tests are still running -- or already failed. PyPI publishes
+# cannot be undone, so this waits on the actual test result instead.
+#
+# `workflow_run` does not check out the pushing commit by default -- it runs
+# against the default branch tip -- so every step below that needs "the commit
+# this release is about" uses `github.event.workflow_run.head_sha` explicitly,
+# never $GITHUB_SHA (which, under `workflow_run`, is not that commit).
+on:
+  workflow_run:
+    workflows: ["test"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write      # create the tag and the release
+  id-token: write      # PyPI trusted publishing
+  pull-requests: read  # read the merged PR's labels off the commit
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          # `git describe` needs the tags, and a shallow clone has none --
+          # every release would compute as the first one.
+          fetch-depth: 0
+
+      - name: what does this merge ship
+        id: impact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          LABELS=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" \
+            --jq '[.[0].labels // [] | .[].name] | join(",")')
+          # A commit that reached main without a pull request -- a direct push,
+          # the revert button, a cherry-pick -- has no labels to read. That is
+          # `none`, and saying so is what stops it looking like a broken job.
+          if [ -z "$LABELS" ]; then
+            echo "no pull request for $SHA; not releasing"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          PREVIOUS=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          # No `|| true`: next_tag exits 0 with no output for release::none, and
+          # non-zero only when it cannot read the previous tag or the labels
+          # contradict each other. Swallowing that would turn a broken tag
+          # history into a silently skipped release.
+          TAG=$(python3 dev/next_tag.py "$PREVIOUS" "$LABELS")
+          if [ -z "$TAG" ]; then
+            echo "release::none; not releasing"
+          else
+            echo "releasing $TAG"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        if: steps.impact.outputs.tag != ''
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: astral-sh/setup-uv@v5
+        if: steps.impact.outputs.tag != ''
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: put uv-installed tools on PATH
+        # `$GITHUB_PATH` only takes effect for later steps, not the one that
+        # writes it -- hence its own step ahead of the one that runs `just`.
+        # Insurance against the runner image not already putting
+        # ~/.local/bin on PATH by default; GitLab's equivalent job did this
+        # explicitly rather than relying on it.
+        if: steps.impact.outputs.tag != ''
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: tag locally, then build
+        if: steps.impact.outputs.tag != ''
+        env:
+          TAG: ${{ steps.impact.outputs.tag }}
+        run: |
+          git -c user.email=ci@kraft.invalid -c user.name="Kraft CI" tag -a "$TAG" -m "$TAG"
+          uv tool install rust-just
+          npm ci --prefix frontend
+          just bundle
+          uv build --wheel
+
+      - name: smoke test the wheel
+        if: steps.impact.outputs.tag != ''
+        env:
+          TAG: ${{ steps.impact.outputs.tag }}
+        run: |
+          # A wheel that lost the SPA, or that versioned itself from a shallow
+          # clone, must not become a release. This is the guard that makes
+          # `just bundle` living outside the build backend survivable.
+          WHEEL=$(ls dist/*.whl)
+          uv venv /tmp/smoke
+          VIRTUAL_ENV=/tmp/smoke uv pip install "$WHEEL"
+          /tmp/smoke/bin/kraft --version | grep -qF "${TAG#v}"
+          # Ask the installed package where its bundle is, rather than guessing
+          # a site-packages path that a python version bump would invalidate.
+          /tmp/smoke/bin/python -c \
+            "from kraft.paths import BUNDLED; import sys; sys.exit(0 if (BUNDLED / 'web' / 'index.html').is_file() else 1)"
+
+      - name: push the tag and create the release
+        if: steps.impact.outputs.tag != ''
+        env:
+          TAG: ${{ steps.impact.outputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git push origin "$TAG"
+          gh release create "$TAG" dist/*.whl --title "Kraft $TAG" --generate-notes
+
+      - name: publish to PyPI
+        if: steps.impact.outputs.tag != ''
+        uses: pypa/gh-action-pypi-publish@release/v1

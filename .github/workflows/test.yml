@@ -1,0 +1,188 @@
+# Everything runs on every pull request. The GitLab config this replaced gated
+# each job behind `changes:` rules because free-tier minutes were scarce -- see
+# its own header comment. Public repositories have unlimited Actions minutes on
+# standard runners, so the gating bought nothing and cost two hazards: a fully
+# path-gated change could produce zero jobs (which broke auto-merge, and needed
+# an unconditional job to work around), and a required check that never runs
+# blocks a pull request forever under branch protection.
+name: test
+
+on:
+  pull_request:
+    # `labeled`/`unlabeled` matter: release-impact reads the labels off the
+    # event payload, so without them, adding the label a failing check asked
+    # for would not re-run that check.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  BD_VERSION: "1.2.2"
+
+jobs:
+  python:
+    name: lint and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # setuptools-scm derives the version from tags; a shallow clone has
+          # none and every build in it silently versions itself 0.1.dev1.
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: install bd
+        run: |
+          case "$(uname -m)" in aarch64|arm64) BD_ARCH=arm64 ;; *) BD_ARCH=amd64 ;; esac
+          curl -fsSL "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin bd
+          git config --global user.email ci@kraft.invalid
+          git config --global user.name "Kraft CI"
+          bd version
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pytest -m "not e2e and not slow"
+      # ~1s, no tests run: catches a renamed pinned test the suite above would not.
+      - run: uv run python -m kraft.intent
+
+  slow:
+    name: slow tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: install bd
+        run: |
+          case "$(uname -m)" in aarch64|arm64) BD_ARCH=arm64 ;; *) BD_ARCH=amd64 ;; esac
+          curl -fsSL "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin bd
+          git config --global user.email ci@kraft.invalid
+          git config --global user.name "Kraft CI"
+      - run: uv sync --frozen
+      - run: uv run pytest -m "slow"
+
+  lite-floor:
+    # The kraft-lite plugin claims to need "python3 and nothing else". Both ends
+    # of the supported range, because the floor is what a system python3
+    # actually is on an older machine, and claiming it without testing it is how
+    # that claim quietly becomes false. This folds in what
+    # plugins/.github/workflows/test.yml used to run in the published repo --
+    # which was one step too late, after a bad publish had reached users.
+    #
+    # `--no-project` is required: this repo's pyproject demands >=3.14 and uv
+    # refuses the older interpreter without it. No lockfile and nothing but
+    # pytest, so a dependency appearing here is the first sign the plugin
+    # stopped being stdlib-only.
+    name: kraft-lite on python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv run --python ${{ matrix.python-version }} --no-project --with pytest pytest plugins/kraft-lite/tests -q
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - run: npm test
+        working-directory: frontend
+
+  e2e:
+    # The browser counterpart to the gated Python e2e tier. The image tag and
+    # frontend/package.json's exact "@playwright/test" pin must move together:
+    # the image ships only the browsers its own version expects.
+    name: playwright
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: install uv, bd and git config
+        run: |
+          apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl python3
+          case "$(uname -m)" in aarch64|arm64) BD_ARCH=arm64 ;; *) BD_ARCH=amd64 ;; esac
+          curl -fsSL "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz" \
+            | tar -xz -C /usr/local/bin bd
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          git config --global user.email ci@kraft.invalid
+          git config --global user.name "Kraft CI"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: uv sync --frozen
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - name: start the harness server
+        run: |
+          uv run python frontend/e2e/serve.py > e2e-server.log 2>&1 &
+          for i in $(seq 1 60); do grep -q KRAFT_E2E_REPO e2e-server.log && break; sleep 1; done
+          {
+            echo "KRAFT_E2E_REPO=$(sed -n 's/.*KRAFT_E2E_REPO=//p' e2e-server.log)"
+            echo "KRAFT_E2E_BASE=$(sed -n 's/.*KRAFT_E2E_BASE=//p' e2e-server.log)"
+          } >> "$GITHUB_ENV"
+      - name: the harness actually came up
+        run: |
+          test -n "$KRAFT_E2E_REPO" || { cat e2e-server.log; exit 1; }
+          test -n "$KRAFT_E2E_BASE" || { cat e2e-server.log; exit 1; }
+      # Bail after 3 failures instead of paying the full 120s timeout serially
+      # for every spec: a systemic break turns a ~1min green run into over an
+      # hour of dead runner time otherwise.
+      - run: npm run e2e -- --max-failures=3
+        working-directory: frontend
+      - if: always()
+        run: cat e2e-server.log || true
+
+  release-impact:
+    # Every pull request declares what it ships. The version comes from the git
+    # tag, so there is no bump commit left to forget -- which means the only
+    # place anyone can be asked is here, while the author still knows what the
+    # change is worth. `release::none` is a first-class answer and the expected
+    # one for docs, comments, CI config and test-only changes.
+    #
+    # Skipped for forks on purpose. Only people with write access can label a
+    # pull request, so requiring a label from an outside contributor is a red X
+    # they have no way to clear. For a fork, the maintainer labels before
+    # merging; an unlabelled merge reads as `release::none` and ships nothing.
+    name: release impact declared
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          python3 dev/next_tag.py "" "$LABELS" > /dev/null || {
+            echo "This PR needs exactly one of: release::major, release::minor, release::patch, release::none"
+            exit 1
+          }
+          echo "declared: $LABELS"
