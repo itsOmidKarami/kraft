@@ -18,7 +18,14 @@ from kraft import update
 RELEASE_JSON = [
     {
         "tag_name": "v0.4.0",
-        "assets": {"links": [{"name": "kraft-0.4.0-py3-none-any.whl", "url": "https://x/w.whl"}]},
+        "draft": False,
+        "prerelease": False,
+        "assets": [
+            {
+                "name": "kraft-0.4.0-py3-none-any.whl",
+                "browser_download_url": "https://x/w.whl",
+            }
+        ],
     }
 ]
 
@@ -69,7 +76,9 @@ def test_an_expired_cache_refetches(cache, monkeypatch):
     newer = [
         {
             "tag_name": "v0.5.0",
-            "assets": {"links": [{"name": "k.whl", "url": "https://x/n.whl"}]},
+            "draft": False,
+            "prerelease": False,
+            "assets": [{"name": "k.whl", "browser_download_url": "https://x/n.whl"}],
         }
     ]
     monkeypatch.setattr(update, "_fetch", _fetch(newer))
@@ -103,8 +112,47 @@ def test_an_empty_release_list_is_none(cache, monkeypatch):
 
 
 def test_a_release_with_no_wheel_is_none(cache, monkeypatch):
-    monkeypatch.setattr(update, "_fetch", _fetch([{"tag_name": "v9.0.0", "assets": {"links": []}}]))
+    payload = [{"tag_name": "v9.0.0", "draft": False, "prerelease": False, "assets": []}]
+    monkeypatch.setattr(update, "_fetch", _fetch(payload))
     assert update.latest() is None
+
+
+def test_a_draft_release_is_not_an_update(cache, monkeypatch):
+    """GitHub lists drafts in the same feed; GitLab had no equivalent."""
+    payload = [
+        {
+            "tag_name": "v0.9.9",
+            "draft": True,
+            "prerelease": False,
+            "assets": [{"name": "k.whl", "browser_download_url": "https://x/d.whl"}],
+        },
+        *RELEASE_JSON,
+    ]
+    monkeypatch.setattr(update, "_fetch", _fetch(payload))
+    assert update.latest().tag == "v0.4.0"
+
+
+def test_a_prerelease_is_not_an_update(cache, monkeypatch):
+    payload = [
+        {
+            "tag_name": "v1.0.0rc1",
+            "draft": False,
+            "prerelease": True,
+            "assets": [{"name": "k.whl", "browser_download_url": "https://x/p.whl"}],
+        },
+        *RELEASE_JSON,
+    ]
+    monkeypatch.setattr(update, "_fetch", _fetch(payload))
+    assert update.latest().tag == "v0.4.0"
+
+
+def test_a_release_with_no_wheel_is_skipped(cache, monkeypatch):
+    payload = [
+        {"tag_name": "v0.9.9", "draft": False, "prerelease": False, "assets": []},
+        *RELEASE_JSON,
+    ]
+    monkeypatch.setattr(update, "_fetch", _fetch(payload))
+    assert update.latest().tag == "v0.4.0"
 
 
 @pytest.mark.parametrize(
@@ -177,46 +225,3 @@ def test_perform_without_uv_is_a_readable_failure(monkeypatch):
 
     with pytest.raises(SystemExit, match="uv"):
         update.perform(update.Release(tag="v0.4.0", wheel_url="u/w.whl"), run=run)
-
-
-def test_request_sends_the_token_as_a_private_token_header(monkeypatch):
-    monkeypatch.setenv("GITLAB_TOKEN", "s3cr3t")
-    seen = {}
-
-    def get(url, *, timeout, headers, follow_redirects):
-        seen["headers"] = headers
-        return type("R", (), {"content": b"x", "raise_for_status": lambda self: None})()
-
-    monkeypatch.setattr(httpx, "get", get)
-    assert update._request("https://x/w.whl", 1.0) == b"x"
-    assert seen["headers"] == {"PRIVATE-TOKEN": "s3cr3t"}
-
-
-def test_request_falls_back_to_an_authenticated_glab(monkeypatch):
-    monkeypatch.delenv("GITLAB_TOKEN", raising=False)
-    monkeypatch.setattr(update.shutil, "which", lambda _name: "/usr/bin/glab")
-    monkeypatch.setattr(update, "_glab_authed", lambda _timeout: True)
-    seen = {}
-
-    def run(command, **kwargs):
-        seen["command"] = command
-        return type("R", (), {"stdout": b"from glab"})()
-
-    monkeypatch.setattr(update.subprocess, "run", run)
-    url = update.RELEASES_URL + "/permalink/latest"
-    assert update._request(url, 1.0) == b"from glab"
-    assert seen["command"][:2] == ["glab", "api"]
-
-
-def test_request_is_plain_when_no_token_and_no_glab(monkeypatch):
-    monkeypatch.delenv("GITLAB_TOKEN", raising=False)
-    monkeypatch.setattr(update.shutil, "which", lambda _name: None)
-    seen = {}
-
-    def get(url, *, timeout, follow_redirects):
-        seen["url"] = url
-        return type("R", (), {"content": b"x", "raise_for_status": lambda self: None})()
-
-    monkeypatch.setattr(httpx, "get", get)
-    assert update._request("https://x/w.whl", 1.0) == b"x"
-    assert seen["url"] == "https://x/w.whl"
