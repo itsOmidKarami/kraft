@@ -450,12 +450,11 @@ def test_steer_and_resume_409_on_a_needs_human_stop_that_is_not_needs_context(
     reason. `_needs_context_stop` walks events newest-first, so it must find
     the later, non-needs_context stop and refuse — not the earlier one.
 
-    Both stops land on `implementation`: C1 (Kraft-s7c04.8) now runs
-    `on.test.run` directly at implementation, so calc.py's untouched bug
-    (`KRAFT_FAKE_CLAUDE=noop`) is caught there and `verify` is never reached
-    -- the second, real-failure stop used to happen at `verify`, but the
-    newest-first sequence this test pins is unaffected by which node either
-    stop is on."""
+    The first stop is on `implementation` (needs_context); the second is on
+    `verify`, where its real pytest run genuinely fails on calc.py's untouched
+    bug. C1 (Kraft-s7c04.8) briefly moved the second stop to `implementation`
+    by running `on.test.run` there directly; reverted 2026-09-16, so this is
+    back to its original two-node sequence."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_STATUS", "needs_context")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_QUESTION", "which repo does this target?")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "noop")  # leaves calc.py's bug in place throughout
@@ -475,18 +474,15 @@ def test_steer_and_resume_409_on_a_needs_human_stop_that_is_not_needs_context(
             == 200
         )
 
-        # implementation's own on.test.run gate genuinely fails (calc.py's bug
-        # was never touched — KRAFT_FAKE_CLAUDE=noop) — a different
-        # needs_human stop, on the same node as the first.
+        # verify's real pytest run genuinely fails (calc.py's bug was never
+        # touched — KRAFT_FAKE_CLAUDE=noop) — a different needs_human stop.
         _wait(
             lambda: (
                 lambda b: (
-                    b
-                    if b["status"] == "needs_human" and b["current_node_id"] == "implementation"
-                    else None
+                    b if b["status"] == "needs_human" and b["current_node_id"] == "verify" else None
                 )
             )(client.get(f"/api/work-items/{wid}").json()),
-            "implementation's gate to fail for real",
+            "verify to fail for real",
         )
 
         assert client.post(f"/api/work-items/{wid}/steer", json={"text": "x"}).status_code == 409

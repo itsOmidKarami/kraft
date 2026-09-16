@@ -57,15 +57,11 @@ def _create_running_session(wid: str, session_id: str, node_id: str, *, pid: int
 
 
 def test_default_chain_fix_loop_breach_over_http(tmp_path, monkeypatch):
-    """C1 (Kraft-s7c04.8) now dispatches `on.test.run` at `implementation`
-    too, so a repo whose test suite is broken from intake no longer reaches
-    `verify`'s fix loop at all -- it stops at `implementation` on the very
-    first pass instead (that node has no `fix_loop` to cap-breach). This
-    test's target is specifically `verify`'s cap-breach machinery over HTTP,
-    so `on.test.run` is noop'd everywhere (`noop_verify=True`, which C1's
-    gate reads the same as any other dispatch) and the fix loop is driven by
-    `on.review.local.run`'s own findings instead -- the same scripted-
-    reviewer approach `test_findings_loop.py` uses."""
+    """This test's target is specifically `verify`'s cap-breach machinery
+    over HTTP, so `on.test.run` is noop'd everywhere (`noop_verify=True`)
+    and the fix loop is driven by `on.review.local.run`'s own findings
+    instead -- the same scripted-reviewer approach `test_findings_loop.py`
+    uses."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "noop")
     repo = make_repo(tmp_path)
     # Own policy fixture — do not gate on the shipped attempts value.
