@@ -144,13 +144,14 @@ def test_done_with_concerns_advances_the_chain(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
-def test_run_verify_failure_stops_at_implementation(tmp_path, monkeypatch):
-    """C1 (Kraft-s7c04.8): `implementation` now runs the same `on.test.run`
-    gate `verify` does, directly after its own agent task, so a bug the
-    agent left in place (`KRAFT_FAKE_AGENT=noop`) is caught there and
-    `verify` never even starts -- the shift-left cost move batch-c1's spec
-    calls out by design, not a regression. This test used to stop at
-    `verify`; that assertion moved here on purpose."""
+def test_run_verify_failure_stops_at_verify(tmp_path, monkeypatch):
+    """C1 (Kraft-s7c04.8) had `implementation` run this same `on.test.run`
+    gate directly after its own agent task, so this assertion moved to stop
+    at `implementation` instead. C1 met neither of its own bead's acceptance
+    criteria -- the gate ran after the session exited, so the agent never
+    saw a failure, and `implementation` has no `fix_loop` to route one into
+    -- so it is reverted (Kraft-s7c04.8 decision, 2026-09-16). This test
+    stops at `verify` again."""
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")  # leave the bug in place
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
@@ -179,14 +180,14 @@ def test_run_verify_failure_stops_at_implementation(tmp_path, monkeypatch):
                 ).fetchone()
             )
             assert row["status"] == "needs_human"
-            assert row["current_node_id"] == "implementation"
+            assert row["current_node_id"] == "verify"
 
             types = _events(database, wid)
             assert "work_item_needs_human" in types
             assert "work_item_completed" not in types
-            # implementation started but never completed; verify never starts
-            assert types.count("node_started") == 2
-            assert types.count("node_completed") == 1
+            # verify started but never completed
+            assert types.count("node_started") == 3
+            assert types.count("node_completed") == 2
 
             assert _bd_status(tracker, row["bead_id"]) in ("open", "in_progress")
         finally:

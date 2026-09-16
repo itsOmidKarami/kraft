@@ -95,22 +95,25 @@ def _last_own_round_head(
 
     `prompts._last_reviewed_head` is the wrong source for this: it is keyed
     on `(work_item_id, hook_point)` alone, not `node_id`, and takes the
-    latest `done` row regardless of its siblings. `GATE_HOOK` ("on.test.run")
-    is dispatched by both `implementation` (C1) and `verify` under that one
-    hook_point, with one session row per scope -- so that query lets one
-    node's head stand in for the other's (verify's round 0 would read C1's
-    head and see an empty diff, breaking the spec's "first round selects
-    from the full branch diff"), and lets one passing scope's row stand in
-    for a dispatch whose sibling scope failed (the `retry_after_cap` path:
-    scope A failed, scope B passed, the counter reset wipes the round, and a
-    later HEAD move would otherwise be missed because a passing B's row
-    still reads as "reviewed"). Scoping to this node's own previous round,
-    and requiring every row in it to be `done` with the same `head_sha`,
-    closes both. Coarser than tracking exactly which scope(s) failed:
-    precise per-scope identity would need scope identity persisted on the
-    session row, which this batch does not add. Treating *any* failure (or
-    an inconsistent head across siblings) as "not clean" can only
-    over-select, matching `_matched_scopes`' own fail-open posture.
+    latest `done` row regardless of its siblings. For a while (C1,
+    Kraft-s7c04.8, reverted 2026-09-16) `on.test.run` was dispatched by both
+    `implementation` and `verify` under that one hook_point, with one
+    session row per scope -- so that query would have let one node's head
+    stand in for the other's (verify's round 0 reading C1's head and seeing
+    an empty diff, breaking the spec's "first round selects from the full
+    branch diff"). That reason for scoping to `node_id` is gone with C1, but
+    the other one is independent and still live: it also stops one passing
+    scope's row from standing in for a dispatch whose sibling scope failed
+    (the `retry_after_cap` path: scope A failed, scope B passed, the counter
+    reset wipes the round, and a later HEAD move would otherwise be missed
+    because a passing B's row still reads as "reviewed"). Scoping to this
+    node's own previous round, and requiring every row in it to be `done`
+    with the same `head_sha`, closes both. Coarser than tracking exactly
+    which scope(s) failed: precise per-scope identity would need scope
+    identity persisted on the session row, which this batch does not add.
+    Treating *any* failure (or an inconsistent head across siblings) as "not
+    clean" can only over-select, matching `_matched_scopes`' own fail-open
+    posture.
     """
     rows = [
         r
@@ -137,12 +140,15 @@ def _select_scopes(
     run, and the sandbox to run them under (test-scope design §3.2-3.3, C7
     Kraft-s7c04.14).
 
-    Pulled out of `dispatch_node`'s subprocess branch (batch-c1 spec Task 3)
-    so C1's implementation-time gate and verify's own `on.test.run` dispatch
-    -- both `dispatch_node` calls, just with a different `node` -- compute
-    scopes the exact same way by construction, rather than by two call sites
-    agreeing to stay in sync (spec: "the selection implementation makes must
-    be the same selection verify makes").
+    Pulled out of `dispatch_node`'s subprocess branch (batch-c1 spec Task 3).
+    C1 briefly gave `implementation` its own `on.test.run` dispatch through
+    this same function, so the two computed scopes identically by
+    construction; C1 was reverted (Kraft-s7c04.8, 2026-09-16) because a gate
+    dispatched after the session exits cannot be acted on by it. `verify` is
+    this function's only caller now, and the same-selection property C1 was
+    after is instead conveyed to the implementation agent as a prompt note
+    (`prompts.scope_note`) built from the repo's scope table, so it can apply
+    the same rule to its own diff before it finishes.
 
     The repo's own command(s) win over the registry's. The registry is per
     install and one command for every repo on it; test_scopes is a property
@@ -297,6 +303,7 @@ async def dispatch_node(
                     entry.attachments_of(work_item_row), method_is_own=method_is_own
                 )
                 + (prompts.METHOD_NOTE if method_is_own else "")
+                + prompts.scope_note(task_hook, launch.repo_entry if launch else None)
                 + prompts.progress_note(task_hook, work_item_row, worktree)
             )
         ) + prompts.BEAD_NOTE
@@ -824,14 +831,6 @@ JUDGE_HOOK = "on.fix_loop.judge"
 #: `needs_context_question` reads and must be skipped there. Named rather than
 #: spelled out at each site because `reattach` compares against it too.
 ESCALATION_HOOK = "escalation"
-
-#: The test-scope hook that gates `verify` (`templates/default.yaml`'s
-#: `on.test.run`), also dispatched directly by `walk.walk_node` at the end of
-#: the `implementation` node -- C1 (Kraft-s7c04.8, batch-c1 spec). Named
-#: rather than spelled out at that call site so it stays the one place this
-#: coupling is declared; `_select_scopes` and `_last_own_round_head` key off
-#: the hook_point string either way, not off this constant.
-GATE_HOOK = "on.test.run"
 
 #: Statuses that mean the judge session actually finished thinking -- the
 #: same "was this a real judgement" gate `gate_review._UNTRUSTWORTHY`
