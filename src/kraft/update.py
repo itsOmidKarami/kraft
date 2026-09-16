@@ -46,7 +46,7 @@ class Release:
 def installed() -> str:
     """This Kraft's version, or the answer for a checkout that was never installed."""
     try:
-        return _pkg_version("kraft")
+        return _pkg_version("kraft-sdlc")
     except PackageNotFoundError:
         return "0.0.0+source"
 

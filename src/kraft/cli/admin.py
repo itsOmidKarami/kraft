@@ -621,7 +621,7 @@ def _cmd_init(ns: argparse.Namespace) -> None:
 
 def _version() -> str:
     try:
-        return _pkg_version("kraft")
+        return _pkg_version("kraft-sdlc")
     except PackageNotFoundError:
         # A source checkout that was never installed still answers, rather than
         # traceback: `--version` exists to diagnose an install, so it has to
