@@ -403,6 +403,40 @@ def session_progress(conn: sqlite3.Connection, session_id, usage: Usage) -> None
     )
 
 
+def record_pause_usage(conn: sqlite3.Connection, session_id, usage: Usage | None) -> None:
+    """Model, tokens and cost for a session a human interrupted (Kraft-s7c04.18).
+
+    `session_exited` returns early on a paused row -- deliberately, so the row
+    and the event agree that a human's interruption is not a task failure -- and
+    it is the only writer of `cost_usd`. So a paused session recorded NULL
+    forever: 71 rows carrying 28.0M input tokens and no cost at all, every day
+    from 2026-09-10 on, which is why every figure in the chain-efficiency epic
+    is a floor.
+
+    No event. `worker_session_paused` has already been appended for this exact
+    moment, and a second event meaning the same thing would have to be ignored
+    by every reader; `usage_rollup` reads the row, not the stream.
+
+    No `wall_ms`: it is derived from `started_at` and `exited_at` at read time
+    (`_common.session_wall_ms`), and the pause already wrote both.
+
+    A None `usage` is a no-op. An agent interrupted before its first response
+    completes has no envelope and nothing to report, and `usage.py` deliberately
+    has no rate table -- NULL is the honest record of that, and `cost_complete`
+    already renders it as a floor rather than a total.
+
+    Guarded on `status = 'paused'` for the reason `session_progress` guards on
+    `'running'`: a row that has moved on has settled numbers.
+    """
+    if usage is None:
+        return
+    conn.execute(
+        "UPDATE worker_sessions SET model = ?, tokens_in = ?, tokens_out = ?, cost_usd = ? "
+        "WHERE id = ? AND status = 'paused'",
+        (usage.model, usage.tokens_in, usage.tokens_out, usage.cost_usd, session_id),
+    )
+
+
 def session_exited(
     conn: sqlite3.Connection,
     session_id,
@@ -428,6 +462,14 @@ def session_exited(
     # human's interruption is not a task failure, and the row and the event have to
     # agree: return before either is written.
     if row is None or row["status"] == "paused":
+        # Still no status move and still no event -- but the usage this caller
+        # already read off disk is the only record that will ever exist of what
+        # the interrupted session spent, and returning without it is how 71
+        # paused rows came to carry NULL cost (Kraft-s7c04.18). Covers
+        # `reattach._exit_from_file` for free: it reads the same usage and
+        # reaches the same branch.
+        if row is not None:
+            record_pause_usage(conn, session_id, usage)
         return
     # COALESCE: a None ref must not erase one an earlier resolution already stored.
     conn.execute(

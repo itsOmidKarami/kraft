@@ -105,9 +105,20 @@ export function nodeRunSpan(
     .slice(startIdx + 1)
     .find((e) => e.type === "node_completed" && e.payload.node_id === nodeId);
   if (startIdx >= 0 && completed) return { from, to: completed.created_at };
-  const latest = runs.at(-1);
-  if (latest && latest.status !== "running" && latest.status !== "pending") {
-    return { from, to: latest.exited_at ?? from };
+  // Liveness, not recency (Kraft-s7c04.47). `runs` is ordered by `created_at`,
+  // and a node that fans a fast builtin alongside a slow agent creates both in
+  // the same tick -- `implementation` creates `on.repos.scan` 0.5 ms after
+  // `on.implementation.start`, and it exits in 61 ms. Taking the last-created
+  // session froze the node's clock 62 ms after it started, so a 75-minute run
+  // read "0s" for its whole duration. Any run still going keeps the span open;
+  // when none is, the span ends at the LATEST exit rather than at whichever
+  // session happened to be created last.
+  if (runs.length && !runs.some((s) => s.status === "running" || s.status === "pending")) {
+    const lastExit = runs.reduce<string | null>(
+      (acc, s) => (s.exited_at && (!acc || s.exited_at > acc) ? s.exited_at : acc),
+      null,
+    );
+    return { from, to: lastExit ?? from };
   }
   return { from, to: null };
 }

@@ -50,6 +50,14 @@ def http() -> httpx.AsyncClient:
         # `escalation_running` guard against the very escalation turn
         # calling it (`kraft.executor.gates.auto_escalate_stuck`).
         headers["X-Kraft-Session-Id"] = session_id
+    client = os.environ.get("KRAFT_CLIENT")
+    if client:
+        # Which front door this call came in by, so a route can tell an agent's
+        # decision from a person's (Kraft-s7c04.43). The bearer token above
+        # cannot: it is attached to every call this module makes, so a human
+        # typing `kraft item approve` carries the same credential an MCP client
+        # does. Only the MCP server sets this, in `mcp.serve_stdio`.
+        headers["X-Kraft-Client"] = client
     return httpx.AsyncClient(base_url=base_url(), headers=headers, timeout=30)
 
 

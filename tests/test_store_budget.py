@@ -4,6 +4,7 @@ import uuid
 from support.store_fixtures import open_db
 
 from kraft import store
+from kraft.store._common import session_wall_ms
 
 
 async def _spend_fixture_one(database, *, costs: list[float | None]) -> str:
@@ -127,3 +128,55 @@ def test_local_midnight_is_utc_and_sorts_against_stored_timestamps():
     # string comparison is the whole point: it is what the SQL does
     assert "2026-09-04T15:00:00.123456+00:00" >= midnight
     assert "2026-09-04T14:59:59.999999+00:00" < midnight
+
+
+def _row(**over):
+    base = {
+        "wall_ms": None,
+        "started_at": "2026-09-15T10:00:00+00:00",
+        "created_at": "2026-09-15T09:59:00+00:00",
+        "exited_at": None,
+    }
+    return {**base, **over}
+
+
+def test_a_recorded_wall_ms_wins_over_any_derivation():
+    """`session_exited` wrote it against its own clock; nothing here second-
+    guesses that."""
+    assert (
+        session_wall_ms(_row(wall_ms=4_501_473, exited_at="2026-09-15T10:00:01+00:00")) == 4_501_473
+    )
+
+
+def test_a_paused_session_derives_its_span_from_its_own_stamps():
+    """Kraft-s7c04.18: 71 paused rows carry NULL wall_ms and an exited_at."""
+    row = _row(exited_at="2026-09-15T10:01:30+00:00")
+    assert session_wall_ms(row) == 90_000
+
+
+def test_a_running_session_derives_against_now_rather_than_reading_zero():
+    """Kraft-s7c04.47's totals half: a live session has no exited_at, and
+    `or 0` made a node that had been running 75 minutes sum to nothing."""
+    assert session_wall_ms(_row(), now="2026-09-15T10:25:00+00:00") == 1_500_000
+
+
+def test_created_at_backs_up_a_missing_started_at():
+    """A session paused while still pending never got a started_at -- the same
+    fallback `session_exited` itself uses."""
+    row = _row(started_at=None, exited_at="2026-09-15T10:00:00+00:00")
+    assert session_wall_ms(row) == 60_000
+
+
+def test_a_row_with_no_usable_start_is_unknown_not_zero():
+    """None means "no answer". Zero would be an answer, and a wrong one."""
+    assert session_wall_ms(_row(started_at=None, created_at=None)) is None
+
+
+def test_a_naive_timestamp_derives_to_none_rather_than_crashing():
+    """A row written outside `_now()`'s own format (sqlite's `datetime('now')`,
+    say, as some test fixtures do directly) is naive; `_now()`'s own default is
+    aware, and subtracting the two raises TypeError rather than ValueError.
+    Surfaced by Kraft-s7c04.18's read-time derivation running on every row,
+    including a still-running one a raw SQL insert seeded outside store.py."""
+    row = _row(started_at=None, created_at="2026-09-15 09:59:00")
+    assert session_wall_ms(row, now="2026-09-15T10:25:00+00:00") is None
