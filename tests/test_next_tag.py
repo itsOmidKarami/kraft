@@ -66,3 +66,17 @@ def test_an_unknown_impact_is_refused():
 )
 def test_impact_from_labels(labels, expected):
     assert impact_from_labels(labels) == expected
+
+
+def test_two_release_labels_raise():
+    """GitHub cannot enforce one-of, so this is where the rule lives."""
+    with pytest.raises(ValueError, match="more than one"):
+        impact_from_labels("release::minor,release::patch")
+
+
+def test_one_release_label_among_others_still_reads():
+    assert impact_from_labels("bug,release::patch,needs-review") == "patch"
+
+
+def test_no_release_label_is_none():
+    assert impact_from_labels("bug,needs-review") is None
