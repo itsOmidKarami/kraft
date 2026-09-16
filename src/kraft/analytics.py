@@ -27,6 +27,8 @@ import sqlite3
 import statistics
 from datetime import UTC, datetime, timedelta
 
+from kraft.store._common import session_wall_ms
+
 RANGES = {"7d": 7, "30d": 30, "90d": 90, "8w": 56, "all": None}
 
 #: Events that stop an item on a person, and the ones that start it again.
@@ -186,6 +188,11 @@ def _resolved_without_human(item_events: list[sqlite3.Row], stop_index: int) -> 
         payload = json.loads(e["payload"])
         if t == "work_item_retried" and payload.get("escalated"):
             return True
+        # `== "agent"` and deliberately not `in ("agent", "assistant")`
+        # (Kraft-s7c04.43). `agent` is Kraft's own gate auto-review -- the
+        # machinery unblocking itself, nobody paged. An `assistant` cleared the
+        # gate because a person told it to, so a person was paged and this is
+        # the touch the metric exists to count.
         if t in ("gate_approved", "gate_rejected") and payload.get("by") == "agent":
             return True
         return False
@@ -332,7 +339,8 @@ def compute(
     # ── sessions: tokens, cost, wall time, rounds, caps ──────────────────────
     holes = ",".join("?" * len(ids))
     sessions = conn.execute(
-        f"SELECT work_item_id, node_id, round, tokens_in, tokens_out, cost_usd, wall_ms, status "
+        f"SELECT work_item_id, node_id, round, tokens_in, tokens_out, cost_usd, wall_ms, "
+        f"status, started_at, created_at, exited_at "
         f"FROM worker_sessions WHERE work_item_id IN ({holes})",
         ids,
     ).fetchall()
@@ -356,8 +364,13 @@ def compute(
             },
         )
         tok = (s["tokens_in"] or 0) + (s["tokens_out"] or 0)
+        # Derived when the column is NULL: only `session_exited` writes it, and
+        # a paused session never gets there -- 71 rows, every one of them with
+        # the stamps to answer with (Kraft-s7c04.18). This rollup is the one
+        # rendered as "minutes per node", so the loss was visible.
+        wall = session_wall_ms(s) or 0
         node["runs"] += 1
-        node["wall_ms"] += s["wall_ms"] or 0
+        node["wall_ms"] += wall
         node["tokens"] += tok
         node["cost_usd"] += s["cost_usd"] or 0.0
         node["capped_out"] += 1 if s["status"] == "capped_out" else 0
@@ -373,7 +386,7 @@ def compute(
         totals["tokens_in"] += s["tokens_in"] or 0
         totals["tokens_out"] += s["tokens_out"] or 0
         totals["cost_usd"] += s["cost_usd"] or 0.0
-        totals["wall_ms"] += s["wall_ms"] or 0
+        totals["wall_ms"] += wall
         totals["capped_out"] += 1 if s["status"] == "capped_out" else 0
 
         rr = by_repo[repo_of[s["work_item_id"]]]
