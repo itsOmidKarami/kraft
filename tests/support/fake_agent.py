@@ -22,6 +22,7 @@ import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
 
 
@@ -136,6 +137,22 @@ def main() -> int:
     if mode == "fix":
         calc = pathlib.Path("calc.py")
         calc.write_text(calc.read_text().replace("a - b", "a + b"))
+    if mode == "rebase":
+        # Kraft-s7c04.23's resolver dispatch: no real agent runs `git`, so
+        # the fake re-runs the rebase itself, resolves by taking "theirs",
+        # and completes it -- the sha it targets is read back out of its own
+        # `-p` instruction, the same way `_record_prompt` already does.
+        instr = ""
+        for i, a in enumerate(sys.argv):
+            if a == "-p" and i + 1 < len(sys.argv):
+                instr = sys.argv[i + 1]
+                break
+        target = re.search(r"replayed onto (\S+)", instr)
+        if target:
+            env = {**os.environ, "GIT_EDITOR": "true"}
+            subprocess.run(["git", "rebase", target.group(1)], env=env)
+            subprocess.run(["git", "add", "-A"], env=env)
+            subprocess.run(["git", "rebase", "--continue"], env=env)
     result_path = os.environ.get("KRAFT_RESULT_PATH")
     if mode not in ("error", "rate_limit") and result_path:
         _write_artifact(sys.argv)

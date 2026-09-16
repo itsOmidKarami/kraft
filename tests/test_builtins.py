@@ -1552,3 +1552,52 @@ def test_mr_rebase_raises_on_conflict(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_refresh_worktree_base_raises_rebase_conflict_a_runtimeerror_subclass(tmp_path):
+    """.23: the three callers that can now *act* on a conflict need to tell
+    one apart from any other git failure without matching on message text --
+    and every existing `except RuntimeError` around this call must keep
+    working unchanged, since `RebaseConflict` is a subclass."""
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            worktree = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id="w1"
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
+            )
+            branch = store.branch_for(row)
+
+            (worktree / "calc.py").write_text(
+                "def add(a, b):\n    return a - b - 1  # bug: should be +\n"
+            )
+            _git(worktree, "add", "-A")
+            _git(worktree, "commit", "-m", "worktree edit")
+
+            (repo / "calc.py").write_text(
+                "def add(a, b):\n    return a - b - 2  # bug: should be +\n"
+            )
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "conflicting edit")
+
+            with pytest.raises(kraft_builtins.RebaseConflict):
+                await kraft_builtins.refresh_worktree_base(worktree, repo, branch)
+
+            # The compatibility claim itself: a bare `except RuntimeError` --
+            # every call site that predates this bead -- still catches it.
+            try:
+                await kraft_builtins.refresh_worktree_base(worktree, repo, branch)
+                raised = False
+            except RuntimeError:
+                raised = True
+            assert raised
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())

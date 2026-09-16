@@ -10,7 +10,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from support.api import _client, _force_node, _poll_events, _post_default, _set_status
+from support.api import _await_gate, _client, _force_node, _poll_events, _post_default, _set_status
 from support.harness import make_repo
 
 
@@ -161,7 +161,7 @@ def test_resume_works_when_a_slot_is_free(tmp_path, monkeypatch):
         assert r.status_code == 200, r.text
 
 
-def _post_past_the_still_finishing_walk(client, path, timeout=10):
+def _post_past_the_still_finishing_walk(client, path, timeout=10, json=None):
     """Retry a POST past a transient 'a walk is already running' 409.
 
     `work_item_completed` lands on the timeline a few statements before the
@@ -169,18 +169,22 @@ def _post_past_the_still_finishing_walk(client, path, timeout=10):
     polls for that event and then immediately posts to `/resume` or `/retry`
     can race `deps.task_is_live`'s check. Retry past it rather than add a
     sleep tuned to how long those last few statements take."""
+    body = json if json is not None else {}
     deadline = time.monotonic() + timeout
     r = None
     while time.monotonic() < deadline:
-        r = client.post(path, json={})
+        r = client.post(path, json=body)
         if r.status_code != 409 or "already running" not in r.json().get("detail", ""):
             return r
         time.sleep(0.1)
     return r
 
 
-def test_resume_rebase_failure_auto_escalates_when_armed(tmp_path, monkeypatch):
-    """Kraft-h48r: `resume_work_item`'s rebase-failure branch used to
+def test_resume_non_conflict_rebase_failure_auto_escalates_when_armed(tmp_path, monkeypatch):
+    """A git failure that is NOT a conflict (`RebaseConflict` specifically) --
+    still stops and escalates exactly as before Kraft-s7c04.23; only a
+    conflict gets the new resolver path. Kraft-h48r: `resume_work_item`'s
+    rebase-failure branch used to
     `mark_needs_human` and return without ever giving `auto_escalate_stuck`
     a chance to fire -- `walk.run`/`resuming.resume` call it after every
     step, and this route terminates before either of them runs.
@@ -219,16 +223,20 @@ def test_resume_rebase_failure_auto_escalates_when_armed(tmp_path, monkeypatch):
         assert calls == [(wid, True)]
 
 
-def test_resume_rebase_failure_does_not_escalate_when_disarmed(tmp_path, monkeypatch):
+def test_resume_rebase_conflict_does_not_escalate_when_disarmed(tmp_path, monkeypatch):
     """Regression guard: `auto_escalate_stuck: false` must still no-op here
-    exactly like it does on the walk-driven path."""
+    exactly like it does on the walk-driven path -- converted to raise
+    `RebaseConflict` specifically (Kraft-s7c04.23 review finding: the old
+    bare-`RuntimeError` version kept passing after this change landed while
+    silently no longer covering the conflict path it is named for). The
+    steer restore is unconditional and must still fire even disarmed."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     import kraft.builtins as builtins_mod
 
     calls = []
 
     async def fail_refresh(*a, **kw):
-        raise RuntimeError("rebase conflict: could not apply")
+        raise builtins_mod.RebaseConflict("rebase conflict: could not apply")
 
     async def fake_dispatch(database, run_dirs, *, work_item_id, message, launch, auto, evts=None):
         calls.append((work_item_id, auto))
@@ -243,16 +251,29 @@ def test_resume_rebase_failure_does_not_escalate_when_disarmed(tmp_path, monkeyp
             json={"title": "x", "repo": str(repo), "chain_template": "quick-task"},
         ).json()["id"]
         _poll_events(client, wid, "work_item_completed")
-        _set_status(wid, "paused")
+        # `implementation`, not wherever the walk left it: that node has an
+        # agent task downstream to steer, unlike `verify`'s subprocess-only
+        # tasks, which `_steer_reachable` refuses on principle -- a refusal
+        # this test does not want to exercise.
+        _force_node(wid, "implementation", "paused")
         client.app.state.policy = dataclasses.replace(
             client.app.state.policy, auto_escalate_stuck=False
         )
 
-        r = _post_past_the_still_finishing_walk(client, f"/api/work-items/{wid}/resume")
+        r = _post_past_the_still_finishing_walk(
+            client, f"/api/work-items/{wid}/resume", json={"steer": "watch the auth module"}
+        )
 
         assert r.status_code == 200, r.text
-        assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
-        assert calls == []
+        # The stop is now recorded inside the spawned conflict-resolution
+        # task, not synchronously before the route returns (Kraft-s7c04.23
+        # review finding: awaiting it inline blocked the response and hid it
+        # from `task_is_live`, reopening Kraft-s7c04.20).
+        _poll_events(client, wid, "work_item_needs_human")
+        item = client.get(f"/api/work-items/{wid}").json()
+        assert item["status"] == "needs_human"
+        assert calls == [], "disarmed must not dispatch the resolver or the escalation"
+        assert item["pending_steer_context"] == "watch the auth module"
 
 
 def test_retry_refuses_when_all_slots_are_busy(tmp_path, monkeypatch):
@@ -287,8 +308,11 @@ def test_retry_works_when_a_slot_is_free(tmp_path, monkeypatch):
         assert r.status_code == 200, r.text
 
 
-def test_retry_rebase_failure_auto_escalates_when_armed(tmp_path, monkeypatch):
-    """Kraft-h48r: `retry_work_item`'s rebase-failure branch used to
+def test_retry_non_conflict_rebase_failure_auto_escalates_when_armed(tmp_path, monkeypatch):
+    """A git failure that is NOT a conflict (`RebaseConflict` specifically) --
+    still stops and escalates exactly as before Kraft-s7c04.23; only a
+    conflict gets the new resolver path. Kraft-h48r: `retry_work_item`'s
+    rebase-failure branch used to
     `mark_needs_human` and return without ever giving `auto_escalate_stuck`
     a chance to fire -- `walk.run`/`resuming.resume` call it after every
     step, and this route terminates before either of them runs."""
@@ -322,16 +346,19 @@ def test_retry_rebase_failure_auto_escalates_when_armed(tmp_path, monkeypatch):
         assert calls == [(wid, True)]
 
 
-def test_retry_rebase_failure_does_not_escalate_when_disarmed(tmp_path, monkeypatch):
+def test_retry_rebase_conflict_does_not_escalate_when_disarmed(tmp_path, monkeypatch):
     """Regression guard: `auto_escalate_stuck: false` must still no-op here
-    exactly like it does on the walk-driven path."""
+    exactly like it does on the walk-driven path -- converted to raise
+    `RebaseConflict` specifically, the same review finding as its `/resume`
+    sibling. `/retry` never persists a steer ahead of the rebase, so this is
+    the first assertion that the helper writes it at all."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     import kraft.builtins as builtins_mod
 
     calls = []
 
     async def fail_refresh(*a, **kw):
-        raise RuntimeError("rebase conflict: could not apply")
+        raise builtins_mod.RebaseConflict("rebase conflict: could not apply")
 
     async def fake_dispatch(database, run_dirs, *, work_item_id, message, launch, auto, evts=None):
         calls.append((work_item_id, auto))
@@ -346,16 +373,215 @@ def test_retry_rebase_failure_does_not_escalate_when_disarmed(tmp_path, monkeypa
             json={"title": "x", "repo": str(repo), "chain_template": "quick-task"},
         ).json()["id"]
         _poll_events(client, wid, "work_item_completed")
-        _force_node(wid, "verify", "needs_human")
+        # `implementation`, not `verify`: that node has an agent task
+        # downstream to steer, unlike `verify`'s subprocess-only tasks.
+        _force_node(wid, "implementation", "needs_human")
         client.app.state.policy = dataclasses.replace(
             client.app.state.policy, auto_escalate_stuck=False
         )
 
+        r = _post_past_the_still_finishing_walk(
+            client, f"/api/work-items/{wid}/retry", json={"steer": "watch the auth module"}
+        )
+
+        assert r.status_code == 200, r.text
+        # See the /resume sibling's comment: the stop is recorded inside the
+        # spawned task now, not before the route returns.
+        _poll_events(client, wid, "work_item_needs_human")
+        item = client.get(f"/api/work-items/{wid}").json()
+        assert item["status"] == "needs_human"
+        assert calls == [], "disarmed must not dispatch the resolver or the escalation"
+        assert item["pending_steer_context"] == "watch the auth module"
+
+
+def test_retry_rebase_conflict_restarts_at_its_own_node_when_before_verify(tmp_path, monkeypatch):
+    """The `min()` assertion (design §4.6): an item stopped before `verify`
+    (here, `plan`) must restart at its own node on a resolving verdict, not
+    jump forward to `verify` -- a plain "jump to verify" would skip
+    implementation entirely, and passes every other resolver test, which all
+    stop at or after `verify`."""
+    import kraft.builtins as builtins_mod
+    from kraft.executor import walk
+
+    starts = []
+
+    async def fail_refresh(*a, **kw):
+        raise builtins_mod.RebaseConflict("conflict")
+
+    async def fake_resolve(*a, **kw):
+        return "ok", None, "deadbeef"
+
+    async def fake_run(database, run_dirs, *, work_item_id, registry, start_index=0, **kw):
+        starts.append(start_index)
+        return "completed"
+
+    monkeypatch.setattr(builtins_mod, "refresh_worktree_base", fail_refresh)
+    monkeypatch.setattr(walk, "resolve_rebase_conflict", fake_resolve)
+    monkeypatch.setattr("kraft.api.routes.lifecycle.executor.run", fake_run)
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _force_node(wid, "plan", "needs_human")
+
         r = _post_past_the_still_finishing_walk(client, f"/api/work-items/{wid}/retry")
 
         assert r.status_code == 200, r.text
-        assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
-        assert calls == []
+        deadline = time.monotonic() + 5
+        while not starts and time.monotonic() < deadline:
+            time.sleep(0.05)
+    assert starts[-1] == 1, "restarted at verify's index (5) instead of plan's own (1)"
+
+
+def test_retry_rebase_conflict_bounces_to_verify_and_clears_the_span(tmp_path, monkeypatch):
+    """An item stopped *after* `verify` (here, `mr_checks`) restarts at
+    `verify` on a resolving verdict -- and every node in that span has its
+    loop counters cleared, the coupling with .25 the design calls out (§5)."""
+    import kraft.builtins as builtins_mod
+    from kraft import store as kraft_store
+    from kraft.executor import walk
+    from kraft.policy import Cap
+
+    starts = []
+
+    async def fail_refresh(*a, **kw):
+        raise builtins_mod.RebaseConflict("conflict")
+
+    async def fake_resolve(*a, **kw):
+        return "ok", None, "deadbeef"
+
+    async def fake_run(database, run_dirs, *, work_item_id, registry, start_index=0, **kw):
+        starts.append(start_index)
+        return "completed"
+
+    monkeypatch.setattr(builtins_mod, "refresh_worktree_base", fail_refresh)
+    monkeypatch.setattr(walk, "resolve_rebase_conflict", fake_resolve)
+    monkeypatch.setattr("kraft.api.routes.lifecycle.executor.run", fake_run)
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _force_node(wid, "mr_checks", "needs_human")
+        conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+        try:
+            cap = Cap(attempts=9, wall_clock_s=3600)
+            kraft_store.bump_counter(conn, wid, "verify_fix_loop", cap)
+            kraft_store.bump_counter(conn, wid, "ci_fix_loop", cap)
+            conn.commit()
+        finally:
+            conn.close()
+
+        r = _post_past_the_still_finishing_walk(client, f"/api/work-items/{wid}/retry")
+
+        assert r.status_code == 200, r.text
+        deadline = time.monotonic() + 5
+        while not starts and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert starts[-1] == 5, "did not bounce back to verify's index"
+        conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+        try:
+            rows = conn.execute(
+                "SELECT key FROM retry_counters WHERE work_item_id = ?", (wid,)
+            ).fetchall()
+        finally:
+            conn.close()
+    assert rows == [], "the bounce span's loop counters survived the resolver's restart"
+
+
+def test_retry_rebase_conflict_resolver_success_actually_advances_the_walk(tmp_path, monkeypatch):
+    """Kraft-s7c04.23 review findings 1 & 2. Awaiting the resolver inline in
+    the route handler (rather than as the item's own spawned task) meant a
+    successful resolve never went anywhere: nothing put the item back to
+    `active` before `executor.run` started, so `run_once`'s own
+    `status != "active"` check at its first node immediately returned
+    "paused" and did nothing. Unlike the restart-index tests above, this one
+    does NOT monkeypatch `executor.run` -- the walk must actually run,
+    through the real (noop-bound) nodes between `verify` and `human_review`,
+    for this to pass."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    import kraft.builtins as builtins_mod
+    from kraft.executor import walk
+
+    calls = {"n": 0}
+
+    async def fail_refresh_once(*a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise builtins_mod.RebaseConflict("conflict")
+        return None  # pre_mr_rebase's own later attempt: no movement
+
+    async def fake_resolve(*a, **kw):
+        return "ok", None, "deadbeef"
+
+    monkeypatch.setattr(builtins_mod, "refresh_worktree_base", fail_refresh_once)
+    monkeypatch.setattr(walk, "resolve_rebase_conflict", fake_resolve)
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _force_node(wid, "verify", "needs_human")
+
+        r = _post_past_the_still_finishing_walk(client, f"/api/work-items/{wid}/retry")
+
+        assert r.status_code == 200, r.text
+        # Under the bug this never becomes pending -- the walk dies at its
+        # very first status check with nothing dispatched past `verify`.
+        item = _await_gate(client, wid, "human_review_approval", timeout=20)
+        assert item["pending_gate"] == "human_review_approval"
+
+
+def test_retry_while_the_resolver_is_running_is_refused(tmp_path, monkeypatch):
+    """Finding 2's other half: for as long as the resolver runs, the item
+    must not be re-claimable by a concurrent `/retry` -- refused with 409
+    rather than starting a second walk in the same worktree (the collision
+    Kraft-s7c04.20 closed). In practice the item's own status (still
+    `active` from the first call's `claim_for_run`, not reverted to
+    `needs_human` until the resolver finishes) refuses the race even before
+    `deps.task_is_live` would -- either guard firing proves no second walk
+    can start; this asserts on the observable one."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    import asyncio as _asyncio
+    import threading
+
+    import kraft.builtins as builtins_mod
+    from kraft.executor import walk
+
+    # `threading.Event`, not `asyncio.Event`: `TestClient` runs the app on a
+    # background-thread event loop, and this signal crosses from the main
+    # (synchronous) test thread into that loop -- an `asyncio.Event.set()`
+    # called cross-thread is not the safe way to do that.
+    started = threading.Event()
+    release = threading.Event()
+
+    async def fail_refresh(*a, **kw):
+        raise builtins_mod.RebaseConflict("conflict")
+
+    async def slow_resolve(*a, **kw):
+        started.set()
+        while not release.is_set():
+            await _asyncio.sleep(0.01)
+        return "ok", None, "deadbeef"
+
+    monkeypatch.setattr(builtins_mod, "refresh_worktree_base", fail_refresh)
+    monkeypatch.setattr(walk, "resolve_rebase_conflict", slow_resolve)
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _force_node(wid, "verify", "needs_human")
+
+        r1 = _post_past_the_still_finishing_walk(client, f"/api/work-items/{wid}/retry")
+        assert r1.status_code == 200, r1.text
+
+        assert started.wait(timeout=10), "the resolver never started"
+
+        r2 = client.post(f"/api/work-items/{wid}/retry", json={})
+        release.set()
+
+        assert r2.status_code == 409, r2.text
+        assert r2.json()["detail"] in (
+            "work item is not stopped",
+            "a walk is already running for this work item",
+        )
+        # Confirms *why* it's refused: the item never reverted to a
+        # re-claimable state while the resolver was still running.
+        assert client.get(f"/api/work-items/{wid}").json()["status"] == "active"
 
 
 def _create_escalation_session(
