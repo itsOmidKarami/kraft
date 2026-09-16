@@ -496,3 +496,83 @@ def test_unplanned_touches_per_item_breaks_out_by_chain_template(tmp_path):
         conn.close()
     assert alpha["unplanned_touches_per_item"] == 1
     assert beta["unplanned_touches_per_item"] == 0
+
+
+def test_a_paused_session_s_time_reaches_the_node_and_the_totals(tmp_path):
+    """Kraft-s7c04.18: this rollup is the one a human reads as "minutes per
+    node" (`Analytics.tsx`, `Math.round(n.avg_ms / 60_000)`). `wall_ms or 0`
+    dropped every session that never reached session_exited -- 71 of them on
+    the live DB, all paused."""
+    conn = db._connect(tmp_path / "orchestrator.db")
+    db.migrate(conn)
+    _item(conn, "w1", created=_at(1))
+    # recorded: session_exited wrote 60s onto the row
+    _session(conn, "s1", "w1", "verify", wall_ms=60_000)
+    # paused: NULL wall_ms, two stamps 120s apart
+    _session(conn, "s2", "w1", "verify", status="paused", wall_ms=None)
+    conn.execute(
+        "UPDATE worker_sessions SET started_at = '2026-09-03T10:00:00+00:00', "
+        "exited_at = '2026-09-03T10:02:00+00:00' WHERE id = 's2'"
+    )
+    conn.commit()
+    try:
+        report = analytics.compute(conn, range_="all")
+    finally:
+        conn.close()
+
+    verify = next(n for n in report["by_node"] if n["node"] == "verify")
+    assert verify["wall_ms"] == 180_000  # 60s recorded + 120s derived
+    assert verify["avg_ms"] == 90_000
+    assert report["totals"]["wall_ms"] == 180_000
+
+
+def test_an_assistant_clearing_a_gate_still_counts_as_a_human_touch(tmp_path):
+    """Kraft-s7c04.43 added a third `by` value, and the tempting change is to
+    treat `assistant` like `agent` here. It is the wrong change. `agent` is
+    skipped because it is the machinery unblocking itself; an assistant cleared
+    this gate because a person told it to, and this metric counts stops that
+    needed a person. Same reasoning pins `executor.gates._auto_dispatch_count`.
+    """
+    conn = _episode_conn(
+        tmp_path,
+        [
+            (
+                "work_item_needs_human",
+                {
+                    "node_id": "verify",
+                    "reason": "verify_fix_loop exhausted after 2 fix cycle(s)",
+                    "capped": {"cycles": 2, "attempts": 3},
+                },
+            ),
+            ("gate_approved", {"gate": "human_review_approval", "by": "assistant"}),
+        ],
+    )
+    try:
+        t = analytics.compute(conn, range_="all")["totals"]
+    finally:
+        conn.close()
+    assert t["unplanned_touches_per_item"] == 1
+
+
+def test_a_worker_agent_clearing_its_own_gate_is_still_not_a_human_touch(tmp_path):
+    """The other half, unchanged: `agent` is Kraft's own gate auto-review, and
+    the run closed without anyone being paged."""
+    conn = _episode_conn(
+        tmp_path,
+        [
+            (
+                "work_item_needs_human",
+                {
+                    "node_id": "verify",
+                    "reason": "verify_fix_loop exhausted after 2 fix cycle(s)",
+                    "capped": {"cycles": 2, "attempts": 3},
+                },
+            ),
+            ("gate_approved", {"gate": "human_review_approval", "by": "agent"}),
+        ],
+    )
+    try:
+        t = analytics.compute(conn, range_="all")["totals"]
+    finally:
+        conn.close()
+    assert t["unplanned_touches_per_item"] == 0

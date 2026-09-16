@@ -8,6 +8,7 @@ a human's note leading its prompt.
 from __future__ import annotations
 
 import asyncio
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -670,3 +671,33 @@ def test_two_concurrent_resumes_produce_one_two_hundred_and_one_409(tmp_path, mo
         a, b = client.portal.call(scenario)
         assert sorted([a.status_code, b.status_code]) == [200, 409]
         assert len(client.app.state.tasks) <= 1
+
+
+def test_pause_interrupts_the_agent_rather_than_terminating_it(monkeypatch):
+    """Kraft-s7c04.18: SIGTERM kills a claude process mid-turn without a word.
+    SIGINT makes it flush the result envelope carrying total_cost_usd, which is
+    the only cost figure Kraft will ever have for a session a human stopped.
+    Measured against claude 2.1.273."""
+    from kraft.api.routes import lifecycle
+
+    sent = []
+    monkeypatch.setattr(lifecycle.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(lifecycle.os, "killpg", lambda pgid, sig: sent.append((pgid, sig)))
+
+    lifecycle._terminate(4242)
+
+    assert sent == [(4242, signal.SIGINT)]
+
+
+def test_terminate_still_swallows_a_process_that_is_already_gone(monkeypatch):
+    """Unchanged posture: the row moves to paused either way."""
+    from kraft.api.routes import lifecycle
+
+    def boom(pgid, sig):
+        raise ProcessLookupError
+
+    monkeypatch.setattr(lifecycle.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(lifecycle.os, "killpg", boom)
+
+    lifecycle._terminate(4242)  # must not raise
+    lifecycle._terminate(None)  # must not raise

@@ -177,6 +177,39 @@ async def apply_approval(st, row, gate: str) -> tuple[dict | None, str | None]:
     return chain, None
 
 
+def _decided_by(request: Request) -> str:
+    """Which of three kinds of caller made this gate decision (Kraft-s7c04.43).
+
+    A gate exists to record who decided, and this route recorded everyone as a
+    person -- it took `by="human"` from `store.gates`' default, so the MCP
+    approve/reject tools an agent calls landed here indistinguishable from a
+    human clicking Approve. `analytics.py` branches on `by` to decide whether a
+    run boundary was real human oversight, so the error ran in the
+    safe-looking direction: an agent clearing its own gate read as supervision.
+
+    Three values, because there are three callers and only one is a person:
+
+    * `agent` -- a Kraft worker. `X-Kraft-Session-Id` comes from
+      `KRAFT_SESSION_ID`, set only at `adapters.agent`'s dispatch, so its
+      presence means a session Kraft itself launched. Checked first: a worker
+      reaching the API through MCP carries both headers, and what it *is*
+      outranks how it connected.
+    * `assistant` -- a session reaching Kraft through the MCP server
+      (`mcp.serve_stdio` tags its own process). Not a worker deciding about its
+      own artifact, and not a person either.
+    * `human` -- a browser, or `kraft item approve` typed at a terminal.
+
+    Deliberately not keyed on the MCP bearer token: `client.transport.http`
+    attaches it to every call it makes, CLI included, so it cannot tell an
+    agent from a person at all.
+    """
+    if request.headers.get("x-kraft-session-id"):
+        return "agent"
+    if request.headers.get("x-kraft-client") == "mcp":
+        return "assistant"
+    return "human"
+
+
 @api_router.post("/work-items/{wid}/gates/{gate}/approve")
 async def approve_gate(wid: str, gate: str, request: Request):
     st = request.app.state
@@ -214,7 +247,7 @@ async def approve_gate(wid: str, gate: str, request: Request):
             422, f"{reason} -- gate {gate!r} cannot be approved; run `kraft item retry` instead"
         )
 
-    await st.db.write(lambda c: store.approve_gate(c, wid, gate))
+    await st.db.write(lambda c: store.approve_gate(c, wid, gate, by=_decided_by(request)))
     start = board._gate_node_index(chain, gate) + 1
     try:
         deps.spawn(
@@ -290,6 +323,7 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
             gate=gate,
             note=body.note,
             node=body.node,
+            by=_decided_by(request),
             # A person only ever rejects; `fixed` is a gate-reviewer verdict and
             # has no door here (Kraft-s7c04.16).
             verdict="reject",

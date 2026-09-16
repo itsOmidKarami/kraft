@@ -24,6 +24,11 @@ logger = logging.getLogger(__name__)
 
 _AGENT_STATUSES = ("done", "failed", "done_with_concerns", "needs_context")
 
+#: Test seam. `run_task`'s flush wait is the one sleep a test needs to observe
+#: without paying, because the whole point of it is ordering against
+#: `_kill_group`, not duration.
+_flush_sleep = asyncio.sleep
+
 
 def result_path_for(run_dirs, session_id: str) -> Path:
     """Where a session's $KRAFT_RESULT_PATH lives -- the one formula every
@@ -361,6 +366,10 @@ async def run_task(
     #: and never waited on) gets after SIGTERM before SIGKILL. serve.py's own
     #: `_terminate` uses the same 10s.
     group_kill_grace: float = 10.0,
+    #: How long to let an interrupted agent flush its result envelope before
+    #: `_kill_group`'s SIGTERM lands on it (Kraft-s7c04.18). Paid only on a
+    #: pause. ~1s observed against claude 2.1.273; 2s is the margin.
+    flush_grace: float = 2.0,
     round: int = 0,
     head_sha: str | None = None,
     thread: int = 1,
@@ -520,6 +529,24 @@ async def run_task(
         # this function leaves the loop.
         stop.set()
         watcher.join(timeout=2)
+        # A paused row means a human interrupted this session and `_terminate`
+        # SIGINT'd it rather than SIGTERM'ing it, so the agent CLI would flush
+        # the result envelope that carries its cost (Kraft-s7c04.18). The wait
+        # has to be here and not in the pause route: `_kill_group` below
+        # SIGTERMs the whole group the moment this loop leaves, which on a
+        # cancel is milliseconds after the SIGINT, and a sleep in the route
+        # would run concurrently and protect nothing. The group leader is the
+        # `/bin/sh` wrapper, not the agent, so `proc.poll()` reaping the
+        # wrapper says nothing about whether the agent has finished writing.
+        # `db.write` for a SELECT is deliberate, not a slip: the pause is
+        # written by the API route concurrently with this coroutine, and
+        # `db.write` queues onto the serialized writer so it observes that
+        # write. `db.read` goes to the separate `_reader` connection, whose
+        # snapshot may predate the pause -- which would skip the flush wait
+        # and lose exactly the cost this fix exists to keep.
+        paused = await db.write(lambda c: store.session_status(c, session_id)) == "paused"
+        if paused and flush_grace:
+            await _flush_sleep(flush_grace)
         # Same cancellation as above: without this inside `finally`, a pause
         # or skip propagates CancelledError past the kill calls entirely, and
         # a sandboxed session's container -- parented by the docker daemon,
@@ -533,6 +560,16 @@ async def run_task(
         finally:
             if sandbox:
                 await _sandbox.teardown(session_id)
+        if paused:
+            # The cancelled path never reaches `session_exited`, so Task 6's
+            # hook inside it never fires. Idempotent with that hook for the
+            # pause that was not cancelled: both write the same numbers and
+            # both are guarded on the row still being paused.
+            await db.write(
+                lambda c: store.record_pause_usage(
+                    c, session_id, _usage.read(log_path, result_path)
+                )
+            )
     returncode = proc.returncode
     status = _resolve(result_path, returncode)
     # A session that exits clean with no result file at all never reached the

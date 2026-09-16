@@ -1,8 +1,10 @@
 import asyncio
 
+import pytest
 from support.store_fixtures import mk_item, open_db
 
 from kraft import db, events, store
+from kraft.usage import Usage
 
 
 def test_session_lifecycle(tmp_path):
@@ -1345,3 +1347,114 @@ def test_reusable_session_still_reuses_a_crash_recovery_after_an_older_rejection
             await database.close()
 
     asyncio.run(scenario())
+
+
+async def _paused_session_seed(database, sid="s1"):
+    await mk_item(database)
+    await database.write(
+        lambda c: store.create_session(
+            c,
+            id=sid,
+            work_item_id="w1",
+            node_id="chain_review",
+            hook_point="gate_review",
+            log_path="/l",
+            result_path="/r",
+        )
+    )
+
+
+def test_a_paused_session_records_the_usage_it_was_handed(tmp_path):
+    """Kraft-s7c04.18: `session_exited` returns early on a paused row -- so the
+    row and the event agree a human's interruption is not a task failure -- and
+    it is the only writer of cost_usd. 71 paused rows, 28.0M tokens, NULL cost,
+    permanently."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await _paused_session_seed(database)
+            await database.write(lambda c: store.session_running(c, "s1", 1, 1.0))
+            await database.write(lambda c: store.pause_work_item(c, "w1", ["s1"]))
+            await database.write(
+                lambda c: store.session_exited(
+                    c, "s1", "failed", None, Usage(214_775, 19, 1.37, "claude-opus-5")
+                )
+            )
+            return database.read(
+                lambda c: c.execute(
+                    "SELECT status, tokens_in, tokens_out, cost_usd, model "
+                    "FROM worker_sessions WHERE id = 's1'"
+                ).fetchone()
+            ), database.read(
+                lambda c: [
+                    r["type"]
+                    for r in c.execute(
+                        "SELECT type FROM events WHERE work_item_id = 'w1'"
+                    ).fetchall()
+                ]
+            )
+        finally:
+            await database.close()
+
+    row, types = asyncio.run(scenario())
+    assert row["cost_usd"] == pytest.approx(1.37)
+    assert (row["tokens_in"], row["tokens_out"]) == (214_775, 19)
+    assert row["model"] == "claude-opus-5"
+    # the status is NOT moved and no exit event is emitted: a pause is not a
+    # task failure, and worker_session_paused already described this moment
+    assert row["status"] == "paused"
+    assert "worker_session_exited" not in types
+
+
+def test_recording_pause_usage_is_a_no_op_on_a_session_that_moved_on(tmp_path):
+    """Same reason `session_progress` guards on 'running': a row that has
+    settled must not be reopened by a late writer."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await _paused_session_seed(database)
+            await database.write(lambda c: store.session_running(c, "s1", 1, 1.0))
+            await database.write(
+                lambda c: store.session_exited(c, "s1", "done", None, Usage(10, 1, 0.01, "m"))
+            )
+            await database.write(
+                lambda c: store.record_pause_usage(c, "s1", Usage(999, 999, 9.99, "wrong"))
+            )
+            return database.read(
+                lambda c: c.execute(
+                    "SELECT cost_usd, model FROM worker_sessions WHERE id = 's1'"
+                ).fetchone()
+            )
+        finally:
+            await database.close()
+
+    row = asyncio.run(scenario())
+    assert row["cost_usd"] == pytest.approx(0.01)
+    assert row["model"] == "m"
+
+
+def test_a_pause_with_no_envelope_records_nothing_rather_than_zero(tmp_path):
+    """An agent SIGINT'd before its first response has no number to report, and
+    usage.py deliberately has no rate table. NULL is the honest record; zero
+    would be a claim."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await _paused_session_seed(database)
+            await database.write(lambda c: store.session_running(c, "s1", 1, 1.0))
+            await database.write(lambda c: store.pause_work_item(c, "w1", ["s1"]))
+            await database.write(lambda c: store.record_pause_usage(c, "s1", None))
+            return database.read(
+                lambda c: c.execute(
+                    "SELECT cost_usd, tokens_in FROM worker_sessions WHERE id = 's1'"
+                ).fetchone()
+            )
+        finally:
+            await database.close()
+
+    row = asyncio.run(scenario())
+    assert row["cost_usd"] is None
+    assert row["tokens_in"] is None

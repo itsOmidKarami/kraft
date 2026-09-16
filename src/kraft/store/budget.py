@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
+from kraft.store._common import session_wall_ms
 
 
 def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
@@ -18,9 +19,14 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
     — cost comes only from the agent, so a sum over those is a floor, not a
     total. Treating a missing cost as zero would quietly under-report the bill,
     which is the one thing a cost figure must not do.
+
+    `wall_ms` is derived when the column is NULL (`_common.session_wall_ms`) --
+    unlike cost, time is knowable for a session that never reported, because
+    the row carries the same two stamps `session_exited` would have used.
     """
     rows = conn.execute(
-        "SELECT node_id, round, tokens_in, tokens_out, cost_usd, wall_ms, status "
+        "SELECT node_id, round, tokens_in, tokens_out, cost_usd, wall_ms, status, "
+        "started_at, created_at, exited_at "
         "FROM worker_sessions WHERE work_item_id = ?",
         (work_item_id,),
     ).fetchall()
@@ -47,7 +53,11 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
         # a session that spent tokens but reported no cost makes the sum a floor
         if r["cost_usd"] is None and (r["tokens_in"] or r["tokens_out"]):
             node["cost_complete"] = False
-        node["wall_ms"] += r["wall_ms"] or 0
+        # Not `r["wall_ms"] or 0`: only `session_exited` writes that column, so
+        # a paused, skipped, capped or still-running session contributed
+        # nothing and a node that had been running 75 minutes summed to 0
+        # (Kraft-s7c04.18, .47). The stamps are on the row either way.
+        node["wall_ms"] += session_wall_ms(r) or 0
         node["sessions"] += 1
         node["capped_out"] += 1 if r["status"] == "capped_out" else 0
         rounds.setdefault(r["node_id"], set()).add(r["round"] or 0)

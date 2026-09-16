@@ -9,6 +9,7 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
 from support.harness import fake_docker_bin
 
 from kraft import db, events, logs, store
@@ -1298,3 +1299,102 @@ def test_run_task_leaves_the_exit_file_beside_the_result(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_run_task_records_usage_when_a_pause_cancels_it(tmp_path):
+    """Kraft-s7c04.18: `deps.cancel` raises CancelledError out of the poll loop,
+    so nothing after the `finally` runs -- `session_exited` is never reached and
+    neither is any usage read. This is the only place the cancelled pause path
+    passes through."""
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database)
+            task = asyncio.create_task(
+                sp.run_task(
+                    database,
+                    rd,
+                    session_id="s-paused",
+                    work_item_id="w1",
+                    node_id="verify",
+                    hook_point="on.test.run",
+                    cmd=["sleep", "5"],
+                    cwd=tmp_path,
+                    flush_grace=0,
+                )
+            )
+            for _ in range(200):
+                row = database.read(
+                    lambda c: c.execute(
+                        "SELECT status FROM worker_sessions WHERE id='s-paused'"
+                    ).fetchone()
+                )
+                if row and row["status"] == "running":
+                    break
+                await asyncio.sleep(0.02)
+            # what the agent flushed on its way out, written where run_task looks
+            (rd.logs / "s-paused.log").write_text(
+                json.dumps(
+                    {
+                        "type": "result",
+                        "total_cost_usd": 0.42,
+                        "usage": {"input_tokens": 0, "output_tokens": 0},
+                        "modelUsage": {"claude-opus-5": {"inputTokens": 1000, "outputTokens": 20}},
+                    }
+                )
+                + "\n"
+            )
+            await database.write(lambda c: store.pause_work_item(c, "w1", ["s-paused"]))
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            return database.read(
+                lambda c: c.execute(
+                    "SELECT status, cost_usd, tokens_in FROM worker_sessions WHERE id='s-paused'"
+                ).fetchone()
+            )
+        finally:
+            await database.close()
+
+    row = asyncio.run(scenario())
+    assert row["status"] == "paused"
+    assert row["cost_usd"] == pytest.approx(0.42)
+    assert row["tokens_in"] == 1000
+
+
+def test_run_task_waits_for_the_flush_only_when_the_row_is_paused(tmp_path, monkeypatch):
+    """The wait exists because `_kill_group` SIGTERMs the group the instant the
+    poll loop leaves, milliseconds after the route's SIGINT. It must not be paid
+    on a normal exit, which is every session that was never interrupted."""
+    slept = []
+
+    async def fake_sleep(s):
+        slept.append(s)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database)
+            monkeypatch.setattr(sp, "_flush_sleep", fake_sleep)
+            status = await sp.run_task(
+                database,
+                rd,
+                session_id="s-clean",
+                work_item_id="w1",
+                node_id="verify",
+                hook_point="on.test.run",
+                cmd=["true"],
+                cwd=tmp_path,
+                flush_grace=2.0,
+            )
+            return status
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario()) == "done"
+    assert slept == []
