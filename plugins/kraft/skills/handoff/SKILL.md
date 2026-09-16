@@ -7,7 +7,7 @@ description: Use when work agreed in this session should be handed to Kraft inst
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
 plugin has been installed without the program it drives: say so and point at
-https://gitlab.com/itsOmidKarami/kraft#install rather than reporting a
+https://github.com/itsOmidKarami/kraft#install rather than reporting a
 connection error.
 
 # Handing work to Kraft
