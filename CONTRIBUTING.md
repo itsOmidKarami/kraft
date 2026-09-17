@@ -68,6 +68,20 @@ GitHub Release with the wheel attached, and publishes to PyPI. The tag is create
 locally before the build (setuptools-scm reads the version from it) and pushed
 only after the smoke test passes, so a failed build leaves nothing behind.
 
+### Plugin manifest versions
+
+`plugins/kraft/.claude-plugin/plugin.json` and `plugins/kraft-lite/.claude-plugin/plugin.json`
+carry their own `version` field, shown in `/plugin list`. Nothing derives it
+automatically the way the wheel's version comes from the tag, so a
+`release::{major,minor,patch}`-labelled pull request must already bump both
+files to the version that label will tag — the lint job checks this
+(`dev/check_plugin_version.py`) and fails with the exact command to run if
+they're stale:
+
+```bash
+python3 dev/stamp_plugin_versions.py <version>   # no leading v
+```
+
 ## Branch hygiene
 
 Two ways a branch you're reusing by hand can quietly cost you work:
