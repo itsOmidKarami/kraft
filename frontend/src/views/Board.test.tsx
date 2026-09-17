@@ -71,7 +71,7 @@ beforeEach(() => {
 
 const renderBoard = () =>
   render(
-    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <MemoryRouter>
       <Board />
     </MemoryRouter>,
   );
@@ -123,7 +123,7 @@ function GoBack() {
 }
 const renderBoardWithProbe = () =>
   render(
-    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <MemoryRouter>
       <GoBack />
       <LocationProbe />
       <Board />
@@ -517,7 +517,6 @@ describe("Board", () => {
     setItems(wi({ id: "w1" }));
     const { container } = render(
       <MemoryRouter
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
         initialEntries={["/"]}
       >
         <Board />
@@ -544,7 +543,7 @@ describe("Board", () => {
   it("Enter on the row navigates, but Enter bubbling from a focused child does not", async () => {
     setItems(wi({ id: "w1", status: "completed" }));
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter>
         <Routes>
           <Route path="/" element={<Board />} />
           <Route path="/work-items/:id" element={<div>item page</div>} />
@@ -634,7 +633,6 @@ describe("Board", () => {
     render(
       <MemoryRouter
         initialEntries={["/"]}
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
       >
         <Routes>
           <Route path="/" element={<Board />} />
