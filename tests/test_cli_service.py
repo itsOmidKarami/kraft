@@ -101,6 +101,7 @@ def test_service_files_survive_a_special_character_in_the_environment(tmp_path, 
     """An `&` in PATH or KRAFT_HOME used to produce a plist launchd cannot
     parse, and a `"` a systemd unit that fails to load."""
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     home = tmp_path / 'a&b "c"'
     monkeypatch.setenv("KRAFT_HOME", str(home))
 
@@ -179,41 +180,12 @@ def test_install_and_uninstall_service_use_real_systemd_user(tmp_path, monkeypat
     probe.close()
     monkeypatch.setenv("KRAFT_PORT", str(port))
 
-    # Diagnostic-only: pin down whether the systemd unit that eventually
-    # runs is the one this test just wrote, or a stray pre-existing one at
-    # the real (non-monkeypatched) home -- and whether it's there *before*
-    # we've done anything at all. pwd, not Path.home()/expanduser(), since
-    # both of those read the just-monkeypatched $HOME -- exactly the fake
-    # path, not the real login user's actual home.
-    import pwd
-
-    real_home = pwd.getpwuid(os.getuid()).pw_dir
-    real_unit = pathlib.Path(real_home) / ".config" / "systemd" / "user" / "kraft.service"
-    print(f"--- pre-flight: real_home(pwd)={real_home} ---")
-    print(f"--- pre-flight: real_unit={real_unit} exists={real_unit.exists()} ---")
-    if real_unit.is_file():
-        print(f"--- pre-flight: real_unit content ---\n{real_unit.read_text()}")
-
     try:
         cli.main(["admin", "install-service"])
         pid_path = RunDirs(run_dir).pid
-        if not _wait_for(lambda: cli.admin._read_pid(pid_path) is not None):
-            # Diagnostic-only: this path has apparently never run to
-            # completion in any CI before (the GitLab config it replaced
-            # had no systemd/linger setup either), so a bare timeout gives
-            # no way to tell a slow start from a unit that never started.
-            unit_path = cli.admin._systemd_unit_path()
-            print(f"--- unit file at {unit_path} ---")
-            print(unit_path.read_text() if unit_path.is_file() else "<missing>")
-            for cmd in (
-                ["systemctl", "--user", "status", "kraft.service", "--no-pager"],
-                ["journalctl", "--user", "-u", "kraft.service", "--no-pager", "-n", "100"],
-            ):
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                print(f"--- {' '.join(cmd)} (exit {result.returncode}) ---")
-                print(result.stdout)
-                print(result.stderr)
-            pytest.fail("systemd never brought the daemon up")
+        assert _wait_for(lambda: cli.admin._read_pid(pid_path) is not None), (
+            "systemd never brought the daemon up"
+        )
     finally:
         cli.main(["admin", "uninstall-service"])
         assert not cli.admin._systemd_unit_path().exists()
