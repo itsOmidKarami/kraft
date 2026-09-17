@@ -182,9 +182,14 @@ def test_install_and_uninstall_service_use_real_systemd_user(tmp_path, monkeypat
     # Diagnostic-only: pin down whether the systemd unit that eventually
     # runs is the one this test just wrote, or a stray pre-existing one at
     # the real (non-monkeypatched) home -- and whether it's there *before*
-    # we've done anything at all.
-    real_unit = pathlib.Path("~/.config/systemd/user/kraft.service").expanduser()
-    print(f"--- pre-flight: Path.home()={pathlib.Path.home()} ---")
+    # we've done anything at all. pwd, not Path.home()/expanduser(), since
+    # both of those read the just-monkeypatched $HOME -- exactly the fake
+    # path, not the real login user's actual home.
+    import pwd
+
+    real_home = pwd.getpwuid(os.getuid()).pw_dir
+    real_unit = pathlib.Path(real_home) / ".config" / "systemd" / "user" / "kraft.service"
+    print(f"--- pre-flight: real_home(pwd)={real_home} ---")
     print(f"--- pre-flight: real_unit={real_unit} exists={real_unit.exists()} ---")
     if real_unit.is_file():
         print(f"--- pre-flight: real_unit content ---\n{real_unit.read_text()}")
