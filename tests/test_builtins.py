@@ -1693,3 +1693,87 @@ def test_carry_local_files_ignores_a_source_that_is_not_there(tmp_path):
 
     assert carried == []
     assert refused == []
+
+
+def test_local_files_land_before_uv_sync_resolves_an_interpreter(tmp_path, monkeypatch):
+    """Arriving eventually is not enough. uv picks the interpreter when it runs,
+    so a pin copied after `uv sync` is a pin that changed nothing (Kraft-gxcmy)."""
+    repo = make_repo(tmp_path)
+    (repo / ".gitignore").write_text(".python-version\n")
+    (repo / "pyproject.toml").write_text('[project]\nname = "s"\nversion = "0"\n')
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "add a python project")
+    (repo / ".python-version").write_text("3.11\n")
+
+    seen: dict[str, str] = {}
+    real_run = subprocess.run
+
+    def spy(args, **kwargs):
+        if list(args[:2]) == ["uv", "sync"]:
+            pin = Path(kwargs["cwd"]) / ".python-version"
+            seen["pin"] = pin.read_text() if pin.is_file() else "<absent>"
+            return subprocess.CompletedProcess(args, 0, "", "")
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(kraft_builtins.subprocess, "run", spy)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="w1",
+                    bead_id="B",
+                    title="t",
+                    repo=str(repo),
+                    chain_template="default",
+                    chain_definition="{}",
+                )
+            )
+            await kraft_builtins.ensure_worktree(
+                database,
+                rd,
+                repo=str(repo),
+                work_item_id="w1",
+                local_files=[".python-version"],
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    assert seen["pin"] == "3.11\n"
+
+
+def test_ensure_worktree_without_local_files_is_unchanged(tmp_path):
+    """The feature is opt-in: an unconfigured repo must behave exactly as before."""
+    repo = make_repo(tmp_path)
+    (repo / ".gitignore").write_text(".python-version\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "ignore the pin")
+    (repo / ".python-version").write_text("3.11\n")
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="w1",
+                    bead_id="B",
+                    title="t",
+                    repo=str(repo),
+                    chain_template="default",
+                    chain_definition="{}",
+                )
+            )
+            worktree = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id="w1"
+            )
+            assert not (worktree / ".python-version").exists()
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())

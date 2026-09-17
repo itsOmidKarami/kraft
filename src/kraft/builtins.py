@@ -381,6 +381,7 @@ async def ensure_worktree(
     repo: str,
     work_item_id: str,
     attachments: list[dict] | None = None,
+    local_files: list[str] | None = None,
 ) -> Path:
     """The item's worktree, created if it is not there yet, with intake
     attachments copied in.
@@ -461,6 +462,18 @@ async def ensure_worktree(
     await asyncio.to_thread(
         _copy_attachments, Path(repo), worktree, attachments or [], work_item_id
     )
+    # Before the sync, not after: uv chooses an interpreter when it runs, so a
+    # pin that lands later is a pin that changed nothing (Kraft-gxcmy).
+    _, refused = await asyncio.to_thread(
+        _carry_local_files, Path(repo), worktree, local_files or []
+    )
+    if refused:
+        logger.warning(
+            "not carried into %s (the worktree would not ignore them, so Kraft "
+            "cannot keep them out of a commit): %s",
+            work_item_id,
+            ", ".join(refused),
+        )
     # Every node from `spec` on can commit, and the shared pre-commit hook
     # (`.beads/hooks/pre-commit`) needs `pre-commit` on PATH -- via `uv run
     # --no-sync` -- to catch a formatting slip before it reaches CI. A
