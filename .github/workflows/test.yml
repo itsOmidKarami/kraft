@@ -42,6 +42,16 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    # checks: write is action-junit-report's annotations; pull-requests: write
+    # is its optional PR comment and the coverage action's PR comment;
+    # contents: write is the coverage action pushing history to its own
+    # python-coverage-comment-action-data branch on pushes to main. A fork's
+    # GITHUB_TOKEN is downgraded to read-only regardless of this block, so
+    # granting it here doesn't widen what untrusted code can do.
+    permissions:
+      contents: write
+      checks: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -59,9 +69,37 @@ jobs:
           git config --global user.name "Kraft CI"
           bd version
       - run: uv sync --frozen
-      - run: uv run pytest -m "not e2e"
+      - run: >
+          uv run pytest -m "not e2e" -n auto
+          --junitxml=junit.xml --cov=src/kraft --cov-report=xml:coverage.xml
       # ~1s, no tests run: catches a renamed pinned test the suite above would not.
       - run: uv run python -m kraft.intent
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            junit.xml
+            coverage.xml
+      # Skipped for forks: their GITHUB_TOKEN is read-only, so the annotation
+      # step would just fail. Not gated on the event type -- only relevant on
+      # pull_request, and there's no pull_request context on a push to main.
+      - if: >-
+          always() && github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        uses: mikepenz/action-junit-report@v6
+        with:
+          report_paths: junit.xml
+      # Runs on both pull_request (posts/updates the PR comment) and push to
+      # main (writes history + badge to the data branch) -- see the action's
+      # own heuristic for picking which. Push to main has no fork to gate on.
+      - if: >-
+          always() &&
+          (github.event_name == 'push' ||
+           github.event.pull_request.head.repo.full_name == github.repository)
+        uses: py-cov-action/python-coverage-comment-action@v4.3
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   lite-floor:
     # The kraft-lite plugin claims to need "python3 and nothing else". Both ends
