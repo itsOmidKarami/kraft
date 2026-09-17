@@ -38,13 +38,6 @@ jobs:
           cache-dependency-glob: uv.lock
       - run: uv sync --frozen
       - run: uv run ruff check .
-      - name: plugin manifests match the release this PR would produce
-        if: github.event_name == 'pull_request'
-        run: |
-          PREVIOUS=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          python3 dev/check_plugin_version.py "$PREVIOUS" "$LABELS"
-        env:
-          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
       - run: uv run ruff format --check .
 
   test:

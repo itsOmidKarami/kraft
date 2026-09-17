@@ -71,16 +71,20 @@ only after the smoke test passes, so a failed build leaves nothing behind.
 ### Plugin manifest versions
 
 `plugins/kraft/.claude-plugin/plugin.json` and `plugins/kraft-lite/.claude-plugin/plugin.json`
-carry their own `version` field, shown in `/plugin list`. Nothing derives it
-automatically the way the wheel's version comes from the tag, so a
-`release::{major,minor,patch}`-labelled pull request must already bump both
-files to the version that label will tag — the lint job checks this
-(`dev/check_plugin_version.py`) and fails with the exact command to run if
-they're stale:
+carry their own `version` field, shown in `/plugin list`. You never edit this by
+hand and pull requests never touch it: `release.yml` stamps both files with
+`dev/stamp_plugin_versions.py` right after it tags a release, then opens and
+auto-merges a `release::none` pull request with the result. Doing this on a
+release, rather than asking every in-flight pull request to predict its own
+future version, is what a hand-stamped file could never do without conflicting
+with every other open pull request the moment a release lands.
 
-```bash
-python3 dev/stamp_plugin_versions.py <version>   # no leading v
-```
+Opening that pull request needs its own credential: the default `GITHUB_TOKEN`
+can't be used, because GitHub suppresses further workflow runs triggered by
+`GITHUB_TOKEN`, which would leave the PR's required status checks pending
+forever. `release.yml` mints a short-lived token from a GitHub App installed
+on this repo instead (`RELEASE_BOT_APP_ID` / `RELEASE_BOT_PRIVATE_KEY`),
+scoped to just contents and pull-request writes on `kraft`.
 
 ## Branch hygiene
 

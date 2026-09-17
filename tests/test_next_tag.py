@@ -12,9 +12,9 @@ from pathlib import Path
 
 import pytest
 
-# `dev/` is not a package (no __init__.py), and tests/test_check_plugin_version.py
-# invokes its script by path. This one needs the functions rather than the exit
-# code, so it loads the file directly instead of adding a package just for tests.
+# `dev/` is not a package (no __init__.py). This test needs the functions
+# rather than a script's exit code, so it loads the file directly instead of
+# adding a package just for tests.
 _SPEC = importlib.util.spec_from_file_location(
     "next_tag", Path(__file__).resolve().parents[1] / "dev" / "next_tag.py"
 )
