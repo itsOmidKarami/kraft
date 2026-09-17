@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_323e79e8bb4dca6e_events_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.15.4">coverage.py v7.15.4</a>,
-            created at 2026-09-17 21:32 +0000
+            created at 2026-09-17 22:07 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -440,13 +440,14 @@
     <p class="run run2"><span class="n"><a id="t358" href="#t358">358</a></span><span class="t">        <span class="nam">resume_session_id</span><span class="op">=</span><span class="nam">resume_session_id</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t359" href="#t359">359</a></span><span class="t">        <span class="nam">autocompact</span><span class="op">=</span><span class="str">&quot;auto&quot;</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t360" href="#t360">360</a></span><span class="t">        <span class="nam">identify_as_worker</span><span class="op">=</span><span class="key">False</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t361" href="#t361">361</a></span><span class="t">        <span class="nam">thread</span><span class="op">=</span><span class="nam">thread</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t362" href="#t362">362</a></span><span class="t">    <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t363" href="#t363">363</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t364" href="#t364">364</a></span><span class="t">    <span class="nam">cli_session_id</span> <span class="op">=</span> <span class="nam">_extract_cli_session_id</span><span class="op">(</span><span class="nam">run_dirs</span><span class="op">.</span><span class="nam">logs</span> <span class="op">/</span> <span class="fst">f&quot;</span><span class="op">{</span><span class="nam">session_id</span><span class="op">}</span><span class="fst">.log</span><span class="fst">&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t365" href="#t365">365</a></span><span class="t">    <span class="key">if</span> <span class="nam">cli_session_id</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t366" href="#t366">366</a></span><span class="t">        <span class="key">await</span> <span class="nam">db</span><span class="op">.</span><span class="nam">write</span><span class="op">(</span><span class="key">lambda</span> <span class="nam">c</span><span class="op">:</span> <span class="nam">store</span><span class="op">.</span><span class="nam">set_escalation_session</span><span class="op">(</span><span class="nam">c</span><span class="op">,</span> <span class="nam">work_item_id</span><span class="op">,</span> <span class="nam">cli_session_id</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t367" href="#t367">367</a></span><span class="t">    <span class="key">return</span> <span class="nam">status</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t361" href="#t361">361</a></span><span class="t">        <span class="nam">repo_entry</span><span class="op">=</span><span class="nam">launch</span><span class="op">.</span><span class="nam">repo_entry</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t362" href="#t362">362</a></span><span class="t">        <span class="nam">thread</span><span class="op">=</span><span class="nam">thread</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t363" href="#t363">363</a></span><span class="t">    <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t364" href="#t364">364</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t365" href="#t365">365</a></span><span class="t">    <span class="nam">cli_session_id</span> <span class="op">=</span> <span class="nam">_extract_cli_session_id</span><span class="op">(</span><span class="nam">run_dirs</span><span class="op">.</span><span class="nam">logs</span> <span class="op">/</span> <span class="fst">f&quot;</span><span class="op">{</span><span class="nam">session_id</span><span class="op">}</span><span class="fst">.log</span><span class="fst">&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t366" href="#t366">366</a></span><span class="t">    <span class="key">if</span> <span class="nam">cli_session_id</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t367" href="#t367">367</a></span><span class="t">        <span class="key">await</span> <span class="nam">db</span><span class="op">.</span><span class="nam">write</span><span class="op">(</span><span class="key">lambda</span> <span class="nam">c</span><span class="op">:</span> <span class="nam">store</span><span class="op">.</span><span class="nam">set_escalation_session</span><span class="op">(</span><span class="nam">c</span><span class="op">,</span> <span class="nam">work_item_id</span><span class="op">,</span> <span class="nam">cli_session_id</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t368" href="#t368">368</a></span><span class="t">    <span class="key">return</span> <span class="nam">status</span>&nbsp;</span><span class="r"></span></p>
 </main>
 <footer>
     <div class="content">
@@ -456,7 +457,7 @@
             <a class="nav" href="z_323e79e8bb4dca6e_events_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.15.4">coverage.py v7.15.4</a>,
-            created at 2026-09-17 21:32 +0000
+            created at 2026-09-17 22:07 +0000
         </p>
     </div>
 </footer>
