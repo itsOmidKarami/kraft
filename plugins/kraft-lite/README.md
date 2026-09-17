@@ -26,9 +26,9 @@ kraft-lite` afterwards — Claude Code owns the clone, so the force-push below
 never becomes your problem. It needs Python 3.10 or newer and nothing else — no
 pip install, no dependencies. CI tests both ends of that range.
 
-Add `--scope project` to either command to keep it to one repo. Each release is
-tagged `kraft-lite--vX.Y.Z`, which is the only stable point in this history —
-see [Contributing](#contributing).
+Add `--scope project` to either command to keep it to one repo. The version is
+Kraft's own release tag, so plugin `0.62.3` is the surface `kraft 0.62.3`
+serves — see [Contributing](#contributing).
 
 ## What is fixed and what is not
 
