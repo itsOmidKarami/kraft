@@ -193,14 +193,20 @@ def _merge_agent_defaults(data: dict, path: Path) -> None:
             raise RegistryError(f"{path.name}: 'defaults.agent' {key!r} must be a list of strings")
     if not agent_defaults:
         return
-    for binding in data["hooks"].values():
+    for hook, binding in data["hooks"].items():
         if not isinstance(binding, dict) or binding.get("kind") != "agent":
             continue
         for key, dval in agent_defaults.items():
             if key in _AGENT_LIST_KEYS:
+                if key in binding and not (
+                    isinstance(binding[key], list) and all(isinstance(x, str) for x in binding[key])
+                ):
+                    raise RegistryError(
+                        f"{path.name}: hook {hook!r} {key!r} must be a list of strings"
+                    )
                 own = binding.get(key, [])
                 merged = list(dval)
-                for x in own if isinstance(own, list) else []:
+                for x in own:
                     if x not in merged:
                         merged.append(x)
                 binding[key] = merged

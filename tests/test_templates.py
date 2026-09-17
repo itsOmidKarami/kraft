@@ -795,6 +795,15 @@ def test_defaults_agent_steering_must_be_a_list_of_strings(tmp_path):
         templates.load_registry(tmp_path / "registry.yaml")
 
 
+def test_defaults_agent_merge_rejects_a_bindings_own_non_list_value(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "defaults:\n  agent: { deny_tools: [WebFetch] }\n"
+        "hooks:\n  on.a: { kind: agent, command: claude, deny_tools: Bash }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="deny_tools"):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
 def test_defaults_missing_entirely_is_fine(tmp_path):
     (tmp_path / "registry.yaml").write_text("hooks:\n  on.a: { kind: agent, command: claude }\n")
     reg = templates.load_registry(tmp_path / "registry.yaml")
