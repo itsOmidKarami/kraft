@@ -852,11 +852,27 @@ def test_load_registry_accepts_a_model_matching_its_harness(tmp_path):
 
 
 def test_load_registry_rejects_a_model_not_matching_its_harness(tmp_path):
+    """Checked against codex, not claude: a model id is an open set Anthropic
+    owns, so `claude.yaml` declares no `model` `values:` at all and anything
+    is accepted there. codex keeps a real pattern, so it is what still pins
+    load_registry's model check.
+    """
     (tmp_path / "registry.yaml").write_text(
-        "hooks:\n  on.x: { kind: agent, command: claude, model: anything-at-all }\n"
+        "hooks:\n  on.x: { kind: agent, harness: codex, model: anything-at-all }\n"
     )
     with pytest.raises(templates.RegistryError, match="'model'.*'anything-at-all'"):
         templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_load_registry_accepts_any_model_for_a_harness_without_values(tmp_path):
+    """The upgrade case: `model: fable` was valid before harnesses existed and
+    must stay valid, because load_registry raising here stops the daemon
+    booting (api/startup.py does not catch RegistryError).
+    """
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.x: { kind: agent, harness: claude, model: fable }\n"
+    )
+    assert templates.load_registry(tmp_path / "registry.yaml").hooks["on.x"]["model"] == "fable"
 
 
 def test_load_registry_rejects_deny_tools_not_a_list(tmp_path):

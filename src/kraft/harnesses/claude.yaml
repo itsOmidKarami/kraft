@@ -12,7 +12,18 @@ capabilities:
   # "When using --print, --output-format=stream-json requires --verbose"
   # (measured against claude 2.1.260).
   structured_log:   { cli: ["--output-format", "stream-json", "--verbose"] }
-  model:            { cli: ["--model", "{value}"], values: ['(opus|sonnet|haiku)(-.*)?(\[.*\])?', 'claude-.*'] }
+  # No `values:` on purpose -- the empty list means "accepts anything"
+  # (harness.value_ok). `--model` takes "an alias for the latest model (e.g.
+  # fable, opus, or sonnet) or a model's full name", plus the provider-prefixed
+  # ids Bedrock and Vertex use (us.anthropic.claude-...): a set Anthropic
+  # changes without Kraft, so any list shipped here goes stale. It is also a
+  # hard gate rather than a warning -- load_registry rejects a binding whose
+  # value fails `values:`, and api/startup.py does not catch RegistryError --
+  # so a too-narrow list stops an existing install booting after an upgrade.
+  # A wrong model is caught by the CLI at launch, which is the cheap failure.
+  # `effort` and `permission_mode` below keep their lists: those really are
+  # closed vocabularies the CLI prints back at you.
+  model:            { cli: ["--model", "{value}"] }
   effort:           { cli: ["--effort", "{value}"], values: [low, medium, high, xhigh, max] }
   # Kraft-avpe: Monitor is never legitimate in a one-shot `claude -p` process
   # -- there is no later turn for it to resume into -- so it is denied on

@@ -36,14 +36,30 @@ def test_context_channel_is_explicit_per_harness():
 
 
 def test_values_are_fullmatch_patterns():
-    claude = harness.load(None).valid["claude"]
+    hs = harness.load(None).valid
+    claude, codex = hs["claude"], hs["codex"]
     assert claude.value_ok("effort", "low")
     assert not claude.value_ok("effort", "lower")  # fullmatch, not search
-    assert claude.value_ok("model", "claude-opus-5")
-    assert claude.value_ok("model", "sonnet")
-    assert not claude.value_ok("model", "gpt-5")
+    # codex's model list is a real pattern, so it carries the fullmatch case.
+    assert codex.value_ok("model", "gpt-5-codex")
+    assert not codex.value_ok("model", "sonnet")
     # A capability with no `values:` accepts anything.
     assert claude.value_ok("prompt", "anything at all")
+
+
+def test_claude_constrains_effort_but_not_model():
+    """A model id is an open set Anthropic owns -- aliases, full names and the
+    provider-prefixed ids Bedrock and Vertex use. `values:` on `model` is a
+    hard gate (load_registry raises, api/startup.py does not catch), so a
+    narrow list stops an existing install booting after an upgrade. effort is
+    a genuinely closed vocabulary and keeps its list.
+    """
+    claude = harness.load(None).valid["claude"]
+    for model in ("fable", "opus", "opusplan", "claude-opus-5", "sonnet[1m]"):
+        assert claude.value_ok("model", model), model
+    assert claude.value_ok("model", "us.anthropic.claude-sonnet-4-5-v1:0")
+    assert claude.value_ok("effort", "max")
+    assert not claude.value_ok("effort", "minimal")  # codex's value, not claude's
 
 
 def _write(tmp_path: Path, name: str, body: str) -> Path:
