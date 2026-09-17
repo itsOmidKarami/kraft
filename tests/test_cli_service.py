@@ -179,6 +179,16 @@ def test_install_and_uninstall_service_use_real_systemd_user(tmp_path, monkeypat
     probe.close()
     monkeypatch.setenv("KRAFT_PORT", str(port))
 
+    # Diagnostic-only: pin down whether the systemd unit that eventually
+    # runs is the one this test just wrote, or a stray pre-existing one at
+    # the real (non-monkeypatched) home -- and whether it's there *before*
+    # we've done anything at all.
+    real_unit = pathlib.Path("~/.config/systemd/user/kraft.service").expanduser()
+    print(f"--- pre-flight: Path.home()={pathlib.Path.home()} ---")
+    print(f"--- pre-flight: real_unit={real_unit} exists={real_unit.exists()} ---")
+    if real_unit.is_file():
+        print(f"--- pre-flight: real_unit content ---\n{real_unit.read_text()}")
+
     try:
         cli.main(["admin", "install-service"])
         pid_path = RunDirs(run_dir).pid
