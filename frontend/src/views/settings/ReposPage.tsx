@@ -321,6 +321,39 @@ function RepoDetail({
         />
       </div>
 
+      <SectionLabel>Worktree</SectionLabel>
+      <div className="field">
+        <label>
+          local files{" "}
+          <span className="field-hint">
+            · copied into every worktree before <code>uv sync</code>, refused if the repo does not
+            gitignore them
+          </span>
+        </label>
+        <div className="submodules">
+          {current.local_files.map((name) => (
+            <button
+              key={name}
+              type="button"
+              className="tag"
+              onClick={() => set({ local_files: current.local_files.filter((n) => n !== name) })}
+            >
+              {name} ✕
+            </button>
+          ))}
+          <button
+            type="button"
+            className="tag tag-off"
+            onClick={() => {
+              const name = window.prompt("Relative file path, e.g. .python-version");
+              if (name) set({ local_files: [...current.local_files, name] });
+            }}
+          >
+            + add
+          </button>
+        </div>
+      </div>
+
       <SectionLabel>Testing</SectionLabel>
       <div className="field">
         <label htmlFor="repo-test-command">test command · on.test.run</label>

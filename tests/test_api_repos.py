@@ -159,6 +159,41 @@ def test_patch_repo_with_a_missing_steering_name_is_refused(tmp_path, client, te
     assert entry["steering"] == []
 
 
+def test_patch_repo_round_trips_local_files(tmp_path, client, templates_dir):
+    """The Settings UI's only write path for `local_files` (Kraft-gxcmy):
+    PATCH goes through the same `entry.update`/`_validate_repos` machinery as
+    every other repos.yaml list field, so this pins the round trip end to end
+    rather than re-testing `load_repos`' own validation (tests/test_api_repos.py's
+    `local_file` tests already cover that)."""
+    repo = make_repo(tmp_path)
+    client.post("/api/repos", json={"path": str(repo), "enabled": False})
+
+    r = client.patch(f"/api/repos?path={repo}", json={"local_files": [".python-version"]})
+    assert r.status_code == 200, r.text
+
+    on_disk = yaml.safe_load((templates_dir / "repos.yaml").read_text())
+    assert on_disk["repos"][0]["local_files"] == [".python-version"]
+
+    (entry,) = client.get("/api/repos").json()["repos"]
+    assert entry["local_files"] == [".python-version"]
+
+
+def test_patch_repo_with_a_glob_in_local_files_is_refused(tmp_path, client, templates_dir):
+    """Write-side validation must reject exactly what the read side would
+    later choke on (same shape as the steering regression guard above), so a
+    bad PATCH from the UI cannot brick every later GET /repos."""
+    repo = make_repo(tmp_path)
+    client.post("/api/repos", json={"path": str(repo), "enabled": False})
+    before = (templates_dir / "repos.yaml").read_text()
+
+    r = client.patch(f"/api/repos?path={repo}", json={"local_files": ["*.pyc"]})
+    assert 400 <= r.status_code < 500, r.text
+    assert (templates_dir / "repos.yaml").read_text() == before
+
+    (entry,) = client.get("/api/repos").json()["repos"]
+    assert entry["local_files"] == []
+
+
 def test_connecting_a_workspace_auto_connects_its_submodules_disabled(tmp_path, client):
     root, _sub = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
     client.post("/api/repos", json={"path": str(root)})

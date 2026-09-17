@@ -17,6 +17,7 @@ const REPO_A = {
   default_model: null,
   deny_tools: [],
   steering: [],
+  local_files: [],
   default_root_merge_policy: "bump" as const,
   managed: true,
 };

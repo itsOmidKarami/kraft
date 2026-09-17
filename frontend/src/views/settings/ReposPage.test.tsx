@@ -250,6 +250,37 @@ describe("Settings · repo detail (5b)", () => {
     );
   });
 
+  it("local files are addable, removable, and round-trip through patchRepo", async () => {
+    const repoC = repo({
+      path: "/repo-c",
+      name: "repo-c",
+      local_files: [".python-version"],
+    });
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [repo(), repoC] });
+    const patch = vi.spyOn(api, "patchRepo").mockResolvedValue(repoC);
+    const prompt = vi.spyOn(window, "prompt").mockReturnValue(".env");
+    renderAt("/settings/repos?repo=/repo-c");
+
+    const tag = await screen.findByText(".python-version ✕");
+    expect(tag).toBeInTheDocument();
+    // "+ add" is not unique — steering and deny tools use the same label —
+    // so scope to local files' own field container.
+    const field = tag.closest(".field") as HTMLElement;
+
+    await userEvent.click(within(field).getByRole("button", { name: "+ add" }));
+    expect(prompt).toHaveBeenCalledWith("Relative file path, e.g. .python-version");
+    expect(await screen.findByText(".env ✕")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByText(".python-version ✕"));
+    expect(screen.queryByText(".python-version ✕")).toBeNull();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Save" }));
+    expect(patch).toHaveBeenCalledWith(
+      "/repo-c",
+      expect.objectContaining({ local_files: [".env"] }),
+    );
+  });
+
   it("re-probing offers the found scopes, and applying them stages a draft edit", async () => {
     vi.spyOn(api, "probeRepo").mockResolvedValue({
       path: "/repo-a",

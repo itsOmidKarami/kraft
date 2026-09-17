@@ -19,6 +19,7 @@ export const repo = (overrides: Partial<Repo> = {}): Repo => ({
   default_model: null,
   deny_tools: [],
   steering: [],
+  local_files: [],
   default_root_merge_policy: "bump",
   managed: true,
   ...overrides,
