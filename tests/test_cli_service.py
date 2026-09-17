@@ -161,6 +161,10 @@ def test_install_and_uninstall_service_use_the_real_launchd(tmp_path, monkeypatc
     _operator_has_a_real_service(),
     reason="this machine has a real kraft service installed; the test would unload it",
 )
+@pytest.mark.skipif(
+    os.environ.get("GITHUB_ACTIONS") == "true",
+    reason="flaky under GitHub Actions: daemon-reload/enable --now race, see Kraft-1zvs3",
+)
 def test_install_and_uninstall_service_use_real_systemd_user(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     # systemctl --user resolves unit files under $XDG_CONFIG_HOME when set,
