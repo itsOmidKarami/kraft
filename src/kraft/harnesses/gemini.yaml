@@ -1,0 +1,22 @@
+# Verified against gemini 0.46.0 on 2026-09-17. This is the harness that
+# stresses the format: no out-of-band context channel, no effort, and a
+# --resume that takes an index or "latest" rather than a session id, so it
+# declares no `resume` capability at all.
+id: gemini
+kind: cli
+command: [gemini]
+
+capabilities:
+  context:         { channel: prompt }
+  structured_log:  { cli: ["-o", "stream-json"] }
+  model:           { cli: ["-m", "{value}"], values: ['gemini-.*'] }
+  # `yolo`, not `auto_edit`: auto_edit auto-approves edit tools only, so Bash
+  # would still prompt, and a headless worker has nobody to ask -- every ask
+  # becomes a silent denial (the failure work item 6363c65e already cost us).
+  # The disposable worktree is the real boundary, not the approval mode.
+  permission_mode: { cli: ["--approval-mode", "{value}"], values: [default, auto_edit, yolo, plan], always: yolo }
+  usage:           { source: result_file }
+  prompt:          { cli: ["-p", "{value}"] }
+
+# Absent: effort, deny_tools, allowed_tools, approval_channel, resume,
+# autocompact, rate_limit_signal.

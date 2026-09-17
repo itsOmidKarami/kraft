@@ -1,0 +1,30 @@
+# How Claude Code spells the options Kraft names neutrally. A fact about a
+# CLI. An operator who needs to change one drops a file of this name into
+# $KRAFT_HOME/templates/harnesses/ and thereby owns it -- see harness.py.
+id: claude
+kind: cli
+command: [claude]
+
+capabilities:
+  prompt:           { cli: ["-p", "{value}"] }
+  context:          { channel: system_prompt, cli: ["--append-system-prompt", "{value}"] }
+  # --verbose is mandatory, not decoration: without it the CLI exits 1 with
+  # "When using --print, --output-format=stream-json requires --verbose"
+  # (measured against claude 2.1.260).
+  structured_log:   { cli: ["--output-format", "stream-json", "--verbose"] }
+  model:            { cli: ["--model", "{value}"], values: ['(opus|sonnet|haiku)(-.*)?', 'claude-.*'] }
+  effort:           { cli: ["--effort", "{value}"], values: [low, medium, high] }
+  # Kraft-avpe: Monitor is never legitimate in a one-shot `claude -p` process
+  # -- there is no later turn for it to resume into -- so it is denied on
+  # every launch rather than trusted to prose.
+  deny_tools:       { cli: ["--disallowed-tools", "{csv}"], always: [Monitor] }
+  allowed_tools:    { cli: ["--allowedTools", "{csv}"] }
+  permission_mode:  { cli: ["--permission-mode", "{value}"], values: [acceptEdits, auto, bypassPermissions, manual, dontAsk, plan], always: auto }
+  # The CLI calls this MCP tool instead of prompting a human. On an install
+  # where `kraft admin init` never registered it, the flag names a tool that
+  # does not exist and the CLI completes normally (measured).
+  approval_channel: { cli: ["--permission-prompt-tool", "{value}"], always: mcp__kraft__permission_request }
+  resume:           { cli: ["--resume", "{value}"] }
+  autocompact:      { cli: ["--autocompact", "{value}"] }
+  usage:            { source: envelope, reader: claude-stream-json }
+  rate_limit_signal: { reader: claude-stream-json }

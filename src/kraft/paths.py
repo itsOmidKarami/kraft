@@ -34,6 +34,19 @@ def default_skills_dir() -> Path:
     return kraft_home() / "skills"
 
 
+def default_harnesses_dir() -> Path:
+    """Where an operator may override or add a harness definition.
+
+    Same shape and same reason as `default_skills_dir`: the shipped harnesses
+    live in the package (`kraft.harness.BUNDLED`), and this directory exists
+    only when someone has deliberately added or overridden one. Not seeded by
+    `cli.seed_home` -- a seeded copy would freeze at whichever version the
+    operator first installed, which is the drift measured live on 2026-09-13
+    (Kraft-717xy).
+    """
+    return kraft_home() / "templates" / "harnesses"
+
+
 #: Built SPA and default config, copied in by `just install`. Absent in a plain
 #: source checkout — the API then serves no SPA, and `just dev` points
 #: KRAFT_FRONTEND_DIST at vite's output instead.
