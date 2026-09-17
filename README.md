@@ -28,6 +28,18 @@ curl -fsSL https://raw.githubusercontent.com/itsOmidKarami/kraft/main/install.sh
 shell. `kraft admin update` installs the newest release later on, and
 `kraft --version` says what you have.
 
+### Homebrew (macOS)
+
+```bash
+brew tap itsOmidKarami/kraft
+brew install kraft
+kraft admin init
+kraft
+```
+
+`kraft admin update` detects a Homebrew install and runs `brew upgrade kraft`
+instead of its usual `uv tool install`, so either update path works.
+
 ### From source (development)
 
 ```bash
