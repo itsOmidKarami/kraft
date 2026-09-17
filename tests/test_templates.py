@@ -124,7 +124,7 @@ def test_policy_yaml_is_not_scanned_as_a_template():
     assert "policy" not in ts.valid
 
 
-def test_shipped_default_yaml_is_the_fourteen_node_chain():
+def test_shipped_default_yaml_is_the_fifteen_node_chain():
     reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
     ts = templates.load_templates(TEMPLATES_DIR, reg)
     assert "default" in ts.valid, ts.invalid
@@ -135,6 +135,7 @@ def test_shipped_default_yaml_is_the_fourteen_node_chain():
         "chain_review",
         "env_setup",
         "implementation",
+        "repos_scan",
         "verify",
         "pre_mr_rebase",
         "mr_meta",
@@ -154,6 +155,8 @@ def test_shipped_default_yaml_is_the_fourteen_node_chain():
     assert gates["post_merge_watch"] is None
 
     by_id = {n["id"]: n for n in nodes}
+    assert by_id["implementation"]["tasks"] == ["on.implementation.start"]
+    assert by_id["repos_scan"]["tasks"] == ["on.repos.scan"]
     assert by_id["pre_mr_rebase"]["rebase_bounce_to"] == "verify"
     assert by_id["pre_mr_rebase"]["tasks"] == ["on.mr.rebase"]
     assert by_id["post_merge_watch"]["tasks"] == ["on.merge.watch"]

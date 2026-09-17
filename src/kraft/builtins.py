@@ -785,8 +785,8 @@ async def scan_submodules(
     declared, give it a `work_item_repos` row and a pinned identity, before
     `open_mr` would otherwise have to refuse over it.
 
-    Runs right after `on.implementation.start` in the same node (see
-    `default.yaml`), so a plain green `verify` never masks a change `open_mr`
+    Runs in its own node right after `implementation` (see `default.yaml`),
+    so a plain green `verify` never masks a change `open_mr`
     would reject three nodes later -- this is what would have rescued work
     item 9d0ab38ff3c9439b90506df0f6966660, which declared nothing.
     """

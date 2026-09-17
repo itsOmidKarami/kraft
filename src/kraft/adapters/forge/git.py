@@ -267,7 +267,7 @@ async def _assert_submodules_covered(repo: Path, covered: set[Path]) -> None:
     """Refuse to open the root's merge request while an initialized submodule
     holds commits no `work_item_repos` row will carry anywhere.
 
-    The §3a scan (`builtins.scan_submodules`) runs earlier in the same node
+    The §3a scan (`builtins.scan_submodules`) runs in an earlier node
     and is what normally covers a submodule the agent touched but nobody
     declared -- this only fires when that scan itself missed one (submodule
     init failed, `git submodule status` errored), which must stop the chain
