@@ -241,7 +241,7 @@ def test_repo_default_model_reaches_the_agent_launch(tmp_path, monkeypatch):
                 bd_cwd=str(tracker),
             )
             launch = executor.LaunchContext(
-                repo_entry={"default_model": "haiku"}, steering_dir=None
+                repo_entry={"default_model": "haiku", "setup_command": ""}, steering_dir=None
             )
             result = await executor.run(
                 database,
@@ -632,7 +632,8 @@ def test_a_subprocess_hook_prefers_the_repos_test_command(tmp_path, monkeypatch)
                     repo_entry={
                         "test_command": (
                             f"{sys.executable} -c \"open({str(marker)!r}, 'w').write('repo')\""
-                        )
+                        ),
+                        "setup_command": "",
                     },
                     steering_dir=None,
                 ),
@@ -690,7 +691,7 @@ def test_a_sandboxed_subprocess_hook_actually_runs_through_docker(tmp_path, monk
                 work_item_id=wid,
                 registry=registry,
                 bd_cwd=str(tracker),
-                launch=executor.LaunchContext(repo_entry={}, steering_dir=None),
+                launch=executor.LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None),
             )
         finally:
             await database.close()
@@ -739,7 +740,9 @@ def test_a_repo_can_turn_off_a_binding_that_turned_sandboxing_on(tmp_path, monke
                 work_item_id=wid,
                 registry=registry,
                 bd_cwd=str(tracker),
-                launch=executor.LaunchContext(repo_entry={"sandbox": False}, steering_dir=None),
+                launch=executor.LaunchContext(
+                    repo_entry={"sandbox": False, "setup_command": ""}, steering_dir=None
+                ),
             )
         finally:
             await database.close()
@@ -785,7 +788,7 @@ def test_a_subprocess_hook_falls_back_to_the_registry_command(tmp_path, monkeypa
                 work_item_id=wid,
                 registry=registry,
                 bd_cwd=str(tracker),
-                launch=executor.LaunchContext(repo_entry={}, steering_dir=None),
+                launch=executor.LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None),
             )
         finally:
             await database.close()

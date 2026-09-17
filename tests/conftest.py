@@ -15,6 +15,30 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 
 
+@pytest.fixture(autouse=True)
+def _default_setup_command_for_tests_without_a_launch_context(monkeypatch):
+    """`setup_command` has no default (Kraft-kji8w): `ensure_worktree` now
+    raises for a bare `repo_entry=None`, which is what every executor test in
+    this suite that never built a `LaunchContext` passes. Most of those tests
+    are about chain walking, gates, loops or forge dispatch, not repo
+    preparation -- so default *only* a bare `None` to "nothing declared,
+    deliberately" here. A test that explicitly passes `repo_entry={}` (the
+    handful in test_builtins.py that exist to prove the undeclared case
+    raises) is untouched: this fixture never sees that call, because `{}` is
+    not `None`.
+    """
+    import kraft.builtins as builtins_mod
+
+    real_ensure_worktree = builtins_mod.ensure_worktree
+
+    async def _ensure_worktree_with_default(*args, repo_entry=None, **kwargs):
+        if repo_entry is None:
+            repo_entry = {"setup_command": ""}
+        return await real_ensure_worktree(*args, repo_entry=repo_entry, **kwargs)
+
+    monkeypatch.setattr(builtins_mod, "ensure_worktree", _ensure_worktree_with_default)
+
+
 def pytest_collection_modifyitems(config, items):
     if os.environ.get("KRAFT_E2E") == "1" and shutil.which("claude"):
         return

@@ -1154,7 +1154,7 @@ def _run_back_half(tmp_path, monkeypatch, fake, *, backend="fake", launch=None, 
                 work_item_id=wid,
                 registry=_forge_registry(backend, **poll),
                 bd_cwd=str(tracker),
-                launch=launch,
+                launch=launch or executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             row = database.read(
                 lambda c: c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()
@@ -1210,7 +1210,9 @@ def test_the_executor_passes_the_repo_forge_to_a_forge_node(tmp_path, monkeypatc
     `backend: auto` chain fails on a repo whose forge is recorded perfectly well.
     """
     fake = forge.FakeForge(ci_states=["success"])
-    launch = executor.LaunchContext(repo_entry={"forge": "gitlab"}, steering_dir=None)
+    launch = executor.LaunchContext(
+        repo_entry={"forge": "gitlab", "setup_command": ""}, steering_dir=None
+    )
 
     _run_back_half(tmp_path, monkeypatch, fake, backend="auto", launch=launch)
 
@@ -1878,7 +1880,12 @@ def test_merge_completes_the_merge_after_a_rebase_when_no_bounce_is_configured(
             subprocess.run(["git", "commit", "-m", "moved on upstream"], cwd=repo, check=True)
 
             return await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
         finally:
             await database.close()
@@ -2226,6 +2233,7 @@ def test_the_shape_that_broke_on_9d0ab38ff3c9439b90506df0f6966660(tmp_path, monk
                 work_item_id=wid,
                 registry=_forge_registry("fake"),
                 bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             repos = database.read(lambda c: store.repos_for(c, wid))
             return status, repos
@@ -2442,6 +2450,7 @@ def test_ci_fix_loop_stops_for_waiting_on_the_repairs_re_measure(tmp_path, monke
                 registry=_ci_fixloop_registry(),
                 bd_cwd=str(tracker),
                 policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "waiting"
             types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, wid))]
@@ -2558,6 +2567,7 @@ def test_ci_poll_rebases_and_bounces_on_a_confirmed_conflict(tmp_path, monkeypat
                 registry=_mr_checks_bounce_registry(),
                 bd_cwd=str(tracker),
                 policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             # Not "completed": the second pass through mr_checks hits the
             # same FakeForge-reported "still unmergeable" verdict, but this
@@ -2666,6 +2676,7 @@ def test_ci_poll_stops_for_a_human_on_a_real_rebase_conflict(tmp_path, monkeypat
                 registry=_mr_checks_bounce_registry(),
                 bd_cwd=str(tracker),
                 policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "needs_human"
 
@@ -2753,7 +2764,12 @@ def test_post_merge_watch_delays_completion_and_bead_close_until_it_runs(tmp_pat
                 bd_cwd=str(tracker),
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             row = database.read(
                 lambda c: c.execute(

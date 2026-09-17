@@ -30,6 +30,20 @@ def _client(tmp_path, monkeypatch, *, templates_dir=None, peer=("127.0.0.1", 543
         "KRAFT_FRONTEND_DIST", os.environ.get("KRAFT_FRONTEND_DIST") or str(tmp_path / "no-dist")
     )
     import kraft.api as api
+    from kraft.api import deps
+
+    # `setup_command` has no default (Kraft-kji8w): a repo this suite never
+    # connected through `POST /repos` gets no entry at all, and dispatch would
+    # stop every one of these tests at `needs_human` before they reach the
+    # behavior they actually test. Most of this file is not about repo
+    # config -- the handful that are (test_api_repos.py) drive `load_repos`
+    # directly rather than through this fixture.
+    real_connected = deps._connected
+
+    def _connected_or_default(repos, path):
+        return real_connected(repos, path) or {"setup_command": ""}
+
+    monkeypatch.setattr(deps, "_connected", _connected_or_default)
 
     return TestClient(api.app, client=peer)
 

@@ -12,6 +12,7 @@ from pathlib import Path
 from kraft import logs, store
 from kraft.adapters.forge import git
 from kraft.config import git_read, main_ignore_args
+from kraft.worker_env import worker_env
 
 logger = logging.getLogger(__name__)
 
@@ -409,6 +410,25 @@ async def _setup_submodules(
     )
 
 
+async def _discard_worktree(repo: Path, worktree: Path) -> str | None:
+    """Remove a worktree whose setup failed, keeping its branch. Returns a
+    reason when the directory survives, or None.
+
+    `ensure_worktree` returns early when the directory exists, so a worktree
+    left behind by a failed setup would make the next attempt skip setup
+    entirely. The branch stays: a rejected gate already removes a worktree and
+    keeps its branch, and the commits on it are not this failure's business.
+    Not best-effort like the abandon path -- a survivor is reported into the
+    error the caller is about to raise, because silence here is the bug.
+    """
+    for args in (
+        ["git", "worktree", "remove", "--force", str(worktree)],
+        ["git", "worktree", "prune"],
+    ):
+        await asyncio.to_thread(subprocess.run, args, cwd=repo, capture_output=True, text=True)
+    return None if not worktree.exists() else f"{worktree} still present"
+
+
 async def ensure_worktree(
     db,
     run_dirs,
@@ -511,25 +531,36 @@ async def ensure_worktree(
             ", ".join(refused),
         )
     # Every node from `spec` on can commit, and the shared pre-commit hook
-    # (`.beads/hooks/pre-commit`) needs `pre-commit` on PATH -- via `uv run
-    # --no-sync` -- to catch a formatting slip before it reaches CI. A
-    # freshly created worktree has no `.venv` yet, so the very first commit
-    # an agent made hit `Failed to spawn: pre-commit` and fell back to
-    # `--no-verify`, skipping the check it most needed for the doc it had
-    # just written (Kraft-i047). Sync once here, before any node dispatches,
-    # so the safety net is live for that first commit too. Best-effort: a
-    # sync failure (offline, first-run download taking too long) logs and
-    # falls back to today's `--no-verify` behavior rather than failing the
-    # whole worktree over tooling, not content.
-    if (worktree / "pyproject.toml").is_file():
-        synced = await asyncio.to_thread(
-            subprocess.run, ["uv", "sync"], cwd=worktree, capture_output=True, text=True
+    # needs its tooling on PATH, so the worktree must be a working environment
+    # before the first node dispatches (Kraft-i047). There is no default and no
+    # marker sniffing: the repo declares how it is prepared, or the chain stops
+    # (Kraft-kji8w). A failure here used to be a log warning, which dispatched
+    # a node into a known-broken environment and let the verify node retry a
+    # deterministic failure ten times over (Kraft-s0w2l).
+    cmd = (repo_entry or {}).get("setup_command")
+    if cmd is None:
+        await _discard_worktree(Path(repo), worktree)
+        raise RuntimeError(
+            f"no setup_command declared for {repo} in repos.yaml, so {work_item_id}'s "
+            'worktree cannot be prepared. Declare one (use "" for a repo that '
+            "deliberately needs no preparation)."
         )
-        if synced.returncode != 0:
-            logger.warning(
-                "uv sync failed for %s: %s",
-                work_item_id,
-                synced.stderr.strip() or synced.stdout.strip(),
+    if cmd:
+        done = await asyncio.to_thread(
+            subprocess.run,
+            cmd,
+            shell=True,
+            cwd=worktree,
+            env=worker_env(repo_entry),
+            capture_output=True,
+            text=True,
+        )
+        if done.returncode != 0:
+            detail = done.stderr.strip() or done.stdout.strip()
+            left = await _discard_worktree(Path(repo), worktree)
+            suffix = f" (and its worktree could not be removed: {left})" if left else ""
+            raise RuntimeError(
+                f"setup command failed for {work_item_id}: {cmd!r}: {detail}{suffix}"
             )
     decl = db.read(
         lambda c: c.execute(

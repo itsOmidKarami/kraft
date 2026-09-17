@@ -67,7 +67,12 @@ def test_run_happy_path_completes_and_closes_bead(tmp_path, monkeypatch):
                 bd_cwd=str(tracker),
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "completed"
 
@@ -122,7 +127,12 @@ def test_done_with_concerns_advances_the_chain(tmp_path, monkeypatch):
                 bd_cwd=str(tracker),
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "completed"
 
@@ -177,7 +187,12 @@ def test_run_verify_failure_stops_at_verify(tmp_path, monkeypatch):
                 bd_cwd=str(tracker),
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "needs_human"
 
@@ -222,7 +237,12 @@ def test_rate_limit_stops_the_chain_without_a_fix_loop(tmp_path, monkeypatch):
                 bd_cwd=str(tracker),
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "rate_limited"
 
@@ -287,7 +307,12 @@ def test_a_waiting_task_marks_the_row_and_ends_the_run(tmp_path, monkeypatch):
                 database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "waiting"
             row = database.read(
@@ -339,7 +364,12 @@ def test_needs_human_reason_names_a_failed_forge_task_s_kind(tmp_path, monkeypat
                 database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "needs_human"
             stopped = next(
@@ -416,7 +446,13 @@ def test_an_in_process_blind_failure_stops_without_opening_a_fix_cycle(tmp_path,
                 database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "needs_human"
             evts = database.read(lambda c: events.read_after(c, 0, wid))
@@ -485,7 +521,13 @@ def test_a_red_pipeline_with_failed_jobs_opens_its_fix_cycle_as_before(tmp_path,
                 database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             evts = database.read(lambda c: events.read_after(c, 0, wid))
             counter = database.read(lambda c: store.read_counter(c, wid, "ci_fix_loop"))
@@ -544,7 +586,13 @@ def test_a_co_failing_subprocess_task_keeps_the_loop_open(tmp_path, monkeypatch)
                 database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
             )
             await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             evts = database.read(lambda c: events.read_after(c, 0, wid))
             return [e["type"] for e in evts]
@@ -598,7 +646,13 @@ def test_a_co_tasks_findings_keep_the_loop_open(tmp_path, monkeypatch):
                 database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
             )
             await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             evts = database.read(lambda c: events.read_after(c, 0, wid))
             return [e["type"] for e in evts]
@@ -646,7 +700,13 @@ def test_a_pending_needs_context_question_outranks_the_unwinnable_stop(tmp_path,
                 database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "needs_human"
             evts = database.read(lambda c: events.read_after(c, 0, wid))
@@ -706,6 +766,7 @@ def test_a_steer_with_no_agent_dispatch_to_land_in_is_reported_undelivered(tmp_p
                 registry=registry,
                 bd_cwd=str(tracker),
                 steer="please look at the flaky pipeline",
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "needs_human"
             return [
@@ -750,6 +811,7 @@ def test_a_steer_taken_by_a_real_agent_is_not_reported_undelivered(tmp_path, mon
                 registry=registry,
                 bd_cwd=str(tracker),
                 steer="a note for whichever agent runs first",
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "completed"
             return _events(database, wid)
@@ -788,7 +850,12 @@ def test_dispatch_routes_on_mr_rebase_to_the_mr_rebase_builtin(tmp_path, monkeyp
                 database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "completed"
             session = database.read(
@@ -859,7 +926,12 @@ def test_run_unknown_hook_in_registry_is_needs_human(tmp_path):
                 database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "needs_human"
 
@@ -938,7 +1010,7 @@ def test_fix_cycle_dispatch_gets_the_same_launch_context(tmp_path, monkeypatch):
                 bd_cwd=str(tracker),
             )
             launch = executor.LaunchContext(
-                repo_entry={"default_model": "haiku"}, steering_dir=None
+                repo_entry={"default_model": "haiku", "setup_command": ""}, steering_dir=None
             )
             await executor.run(
                 database,
@@ -993,7 +1065,8 @@ def test_run_once_threads_local_files_from_the_launch_context(tmp_path, monkeypa
                 database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
             )
             launch = executor.LaunchContext(
-                repo_entry={"local_files": [".python-version"]}, steering_dir=None
+                repo_entry={"local_files": [".python-version"], "setup_command": ""},
+                steering_dir=None,
             )
             result = await executor.run_once(
                 database,
@@ -1117,6 +1190,7 @@ def test_a_moved_base_bounces_back_to_verify_with_a_drift_note(tmp_path, monkeyp
                 registry=registry,
                 bd_cwd=str(tracker),
                 policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "completed"
 
@@ -1216,6 +1290,7 @@ def test_a_bounce_clears_the_targets_fix_loop_counter(tmp_path, monkeypatch):
                 registry=registry,
                 bd_cwd=str(tracker),
                 policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "completed"
             assert database.read(lambda c: store.read_counter(c, wid, "verify_fix_loop")) is None, (
@@ -1297,6 +1372,7 @@ def test_a_bounce_clears_an_intervening_nodes_fix_loop_too(tmp_path, monkeypatch
                 registry=registry,
                 bd_cwd=str(tracker),
                 policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "completed"
             assert database.read(lambda c: store.read_counter(c, wid, "verify_fix_loop")) is None
@@ -1370,7 +1446,13 @@ def test_pre_mr_rebase_conflict_dispatches_resolver_and_bounces_to_verify(tmp_pa
             _git(repo, "commit", "-m", "conflicting edit upstream")
 
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             evts = database.read(lambda c: events.read_after(c, 0, wid))
             starts = [e["payload"]["node_id"] for e in evts if e["type"] == "node_started"]
@@ -1420,7 +1502,13 @@ def test_no_movement_skips_the_bounce(tmp_path, monkeypatch):
             )
 
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "completed"
 
@@ -1502,7 +1590,13 @@ def test_rebase_bounce_cap_escalates_to_needs_human(tmp_path, monkeypatch):
             )
 
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "needs_human"
 
@@ -1543,7 +1637,12 @@ def test_run_closes_an_auto_intaken_bead_in_its_own_workspace(tmp_path, monkeypa
             )
             assert (
                 await executor.run(
-                    database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                    database,
+                    rd,
+                    work_item_id=wid,
+                    registry=registry,
+                    bd_cwd=str(tracker),
+                    launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
                 )
                 == "completed"
             )
@@ -1587,7 +1686,13 @@ def test_the_first_node_runs_before_env_setup_and_still_has_a_worktree(tmp_path)
                     chain_definition=json.dumps(chain),
                 )
             )
-            await executor.run(database, rd, work_item_id="w1", registry=registry)
+            await executor.run(
+                database,
+                rd,
+                work_item_id="w1",
+                registry=registry,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
+            )
             assert (rd.worktrees / "w1").is_dir()
         finally:
             await database.close()
@@ -1625,6 +1730,7 @@ def test_needs_human_names_the_session_that_failed(tmp_path, monkeypatch):
                     work_item_id=wid,
                     registry=fake_registry(sys.executable, _FAKE_AGENT),
                     bd_cwd=str(tracker),
+                    launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
                 )
                 == "needs_human"
             )
@@ -1678,7 +1784,12 @@ def _run_one_node(tmp_path, template: Template, registry: Registry) -> tuple[str
                 bd_cwd=str(tracker),
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             return result, database.read(lambda c: events.read_after(c, 0, wid))
         finally:
@@ -2279,7 +2390,12 @@ def test_pausing_between_nodes_stops_the_walk_before_the_next_one_starts(tmp_pat
 
             monkeypatch.setattr(walk_mod, "walk_node", spy)
             result = await executor.run_once(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "paused"
             assert calls == ["env_setup"], "implementation must never have been dispatched"
@@ -2301,7 +2417,8 @@ def test_pausing_between_nodes_stops_the_walk_before_the_next_one_starts(tmp_pat
                 work_item_id=wid,
                 registry=registry,
                 bd_cwd=str(tracker),
-                start_index=1,  # implementation: the node right after env_setup
+                start_index=1,  # implementation: the node right after env_setup,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result2 == "completed"
             types = _events(database, wid)
@@ -2349,7 +2466,12 @@ def test_a_blocked_bead_pauses_the_walk_before_any_worktree_is_made(tmp_path, mo
                 check=True,
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "paused"
             assert not (rd.worktrees / wid).exists()
@@ -2414,12 +2536,22 @@ def test_resuming_a_still_blocked_item_re_pauses_cheaply(tmp_path, monkeypatch):
                 check=True,
             )
             first = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert first == "paused"
             # A resume re-enters through run_once at the same start_index (0).
             second = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert second == "paused"
             sessions = database.read(
@@ -2482,7 +2614,12 @@ def test_a_blocked_sub_bead_named_in_the_description_pauses_the_walk(tmp_path, m
             assert await beads.blocked_by([row["bead_id"]], cwd=str(tracker)) == []
             assert json.loads(row["implements_beads"]) == [sub]
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "paused"
             assert not (rd.worktrees / wid).exists()
@@ -2540,7 +2677,12 @@ def test_a_bead_blocked_only_by_its_own_bundlemate_dispatches(tmp_path, monkeypa
             )
             assert set(json.loads(row["implements_beads"])) == {sub, bundlemate}
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "completed"
         finally:
@@ -2570,7 +2712,12 @@ def test_an_unblocked_bead_dispatches_exactly_as_before(tmp_path, monkeypatch):
                 bd_cwd=str(tracker),
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "completed"
         finally:
