@@ -22,9 +22,23 @@ def test_sigterm_shuts_down_cleanly_mid_task(tmp_path):
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
     # A worktree needs a declared setup_command since Kraft-kji8w; this test
-    # is about shutdown, not preparation, so declare deliberately nothing.
+    # is about shutdown, not preparation, so declare deliberately nothing else.
+    # `env_passthrough` is what actually gets `KRAFT_FAKE_CLAUDE*` from this
+    # real daemon subprocess's own environment into the worker it launches --
+    # the autouse fixture in conftest.py that does this for in-process tests
+    # has no effect here, since the daemon runs as a separate `python -m kraft`.
     (templates / "repos.yaml").write_text(
-        yaml.safe_dump({"repos": [{"path": str(repo), "setup_command": ""}]})
+        yaml.safe_dump(
+            {
+                "repos": [
+                    {
+                        "path": str(repo),
+                        "setup_command": "",
+                        "env_passthrough": ["KRAFT_FAKE_CLAUDE", "KRAFT_FAKE_CLAUDE_DELAY"],
+                    }
+                ]
+            }
+        )
     )
     slow_env = {"KRAFT_FAKE_CLAUDE": "slow", "KRAFT_FAKE_CLAUDE_DELAY": "15"}
 

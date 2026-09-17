@@ -428,10 +428,11 @@ def _serve() -> None:
     # which `_read_pid` detects and clears on the next read -- so the gap
     # needs no handler of its own.
     pid_path.write_text(str(os.getpid()))
-    # Every worker Kraft launches inherits this environment (adapters/
-    # subprocess.py's `full_env` starts from `os.environ`): a leftover
-    # process found on a port can be checked against the daemon it actually
-    # is, rather than assumed stale and killed (Kraft-f8u3).
+    # Every worker Kraft launches inherits these two names (they're in
+    # `worker_env.BASELINE`, which `adapters/subprocess.py`'s `full_env`
+    # copies out of `os.environ`): a leftover process found on a port can be
+    # checked against the daemon it actually is, rather than assumed stale
+    # and killed (Kraft-f8u3).
     os.environ["KRAFT_DAEMON_PID"] = str(os.getpid())
     os.environ["KRAFT_DAEMON_PORT"] = str(port)
     _update_notice()

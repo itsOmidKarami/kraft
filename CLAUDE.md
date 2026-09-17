@@ -126,4 +126,11 @@ destroyed with the worktree. This overrides the Conservative profile's
 "do not run git commits" for commits only: a worker still does not push,
 merge, sync Dolt, or close beads. Kraft does those itself.
 
+A worker's environment is built from an allowlist, not inherited from whatever
+shell started the Kraft daemon: `PATH`, `HOME`, the usual locale and proxy
+vars, Kraft's own `KRAFT_*`, and the agent's credential var. Anything else a
+repo needs is declared in its `repos.yaml` entry — `env:` for literal values,
+`env_passthrough:` to name a var the daemon already has. Do not assume a
+variable from your own shell is present in a worktree.
+
 @CLAUDE.local.md

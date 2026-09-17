@@ -17,6 +17,17 @@ from kraft.sandbox import FORWARDED_ENV
 #: credentials are deliberately absent: Kraft's own forge calls go through
 #: `git.run_git`, and a worker does not push, merge or close beads. A repo
 #: whose node genuinely needs one names it in `env_passthrough`.
+#:
+#: The `KRAFT_*` names below are a property of the install, not of a repo, so
+#: they belong here rather than behind `env_passthrough`: `KRAFT_HOME`,
+#: `KRAFT_RUN_DIR`, `KRAFT_TEMPLATES_DIR`, `KRAFT_SKILLS_DIR`, `KRAFT_HOST`
+#: and `KRAFT_PORT` are what a worker's own `kraft` CLI and MCP client use to
+#: find the instance that launched them (`paths.kraft_home`,
+#: `transport.base_url`, `transport.http`) -- without them a worker started
+#: by a non-default instance talks to `~/.kraft` on the default port instead.
+#: `KRAFT_DAEMON_PID` and `KRAFT_DAEMON_PORT` are what
+#: `never-signal-processes-you-didnt-start.md` tells a worker to check before
+#: killing anything it finds listening on a port.
 BASELINE = frozenset(
     {
         "PATH",
@@ -37,6 +48,14 @@ BASELINE = frozenset(
         "https_proxy",
         "no_proxy",
         "SSL_CERT_FILE",
+        "KRAFT_HOME",
+        "KRAFT_RUN_DIR",
+        "KRAFT_TEMPLATES_DIR",
+        "KRAFT_SKILLS_DIR",
+        "KRAFT_HOST",
+        "KRAFT_PORT",
+        "KRAFT_DAEMON_PID",
+        "KRAFT_DAEMON_PORT",
     }
 )
 

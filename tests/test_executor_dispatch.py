@@ -1,3 +1,4 @@
+import ast
 import asyncio
 import json
 import os
@@ -643,6 +644,60 @@ def test_a_subprocess_hook_prefers_the_repos_test_command(tmp_path, monkeypatch)
 
     asyncio.run(scenario())
     assert marker.read_text() == "repo", "the registry's hardcoded command won"
+
+
+def test_the_repos_declared_env_reaches_a_test_scopes_run_task(tmp_path, monkeypatch):
+    """dispatch.py:471 calls `_subprocess.run_task` directly for each matched
+    test scope, bypassing `resolve_invocation`. Left unwired, that call hands
+    `run_task` a `repo_entry` it never reads, and the repo's declared `env`
+    never reaches the one path whose job is to decide whether the MR is safe
+    to merge (Kraft-69atv Step 4b). The call-site override
+    (`PYTHONDONTWRITEBYTECODE=1`) must still win alongside it."""
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    dumped = tmp_path / "child-env.txt"
+
+    registry_base = fake_registry(sys.executable, _FAKE_AGENT)
+    registry = Registry(hooks={**registry_base.hooks, "on.test.run": {"kind": "subprocess"}})
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(
+                    repo_entry={
+                        "test_command": (
+                            f'{sys.executable} -c "import os; '
+                            f"open({str(dumped)!r}, 'w').write(repr(dict(os.environ)))\""
+                        ),
+                        "setup_command": "",
+                        "env": {"MY_REPO": "1"},
+                    },
+                    steering_dir=None,
+                ),
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    child = ast.literal_eval(dumped.read_text())
+    assert child["MY_REPO"] == "1"  # the repo's declared env reached the scope
+    assert child["PYTHONDONTWRITEBYTECODE"] == "1"  # the call-site override still wins
 
 
 def test_a_sandboxed_subprocess_hook_actually_runs_through_docker(tmp_path, monkeypatch):
