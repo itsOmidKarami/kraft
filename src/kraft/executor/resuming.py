@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from kraft import builtins as _builtins
+from kraft import config as _config
 from kraft import policy as _policy
 from kraft import store
 from kraft.executor import entry, gates, walk
@@ -166,7 +167,7 @@ async def resume_once(
             attachments=entry.attachments_of(row),
             local_files=(launch.repo_entry or {}).get("local_files") if launch else None,
         )
-    except RuntimeError as exc:
+    except (RuntimeError, _config.ConfigError) as exc:
         reason = str(exc)
         await db.write(lambda c: store.enter_node(c, work_item_id, cur))
         await db.write(lambda c: store.mark_needs_human(c, work_item_id, cur, reason))

@@ -1183,7 +1183,7 @@ async def run_once(
             attachments=entry.attachments_of(row),
             local_files=(launch.repo_entry or {}).get("local_files") if launch else None,
         )
-    except RuntimeError as exc:
+    except (RuntimeError, _config.ConfigError) as exc:
         failing_node = nodes[start_index]["id"]
         reason = str(exc)
         await db.write(lambda c: store.enter_node(c, work_item_id, failing_node))

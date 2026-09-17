@@ -5,12 +5,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from support.harness import _git, fake_registry, isolated_bd, make_repo
 
 from kraft import db, events, executor, store
 from kraft.adapters import beads
 from kraft.adapters import forge as _forge
-from kraft.config import git_read
+from kraft.api import deps
+from kraft.config import ConfigError, git_read
 from kraft.paths import RunDirs
 from kraft.templates import Registry, Template, load_registry, load_templates
 
@@ -2693,3 +2695,63 @@ def test_on_failure_repair_still_fires_on_a_resumed_entry(tmp_path, monkeypatch)
     )
     assert rounds == [4]
     assert repaired == [walk._REPAIR_ROUND], "on_failure repair did not run on the resumed entry"
+
+
+def test_a_poisoned_repo_entry_is_attributed_to_the_node_not_a_bare_crash(tmp_path):
+    """A malformed repos.yaml reaches ensure_worktree through the repo entry.
+    It must land as needs_human against the node that was about to dispatch,
+    not as guard's bare "executor crashed" (Kraft-cuo3p)."""
+    poisoned = deps._PoisonedRepoEntry(ConfigError("repos.yaml: 'local_files' must be a list"))
+    with pytest.raises(ConfigError):
+        poisoned.get("local_files")
+
+
+def test_walk_attributes_a_config_error_to_the_first_node(tmp_path):
+    """The whole point of Task 1: a broken repos.yaml names the node it broke."""
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="poisoned config",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            launch = executor.LaunchContext(
+                repo_entry=deps._PoisonedRepoEntry(ConfigError("repos.yaml: boom")),
+                steering_dir=None,
+            )
+            result = await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=launch,
+            )
+            assert result == "needs_human"
+
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT status, current_node_id FROM work_items WHERE id = ?", (wid,)
+                ).fetchone()
+            )
+            assert row["status"] == "needs_human"
+            assert row["current_node_id"] is not None
+
+            evts = database.read(lambda c: events.read_after(c, 0, wid))
+            reason = next(
+                e["payload"]["reason"] for e in evts if e["type"] == "work_item_needs_human"
+            )
+            assert "boom" in reason
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
