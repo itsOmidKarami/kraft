@@ -415,8 +415,8 @@ async def ensure_worktree(
     *,
     repo: str,
     work_item_id: str,
+    repo_entry: dict | None,
     attachments: list[dict] | None = None,
-    local_files: list[str] | None = None,
 ) -> Path:
     """The item's worktree, created if it is not there yet, with intake
     attachments copied in.
@@ -499,8 +499,9 @@ async def ensure_worktree(
     )
     # Before the sync, not after: uv chooses an interpreter when it runs, so a
     # pin that lands later is a pin that changed nothing (Kraft-gxcmy).
+    entry = repo_entry or {}
     _, refused = await asyncio.to_thread(
-        _carry_local_files, Path(repo), worktree, local_files or []
+        _carry_local_files, Path(repo), worktree, entry.get("local_files") or []
     )
     if refused:
         logger.warning(
@@ -984,6 +985,7 @@ async def env_setup(
     work_item_id: str,
     node_id: str,
     repo: str,
+    repo_entry: dict | None = None,
     round: int = 0,
     attachments: list[dict] | None = None,
     head_sha: str | None = None,
@@ -994,13 +996,14 @@ async def env_setup(
     # `resume` have already called `ensure_worktree` with the same attachments,
     # so this call is the early-return path and does no git or copy work in
     # the ordinary case — it only does real work when a test or a future chain
-    # calls `env_setup` without that prior call having happened. On that path
-    # this call passes no `local_files`, so the worktree it creates gets none
-    # of the repo's pins and `uv sync` runs unpinned — Kraft-gxcmy again, just
-    # from a different call site. The report below at least names the gap;
-    # closing it for real means threading `local_files` into this call too.
+    # calls `env_setup` without that prior call having happened.
     worktree = await ensure_worktree(
-        db, run_dirs, repo=repo, work_item_id=work_item_id, attachments=attachments
+        db,
+        run_dirs,
+        repo=repo,
+        work_item_id=work_item_id,
+        attachments=attachments,
+        repo_entry=repo_entry,
     )
     missing = await asyncio.to_thread(_uncarried_local_files, Path(repo), worktree)
     report = f"worktree ready at {worktree}\n"

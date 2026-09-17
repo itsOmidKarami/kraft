@@ -19,6 +19,10 @@ from kraft.templates import Registry, Template, load_registry, load_templates
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
 
+#: A repo that deliberately needs no preparation. Most tests here are about
+#: chain walking, not environments.
+NO_SETUP = {"setup_command": ""}
+
 
 def _quick_task() -> Template:
     reg = load_registry(_REPO_ROOT / "templates" / "registry.yaml")
@@ -1095,7 +1099,9 @@ def test_a_moved_base_bounces_back_to_verify_with_a_drift_note(tmp_path, monkeyp
             )
             from kraft import builtins as kraft_builtins
 
-            await kraft_builtins.ensure_worktree(database, rd, repo=str(repo), work_item_id=wid)
+            await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id=wid, repo_entry=NO_SETUP
+            )
 
             (repo / "moved.txt").write_text("moved on\n")
             subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
@@ -1187,7 +1193,9 @@ def test_a_bounce_clears_the_targets_fix_loop_counter(tmp_path, monkeypatch):
             )
             from kraft import builtins as kraft_builtins
 
-            await kraft_builtins.ensure_worktree(database, rd, repo=str(repo), work_item_id=wid)
+            await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id=wid, repo_entry=NO_SETUP
+            )
 
             # A stale counter left over from an earlier, unrelated pass over
             # `verify` -- what a bounce must not let the re-entered loop inherit.
@@ -1270,7 +1278,9 @@ def test_a_bounce_clears_an_intervening_nodes_fix_loop_too(tmp_path, monkeypatch
             )
             from kraft import builtins as kraft_builtins
 
-            await kraft_builtins.ensure_worktree(database, rd, repo=str(repo), work_item_id=wid)
+            await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id=wid, repo_entry=NO_SETUP
+            )
 
             cap = policy.Cap(attempts=3, wall_clock_s=3600)
             await database.write(lambda c: store.bump_counter(c, wid, "verify_fix_loop", cap))
@@ -1343,7 +1353,7 @@ def test_pre_mr_rebase_conflict_dispatches_resolver_and_bounces_to_verify(tmp_pa
                 bd_cwd=str(tracker),
             )
             worktree = await kraft_builtins.ensure_worktree(
-                database, rd, repo=str(repo), work_item_id=wid
+                database, rd, repo=str(repo), work_item_id=wid, repo_entry=NO_SETUP
             )
 
             # A real conflict: the worktree and the (now-upstream) repo both
@@ -1405,7 +1415,9 @@ def test_no_movement_skips_the_bounce(tmp_path, monkeypatch):
             )
             from kraft import builtins as kraft_builtins
 
-            await kraft_builtins.ensure_worktree(database, rd, repo=str(repo), work_item_id=wid)
+            await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id=wid, repo_entry=NO_SETUP
+            )
 
             result = await executor.run(
                 database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
@@ -1479,7 +1491,9 @@ def test_rebase_bounce_cap_escalates_to_needs_human(tmp_path, monkeypatch):
             )
             from kraft import builtins as kraft_builtins
 
-            await kraft_builtins.ensure_worktree(database, rd, repo=str(repo), work_item_id=wid)
+            await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id=wid, repo_entry=NO_SETUP
+            )
 
             # one commit before the run starts, so the first pre_mr_rebase
             # entry already has something to rebase
@@ -1952,7 +1966,7 @@ async def _resolver_scenario(tmp_path, tracker, agent_env, call_resolver):
             bd_cwd=str(tracker),
         )
         worktree = await kraft_builtins.ensure_worktree(
-            database, rd, repo=str(repo), work_item_id=wid
+            database, rd, repo=str(repo), work_item_id=wid, repo_entry=NO_SETUP
         )
         row = database.read(
             lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()

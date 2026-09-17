@@ -22,6 +22,10 @@ from kraft.adapters import forge
 from kraft.paths import RunDirs
 from kraft.templates import Registry, Template
 
+#: A repo that deliberately needs no preparation. Most tests here are about
+#: forge dispatch, not environments.
+NO_SETUP = {"setup_command": ""}
+
 
 def test_fake_forge_round_trips_an_mr(tmp_path):
     f = forge.FakeForge(ci_states=["pending", "success"])
@@ -1863,7 +1867,9 @@ def test_merge_completes_the_merge_after_a_rebase_when_no_bounce_is_configured(
                 template=template,
                 bd_cwd=str(tracker),
             )
-            await _builtins.ensure_worktree(database, rd, repo=str(repo), work_item_id=wid)
+            await _builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id=wid, repo_entry=NO_SETUP
+            )
 
             # Origin moves in a way the branch does not touch, so the forced
             # rebase this triggers is clean.
@@ -1922,7 +1928,7 @@ def test_merge_does_not_treat_a_rebased_submodule_as_landed_in_a_multi_repo_item
                 root_merge_policy="bump",
             )
             worktree = await _builtins.ensure_worktree(
-                database, rd, repo=str(root), work_item_id=wid
+                database, rd, repo=str(root), work_item_id=wid, repo_entry=NO_SETUP
             )
             row = database.read(
                 lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
@@ -2041,7 +2047,7 @@ def test_run_task_opens_a_merge_request_per_repo_deepest_first(tmp_path, monkeyp
                 root_merge_policy="bump",
             )
             worktree = await _builtins.ensure_worktree(
-                database, rd, repo=str(root), work_item_id=wid
+                database, rd, repo=str(root), work_item_id=wid, repo_entry=NO_SETUP
             )
             subprocess.run(["git", "fetch", "-q", "origin"], cwd=worktree, check=True)
             row = database.read(
@@ -2140,7 +2146,7 @@ def test_root_with_no_changes_of_its_own_never_opens_a_merge_request(tmp_path, m
                 root_merge_policy="bump_no_mr",
             )
             worktree = await _builtins.ensure_worktree(
-                database, rd, repo=str(root), work_item_id=wid
+                database, rd, repo=str(root), work_item_id=wid, repo_entry=NO_SETUP
             )
             row = database.read(
                 lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
@@ -2204,7 +2210,7 @@ def test_the_shape_that_broke_on_9d0ab38ff3c9439b90506df0f6966660(tmp_path, monk
                 root_merge_policy="skip",
             )
             worktree = await _builtins.ensure_worktree(
-                database, rd, repo=str(root), work_item_id=wid
+                database, rd, repo=str(root), work_item_id=wid, repo_entry=NO_SETUP
             )
             sub = worktree / "repos" / "packages"
             (sub / "metrics.py").write_text("ATTRS = 6\n")
@@ -2532,7 +2538,9 @@ def test_ci_poll_rebases_and_bounces_on_a_confirmed_conflict(tmp_path, monkeypat
                 template=_mr_checks_bounce_template(),
                 bd_cwd=str(tracker),
             )
-            await _builtins.ensure_worktree(database, rd, repo=str(repo), work_item_id=wid)
+            await _builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id=wid, repo_entry=NO_SETUP
+            )
 
             # Origin moves in a way the branch does not touch, so the forced
             # rebase this triggers is clean.
@@ -2627,7 +2635,7 @@ def test_ci_poll_stops_for_a_human_on_a_real_rebase_conflict(tmp_path, monkeypat
                 bd_cwd=str(tracker),
             )
             worktree = await _builtins.ensure_worktree(
-                database, rd, repo=str(repo), work_item_id=wid
+                database, rd, repo=str(repo), work_item_id=wid, repo_entry=NO_SETUP
             )
             original_base = database.read(
                 lambda c: c.execute(
