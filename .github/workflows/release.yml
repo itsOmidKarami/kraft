@@ -137,6 +137,23 @@ jobs:
         if: steps.impact.outputs.tag != ''
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
 
+      - name: mint a token to open the stamp PR
+        # The default GITHUB_TOKEN deliberately can't do this part: GitHub
+        # suppresses further workflow runs triggered by GITHUB_TOKEN, so a PR
+        # opened with it would never fire test.yml -- its required status
+        # checks would sit pending forever and auto-merge below would never
+        # fire. A GitHub App installation token doesn't carry that
+        # restriction, is scoped to just this repo (contents + pull-requests),
+        # and isn't tied to a personal account the way a PAT would be.
+        if: steps.impact.outputs.tag != ''
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: kraft
+
       - name: stamp plugin manifests for this release
         # Writing plugin.json's version here, not on the PR that triggers a
         # release, is the whole point: a value only this job ever writes can
@@ -150,7 +167,7 @@ jobs:
         if: steps.impact.outputs.tag != ''
         env:
           TAG: ${{ steps.impact.outputs.tag }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           VERSION="${TAG#v}"
           BRANCH="stamp-plugin-versions-$VERSION"
@@ -159,7 +176,11 @@ jobs:
             checkout -b "$BRANCH"
           git -c user.email=ci@kraft.invalid -c user.name="Kraft CI" \
             commit -am "chore: stamp plugin manifests for $TAG"
-          git push origin "$BRANCH"
+          # actions/checkout persisted GITHUB_TOKEN's own auth header, which
+          # takes precedence over any credential embedded in the remote URL --
+          # drop it so the push below actually authenticates as the App.
+          git config --local --unset-all http.https://github.com/.extraheader
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$BRANCH"
           gh pr create --base main --head "$BRANCH" \
             --title "chore: stamp plugin manifests for $TAG" \
             --body "Plugin manifest versions, written by the release workflow that just published $TAG." \

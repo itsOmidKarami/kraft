@@ -79,6 +79,13 @@ release, rather than asking every in-flight pull request to predict its own
 future version, is what a hand-stamped file could never do without conflicting
 with every other open pull request the moment a release lands.
 
+Opening that pull request needs its own credential: the default `GITHUB_TOKEN`
+can't be used, because GitHub suppresses further workflow runs triggered by
+`GITHUB_TOKEN`, which would leave the PR's required status checks pending
+forever. `release.yml` mints a short-lived token from a GitHub App installed
+on this repo instead (`RELEASE_BOT_APP_ID` / `RELEASE_BOT_PRIVATE_KEY`),
+scoped to just contents and pull-request writes on `kraft`.
+
 ## Branch hygiene
 
 Two ways a branch you're reusing by hand can quietly cost you work:
