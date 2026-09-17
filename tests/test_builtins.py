@@ -1601,3 +1601,230 @@ def test_refresh_worktree_base_raises_rebase_conflict_a_runtimeerror_subclass(tm
             await database.close()
 
     asyncio.run(scenario())
+
+
+def _linked_worktree(repo, tmp_path, name="wt"):
+    wt = tmp_path / name
+    subprocess.run(
+        ["git", "worktree", "add", "-q", str(wt), "-b", name],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    return wt
+
+
+def test_carry_local_files_copies_an_ignored_untracked_file(tmp_path):
+    """The whole point of Kraft-gxcmy: the pin exists in the developer's
+    checkout and nowhere in the worktree, because it was never committed."""
+    repo = make_repo(tmp_path)
+    (repo / ".gitignore").write_text(".python-version\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "ignore the pin")
+    (repo / ".python-version").write_text("3.11\n")
+    wt = _linked_worktree(repo, tmp_path)
+
+    carried, refused = kraft_builtins._carry_local_files(repo, wt, [".python-version"])
+
+    assert carried == [".python-version"]
+    assert refused == []
+    assert (wt / ".python-version").read_text() == "3.11\n"
+    # and invisible to git, so `open_mr`'s dirty-worktree guard never sees it
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=wt, capture_output=True, text=True
+    )
+    assert status.stdout == ""
+
+
+def test_carry_local_files_refuses_a_file_the_worktree_would_not_ignore(tmp_path):
+    """Kraft cannot hold an unignored file out of a commit, so it declines to
+    create one. A refusal is reported, never raised."""
+    repo = make_repo(tmp_path)
+    (repo / ".python-version").write_text("3.11\n")
+    wt = _linked_worktree(repo, tmp_path)
+
+    carried, refused = kraft_builtins._carry_local_files(repo, wt, [".python-version"])
+
+    assert carried == []
+    assert refused == [".python-version"]
+    assert not (wt / ".python-version").exists()
+
+
+def test_carry_local_files_skips_a_symlinked_destination(tmp_path):
+    repo = make_repo(tmp_path)
+    (repo / ".gitignore").write_text(".python-version\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "ignore the pin")
+    (repo / ".python-version").write_text("3.11\n")
+    wt = _linked_worktree(repo, tmp_path)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("untouched\n")
+    (wt / ".python-version").symlink_to(outside)
+
+    carried, refused = kraft_builtins._carry_local_files(repo, wt, [".python-version"])
+
+    assert carried == []
+    assert refused == []
+    assert outside.read_text() == "untouched\n"
+
+
+def test_carry_local_files_leaves_an_existing_destination_alone(tmp_path):
+    repo = make_repo(tmp_path)
+    (repo / ".gitignore").write_text(".python-version\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "ignore the pin")
+    (repo / ".python-version").write_text("3.11\n")
+    wt = _linked_worktree(repo, tmp_path)
+    (wt / ".python-version").write_text("3.12\n")
+
+    carried, refused = kraft_builtins._carry_local_files(repo, wt, [".python-version"])
+
+    assert carried == []
+    assert refused == []
+    assert (wt / ".python-version").read_text() == "3.12\n"
+
+
+def test_carry_local_files_ignores_a_source_that_is_not_there(tmp_path):
+    repo = make_repo(tmp_path)
+    (repo / ".gitignore").write_text(".python-version\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "ignore the pin")
+    wt = _linked_worktree(repo, tmp_path)
+
+    carried, refused = kraft_builtins._carry_local_files(repo, wt, [".python-version"])
+
+    assert carried == []
+    assert refused == []
+
+
+def test_carry_local_files_refuses_a_directory_entry_missing_its_trailing_slash(tmp_path):
+    """`config.py` only rejects a directory entry that ends in `/`, so a plain
+    `.venv` in `local_files` passes validation and reaches here. It is not a
+    file, so it always fails `src.is_file()` -- the same branch a genuinely
+    absent source takes. Without this, a typo like this is carried nowhere,
+    refused nowhere, and never shows up in `env_setup`'s report either
+    (`_uncarried_local_files`'s `"/" not in n` filter drops the `--directory`
+    listing's `.venv/` entry) -- zero feedback for a plausible mistake."""
+    repo = make_repo(tmp_path)
+    (repo / ".venv").mkdir()
+    (repo / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n")
+    wt = _linked_worktree(repo, tmp_path)
+
+    carried, refused = kraft_builtins._carry_local_files(repo, wt, [".venv"])
+
+    assert carried == []
+    assert refused == [".venv"]
+
+
+def test_local_files_land_before_uv_sync_resolves_an_interpreter(tmp_path, monkeypatch):
+    """Arriving eventually is not enough. uv picks the interpreter when it runs,
+    so a pin copied after `uv sync` is a pin that changed nothing (Kraft-gxcmy)."""
+    repo = make_repo(tmp_path)
+    (repo / ".gitignore").write_text(".python-version\n")
+    (repo / "pyproject.toml").write_text('[project]\nname = "s"\nversion = "0"\n')
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "add a python project")
+    (repo / ".python-version").write_text("3.11\n")
+
+    seen: dict[str, str] = {}
+    real_run = subprocess.run
+
+    def spy(args, **kwargs):
+        if list(args[:2]) == ["uv", "sync"]:
+            pin = Path(kwargs["cwd"]) / ".python-version"
+            seen["pin"] = pin.read_text() if pin.is_file() else "<absent>"
+            return subprocess.CompletedProcess(args, 0, "", "")
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(kraft_builtins.subprocess, "run", spy)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="w1",
+                    bead_id="B",
+                    title="t",
+                    repo=str(repo),
+                    chain_template="default",
+                    chain_definition="{}",
+                )
+            )
+            await kraft_builtins.ensure_worktree(
+                database,
+                rd,
+                repo=str(repo),
+                work_item_id="w1",
+                local_files=[".python-version"],
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    assert seen["pin"] == "3.11\n"
+
+
+def test_ensure_worktree_without_local_files_is_unchanged(tmp_path):
+    """The feature is opt-in: an unconfigured repo must behave exactly as before."""
+    repo = make_repo(tmp_path)
+    (repo / ".gitignore").write_text(".python-version\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "ignore the pin")
+    (repo / ".python-version").write_text("3.11\n")
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="w1",
+                    bead_id="B",
+                    title="t",
+                    repo=str(repo),
+                    chain_template="default",
+                    chain_definition="{}",
+                )
+            )
+            worktree = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id="w1"
+            )
+            assert not (worktree / ".python-version").exists()
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_uncarried_local_files_names_root_files_missing_from_the_worktree(tmp_path):
+    """An unconfigured repo is the default, so the gap has to be visible
+    without anyone having configured anything (Kraft-gxcmy)."""
+    repo = make_repo(tmp_path)
+    (repo / ".gitignore").write_text(".venv/\n.env\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "ignore local state")
+    (repo / ".python-version").write_text("3.11\n")  # untracked, not ignored
+    (repo / ".env").write_text("TOKEN=x\n")  # untracked and ignored
+    (repo / ".venv").mkdir()  # a directory: never reported
+    (repo / ".venv" / "marker").write_text("x\n")
+    wt = _linked_worktree(repo, tmp_path)
+
+    missing = kraft_builtins._uncarried_local_files(repo, wt)
+
+    assert missing == [".env", ".python-version"]
+
+
+def test_uncarried_local_files_omits_what_was_carried(tmp_path):
+    repo = make_repo(tmp_path)
+    (repo / ".gitignore").write_text(".python-version\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "ignore the pin")
+    (repo / ".python-version").write_text("3.11\n")
+    wt = _linked_worktree(repo, tmp_path)
+    kraft_builtins._carry_local_files(repo, wt, [".python-version"])
+
+    assert kraft_builtins._uncarried_local_files(repo, wt) == []

@@ -189,6 +189,7 @@ class RepoPatch(BaseModel):
     default_model: str | None = None
     deny_tools: list[str] | None = None
     steering: list[str] | None = None
+    local_files: list[str] | None = None
     default_root_merge_policy: str | None = None
 
 

@@ -17,6 +17,10 @@ export interface Repo {
   default_model: string | null;
   deny_tools: string[];
   steering: string[];
+  /** Relative file paths carried into every worktree before `uv sync`
+   *  (Kraft-gxcmy) -- refused, not copied, if the repo does not gitignore
+   *  the entry. */
+  local_files: string[];
   default_root_merge_policy: "bump" | "skip" | "bump_no_mr";
   /** A human has touched this entry — not "this has run". One-way: never
    *  returns to false. Drives the Detected section in ReposPage. */

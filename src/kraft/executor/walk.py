@@ -1181,6 +1181,7 @@ async def run_once(
             repo=row["repo"],
             work_item_id=work_item_id,
             attachments=entry.attachments_of(row),
+            local_files=(launch.repo_entry or {}).get("local_files") if launch else None,
         )
     except RuntimeError as exc:
         failing_node = nodes[start_index]["id"]

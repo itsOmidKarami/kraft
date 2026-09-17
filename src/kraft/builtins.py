@@ -189,6 +189,97 @@ def _copy_attachments(
         )
 
 
+def _carry_local_files(repo: Path, worktree: Path, rels: list[str]) -> tuple[list[str], list[str]]:
+    """Copy `rels` from `repo` into `worktree`. Returns `(carried, refused)`.
+
+    `git worktree add` checks out tracked content at HEAD, so a machine-local
+    file the developer never committed does not exist in the worktree. A
+    `.python-version` left behind this way is not a missing convenience: uv
+    falls through to `requires-python`, and `~=3.11` means `>=3.11, <4`, so it
+    picks whatever interpreter PATH offers first and the chain runs on it
+    silently -- 3.14 on work item 1e2e6b45898e42298d16232c9cbfb768, ten retries
+    deep (Kraft-gxcmy).
+
+    A file the worktree would not ignore is refused rather than carried. Kraft
+    has no way to hold an unignored file out of a commit: a per-worktree
+    `info/exclude` is read from the *common* dir, so an entry there would leak
+    to every other worktree of the same repo, and a `core.excludesFile` set in
+    the worktree's own config is outranked by `main_ignore_args`' `-c` -- which
+    is live during `_commit_paths`, exactly where it would have mattered.
+    Refusing keeps a carried file clear of `open_mr`'s dirty-worktree guard by
+    construction, and an unignored machine-local file is one `git add -A` from
+    being committed with or without Kraft.
+
+    Never raises: a refusal or a missing source is reported to the caller, not
+    turned into a failed worktree. The destination guards are
+    `_copy_attachments`' (Kraft-85wk) -- a symlinked destination is skipped
+    whether or not it dangles, and the resolved destination must stay inside
+    the worktree.
+    """
+    worktree_root = worktree.resolve()
+    carried: list[str] = []
+    refused: list[str] = []
+    for rel in rels:
+        src = repo / rel
+        dest = worktree / rel
+        if not src.is_file():
+            # config.py only rejects a directory entry that ends in `/`
+            # (`.venv/`), so a bare `.venv` passes validation and lands here.
+            # Silently skipping it -- indistinguishable from a source that was
+            # simply never created -- hides exactly the typo an operator most
+            # needs to see; refusing it, like an unignored file, at least says
+            # something went wrong. A genuinely absent source (no file, no
+            # directory) stays a silent no-op, per the spec.
+            if src.exists():
+                refused.append(rel)
+            continue
+        if dest.is_symlink() or dest.exists():
+            continue
+        resolved = dest.resolve()
+        if resolved != worktree_root and worktree_root not in resolved.parents:
+            continue
+        # The worktree's own rules, not `main`'s: `main_ignore_args` widens what
+        # counts as ignored for Kraft's own commits, but a plain `git add -A`
+        # from an agent sees only what is checked out here.
+        ignored = subprocess.run(
+            ["git", "check-ignore", "-q", "--", rel],
+            cwd=str(worktree),
+            capture_output=True,
+            text=True,
+        )
+        if ignored.returncode != 0:
+            refused.append(rel)
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dest)
+        carried.append(rel)
+    return carried, refused
+
+
+def _uncarried_local_files(repo: Path, worktree: Path) -> list[str]:
+    """Root-level files present in `repo` but absent from `worktree`.
+
+    `local_files` is opt-in, which means an unconfigured repo behaves exactly
+    as it did before -- including the part where it is silently wrong. Nobody
+    knew to configure the repo on work item 1e2e6b45898e42298d16232c9cbfb768
+    until after it had burned ten retries (Kraft-gxcmy), so the gap says its own
+    name here instead of waiting to be discovered.
+
+    No `--exclude-standard`: an *ignored* root file is the likeliest carry
+    candidate of all, so the listing has to include it. `--directory` collapses
+    an untracked directory to a single entry with a trailing slash, which the
+    filter then drops -- `.venv/` and `node_modules/` are artifacts to rebuild,
+    never files to carry.
+
+    Stateless by design: a carried file exists in the worktree, so nothing needs
+    to be told what Task 3 copied, and this reads correctly on
+    `ensure_worktree`'s early-return path where no copy happened at all.
+    """
+    listed = git_read(repo, "ls-files", "--others", "--directory", expected_failure=True) or ""
+    names = [n for n in listed.splitlines() if n and "/" not in n]
+    return sorted(n for n in names if not (worktree / n).exists())
+
+
 def _pin_identity(repo: Path, worktree: Path, work_item_id: str) -> None:
     """Resolve `user.name`/`user.email` from `repo` and write them into
     `worktree`'s own git config, plus every submodule's separate gitdir.
@@ -325,6 +416,7 @@ async def ensure_worktree(
     repo: str,
     work_item_id: str,
     attachments: list[dict] | None = None,
+    local_files: list[str] | None = None,
 ) -> Path:
     """The item's worktree, created if it is not there yet, with intake
     attachments copied in.
@@ -405,6 +497,18 @@ async def ensure_worktree(
     await asyncio.to_thread(
         _copy_attachments, Path(repo), worktree, attachments or [], work_item_id
     )
+    # Before the sync, not after: uv chooses an interpreter when it runs, so a
+    # pin that lands later is a pin that changed nothing (Kraft-gxcmy).
+    _, refused = await asyncio.to_thread(
+        _carry_local_files, Path(repo), worktree, local_files or []
+    )
+    if refused:
+        logger.warning(
+            "not carried into %s (the worktree would not ignore them, so Kraft "
+            "cannot keep them out of a commit): %s",
+            work_item_id,
+            ", ".join(refused),
+        )
     # Every node from `spec` on can commit, and the shared pre-commit hook
     # (`.beads/hooks/pre-commit`) needs `pre-commit` on PATH -- via `uv run
     # --no-sync` -- to catch a formatting slip before it reaches CI. A
@@ -890,10 +994,28 @@ async def env_setup(
     # `resume` have already called `ensure_worktree` with the same attachments,
     # so this call is the early-return path and does no git or copy work in
     # the ordinary case — it only does real work when a test or a future chain
-    # calls `env_setup` without that prior call having happened.
+    # calls `env_setup` without that prior call having happened. On that path
+    # this call passes no `local_files`, so the worktree it creates gets none
+    # of the repo's pins and `uv sync` runs unpinned — Kraft-gxcmy again, just
+    # from a different call site. The report below at least names the gap;
+    # closing it for real means threading `local_files` into this call too.
     worktree = await ensure_worktree(
         db, run_dirs, repo=repo, work_item_id=work_item_id, attachments=attachments
     )
+    missing = await asyncio.to_thread(_uncarried_local_files, Path(repo), worktree)
+    report = f"worktree ready at {worktree}\n"
+    if missing:
+        # Informational, not a to-do list: on most repos this names things
+        # like `.DS_Store` or `.testmondata` that nobody would ever carry.
+        # No hardcoded skip list for those, though -- a per-name filter here
+        # is exactly the per-repo maintenance treadmill `local_files` was
+        # built to avoid, and it would just be wrong on the next repo.
+        report += (
+            "\nuntracked root-level files present in the repo but not in this "
+            "worktree (git worktree add only checks out tracked content) -- "
+            "most of these are irrelevant noise, worth a glance only if the "
+            "build actually needs one of them:\n" + "".join(f"  {n}\n" for n in missing)
+        )
     return await _record_done(
         db,
         run_dirs,
@@ -902,7 +1024,7 @@ async def env_setup(
         node_id=node_id,
         hook_point="on.env.prepare",
         round=round,
-        log=f"worktree ready at {worktree}\n",
+        log=report,
         head_sha=head_sha,
     )
 

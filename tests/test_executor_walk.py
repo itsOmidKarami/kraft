@@ -959,6 +959,52 @@ def test_fix_cycle_dispatch_gets_the_same_launch_context(tmp_path, monkeypatch):
     assert argvs[0][argvs[0].index("--model") + 1] == "haiku"
 
 
+def test_run_once_threads_local_files_from_the_launch_context(tmp_path, monkeypatch):
+    """Kraft-gxcmy's production wiring: `run_once` (`walk.py:1184`) passes
+    `launch.repo_entry["local_files"]` into `ensure_worktree`. Every other
+    `local_files` test drives `ensure_worktree` directly -- not the path that
+    actually runs in production -- so deleting that one line left the whole
+    suite green. This test fails if it is."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    (repo / ".gitignore").write_text(".python-version\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "ignore the pin")
+    (repo / ".python-version").write_text("3.11\n")
+
+    tmpl = Template(
+        id="env-only",
+        nodes=[{"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None}],
+    )
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
+            )
+            launch = executor.LaunchContext(
+                repo_entry={"local_files": [".python-version"]}, steering_dir=None
+            )
+            result = await executor.run_once(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=launch,
+            )
+            assert result == "completed"
+            assert (rd.worktrees / wid / ".python-version").read_text() == "3.11\n"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 # --- rebase-and-drift-review before open_mr (Kraft-4bgg) --------------------
 
 
