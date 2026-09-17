@@ -181,7 +181,7 @@ def perform(release: Release, *, run=None) -> int:
     with tempfile.TemporaryDirectory() as tmpdir:
         wheel_path = Path(tmpdir) / release.wheel_url.rsplit("/", 1)[-1]
         wheel_path.write_bytes(_request(release.wheel_url, DOWNLOAD_TIMEOUT))
-        command = ["uv", "tool", "install", "--force", "--from", str(wheel_path), "kraft"]
+        command = ["uv", "tool", "install", "--force", "--from", str(wheel_path), "kraft-sdlc"]
         try:
             return run(command).returncode
         except FileNotFoundError:

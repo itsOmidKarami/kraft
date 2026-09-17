@@ -103,7 +103,7 @@ bundle:
 # Install `kraft` as a real command (then just run `kraft` from anywhere).
 # State lands in ~/.kraft, seeded from templates/ on first run.
 install: bundle
-    uv tool install --from . kraft --force
+    uv tool install --from . kraft-sdlc --force
     @echo "installed. run: kraft"
     @grep -q "register-python-argcomplete kraft" ~/.zshrc 2>/dev/null || echo 'tip: add eval "$(register-python-argcomplete kraft)" to ~/.zshrc for tab completion'
 
