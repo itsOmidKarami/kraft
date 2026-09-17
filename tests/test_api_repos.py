@@ -787,6 +787,46 @@ def test_load_repos_rejects_a_non_boolean_managed(tmp_path):
         config.load_repos(path)
 
 
+def test_load_repos_defaults_local_files_to_empty(tmp_path):
+    path = tmp_path / "repos.yaml"
+    path.write_text(yaml.safe_dump({"repos": [{"path": "/a"}]}))
+    assert config.load_repos(path)[0]["local_files"] == []
+
+
+def test_load_repos_keeps_a_declared_local_file(tmp_path):
+    path = tmp_path / "repos.yaml"
+    path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "local_files": [".python-version"]}]}))
+    assert config.load_repos(path)[0]["local_files"] == [".python-version"]
+
+
+def test_load_repos_rejects_a_non_list_local_files(tmp_path):
+    path = tmp_path / "repos.yaml"
+    path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "local_files": ".python-version"}]}))
+    with pytest.raises(config.ConfigError, match="'local_files' must be a list"):
+        config.load_repos(path)
+
+
+def test_load_repos_rejects_an_absolute_local_file(tmp_path):
+    path = tmp_path / "repos.yaml"
+    path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "local_files": ["/etc/passwd"]}]}))
+    with pytest.raises(config.ConfigError, match="must be a relative path"):
+        config.load_repos(path)
+
+
+def test_load_repos_rejects_a_local_file_escaping_the_repo(tmp_path):
+    path = tmp_path / "repos.yaml"
+    path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "local_files": ["../secrets"]}]}))
+    with pytest.raises(config.ConfigError, match="must be a relative path"):
+        config.load_repos(path)
+
+
+def test_load_repos_rejects_a_local_files_directory_entry(tmp_path):
+    path = tmp_path / "repos.yaml"
+    path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "local_files": [".venv/"]}]}))
+    with pytest.raises(config.ConfigError, match="must name a file"):
+        config.load_repos(path)
+
+
 def test_a_configured_submodule_edge_becomes_a_child_repo_entry(tmp_path):
     path = tmp_path / "repos.yaml"
     path.write_text(

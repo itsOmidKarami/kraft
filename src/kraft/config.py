@@ -218,6 +218,26 @@ def load_repos(
         if r.get("test_command") is not None and not isinstance(r["test_command"], str):
             raise ConfigError("repos.yaml: 'test_command' must be a string")
         r["test_scopes"] = _normalize_test_scopes(r.get("test_scopes"))
+        # Files `git worktree add` cannot carry: it checks out tracked content
+        # at HEAD, so an untracked `.python-version` never reaches the worktree
+        # and uv resolves an interpreter off PATH instead -- 3.14 against a repo
+        # that wanted 3.11, with nothing to say so (Kraft-gxcmy). Relative file
+        # paths only: a directory here is how a list like this starts dragging
+        # `.venv` and `node_modules` into every worktree, and a glob is the same
+        # trap with extra steps.
+        r.setdefault("local_files", [])
+        if not isinstance(r["local_files"], list) or not all(
+            isinstance(x, str) and x for x in r["local_files"]
+        ):
+            raise ConfigError("repos.yaml: 'local_files' must be a list of non-empty strings")
+        for rel in r["local_files"]:
+            if rel.endswith("/"):
+                raise ConfigError(f"repos.yaml: 'local_files' entry {rel!r} must name a file")
+            if Path(rel).is_absolute() or ".." in Path(rel).parts:
+                raise ConfigError(
+                    f"repos.yaml: 'local_files' entry {rel!r} must be a relative path "
+                    "inside the repo"
+                )
         for key in ("deny_tools", "steering"):
             v = r.setdefault(key, [])
             if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
