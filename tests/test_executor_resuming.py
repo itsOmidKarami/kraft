@@ -10,6 +10,10 @@ from kraft.templates import Registry, Template, load_registry, load_templates
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
+#: A repo that deliberately needs no preparation. Most tests here are about
+#: resuming a chain, not environments.
+NO_SETUP = {"setup_command": ""}
+
 
 def _quick_task() -> Template:
     reg = load_registry(_REPO_ROOT / "templates" / "registry.yaml")
@@ -63,6 +67,7 @@ def test_reconcile_accepts_a_done_with_concerns_session(tmp_path):
                 registry=registry,
                 adopted={},
                 bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "completed"
             row = database.read(
@@ -176,6 +181,7 @@ def test_reconcile_reuses_a_done_measuring_session_after_a_crash(tmp_path):
                 adopted={},
                 bd_cwd=str(tracker),
                 policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             rows = database.read(
                 lambda c: c.execute(
@@ -286,6 +292,7 @@ def test_reconcile_reproduces_kraft_s15p0s_discarded_plan_session(tmp_path):
                 registry=registry,
                 adopted={},
                 bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             row = database.read(
                 lambda c: c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()
@@ -358,6 +365,7 @@ def test_reconcile_still_needs_human_when_latest_attempt_failed(tmp_path):
                 registry=registry,
                 adopted={},
                 bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "needs_human"
             row = database.read(
@@ -402,7 +410,8 @@ def test_resume_threads_local_files_from_the_launch_context(tmp_path):
                 database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
             )
             launch = executor.LaunchContext(
-                repo_entry={"local_files": [".python-version"]}, steering_dir=None
+                repo_entry={"local_files": [".python-version"], "setup_command": ""},
+                steering_dir=None,
             )
             result = await executor.resume(
                 database,

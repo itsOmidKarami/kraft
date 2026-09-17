@@ -514,7 +514,16 @@ def test_an_auto_started_item_stops_at_its_first_gate(tmp_path, monkeypatch):
     # now refuses it, so using it here would test the refusal instead of the gate.
     (templates_dir / "repos.yaml").write_text(
         yaml.safe_dump(
-            {"repos": [{"path": str(repo), "enabled": True, "default_chain_template": "default"}]}
+            {
+                "repos": [
+                    {
+                        "path": str(repo),
+                        "enabled": True,
+                        "default_chain_template": "default",
+                        "setup_command": "",
+                    }
+                ]
+            }
         )
     )
     # interval_s is long so the lifespan poller never ticks on its own; the test

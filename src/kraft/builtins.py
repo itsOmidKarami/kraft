@@ -12,6 +12,7 @@ from pathlib import Path
 from kraft import logs, store
 from kraft.adapters.forge import git
 from kraft.config import git_read, main_ignore_args
+from kraft.worker_env import worker_env
 
 logger = logging.getLogger(__name__)
 
@@ -409,14 +410,33 @@ async def _setup_submodules(
     )
 
 
+async def _discard_worktree(repo: Path, worktree: Path) -> str | None:
+    """Remove a worktree whose setup failed, keeping its branch. Returns a
+    reason when the directory survives, or None.
+
+    `ensure_worktree` returns early when the directory exists, so a worktree
+    left behind by a failed setup would make the next attempt skip setup
+    entirely. The branch stays: a rejected gate already removes a worktree and
+    keeps its branch, and the commits on it are not this failure's business.
+    Not best-effort like the abandon path -- a survivor is reported into the
+    error the caller is about to raise, because silence here is the bug.
+    """
+    for args in (
+        ["git", "worktree", "remove", "--force", str(worktree)],
+        ["git", "worktree", "prune"],
+    ):
+        await asyncio.to_thread(subprocess.run, args, cwd=repo, capture_output=True, text=True)
+    return None if not worktree.exists() else f"{worktree} still present"
+
+
 async def ensure_worktree(
     db,
     run_dirs,
     *,
     repo: str,
     work_item_id: str,
+    repo_entry: dict | None,
     attachments: list[dict] | None = None,
-    local_files: list[str] | None = None,
 ) -> Path:
     """The item's worktree, created if it is not there yet, with intake
     attachments copied in.
@@ -444,6 +464,15 @@ async def ensure_worktree(
     worktree = run_dirs.worktrees / work_item_id
     if worktree.is_dir():
         return worktree
+    # Read from repo_entry before `git worktree add` runs, not after: a
+    # poisoned entry (malformed repos.yaml) raises ConfigError on `.get`, and
+    # reading it only after the worktree exists would leave that worktree
+    # behind for a later `kraft item retry` to find via the early return
+    # above -- skipping setup_command entirely and dispatching into an
+    # unprepared worktree.
+    entry = repo_entry or {}
+    local_files = entry.get("local_files") or []
+    cmd = entry.get("setup_command")
     # Pin the base before the worktree exists, so the early return above
     # guarantees a crashed-and-retried run never re-pins to a moved HEAD.
     row = db.read(
@@ -499,9 +528,7 @@ async def ensure_worktree(
     )
     # Before the sync, not after: uv chooses an interpreter when it runs, so a
     # pin that lands later is a pin that changed nothing (Kraft-gxcmy).
-    _, refused = await asyncio.to_thread(
-        _carry_local_files, Path(repo), worktree, local_files or []
-    )
+    _, refused = await asyncio.to_thread(_carry_local_files, Path(repo), worktree, local_files)
     if refused:
         logger.warning(
             "not carried into %s (the worktree would not ignore them, so Kraft "
@@ -510,25 +537,35 @@ async def ensure_worktree(
             ", ".join(refused),
         )
     # Every node from `spec` on can commit, and the shared pre-commit hook
-    # (`.beads/hooks/pre-commit`) needs `pre-commit` on PATH -- via `uv run
-    # --no-sync` -- to catch a formatting slip before it reaches CI. A
-    # freshly created worktree has no `.venv` yet, so the very first commit
-    # an agent made hit `Failed to spawn: pre-commit` and fell back to
-    # `--no-verify`, skipping the check it most needed for the doc it had
-    # just written (Kraft-i047). Sync once here, before any node dispatches,
-    # so the safety net is live for that first commit too. Best-effort: a
-    # sync failure (offline, first-run download taking too long) logs and
-    # falls back to today's `--no-verify` behavior rather than failing the
-    # whole worktree over tooling, not content.
-    if (worktree / "pyproject.toml").is_file():
-        synced = await asyncio.to_thread(
-            subprocess.run, ["uv", "sync"], cwd=worktree, capture_output=True, text=True
+    # needs its tooling on PATH, so the worktree must be a working environment
+    # before the first node dispatches (Kraft-i047). There is no default and no
+    # marker sniffing: the repo declares how it is prepared, or the chain stops
+    # (Kraft-kji8w). A failure here used to be a log warning, which dispatched
+    # a node into a known-broken environment and let the verify node retry a
+    # deterministic failure ten times over (Kraft-s0w2l).
+    if cmd is None:
+        await _discard_worktree(Path(repo), worktree)
+        raise RuntimeError(
+            f"no setup_command declared for {repo} in repos.yaml, so {work_item_id}'s "
+            'worktree cannot be prepared. Declare one (use "" for a repo that '
+            "deliberately needs no preparation)."
         )
-        if synced.returncode != 0:
-            logger.warning(
-                "uv sync failed for %s: %s",
-                work_item_id,
-                synced.stderr.strip() or synced.stdout.strip(),
+    if cmd:
+        done = await asyncio.to_thread(
+            subprocess.run,
+            cmd,
+            shell=True,
+            cwd=worktree,
+            env=worker_env(repo_entry),
+            capture_output=True,
+            text=True,
+        )
+        if done.returncode != 0:
+            detail = done.stderr.strip() or done.stdout.strip()
+            left = await _discard_worktree(Path(repo), worktree)
+            suffix = f" (and its worktree could not be removed: {left})" if left else ""
+            raise RuntimeError(
+                f"setup command failed for {work_item_id}: {cmd!r}: {detail}{suffix}"
             )
     decl = db.read(
         lambda c: c.execute(
@@ -984,6 +1021,7 @@ async def env_setup(
     work_item_id: str,
     node_id: str,
     repo: str,
+    repo_entry: dict | None = None,
     round: int = 0,
     attachments: list[dict] | None = None,
     head_sha: str | None = None,
@@ -994,13 +1032,14 @@ async def env_setup(
     # `resume` have already called `ensure_worktree` with the same attachments,
     # so this call is the early-return path and does no git or copy work in
     # the ordinary case — it only does real work when a test or a future chain
-    # calls `env_setup` without that prior call having happened. On that path
-    # this call passes no `local_files`, so the worktree it creates gets none
-    # of the repo's pins and `uv sync` runs unpinned — Kraft-gxcmy again, just
-    # from a different call site. The report below at least names the gap;
-    # closing it for real means threading `local_files` into this call too.
+    # calls `env_setup` without that prior call having happened.
     worktree = await ensure_worktree(
-        db, run_dirs, repo=repo, work_item_id=work_item_id, attachments=attachments
+        db,
+        run_dirs,
+        repo=repo,
+        work_item_id=work_item_id,
+        attachments=attachments,
+        repo_entry=repo_entry,
     )
     missing = await asyncio.to_thread(_uncarried_local_files, Path(repo), worktree)
     report = f"worktree ready at {worktree}\n"

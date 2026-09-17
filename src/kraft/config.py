@@ -168,6 +168,7 @@ def _migrate_submodule_edges(repos: list[dict]) -> list[dict]:
                     # the edge carried a human decision -- that is the touch
                     "managed": True,
                     "test_command": e.get("test_command"),
+                    "setup_command": e.get("setup_command"),
                     "default_chain_template": e.get("chain_override") or "default",
                 }
             )
@@ -242,6 +243,26 @@ def load_repos(
                 raise ConfigError(
                     f"repos.yaml: 'local_files' entry {rel!r} must be a literal path, not a glob"
                 )
+        # How this repo's worktree is prepared. No default and no fallback:
+        # an absent key is "nobody has decided yet" and stops the chain when
+        # the worktree is built, while `""` is a deliberate "nothing to do"
+        # (Kraft-kji8w). Validated for shape here; required at use, because a
+        # ConfigError raised at load would take down every repo at once.
+        r.setdefault("setup_command", None)
+        if r.get("setup_command") is not None and not isinstance(r["setup_command"], str):
+            raise ConfigError("repos.yaml: 'setup_command' must be a string")
+        # Layered onto the worker baseline, which is an allowlist rather than
+        # the daemon's inherited environment (Kraft-69atv).
+        r.setdefault("env", {})
+        if not isinstance(r["env"], dict) or not all(
+            isinstance(k, str) and isinstance(v, str) for k, v in r["env"].items()
+        ):
+            raise ConfigError("repos.yaml: 'env' must be a map of string to string")
+        r.setdefault("env_passthrough", [])
+        if not isinstance(r["env_passthrough"], list) or not all(
+            isinstance(x, str) and x for x in r["env_passthrough"]
+        ):
+            raise ConfigError("repos.yaml: 'env_passthrough' must be a list of non-empty strings")
         for key in ("deny_tools", "steering"):
             v = r.setdefault(key, [])
             if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
@@ -395,6 +416,24 @@ def _first_test_command(directory: Path) -> str | None:
     return next((cmd for marker, cmd in _TEST_COMMANDS if (directory / marker).is_file()), None)
 
 
+#: Marker -> the command that prepares a checkout of this kind of repo. A
+#: *suggestion* written into repos.yaml at connect time for a human to check,
+#: never consulted at run time: the runtime runs what is declared and infers
+#: nothing. Ordered so a lockfile beats the manifest beside it.
+_SETUP_COMMANDS = [
+    ("package-lock.json", "npm ci"),
+    ("yarn.lock", "yarn install --frozen-lockfile"),
+    ("pnpm-lock.yaml", "pnpm install --frozen-lockfile"),
+    ("pyproject.toml", "uv sync"),
+    ("Cargo.toml", "cargo fetch"),
+    ("go.mod", "go mod download"),
+]
+
+
+def _first_setup_command(directory: Path) -> str | None:
+    return next((cmd for marker, cmd in _SETUP_COMMANDS if (directory / marker).is_file()), None)
+
+
 def _probe_test_scopes(
     root: Path, *, test_command: str | None = None
 ) -> tuple[str | None, list[dict]]:
@@ -501,6 +540,7 @@ def probe_repo(path: str | Path, *, test_command: str | None = None) -> dict:
         "has_engineering": (root / ".engineering").is_dir(),
         "test_command": test_command,
         "test_scopes": test_scopes,
+        "setup_command": _first_setup_command(root),
         "forge": forge,
         "project": project,
     }

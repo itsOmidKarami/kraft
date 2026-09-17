@@ -32,6 +32,14 @@ zero exit code says the command ran, not that what it did was right.
    the running server reads that file fresh on each request, no restart
    needed.
 
+   Read back the probed `setup_command` the same way, and check it just as
+   hard. It is what prepares every worktree for this repo, and there is no
+   default behind it: a repo with no `setup_command` stops its next work item
+   rather than guessing. A repo that genuinely needs no preparation declares
+   `setup_command: ""` — deliberately nothing, not an oversight. Correct a
+   wrong probe by editing this repo's entry in `repos.yaml` directly, the same
+   way as `test_command`.
+
    If the repo has submodules, connect writes each `.gitmodules` path as its
    own repo entry, not a sub-field of this one — run `kraft repo list --all`
    (they're `managed: false` until touched, so plain `kraft repo list` won't
@@ -66,7 +74,17 @@ zero exit code says the command ran, not that what it did was right.
    worktree in it, not the one you just created — that mismatch is what made
    the old `$$`-based version of this step fail its own cleanup.
 
-   First probe, cheap and fast — whatever fits this repo's toolchain (`uv run
+   First, the repo's own declared preparation — this is what every real
+   worktree gets, so a wrong `setup_command` should fail here, once, while
+   someone is still watching:
+
+   ```bash
+   (cd "$PROBE" && <setup_command>)
+   ```
+
+   Use the `setup_command` confirmed in step 1, not a guess.
+
+   Next, cheap and fast — whatever fits this repo's toolchain (`uv run
    python -V`, `node -v`, ...), not the test suite:
 
    ```bash
@@ -109,7 +127,7 @@ zero exit code says the command ran, not that what it did was right.
      - .python-version
    ```
 
-   Kraft copies those into every worktree before it runs `uv sync`, and
+   Kraft copies those into every worktree before it runs `setup_command`, and
    **refuses any entry the repo does not gitignore** — it cannot keep an
    unignored file out of a commit. If a needed file is not ignored, add it to
    `.gitignore` rather than dropping it from `local_files`. Cut a fresh probe

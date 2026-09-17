@@ -670,7 +670,12 @@ def test_connected_repos_default_model_reaches_the_agent_launch(tmp_path, monkey
     with _client(tmp_path, monkeypatch, templates_dir) as client:
         added = client.post(
             "/api/repos",
-            json={"path": str(repo), "default_model": "haiku", "test_command": "pytest"},
+            json={
+                "path": str(repo),
+                "default_model": "haiku",
+                "test_command": "pytest",
+                "setup_command": "",
+            },
         )
         assert added.status_code == 201
 
@@ -708,7 +713,13 @@ def test_connected_repos_steering_reaches_the_agent_launch(tmp_path, monkeypatch
 
     with _client(tmp_path, monkeypatch, templates_dir) as client:
         added = client.post(
-            "/api/repos", json={"path": str(repo), "steering": ["house"], "test_command": "pytest"}
+            "/api/repos",
+            json={
+                "path": str(repo),
+                "steering": ["house"],
+                "test_command": "pytest",
+                "setup_command": "",
+            },
         )
         assert added.status_code == 201, added.text
 
@@ -874,6 +885,75 @@ def test_load_repos_rejects_a_local_files_glob_pattern_double_star(tmp_path):
     path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "local_files": ["**/*.env"]}]}))
     with pytest.raises(config.ConfigError, match="must be a literal path, not a glob"):
         config.load_repos(path)
+
+
+def test_load_repos_rejects_a_non_string_setup_command(tmp_path):
+    path = tmp_path / "repos.yaml"
+    path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "setup_command": ["uv", "sync"]}]}))
+    with pytest.raises(config.ConfigError, match="setup_command"):
+        config.load_repos(path)
+
+
+def test_load_repos_rejects_a_non_flat_string_map_env(tmp_path):
+    path = tmp_path / "repos.yaml"
+    path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "env": {"A": 1}}]}))
+    with pytest.raises(config.ConfigError, match="'env'"):
+        config.load_repos(path)
+
+
+def test_load_repos_rejects_a_non_string_env_passthrough_entry(tmp_path):
+    path = tmp_path / "repos.yaml"
+    path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "env_passthrough": ["", "OK"]}]}))
+    with pytest.raises(config.ConfigError, match="env_passthrough"):
+        config.load_repos(path)
+
+
+def test_load_repos_defaults_setup_command_env_and_env_passthrough(tmp_path):
+    path = tmp_path / "repos.yaml"
+    path.write_text(yaml.safe_dump({"repos": [{"path": "/a"}]}))
+    entry = config.load_repos(path)[0]
+    assert entry["setup_command"] is None
+    assert entry["env"] == {}
+    assert entry["env_passthrough"] == []
+
+
+@pytest.mark.parametrize(
+    "marker, expected",
+    [
+        ("pyproject.toml", "uv sync"),
+        ("package-lock.json", "npm ci"),
+        ("yarn.lock", "yarn install --frozen-lockfile"),
+        ("pnpm-lock.yaml", "pnpm install --frozen-lockfile"),
+        ("Cargo.toml", "cargo fetch"),
+        ("go.mod", "go mod download"),
+    ],
+)
+def test_the_setup_probe_suggests_per_marker(tmp_path, marker, expected):
+    (tmp_path / marker).write_text("")
+    assert config._first_setup_command(tmp_path) == expected
+
+
+def test_the_setup_probe_suggests_nothing_for_an_unmarked_repo(tmp_path):
+    assert config._first_setup_command(tmp_path) is None
+
+
+def test_probe_repo_suggests_a_setup_command(tmp_path):
+    repo = make_repo(tmp_path)
+    (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
+    assert config.probe_repo(repo)["setup_command"] == "uv sync"
+
+
+def test_add_repo_writes_the_probed_setup_command(tmp_path, client):
+    repo = make_repo(tmp_path)
+    (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
+    entry = client.post("/api/repos", json={"path": str(repo)}).json()
+    assert entry["setup_command"] == "uv sync"
+
+
+def test_add_repo_leaves_setup_command_undeclared_with_no_marker(tmp_path, client):
+    repo = make_repo(tmp_path, name="plain")
+    entry = client.post("/api/repos", json={"path": str(repo)}).json()
+    assert entry["setup_command"] is None
 
 
 def test_a_configured_submodule_edge_becomes_a_child_repo_entry(tmp_path):

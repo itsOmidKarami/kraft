@@ -107,6 +107,17 @@ def test_a_disconnected_repo_path_fails(app, tmp_path, monkeypatch):
     assert "no longer a git repo" in row["detail"]
 
 
+def test_doctor_reports_a_connected_repo_with_no_setup_command(app, tmp_path):
+    """Section 1 removes the Python default deliberately, so every connected
+    repo needs a declaration. Finding that out from doctor beats finding it
+    out from a parked work item."""
+    repo = make_repo(tmp_path, name="undeclared")
+    asyncio.run(client.ensure_repo(str(repo)))
+    row = next(r for r in asyncio.run(doctor.run_checks()) if r["name"].startswith("setup "))
+    assert not row["ok"]
+    assert "setup_command" in row["detail"]
+
+
 def _bind_auto_forge(tmp_path):
     """Put a `backend: auto` forge hook in the registry the server loaded.
 

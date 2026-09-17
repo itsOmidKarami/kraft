@@ -20,6 +20,7 @@ class RepoBody(BaseModel):
     default_chain_template: str | None = None
     test_command: str | None = None
     test_scopes: list[dict] | None = None
+    setup_command: str | None = None
     forge: str | None = None
     project: str | None = None
     # None means "pick a safe default": enabled if a test command was given or
@@ -68,6 +69,7 @@ def _auto_connect_children(repos: list[dict], parent: dict, submodule_paths: lis
                 "default_chain_template": "default",
                 "test_command": probed["test_command"],
                 "test_scopes": None,
+                "setup_command": probed["setup_command"],
                 "forge": probed["forge"],
                 "project": probed["project"],
                 "enabled": False,
@@ -144,12 +146,16 @@ async def add_repo(body: RepoBody, request: Request):
     has_nested = any(scope.get("paths") != ["**"] for scope in probed_scopes)
     nested_probed_scopes = probed_scopes if has_nested else None
     test_scopes = body.test_scopes if body.test_scopes is not None else nested_probed_scopes
+    setup_command = (
+        body.setup_command if body.setup_command is not None else probed["setup_command"]
+    )
     entry = {
         "path": probed["path"],
         "name": body.name or probed["name"],
         "default_chain_template": body.default_chain_template or "default",
         "test_command": test_command,
         "test_scopes": test_scopes,
+        "setup_command": setup_command,
         "forge": body.forge or probed["forge"],
         "project": body.project or probed["project"],
         "enabled": body.enabled if body.enabled is not None else bool(test_command or test_scopes),
@@ -183,6 +189,7 @@ class RepoPatch(BaseModel):
     default_chain_template: str | None = None
     test_command: str | None = None
     test_scopes: list[dict] | None = None
+    setup_command: str | None = None
     forge: str | None = None
     project: str | None = None
     enabled: bool | None = None

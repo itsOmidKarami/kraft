@@ -16,6 +16,10 @@ from kraft import db, store
 from kraft.config import git_read
 from kraft.paths import RunDirs
 
+#: A repo that deliberately needs no preparation. Most tests here are about
+#: git and attachments, not environments.
+NO_SETUP = {"setup_command": ""}
+
 
 def test_env_setup_creates_worktree_and_branch(tmp_path):
     repo = make_repo(tmp_path)
@@ -42,6 +46,7 @@ def test_env_setup_creates_worktree_and_branch(tmp_path):
                 work_item_id="w1",
                 node_id="env_setup",
                 repo=str(repo),
+                repo_entry=NO_SETUP,
             )
             assert status == "done"
             worktree = rd.worktrees / "w1"
@@ -101,6 +106,7 @@ def test_env_setup_copies_an_uncommitted_attachment_into_the_worktree(tmp_path):
                 node_id="env_setup",
                 repo=str(repo),
                 attachments=[{"kind": "plan", "path": ".engineering/plans/p.md"}],
+                repo_entry=NO_SETUP,
             )
             assert status == "done"
             copied = rd.worktrees / "w1" / ".engineering" / "plans" / "p.md"
@@ -142,6 +148,7 @@ def test_ensure_worktree_alone_copies_attachments_before_any_node_runs(tmp_path)
                 repo=str(repo),
                 work_item_id="w1",
                 attachments=[{"kind": "spec", "path": ".engineering/specs/s.md"}],
+                repo_entry=NO_SETUP,
             )
             copied = worktree / ".engineering" / "specs" / "s.md"
             assert copied.read_text() == "# the spec\n"
@@ -196,6 +203,7 @@ def test_an_attachment_from_another_worktree_is_copied_from_its_source(tmp_path)
                         "source": str(spec),
                     }
                 ],
+                repo_entry=NO_SETUP,
             )
             copied = worktree / ".engineering" / "specs" / "s.md"
             assert copied.read_text() == "# from the other worktree\n"
@@ -240,6 +248,7 @@ def test_a_missing_attachment_source_fails_loudly(tmp_path):
                             "source": str(tmp_path / "run" / "attachments" / "w1" / "spec.md"),
                         }
                     ],
+                    repo_entry=NO_SETUP,
                 )
         finally:
             await database.close()
@@ -374,6 +383,7 @@ def test_an_attached_document_is_committed_in_the_worktree(tmp_path):
                 repo=str(repo),
                 work_item_id="w1",
                 attachments=[{"kind": "spec", "path": ".engineering/specs/s.md"}],
+                repo_entry=NO_SETUP,
             )
             assert _porcelain(worktree) == []
             in_head = subprocess.run(
@@ -417,6 +427,7 @@ def test_env_setup_leaves_a_committed_attachment_alone(tmp_path):
                 node_id="env_setup",
                 repo=str(repo),
                 attachments=[{"kind": "plan", "path": ".engineering/plans/p.md"}],
+                repo_entry=NO_SETUP,
             )
             copied = rd.worktrees / "w1" / ".engineering" / "plans" / "p.md"
             # git brought the committed version; the copy must not clobber it
@@ -467,6 +478,7 @@ def test_env_setup_does_not_write_through_a_symlinked_attachment(tmp_path):
                 node_id="env_setup",
                 repo=str(repo),
                 attachments=[{"kind": "plan", "path": ".engineering/plans/p.md"}],
+                repo_entry=NO_SETUP,
             )
             assert status == "done"
             assert not outside.exists()
@@ -543,6 +555,7 @@ def test_env_setup_stamps_base_ref(tmp_path):
                 work_item_id="w1",
                 node_id="env_setup",
                 repo=str(repo),
+                repo_entry=NO_SETUP,
             )
             row = database.read(
                 lambda c: c.execute("SELECT base_ref FROM work_items WHERE id='w1'").fetchone()
@@ -579,6 +592,7 @@ def test_env_setup_does_not_restamp_on_reentry(tmp_path):
                 work_item_id="w1",
                 node_id="env_setup",
                 repo=str(repo),
+                repo_entry=NO_SETUP,
             )
             await database.write(lambda c: store.set_base_ref(c, "w1", "PINNED"))
             # second call: `ensure_worktree` returns early (the worktree already
@@ -591,6 +605,7 @@ def test_env_setup_does_not_restamp_on_reentry(tmp_path):
                 work_item_id="w1",
                 node_id="env_setup",
                 repo=str(repo),
+                repo_entry=NO_SETUP,
             )
             assert status == "done"
             row = database.read(
@@ -632,7 +647,7 @@ def test_ensure_worktree_is_idempotent_and_pins_base_ref_once(tmp_path):
         try:
             await _make_item(database, repo)
             first = await kraft_builtins.ensure_worktree(
-                database, rd, repo=str(repo), work_item_id="w1"
+                database, rd, repo=str(repo), work_item_id="w1", repo_entry=NO_SETUP
             )
             assert first.is_dir()
             pinned = _base_ref(database)
@@ -645,7 +660,7 @@ def test_ensure_worktree_is_idempotent_and_pins_base_ref_once(tmp_path):
             _git(repo, "add", "-A")
             _git(repo, "commit", "-m", "second")
             again = await kraft_builtins.ensure_worktree(
-                database, rd, repo=str(repo), work_item_id="w1"
+                database, rd, repo=str(repo), work_item_id="w1", repo_entry=NO_SETUP
             )
             assert again == first
             assert _base_ref(database) == pinned
@@ -667,12 +682,12 @@ def test_ensure_worktree_reattaches_an_existing_branch(tmp_path):
         try:
             await _make_item(database, repo)
             wt = await kraft_builtins.ensure_worktree(
-                database, rd, repo=str(repo), work_item_id="w1"
+                database, rd, repo=str(repo), work_item_id="w1", repo_entry=NO_SETUP
             )
             _git(repo, "worktree", "remove", "--force", str(wt))
 
             again = await kraft_builtins.ensure_worktree(
-                database, rd, repo=str(repo), work_item_id="w1"
+                database, rd, repo=str(repo), work_item_id="w1", repo_entry=NO_SETUP
             )
             assert again.is_dir()
             row = database.read(
@@ -709,6 +724,7 @@ def test_ensure_worktree_branch_is_a_title_slug(tmp_path):
                 rd,
                 repo=str(repo),
                 work_item_id="b63d95be41884b6e83a423c114a97ce3",
+                repo_entry=NO_SETUP,
             )
             expected = "kraft/readable-merge-records-branch-slugs-gfm-tables-b63d95be"
             assert git_read(wt, "rev-parse", "--abbrev-ref", "HEAD") == expected
@@ -740,7 +756,7 @@ def test_ensure_worktree_keeps_the_legacy_uuid_branch(tmp_path):
                 lambda c: c.execute("UPDATE work_items SET branch = NULL WHERE id='w1'")
             )
             wt = await kraft_builtins.ensure_worktree(
-                database, rd, repo=str(repo), work_item_id="w1"
+                database, rd, repo=str(repo), work_item_id="w1", repo_entry=NO_SETUP
             )
             assert git_read(wt, "rev-parse", "--abbrev-ref", "HEAD") == "kraft/w1"
         finally:
@@ -749,18 +765,8 @@ def test_ensure_worktree_keeps_the_legacy_uuid_branch(tmp_path):
     asyncio.run(scenario())
 
 
-def test_ensure_worktree_syncs_deps_so_the_first_commit_can_run_pre_commit(tmp_path):
-    """A fresh worktree had no `.venv`, so `spec` -- the first node to commit,
-    ahead of `env_setup` in `default.yaml` -- hit `Failed to spawn: pre-commit`
-    and fell back to `--no-verify`, skipping ruff-format on the doc it had just
-    written (Kraft-i047). `uv sync` here, before any node dispatches, closes
-    that gap for any worktree that is actually a uv project."""
+def test_a_declared_setup_command_runs_in_the_worktree(tmp_path):
     repo = make_repo(tmp_path)
-    (repo / "pyproject.toml").write_text(
-        '[project]\nname = "sample"\nversion = "0.0.0"\nrequires-python = ">=3.11"\n'
-    )
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-m", "add pyproject")
 
     async def scenario():
         rd = RunDirs(tmp_path / "run").ensure()
@@ -768,21 +774,21 @@ def test_ensure_worktree_syncs_deps_so_the_first_commit_can_run_pre_commit(tmp_p
         try:
             await _make_item(database, repo)
             wt = await kraft_builtins.ensure_worktree(
-                database, rd, repo=str(repo), work_item_id="w1"
+                database,
+                rd,
+                repo=str(repo),
+                work_item_id="w1",
+                repo_entry={"setup_command": "touch prepared.txt"},
             )
-            assert (wt / ".venv" / "bin" / "python3").exists()
+            assert (wt / "prepared.txt").exists()
         finally:
             await database.close()
 
     asyncio.run(scenario())
 
 
-def test_ensure_worktree_skips_sync_when_repo_has_no_pyproject(tmp_path):
-    """The common test fixture (`make_repo`) is not a uv project; `uv sync`
-    against it would fail loudly for every other test in this file if the
-    gate on `pyproject.toml` ever slipped."""
+def test_an_empty_setup_command_runs_nothing_and_does_not_raise(tmp_path):
     repo = make_repo(tmp_path)
-    assert not (repo / "pyproject.toml").exists()
 
     async def scenario():
         rd = RunDirs(tmp_path / "run").ensure()
@@ -790,9 +796,118 @@ def test_ensure_worktree_skips_sync_when_repo_has_no_pyproject(tmp_path):
         try:
             await _make_item(database, repo)
             wt = await kraft_builtins.ensure_worktree(
-                database, rd, repo=str(repo), work_item_id="w1"
+                database, rd, repo=str(repo), work_item_id="w1", repo_entry={"setup_command": ""}
             )
-            assert not (wt / ".venv").exists()
+            assert wt.is_dir()
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_an_undeclared_setup_command_stops_the_chain(tmp_path):
+    """No default and no fallback: Python is not a special case (Kraft-kji8w)."""
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            with pytest.raises(RuntimeError, match="setup_command"):
+                await kraft_builtins.ensure_worktree(
+                    database, rd, repo=str(repo), work_item_id="w1", repo_entry={}
+                )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_a_failing_setup_command_raises_with_its_stderr(tmp_path):
+    """Kraft-s0w2l: the chain used to dispatch into a known-broken worktree."""
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            with pytest.raises(RuntimeError, match="deliberate failure"):
+                await kraft_builtins.ensure_worktree(
+                    database,
+                    rd,
+                    repo=str(repo),
+                    work_item_id="w1",
+                    repo_entry={"setup_command": "echo deliberate failure >&2; exit 3"},
+                )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_a_failed_setup_leaves_no_worktree_so_retry_reruns_it(tmp_path):
+    """The regression that makes the whole fix real. ensure_worktree returns
+    early when the directory exists, so a worktree left behind by a failed
+    setup would make `kraft item retry` -- the only door back onto a stopped
+    item -- skip setup entirely and dispatch into the broken environment."""
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            with pytest.raises(RuntimeError):
+                await kraft_builtins.ensure_worktree(
+                    database,
+                    rd,
+                    repo=str(repo),
+                    work_item_id="w1",
+                    repo_entry={"setup_command": "exit 1"},
+                )
+            assert not (rd.worktrees / "w1").exists()
+
+            wt = await kraft_builtins.ensure_worktree(
+                database,
+                rd,
+                repo=str(repo),
+                work_item_id="w1",
+                repo_entry={"setup_command": "touch recovered.txt"},
+            )
+            assert (wt / "recovered.txt").exists()
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_setup_runs_after_local_files_are_carried(tmp_path):
+    """Kraft-gxcmy: uv picks an interpreter when it runs, so a pin that lands
+    after the toolchain is a pin that changed nothing."""
+    repo = make_repo(tmp_path)
+    (repo / ".gitignore").write_text(".python-version\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "ignore the pin")
+    (repo / ".python-version").write_text("3.11\n")
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            wt = await kraft_builtins.ensure_worktree(
+                database,
+                rd,
+                repo=str(repo),
+                work_item_id="w1",
+                repo_entry={
+                    "setup_command": "cp .python-version seen-by-setup.txt",
+                    "local_files": [".python-version"],
+                },
+            )
+            assert (wt / "seen-by-setup.txt").read_text().strip() == "3.11"
         finally:
             await database.close()
 
@@ -811,7 +926,7 @@ def test_ensure_worktree_pins_commit_identity_into_the_worktree(tmp_path):
         try:
             await _make_item(database, repo)
             wt = await kraft_builtins.ensure_worktree(
-                database, rd, repo=str(repo), work_item_id="w1"
+                database, rd, repo=str(repo), work_item_id="w1", repo_entry=NO_SETUP
             )
             assert git_read(wt, "config", "--local", "user.name") == "t"
             assert git_read(wt, "config", "--local", "user.email") == "t@t"
@@ -847,7 +962,7 @@ def test_ensure_worktree_fails_when_the_repo_has_no_resolvable_identity(tmp_path
             await _make_item(database, repo)
             with pytest.raises(RuntimeError, match="user.name|user.email"):
                 await kraft_builtins.ensure_worktree(
-                    database, rd, repo=str(repo), work_item_id="w1"
+                    database, rd, repo=str(repo), work_item_id="w1", repo_entry=NO_SETUP
                 )
         finally:
             await database.close()
@@ -876,7 +991,7 @@ def test_ensure_worktree_checks_out_a_declared_submodule_on_the_items_branch(tmp
                 )
             )
             worktree = await kraft_builtins.ensure_worktree(
-                database, rd, repo=str(root), work_item_id="w1"
+                database, rd, repo=str(root), work_item_id="w1", repo_entry=NO_SETUP
             )
             row = database.read(
                 lambda c: c.execute("SELECT * FROM work_items WHERE id = 'w1'").fetchone()
@@ -933,7 +1048,9 @@ def test_ensure_worktree_never_runs_a_blanket_submodule_init(tmp_path, monkeypat
                     root_merge_policy="bump_no_mr",
                 )
             )
-            await kraft_builtins.ensure_worktree(database, rd, repo=str(root), work_item_id="w1")
+            await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(root), work_item_id="w1", repo_entry=NO_SETUP
+            )
         finally:
             await database.close()
 
@@ -971,7 +1088,7 @@ def test_scan_submodules_finds_a_submodule_the_agent_touched_but_nobody_declared
                 )  # no submodules declared -- exactly the real item's shape
             )
             worktree = await kraft_builtins.ensure_worktree(
-                database, rd, repo=str(root), work_item_id="w1"
+                database, rd, repo=str(root), work_item_id="w1", repo_entry=NO_SETUP
             )
             # the agent's own half, done correctly: init + branch + commit
             # inside the submodule, root pointer never touched
@@ -1031,7 +1148,7 @@ def test_ensure_worktree_raises_when_git_fails(tmp_path):
             await _make_item(database, not_a_repo)
             with pytest.raises(RuntimeError, match="w1"):
                 await kraft_builtins.ensure_worktree(
-                    database, rd, repo=str(not_a_repo), work_item_id="w1"
+                    database, rd, repo=str(not_a_repo), work_item_id="w1", repo_entry=NO_SETUP
                 )
         finally:
             await database.close()
@@ -1076,10 +1193,16 @@ def test_the_worktree_and_the_forge_agree_on_the_branch(tmp_path, monkeypatch):
             registry = Registry(
                 hooks={"on.mr.open": {"kind": "forge", "handler": "open_mr", "backend": "fake"}}
             )
+            launch = executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None)
             # one node, no gate: the chain completes and closes its own bead in
             # `tracker`, which is why intake and run are handed the same one
             await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=launch,
             )
             row = database.read(
                 lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
@@ -1132,7 +1255,7 @@ def test_ensure_worktree_raises_when_the_repo_has_no_commit_identity(tmp_path):
             )
             with pytest.raises(RuntimeError, match="user.email"):
                 await kraft_builtins.ensure_worktree(
-                    database, rd, repo=str(repo), work_item_id="w1"
+                    database, rd, repo=str(repo), work_item_id="w1", repo_entry=NO_SETUP
                 )
         finally:
             await database.close()
@@ -1156,7 +1279,7 @@ def test_refresh_worktree_base_returns_none_when_already_up_to_date(tmp_path):
         try:
             await _make_item(database, repo)
             worktree = await kraft_builtins.ensure_worktree(
-                database, rd, repo=str(repo), work_item_id="w1"
+                database, rd, repo=str(repo), work_item_id="w1", repo_entry=NO_SETUP
             )
             row = database.read(
                 lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
@@ -1185,7 +1308,7 @@ def test_refresh_worktree_base_skips_when_branch_already_pushed(tmp_path):
         try:
             await _make_item(database, repo)
             worktree = await kraft_builtins.ensure_worktree(
-                database, rd, repo=str(repo), work_item_id="w1"
+                database, rd, repo=str(repo), work_item_id="w1", repo_entry=NO_SETUP
             )
             row = database.read(
                 lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
@@ -1216,7 +1339,7 @@ def test_refresh_worktree_base_rebases_and_returns_new_head(tmp_path):
         try:
             await _make_item(database, repo)
             worktree = await kraft_builtins.ensure_worktree(
-                database, rd, repo=str(repo), work_item_id="w1"
+                database, rd, repo=str(repo), work_item_id="w1", repo_entry=NO_SETUP
             )
             row = database.read(
                 lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
@@ -1279,7 +1402,7 @@ def test_ensure_worktree_forks_from_origin_when_the_local_checkout_is_behind(tmp
         try:
             await _make_item(database, repo)
             worktree = await kraft_builtins.ensure_worktree(
-                database, rd, repo=str(repo), work_item_id="w1"
+                database, rd, repo=str(repo), work_item_id="w1", repo_entry=NO_SETUP
             )
             assert (worktree / "upstream.txt").is_file()
             assert _base_ref(database) == upstream
@@ -1300,7 +1423,7 @@ def test_refresh_worktree_base_rebases_onto_origin_when_the_local_checkout_is_be
         try:
             await _make_item(database, repo)
             worktree = await kraft_builtins.ensure_worktree(
-                database, rd, repo=str(repo), work_item_id="w1"
+                database, rd, repo=str(repo), work_item_id="w1", repo_entry=NO_SETUP
             )
             branch = store.branch_for(
                 database.read(
@@ -1334,7 +1457,7 @@ def test_refresh_worktree_base_falls_back_to_local_head_when_origin_is_unreachab
         try:
             await _make_item(database, repo)
             worktree = await kraft_builtins.ensure_worktree(
-                database, rd, repo=str(repo), work_item_id="w1"
+                database, rd, repo=str(repo), work_item_id="w1", repo_entry=NO_SETUP
             )
             branch = store.branch_for(
                 database.read(
@@ -1388,7 +1511,7 @@ def test_refresh_worktree_base_raises_and_aborts_on_conflict(tmp_path):
         try:
             await _make_item(database, repo)
             worktree = await kraft_builtins.ensure_worktree(
-                database, rd, repo=str(repo), work_item_id="w1"
+                database, rd, repo=str(repo), work_item_id="w1", repo_entry=NO_SETUP
             )
             row = database.read(
                 lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
@@ -1429,7 +1552,7 @@ def test_mr_rebase_moves_the_base_and_records_a_done_session(tmp_path):
         try:
             await _make_item(database, repo)
             worktree = await kraft_builtins.ensure_worktree(
-                database, rd, repo=str(repo), work_item_id="w1"
+                database, rd, repo=str(repo), work_item_id="w1", repo_entry=NO_SETUP
             )
             row = database.read(
                 lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
@@ -1478,7 +1601,7 @@ def test_mr_rebase_leaves_base_ref_alone_when_nothing_to_rebase(tmp_path):
         try:
             await _make_item(database, repo)
             worktree = await kraft_builtins.ensure_worktree(
-                database, rd, repo=str(repo), work_item_id="w1"
+                database, rd, repo=str(repo), work_item_id="w1", repo_entry=NO_SETUP
             )
             row = database.read(
                 lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
@@ -1515,7 +1638,7 @@ def test_mr_rebase_raises_on_conflict(tmp_path):
         try:
             await _make_item(database, repo)
             worktree = await kraft_builtins.ensure_worktree(
-                database, rd, repo=str(repo), work_item_id="w1"
+                database, rd, repo=str(repo), work_item_id="w1", repo_entry=NO_SETUP
             )
             row = database.read(
                 lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
@@ -1567,7 +1690,7 @@ def test_refresh_worktree_base_raises_rebase_conflict_a_runtimeerror_subclass(tm
         try:
             await _make_item(database, repo)
             worktree = await kraft_builtins.ensure_worktree(
-                database, rd, repo=str(repo), work_item_id="w1"
+                database, rd, repo=str(repo), work_item_id="w1", repo_entry=NO_SETUP
             )
             row = database.read(
                 lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
@@ -1716,57 +1839,6 @@ def test_carry_local_files_refuses_a_directory_entry_missing_its_trailing_slash(
     assert refused == [".venv"]
 
 
-def test_local_files_land_before_uv_sync_resolves_an_interpreter(tmp_path, monkeypatch):
-    """Arriving eventually is not enough. uv picks the interpreter when it runs,
-    so a pin copied after `uv sync` is a pin that changed nothing (Kraft-gxcmy)."""
-    repo = make_repo(tmp_path)
-    (repo / ".gitignore").write_text(".python-version\n")
-    (repo / "pyproject.toml").write_text('[project]\nname = "s"\nversion = "0"\n')
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-m", "add a python project")
-    (repo / ".python-version").write_text("3.11\n")
-
-    seen: dict[str, str] = {}
-    real_run = subprocess.run
-
-    def spy(args, **kwargs):
-        if list(args[:2]) == ["uv", "sync"]:
-            pin = Path(kwargs["cwd"]) / ".python-version"
-            seen["pin"] = pin.read_text() if pin.is_file() else "<absent>"
-            return subprocess.CompletedProcess(args, 0, "", "")
-        return real_run(args, **kwargs)
-
-    monkeypatch.setattr(kraft_builtins.subprocess, "run", spy)
-
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            await database.write(
-                lambda c: store.create_work_item(
-                    c,
-                    id="w1",
-                    bead_id="B",
-                    title="t",
-                    repo=str(repo),
-                    chain_template="default",
-                    chain_definition="{}",
-                )
-            )
-            await kraft_builtins.ensure_worktree(
-                database,
-                rd,
-                repo=str(repo),
-                work_item_id="w1",
-                local_files=[".python-version"],
-            )
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
-    assert seen["pin"] == "3.11\n"
-
-
 def test_ensure_worktree_without_local_files_is_unchanged(tmp_path):
     """The feature is opt-in: an unconfigured repo must behave exactly as before."""
     repo = make_repo(tmp_path)
@@ -1791,7 +1863,7 @@ def test_ensure_worktree_without_local_files_is_unchanged(tmp_path):
                 )
             )
             worktree = await kraft_builtins.ensure_worktree(
-                database, rd, repo=str(repo), work_item_id="w1"
+                database, rd, repo=str(repo), work_item_id="w1", repo_entry=NO_SETUP
             )
             assert not (worktree / ".python-version").exists()
         finally:

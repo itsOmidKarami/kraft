@@ -231,6 +231,18 @@ kraft repo path --shell       # a shell function that does the cd for you
 kraft repo open <id>          # the worktree in an editor
 ```
 
+A connected repo's entry in `repos.yaml` carries how Kraft prepares a worktree
+for it:
+
+| Key | What it does |
+|---|---|
+| `setup_command` | Run in every new worktree before any node starts. Required — `""` means "deliberately nothing". A repo with no `setup_command` stops its next work item. |
+| `env` | Literal variables every worker for this repo gets. |
+| `env_passthrough` | Names of variables to carry over from the daemon's own environment, for what the baseline allowlist does not cover. |
+
+`kraft repo connect` probes a `setup_command` from the repo's markers; check it
+before trusting it, and `kraft admin doctor` reports any repo still undeclared.
+
 Editing a repo's settings stays in the UI.
 
 Service and admin:

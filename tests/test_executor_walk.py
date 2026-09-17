@@ -5,17 +5,23 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from support.harness import _git, fake_registry, isolated_bd, make_repo
 
 from kraft import db, events, executor, store
 from kraft.adapters import beads
 from kraft.adapters import forge as _forge
-from kraft.config import git_read
+from kraft.api import deps
+from kraft.config import ConfigError, git_read
 from kraft.paths import RunDirs
 from kraft.templates import Registry, Template, load_registry, load_templates
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
+
+#: A repo that deliberately needs no preparation. Most tests here are about
+#: chain walking, not environments.
+NO_SETUP = {"setup_command": ""}
 
 
 def _quick_task() -> Template:
@@ -61,7 +67,12 @@ def test_run_happy_path_completes_and_closes_bead(tmp_path, monkeypatch):
                 bd_cwd=str(tracker),
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "completed"
 
@@ -116,7 +127,12 @@ def test_done_with_concerns_advances_the_chain(tmp_path, monkeypatch):
                 bd_cwd=str(tracker),
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "completed"
 
@@ -171,7 +187,12 @@ def test_run_verify_failure_stops_at_verify(tmp_path, monkeypatch):
                 bd_cwd=str(tracker),
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "needs_human"
 
@@ -216,7 +237,12 @@ def test_rate_limit_stops_the_chain_without_a_fix_loop(tmp_path, monkeypatch):
                 bd_cwd=str(tracker),
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "rate_limited"
 
@@ -281,7 +307,12 @@ def test_a_waiting_task_marks_the_row_and_ends_the_run(tmp_path, monkeypatch):
                 database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "waiting"
             row = database.read(
@@ -333,7 +364,12 @@ def test_needs_human_reason_names_a_failed_forge_task_s_kind(tmp_path, monkeypat
                 database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "needs_human"
             stopped = next(
@@ -410,7 +446,13 @@ def test_an_in_process_blind_failure_stops_without_opening_a_fix_cycle(tmp_path,
                 database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "needs_human"
             evts = database.read(lambda c: events.read_after(c, 0, wid))
@@ -479,7 +521,13 @@ def test_a_red_pipeline_with_failed_jobs_opens_its_fix_cycle_as_before(tmp_path,
                 database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             evts = database.read(lambda c: events.read_after(c, 0, wid))
             counter = database.read(lambda c: store.read_counter(c, wid, "ci_fix_loop"))
@@ -538,7 +586,13 @@ def test_a_co_failing_subprocess_task_keeps_the_loop_open(tmp_path, monkeypatch)
                 database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
             )
             await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             evts = database.read(lambda c: events.read_after(c, 0, wid))
             return [e["type"] for e in evts]
@@ -592,7 +646,13 @@ def test_a_co_tasks_findings_keep_the_loop_open(tmp_path, monkeypatch):
                 database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
             )
             await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             evts = database.read(lambda c: events.read_after(c, 0, wid))
             return [e["type"] for e in evts]
@@ -640,7 +700,13 @@ def test_a_pending_needs_context_question_outranks_the_unwinnable_stop(tmp_path,
                 database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "needs_human"
             evts = database.read(lambda c: events.read_after(c, 0, wid))
@@ -700,6 +766,7 @@ def test_a_steer_with_no_agent_dispatch_to_land_in_is_reported_undelivered(tmp_p
                 registry=registry,
                 bd_cwd=str(tracker),
                 steer="please look at the flaky pipeline",
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "needs_human"
             return [
@@ -744,6 +811,7 @@ def test_a_steer_taken_by_a_real_agent_is_not_reported_undelivered(tmp_path, mon
                 registry=registry,
                 bd_cwd=str(tracker),
                 steer="a note for whichever agent runs first",
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "completed"
             return _events(database, wid)
@@ -782,7 +850,12 @@ def test_dispatch_routes_on_mr_rebase_to_the_mr_rebase_builtin(tmp_path, monkeyp
                 database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "completed"
             session = database.read(
@@ -853,7 +926,12 @@ def test_run_unknown_hook_in_registry_is_needs_human(tmp_path):
                 database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "needs_human"
 
@@ -932,7 +1010,7 @@ def test_fix_cycle_dispatch_gets_the_same_launch_context(tmp_path, monkeypatch):
                 bd_cwd=str(tracker),
             )
             launch = executor.LaunchContext(
-                repo_entry={"default_model": "haiku"}, steering_dir=None
+                repo_entry={"default_model": "haiku", "setup_command": ""}, steering_dir=None
             )
             await executor.run(
                 database,
@@ -987,7 +1065,8 @@ def test_run_once_threads_local_files_from_the_launch_context(tmp_path, monkeypa
                 database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
             )
             launch = executor.LaunchContext(
-                repo_entry={"local_files": [".python-version"]}, steering_dir=None
+                repo_entry={"local_files": [".python-version"], "setup_command": ""},
+                steering_dir=None,
             )
             result = await executor.run_once(
                 database,
@@ -1093,7 +1172,9 @@ def test_a_moved_base_bounces_back_to_verify_with_a_drift_note(tmp_path, monkeyp
             )
             from kraft import builtins as kraft_builtins
 
-            await kraft_builtins.ensure_worktree(database, rd, repo=str(repo), work_item_id=wid)
+            await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id=wid, repo_entry=NO_SETUP
+            )
 
             (repo / "moved.txt").write_text("moved on\n")
             subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
@@ -1109,6 +1190,7 @@ def test_a_moved_base_bounces_back_to_verify_with_a_drift_note(tmp_path, monkeyp
                 registry=registry,
                 bd_cwd=str(tracker),
                 policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "completed"
 
@@ -1185,7 +1267,9 @@ def test_a_bounce_clears_the_targets_fix_loop_counter(tmp_path, monkeypatch):
             )
             from kraft import builtins as kraft_builtins
 
-            await kraft_builtins.ensure_worktree(database, rd, repo=str(repo), work_item_id=wid)
+            await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id=wid, repo_entry=NO_SETUP
+            )
 
             # A stale counter left over from an earlier, unrelated pass over
             # `verify` -- what a bounce must not let the re-entered loop inherit.
@@ -1206,6 +1290,7 @@ def test_a_bounce_clears_the_targets_fix_loop_counter(tmp_path, monkeypatch):
                 registry=registry,
                 bd_cwd=str(tracker),
                 policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "completed"
             assert database.read(lambda c: store.read_counter(c, wid, "verify_fix_loop")) is None, (
@@ -1268,7 +1353,9 @@ def test_a_bounce_clears_an_intervening_nodes_fix_loop_too(tmp_path, monkeypatch
             )
             from kraft import builtins as kraft_builtins
 
-            await kraft_builtins.ensure_worktree(database, rd, repo=str(repo), work_item_id=wid)
+            await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id=wid, repo_entry=NO_SETUP
+            )
 
             cap = policy.Cap(attempts=3, wall_clock_s=3600)
             await database.write(lambda c: store.bump_counter(c, wid, "verify_fix_loop", cap))
@@ -1285,6 +1372,7 @@ def test_a_bounce_clears_an_intervening_nodes_fix_loop_too(tmp_path, monkeypatch
                 registry=registry,
                 bd_cwd=str(tracker),
                 policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "completed"
             assert database.read(lambda c: store.read_counter(c, wid, "verify_fix_loop")) is None
@@ -1341,7 +1429,7 @@ def test_pre_mr_rebase_conflict_dispatches_resolver_and_bounces_to_verify(tmp_pa
                 bd_cwd=str(tracker),
             )
             worktree = await kraft_builtins.ensure_worktree(
-                database, rd, repo=str(repo), work_item_id=wid
+                database, rd, repo=str(repo), work_item_id=wid, repo_entry=NO_SETUP
             )
 
             # A real conflict: the worktree and the (now-upstream) repo both
@@ -1358,7 +1446,13 @@ def test_pre_mr_rebase_conflict_dispatches_resolver_and_bounces_to_verify(tmp_pa
             _git(repo, "commit", "-m", "conflicting edit upstream")
 
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             evts = database.read(lambda c: events.read_after(c, 0, wid))
             starts = [e["payload"]["node_id"] for e in evts if e["type"] == "node_started"]
@@ -1403,10 +1497,18 @@ def test_no_movement_skips_the_bounce(tmp_path, monkeypatch):
             )
             from kraft import builtins as kraft_builtins
 
-            await kraft_builtins.ensure_worktree(database, rd, repo=str(repo), work_item_id=wid)
+            await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id=wid, repo_entry=NO_SETUP
+            )
 
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "completed"
 
@@ -1477,7 +1579,9 @@ def test_rebase_bounce_cap_escalates_to_needs_human(tmp_path, monkeypatch):
             )
             from kraft import builtins as kraft_builtins
 
-            await kraft_builtins.ensure_worktree(database, rd, repo=str(repo), work_item_id=wid)
+            await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id=wid, repo_entry=NO_SETUP
+            )
 
             # one commit before the run starts, so the first pre_mr_rebase
             # entry already has something to rebase
@@ -1486,7 +1590,13 @@ def test_rebase_bounce_cap_escalates_to_needs_human(tmp_path, monkeypatch):
             )
 
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "needs_human"
 
@@ -1527,7 +1637,12 @@ def test_run_closes_an_auto_intaken_bead_in_its_own_workspace(tmp_path, monkeypa
             )
             assert (
                 await executor.run(
-                    database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                    database,
+                    rd,
+                    work_item_id=wid,
+                    registry=registry,
+                    bd_cwd=str(tracker),
+                    launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
                 )
                 == "completed"
             )
@@ -1571,7 +1686,13 @@ def test_the_first_node_runs_before_env_setup_and_still_has_a_worktree(tmp_path)
                     chain_definition=json.dumps(chain),
                 )
             )
-            await executor.run(database, rd, work_item_id="w1", registry=registry)
+            await executor.run(
+                database,
+                rd,
+                work_item_id="w1",
+                registry=registry,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
+            )
             assert (rd.worktrees / "w1").is_dir()
         finally:
             await database.close()
@@ -1609,6 +1730,7 @@ def test_needs_human_names_the_session_that_failed(tmp_path, monkeypatch):
                     work_item_id=wid,
                     registry=fake_registry(sys.executable, _FAKE_AGENT),
                     bd_cwd=str(tracker),
+                    launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
                 )
                 == "needs_human"
             )
@@ -1662,7 +1784,12 @@ def _run_one_node(tmp_path, template: Template, registry: Registry) -> tuple[str
                 bd_cwd=str(tracker),
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             return result, database.read(lambda c: events.read_after(c, 0, wid))
         finally:
@@ -1950,7 +2077,7 @@ async def _resolver_scenario(tmp_path, tracker, agent_env, call_resolver):
             bd_cwd=str(tracker),
         )
         worktree = await kraft_builtins.ensure_worktree(
-            database, rd, repo=str(repo), work_item_id=wid
+            database, rd, repo=str(repo), work_item_id=wid, repo_entry=NO_SETUP
         )
         row = database.read(
             lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
@@ -2263,7 +2390,12 @@ def test_pausing_between_nodes_stops_the_walk_before_the_next_one_starts(tmp_pat
 
             monkeypatch.setattr(walk_mod, "walk_node", spy)
             result = await executor.run_once(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "paused"
             assert calls == ["env_setup"], "implementation must never have been dispatched"
@@ -2285,7 +2417,8 @@ def test_pausing_between_nodes_stops_the_walk_before_the_next_one_starts(tmp_pat
                 work_item_id=wid,
                 registry=registry,
                 bd_cwd=str(tracker),
-                start_index=1,  # implementation: the node right after env_setup
+                start_index=1,  # implementation: the node right after env_setup,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result2 == "completed"
             types = _events(database, wid)
@@ -2333,7 +2466,12 @@ def test_a_blocked_bead_pauses_the_walk_before_any_worktree_is_made(tmp_path, mo
                 check=True,
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "paused"
             assert not (rd.worktrees / wid).exists()
@@ -2398,12 +2536,22 @@ def test_resuming_a_still_blocked_item_re_pauses_cheaply(tmp_path, monkeypatch):
                 check=True,
             )
             first = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert first == "paused"
             # A resume re-enters through run_once at the same start_index (0).
             second = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert second == "paused"
             sessions = database.read(
@@ -2466,7 +2614,12 @@ def test_a_blocked_sub_bead_named_in_the_description_pauses_the_walk(tmp_path, m
             assert await beads.blocked_by([row["bead_id"]], cwd=str(tracker)) == []
             assert json.loads(row["implements_beads"]) == [sub]
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "paused"
             assert not (rd.worktrees / wid).exists()
@@ -2524,7 +2677,12 @@ def test_a_bead_blocked_only_by_its_own_bundlemate_dispatches(tmp_path, monkeypa
             )
             assert set(json.loads(row["implements_beads"])) == {sub, bundlemate}
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "completed"
         finally:
@@ -2554,7 +2712,12 @@ def test_an_unblocked_bead_dispatches_exactly_as_before(tmp_path, monkeypatch):
                 bd_cwd=str(tracker),
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
             )
             assert result == "completed"
         finally:
@@ -2693,3 +2856,63 @@ def test_on_failure_repair_still_fires_on_a_resumed_entry(tmp_path, monkeypatch)
     )
     assert rounds == [4]
     assert repaired == [walk._REPAIR_ROUND], "on_failure repair did not run on the resumed entry"
+
+
+def test_a_poisoned_repo_entry_is_attributed_to_the_node_not_a_bare_crash(tmp_path):
+    """A malformed repos.yaml reaches ensure_worktree through the repo entry.
+    It must land as needs_human against the node that was about to dispatch,
+    not as guard's bare "executor crashed" (Kraft-cuo3p)."""
+    poisoned = deps._PoisonedRepoEntry(ConfigError("repos.yaml: 'local_files' must be a list"))
+    with pytest.raises(ConfigError):
+        poisoned.get("local_files")
+
+
+def test_walk_attributes_a_config_error_to_the_first_node(tmp_path):
+    """The whole point of Task 1: a broken repos.yaml names the node it broke."""
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = fake_registry(sys.executable, _FAKE_AGENT)
+            wid = await executor.intake(
+                database,
+                rd,
+                title="poisoned config",
+                repo=str(repo),
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+            )
+            launch = executor.LaunchContext(
+                repo_entry=deps._PoisonedRepoEntry(ConfigError("repos.yaml: boom")),
+                steering_dir=None,
+            )
+            result = await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                launch=launch,
+            )
+            assert result == "needs_human"
+
+            row = database.read(
+                lambda c: c.execute(
+                    "SELECT status, current_node_id FROM work_items WHERE id = ?", (wid,)
+                ).fetchone()
+            )
+            assert row["status"] == "needs_human"
+            assert row["current_node_id"] is not None
+
+            evts = database.read(lambda c: events.read_after(c, 0, wid))
+            reason = next(
+                e["payload"]["reason"] for e in evts if e["type"] == "work_item_needs_human"
+            )
+            assert "boom" in reason
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())

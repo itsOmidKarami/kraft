@@ -5,6 +5,7 @@ from pathlib import Path
 
 import psutil
 import pytest
+import yaml
 from support.harness import fake_templates_dir, isolated_bd, make_repo
 from support.server import running_server
 
@@ -37,6 +38,11 @@ def test_reattach_adopts_running_agent(tmp_path):
     templates = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
+    # A worktree needs a declared setup_command since Kraft-kji8w; this test
+    # is about reattaching a running agent, not preparation.
+    (templates / "repos.yaml").write_text(
+        yaml.safe_dump({"repos": [{"path": str(repo), "setup_command": ""}]})
+    )
     slow_env = {"KRAFT_FAKE_CLAUDE": "slow", "KRAFT_FAKE_CLAUDE_DELAY": "8"}
 
     with running_server(

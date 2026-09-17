@@ -249,6 +249,7 @@ async def dispatch_node(
             run_dirs,
             repo=work_item_row["repo"],
             attachments=entry.attachments_of(work_item_row),
+            repo_entry=launch.repo_entry if launch else None,
             **common,
         )
     if kind == "builtin" and binding.get("handler") == "noop":
