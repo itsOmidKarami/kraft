@@ -697,7 +697,9 @@ def _resolve_template_dict(
     for key in ("insert_before", "insert_after"):
         spec = data.get(key, {})
         if not isinstance(spec, dict):
-            raise RegistryError(f"template {tid!r}: {key!r} must be a mapping of anchor to node list")
+            raise RegistryError(
+                f"template {tid!r}: {key!r} must be a mapping of anchor to node list"
+            )
         for anchor, extra in spec.items():
             if not isinstance(extra, list) or not all(isinstance(n, dict) for n in extra):
                 raise RegistryError(
@@ -744,7 +746,7 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
             continue
         raw_by_id[tid] = data
 
-    for tid, data in raw_by_id.items():
+    for tid in raw_by_id:
         try:
             nodes = _resolve_template_dict(tid, raw_by_id)
         except RegistryError as exc:

@@ -308,7 +308,11 @@ _BASE_TEMPLATE = (
 def test_extends_inherits_the_base_templates_nodes(tmp_path):
     d = _dir(
         tmp_path,
-        **{"registry.yaml": REGISTRY_YAML, "base.yaml": _BASE_TEMPLATE, "child.yaml": "id: child\nextends: base\n"},
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "base.yaml": _BASE_TEMPLATE,
+            "child.yaml": "id: child\nextends: base\n",
+        },
     )
     ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
     assert "child" in ts.valid, ts.invalid
@@ -351,7 +355,10 @@ def test_extends_insert_before_and_after_an_anchor(tmp_path):
         "insert_before: { verify: [{ id: pre, tasks: [on.env.prepare] }] }\n"
         "insert_after:  { verify: [{ id: post, tasks: [on.env.prepare] }] }\n"
     )
-    d = _dir(tmp_path, **{"registry.yaml": REGISTRY_YAML, "base.yaml": _BASE_TEMPLATE, "child.yaml": child})
+    d = _dir(
+        tmp_path,
+        **{"registry.yaml": REGISTRY_YAML, "base.yaml": _BASE_TEMPLATE, "child.yaml": child},
+    )
     ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
     assert [n["id"] for n in ts.valid["child"].nodes] == [
         "env_setup",
@@ -363,21 +370,35 @@ def test_extends_insert_before_and_after_an_anchor(tmp_path):
 
 
 def test_extends_insert_before_rejects_an_unknown_anchor(tmp_path):
-    child = "id: child\nextends: base\ninsert_before: { bogus: [{ id: pre, tasks: [on.env.prepare] }] }\n"
-    d = _dir(tmp_path, **{"registry.yaml": REGISTRY_YAML, "base.yaml": _BASE_TEMPLATE, "child.yaml": child})
+    child = (
+        "id: child\nextends: base\n"
+        "insert_before: { bogus: [{ id: pre, tasks: [on.env.prepare] }] }\n"
+    )
+    d = _dir(
+        tmp_path,
+        **{"registry.yaml": REGISTRY_YAML, "base.yaml": _BASE_TEMPLATE, "child.yaml": child},
+    )
     ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
     assert "bogus" in ts.invalid["child"]
 
 
 def test_extends_and_nodes_together_is_a_load_error(tmp_path):
-    child = "id: child\nextends: base\nnodes:\n  - { id: x, tasks: [on.env.prepare], gate_after: null }\n"
-    d = _dir(tmp_path, **{"registry.yaml": REGISTRY_YAML, "base.yaml": _BASE_TEMPLATE, "child.yaml": child})
+    child = (
+        "id: child\nextends: base\n"
+        "nodes:\n  - { id: x, tasks: [on.env.prepare], gate_after: null }\n"
+    )
+    d = _dir(
+        tmp_path,
+        **{"registry.yaml": REGISTRY_YAML, "base.yaml": _BASE_TEMPLATE, "child.yaml": child},
+    )
     ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
     assert "child" in ts.invalid
 
 
 def test_extends_unknown_base_is_a_load_error(tmp_path):
-    d = _dir(tmp_path, **{"registry.yaml": REGISTRY_YAML, "child.yaml": "id: child\nextends: bogus\n"})
+    d = _dir(
+        tmp_path, **{"registry.yaml": REGISTRY_YAML, "child.yaml": "id: child\nextends: bogus\n"}
+    )
     ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
     assert "bogus" in ts.invalid["child"]
 
@@ -397,15 +418,23 @@ def test_extends_cycle_is_a_load_error(tmp_path):
 
 
 def test_remove_without_extends_is_a_load_error(tmp_path):
-    tmpl = "id: solo\nnodes:\n  - { id: x, tasks: [on.env.prepare], gate_after: null }\nremove: [x]\n"
+    tmpl = (
+        "id: solo\nnodes:\n  - { id: x, tasks: [on.env.prepare], gate_after: null }\nremove: [x]\n"
+    )
     d = _dir(tmp_path, **{"registry.yaml": REGISTRY_YAML, "solo.yaml": tmpl})
     ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
     assert "extends" in ts.invalid["solo"]
 
 
 def test_insert_introducing_a_duplicate_node_id_is_a_load_error(tmp_path):
-    child = "id: child\nextends: base\ninsert_after: { verify: [{ id: verify, tasks: [on.env.prepare] }] }\n"
-    d = _dir(tmp_path, **{"registry.yaml": REGISTRY_YAML, "base.yaml": _BASE_TEMPLATE, "child.yaml": child})
+    child = (
+        "id: child\nextends: base\n"
+        "insert_after: { verify: [{ id: verify, tasks: [on.env.prepare] }] }\n"
+    )
+    d = _dir(
+        tmp_path,
+        **{"registry.yaml": REGISTRY_YAML, "base.yaml": _BASE_TEMPLATE, "child.yaml": child},
+    )
     ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
     assert "duplicate" in ts.invalid["child"]
 
@@ -424,7 +453,9 @@ def test_a_deep_extends_chain_resolves(tmp_path):
     assert [n["id"] for n in ts.valid["grandchild"].nodes] == ["implementation", "verify"]
 
 
-def test_extending_a_template_whose_own_nodes_fail_validation_still_reports_the_root_cause(tmp_path):
+def test_extending_a_template_whose_own_nodes_fail_validation_still_reports_the_root_cause(
+    tmp_path,
+):
     """A child inherits its base's problems too -- each template is still
     validated independently, so the child's own error names the real defect
     rather than a generic 'base is broken'."""
@@ -714,7 +745,8 @@ def test_defaults_rejects_an_unknown_top_level_key(tmp_path):
 
 def test_defaults_agent_rejects_an_unknown_key(tmp_path):
     (tmp_path / "registry.yaml").write_text(
-        "defaults:\n  agent: { handler: nope }\nhooks:\n  on.a: { kind: builtin, handler: env_setup }\n"
+        "defaults:\n  agent: { handler: nope }\n"
+        "hooks:\n  on.a: { kind: builtin, handler: env_setup }\n"
     )
     with pytest.raises(templates.RegistryError, match="defaults.agent"):
         templates.load_registry(tmp_path / "registry.yaml")
@@ -730,9 +762,7 @@ def test_defaults_agent_steering_must_be_a_list_of_strings(tmp_path):
 
 
 def test_defaults_missing_entirely_is_fine(tmp_path):
-    (tmp_path / "registry.yaml").write_text(
-        "hooks:\n  on.a: { kind: agent, command: claude }\n"
-    )
+    (tmp_path / "registry.yaml").write_text("hooks:\n  on.a: { kind: agent, command: claude }\n")
     reg = templates.load_registry(tmp_path / "registry.yaml")
     assert reg.hooks["on.a"] == {"kind": "agent", "command": "claude"}
 

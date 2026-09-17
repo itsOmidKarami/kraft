@@ -111,7 +111,7 @@ def test_attempt_increments_and_reports_the_cap(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(kl.shutil, "which", lambda name: None)
     monkeypatch.chdir(tmp_path)
     kl.main(["start", "--title", "t"])
-    for node in ("spec", "plan", "chain_review", "env_setup", "implementation"):
+    for node in ("spec", "plan", "chain_review", "env_setup", "implementation", "repos_scan"):
         kl.main(["approve"] if node in {"spec", "plan", "chain_review"} else ["close"])
     capsys.readouterr()
 
@@ -612,6 +612,7 @@ def test_a_rewind_reopens_every_node_after_the_named_one(tmp_path, monkeypatch, 
 
     for expected in (
         "implementation",
+        "repos_scan",
         "verify",
         "pre_mr_rebase",
         "mr_meta",
@@ -629,7 +630,7 @@ def test_a_rewind_reopens_every_node_after_the_named_one(tmp_path, monkeypatch, 
 def test_a_rewind_clears_the_gate_and_attempt_labels(tmp_path, monkeypatch, capsys):
     """A reopened node still carrying its old gate label reports `blocked`, and a
     spent attempt count would shrink the fix loop on the retry."""
-    _walk_to(tmp_path, monkeypatch, capsys, "implementation")
+    _walk_to(tmp_path, monkeypatch, capsys, "repos_scan")
     kl.main(["attempt"])
     kl.main(["attempt"])
     capsys.readouterr()
