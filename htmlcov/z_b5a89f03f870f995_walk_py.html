@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_323e79e8bb4dca6e_findings_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.15.4">coverage.py v7.15.4</a>,
-            created at 2026-09-17 17:38 +0000
+            created at 2026-09-17 18:16 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -1263,9 +1263,9 @@
     <p class="run run2"><span class="n"><a id="t1181" href="#t1181">1181</a></span><span class="t">            <span class="nam">repo</span><span class="op">=</span><span class="nam">row</span><span class="op">[</span><span class="str">&quot;repo&quot;</span><span class="op">]</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t1182" href="#t1182">1182</a></span><span class="t">            <span class="nam">work_item_id</span><span class="op">=</span><span class="nam">work_item_id</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t1183" href="#t1183">1183</a></span><span class="t">            <span class="nam">attachments</span><span class="op">=</span><span class="nam">entry</span><span class="op">.</span><span class="nam">attachments_of</span><span class="op">(</span><span class="nam">row</span><span class="op">)</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t1184" href="#t1184">1184</a></span><span class="t">            <span class="nam">local_files</span><span class="op">=</span><span class="op">(</span><span class="nam">launch</span><span class="op">.</span><span class="nam">repo_entry</span> <span class="key">or</span> <span class="op">{</span><span class="op">}</span><span class="op">)</span><span class="op">.</span><span class="nam">get</span><span class="op">(</span><span class="str">&quot;local_files&quot;</span><span class="op">)</span> <span class="key">if</span> <span class="nam">launch</span> <span class="key">else</span> <span class="key">None</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t1184" href="#t1184">1184</a></span><span class="t">            <span class="nam">repo_entry</span><span class="op">=</span><span class="nam">launch</span><span class="op">.</span><span class="nam">repo_entry</span> <span class="key">if</span> <span class="nam">launch</span> <span class="key">else</span> <span class="key">None</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t1185" href="#t1185">1185</a></span><span class="t">        <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t1186" href="#t1186">1186</a></span><span class="t">    <span class="key">except</span> <span class="nam">RuntimeError</span> <span class="key">as</span> <span class="nam">exc</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1186" href="#t1186">1186</a></span><span class="t">    <span class="key">except</span> <span class="op">(</span><span class="nam">RuntimeError</span><span class="op">,</span> <span class="nam">_config</span><span class="op">.</span><span class="nam">ConfigError</span><span class="op">)</span> <span class="key">as</span> <span class="nam">exc</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t1187" href="#t1187">1187</a></span><span class="t">        <span class="nam">failing_node</span> <span class="op">=</span> <span class="nam">nodes</span><span class="op">[</span><span class="nam">start_index</span><span class="op">]</span><span class="op">[</span><span class="str">&quot;id&quot;</span><span class="op">]</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t1188" href="#t1188">1188</a></span><span class="t">        <span class="nam">reason</span> <span class="op">=</span> <span class="nam">str</span><span class="op">(</span><span class="nam">exc</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t1189" href="#t1189">1189</a></span><span class="t">        <span class="key">await</span> <span class="nam">db</span><span class="op">.</span><span class="nam">write</span><span class="op">(</span><span class="key">lambda</span> <span class="nam">c</span><span class="op">:</span> <span class="nam">store</span><span class="op">.</span><span class="nam">enter_node</span><span class="op">(</span><span class="nam">c</span><span class="op">,</span> <span class="nam">work_item_id</span><span class="op">,</span> <span class="nam">failing_node</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
@@ -1430,7 +1430,7 @@
             <a class="nav" href="z_323e79e8bb4dca6e_findings_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.15.4">coverage.py v7.15.4</a>,
-            created at 2026-09-17 17:38 +0000
+            created at 2026-09-17 18:16 +0000
         </p>
     </div>
 </footer>
