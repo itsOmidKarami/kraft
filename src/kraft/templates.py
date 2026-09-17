@@ -105,24 +105,25 @@ ATTACHMENT_GATES = {"spec": "spec_approval", "plan": "plan_approval"}
 #: An `artifact:` value becomes a path segment (`.engineering/<kind>s/<id>.md`),
 #: so it is a bare lowercase identifier — not a path, not a pattern.
 _ARTIFACT_KIND = re.compile(r"[a-z][a-z0-9_-]*")
-#: The levels `claude --effort` takes. Checked at config load rather than at
-#: dispatch: a typo reaching the CLI fails the node *after* the work item has
-#: already paid for a worktree and a session (Kraft-tff).
+#: The levels an agent override's `effort` may take when it is validated with
+#: no harness in scope (a work item's own override, a node override) --
+#: `load_registry`'s own per-binding `effort` check is against the named
+#: harness's own `values:` instead (leak 10 in the design spec), since
+#: `minimal` is real for codex and invalid for claude. Checked at config load
+#: rather than at dispatch: a typo reaching the CLI fails the node *after* the
+#: work item has already paid for a worktree and a session (Kraft-tff).
 _EFFORT_LEVELS = {"low", "medium", "high", "xhigh", "max"}
-
-#: The modes `claude --permission-mode` takes. Checked at config load for the
-#: same reason as `_EFFORT_LEVELS`: a typo in a permission grant that reaches
-#: the CLI fails the node after the work item has paid for a worktree and a
-#: session.
-_PERMISSION_MODES = {"default", "auto", "acceptEdits", "plan", "bypassPermissions"}
 
 #: The keys a `defaults.agent` block may set -- the same closed set an agent
 #: hook's own binding is checked against below, hoisted to module scope so
 #: this list and the defaults-merge pre-pass share one definition instead of
-#: drifting into two.
+#: drifting into two. No `_PERMISSION_MODES` beside it any more: the modes a
+#: binding may name are the named harness's own `values:` (leak 9 in the
+#: design spec), since `yolo` is real for gemini and invalid for claude.
 _AGENT_ONLY_KEYS = frozenset(
     {
         "profile",
+        "harness",
         "model",
         "escalate_model",
         "deny_tools",
@@ -160,12 +161,25 @@ class TemplateSet:
     invalid: dict
 
 
-def _agent_profiles() -> dict:
-    # Function-local: a config loader that imports the adapter layer at module
-    # scope invites a cycle later, even though there is none today.
-    from kraft.adapters.agent import PROFILES
+def _harnesses() -> "harness.HarnessSet":
+    # Function-local, same reason the old `_agent_profiles` was: a config
+    # loader importing the adapter layer at module scope invites a cycle.
+    from kraft import harness
 
-    return PROFILES
+    return harness.load(None)
+
+
+#: Binding keys that name a capability, and so are checked against the
+#: harness's own declaration. `escalate_model` is checked as `model`: it is
+#: the same capability used on a different turn.
+_CAPABILITY_KEYS = {
+    "model": "model",
+    "escalate_model": "model",
+    "effort": "effort",
+    "deny_tools": "deny_tools",
+    "allowed_tools": "allowed_tools",
+    "permission_mode": "permission_mode",
+}
 
 
 def _merge_agent_defaults(data: dict, path: Path) -> None:
@@ -219,6 +233,7 @@ def load_registry(
     *,
     steering_dir: Path | None = None,
     skills_dir: Path | None = None,
+    harnesses: "harness.HarnessSet | None" = None,
 ) -> Registry:
     path = Path(path)
     steering_dir = steering_dir if steering_dir is not None else path.parent / "steering"
@@ -243,8 +258,11 @@ def load_registry(
             raise RegistryError(f"{path.name}: hook {hook!r} has unknown kind {kind!r}")
         if kind == "builtin" and not isinstance(binding.get("handler"), str):
             raise RegistryError(f"{path.name}: builtin hook {hook!r} needs a string 'handler'")
-        if kind == "agent" and not isinstance(binding.get("command"), str):
-            raise RegistryError(f"{path.name}: agent hook {hook!r} needs a string 'command'")
+        if kind == "agent" and "command" in binding and not isinstance(binding["command"], str):
+            raise RegistryError(
+                f"{path.name}: agent hook {hook!r} 'command' must be a string "
+                "(it overrides argv[0] only)"
+            )
         if kind == "forge":
             handler = binding.get("handler")
             if handler not in _FORGE_HANDLERS:
@@ -297,26 +315,27 @@ def load_registry(
             )
 
         if kind == "agent":
-            profiles = _agent_profiles()
-            profile = binding.get("profile", "claude")
-            if profile not in profiles:
+            hs = harnesses if harnesses is not None else _harnesses()
+            # `profile:` is the pre-harness spelling. Kept for one release so
+            # an install that edited registry.yaml still loads; `harness:`
+            # wins when both are present.
+            hid = binding.get("harness") or binding.get("profile") or "claude"
+            if hid in hs.invalid:
                 raise RegistryError(
-                    f"{path.name}: hook {hook!r} has unknown profile {profile!r}; "
-                    f"known: {sorted(profiles)}"
+                    f"{path.name}: hook {hook!r} names harness {hid!r}, which failed "
+                    f"to load: {hs.invalid[hid]}"
                 )
+            if hid not in hs.valid:
+                raise RegistryError(
+                    f"{path.name}: hook {hook!r} has unknown harness {hid!r}; "
+                    f"known: {sorted(hs.valid)}"
+                )
+            h = hs.valid[hid]
+            # Normalised here so no consumer re-derives the default.
+            binding["harness"] = hid
             for key in ("model", "escalate_model"):
                 if binding.get(key) is not None and not isinstance(binding[key], str):
                     raise RegistryError(f"{path.name}: hook {hook!r} {key!r} must be a string")
-            if "effort" in binding and binding["effort"] not in _EFFORT_LEVELS:
-                raise RegistryError(
-                    f"{path.name}: hook {hook!r} 'effort' must be one of "
-                    f"{sorted(_EFFORT_LEVELS)}; got {binding['effort']!r}"
-                )
-            if "permission_mode" in binding and binding["permission_mode"] not in _PERMISSION_MODES:
-                raise RegistryError(
-                    f"{path.name}: hook {hook!r} 'permission_mode' must be one of "
-                    f"{sorted(_PERMISSION_MODES)}; got {binding['permission_mode']!r}"
-                )
             for key in ("deny_tools", "steering", "allowed_tools"):
                 v = binding.get(key, [])
                 if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
@@ -339,6 +358,30 @@ def load_registry(
                         f"{path.name}: hook {hook!r} 'artifact' must be a bare lowercase "
                         f"kind like 'spec' or 'plan'; got {art!r}"
                     )
+            # Fail at load, no emulation: a binding naming a capability its
+            # harness does not declare, or a value outside that capability's
+            # own `values:`, is rejected here rather than at 3am.
+            for key, capability in _CAPABILITY_KEYS.items():
+                if key not in binding or binding[key] is None:
+                    continue
+                if not h.supports(capability):
+                    raise RegistryError(
+                        f"{path.name}: hook {hook!r} sets {key!r}, but harness "
+                        f"{hid!r} ({h.path}) declares no {capability!r} capability"
+                    )
+                given = binding[key]
+                values = given if isinstance(given, list) else [given]
+                for one in values:
+                    if not isinstance(one, str):
+                        raise RegistryError(
+                            f"{path.name}: hook {hook!r} {key!r} must be a string "
+                            "or list of strings"
+                        )
+                    if not h.value_ok(capability, one):
+                        raise RegistryError(
+                            f"{path.name}: hook {hook!r} {key!r}={one!r} is not accepted "
+                            f"by harness {hid!r} ({h.path})"
+                        )
         else:
             for key in _AGENT_ONLY_KEYS:
                 if key in binding:
