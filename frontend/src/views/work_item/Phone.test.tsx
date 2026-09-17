@@ -78,7 +78,6 @@ const renderDetail = (hash = "") =>
   render(
     <MemoryRouter
       initialEntries={[`/work-items/wi_01HX3K9${hash}`]}
-      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
       <Routes>
         <Route path="/work-items/:id" element={<WorkItemDetail />} />

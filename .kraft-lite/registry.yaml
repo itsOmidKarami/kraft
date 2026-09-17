@@ -88,3 +88,29 @@ on.merge:
   skill: superpowers:finishing-a-development-branch
   prompt: Merge the branch and clean up the worktree.
   # also found: (none)
+
+on.repos.scan:
+  kind: prompt
+  prompt: Scan the repos this chain touches for relevant context before work starts.
+  # also found: (none)
+
+on.mr.describe:
+  kind: skill
+  skill: mr-metadata
+  prompt: Write the merge request's title and description from the finished diff.
+  # also found: (none)
+
+on.mr.rebase:
+  kind: prompt
+  prompt: Rebase the branch onto its target if it has drifted before merging.
+  # also found: (none)
+
+on.mr.sync:
+  kind: prompt
+  prompt: Pull the merge request's latest remote state into the local branch before continuing.
+  # also found: (none)
+
+on.merge.watch:
+  kind: prompt
+  prompt: Watch the merge until it lands or fails, then report which.
+  # also found: (none)

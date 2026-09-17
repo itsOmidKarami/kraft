@@ -25,7 +25,6 @@ const REPO_A = {
 function renderModal(onClose: () => void = () => {}) {
   return render(
     <MemoryRouter
-      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
       <Routes>
         <Route path="/" element={<IntakeModal onClose={onClose} />} />

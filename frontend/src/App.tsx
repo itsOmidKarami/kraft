@@ -64,7 +64,7 @@ export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) 
     return <Login bind={bind} sessionExpiryDays={sessionExpiryDays} onSignedIn={signedIn} />;
 
   return (
-    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <BrowserRouter>
       <div className="app-shell">
         <AppNav />
         <div className="app-content">

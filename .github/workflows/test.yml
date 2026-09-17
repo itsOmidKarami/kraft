@@ -27,17 +27,24 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # setuptools-scm derives the version from tags; a shallow clone has
           # none and every build in it silently versions itself 0.1.dev1.
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
       - run: uv sync --frozen
       - run: uv run ruff check .
+      - name: plugin manifests match the release this PR would produce
+        if: github.event_name == 'pull_request'
+        run: |
+          PREVIOUS=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          python3 dev/check_plugin_version.py "$PREVIOUS" "$LABELS"
+        env:
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
       - run: uv run ruff format --check .
 
   test:
@@ -53,10 +60,10 @@ jobs:
       checks: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -75,7 +82,7 @@ jobs:
       # ~1s, no tests run: catches a renamed pinned test the suite above would not.
       - run: uv run python -m kraft.intent
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: test-reports
           path: |
@@ -87,7 +94,7 @@ jobs:
       - if: >-
           always() && github.event_name == 'pull_request' &&
           github.event.pull_request.head.repo.full_name == github.repository
-        uses: mikepenz/action-junit-report@v6
+        uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
         with:
           report_paths: junit.xml
       # Runs on both pull_request (posts/updates the PR comment) and push to
@@ -97,7 +104,7 @@ jobs:
           always() &&
           (github.event_name == 'push' ||
            github.event.pull_request.head.repo.full_name == github.repository)
-        uses: py-cov-action/python-coverage-comment-action@v4.3
+        uses: py-cov-action/python-coverage-comment-action@a05be3d2e8a6272d3ef5fb2840ab20368bb2eb71 # v4.3
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -119,18 +126,18 @@ jobs:
       matrix:
         python-version: ["3.10", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
       - run: uv run --python ${{ matrix.python-version }} --no-project --with pytest pytest plugins/kraft-lite/tests -q
 
   frontend:
     name: frontend
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
@@ -149,7 +156,7 @@ jobs:
     container:
       image: mcr.microsoft.com/playwright:v1.62.1-noble
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
       - name: install uv, bd and git config
@@ -205,7 +212,7 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - env:
           LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
         run: |

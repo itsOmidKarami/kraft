@@ -36,7 +36,7 @@ const setSessions = (id: string, sessions: WorkerSession[]) =>
 
 const renderPeek = () =>
   render(
-    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <MemoryRouter>
       <PeekPane id="w1" onClose={vi.fn()} />
     </MemoryRouter>,
   );
@@ -79,7 +79,7 @@ describe("PeekPane", () => {
     const onClose = vi.fn();
     setOneItem();
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter>
         <PeekPane id="w1" onClose={onClose} />
       </MemoryRouter>,
     );
@@ -102,7 +102,7 @@ describe("PeekPane", () => {
     const id = "c7446dca30d840a8a69977c6649a7b11";
     useStore.setState({ workItems: { [id]: baseItem({ id, repo: "/Users/dev/code/kraft" }) } } as never);
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter>
         <PeekPane id={id} onClose={vi.fn()} />
       </MemoryRouter>,
     );
@@ -183,7 +183,7 @@ describe("PeekPane", () => {
     outside.textContent = "elsewhere";
     document.body.appendChild(outside);
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter>
         <PeekPane id="w1" onClose={onClose} />
       </MemoryRouter>,
     );
@@ -197,7 +197,7 @@ describe("PeekPane", () => {
     const onClose = vi.fn();
     setOneItem();
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter>
         <PeekPane id="w1" onClose={onClose} />
       </MemoryRouter>,
     );
@@ -252,7 +252,7 @@ describe("PeekPane", () => {
   it("opens on the composer a board row's button asked for, inside the peek (W11 · B.3, I.3)", () => {
     setOneItem({ status: "needs_human", cappedOut: { cycles: 3, attempts: 3 } });
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter>
         <PeekPane id="w1" onClose={vi.fn()} compose="steerRetry" />
       </MemoryRouter>,
     );
@@ -264,7 +264,7 @@ describe("PeekPane", () => {
     const onClose = vi.fn();
     setOneItem({ status: "active" });
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter>
         <PeekPane id="w1" onClose={onClose} />
       </MemoryRouter>,
     );
@@ -384,7 +384,7 @@ describe("PeekPane", () => {
     row.textContent = "another item";
     document.body.appendChild(row);
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter>
         <PeekPane id="w1" onClose={onClose} />
       </MemoryRouter>,
     );

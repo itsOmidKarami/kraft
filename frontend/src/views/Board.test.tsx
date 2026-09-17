@@ -54,7 +54,10 @@ beforeEach(() => {
     wi({ id: "w1", repo: "/repo-a", status: "active" }),
     wi({ id: "w2", repo: "/repo-b", status: "completed", chain_template: "default" }),
   );
-  vi.restoreAllMocks();
+  // Kraft-5fx.17: resetAllMocks, not restoreAllMocks — see store.test.ts's
+  // beforeEach for why restoreAllMocks doesn't reliably undo a spy on a
+  // zustand store method under vitest 5.
+  vi.resetAllMocks();
   // Board re-bootstraps on mount; keep it inert so tests keep the state set above.
   vi.spyOn(useStore.getState(), "bootstrap").mockResolvedValue();
   // Board checks repo count for the fresh-install branch (design 08); a
@@ -71,7 +74,7 @@ beforeEach(() => {
 
 const renderBoard = () =>
   render(
-    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <MemoryRouter>
       <Board />
     </MemoryRouter>,
   );
@@ -123,7 +126,7 @@ function GoBack() {
 }
 const renderBoardWithProbe = () =>
   render(
-    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <MemoryRouter>
       <GoBack />
       <LocationProbe />
       <Board />
@@ -517,7 +520,6 @@ describe("Board", () => {
     setItems(wi({ id: "w1" }));
     const { container } = render(
       <MemoryRouter
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
         initialEntries={["/"]}
       >
         <Board />
@@ -544,7 +546,7 @@ describe("Board", () => {
   it("Enter on the row navigates, but Enter bubbling from a focused child does not", async () => {
     setItems(wi({ id: "w1", status: "completed" }));
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter>
         <Routes>
           <Route path="/" element={<Board />} />
           <Route path="/work-items/:id" element={<div>item page</div>} />
@@ -634,7 +636,6 @@ describe("Board", () => {
     render(
       <MemoryRouter
         initialEntries={["/"]}
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
       >
         <Routes>
           <Route path="/" element={<Board />} />
