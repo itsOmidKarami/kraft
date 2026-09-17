@@ -12,8 +12,8 @@ capabilities:
   # "When using --print, --output-format=stream-json requires --verbose"
   # (measured against claude 2.1.260).
   structured_log:   { cli: ["--output-format", "stream-json", "--verbose"] }
-  model:            { cli: ["--model", "{value}"], values: ['(opus|sonnet|haiku)(-.*)?', 'claude-.*'] }
-  effort:           { cli: ["--effort", "{value}"], values: [low, medium, high] }
+  model:            { cli: ["--model", "{value}"], values: ['(opus|sonnet|haiku)(-.*)?(\[.*\])?', 'claude-.*'] }
+  effort:           { cli: ["--effort", "{value}"], values: [low, medium, high, xhigh, max] }
   # Kraft-avpe: Monitor is never legitimate in a one-shot `claude -p` process
   # -- there is no later turn for it to resume into -- so it is denied on
   # every launch rather than trusted to prose.
