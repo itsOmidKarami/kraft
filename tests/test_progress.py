@@ -96,7 +96,7 @@ def test_committed_task_ignores_words_that_merely_end_in_task():
     assert progress.committed_task(["subtask 4 renamed", "Plan: x"]) == 0
 
 
-TASKS = ["parse", "serve", "render"]
+TASKS = [("parse", False), ("serve", False), ("render", False)]
 
 
 def test_combine_with_no_signal_is_task_one():
@@ -122,6 +122,27 @@ def test_combine_caps_at_the_last_task():
 
 def test_combine_without_tasks_is_none():
     assert progress.combine([], reported=2, committed=1) is None
+
+
+def test_combine_clamps_current_off_a_done_marked_task():
+    tasks = [("a", False)] * 6 + [("g", True), ("h", True), ("i", True), ("j", True)]
+    # reported=0, committed=6 -> raw current would be 7, but task 7 is [DONE]
+    p = progress.combine(tasks, reported=0, committed=6)
+    assert p["current"] == 6
+    assert p["title"] == "a"
+
+
+def test_combine_marks_a_done_task_done_regardless_of_position():
+    tasks = [("a", False), ("b", True), ("c", False)]
+    p = progress.combine(tasks, reported=1, committed=0)
+    assert [t["state"] for t in p["tasks"]] == ["current", "done", "pending"]
+
+
+def test_combine_clamp_stops_at_task_one():
+    tasks = [("a", True), ("b", True)]
+    p = progress.combine(tasks, reported=0, committed=1)
+    assert p["current"] == 1
+    assert [t["state"] for t in p["tasks"]] == ["done", "done"]
 
 
 def test_implementation_node_is_found_by_hook_not_name():

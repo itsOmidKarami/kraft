@@ -68,24 +68,33 @@ def committed_task(subjects: list[str]) -> int:
     )
 
 
-def combine(tasks: list[str], reported: int, committed: int) -> dict | None:
+def combine(tasks: list[tuple[str, bool]], reported: int, committed: int) -> dict | None:
     """A report means "starting task K"; a commit naming K means K is done, so
-    the one after it is current. Capped at the last task."""
+    the one after it is current -- unless that lands on a task the plan
+    itself marks `[DONE]` (already merged outside this work item), in which
+    case `current` walks back to the last task that isn't. Capped at the
+    last task."""
     if not tasks:
         return None
     total = len(tasks)
     current = min(total, max(reported, committed + 1))
+    while current > 1 and tasks[current - 1][1]:
+        current -= 1
     return {
         "current": current,
         "total": total,
-        "title": tasks[current - 1],
+        "title": tasks[current - 1][0],
         "tasks": [
             {
                 "n": n,
                 "title": title,
-                "state": "done" if n < current else "current" if n == current else "pending",
+                "state": "done"
+                if done or n < current
+                else "current"
+                if n == current
+                else "pending",
             }
-            for n, title in enumerate(tasks, 1)
+            for n, (title, done) in enumerate(tasks, 1)
         ],
     }
 
