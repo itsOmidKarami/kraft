@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 import pytest
+import yaml
 from support.harness import fake_templates_dir, isolated_bd, make_repo
 from support.server import running_server
 
@@ -20,6 +21,11 @@ def test_sigterm_shuts_down_cleanly_mid_task(tmp_path):
     templates = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
+    # A worktree needs a declared setup_command since Kraft-kji8w; this test
+    # is about shutdown, not preparation, so declare deliberately nothing.
+    (templates / "repos.yaml").write_text(
+        yaml.safe_dump({"repos": [{"path": str(repo), "setup_command": ""}]})
+    )
     slow_env = {"KRAFT_FAKE_CLAUDE": "slow", "KRAFT_FAKE_CLAUDE_DELAY": "15"}
 
     with running_server(
