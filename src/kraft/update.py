@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError
@@ -164,20 +165,51 @@ def is_behind(release: Release | None) -> bool:
     return bool(there) and _parts(installed()) < there
 
 
+def _is_homebrew_install() -> bool:
+    """True when this process is the venv Homebrew's `kraft` formula built.
+
+    Homebrew's `virtualenv_create` puts the venv at
+    `<prefix>/Cellar/kraft/<version>/libexec`, so a running kraft's
+    `sys.prefix` contains that "/Cellar/kraft/" segment if and only if
+    Homebrew is what installed it -- `uv tool`, pip, and a source checkout
+    never produce that path shape.
+    """
+    return "/Cellar/kraft/" in sys.prefix
+
+
 def perform(release: Release, *, run=None) -> int:
     """Replace this install with `release`. Returns the installer's exit code.
 
-    `uv tool install --force` is the same command `just install` ends with, so
-    an updated Kraft is byte-identical to a freshly installed one rather than
-    something only this path can produce.
+    Installed by Homebrew -> updated by Homebrew: `brew upgrade` reads the
+    formula this project's own release workflow bumps, and a `uv tool
+    install` here would just leave a second, unrelated `kraft` on PATH
+    instead of touching the Homebrew one. ponytail: doesn't thread `--force`
+    through to `brew reinstall` for the "already current, force anyway" case
+    -- that's a dev-only edge of `kraft admin update --force`, and `brew
+    upgrade` no-opping on an up-to-date formula is a fine ceiling for it.
+
+    Otherwise, `uv tool install --force` is the same command `just install`
+    ends with, so an updated Kraft is byte-identical to a freshly installed
+    one rather than something only this path can produce.
 
     `release.wheel_url` is a plain public URL now, but it is still fetched here
     rather than handed to `uv`, so that one code path downloads every wheel.
     """
+    run = run or subprocess.run
+    if _is_homebrew_install():
+        command = ["brew", "upgrade", "kraft"]
+        try:
+            return run(command).returncode
+        except FileNotFoundError:
+            raise SystemExit(
+                "kraft admin update: this is a Homebrew install, but `brew` is not "
+                "on PATH. Install it, or run this yourself:\n"
+                f"  {' '.join(command)}"
+            ) from None
+
     import tempfile
     from pathlib import Path
 
-    run = run or subprocess.run
     with tempfile.TemporaryDirectory() as tmpdir:
         wheel_path = Path(tmpdir) / release.wheel_url.rsplit("/", 1)[-1]
         wheel_path.write_bytes(_request(release.wheel_url, DOWNLOAD_TIMEOUT))
