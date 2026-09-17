@@ -154,6 +154,20 @@ def test_get_put_registry_round_trip_is_byte_identical(client, templates_dir):
     assert (templates_dir / "registry.yaml").read_text() == before
 
 
+def test_put_registry_preserves_the_defaults_block(client, templates_dir):
+    registry_path = templates_dir / "registry.yaml"
+    data = yaml.safe_load(registry_path.read_text())
+    data["defaults"] = {"agent": {"steering": ["never-signal-processes-you-didnt-start"]}}
+    registry_path.write_text(yaml.safe_dump(data))
+    assert client.post("/api/templates/reload").status_code == 200
+
+    hooks = client.get("/api/registry").json()["hooks"]
+    assert client.put("/api/registry", json={"hooks": hooks}).status_code == 200
+
+    after = yaml.safe_load(registry_path.read_text())
+    assert after["defaults"] == {"agent": {"steering": ["never-signal-processes-you-didnt-start"]}}
+
+
 def test_templates_lists_only_resolvable_sorted(tmp_path, monkeypatch):
     bad = fake_templates_dir(tmp_path, "claude")
     (bad / "broken.yaml").write_text(
@@ -172,7 +186,7 @@ def test_parse_template_yaml_round_trips_default(client):
     body = client.post("/api/templates/parse", json={"text": text}).json()
     assert body["error"] is None
     assert body["nodes"][0]["id"] == "spec"
-    assert len(body["nodes"]) == 14
+    assert len(body["nodes"]) == 15
 
 
 def test_parse_template_yaml_reports_a_syntax_error(client):

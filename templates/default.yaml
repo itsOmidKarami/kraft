@@ -14,7 +14,15 @@ nodes:
     tasks: [on.env.prepare]
     gate_after: null
   - id: implementation
-    tasks: [on.implementation.start, on.repos.scan]
+    tasks: [on.implementation.start]
+    gate_after: null
+  # Kraft-ilff3 interim fix: on.repos.scan was a co-task under the same
+  # `asyncio.gather` as the implementation agent, not something that ran
+  # after it -- the agent takes minutes, the scan takes milliseconds, so it
+  # scanned an untouched worktree and reported nothing. Its own node, same
+  # position in the chain, actually runs after.
+  - id: repos_scan
+    tasks: [on.repos.scan]
     gate_after: null
   - id: verify
     tasks: [on.test.run, on.review.local.run]

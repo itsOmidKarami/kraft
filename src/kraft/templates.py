@@ -116,6 +116,28 @@ _EFFORT_LEVELS = {"low", "medium", "high", "xhigh", "max"}
 #: session.
 _PERMISSION_MODES = {"default", "auto", "acceptEdits", "plan", "bypassPermissions"}
 
+#: The keys a `defaults.agent` block may set -- the same closed set an agent
+#: hook's own binding is checked against below, hoisted to module scope so
+#: this list and the defaults-merge pre-pass share one definition instead of
+#: drifting into two.
+_AGENT_ONLY_KEYS = frozenset(
+    {
+        "profile",
+        "model",
+        "escalate_model",
+        "deny_tools",
+        "steering",
+        "skill",
+        "artifact",
+        "effort",
+        "allowed_tools",
+        "permission_mode",
+    }
+)
+#: The `_AGENT_ONLY_KEYS` that merge as a list -- default's items first, then
+#: the binding's own, deduped -- rather than binding-wins-or-not.
+_AGENT_LIST_KEYS = frozenset({"deny_tools", "steering", "allowed_tools"})
+
 
 class RegistryError(Exception):
     pass
@@ -146,6 +168,52 @@ def _agent_profiles() -> dict:
     return PROFILES
 
 
+def _merge_agent_defaults(data: dict, path: Path) -> None:
+    """Merge a registry's `defaults.agent` block into every `kind: agent`
+    binding under `hooks`, in place, before `load_registry`'s own per-binding
+    validation runs below -- so a typo in a default fails at load, the same
+    as a typo in the binding itself already does. Scalars: the binding's own
+    value wins over the default. Lists: the default's items first, then the
+    binding's own, deduped.
+    """
+    defaults = data.get("defaults") or {}
+    if not isinstance(defaults, dict) or (set(defaults) - {"agent"}):
+        raise RegistryError(f"{path.name}: 'defaults' takes only an 'agent' key")
+    agent_defaults = defaults.get("agent") or {}
+    if not isinstance(agent_defaults, dict):
+        raise RegistryError(f"{path.name}: 'defaults.agent' must be a mapping")
+    unknown = sorted(set(agent_defaults) - _AGENT_ONLY_KEYS)
+    if unknown:
+        raise RegistryError(f"{path.name}: 'defaults.agent' has unknown key(s) {unknown}")
+    for key in _AGENT_LIST_KEYS:
+        if key in agent_defaults and not (
+            isinstance(agent_defaults[key], list)
+            and all(isinstance(x, str) for x in agent_defaults[key])
+        ):
+            raise RegistryError(f"{path.name}: 'defaults.agent' {key!r} must be a list of strings")
+    if not agent_defaults:
+        return
+    for hook, binding in data["hooks"].items():
+        if not isinstance(binding, dict) or binding.get("kind") != "agent":
+            continue
+        for key, dval in agent_defaults.items():
+            if key in _AGENT_LIST_KEYS:
+                if key in binding and not (
+                    isinstance(binding[key], list) and all(isinstance(x, str) for x in binding[key])
+                ):
+                    raise RegistryError(
+                        f"{path.name}: hook {hook!r} {key!r} must be a list of strings"
+                    )
+                own = binding.get(key, [])
+                merged = list(dval)
+                for x in own:
+                    if x not in merged:
+                        merged.append(x)
+                binding[key] = merged
+            elif key not in binding:
+                binding[key] = dval
+
+
 def load_registry(
     path: str | Path,
     *,
@@ -166,6 +234,7 @@ def load_registry(
         raise RegistryError(f"{path.name}: cannot read/parse: {exc}") from exc
     if not isinstance(data, dict) or not isinstance(data.get("hooks"), dict):
         raise RegistryError(f"{path.name}: expected a top-level 'hooks' mapping")
+    _merge_agent_defaults(data, path)
     for hook, binding in data["hooks"].items():
         if not isinstance(binding, dict) or "kind" not in binding:
             raise RegistryError(f"{path.name}: hook {hook!r} is missing 'kind'")
@@ -227,18 +296,6 @@ def load_registry(
                 f"{path.name}: subprocess hook {hook!r} needs a list-of-strings 'command'"
             )
 
-        agent_only = (
-            "profile",
-            "model",
-            "escalate_model",
-            "deny_tools",
-            "steering",
-            "skill",
-            "artifact",
-            "effort",
-            "allowed_tools",
-            "permission_mode",
-        )
         if kind == "agent":
             profiles = _agent_profiles()
             profile = binding.get("profile", "claude")
@@ -283,7 +340,7 @@ def load_registry(
                         f"kind like 'spec' or 'plan'; got {art!r}"
                     )
         else:
-            for key in agent_only:
+            for key in _AGENT_ONLY_KEYS:
                 if key in binding:
                     raise RegistryError(
                         f"{path.name}: hook {hook!r} is kind {kind!r}; {key!r} applies "
@@ -356,7 +413,7 @@ def load_registry(
         # superset with no behaviour change for `builtin`.
         known |= {"interactive", "timeout", "repos", "sandbox"}
         if kind == "agent":
-            known |= set(agent_only)
+            known |= _AGENT_ONLY_KEYS
         if "interactive" in binding and not isinstance(binding["interactive"], bool):
             raise RegistryError(f"{path.name}: hook {hook!r} 'interactive' must be a boolean")
         unknown = sorted(set(binding) - known)
@@ -591,9 +648,93 @@ def validate_agent_overrides(overrides: dict) -> list[str]:
     return [f"agent_overrides {e}" for e in validate_model_effort_fields(overrides)]
 
 
+#: The keys `_resolve_template_dict` treats as composition -- meaningless,
+#: and rejected, on a template that does not `extends` (spec §2's "Hard load
+#: errors" posture: a key that silently does nothing is worse than a
+#: rejected one).
+_COMPOSITION_KEYS = ("remove", "insert_before", "insert_after")
+
+
+def _resolve_template_dict(
+    tid: str, raw_by_id: dict[str, dict], *, visiting: frozenset[str] = frozenset()
+) -> list:
+    """Resolve one raw template dict into a flat node list, recursively
+    resolving `extends` first. Raises `RegistryError` -- caught by
+    `load_templates`'s own per-template try/except below, the same as every
+    other load-time defect -- since this runs before any node-level
+    validation has produced a node to attach an error to.
+
+    Every node returned is a fresh `dict` copy: two templates extending the
+    same base, or one template's own `insert_before`/`insert_after`, must
+    never share a node dict a sibling resolution could then mutate.
+    """
+    data = raw_by_id[tid]
+    extends = data.get("extends")
+
+    if extends is None:
+        nodes = data.get("nodes")
+        if not isinstance(nodes, list) or not nodes:
+            raise RegistryError(f"template {tid!r}: 'nodes' must be a non-empty list")
+        used = sorted(k for k in _COMPOSITION_KEYS if k in data)
+        if used:
+            raise RegistryError(f"template {tid!r}: {used} require 'extends'")
+        bad = next((n for n in nodes if not isinstance(n, dict)), None)
+        if bad is not None:
+            raise RegistryError(f"template {tid!r}: node entries must be mappings, got {bad!r}")
+        return [dict(n) for n in nodes]
+
+    if "nodes" in data:
+        raise RegistryError(f"template {tid!r}: cannot set both 'extends' and 'nodes'")
+    if not isinstance(extends, str):
+        raise RegistryError(f"template {tid!r}: 'extends' must be a string template id")
+    if extends not in raw_by_id:
+        raise RegistryError(f"template {tid!r}: extends unknown template {extends!r}")
+    if extends in visiting:
+        raise RegistryError(f"template {tid!r}: 'extends' cycle at {extends!r}")
+
+    nodes = _resolve_template_dict(extends, raw_by_id, visiting=visiting | {tid})
+
+    remove = data.get("remove", [])
+    if not isinstance(remove, list) or not all(isinstance(x, str) for x in remove):
+        raise RegistryError(f"template {tid!r}: 'remove' must be a list of node ids")
+    base_ids = {n["id"] for n in nodes if isinstance(n.get("id"), str)}
+    unknown_remove = sorted(set(remove) - base_ids)
+    if unknown_remove:
+        raise RegistryError(f"template {tid!r}: 'remove' names unknown node id(s) {unknown_remove}")
+    nodes = [n for n in nodes if n.get("id") not in remove]
+
+    for key in ("insert_before", "insert_after"):
+        spec = data.get(key, {})
+        if not isinstance(spec, dict):
+            raise RegistryError(
+                f"template {tid!r}: {key!r} must be a mapping of anchor to node list"
+            )
+        for anchor, extra in spec.items():
+            if not isinstance(extra, list) or not all(isinstance(n, dict) for n in extra):
+                raise RegistryError(
+                    f"template {tid!r}: {key!r}[{anchor!r}] must be a list of node dicts"
+                )
+            ids_now = [n.get("id") for n in nodes]
+            if anchor not in ids_now:
+                raise RegistryError(
+                    f"template {tid!r}: {key!r} names unknown anchor node id {anchor!r}"
+                )
+            idx = ids_now.index(anchor)
+            offset = idx if key == "insert_before" else idx + 1
+            nodes[offset:offset] = [dict(n) for n in extra]
+
+    ids = [n.get("id") for n in nodes]
+    dupes = sorted({i for i in ids if ids.count(i) > 1})
+    if dupes:
+        raise RegistryError(f"template {tid!r}: duplicate node id(s) {dupes}")
+
+    return nodes
+
+
 def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
     valid: dict[str, Template] = {}
     invalid: dict[str, str] = {}
+    raw_by_id: dict[str, dict] = {}
 
     for path in sorted(Path(dir).glob("*.yaml")):
         if path.name in CONFIG_FILES:
@@ -609,13 +750,16 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
             invalid[stem] = f"{path.name}: missing a string 'id'"
             continue
         tid = data["id"]
-        if tid in valid or tid in invalid:
+        if tid in raw_by_id or tid in invalid:
             invalid[stem] = f"{path.name}: duplicate template id {tid!r}"
             continue
+        raw_by_id[tid] = data
 
-        nodes = data.get("nodes")
-        if not isinstance(nodes, list) or not nodes:
-            invalid[tid] = f"template {tid!r}: 'nodes' must be a non-empty list"
+    for tid in raw_by_id:
+        try:
+            nodes = _resolve_template_dict(tid, raw_by_id)
+        except RegistryError as exc:
+            invalid[tid] = str(exc)
             continue
 
         node_errors = validate_nodes(nodes, registry)

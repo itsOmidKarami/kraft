@@ -151,9 +151,13 @@ async def put_registry(body: RegistryBody, request: Request):
     has to surface immediately, not at the next intake.
     """
     st = request.app.state
+    current = yaml.safe_load((st.templates_dir / "registry.yaml").read_text()) or {}
+    doc = {"hooks": body.hooks}
+    if "defaults" in current:
+        doc["defaults"] = current["defaults"]
     with tempfile.TemporaryDirectory() as tmp:
         candidate = Path(tmp) / "registry.yaml"
-        candidate.write_text(yaml.safe_dump({"hooks": body.hooks}))
+        candidate.write_text(yaml.safe_dump(doc))
         try:
             registry = load_registry(
                 candidate, steering_dir=st.templates_dir / "steering", skills_dir=st.skills_dir
@@ -164,7 +168,7 @@ async def put_registry(body: RegistryBody, request: Request):
             if src.name not in CONFIG_FILES:
                 (Path(tmp) / src.name).write_text(src.read_text())
         checked = load_templates(Path(tmp), registry)
-    config_mod.write_yaml(st.templates_dir / "registry.yaml", {"hooks": body.hooks})
+    config_mod.write_yaml(st.templates_dir / "registry.yaml", doc)
     deps._reload_templates(st)
     return {"hooks": body.hooks, "invalid_templates": checked.invalid}
 

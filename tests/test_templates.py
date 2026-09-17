@@ -29,6 +29,9 @@ def test_shipped_yaml_parses_and_matches_spec():
     assert all(n["gate_after"] is None for n in quick["nodes"])
 
     registry = yaml.safe_load((TEMPLATES_DIR / "registry.yaml").read_text())
+    assert registry["defaults"] == {
+        "agent": {"steering": ["never-signal-processes-you-didnt-start"]}
+    }
     assert {
         "on.env.prepare",
         "on.implementation.start",
@@ -39,14 +42,12 @@ def test_shipped_yaml_parses_and_matches_spec():
         "command": "claude",
         "skill": "spec",
         "artifact": "spec",
-        "steering": ["never-signal-processes-you-didnt-start"],
     }
     assert registry["hooks"]["on.plan.requested"] == {
         "kind": "agent",
         "command": "claude",
         "skill": "plan",
         "artifact": "plan",
-        "steering": ["never-signal-processes-you-didnt-start"],
     }
     # The back half is no longer noop (Kraft-33j). `auto` and not a CLI name:
     # the registry is per install, the forge is a property of the repo, and
@@ -72,18 +73,33 @@ def test_shipped_yaml_parses_and_matches_spec():
         "command": "claude",
         "skill": "review-brief",
         "artifact": "review_brief",
-        "steering": ["never-signal-processes-you-didnt-start"],
     }
     assert registry["hooks"]["on.env.prepare"] == {"kind": "builtin", "handler": "env_setup"}
     assert registry["hooks"]["on.implementation.start"] == {
         "kind": "agent",
         "command": "claude",
-        "steering": ["never-signal-processes-you-didnt-start"],
     }
     assert registry["hooks"]["on.test.run"] == {
         "kind": "subprocess",
         "command": ["uv", "run", "pytest", "-q"],
     }
+
+
+def test_shipped_registry_merges_its_own_defaults():
+    reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
+    for hook_id in (
+        "on.spec.requested",
+        "on.plan.requested",
+        "on.implementation.start",
+        "on.chain.review_ready",
+        "on.review.local.run",
+        "on.review.security.run",
+        "on.human_review.requested",
+        "on.mr_checks.repair",
+        "on.fix_loop.judge",
+        "on.mr.describe",
+    ):
+        assert reg.hooks[hook_id]["steering"] == ["never-signal-processes-you-didnt-start"], hook_id
 
 
 REGISTRY_YAML = """\
@@ -99,6 +115,13 @@ nodes:
   - { id: env_setup,      tasks: [on.env.prepare],         gate_after: null }
   - { id: implementation, tasks: [on.implementation.start], gate_after: null }
   - { id: verify,         tasks: [on.test.run],            gate_after: null }
+"""
+
+_TWO_AGENT_HOOKS_REGISTRY = """\
+hooks:
+  on.a: { kind: agent, command: claude }
+  on.b: { kind: agent, command: claude, steering: [own] }
+  on.c: { kind: subprocess, command: [pytest] }
 """
 
 BAD_HOOK_TEMPLATE = """\
@@ -117,7 +140,7 @@ def test_policy_yaml_is_not_scanned_as_a_template():
     assert "policy" not in ts.valid
 
 
-def test_shipped_default_yaml_is_the_fourteen_node_chain():
+def test_shipped_default_yaml_is_the_fifteen_node_chain():
     reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
     ts = templates.load_templates(TEMPLATES_DIR, reg)
     assert "default" in ts.valid, ts.invalid
@@ -128,6 +151,7 @@ def test_shipped_default_yaml_is_the_fourteen_node_chain():
         "chain_review",
         "env_setup",
         "implementation",
+        "repos_scan",
         "verify",
         "pre_mr_rebase",
         "mr_meta",
@@ -147,6 +171,8 @@ def test_shipped_default_yaml_is_the_fourteen_node_chain():
     assert gates["post_merge_watch"] is None
 
     by_id = {n["id"]: n for n in nodes}
+    assert by_id["implementation"]["tasks"] == ["on.implementation.start"]
+    assert by_id["repos_scan"]["tasks"] == ["on.repos.scan"]
     assert by_id["pre_mr_rebase"]["rebase_bounce_to"] == "verify"
     assert by_id["pre_mr_rebase"]["tasks"] == ["on.mr.rebase"]
     assert by_id["post_merge_watch"]["tasks"] == ["on.merge.watch"]
@@ -266,6 +292,217 @@ def test_validate_nodes_is_what_load_templates_calls_for_its_own_nodes(tmp_path)
         [{"id": "n1", "tasks": ["on.test.run"], "gate_after": "bogus_gate"}], reg
     )
     assert direct[0] in ts.invalid["weirdgate"]
+
+
+# ── template composition: extends/remove/insert_before/insert_after ───────
+
+_BASE_TEMPLATE = (
+    "id: base\n"
+    "nodes:\n"
+    "  - { id: env_setup,      tasks: [on.env.prepare],         gate_after: null }\n"
+    "  - { id: implementation, tasks: [on.implementation.start], gate_after: null }\n"
+    "  - { id: verify,         tasks: [on.test.run],            gate_after: null }\n"
+)
+
+
+def test_extends_inherits_the_base_templates_nodes(tmp_path):
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "base.yaml": _BASE_TEMPLATE,
+            "child.yaml": "id: child\nextends: base\n",
+        },
+    )
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert "child" in ts.valid, ts.invalid
+    assert [n["id"] for n in ts.valid["child"].nodes] == ["env_setup", "implementation", "verify"]
+
+
+def test_extends_leaves_the_base_template_itself_untouched(tmp_path):
+    """Resolving `child` must not mutate `base`'s own node list -- two
+    templates extending the same base must not see each other's edits."""
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "base.yaml": _BASE_TEMPLATE,
+            "child.yaml": "id: child\nextends: base\nremove: [env_setup]\n",
+        },
+    )
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert [n["id"] for n in ts.valid["base"].nodes] == ["env_setup", "implementation", "verify"]
+    assert [n["id"] for n in ts.valid["child"].nodes] == ["implementation", "verify"]
+
+
+def test_extends_remove_rejects_an_unknown_node_id(tmp_path):
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "base.yaml": _BASE_TEMPLATE,
+            "child.yaml": "id: child\nextends: base\nremove: [bogus]\n",
+        },
+    )
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert "bogus" in ts.invalid["child"]
+
+
+def test_extends_insert_before_and_after_an_anchor(tmp_path):
+    child = (
+        "id: child\n"
+        "extends: base\n"
+        "insert_before: { verify: [{ id: pre, tasks: [on.env.prepare] }] }\n"
+        "insert_after:  { verify: [{ id: post, tasks: [on.env.prepare] }] }\n"
+    )
+    d = _dir(
+        tmp_path,
+        **{"registry.yaml": REGISTRY_YAML, "base.yaml": _BASE_TEMPLATE, "child.yaml": child},
+    )
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert [n["id"] for n in ts.valid["child"].nodes] == [
+        "env_setup",
+        "implementation",
+        "pre",
+        "verify",
+        "post",
+    ]
+
+
+def test_extends_insert_before_rejects_an_unknown_anchor(tmp_path):
+    child = (
+        "id: child\nextends: base\n"
+        "insert_before: { bogus: [{ id: pre, tasks: [on.env.prepare] }] }\n"
+    )
+    d = _dir(
+        tmp_path,
+        **{"registry.yaml": REGISTRY_YAML, "base.yaml": _BASE_TEMPLATE, "child.yaml": child},
+    )
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert "bogus" in ts.invalid["child"]
+
+
+def test_extends_and_nodes_together_is_a_load_error(tmp_path):
+    child = (
+        "id: child\nextends: base\n"
+        "nodes:\n  - { id: x, tasks: [on.env.prepare], gate_after: null }\n"
+    )
+    d = _dir(
+        tmp_path,
+        **{"registry.yaml": REGISTRY_YAML, "base.yaml": _BASE_TEMPLATE, "child.yaml": child},
+    )
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert "child" in ts.invalid
+
+
+def test_plain_string_nodes_are_quarantined_not_silently_dropped(tmp_path):
+    """A `nodes:` list of bare strings (an easy YAML slip) must land in
+    `invalid`, not load as a valid template with zero nodes -- a zero-node
+    chain would complete without running anything."""
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "typo.yaml": "id: typo\nnodes: [implementation, verify]\n",
+        },
+    )
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert "typo" in ts.invalid
+    assert "typo" not in ts.valid
+
+
+def test_extends_of_a_plain_string_nodes_base_is_a_load_error(tmp_path):
+    """A malformed base (bare-string `nodes:`) must quarantine both itself
+    and any child that extends it, not raise AttributeError out of the
+    loader when the extends branch inspects the base's node dicts."""
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "typo.yaml": "id: typo\nnodes: [implementation, verify]\n",
+            "child.yaml": "id: child\nextends: typo\n",
+        },
+    )
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert "typo" in ts.invalid
+    assert "child" in ts.invalid
+    assert "child" not in ts.valid
+
+
+def test_extends_unknown_base_is_a_load_error(tmp_path):
+    d = _dir(
+        tmp_path, **{"registry.yaml": REGISTRY_YAML, "child.yaml": "id: child\nextends: bogus\n"}
+    )
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert "bogus" in ts.invalid["child"]
+
+
+def test_extends_cycle_is_a_load_error(tmp_path):
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "a.yaml": "id: a\nextends: b\n",
+            "b.yaml": "id: b\nextends: a\n",
+        },
+    )
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert "cycle" in ts.invalid["a"]
+    assert "cycle" in ts.invalid["b"]
+
+
+def test_remove_without_extends_is_a_load_error(tmp_path):
+    tmpl = (
+        "id: solo\nnodes:\n  - { id: x, tasks: [on.env.prepare], gate_after: null }\nremove: [x]\n"
+    )
+    d = _dir(tmp_path, **{"registry.yaml": REGISTRY_YAML, "solo.yaml": tmpl})
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert "extends" in ts.invalid["solo"]
+
+
+def test_insert_introducing_a_duplicate_node_id_is_a_load_error(tmp_path):
+    child = (
+        "id: child\nextends: base\n"
+        "insert_after: { verify: [{ id: verify, tasks: [on.env.prepare] }] }\n"
+    )
+    d = _dir(
+        tmp_path,
+        **{"registry.yaml": REGISTRY_YAML, "base.yaml": _BASE_TEMPLATE, "child.yaml": child},
+    )
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert "duplicate" in ts.invalid["child"]
+
+
+def test_a_deep_extends_chain_resolves(tmp_path):
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "base.yaml": _BASE_TEMPLATE,
+            "child.yaml": "id: child\nextends: base\nremove: [env_setup]\n",
+            "grandchild.yaml": "id: grandchild\nextends: child\n",
+        },
+    )
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert [n["id"] for n in ts.valid["grandchild"].nodes] == ["implementation", "verify"]
+
+
+def test_extending_a_template_whose_own_nodes_fail_validation_still_reports_the_root_cause(
+    tmp_path,
+):
+    """A child inherits its base's problems too -- each template is still
+    validated independently, so the child's own error names the real defect
+    rather than a generic 'base is broken'."""
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "base.yaml": "id: base\nnodes:\n  - { id: x, tasks: [on.bogus], gate_after: null }\n",
+            "child.yaml": "id: child\nextends: base\n",
+        },
+    )
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert "on.bogus" in ts.invalid["child"]
 
 
 def test_validate_agent_overrides_rejects_unknown_effort():
@@ -470,6 +707,107 @@ def test_load_registry_rejects_bad_bindings(tmp_path, body):
     (tmp_path / "registry.yaml").write_text(body)
     with pytest.raises(templates.RegistryError):
         templates.load_registry(tmp_path / "registry.yaml")
+
+
+# ── registry `defaults:` (Kraft-6m2x6 phase 1) ─────────────────────────────
+
+
+def _steering_dir_with(tmp_path, *names):
+    d = tmp_path / "steering"
+    d.mkdir(exist_ok=True)
+    for name in names:
+        (d / f"{name}.md").write_text("# House style\nBe direct.\n")
+    return d
+
+
+def test_defaults_agent_steering_merges_into_a_hook_with_none(tmp_path):
+    _steering_dir_with(tmp_path, "shared", "own")
+    (tmp_path / "registry.yaml").write_text(
+        "defaults:\n  agent: { steering: [shared] }\n" + _TWO_AGENT_HOOKS_REGISTRY
+    )
+    reg = templates.load_registry(tmp_path / "registry.yaml", steering_dir=tmp_path / "steering")
+    assert reg.hooks["on.a"]["steering"] == ["shared"]
+
+
+def test_defaults_agent_steering_prepends_before_the_bindings_own(tmp_path):
+    _steering_dir_with(tmp_path, "shared", "own")
+    (tmp_path / "registry.yaml").write_text(
+        "defaults:\n  agent: { steering: [shared] }\n" + _TWO_AGENT_HOOKS_REGISTRY
+    )
+    reg = templates.load_registry(tmp_path / "registry.yaml", steering_dir=tmp_path / "steering")
+    assert reg.hooks["on.b"]["steering"] == ["shared", "own"]
+
+
+def test_defaults_agent_steering_dedupes_a_repeated_entry(tmp_path):
+    _steering_dir_with(tmp_path, "shared")
+    (tmp_path / "registry.yaml").write_text(
+        "defaults:\n  agent: { steering: [shared] }\n"
+        "hooks:\n  on.a: { kind: agent, command: claude, steering: [shared] }\n"
+    )
+    reg = templates.load_registry(tmp_path / "registry.yaml", steering_dir=tmp_path / "steering")
+    assert reg.hooks["on.a"]["steering"] == ["shared"]
+
+
+def test_defaults_agent_scalar_does_not_override_the_bindings_own_value(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "defaults:\n  agent: { model: opus }\n"
+        "hooks:\n"
+        "  on.a: { kind: agent, command: claude, model: sonnet }\n"
+        "  on.b: { kind: agent, command: claude }\n"
+    )
+    reg = templates.load_registry(tmp_path / "registry.yaml")
+    assert reg.hooks["on.a"]["model"] == "sonnet"
+    assert reg.hooks["on.b"]["model"] == "opus"
+
+
+def test_defaults_do_not_apply_to_a_non_agent_kind(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "defaults:\n  agent: { model: opus }\n"
+        "hooks:\n  on.a: { kind: builtin, handler: env_setup }\n"
+    )
+    reg = templates.load_registry(tmp_path / "registry.yaml")
+    assert "model" not in reg.hooks["on.a"]
+
+
+def test_defaults_rejects_an_unknown_top_level_key(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "defaults:\n  subprocess: {}\nhooks:\n  on.a: { kind: builtin, handler: env_setup }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="defaults"):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_defaults_agent_rejects_an_unknown_key(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "defaults:\n  agent: { handler: nope }\n"
+        "hooks:\n  on.a: { kind: builtin, handler: env_setup }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="defaults.agent"):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_defaults_agent_steering_must_be_a_list_of_strings(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "defaults:\n  agent: { steering: not-a-list }\n"
+        "hooks:\n  on.a: { kind: agent, command: claude }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="steering"):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_defaults_agent_merge_rejects_a_bindings_own_non_list_value(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "defaults:\n  agent: { deny_tools: [WebFetch] }\n"
+        "hooks:\n  on.a: { kind: agent, command: claude, deny_tools: Bash }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="deny_tools"):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_defaults_missing_entirely_is_fine(tmp_path):
+    (tmp_path / "registry.yaml").write_text("hooks:\n  on.a: { kind: agent, command: claude }\n")
+    reg = templates.load_registry(tmp_path / "registry.yaml")
+    assert reg.hooks["on.a"] == {"kind": "agent", "command": "claude"}
 
 
 # ── new agent-hook keys: profile, model, deny_tools, steering ──────────────────
