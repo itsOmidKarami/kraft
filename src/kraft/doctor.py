@@ -525,6 +525,20 @@ async def _repo_checks() -> list[dict]:
             checks.append(_check(name, True, f"{path} — no .beads: work items here file no bead"))
         else:
             checks.append(_check(name, True, str(path)))
+        if repo.get("setup_command") is None:
+            # No default stands behind this key: an undeclared repo stops its
+            # next work item when the worktree is built (Kraft-kji8w). That is
+            # deliberate; being told here rather than by a parked item is what
+            # makes it survivable.
+            suggestion = config._first_setup_command(path) if path.is_dir() else None
+            checks.append(
+                _check(
+                    f"setup {repo.get('name') or repo['path']}",
+                    False,
+                    f"no setup_command in repos.yaml — suggest: {suggestion or 'none found'}"
+                    ' (use "" if this repo deliberately needs no preparation)',
+                )
+            )
         if auto:
             checks.append(_forge_check(repo))
     return checks or [_check("repos", True, "none connected")]

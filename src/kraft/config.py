@@ -168,6 +168,7 @@ def _migrate_submodule_edges(repos: list[dict]) -> list[dict]:
                     # the edge carried a human decision -- that is the touch
                     "managed": True,
                     "test_command": e.get("test_command"),
+                    "setup_command": e.get("setup_command"),
                     "default_chain_template": e.get("chain_override") or "default",
                 }
             )

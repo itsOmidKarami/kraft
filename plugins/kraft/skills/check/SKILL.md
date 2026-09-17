@@ -17,6 +17,11 @@ narrate:
   `builtin:noop`, or missing from the live registry entirely.
 - `chain_templates` - a node a shipped chain template has that the live
   installed copy of that template doesn't.
+- `setup <repo>` - a connected repo with no `setup_command` in `repos.yaml`.
+  There is no default, so this repo's next work item stops when its worktree
+  is built. The row carries a suggestion probed from the repo's own markers;
+  check it against what the repo actually needs before writing it in, the same
+  way step 1 of `onboard` checks a probed `test_command`.
 
 Translate each row's compact detail (`h1, h2 missing entirely` style) into one
 line per hook or node, grouped under its own heading, so a human reads "these
