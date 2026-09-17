@@ -136,3 +136,25 @@ jobs:
       - name: publish to PyPI
         if: steps.impact.outputs.tag != ''
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+
+      - name: bump the homebrew tap
+        # Points the formula at this run's own GitHub Release asset, not the
+        # PyPI upload -- that one is already sha256-verified above and, unlike
+        # querying PyPI's API, needs no wait for index propagation.
+        if: steps.impact.outputs.tag != ''
+        env:
+          TAG: ${{ steps.impact.outputs.tag }}
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          WHEEL=$(ls dist/*.whl)
+          SHA256=$(shasum -a 256 "$WHEEL" | cut -d' ' -f1)
+          URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$(basename "$WHEEL")"
+
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/itsOmidKarami/homebrew-kraft" /tmp/homebrew-kraft
+          cd /tmp/homebrew-kraft
+          sed -i \
+            -e "s#^  url \".*\"#  url \"$URL\"#" \
+            -e "s#^  sha256 \".*\"#  sha256 \"$SHA256\"#" \
+            Formula/kraft.rb
+          git -c user.email=ci@kraft.invalid -c user.name="Kraft CI" commit -am "kraft ${TAG#v}"
+          git push
