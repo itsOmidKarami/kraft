@@ -13,11 +13,11 @@ from kraft.cli import admin
 
 
 def test_version_is_not_the_placeholder():
-    assert metadata.version("kraft") != "0.0.0"
+    assert metadata.version("kraft-sdlc") != "0.0.0"
 
 
 def test_cli_version_matches_the_installed_distribution():
-    assert admin._version() == metadata.version("kraft")
+    assert admin._version() == metadata.version("kraft-sdlc")
 
 
 def test_version_survives_not_being_installed(monkeypatch):

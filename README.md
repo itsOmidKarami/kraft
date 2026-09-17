@@ -12,7 +12,7 @@ worktrees. How it fits together: [ARCHITECTURE.md](ARCHITECTURE.md).
 ## Install and run
 
 ```bash
-uv tool install kraft
+uv tool install kraft-sdlc
 kraft admin init   # register the MCP server and skills with your agent
 kraft              # http://127.0.0.1:8765
 ```

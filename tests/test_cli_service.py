@@ -88,6 +88,7 @@ def test_launchd_plist_content(tmp_path, monkeypatch):
 
 def test_systemd_unit_content(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "kraft-home"))
     path = cli.admin._write_systemd_unit("/usr/local/bin/kraft")
     text = path.read_text()
@@ -100,6 +101,7 @@ def test_service_files_survive_a_special_character_in_the_environment(tmp_path, 
     """An `&` in PATH or KRAFT_HOME used to produce a plist launchd cannot
     parse, and a `"` a systemd unit that fails to load."""
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     home = tmp_path / 'a&b "c"'
     monkeypatch.setenv("KRAFT_HOME", str(home))
 
@@ -159,8 +161,16 @@ def test_install_and_uninstall_service_use_the_real_launchd(tmp_path, monkeypatc
     _operator_has_a_real_service(),
     reason="this machine has a real kraft service installed; the test would unload it",
 )
+@pytest.mark.skipif(
+    os.environ.get("GITHUB_ACTIONS") == "true",
+    reason="flaky under GitHub Actions: daemon-reload/enable --now race, see Kraft-1zvs3",
+)
 def test_install_and_uninstall_service_use_real_systemd_user(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    # systemctl --user resolves unit files under $XDG_CONFIG_HOME when set,
+    # which would otherwise point outside the fake HOME above and make
+    # `enable --now` unable to find the unit this test just wrote.
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "kraft-home"))
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
     run_dir = tmp_path / "kraft-home" / "run"

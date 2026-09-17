@@ -58,7 +58,7 @@ def _plugin_manifest() -> dict:
     `/kraft:handoff`.
     """
     try:
-        version = metadata.version("kraft")
+        version = metadata.version("kraft-sdlc")
     except metadata.PackageNotFoundError:
         # Running from a source tree that was never installed.
         version = "0.0.0"
