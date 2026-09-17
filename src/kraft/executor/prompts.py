@@ -63,10 +63,13 @@ _FIX_PREVIOUS_SUMMARY = " Its session summary is at {summary_ref}."
 def format_findings(
     found: list[_findings.Finding], repeats: set[str], *, tags: bool = False
 ) -> str:
-    """One bullet per finding. `tags` prefixes each with its stable identity,
-    for the two readers that have to refer back to a specific finding across
-    rounds -- the reviewer being asked "is this one still there?"
-    (`carried_findings_note`) and the fixer reading a round history
+    """One bullet per finding, plus one indented line per job it came from
+    naming exactly where that job's own session log lives -- so a fix agent
+    can pull the full output for any finding without re-running anything
+    (Kraft-s7c04.34/.35). `tags` prefixes each finding with its stable
+    identity, for the two readers that have to refer back to a specific
+    finding across rounds -- the reviewer being asked "is this one still
+    there?" (`carried_findings_note`) and the fixer reading a round history
     (`format_judge_history` already shows a tag for the same reason)."""
     lines = []
     for f in found:
@@ -74,6 +77,8 @@ def format_findings(
         tag = "REPEAT " if f.fingerprint in repeats else ""
         ident = f"[{f.fingerprint}] " if tags else ""
         lines.append(f"- {ident}{tag}[{f.severity}] {where} — {f.message} ({f.source_plugin})")
+        for job in f.jobs:
+            lines.append(f"    {job.label} → {job.log_ref}")
     return "\n".join(lines)
 
 

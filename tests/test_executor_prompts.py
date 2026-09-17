@@ -1,4 +1,5 @@
 from kraft.executor import prompts
+from kraft.findings import Finding, JobRef
 
 
 def test_attachment_note_keeps_the_imperative_for_the_implementer():
@@ -65,3 +66,22 @@ def test_scope_note_handles_a_legacy_bare_test_command():
     # LaunchContext built by hand may not have been through that.
     out = prompts.scope_note("on.implementation.start", {"test_command": "just test"})
     assert "just test" in out
+
+
+def test_format_findings_renders_job_refs():
+    found = [
+        Finding(
+            severity="critical",
+            message="on.test.run failed: 2 job(s)",
+            file=None,
+            line=None,
+            source_plugin="on.test.run",
+            jobs=(
+                JobRef(label="just test-ui", log_ref="kraft view logs w1 --session s1"),
+                JobRef(label="just e2e-ci", log_ref="kraft view logs w1 --session s2"),
+            ),
+        )
+    ]
+    text = prompts.format_findings(found, repeats=set())
+    assert "just test-ui → kraft view logs w1 --session s1" in text
+    assert "just e2e-ci → kraft view logs w1 --session s2" in text

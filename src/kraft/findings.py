@@ -32,11 +32,21 @@ _MESSAGE_CAP = 400
 #: Lines worth keeping from a failed task's output.
 _MARKER = re.compile(r"✘|FAILED|Error:|Traceback")
 
-#: Wall-clock noise that must not affect a finding's fingerprint: an
-#: identical failure at a different duration or timestamp is still the same
-#: failure. `# ponytail: heuristic, not framework-aware; upgrade to
-#: structured test-name diffing if a real framework ever needs it.`
-_NOISE = re.compile(r"\(\d+(?:\.\d+)?\s*(?:ms|s|m)\)|\b\d{2}:\d{2}:\d{2}\b")
+#: Wall-clock noise, and any other per-run varying token, that must not
+#: affect a finding's fingerprint: an identical failure at a different
+#: duration, timestamp, run ordinal, or reported-via URL is still the same
+#: failure. `_MARKER.pattern` is reused rather than re-listing the four
+#: markers, so a run ordinal is stripped after *any* of them, not only the
+#: `✘` the original evidence happened to show (Kraft-s7c04.34).
+#: `# ponytail: heuristic, not framework-aware; upgrade to structured
+#: per-source reporting (JUnit for test runners, CI artifacts/reports for
+#: pipelines) if this ever proves insufficient in practice.`
+_NOISE = re.compile(
+    r"\(\d+(?:\.\d+)?\s*(?:ms|s|m)\)"
+    r"|\b\d{2}:\d{2}:\d{2}\b"
+    rf"|(?:{_MARKER.pattern})\s*\d+(?=\s|$)"
+    r"|https?://\S+"
+)
 
 #: What a `same_as` must look like to be believed: the shape `fingerprint`
 #: itself produces. A model asked to echo a tag will sometimes write a sentence
@@ -55,6 +65,13 @@ class Finding:
     #: reviewer that was shown both says so. Optional and last, so every
     #: positional construction keeps working.
     same_as: str | None = None
+    #: Where each job that produced this finding actually ran, for a fix
+    #: agent to pull the full session output from directly -- never part of
+    #: `fingerprint`'s hash input, the same treatment `same_as`/`line` below
+    #: already get. A resumed/re-dispatched job gets a new session every
+    #: round; that must change what's readable, never what this finding *is*
+    #: (Kraft-s7c04.34/.35 brainstorm).
+    jobs: tuple[JobRef, ...] = ()
 
     @property
     def fingerprint(self) -> str:
@@ -83,6 +100,36 @@ class Finding:
         norm = _WS.sub(" ", self.message).strip().lower()
         raw = "\0".join((self.source_plugin, self.file or "", norm))
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+@dataclass(frozen=True)
+class JobRef:
+    """One job that ran as part of a finding's own measuring round, and
+    where its full session output lives. Presentation/access only --
+    deliberately excluded from `Finding.fingerprint`."""
+
+    label: str
+    log_ref: str
+
+
+@dataclass(frozen=True)
+class BlindJob:
+    """One failing row `collect_findings` found for a hook with no parsed
+    result file -- `from_blind_failure`'s own input, one per job it should
+    report. `command`, when known, is the exact command that ran (Kraft-
+    s7c04.35), not the registry binding's default."""
+
+    session_id: str
+    log_path: str | Path | None
+    command: str | None = None
+
+
+def session_log_ref(work_item_id: str, session_id: str) -> str:
+    """The CLI invocation that shows exactly this session's own log.
+    `--session`, never "most recent": other sessions can dispatch under the
+    same work item before anyone reads this pointer, and "most recent" would
+    silently drift to the wrong one (Kraft-s7c04.34/.35 brainstorm)."""
+    return f"kraft view logs {work_item_id} --session {session_id}"
 
 
 def _one(raw: object) -> Finding | None:
@@ -174,41 +221,63 @@ def _tail_text(log_path: str | Path) -> str | None:
 
 
 def _extract_message(text: str) -> str:
-    text = _NOISE.sub("", strip_ansi(text))
+    text = strip_ansi(text)
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     marked = [ln for ln in lines if _MARKER.search(ln)]
     chosen = marked[:5] if marked else lines[-5:]
-    return "\n".join(chosen)[:_MESSAGE_CAP]
+    cleaned = [_NOISE.sub("", ln) for ln in chosen]
+    return "\n".join(cleaned)[:_MESSAGE_CAP]
 
 
-def from_blind_failure(
-    hook: str,
-    log_path: str | Path | None,
-    work_item_id: str,
-    session_id: str,
-    reproduce: str | None = None,
-) -> Finding:
-    """A `Finding` for a task that failed without writing its own findings
-    file -- most commonly a `kind: subprocess` measuring task like
-    `on.test.run`. Without this, the task's failure never reaches the fix
-    prompt's content, the judge, or the fingerprint-based stuck-detector; it
-    is only ever named, never shown (traced live on a work item that spun
-    for 7 cycles on the identical test failure because of exactly that gap).
+def from_blind_failure(hook: str, work_item_id: str, jobs: list[BlindJob]) -> Finding:
+    """A `Finding` for one or more tasks under `hook` that failed without
+    writing their own findings file -- most commonly `kind: subprocess`
+    measuring tasks like `on.test.run`'s scope loop (test_scopes can fan one
+    hook out to several commands in a round; C2 runs every one rather than
+    stopping at the first failure, so more than one can fail together).
+    Without this, a blind failure never reaches the fix prompt's content,
+    the judge, or the fingerprint-based stuck-detector; it is only ever
+    named, never shown (traced live on a work item that spun for 7 cycles on
+    the identical, invisible test failure).
 
-    `reproduce`, when given, must be a fixed string that does not vary
-    between rounds (e.g. the hook's own registry-bound command) -- it goes
-    into `message`, which `Finding.fingerprint` hashes whole, so anything
-    round-specific here (a session id, a log path) would fingerprint an
-    unchanged failure differently every cycle and defeat the point of this
-    function.
+    The message contains only what's stable across rounds: the hook name,
+    each job's command (when known) and a noise-stripped extract of its own
+    output. Precise-but-round-varying access -- which exact session to read
+    the full log from -- lives in `Finding.jobs`, never in `message`, so
+    fingerprint stability and log-pointer precision don't trade off against
+    each other (Kraft-s7c04.34/.35 brainstorm).
+
+    Deliberately doesn't tell the agent to re-run anything to *discover* the
+    failure -- the log already exists. The "Confirm the fix with" line is
+    for *after* a fix, not instead of reading `jobs`' pointers.
     """
-    if reproduce:
-        pointer = f"Reproduce with: {reproduce}"
-    else:
-        pointer = f"Full log: kraft view logs {work_item_id} --session {session_id}"
-    text = _tail_text(log_path) if log_path else None
-    if not text or not text.strip():
-        message = f"{hook} failed; no output captured.\n\n{pointer}"
-    else:
-        message = f"{_extract_message(text)}\n\n{pointer}"
-    return Finding(severity="critical", message=message, file=None, line=None, source_plugin=hook)
+    lines: list[str] = []
+    job_refs: list[JobRef] = []
+    commands: list[str] = []
+    for job in jobs:
+        text = _tail_text(job.log_path) if job.log_path else None
+        extract = _extract_message(text) if text and text.strip() else None
+        body = extract or "no output captured"
+        if job.command:
+            lines.append(f"- {job.command}: {body}")
+            commands.append(job.command)
+        else:
+            lines.append(f"- {body}")
+        job_refs.append(
+            JobRef(
+                label=job.command or hook,
+                log_ref=session_log_ref(work_item_id, job.session_id),
+            )
+        )
+    header = f"{hook} failed" + (f": {len(jobs)} job(s)" if len(jobs) > 1 else "")
+    message = header + "\n" + "\n".join(lines)
+    if commands:
+        message += "\n\nConfirm the fix with: " + "; ".join(commands)
+    return Finding(
+        severity="critical",
+        message=message,
+        file=None,
+        line=None,
+        source_plugin=hook,
+        jobs=tuple(job_refs),
+    )

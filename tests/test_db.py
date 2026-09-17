@@ -214,6 +214,17 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         )
     if version < 29:
         drop_lines = (*drop_lines, "thread         INTEGER NOT NULL DEFAULT 1,")
+    if version < 31:
+        drop_lines = (
+            *drop_lines,
+            "command        TEXT",
+            "-- the exact command a subprocess session ran (Kraft-s7c04.35)",
+            "-- every non-subprocess kind and for every row written before this column",
+            "-- existed",
+        )
+        # `command` is the last worker_sessions column -- dropping it leaves
+        # head_sha's own trailing comma dangling before the closing `);`.
+        replace = (*replace, ("head_sha       TEXT,", "head_sha       TEXT"))
     schema = "\n".join(
         rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
     )
@@ -1200,3 +1211,12 @@ def test_worker_sessions_carries_a_head_sha(tmp_path):
     db.migrate(conn)
     cols = {r[1] for r in conn.execute("PRAGMA table_info(worker_sessions)").fetchall()}
     assert "head_sha" in cols
+
+
+def test_worker_sessions_carries_a_command(tmp_path):
+    """Kraft-s7c04.35's column: the exact command a subprocess session ran,
+    not the registry binding's default."""
+    conn = db._connect(tmp_path / "orchestrator.db")
+    db.migrate(conn)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(worker_sessions)").fetchall()}
+    assert "command" in cols

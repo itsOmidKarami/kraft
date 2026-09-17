@@ -25,6 +25,11 @@ def create_session(
     #: -- every non-escalation hook leaves this at the default, one implicit
     #: thread for its whole life.
     thread: int = 1,
+    #: The exact command this session ran, when it's a `kind: subprocess`
+    #: dispatch -- e.g. `just e2e-ci`, not the registry binding's default
+    #: (Kraft-s7c04.35). None for every other kind and for a caller that
+    #: predates this column.
+    command: str | None = None,
 ) -> tuple[str, str, str]:
     """`round` is the fix-cycle index this session was dispatched in (0 = first pass).
 
@@ -57,10 +62,10 @@ def create_session(
     conn.execute(
         "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, pid, "
         "pid_start_time, log_path, result_path, status, attempt, created_at, exited_at, "
-        "round, head_sha, thread) "
+        "round, head_sha, thread, command) "
         "VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, 'pending', "
         "(SELECT COUNT(*) + 1 FROM worker_sessions "
-        "WHERE work_item_id = ? AND node_id = ? AND hook_point = ?), ?, NULL, ?, ?, ?)",
+        "WHERE work_item_id = ? AND node_id = ? AND hook_point = ?), ?, NULL, ?, ?, ?, ?)",
         (
             id,
             work_item_id,
@@ -75,6 +80,7 @@ def create_session(
             round,
             head_sha,
             thread,
+            command,
         ),
     )
     (attempt,) = conn.execute("SELECT attempt FROM worker_sessions WHERE id = ?", (id,)).fetchone()

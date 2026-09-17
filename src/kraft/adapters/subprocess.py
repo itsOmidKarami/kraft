@@ -5,6 +5,7 @@ import errno
 import json
 import logging
 import os
+import shlex
 import shutil
 import signal
 import subprocess
@@ -386,6 +387,9 @@ async def run_task(
     # The task's own exit code, written by the launch wrapper on the way out.
     # A sidecar, never `result_path` itself -- see `_resolve_exit_file`.
     exit_path = result_path.with_suffix(".exit")
+    # Captured before any sandbox wrap reassigns `cmd` below (Kraft-s7c04.35) --
+    # this must read as what actually ran, never a docker-wrapped invocation.
+    command_ran = shlex.join(cmd)
 
     await db.write(
         lambda c: store.create_session(
@@ -399,6 +403,7 @@ async def run_task(
             round=round,
             head_sha=head_sha,
             thread=thread,
+            command=command_ran,
         )
     )
 

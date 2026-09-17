@@ -221,6 +221,34 @@ def test_run_task_result_file_wins(tmp_path):
     asyncio.run(scenario())
 
 
+def test_run_task_records_the_command_it_ran(tmp_path):
+    async def scenario():
+        rd = RunDirs(tmp_path).ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database)
+            status = await sp.run_task(
+                database,
+                rd,
+                session_id="s1",
+                work_item_id="w1",
+                node_id="verify",
+                hook_point="on.test.run",
+                cmd=["true"],
+                cwd=tmp_path,
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT command FROM worker_sessions WHERE id='s1'").fetchone()
+            )
+            return status, row["command"]
+        finally:
+            await database.close()
+
+    status, command = asyncio.run(scenario())
+    assert status == "done"
+    assert command == "true"
+
+
 def test_run_task_stamps_concerns_and_question_onto_the_exit_event(tmp_path):
     """`run_task` reads `read_concerns`/`read_question` off the result file the
     same way it already reads `read_summary_ref`, and carries them on

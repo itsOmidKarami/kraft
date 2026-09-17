@@ -11,6 +11,7 @@ from support.store_fixtures import mk_item, open_db
 from kraft import db, events, executor, store
 from kraft.config import git_read
 from kraft.executor import dispatch
+from kraft.findings import JobRef
 from kraft.paths import RunDirs
 from kraft.templates import Registry, Template, load_registry, load_templates
 
@@ -977,6 +978,123 @@ def test_collect_findings_reports_an_early_scope_failure_even_when_a_later_scope
     assert "2 tests failed" in found[0].message
     assert "just ci-test" in found[0].message
     assert reported == set()
+    assert found[0].jobs == (
+        JobRef(label="just ci-test", log_ref="kraft view logs w1 --session s-scope-1"),
+    )
+
+
+def test_collect_findings_aggregates_multiple_failing_scopes_into_one_finding(
+    tmp_path,
+):
+    """G1 brainstorm: C2 runs every scope rather than stopping at the first
+    failure, so two scopes under on.test.run can fail in the same round --
+    the fix agent needs one coherent notice naming both, not two identical-
+    looking critical findings."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            node = {"id": "verify", "tasks": ["on.test.run"]}
+            registry = Registry(
+                hooks={"on.test.run": {"kind": "subprocess", "command": ["just", "ci-test"]}}
+            )
+            log_a = tmp_path / "a.log"
+            log_a.write_text("test A failed\n")
+            log_b = tmp_path / "b.log"
+            log_b.write_text("test B failed\n")
+            rows = [
+                ("s-scope-1", str(log_a), "failed", "just test-ui"),
+                ("s-scope-2", str(log_b), "failed", "just e2e-ci"),
+            ]
+            for sid, log_path, status, command in rows:
+                await database.write(
+                    lambda c, sid=sid, log_path=log_path, command=command: store.create_session(
+                        c,
+                        id=sid,
+                        work_item_id="w1",
+                        node_id="verify",
+                        hook_point="on.test.run",
+                        log_path=log_path,
+                        result_path=str(tmp_path / f"{sid}.json"),
+                        round=0,
+                        head_sha="sha-a",
+                        command=command,
+                    )
+                )
+                await database.write(
+                    lambda c, sid=sid, status=status: store.session_exited(c, sid, status)
+                )
+            found, reported = dispatch.collect_findings(database, "w1", node, 0, registry)
+            return found, reported
+        finally:
+            await database.close()
+
+    found, reported = asyncio.run(scenario())
+    assert len(found) == 1, f"expected one aggregated finding, got {found}"
+    assert "just test-ui" in found[0].message
+    assert "just e2e-ci" in found[0].message
+    assert len(found[0].jobs) == 2
+    assert reported == set()
+
+
+def test_collect_findings_aggregated_fingerprint_is_stable_across_rounds(tmp_path):
+    """This is the property `walk.py`'s stuck-detector actually depends on
+    (`prints == previous_prints`, `walk.py:840`): aggregating N failing
+    scopes into one Finding shrinks how many fingerprints one round
+    produces (2 -> 1 for the scenario above), which nothing at the
+    `walk.py` level exercises directly in this bundle. Pinning it here
+    instead: the same two scopes failing identically in two different
+    rounds (different session ids, different round numbers -- the
+    round-to-round reality) must still produce the same single fingerprint,
+    or the stuck-detector's streak can never advance past 1."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            node = {"id": "verify", "tasks": ["on.test.run"]}
+            registry = Registry(
+                hooks={"on.test.run": {"kind": "subprocess", "command": ["just", "ci-test"]}}
+            )
+            log_a = tmp_path / "a.log"
+            log_a.write_text("test A failed\n")
+            log_b = tmp_path / "b.log"
+            log_b.write_text("test B failed\n")
+            fingerprints = []
+            for round_ in (0, 1):
+                rows = [
+                    (f"s-r{round_}-1", str(log_a), "failed", "just test-ui"),
+                    (f"s-r{round_}-2", str(log_b), "failed", "just e2e-ci"),
+                ]
+                for sid, log_path, status, command in rows:
+                    await database.write(
+                        lambda c, sid=sid, log_path=log_path, command=command, round_=round_: (
+                            store.create_session(
+                                c,
+                                id=sid,
+                                work_item_id="w1",
+                                node_id="verify",
+                                hook_point="on.test.run",
+                                log_path=log_path,
+                                result_path=str(tmp_path / f"{sid}.json"),
+                                round=round_,
+                                head_sha=f"sha-{round_}",
+                                command=command,
+                            )
+                        )
+                    )
+                    await database.write(
+                        lambda c, sid=sid, status=status: store.session_exited(c, sid, status)
+                    )
+                found, _ = dispatch.collect_findings(database, "w1", node, round_, registry)
+                fingerprints.append(found[0].fingerprint)
+            return fingerprints
+        finally:
+            await database.close()
+
+    fp_round0, fp_round1 = asyncio.run(scenario())
+    assert fp_round0 == fp_round1
 
 
 def test_collect_findings_ignores_a_stale_needs_context_row_from_a_reviewer(tmp_path):

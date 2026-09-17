@@ -7,6 +7,7 @@ import logging
 import shlex
 import sqlite3
 import uuid
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -666,6 +667,14 @@ def collect_findings(db, work_item_id: str, node: dict, round: int, registry: Re
     would still share the latest head_sha, hit the `_FAILING_STATUSES` branch
     below, and mint a bogus `from_blind_failure` critical finding alongside
     the real, later row. An agent hook keeps a plain last-wins read instead.
+
+    Every finding this returns -- parsed or synthesized -- carries a
+    `Finding.jobs` entry per session that produced it, so a fix agent can
+    always pull a job's full session output directly (Kraft-s7c04.34/.35
+    brainstorm). A hook's several failing rows in one round (the scope-loop
+    case above) become ONE synthesized `Finding` with one `JobRef` per
+    failing job, not several near-identical findings -- the fix agent gets
+    one coherent notice about the hook, not a fragmented list.
     """
     rows = db.read(lambda c: store.sessions_for_round(c, work_item_id, node["id"], round))
     by_hook: dict[str, list[sqlite3.Row]] = {}
@@ -682,23 +691,29 @@ def collect_findings(db, work_item_id: str, node: dict, round: int, registry: Re
             if is_scope_loop
             else hook_rows[-1:]
         )
+        blind_jobs: list[_findings.BlindJob] = []
         for row in rows_to_read:
             parsed = _findings.parse(row["result_path"])
             if parsed:
                 reported.add(hook)
-                found.extend(parsed)
+                job = _findings.JobRef(
+                    label=hook, log_ref=_findings.session_log_ref(work_item_id, row["id"])
+                )
+                found.extend(replace(f, jobs=(job,)) for f in parsed)
             elif row["status"] in _FAILING_STATUSES:
                 binding = registry.hooks.get(hook, {})
-                reproduce = (
+                command = row["command"] or (
                     shlex.join(binding["command"])
                     if binding.get("kind") == "subprocess" and binding.get("command")
                     else None
                 )
-                found.append(
-                    _findings.from_blind_failure(
-                        hook, row["log_path"], work_item_id, row["id"], reproduce=reproduce
+                blind_jobs.append(
+                    _findings.BlindJob(
+                        session_id=row["id"], log_path=row["log_path"], command=command
                     )
                 )
+        if blind_jobs:
+            found.append(_findings.from_blind_failure(hook, work_item_id, blind_jobs))
     return found, reported
 
 
