@@ -21,9 +21,10 @@ It used to publish from `itsOmidKarami/kraft-lite`, which is frozen at 0.5.2 and
 receives no more releases. Installing it from there still works; it just stops
 moving.
 
-That is what namespaces the commands as `/kraft-lite:*`. Update with `/plugin
-update kraft-lite`. It needs Python 3.10 or newer and nothing else — no pip
-install, no dependencies. CI tests both ends of that range.
+That is what namespaces the commands as `/kraft-lite:*`. `/plugin update
+kraft-lite` afterwards — Claude Code owns the clone, so the force-push below
+never becomes your problem. It needs Python 3.10 or newer and nothing else — no
+pip install, no dependencies. CI tests both ends of that range.
 
 Add `--scope project` to either command to keep it to one repo. The version is
 Kraft's own release tag, so plugin `0.62.3` is the surface `kraft 0.62.3`
@@ -83,11 +84,14 @@ piece of software.
 
 ## Contributing
 
-This plugin lives in `plugins/kraft-lite/` in the
-[Kraft](https://github.com/itsOmidKarami/kraft) monorepo, the same repository
-`kraft` itself ships from. Open a normal pull request there — see the root
-[CONTRIBUTING.md](../../CONTRIBUTING.md) for tests, the release-label
-convention, and how a merge becomes a release.
+`main` here is regenerated and force-pushed from a private monorepo on every
+publish, so a branch based on it loses its merge base and `git pull` on a hand
+clone will diverge. Refresh a hand clone with:
+
+    git fetch && git reset --hard origin/main
+
+Issues and PRs are welcome regardless: a PR is cherry-picked upstream and returns
+in the next publish rather than being merged here.
 
 ## License
 
