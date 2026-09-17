@@ -79,7 +79,14 @@ def _launchd_plist_path() -> Path:
 
 
 def _systemd_unit_path() -> Path:
-    return Path.home() / ".config" / "systemd" / "user" / _SYSTEMD_UNIT
+    # `systemctl --user` resolves unit files under $XDG_CONFIG_HOME when set,
+    # falling back to ~/.config only when it is not -- writing unconditionally
+    # under Path.home() disagrees with systemctl on any machine where
+    # $XDG_CONFIG_HOME points elsewhere, leaving `enable --now` unable to find
+    # the unit this just wrote.
+    config_home = os.environ.get("XDG_CONFIG_HOME")
+    base = Path(config_home) if config_home else Path.home() / ".config"
+    return base / "systemd" / "user" / _SYSTEMD_UNIT
 
 
 def _write_launchd_plist(kraft_bin: str) -> Path:

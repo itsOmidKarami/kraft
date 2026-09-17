@@ -88,6 +88,7 @@ def test_launchd_plist_content(tmp_path, monkeypatch):
 
 def test_systemd_unit_content(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "kraft-home"))
     path = cli.admin._write_systemd_unit("/usr/local/bin/kraft")
     text = path.read_text()
@@ -161,6 +162,10 @@ def test_install_and_uninstall_service_use_the_real_launchd(tmp_path, monkeypatc
 )
 def test_install_and_uninstall_service_use_real_systemd_user(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    # systemctl --user resolves unit files under $XDG_CONFIG_HOME when set,
+    # which would otherwise point outside the fake HOME above and make
+    # `enable --now` unable to find the unit this test just wrote.
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "kraft-home"))
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
     run_dir = tmp_path / "kraft-home" / "run"
