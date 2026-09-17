@@ -24,9 +24,9 @@ PLAN = """# Land it
 
 def test_parse_tasks_reads_both_heading_depths_and_separators():
     assert progress.parse_tasks(PLAN) == [
-        "the repo stops forbidding commits (Kraft-f3mv)",
-        "one commit contract",
-        "open_mr refuses a dirty worktree",
+        ("the repo stops forbidding commits (Kraft-f3mv)", False),
+        ("one commit contract", False),
+        ("open_mr refuses a dirty worktree", False),
     ]
 
 
@@ -35,7 +35,10 @@ def test_parse_tasks_without_task_headings_is_empty():
 
 
 def test_a_bare_task_heading_has_an_empty_title_and_does_not_eat_the_next_line():
-    assert progress.parse_tasks("## Task 1\nbody text\n## Task 2 — b\n") == ["", "b"]
+    assert progress.parse_tasks("## Task 1\nbody text\n## Task 2 — b\n") == [
+        ("", False),
+        ("b", False),
+    ]
 
 
 def test_parse_tasks_skips_headings_inside_a_fenced_code_block():
@@ -51,7 +54,28 @@ The fixture below is example text for a test, not real plan structure:
 
 ## Task 2 — also real
 """
-    assert progress.parse_tasks(plan) == ["real task", "also real"]
+    assert progress.parse_tasks(plan) == [
+        ("real task", False),
+        ("also real", False),
+    ]
+
+
+def test_parse_tasks_reads_the_done_marker():
+    plan = "## Task 1 — old work [DONE]\n## Task 2 — new work\n"
+    assert progress.parse_tasks(plan) == [
+        ("old work", True),
+        ("new work", False),
+    ]
+
+
+def test_parse_tasks_done_marker_is_exact_not_a_word_match():
+    plan = "## Task 1 — mark request as done\n"
+    assert progress.parse_tasks(plan) == [("mark request as done", False)]
+
+
+def test_parse_tasks_done_marker_strips_trailing_space_before_it():
+    plan = "## Task 1 — old work   [DONE]\n"
+    assert progress.parse_tasks(plan) == [("old work", True)]
 
 
 def test_committed_task_takes_the_highest_task_number_named():
@@ -72,7 +96,7 @@ def test_committed_task_ignores_words_that_merely_end_in_task():
     assert progress.committed_task(["subtask 4 renamed", "Plan: x"]) == 0
 
 
-TASKS = ["parse", "serve", "render"]
+TASKS = [("parse", False), ("serve", False), ("render", False)]
 
 
 def test_combine_with_no_signal_is_task_one():
@@ -100,6 +124,27 @@ def test_combine_without_tasks_is_none():
     assert progress.combine([], reported=2, committed=1) is None
 
 
+def test_combine_clamps_current_off_a_done_marked_task():
+    tasks = [("a", False)] * 6 + [("g", True), ("h", True), ("i", True), ("j", True)]
+    # reported=0, committed=6 -> raw current would be 7, but task 7 is [DONE]
+    p = progress.combine(tasks, reported=0, committed=6)
+    assert p["current"] == 6
+    assert p["title"] == "a"
+
+
+def test_combine_marks_a_done_task_done_regardless_of_position():
+    tasks = [("a", False), ("b", True), ("c", False)]
+    p = progress.combine(tasks, reported=1, committed=0)
+    assert [t["state"] for t in p["tasks"]] == ["current", "done", "pending"]
+
+
+def test_combine_clamp_stops_at_task_one():
+    tasks = [("a", True), ("b", True)]
+    p = progress.combine(tasks, reported=0, committed=1)
+    assert p["current"] == 1
+    assert [t["state"] for t in p["tasks"]] == ["done", "done"]
+
+
 def test_implementation_node_is_found_by_hook_not_name():
     chain = {
         "nodes": [
@@ -124,10 +169,10 @@ def test_read_tasks_prefers_the_plan_attachment(tmp_path):
     artifact.parent.mkdir(parents=True)
     artifact.write_text("## Task 1 — artifact\n")
     assert progress.read_tasks(tmp_path, [{"kind": "plan", "path": "docs/p.md"}], "w1") == [
-        "attached"
+        ("attached", False)
     ]
     assert progress.read_tasks(tmp_path, [{"kind": "spec", "path": "docs/p.md"}], "w1") == [
-        "artifact"
+        ("artifact", False)
     ]
 
 

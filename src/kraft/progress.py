@@ -26,8 +26,11 @@ _COMMIT_TASK = re.compile(r"\btask\s+(\d+(?:\s*[+,&]\s*\d+)*)", re.IGNORECASE)
 _FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})")
 
 
-def parse_tasks(text: str) -> list[str]:
-    """The titles of a plan's `## Task N` / `### Task N` headings, in order.
+def parse_tasks(text: str) -> list[tuple[str, bool]]:
+    """The `(title, done)` pairs of a plan's `## Task N` / `### Task N`
+    headings, in order. `done` is True iff the title ends with the exact
+    tag `[DONE]` -- written by whoever edits the plan to say "already
+    merged outside this work item, don't infer progress into it."
 
     Lines inside a fenced ```/~~~ code block are blanked out first -- a plan
     that quotes a `## Task N` heading in an example or test fixture (Kraft-szad)
@@ -41,7 +44,14 @@ def parse_tasks(text: str) -> list[str]:
             lines.append("")
         else:
             lines.append("" if in_fence else line)
-    return [m[1].strip() for m in _TASK_HEADING.finditer("\n".join(lines))]
+    titles = [m[1].strip() for m in _TASK_HEADING.finditer("\n".join(lines))]
+    result = []
+    for title in titles:
+        done = title.endswith("[DONE]")
+        if done:
+            title = title[: -len("[DONE]")].rstrip()
+        result.append((title, done))
+    return result
 
 
 def committed_task(subjects: list[str]) -> int:
@@ -58,24 +68,33 @@ def committed_task(subjects: list[str]) -> int:
     )
 
 
-def combine(tasks: list[str], reported: int, committed: int) -> dict | None:
+def combine(tasks: list[tuple[str, bool]], reported: int, committed: int) -> dict | None:
     """A report means "starting task K"; a commit naming K means K is done, so
-    the one after it is current. Capped at the last task."""
+    the one after it is current -- unless that lands on a task the plan
+    itself marks `[DONE]` (already merged outside this work item), in which
+    case `current` walks back to the last task that isn't. Capped at the
+    last task."""
     if not tasks:
         return None
     total = len(tasks)
     current = min(total, max(reported, committed + 1))
+    while current > 1 and tasks[current - 1][1]:
+        current -= 1
     return {
         "current": current,
         "total": total,
-        "title": tasks[current - 1],
+        "title": tasks[current - 1][0],
         "tasks": [
             {
                 "n": n,
                 "title": title,
-                "state": "done" if n < current else "current" if n == current else "pending",
+                "state": "done"
+                if done or n < current
+                else "current"
+                if n == current
+                else "pending",
             }
-            for n, title in enumerate(tasks, 1)
+            for n, (title, done) in enumerate(tasks, 1)
         ],
     }
 
@@ -96,7 +115,9 @@ def active_implementation_node(row) -> str | None:
     return None
 
 
-def read_tasks(worktree: Path, attachments: list[dict], work_item_id: str) -> list[str]:
+def read_tasks(
+    worktree: Path, attachments: list[dict], work_item_id: str
+) -> list[tuple[str, bool]]:
     """The attached plan's tasks if there is one, else the plan node's artifact's."""
     rel = next((a["path"] for a in attachments if a.get("kind") == "plan"), None)
     try:
@@ -105,7 +126,7 @@ def read_tasks(worktree: Path, attachments: list[dict], work_item_id: str) -> li
         return []
 
 
-def tasks_for(row, worktree: Path) -> list[str]:
+def tasks_for(row, worktree: Path) -> list[tuple[str, bool]]:
     return read_tasks(worktree, json.loads(row["attachments"] or "[]"), row["id"])
 
 

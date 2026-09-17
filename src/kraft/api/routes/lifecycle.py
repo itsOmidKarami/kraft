@@ -305,7 +305,7 @@ async def report_progress(wid: str, body: Progress, request: Request):
         "node_id": node_id,
         "task": body.task,
         "total": len(tasks),
-        "title": tasks[body.task - 1],
+        "title": tasks[body.task - 1][0],
     }
     await st.db.write(lambda c: events.append(c, wid, "task_progress", payload))
     return {"id": wid, "progress": progress_mod.for_item(st.db, row, worktree)}

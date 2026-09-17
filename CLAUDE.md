@@ -117,6 +117,20 @@ Two consequences worth remembering:
 - Do not attach and then move or delete the file. Resume the item first, or
   re-file it.
 
+### Marking a task already done in a reused plan
+
+A plan attached to one work item is sometimes reused for a later item that
+only implements one of its tasks — the rest already merged elsewhere. Say so
+on the heading itself, not in prose the tooling can't read:
+
+```
+### Task 7: Suggest a setup command at connect time [DONE]
+```
+
+`kraft.progress.parse_tasks()` reads the `[DONE]` tag and keeps the board's
+"Task N of M" from drifting onto a task that was never in scope for the
+running work item.
+
 ## Kraft Workers
 
 A session with `$KRAFT_WORK_ITEM_ID` set is a Kraft worker, running in a
