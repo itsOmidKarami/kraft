@@ -46,7 +46,50 @@ zero exit code says the command ran, not that what it did was right.
    means repo-scope (a `.mcp.json` under the repo root), so a run that prints
    a path outside the repo means something is off before you go further.
 
-3. **Verify.** `kraft admin doctor` - confirm `mcp server` and the `repo
+3. **Rehearse.** A worktree is a fresh checkout of HEAD: nothing untracked
+   comes with it. Find out now, while you can still ask, rather than on the
+   repo's first work item.
+
+   Cut a throwaway worktree outside the repo and run the repo's own test
+   command in it:
+
+   ```bash
+   git -C <repo> worktree add -q /tmp/kraft-onboard-$$ -b kraft-onboard-probe
+   (cd /tmp/kraft-onboard-$$ && <test_command>)
+   ```
+
+   Use the `test_command` you confirmed in step 1, not a guess. Then clean up:
+
+   ```bash
+   git -C <repo> worktree remove --force /tmp/kraft-onboard-$$
+   git -C <repo> branch -D kraft-onboard-probe
+   ```
+
+   A failure here is the finding, not an error to route around. Compare
+   `git -C <repo> ls-files --others --directory` against the worktree: a
+   root-level file listed there and missing from the probe is a file Kraft
+   will not carry either. A toolchain pin (`.python-version`, `.nvmrc`,
+   `.tool-versions`), a `.env`, an `.npmrc` — any of these can change what the
+   worktree resolves without changing whether the command exits zero, so read
+   the list even when the tests pass.
+
+   Anything the repo genuinely needs goes in its `repos.yaml` entry:
+
+   ```yaml
+   local_files:
+     - .python-version
+   ```
+
+   Kraft copies those into every worktree before it runs `uv sync`, and
+   **refuses any entry the repo does not gitignore** — it cannot keep an
+   unignored file out of a commit. If a needed file is not ignored, add it to
+   `.gitignore` rather than dropping it from `local_files`. Re-run the probe
+   after editing, and say whether it went green.
+
+   Do not put a directory or a glob in `local_files`; it takes literal file
+   paths, and the list is validated on load.
+
+4. **Verify.** `kraft admin doctor` - confirm `mcp server` and the `repo
    <name>` row both read `ok`. If either doesn't, stop and report the exact
    line rather than declaring onboarding done with a known problem still
    open.
