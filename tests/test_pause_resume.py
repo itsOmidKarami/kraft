@@ -39,10 +39,13 @@ def _client(tmp_path, monkeypatch):
 
 
 # ponytail: the four "resumed item to complete" waits below run real git
-# worktree/rebase ops plus a real `uv run pytest -q` for the verify node --
-# CI-load-fragile (Kraft-6dqk, Kraft-x527: passes in ~7s locally, ate the full
-# prior 120s budget twice on a loaded shared runner). Bumped to 300s rather
-# than making the wait event-driven; revisit if it still times out.
+# worktree/rebase ops -- CI-load-fragile (Kraft-6dqk, Kraft-x527: passes in
+# ~7s locally, ate the full prior 120s budget twice on a loaded shared
+# runner). Bumped to 300s rather than making the wait event-driven; revisit
+# if it still times out. `_client` above passes `noop_verify=True`, so the
+# verify node itself is a no-op here -- it was a real `uv run pytest -q`
+# subprocess when Kraft-6dqk/x527 were filed, but that's no longer what
+# these waits are paying for.
 def _wait(fn, what, timeout=60):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
