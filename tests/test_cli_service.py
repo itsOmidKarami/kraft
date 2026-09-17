@@ -182,9 +182,23 @@ def test_install_and_uninstall_service_use_real_systemd_user(tmp_path, monkeypat
     try:
         cli.main(["admin", "install-service"])
         pid_path = RunDirs(run_dir).pid
-        assert _wait_for(lambda: cli.admin._read_pid(pid_path) is not None), (
-            "systemd never brought the daemon up"
-        )
+        if not _wait_for(lambda: cli.admin._read_pid(pid_path) is not None):
+            # Diagnostic-only: this path has apparently never run to
+            # completion in any CI before (the GitLab config it replaced
+            # had no systemd/linger setup either), so a bare timeout gives
+            # no way to tell a slow start from a unit that never started.
+            unit_path = cli.admin._systemd_unit_path()
+            print(f"--- unit file at {unit_path} ---")
+            print(unit_path.read_text() if unit_path.is_file() else "<missing>")
+            for cmd in (
+                ["systemctl", "--user", "status", "kraft.service", "--no-pager"],
+                ["journalctl", "--user", "-u", "kraft.service", "--no-pager", "-n", "100"],
+            ):
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                print(f"--- {' '.join(cmd)} (exit {result.returncode}) ---")
+                print(result.stdout)
+                print(result.stderr)
+            pytest.fail("systemd never brought the daemon up")
     finally:
         cli.main(["admin", "uninstall-service"])
         assert not cli.admin._systemd_unit_path().exists()
