@@ -24,14 +24,27 @@ env:
   BD_VERSION: "1.2.2"
 
 jobs:
-  python:
-    name: lint and test
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           # setuptools-scm derives the version from tags; a shallow clone has
           # none and every build in it silently versions itself 0.1.dev1.
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v5
         with:
@@ -46,32 +59,9 @@ jobs:
           git config --global user.name "Kraft CI"
           bd version
       - run: uv sync --frozen
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
-      - run: uv run pytest -m "not e2e and not slow"
+      - run: uv run pytest -m "not e2e"
       # ~1s, no tests run: catches a renamed pinned test the suite above would not.
       - run: uv run python -m kraft.intent
-
-  slow:
-    name: slow tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - name: install bd
-        run: |
-          case "$(uname -m)" in aarch64|arm64) BD_ARCH=arm64 ;; *) BD_ARCH=amd64 ;; esac
-          curl -fsSL "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz" \
-            | sudo tar -xz -C /usr/local/bin bd
-          git config --global user.email ci@kraft.invalid
-          git config --global user.name "Kraft CI"
-      - run: uv sync --frozen
-      - run: uv run pytest -m "slow"
 
   lite-floor:
     # The kraft-lite plugin claims to need "python3 and nothing else". Both ends
