@@ -827,6 +827,20 @@ def test_load_repos_rejects_a_local_files_directory_entry(tmp_path):
         config.load_repos(path)
 
 
+def test_load_repos_rejects_a_local_files_glob_pattern_star(tmp_path):
+    path = tmp_path / "repos.yaml"
+    path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "local_files": ["*.pyc"]}]}))
+    with pytest.raises(config.ConfigError, match="must be a literal path, not a glob"):
+        config.load_repos(path)
+
+
+def test_load_repos_rejects_a_local_files_glob_pattern_double_star(tmp_path):
+    path = tmp_path / "repos.yaml"
+    path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "local_files": ["**/*.env"]}]}))
+    with pytest.raises(config.ConfigError, match="must be a literal path, not a glob"):
+        config.load_repos(path)
+
+
 def test_a_configured_submodule_edge_becomes_a_child_repo_entry(tmp_path):
     path = tmp_path / "repos.yaml"
     path.write_text(

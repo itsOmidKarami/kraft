@@ -238,6 +238,10 @@ def load_repos(
                     f"repos.yaml: 'local_files' entry {rel!r} must be a relative path "
                     "inside the repo"
                 )
+            if any(c in rel for c in "*?["):
+                raise ConfigError(
+                    f"repos.yaml: 'local_files' entry {rel!r} must be a literal path, not a glob"
+                )
         for key in ("deny_tools", "steering"):
             v = r.setdefault(key, [])
             if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
