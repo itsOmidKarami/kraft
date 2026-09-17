@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
-import shlex
 from pathlib import Path
 from typing import NamedTuple
 
+from kraft import harness as _harness
 from kraft import sandbox as _sandbox
 from kraft import skill as _skill
 from kraft import steering as _steering
@@ -64,6 +64,19 @@ _CTX = (
     "force it in."
 )
 
+#: Asked only of a harness whose `usage` capability says `result_file` -- the
+#: agent is then the only source of its own numbers, and without this the row
+#: stores NULL tokens as well as NULL cost. `usage._from_usage_block` already
+#: accepts exactly this shape.
+_USAGE_REQUEST = (
+    "\n\nAlso report your own token usage in that same result file, as a "
+    '"usage" object with "input_tokens" and "output_tokens", and '
+    '"cost_usd" if and only if you know what this session actually cost. '
+    "Omit cost_usd rather than estimating it: a guessed number is worse than "
+    "no number, because someone will decide whether this run was worth it by "
+    "reading it."
+)
+
 
 def artifact_path(kind: str, work_item_id: str) -> str:
     """Where a hook with `artifact: <kind>` must write its document.
@@ -111,89 +124,9 @@ _MR_META_KEYS = (
 )
 
 
-class Profile(NamedTuple):
-    """How one agent CLI spells the options Kraft names neutrally.
-
-    A fact about a CLI, not user configuration — a user editing this is a user
-    reporting a bug. It exists so `registry.yaml` can say `model:` rather than
-    `--model`, which is what stops one vendor's flags leaking into the config an
-    operator edits by hand.
-    """
-
-    prompt: tuple[str, ...]
-    system_prompt: tuple[str, ...]
-    output_json: tuple[str, ...]
-    model: tuple[str, ...]
-    deny_tools: tuple[str, ...]
-    permission_mode: tuple[str, ...]
-    effort: tuple[str, ...]
-    #: How this CLI spells an allowlist, and the flag for a per-node
-    #: permission mode. `permission_mode` above is the *default* argv a binding
-    #: that names no mode still gets; this is the flag on its own, for one that
-    #: does.
-    allowed_tools: tuple[str, ...]
-    permission_mode_flag: tuple[str, ...]
-    permission_prompt_tool: tuple[str, ...]
-    #: How this CLI spells "resume that prior session" and "keep the resumed
-    #: transcript bounded on your own" — the two flags an escalation turn adds
-    #: that no chain dispatch ever needs.
-    resume: tuple[str, ...] = ()
-    autocompact: tuple[str, ...] = ()
-
-
-PROFILES: dict[str, Profile] = {
-    "claude": Profile(
-        prompt=("-p",),
-        system_prompt=("--append-system-prompt",),
-        # NDJSON as the agent works, not one object at exit. `--verbose` is
-        # mandatory, not decoration: without it the CLI exits 1 with
-        # "When using --print, --output-format=stream-json requires --verbose"
-        # (measured against claude 2.1.260). The last line is still the result
-        # envelope, so `_envelope_is_error` and `usage.read_envelope` keep
-        # reading `lines[-1]` unchanged.
-        output_json=("--output-format", "stream-json", "--verbose"),
-        model=("--model",),
-        # The CLI polices itself at Kraft's request, not a sandbox: this flag does
-        # not stop the agent running a shell that ignores it, only tools the CLI
-        # itself dispatches. The real blast-radius containment is the per-item
-        # worktree (spec §3) — deny_tools is defense in depth on top of it.
-        deny_tools=("--disallowed-tools",),
-        # Without this the CLI runs in its default mode, which *asks* — and
-        # `-p` has nobody to ask, since `--permission-prompts` defaults to a
-        # host Kraft does not supply. Every ask becomes a silent denial: the
-        # spec worker on work item 6363c65e was refused the Write of its own
-        # artifact and still exited 0. `auto` decides for itself instead.
-        #
-        # Model-dependent, because the judgement is the model's own: sonnet-5
-        # and opus-5 complete a headless Write+Bash under `auto` with no
-        # denials, haiku-4.5 under identical flags is refused. A binding that
-        # pins a small model can still lose its artifact — which is why the
-        # artifact check in `run_agent_task` is the load-bearing half.
-        permission_mode=("--permission-mode", "auto"),
-        effort=("--effort",),
-        allowed_tools=("--allowedTools",),
-        permission_mode_flag=("--permission-mode",),
-        # The CLI calls this MCP tool instead of prompting a human whenever
-        # `auto` decides it wants to ask. Kraft's own server (`kraft admin mcp`,
-        # registered by `kraft admin init`) answers it. On an install where that
-        # registration was never done the flag names a tool that does not
-        # exist, and the CLI completes normally (measured) -- degrading to
-        # today's behaviour rather than crashing, which is why no --mcp-config
-        # is passed.
-        permission_prompt_tool=("--permission-prompt-tool",),
-        resume=("--resume",),
-        autocompact=("--autocompact",),
-    ),
-}
-
-#: The MCP tool `--permission-prompt-tool` names. `mcp__<server>__<tool>` is the
-#: CLI's addressing scheme; `kraft` is the server name `mcp.build()` registers.
-PERMISSION_TOOL = "mcp__kraft__permission_request"
-
-
 class Invocation(NamedTuple):
     command: str
-    profile: str
+    harness: str
     model: str | None
     deny_tools: tuple[str, ...]
     steering_texts: tuple[str, ...]
@@ -269,8 +202,8 @@ def resolve_invocation(
         else binding.get("escalate_model")
     )
     return Invocation(
-        command=binding["command"],
-        profile=binding.get("profile", "claude"),
+        command=binding.get("command", ""),
+        harness=binding.get("harness", "claude"),
         # `escalate` is the fix loop asking for a capability bump, not naming a
         # model: an unset `escalate_model` falls through to the ordinary chain.
         model=(eff_escalate_model if escalate else None) or eff_model or repo.get("default_model"),
@@ -337,56 +270,32 @@ def _resolve_status(artifact: str | None, work_item_id: str, cwd: Path):
     return resolve
 
 
-async def run_agent_task(
-    db,
-    run_dirs,
+def build_context(
     *,
-    session_id: str,
-    work_item_id: str,
-    node_id: str,
-    hook_point: str,
-    command: str,
+    usage_source: str,
+    context_channel: str,
     title: str,
     task_instruction: str,
     repo_path: str,
-    cwd,
-    round: int = 0,
-    profile: str = "claude",
-    model: str | None = None,
-    deny_tools: tuple[str, ...] = (),
-    effort: str | None = None,
-    allowed_tools: tuple[str, ...] = (),
-    permission_mode: str | None = None,
-    sandbox: dict | None = None,
-    steering_texts: tuple[str, ...] = (),
-    review_package: str | None = None,
+    work_item_id: str,
+    node_id: str,
+    hook_point: str,
+    session_id: str,
     artifact: str | None = None,
+    review_package: str | None = None,
     method_text: str | None = None,
-    #: `--resume <id>` when set — an escalation turn continuing its item's
-    #: existing thread. `None` (every chain dispatch) omits the flag entirely,
-    #: same as today.
-    resume_session_id: str | None = None,
-    #: `--autocompact <value>` when set. Paired with `resume_session_id` by
-    #: `escalate.dispatch`; no chain dispatch sets it.
-    autocompact: str | None = None,
-    #: `False` only for an escalation turn: the child then gets no
-    #: `KRAFT_WORK_ITEM_ID`, so `client.resolve_context()` resolves it as a
-    #: human's own session rather than a worker's, and the existing
-    #: self-action guard (`client.context._forbid_self_action`) lets it act on the
-    #: very item it is escalating — see spec "The self-resume trick". Every
-    #: existing caller keeps today's behavior by leaving this `True`.
-    identify_as_worker: bool = True,
-    head_sha: str | None = None,
-    thread: int = 1,
-    repo_entry: dict | None = None,
+    steering_texts: tuple[str, ...] = (),
 ) -> str:
-    # Kraft-avpe: wording alone didn't hold -- a later session read "don't
-    # background work" as forbidding only a separate watcher, backgrounded a
-    # test run anyway, and ended its turn to wait on a notification a
-    # one-shot `claude -p` process will never deliver. Monitor is never
-    # legitimate in that process shape (no later turn for it to resume into),
-    # so deny it outright instead of trusting the prompt to be read narrowly.
-    deny_tools = tuple(dict.fromkeys((*deny_tools, "Monitor")))
+    """Kraft's contract, method and steering, folded into one block of text.
+
+    A pure function of its arguments -- it takes the two resolved harness
+    *facts* (`usage_source`, `context_channel`) rather than a harness id, so a
+    test can assert on it without loading `harness.py` or launching a process,
+    and this module stays unaware of which harness produced those facts.
+    `context_channel` does not change what is built here: whether the result
+    rides in `--append-system-prompt` or is folded into the prompt itself is
+    `harness.build_argv`'s job, not this one's.
+    """
     ctx = _CTX.format(
         title=title,
         task_instruction=task_instruction,
@@ -442,40 +351,95 @@ async def run_agent_task(
         # reader finding a steering feature beside a rule banning steering
         # files would otherwise assume the rule was forgotten.
         ctx += _steering.HEADING + "\n\n".join(steering_texts)
-    try:
-        prof = PROFILES[profile]
-    except KeyError:
-        raise ValueError(f"unknown agent profile {profile!r}; known: {sorted(PROFILES)}") from None
+    if usage_source == "result_file":
+        ctx += _USAGE_REQUEST
+    return ctx
 
-    cmd = [
-        *shlex.split(command),
-        *prof.prompt,
-        task_instruction,
-        *prof.system_prompt,
-        ctx,
-        *prof.output_json,
-        # The binding's mode when it names one, the profile's default when it
-        # does not -- so every shipped node keeps today's `auto` grant.
-        *(
-            [*prof.permission_mode_flag, permission_mode]
-            if permission_mode
-            else list(prof.permission_mode)
-        ),
-        *prof.permission_prompt_tool,
-        PERMISSION_TOOL,
-    ]
-    if resume_session_id:
-        cmd += [*prof.resume, resume_session_id]
-    if autocompact:
-        cmd += [*prof.autocompact, autocompact]
-    if model:
-        cmd += [*prof.model, model]
-    if deny_tools:
-        cmd += [*prof.deny_tools, ",".join(deny_tools)]
-    if allowed_tools:
-        cmd += [*prof.allowed_tools, ",".join(allowed_tools)]
-    if effort:
-        cmd += [*prof.effort, effort]
+
+async def run_agent_task(
+    db,
+    run_dirs,
+    *,
+    session_id: str,
+    work_item_id: str,
+    node_id: str,
+    hook_point: str,
+    command: str,
+    title: str,
+    task_instruction: str,
+    repo_path: str,
+    cwd,
+    round: int = 0,
+    harness: str = "claude",
+    harnesses: "_harness.HarnessSet | None" = None,
+    model: str | None = None,
+    deny_tools: tuple[str, ...] = (),
+    effort: str | None = None,
+    allowed_tools: tuple[str, ...] = (),
+    permission_mode: str | None = None,
+    sandbox: dict | None = None,
+    steering_texts: tuple[str, ...] = (),
+    review_package: str | None = None,
+    artifact: str | None = None,
+    method_text: str | None = None,
+    #: `--resume <id>` when set — an escalation turn continuing its item's
+    #: existing thread. `None` (every chain dispatch) omits the flag entirely,
+    #: same as today.
+    resume_session_id: str | None = None,
+    #: `--autocompact <value>` when set. Paired with `resume_session_id` by
+    #: `escalate.dispatch`; no chain dispatch sets it.
+    autocompact: str | None = None,
+    #: `False` only for an escalation turn: the child then gets no
+    #: `KRAFT_WORK_ITEM_ID`, so `client.resolve_context()` resolves it as a
+    #: human's own session rather than a worker's, and the existing
+    #: self-action guard (`client.context._forbid_self_action`) lets it act on the
+    #: very item it is escalating — see spec "The self-resume trick". Every
+    #: existing caller keeps today's behavior by leaving this `True`.
+    identify_as_worker: bool = True,
+    head_sha: str | None = None,
+    thread: int = 1,
+    repo_entry: dict | None = None,
+) -> str:
+    hs = harnesses if harnesses is not None else _harness.load(None)
+    try:
+        h = hs.valid[harness]
+    except KeyError:
+        raise ValueError(f"unknown agent harness {harness!r}; known: {sorted(hs.valid)}") from None
+
+    ctx = build_context(
+        usage_source=h.capabilities["usage"].source,
+        context_channel=h.capabilities["context"].channel,
+        title=title,
+        task_instruction=task_instruction,
+        repo_path=repo_path,
+        work_item_id=work_item_id,
+        node_id=node_id,
+        hook_point=hook_point,
+        session_id=session_id,
+        artifact=artifact,
+        review_package=review_package,
+        method_text=method_text,
+        steering_texts=steering_texts,
+    )
+    cmd = _harness.build_argv(
+        h,
+        command=command or None,
+        prompt=task_instruction,
+        context=ctx,
+        resume=resume_session_id,
+        options={
+            k: v
+            for k, v in (
+                ("model", model),
+                ("effort", effort),
+                ("permission_mode", permission_mode),
+                ("deny_tools", tuple(deny_tools) or None),
+                ("allowed_tools", tuple(allowed_tools) or None),
+                ("autocompact", autocompact),
+            )
+            if v
+        },
+    )
     return await _subprocess.run_task(
         db,
         run_dirs,

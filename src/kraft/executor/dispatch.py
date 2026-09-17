@@ -387,7 +387,7 @@ async def dispatch_node(
             hook_point=task_hook,
             review_package=pkg,
             command=inv.command,
-            profile=inv.profile,
+            harness=inv.harness,
             model=inv.model,
             deny_tools=inv.deny_tools,
             effort=inv.effort,
