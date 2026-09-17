@@ -1777,3 +1777,33 @@ def test_ensure_worktree_without_local_files_is_unchanged(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_uncarried_local_files_names_root_files_missing_from_the_worktree(tmp_path):
+    """An unconfigured repo is the default, so the gap has to be visible
+    without anyone having configured anything (Kraft-gxcmy)."""
+    repo = make_repo(tmp_path)
+    (repo / ".gitignore").write_text(".venv/\n.env\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "ignore local state")
+    (repo / ".python-version").write_text("3.11\n")  # untracked, not ignored
+    (repo / ".env").write_text("TOKEN=x\n")  # untracked and ignored
+    (repo / ".venv").mkdir()  # a directory: never reported
+    (repo / ".venv" / "marker").write_text("x\n")
+    wt = _linked_worktree(repo, tmp_path)
+
+    missing = kraft_builtins._uncarried_local_files(repo, wt)
+
+    assert missing == [".env", ".python-version"]
+
+
+def test_uncarried_local_files_omits_what_was_carried(tmp_path):
+    repo = make_repo(tmp_path)
+    (repo / ".gitignore").write_text(".python-version\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "ignore the pin")
+    (repo / ".python-version").write_text("3.11\n")
+    wt = _linked_worktree(repo, tmp_path)
+    kraft_builtins._carry_local_files(repo, wt, [".python-version"])
+
+    assert kraft_builtins._uncarried_local_files(repo, wt) == []

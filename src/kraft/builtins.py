@@ -245,6 +245,30 @@ def _carry_local_files(repo: Path, worktree: Path, rels: list[str]) -> tuple[lis
     return carried, refused
 
 
+def _uncarried_local_files(repo: Path, worktree: Path) -> list[str]:
+    """Root-level files present in `repo` but absent from `worktree`.
+
+    `local_files` is opt-in, which means an unconfigured repo behaves exactly
+    as it did before -- including the part where it is silently wrong. Nobody
+    knew to configure the repo on work item 1e2e6b45898e42298d16232c9cbfb768
+    until after it had burned ten retries (Kraft-gxcmy), so the gap says its own
+    name here instead of waiting to be discovered.
+
+    No `--exclude-standard`: an *ignored* root file is the likeliest carry
+    candidate of all, so the listing has to include it. `--directory` collapses
+    an untracked directory to a single entry with a trailing slash, which the
+    filter then drops -- `.venv/` and `node_modules/` are artifacts to rebuild,
+    never files to carry.
+
+    Stateless by design: a carried file exists in the worktree, so nothing needs
+    to be told what Task 3 copied, and this reads correctly on
+    `ensure_worktree`'s early-return path where no copy happened at all.
+    """
+    listed = git_read(repo, "ls-files", "--others", "--directory", expected_failure=True) or ""
+    names = [n for n in listed.splitlines() if n and "/" not in n]
+    return sorted(n for n in names if not (worktree / n).exists())
+
+
 def _pin_identity(repo: Path, worktree: Path, work_item_id: str) -> None:
     """Resolve `user.name`/`user.email` from `repo` and write them into
     `worktree`'s own git config, plus every submodule's separate gitdir.
@@ -963,6 +987,16 @@ async def env_setup(
     worktree = await ensure_worktree(
         db, run_dirs, repo=repo, work_item_id=work_item_id, attachments=attachments
     )
+    missing = await asyncio.to_thread(_uncarried_local_files, Path(repo), worktree)
+    report = f"worktree ready at {worktree}\n"
+    if missing:
+        report += (
+            "\nthese files exist in the repo but not in this worktree, because "
+            "git does not carry untracked content into a new one:\n"
+            + "".join(f"  {n}\n" for n in missing)
+            + "\nif any of them is needed here, add it to this repo's "
+            "`local_files` in repos.yaml.\n"
+        )
     return await _record_done(
         db,
         run_dirs,
@@ -971,7 +1005,7 @@ async def env_setup(
         node_id=node_id,
         hook_point="on.env.prepare",
         round=round,
-        log=f"worktree ready at {worktree}\n",
+        log=report,
         head_sha=head_sha,
     )
 
