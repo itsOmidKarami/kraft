@@ -55,7 +55,7 @@ zero exit code says the command ran, not that what it did was right.
 
    ```bash
    PROBE=$(mktemp -d /tmp/kraft-onboard-XXXXXX)
-   git -C <repo> worktree add -q "$PROBE" -b "kraft-onboard-$(basename "$PROBE")"
+   git -C <repo> worktree add -q "$PROBE" -b "kraft-onboard-${PROBE##*-}"
    echo "$PROBE"
    ```
 
@@ -91,7 +91,7 @@ zero exit code says the command ran, not that what it did was right.
 
    ```bash
    git -C <repo> worktree remove --force "$PROBE"
-   git -C <repo> branch -D "kraft-onboard-$(basename "$PROBE")"
+   git -C <repo> branch -D "kraft-onboard-${PROBE##*-}"
    ```
 
    A failure in either probe is the finding, not an error to route around.
