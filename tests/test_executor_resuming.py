@@ -368,3 +368,54 @@ def test_reconcile_still_needs_human_when_latest_attempt_failed(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_resume_threads_local_files_from_the_launch_context(tmp_path):
+    """Kraft-gxcmy's production wiring, the resume-side copy of the check in
+    `test_executor_walk.py::test_run_once_threads_local_files_from_the_launch_context`.
+    `resume_once` (`resuming.py:167`) is a copy-paste of `run_once`'s
+    `local_files=` line -- a copy-paste that could just as easily have been
+    dropped. Resuming a freshly-intaken item (crash before the first
+    `load_chain`, `current_node_id` still NULL) takes `resume`'s own
+    worktree-creation path rather than reusing one `run_once` already made, so
+    this actually exercises `_carry_local_files`, not just an early return."""
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    (repo / ".gitignore").write_text(".python-version\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "ignore the pin")
+    (repo / ".python-version").write_text("3.11\n")
+
+    tmpl = Template(
+        id="env-only",
+        nodes=[{"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None}],
+    )
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = Registry(
+                hooks={"on.env.prepare": {"kind": "builtin", "handler": "env_setup"}}
+            )
+            wid = await executor.intake(
+                database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
+            )
+            launch = executor.LaunchContext(
+                repo_entry={"local_files": [".python-version"]}, steering_dir=None
+            )
+            result = await executor.resume(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                adopted={},
+                bd_cwd=str(tracker),
+                launch=launch,
+            )
+            assert result == "completed"
+            assert (rd.worktrees / wid / ".python-version").read_text() == "3.11\n"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
