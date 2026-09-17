@@ -25,9 +25,8 @@ curl -fsSL https://raw.githubusercontent.com/itsOmidKarami/kraft/main/install.sh
 ```
 
 [`install.sh`](install.sh) is short and worth reading before you pipe it to a
-shell. `kraft admin update` installs the newest release later on (it always
-does so via `uv tool install`, so use it only if you installed with `uv` or
-the script above), and `kraft --version` says what you have.
+shell. `kraft admin update` installs the newest release later on, and
+`kraft --version` says what you have.
 
 ### Homebrew (macOS)
 
@@ -38,9 +37,8 @@ kraft admin init
 kraft
 ```
 
-Update with `brew upgrade kraft`, not `kraft admin update` — that command
-always reinstalls via `uv tool install`, which would leave a second,
-unrelated `kraft` on your PATH instead of updating the Homebrew one.
+`kraft admin update` detects a Homebrew install and runs `brew upgrade kraft`
+instead of its usual `uv tool install`, so either update path works.
 
 ### From source (development)
 
