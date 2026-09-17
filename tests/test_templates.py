@@ -411,6 +411,24 @@ def test_plain_string_nodes_are_quarantined_not_silently_dropped(tmp_path):
     assert "typo" not in ts.valid
 
 
+def test_extends_of_a_plain_string_nodes_base_is_a_load_error(tmp_path):
+    """A malformed base (bare-string `nodes:`) must quarantine both itself
+    and any child that extends it, not raise AttributeError out of the
+    loader when the extends branch inspects the base's node dicts."""
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "typo.yaml": "id: typo\nnodes: [implementation, verify]\n",
+            "child.yaml": "id: child\nextends: typo\n",
+        },
+    )
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert "typo" in ts.invalid
+    assert "child" in ts.invalid
+    assert "child" not in ts.valid
+
+
 def test_extends_unknown_base_is_a_load_error(tmp_path):
     d = _dir(
         tmp_path, **{"registry.yaml": REGISTRY_YAML, "child.yaml": "id: child\nextends: bogus\n"}
