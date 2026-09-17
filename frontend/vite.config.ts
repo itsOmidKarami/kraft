@@ -1,6 +1,6 @@
-/// <reference types="vitest" />
 import react from "@vitejs/plugin-react";
-import { defineConfig, type ProxyOptions } from "vite";
+import type { ProxyOptions } from "vite";
+import { defineConfig } from "vitest/config";
 
 // Kraft-y0g2: the fallback is the *dev* instance's port (justfile's `dev_port`),
 // not 8765. `just ui` and `just dev` both export KRAFT_PORT, so this only applies
@@ -36,6 +36,6 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./src/test-setup.ts"],
     exclude: ["e2e/**", "sweep/**", "node_modules/**"],
-    poolOptions: { threads: { execArgv }, forks: { execArgv } },
+    execArgv,
   },
 });
