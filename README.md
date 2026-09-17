@@ -99,12 +99,12 @@
 | src/kraft/store/work\_items.py           |      121 |        0 |    100% |           |
 | src/kraft/templates.py                   |      367 |       17 |     95% |184, 236, 358, 364, 374, 383, 418, 597, 641, 644, 677, 689, 699, 709, 714, 805-809 |
 | src/kraft/triggers.py                    |       38 |       10 |     74% |48-49, 66-73 |
-| src/kraft/update.py                      |       93 |       10 |     89% |50-51, 63-67, 72, 88, 123-125 |
+| src/kraft/update.py                      |      102 |       10 |     90% |51-52, 64-68, 73, 89, 124-126 |
 | src/kraft/usage.py                       |      121 |        4 |     97% |84, 201, 211, 256 |
 | src/kraft/worker\_env.py                 |        8 |        0 |    100% |           |
 | src/kraft/worktree\_read.py              |       48 |        8 |     83% |82, 86-88, 91-95, 103-104 |
 | src/kraft/ws.py                          |       61 |        0 |    100% |           |
-| **TOTAL**                                | **10824** |  **767** | **93%** |           |
+| **TOTAL**                                | **10833** |  **767** | **93%** |           |
 
 
 ## Setup coverage badge
