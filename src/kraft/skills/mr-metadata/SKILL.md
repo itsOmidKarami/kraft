@@ -56,3 +56,9 @@ the one that was made.
 - Three lines is a fine description for a three-line diff.
 - Scope deliberately left out belongs in the description -- it is most of
   what gets rejected.
+- Do not hard-wrap a paragraph at some fixed column. GitHub and GitLab render
+  a single `\n` inside a paragraph as a line break, not a space -- unlike a
+  terminal or an editor, they don't reflow it back into prose. Write each
+  paragraph as one unwrapped line (or let it wrap in your editor without
+  inserting real newlines); use a blank line only where you mean an actual
+  paragraph break.
