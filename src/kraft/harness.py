@@ -15,6 +15,7 @@ non-CLI kind. That is why capability and invocation are separate axes here.
 from __future__ import annotations
 
 import re
+import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -314,3 +315,78 @@ def load(harnesses_dir: Path | None) -> HarnessSet:
                 continue
             valid[stem] = h
     return HarnessSet(valid=valid, invalid=invalid)
+
+
+# shlex for the binding's `command:` override -- the same treatment agent.py
+# gives it today.
+def _fill(fragments: tuple[str, ...], value: str | tuple[str, ...]) -> list[str]:
+    csv = ",".join(value) if isinstance(value, tuple) else value
+    scalar = value if isinstance(value, str) else csv
+    out = []
+    for frag in fragments:
+        out.append(frag.replace("{value}", scalar).replace("{csv}", csv))
+    return out
+
+
+def build_argv(
+    h: Harness,
+    *,
+    command: str | None = None,
+    prompt: str,
+    context: str,
+    options: dict[str, str | tuple[str, ...]] | None = None,
+    resume: str | None = None,
+) -> list[str]:
+    """One command line for one dispatch.
+
+    Order is `capabilities:` declaration order, after the command prefix --
+    the file reads as the command line it builds. A capability the harness
+    does not declare is *skipped*, never emitted flagless: `load_registry`
+    already rejected the binding, and a second line of defence here is what
+    makes the old `agent.py:473` bare-positional bug unrepresentable.
+    """
+    opts = dict(options or {})
+    resuming = bool(resume) and h.supports("resume")
+
+    prefix = list(h.command_resume if resuming and h.command_resume else h.command)
+    if resuming and h.command_resume:
+        prefix = [p.replace("{value}", resume) for p in prefix]
+    if command:
+        # The executable slot only, shlex.split so a multiword wrapper keeps
+        # working (Task 2 note). The harness's own subcommands survive after
+        # it, for both the normal and the resume prefix.
+        prefix = shlex.split(command) + prefix[1:]
+
+    ctx_cap = h.capabilities["context"]
+    prompt_value = f"{context}\n\n{prompt}" if ctx_cap.channel == "prompt" else prompt
+
+    argv = list(prefix)
+    for name, cap in h.capabilities.items():
+        if not cap.argv:
+            continue                      # non-invocable, or carried by `via`
+        if name == "resume":
+            if not resuming or h.command_resume:
+                continue                  # absent, or already in the prefix
+            value: str | tuple[str, ...] | None = resume
+        elif name == "prompt":
+            value = prompt_value
+        elif name == "context":
+            value = context if cap.channel == "system_prompt" else None
+        else:
+            provided = opts.get(name)
+            has_placeholder = any(ph in frag for frag in cap.argv for ph in PLACEHOLDERS)
+            if isinstance(cap.always, tuple):
+                given = provided if isinstance(provided, tuple) else ()
+                merged = tuple(dict.fromkeys((*cap.always, *given)))
+                value = merged or None
+            elif not has_placeholder:
+                # No placeholder to fill (e.g. `structured_log`'s
+                # `--output-format stream-json`) -- this is a flag every
+                # launch gets, unconditionally, from the declaration alone.
+                value = ""
+            else:
+                value = provided if provided is not None else cap.always
+        if value is None:
+            continue
+        argv += _fill(cap.argv, value)
+    return argv

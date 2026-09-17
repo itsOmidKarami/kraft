@@ -165,3 +165,103 @@ def test_id_must_match_file_name(tmp_path):
     _write(tmp_path, "wrong.yaml", _MINIMAL.format(id="right"))
     hs = harness.load(tmp_path / "harnesses")
     assert "does not match its file name" in hs.invalid["wrong"]
+
+
+def _argv(hid, **kw):
+    kw.setdefault("prompt", "do the thing")
+    kw.setdefault("context", "CTX")
+    return harness.build_argv(harness.load(None).valid[hid], **kw)
+
+
+def test_claude_argv_matches_todays_invocation():
+    argv = _argv("claude", options={"model": "sonnet", "effort": "medium"})
+    assert argv[:2] == ["claude", "-p"]
+    assert argv[2] == "do the thing"
+    assert "--append-system-prompt" in argv
+    assert argv[argv.index("--append-system-prompt") + 1] == "CTX"
+    assert argv[argv.index("--model") + 1] == "sonnet"
+    assert argv[argv.index("--effort") + 1] == "medium"
+    # `always:` reaches argv with no binding asking -- spec leaks 1 and 2.
+    assert argv[argv.index("--disallowed-tools") + 1] == "Monitor"
+    assert argv[argv.index("--permission-mode") + 1] == "auto"
+    assert (
+        argv[argv.index("--permission-prompt-tool") + 1]
+        == "mcp__kraft__permission_request"
+    )
+
+
+def test_codex_argv_puts_the_bare_prompt_last():
+    argv = _argv("codex", options={"effort": "high"})
+    assert argv[:2] == ["codex", "exec"]
+    assert argv[-1] == "do the thing"
+    assert "-c" in argv
+    assert "developer_instructions=CTX" in argv
+    assert "model_reasoning_effort=high" in argv
+    # `always: workspace-write`, unasked.
+    assert argv[argv.index("-s") + 1] == "workspace-write"
+
+
+def test_gemini_folds_context_into_the_prompt():
+    """channel: prompt -- the weaker channel, and the whole contract must
+    still arrive. `prompt` is declared last in gemini.yaml (not a
+    bare-positional, so no ordering requirement forces it earlier), so this
+    checks content rather than position."""
+    argv = _argv("gemini")
+    assert argv[0] == "gemini"
+    assert argv[argv.index("-p") + 1] == "CTX\n\ndo the thing"
+    assert "--append-system-prompt" not in argv
+
+
+def test_monitor_does_not_appear_for_a_harness_without_deny_tools():
+    """The spec's clearest leak: `Monitor` was appended unconditionally in
+    `agent.py:388`, so it would have reached every harness."""
+    assert "Monitor" not in _argv("codex")
+    assert "Monitor" not in _argv("gemini")
+
+
+def test_deny_tools_unions_always_with_the_bindings_own():
+    argv = _argv("claude", options={"deny_tools": ("WebFetch", "Monitor")})
+    # Deduplicated, `always` first, one comma-joined value.
+    assert argv[argv.index("--disallowed-tools") + 1] == "Monitor,WebFetch"
+
+
+def test_resume_uses_command_resume_as_the_whole_prefix():
+    argv = _argv("codex", resume="abc-123")
+    assert argv[:4] == ["codex", "exec", "resume", "abc-123"]
+    assert argv[-1] == "do the thing"
+
+
+def test_resume_as_a_flag_when_that_is_how_the_harness_spells_it():
+    argv = _argv("claude", resume="abc-123")
+    assert argv[0] == "claude"
+    assert argv[argv.index("--resume") + 1] == "abc-123"
+
+
+def test_resume_is_ignored_by_a_harness_that_cannot_do_it():
+    """Gemini's --resume takes an index, not an id, so it declares no resume
+    capability. Escalation falls back to a fresh thread (spec: the gaps
+    fail-at-load cannot reach); argv must simply not carry a foreign id."""
+    argv = _argv("gemini", resume="abc-123")
+    assert "abc-123" not in argv
+    assert "--resume" not in argv
+
+
+def test_command_override_replaces_the_executable_slot():
+    argv = _argv("codex", command="/opt/fixtures/codex", resume="x1")
+    assert argv[:4] == ["/opt/fixtures/codex", "exec", "resume", "x1"]
+
+
+def test_a_multiword_override_is_shlex_split():
+    """tests/support/harness.py builds `command` as "<python> <script>" and
+    agent.py shlex.splits it today. Breaking that breaks every dispatch test."""
+    argv = _argv("codex", command="/usr/bin/python3 /t/fake_agent.py")
+    assert argv[:3] == ["/usr/bin/python3", "/t/fake_agent.py", "exec"]
+
+
+def test_an_option_a_harness_does_not_support_is_never_emitted():
+    """Defence in depth. Task 3 rejects such a binding at load; if one ever
+    reaches here it must not become a malformed command line -- the latent
+    bug at agent.py:473."""
+    argv = _argv("codex", options={"deny_tools": ("Write",)})
+    assert "Write" not in argv
+    assert "--disallowed-tools" not in argv
