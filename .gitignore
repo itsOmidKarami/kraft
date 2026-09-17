@@ -18,6 +18,10 @@ build/
 .testmondata*
 .ruff_cache/
 .uv-cache/
+.coverage
+.coverage.*
+junit.xml
+coverage.xml
 
 # macOS
 .DS_Store

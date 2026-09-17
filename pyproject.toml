@@ -35,6 +35,8 @@ dev = [
     "ruff>=0.16.6",  # PEP 758 aware; keep .pre-commit-config.yaml rev in step
     "pre-commit>=4",
     "pytest-testmon>=2.2.0",
+    "pytest-xdist>=3.6",
+    "pytest-cov>=6",
 ]
 
 [project.scripts]
@@ -61,9 +63,14 @@ kraft = ["_bundled/**/*", "skills/**/*"]
 testpaths = ["tests", "plugins/kraft-lite/tests"]
 markers = [
     "e2e: end-to-end tests needing a real claude binary (Chunk C)",
-    "slow: excluded from the blocking PR gate; run in the parallel slow-tests CI job (subprocess servers, real uvicorn, multi-second sleeps)",
+    "slow: subprocess servers, real uvicorn, multi-second sleeps -- included in the main CI test job, just kept separable for local runs",
     "real_executor: opts a test out of a suite-level executor stub; it drives the real executor and real subprocesses",
 ]
+
+# relative_files: python-coverage-comment-action diffs coverage against the
+# data branch's stored paths, which only line up if both sides are relative.
+[tool.coverage.run]
+relative_files = true
 
 [tool.ruff]
 line-length = 100

@@ -187,21 +187,20 @@ fix:
     uv run ruff format .
 
 # What CI's blocking jobs run, in the same order, without --testmon: the
-# recipe `verify` calls instead of `test` (Kraft-579). `just test` stays
+# verify node calls this instead of `test` (Kraft-579). `just test` stays
 # change-selected -- the right default for a human editing one file, and what
 # CLAUDE.md tells contributors to use -- but a change-selected suite is a
-# different question than "does this pass CI", and verify exists to answer
-# the second one. No --testmon also means an empty selection cannot report
-# success by accident: pytest's own exit code for "collected 0 items" is 5,
-# which `adapters/subprocess.py`'s `_resolve` already reads as failed
+# different question than "does this pass CI", and this recipe exists to
+# answer the second one. No --testmon also means an empty selection cannot
+# report success by accident: pytest's own exit code for "collected 0 items"
+# is 5, which `adapters/subprocess.py`'s `_resolve` already reads as failed
 # (Kraft-44t0) -- nothing here needs to special-case that, and nothing should.
 #
-# `tests/test_gitlab_ci_config.py::test_ci_test_recipe_covers_every_blocking_ci_script_line`
-# fails if this drifts from `.gitlab-ci.yml`'s lint-and-test/slow-tests jobs --
-# that test is where the second copy of this list lives; keep the two in step.
+# Keep this in step with .github/workflows/test.yml's `test` job by hand --
+# there's no test enforcing it since GitLab CI's config (and the test that
+# checked it) was retired.
 ci-test:
     uv run ruff check .
     uv run ruff format --check .
-    uv run pytest -m "not e2e and not slow"
-    uv run pytest -m "slow"
+    uv run pytest -m "not e2e" -n auto
     uv run python -m kraft.intent
