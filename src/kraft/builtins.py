@@ -189,6 +189,62 @@ def _copy_attachments(
         )
 
 
+def _carry_local_files(repo: Path, worktree: Path, rels: list[str]) -> tuple[list[str], list[str]]:
+    """Copy `rels` from `repo` into `worktree`. Returns `(carried, refused)`.
+
+    `git worktree add` checks out tracked content at HEAD, so a machine-local
+    file the developer never committed does not exist in the worktree. A
+    `.python-version` left behind this way is not a missing convenience: uv
+    falls through to `requires-python`, and `~=3.11` means `>=3.11, <4`, so it
+    picks whatever interpreter PATH offers first and the chain runs on it
+    silently -- 3.14 on work item 1e2e6b45898e42298d16232c9cbfb768, ten retries
+    deep (Kraft-gxcmy).
+
+    A file the worktree would not ignore is refused rather than carried. Kraft
+    has no way to hold an unignored file out of a commit: a per-worktree
+    `info/exclude` is read from the *common* dir, so an entry there would leak
+    to every other worktree of the same repo, and a `core.excludesFile` set in
+    the worktree's own config is outranked by `main_ignore_args`' `-c` -- which
+    is live during `_commit_paths`, exactly where it would have mattered.
+    Refusing keeps a carried file clear of `open_mr`'s dirty-worktree guard by
+    construction, and an unignored machine-local file is one `git add -A` from
+    being committed with or without Kraft.
+
+    Never raises: a refusal or a missing source is reported to the caller, not
+    turned into a failed worktree. The destination guards are
+    `_copy_attachments`' (Kraft-85wk) -- a symlinked destination is skipped
+    whether or not it dangles, and the resolved destination must stay inside
+    the worktree.
+    """
+    worktree_root = worktree.resolve()
+    carried: list[str] = []
+    refused: list[str] = []
+    for rel in rels:
+        src = repo / rel
+        dest = worktree / rel
+        if not src.is_file() or dest.is_symlink() or dest.exists():
+            continue
+        resolved = dest.resolve()
+        if resolved != worktree_root and worktree_root not in resolved.parents:
+            continue
+        # The worktree's own rules, not `main`'s: `main_ignore_args` widens what
+        # counts as ignored for Kraft's own commits, but a plain `git add -A`
+        # from an agent sees only what is checked out here.
+        ignored = subprocess.run(
+            ["git", "check-ignore", "-q", "--", rel],
+            cwd=str(worktree),
+            capture_output=True,
+            text=True,
+        )
+        if ignored.returncode != 0:
+            refused.append(rel)
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dest)
+        carried.append(rel)
+    return carried, refused
+
+
 def _pin_identity(repo: Path, worktree: Path, work_item_id: str) -> None:
     """Resolve `user.name`/`user.email` from `repo` and write them into
     `worktree`'s own git config, plus every submodule's separate gitdir.

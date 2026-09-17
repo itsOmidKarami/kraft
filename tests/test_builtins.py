@@ -1601,3 +1601,95 @@ def test_refresh_worktree_base_raises_rebase_conflict_a_runtimeerror_subclass(tm
             await database.close()
 
     asyncio.run(scenario())
+
+
+def _linked_worktree(repo, tmp_path, name="wt"):
+    wt = tmp_path / name
+    subprocess.run(
+        ["git", "worktree", "add", "-q", str(wt), "-b", name],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    return wt
+
+
+def test_carry_local_files_copies_an_ignored_untracked_file(tmp_path):
+    """The whole point of Kraft-gxcmy: the pin exists in the developer's
+    checkout and nowhere in the worktree, because it was never committed."""
+    repo = make_repo(tmp_path)
+    (repo / ".gitignore").write_text(".python-version\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "ignore the pin")
+    (repo / ".python-version").write_text("3.11\n")
+    wt = _linked_worktree(repo, tmp_path)
+
+    carried, refused = kraft_builtins._carry_local_files(repo, wt, [".python-version"])
+
+    assert carried == [".python-version"]
+    assert refused == []
+    assert (wt / ".python-version").read_text() == "3.11\n"
+    # and invisible to git, so `open_mr`'s dirty-worktree guard never sees it
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=wt, capture_output=True, text=True
+    )
+    assert status.stdout == ""
+
+
+def test_carry_local_files_refuses_a_file_the_worktree_would_not_ignore(tmp_path):
+    """Kraft cannot hold an unignored file out of a commit, so it declines to
+    create one. A refusal is reported, never raised."""
+    repo = make_repo(tmp_path)
+    (repo / ".python-version").write_text("3.11\n")
+    wt = _linked_worktree(repo, tmp_path)
+
+    carried, refused = kraft_builtins._carry_local_files(repo, wt, [".python-version"])
+
+    assert carried == []
+    assert refused == [".python-version"]
+    assert not (wt / ".python-version").exists()
+
+
+def test_carry_local_files_skips_a_symlinked_destination(tmp_path):
+    repo = make_repo(tmp_path)
+    (repo / ".gitignore").write_text(".python-version\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "ignore the pin")
+    (repo / ".python-version").write_text("3.11\n")
+    wt = _linked_worktree(repo, tmp_path)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("untouched\n")
+    (wt / ".python-version").symlink_to(outside)
+
+    carried, refused = kraft_builtins._carry_local_files(repo, wt, [".python-version"])
+
+    assert carried == []
+    assert outside.read_text() == "untouched\n"
+
+
+def test_carry_local_files_leaves_an_existing_destination_alone(tmp_path):
+    repo = make_repo(tmp_path)
+    (repo / ".gitignore").write_text(".python-version\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "ignore the pin")
+    (repo / ".python-version").write_text("3.11\n")
+    wt = _linked_worktree(repo, tmp_path)
+    (wt / ".python-version").write_text("3.12\n")
+
+    carried, refused = kraft_builtins._carry_local_files(repo, wt, [".python-version"])
+
+    assert carried == []
+    assert (wt / ".python-version").read_text() == "3.12\n"
+
+
+def test_carry_local_files_ignores_a_source_that_is_not_there(tmp_path):
+    repo = make_repo(tmp_path)
+    (repo / ".gitignore").write_text(".python-version\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "ignore the pin")
+    wt = _linked_worktree(repo, tmp_path)
+
+    carried, refused = kraft_builtins._carry_local_files(repo, wt, [".python-version"])
+
+    assert carried == []
+    assert refused == []
