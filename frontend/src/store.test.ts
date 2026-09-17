@@ -39,7 +39,15 @@ beforeEach(() => {
     lastSeq: 0,
     connection: "connecting",
   });
-  vi.restoreAllMocks();
+  // Kraft-5fx.17: vitest 5's restoreAllMocks() only reassigns the spied
+  // object's property back to the original function; it no longer clears the
+  // mock's resolved-value config too. Zustand's setState copies the *current*
+  // hydrateItem reference forward via Object.assign, so a spy on
+  // useStore.getState().hydrateItem outlives the property reassignment and
+  // keeps returning its old resolved value in later tests. resetAllMocks()
+  // clears the config directly, so the shared mock wrapper falls through to
+  // its captured original regardless of which object holds the reference.
+  vi.resetAllMocks();
 });
 
 describe("applyEvent", () => {
