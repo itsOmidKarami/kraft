@@ -259,8 +259,7 @@ def parse(data: object, *, where: str, path: Path | None = None) -> Harness:
             raise HarnessError(f"{where}: capability {name!r} needs a 'reader'")
         if "structured_log" not in caps:
             raise HarnessError(
-                f"{where}: capability {name!r} reads the log, so 'structured_log' "
-                "must be declared"
+                f"{where}: capability {name!r} reads the log, so 'structured_log' must be declared"
             )
 
     # A bare positional would be swallowed by a preceding flag.
@@ -363,10 +362,10 @@ def build_argv(
     argv = list(prefix)
     for name, cap in h.capabilities.items():
         if not cap.argv:
-            continue                      # non-invocable, or carried by `via`
+            continue  # non-invocable, or carried by `via`
         if name == "resume":
             if not resuming or h.command_resume:
-                continue                  # absent, or already in the prefix
+                continue  # absent, or already in the prefix
             value: str | tuple[str, ...] | None = resume
         elif name == "prompt":
             value = prompt_value

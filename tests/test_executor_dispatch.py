@@ -2425,3 +2425,56 @@ def test_the_implementer_has_no_skill_so_its_brief_stays_the_task():
     job" -- addressed to the node that implements."""
     hooks = load_registry(_REPO_ROOT / "templates" / "registry.yaml").hooks
     assert "skill" not in hooks["on.implementation.start"]
+
+
+def test_a_chain_can_run_two_harnesses(tmp_path, monkeypatch):
+    """The point of the whole agent-harnesses spec, exercised with no tokens:
+    one node on claude, the next on codex, both reaching the same
+    result-file contract."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    argv_log = tmp_path / "argv.jsonl"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_ARGV_LOG", str(argv_log))
+    fake = f"{sys.executable} {_FAKE_AGENT}"
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = Registry(
+                hooks={
+                    "on.env.prepare": {"kind": "builtin", "handler": "env_setup"},
+                    "on.a": {"kind": "agent", "command": fake},
+                    "on.b": {"kind": "agent", "command": fake, "harness": "codex"},
+                }
+            )
+            tmpl = Template(
+                id="two-harness",
+                nodes=[
+                    {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None},
+                    {"id": "claude_node", "tasks": ["on.a"], "gate_after": None},
+                    {"id": "codex_node", "tasks": ["on.b"], "gate_after": None},
+                ],
+            )
+            wid = await executor.intake(
+                database,
+                rd,
+                title="make the failing test pass",
+                repo=str(repo),
+                template=tmpl,
+                bd_cwd=str(tracker),
+            )
+            result = await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+            assert result == "completed"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+    # Two harnesses, two spellings, one contract.
+    records = _argv_lines(argv_log)
+    assert any("--append-system-prompt" in r for r in records)
+    assert any(any(a.startswith("developer_instructions=") for a in r) for r in records)

@@ -171,7 +171,14 @@ def fake_docker_bin(tmp_path: Path) -> Path:
     return bin_dir
 
 
-def fake_registry(python_exe: str, fake_agent_path: Path) -> Registry:
+def fake_registry(
+    python_exe: str,
+    fake_agent_path: Path,
+    harnesses: dict[str, str] | None = None,
+) -> Registry:
+    """`harnesses` maps a hook point to the harness it should be bound to, for
+    a test that needs more than one harness in a single chain. Unnamed hooks
+    keep the shipped default (`claude`)."""
     base = load_registry(_REPO_ROOT / "templates" / "registry.yaml")
     hooks = dict(base.hooks)
     fake = f"{python_exe} {fake_agent_path}"
@@ -204,6 +211,8 @@ def fake_registry(python_exe: str, fake_agent_path: Path) -> Registry:
         "on.human_review.requested",
     ):
         hooks[hook] = {"kind": "builtin", "handler": "noop"}
+    for hook, hid in (harnesses or {}).items():
+        hooks[hook] = {**hooks[hook], "harness": hid}
     return Registry(hooks=hooks)
 
 
