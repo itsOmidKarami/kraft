@@ -133,6 +133,7 @@ async def review(
         title=row["title"],
         repo_path=row["repo"],
         cwd=run_dirs.worktrees / work_item_id,
+        repo_entry=launch.repo_entry,
     )
 
     result_path = run_dirs.results / f"{session_id}.json"

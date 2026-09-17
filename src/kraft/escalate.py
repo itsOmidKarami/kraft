@@ -358,6 +358,7 @@ async def dispatch(
         resume_session_id=resume_session_id,
         autocompact="auto",
         identify_as_worker=False,
+        repo_entry=launch.repo_entry,
         thread=thread,
     )
 

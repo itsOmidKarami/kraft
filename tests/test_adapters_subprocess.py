@@ -460,13 +460,53 @@ def test_run_task_passes_env_through_to_docker_argv(tmp_path, monkeypatch):
                 cwd=tmp_path,
                 sandbox={"kind": "docker", "image": "kraft-worker:py"},
                 env={"PYTHONDONTWRITEBYTECODE": "1"},
+                repo_entry={"env": {"MY_REPO": "1"}},
             )
             assert status == "done"
         finally:
             await database.close()
 
     asyncio.run(scenario())
-    assert seen["env"] == {"PYTHONDONTWRITEBYTECODE": "1"}
+    assert seen["env"] == {"MY_REPO": "1", "PYTHONDONTWRITEBYTECODE": "1"}
+
+
+def test_run_task_builds_the_child_env_instead_of_inheriting_os_environ(tmp_path, monkeypatch):
+    """Kraft-69atv: `{**os.environ, ...}` gave every worker whatever shell
+    started the daemon. The child must see the repo's declared `env` and must
+    not see a repo-scoped leak like VIRTUAL_ENV.
+    """
+    monkeypatch.setenv("VIRTUAL_ENV", "/some/other/repo/.venv")
+    dumped = tmp_path / "child-env.txt"
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database)
+            status = await sp.run_task(
+                database,
+                rd,
+                session_id="s-env",
+                work_item_id="w1",
+                node_id="implementation",
+                hook_point="on.implementation.start",
+                cmd=[
+                    "sh",
+                    "-c",
+                    f'env > "{dumped}"; printf \'{{"status":"done"}}\' > "$KRAFT_RESULT_PATH"',
+                ],
+                cwd=tmp_path,
+                repo_entry={"env": {"MY_REPO": "1"}},
+            )
+            assert status == "done"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    child = dict(line.split("=", 1) for line in dumped.read_text().splitlines() if "=" in line)
+    assert child["MY_REPO"] == "1"  # the repo's declaration reached the child
+    assert "VIRTUAL_ENV" not in child  # the daemon's leak did not
+    assert "KRAFT_RESULT_PATH" in child  # the call-site overlay still applies
 
 
 def test_run_task_exit_code_fallback(tmp_path):

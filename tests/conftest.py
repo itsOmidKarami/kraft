@@ -39,6 +39,31 @@ def _default_setup_command_for_tests_without_a_launch_context(monkeypatch):
     monkeypatch.setattr(builtins_mod, "ensure_worktree", _ensure_worktree_with_default)
 
 
+@pytest.fixture(autouse=True)
+def _forward_fake_agent_env_vars_into_worker_env(monkeypatch):
+    """A worker's env is now built by `worker_env`'s allowlist rather than
+    inherited wholesale from the daemon's own process (Kraft-69atv). Every
+    `KRAFT_FAKE_AGENT*`/`KRAFT_FAKE_CLAUDE*` knob `tests/support/fake_agent.py`
+    and `fixtures/fake-claude.sh` read relied on that old inheritance to reach
+    the fake agent's own process -- forward them here, for the life of the
+    test suite, rather than teaching every test that drives a fake agent to
+    declare `env_passthrough` for a fixture-only concern the real allowlist
+    owes nothing to.
+    """
+    import kraft.adapters.subprocess as sp_mod
+    from kraft.worker_env import worker_env as real_worker_env
+
+    def patched(repo_entry, extra=None):
+        names = [k for k in os.environ if k.startswith("KRAFT_FAKE_")]
+        entry = {
+            **(repo_entry or {}),
+            "env_passthrough": [*((repo_entry or {}).get("env_passthrough") or []), *names],
+        }
+        return real_worker_env(entry, extra)
+
+    monkeypatch.setattr(sp_mod, "worker_env", patched)
+
+
 def pytest_collection_modifyitems(config, items):
     if os.environ.get("KRAFT_E2E") == "1" and shutil.which("claude"):
         return

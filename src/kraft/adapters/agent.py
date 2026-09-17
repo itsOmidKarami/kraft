@@ -378,6 +378,7 @@ async def run_agent_task(
     identify_as_worker: bool = True,
     head_sha: str | None = None,
     thread: int = 1,
+    repo_entry: dict | None = None,
 ) -> str:
     # Kraft-avpe: wording alone didn't hold -- a later session read "don't
     # background work" as forbidding only a separate watcher, backgrounded a
@@ -500,4 +501,5 @@ async def run_agent_task(
         thread=thread,
         sandbox=sandbox,
         require_result_file=True,
+        repo_entry=repo_entry,
     )

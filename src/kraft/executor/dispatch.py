@@ -406,6 +406,7 @@ async def dispatch_node(
             + instruction,
             repo_path=work_item_row["repo"],
             cwd=worktree,
+            repo_entry=launch.repo_entry if launch else None,
             **common,
         )
         # The agent is told to commit everything it changes before it exits.
@@ -474,6 +475,7 @@ async def dispatch_node(
                 hook_point=task_hook,
                 cmd=scope["cmd"],
                 cwd=worktree,
+                repo_entry=repo_entry,
                 # The fix loop re-runs the test command after an agent edits source in
                 # the same worktree. A .pyc written on an earlier cycle has the same
                 # second-resolution mtime and (often) size as the fixed source, so

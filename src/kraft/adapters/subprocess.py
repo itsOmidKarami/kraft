@@ -20,6 +20,7 @@ import psutil
 from kraft import events, logs, store
 from kraft import sandbox as _sandbox
 from kraft import usage as _usage
+from kraft.worker_env import worker_env
 
 logger = logging.getLogger(__name__)
 
@@ -381,6 +382,7 @@ async def run_task(
     #: sets this; a subprocess-kind hook a template binds directly has no such
     #: contract.
     require_result_file: bool = False,
+    repo_entry: dict | None = None,
 ) -> str:
     log_path = run_dirs.logs / f"{session_id}.log"
     result_path = result_path_for(run_dirs, session_id)
@@ -407,7 +409,7 @@ async def run_task(
         )
     )
 
-    full_env = {**os.environ, **(env or {}), "KRAFT_RESULT_PATH": str(result_path)}
+    full_env = worker_env(repo_entry, {**(env or {}), "KRAFT_RESULT_PATH": str(result_path)})
     if sandbox:
         # The container writes its result here, and `result_path` is mounted
         # read-write into it by name -- docker can only bind-mount a file
@@ -419,7 +421,7 @@ async def run_task(
             cwd,
             sandbox,
             run_dirs.results,
-            env=env,
+            env={**((repo_entry or {}).get("env") or {}), **(env or {})},
             name=_sandbox.container_name(session_id),
             result_path=result_path,
         )
