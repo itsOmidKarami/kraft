@@ -222,7 +222,18 @@ def _carry_local_files(repo: Path, worktree: Path, rels: list[str]) -> tuple[lis
     for rel in rels:
         src = repo / rel
         dest = worktree / rel
-        if not src.is_file() or dest.is_symlink() or dest.exists():
+        if not src.is_file():
+            # config.py only rejects a directory entry that ends in `/`
+            # (`.venv/`), so a bare `.venv` passes validation and lands here.
+            # Silently skipping it -- indistinguishable from a source that was
+            # simply never created -- hides exactly the typo an operator most
+            # needs to see; refusing it, like an unignored file, at least says
+            # something went wrong. A genuinely absent source (no file, no
+            # directory) stays a silent no-op, per the spec.
+            if src.exists():
+                refused.append(rel)
+            continue
+        if dest.is_symlink() or dest.exists():
             continue
         resolved = dest.resolve()
         if resolved != worktree_root and worktree_root not in resolved.parents:
@@ -983,19 +994,27 @@ async def env_setup(
     # `resume` have already called `ensure_worktree` with the same attachments,
     # so this call is the early-return path and does no git or copy work in
     # the ordinary case — it only does real work when a test or a future chain
-    # calls `env_setup` without that prior call having happened.
+    # calls `env_setup` without that prior call having happened. On that path
+    # this call passes no `local_files`, so the worktree it creates gets none
+    # of the repo's pins and `uv sync` runs unpinned — Kraft-gxcmy again, just
+    # from a different call site. The report below at least names the gap;
+    # closing it for real means threading `local_files` into this call too.
     worktree = await ensure_worktree(
         db, run_dirs, repo=repo, work_item_id=work_item_id, attachments=attachments
     )
     missing = await asyncio.to_thread(_uncarried_local_files, Path(repo), worktree)
     report = f"worktree ready at {worktree}\n"
     if missing:
+        # Informational, not a to-do list: on most repos this names things
+        # like `.DS_Store` or `.testmondata` that nobody would ever carry.
+        # No hardcoded skip list for those, though -- a per-name filter here
+        # is exactly the per-repo maintenance treadmill `local_files` was
+        # built to avoid, and it would just be wrong on the next repo.
         report += (
-            "\nthese files exist in the repo but not in this worktree, because "
-            "git does not carry untracked content into a new one:\n"
-            + "".join(f"  {n}\n" for n in missing)
-            + "\nif any of them is needed here, add it to this repo's "
-            "`local_files` in repos.yaml.\n"
+            "\nuntracked root-level files present in the repo but not in this "
+            "worktree (git worktree add only checks out tracked content) -- "
+            "most of these are irrelevant noise, worth a glance only if the "
+            "build actually needs one of them:\n" + "".join(f"  {n}\n" for n in missing)
         )
     return await _record_done(
         db,

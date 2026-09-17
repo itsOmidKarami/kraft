@@ -1664,6 +1664,7 @@ def test_carry_local_files_skips_a_symlinked_destination(tmp_path):
     carried, refused = kraft_builtins._carry_local_files(repo, wt, [".python-version"])
 
     assert carried == []
+    assert refused == []
     assert outside.read_text() == "untouched\n"
 
 
@@ -1679,6 +1680,7 @@ def test_carry_local_files_leaves_an_existing_destination_alone(tmp_path):
     carried, refused = kraft_builtins._carry_local_files(repo, wt, [".python-version"])
 
     assert carried == []
+    assert refused == []
     assert (wt / ".python-version").read_text() == "3.12\n"
 
 
@@ -1693,6 +1695,25 @@ def test_carry_local_files_ignores_a_source_that_is_not_there(tmp_path):
 
     assert carried == []
     assert refused == []
+
+
+def test_carry_local_files_refuses_a_directory_entry_missing_its_trailing_slash(tmp_path):
+    """`config.py` only rejects a directory entry that ends in `/`, so a plain
+    `.venv` in `local_files` passes validation and reaches here. It is not a
+    file, so it always fails `src.is_file()` -- the same branch a genuinely
+    absent source takes. Without this, a typo like this is carried nowhere,
+    refused nowhere, and never shows up in `env_setup`'s report either
+    (`_uncarried_local_files`'s `"/" not in n` filter drops the `--directory`
+    listing's `.venv/` entry) -- zero feedback for a plausible mistake."""
+    repo = make_repo(tmp_path)
+    (repo / ".venv").mkdir()
+    (repo / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n")
+    wt = _linked_worktree(repo, tmp_path)
+
+    carried, refused = kraft_builtins._carry_local_files(repo, wt, [".venv"])
+
+    assert carried == []
+    assert refused == [".venv"]
 
 
 def test_local_files_land_before_uv_sync_resolves_an_interpreter(tmp_path, monkeypatch):
