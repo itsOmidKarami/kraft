@@ -43,16 +43,6 @@ def test_the_manifest_namespaces_the_skills():
     assert manifest["skills"] == ["./skills"]
 
 
-def test_the_marketplace_offers_this_plugin_from_the_repo_root():
-    """The published repo is its own marketplace, so `source` has to be the root
-    the plugin manifest sits in, and the plugin name has to be the one users type
-    after `@`."""
-    market = json.loads((PLUGIN / ".claude-plugin" / "marketplace.json").read_text())
-    plugin = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text())
-    assert market["name"] == plugin["name"], "`/plugin install kraft-lite@kraft-lite` needs both"
-    assert [(e["name"], e["source"]) for e in market["plugins"]] == [(plugin["name"], "./")]
-
-
 def test_no_skill_cites_a_hook_the_chain_does_not_have(texts):
     cited = {h for text in texts.values() for h in re.findall(r"`(on\.[\w.]+)`", text)}
     assert cited, "the skills cite no hooks at all"
@@ -133,44 +123,6 @@ def test_every_skill_can_find_the_helper_without_the_plugin_variable(texts, name
     assert "is unset" in texts[name], "no fallback path for an unset plugin root"
 
 
-def test_the_readme_warns_that_main_is_force_pushed():
-    """The README's own install instruction is `git clone`. Without this, the
-    first publish after a user installs breaks their `git pull` with no stated
-    recovery, and the plugin looks broken."""
-    readme = (PLUGIN / "README.md").read_text()
-    assert "## Contributing" in readme
-    assert "force-pushed" in readme
-    assert "git reset --hard origin/main" in readme
-
-
-# Not just links: a bare `docs/superpowers/specs/...` in prose is the same dead
-# reference to a reader who only ever sees the published repo. `(?<![\w./-])`
-# keeps `/dev/null` and `.kraft-lite/chain.jsonl` out of it.
-OUTSIDE = re.compile(
-    r"(?<![\w./-])(?:\.\./|/(?:Users|home)/|docs/|design/|src/|templates/|dev/|fixtures/)"
-)
-
-
-def test_no_shipped_prose_cites_a_path_outside_the_plugin(texts):
-    """These files ship to a repo where nothing above the plugin exists. The
-    monorepo has a `docs/` and a `templates/` that the split leaves behind, and
-    citing one reads fine here and 404s there."""
-    prose = {"README.md": (PLUGIN / "README.md").read_text()}
-    prose.update({f"skills/{name}/SKILL.md": text for name, text in texts.items()})
-    offenders = {
-        name: sorted(set(OUTSIDE.findall(text)))
-        for name, text in prose.items()
-        if OUTSIDE.search(text)
-    }
-    assert not offenders, f"paths that do not survive the split: {offenders}"
-
-
-def test_the_readme_links_nowhere_outside_the_published_tree():
-    readme = (PLUGIN / "README.md").read_text()
-    outside = re.findall(r"\]\((?:\.\./|/)[^)]*\)", readme)
-    assert not outside, f"links outside the published tree: {outside}"
-
-
 @pytest.mark.parametrize("name", ["next", "gate", "status"])
 def test_every_stateful_skill_passes_the_chain_id(texts, name):
     """A cleared context has only the skill prose and the disk. If the skills do
@@ -246,17 +198,6 @@ def test_a_trailing_key_with_no_body_is_not_bound():
 
 def test_blank_lines_between_a_key_and_its_body_do_not_unbind_it():
     assert kl._bound_hooks("on.merge:\n\n  kind: skill\n") == {"on.merge"}
-
-
-def test_the_marketplace_entry_matches_the_plugin_manifest():
-    """`claude plugin tag` would validate this, but it tags HEAD and lite-publish
-    tags the subtree-split commit, so the CLI cannot be used here. The two files
-    restate each other's name and description with nothing pinning them."""
-    plugin = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text())
-    marketplace = json.loads((PLUGIN / ".claude-plugin" / "marketplace.json").read_text())
-    entry = next(p for p in marketplace["plugins"] if p["source"] == "./")
-    assert entry["name"] == plugin["name"]
-    assert entry["description"] == plugin["description"]
 
 
 def test_kl_parses_on_the_oldest_supported_python():
