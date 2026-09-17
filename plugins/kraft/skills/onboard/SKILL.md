@@ -10,7 +10,7 @@ connection error.
 
 # Onboarding a repo
 
-Three mechanical steps, each followed by a check against the repo itself — a
+Four mechanical steps, each followed by a check against the repo itself — a
 zero exit code says the command ran, not that what it did was right.
 
 1. **Connect.** `ensure_repo()` (or `kraft repo connect [PATH]` from a
@@ -50,28 +50,57 @@ zero exit code says the command ran, not that what it did was right.
    comes with it. Find out now, while you can still ask, rather than on the
    repo's first work item.
 
-   Cut a throwaway worktree outside the repo and run the repo's own test
-   command in it:
+   Cut a throwaway worktree outside the repo, once, capturing the path
+   `mktemp` actually created:
 
    ```bash
-   git -C <repo> worktree add -q /tmp/kraft-onboard-$$ -b kraft-onboard-probe
-   (cd /tmp/kraft-onboard-$$ && <test_command>)
+   PROBE=$(mktemp -d /tmp/kraft-onboard-XXXXXX)
+   git -C <repo> worktree add -q "$PROBE" -b "kraft-onboard-$(basename "$PROBE")"
+   echo "$PROBE"
    ```
 
-   Use the `test_command` you confirmed in step 1, not a guess. Then clean up:
+   Every command below is a separate shell — `$PROBE` will not still be set in
+   it. Read the path the `echo` printed and substitute that literal value
+   (e.g. `/tmp/kraft-onboard-a1b2c3`) everywhere `$PROBE` appears from here on.
+   Re-running `mktemp` for a later command gives you a directory with no
+   worktree in it, not the one you just created — that mismatch is what made
+   the old `$$`-based version of this step fail its own cleanup.
+
+   First probe, cheap and fast — whatever fits this repo's toolchain (`uv run
+   python -V`, `node -v`, ...), not the test suite:
 
    ```bash
-   git -C <repo> worktree remove --force /tmp/kraft-onboard-$$
-   git -C <repo> branch -D kraft-onboard-probe
+   (cd "$PROBE" && uv run python -V)
    ```
 
-   A failure here is the finding, not an error to route around. Compare
-   `git -C <repo> ls-files --others --directory` against the worktree: a
-   root-level file listed there and missing from the probe is a file Kraft
-   will not carry either. A toolchain pin (`.python-version`, `.nvmrc`,
-   `.tool-versions`), a `.env`, an `.npmrc` — any of these can change what the
-   worktree resolves without changing whether the command exits zero, so read
-   the list even when the tests pass.
+   This is the one likeliest to catch a missing pin silently: `requires-python
+   = "~=3.11"` is satisfied by 3.14 too, so the wrong interpreter can pass
+   every test without ever saying so (Kraft-gxcmy).
+
+   Second probe, opt-in — the repo's own test command, in the same worktree.
+   Say what you're about to run and roughly how long it takes before you run
+   it (a cold `uv sync` plus a full suite can be minutes, not seconds), and
+   let the person decide whether to wait for it now:
+
+   ```bash
+   (cd "$PROBE" && <test_command>)
+   ```
+
+   Use the `test_command` you confirmed in step 1, not a guess. Then clean up,
+   with the same literal path:
+
+   ```bash
+   git -C <repo> worktree remove --force "$PROBE"
+   git -C <repo> branch -D "kraft-onboard-$(basename "$PROBE")"
+   ```
+
+   A failure in either probe is the finding, not an error to route around.
+   Compare `git -C <repo> ls-files --others --directory` against the
+   worktree: a root-level file listed there and missing from the probe is a
+   file Kraft will not carry either. A toolchain pin (`.python-version`,
+   `.nvmrc`, `.tool-versions`), a `.env`, an `.npmrc` — any of these can
+   change what the worktree resolves without changing whether either probe
+   exits zero, so read the list even when both probes pass.
 
    Anything the repo genuinely needs goes in its `repos.yaml` entry:
 
@@ -83,8 +112,8 @@ zero exit code says the command ran, not that what it did was right.
    Kraft copies those into every worktree before it runs `uv sync`, and
    **refuses any entry the repo does not gitignore** — it cannot keep an
    unignored file out of a commit. If a needed file is not ignored, add it to
-   `.gitignore` rather than dropping it from `local_files`. Re-run the probe
-   after editing, and say whether it went green.
+   `.gitignore` rather than dropping it from `local_files`. Cut a fresh probe
+   worktree and re-run after editing, and say whether it went green.
 
    Do not put a directory or a glob in `local_files`; it takes literal file
    paths, and the list is validated on load.
