@@ -672,7 +672,7 @@ def _resolve_template_dict(
         used = sorted(k for k in _COMPOSITION_KEYS if k in data)
         if used:
             raise RegistryError(f"template {tid!r}: {used} require 'extends'")
-        return [dict(n) for n in nodes if isinstance(n, dict)]
+        return [dict(n) if isinstance(n, dict) else n for n in nodes]
 
     if "nodes" in data:
         raise RegistryError(f"template {tid!r}: cannot set both 'extends' and 'nodes'")

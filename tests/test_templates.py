@@ -395,6 +395,22 @@ def test_extends_and_nodes_together_is_a_load_error(tmp_path):
     assert "child" in ts.invalid
 
 
+def test_plain_string_nodes_are_quarantined_not_silently_dropped(tmp_path):
+    """A `nodes:` list of bare strings (an easy YAML slip) must land in
+    `invalid`, not load as a valid template with zero nodes -- a zero-node
+    chain would complete without running anything."""
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "typo.yaml": "id: typo\nnodes: [implementation, verify]\n",
+        },
+    )
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert "typo" in ts.invalid
+    assert "typo" not in ts.valid
+
+
 def test_extends_unknown_base_is_a_load_error(tmp_path):
     d = _dir(
         tmp_path, **{"registry.yaml": REGISTRY_YAML, "child.yaml": "id: child\nextends: bogus\n"}
