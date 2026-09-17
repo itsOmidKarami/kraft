@@ -642,9 +642,88 @@ def validate_agent_overrides(overrides: dict) -> list[str]:
     return [f"agent_overrides {e}" for e in validate_model_effort_fields(overrides)]
 
 
+#: The keys `_resolve_template_dict` treats as composition -- meaningless,
+#: and rejected, on a template that does not `extends` (spec §2's "Hard load
+#: errors" posture: a key that silently does nothing is worse than a
+#: rejected one).
+_COMPOSITION_KEYS = ("remove", "insert_before", "insert_after")
+
+
+def _resolve_template_dict(
+    tid: str, raw_by_id: dict[str, dict], *, visiting: frozenset[str] = frozenset()
+) -> list:
+    """Resolve one raw template dict into a flat node list, recursively
+    resolving `extends` first. Raises `RegistryError` -- caught by
+    `load_templates`'s own per-template try/except below, the same as every
+    other load-time defect -- since this runs before any node-level
+    validation has produced a node to attach an error to.
+
+    Every node returned is a fresh `dict` copy: two templates extending the
+    same base, or one template's own `insert_before`/`insert_after`, must
+    never share a node dict a sibling resolution could then mutate.
+    """
+    data = raw_by_id[tid]
+    extends = data.get("extends")
+
+    if extends is None:
+        nodes = data.get("nodes")
+        if not isinstance(nodes, list) or not nodes:
+            raise RegistryError(f"template {tid!r}: 'nodes' must be a non-empty list")
+        used = sorted(k for k in _COMPOSITION_KEYS if k in data)
+        if used:
+            raise RegistryError(f"template {tid!r}: {used} require 'extends'")
+        return [dict(n) for n in nodes if isinstance(n, dict)]
+
+    if "nodes" in data:
+        raise RegistryError(f"template {tid!r}: cannot set both 'extends' and 'nodes'")
+    if not isinstance(extends, str):
+        raise RegistryError(f"template {tid!r}: 'extends' must be a string template id")
+    if extends not in raw_by_id:
+        raise RegistryError(f"template {tid!r}: extends unknown template {extends!r}")
+    if extends in visiting:
+        raise RegistryError(f"template {tid!r}: 'extends' cycle at {extends!r}")
+
+    nodes = _resolve_template_dict(extends, raw_by_id, visiting=visiting | {tid})
+
+    remove = data.get("remove", [])
+    if not isinstance(remove, list) or not all(isinstance(x, str) for x in remove):
+        raise RegistryError(f"template {tid!r}: 'remove' must be a list of node ids")
+    base_ids = {n["id"] for n in nodes if isinstance(n.get("id"), str)}
+    unknown_remove = sorted(set(remove) - base_ids)
+    if unknown_remove:
+        raise RegistryError(f"template {tid!r}: 'remove' names unknown node id(s) {unknown_remove}")
+    nodes = [n for n in nodes if n.get("id") not in remove]
+
+    for key in ("insert_before", "insert_after"):
+        spec = data.get(key, {})
+        if not isinstance(spec, dict):
+            raise RegistryError(f"template {tid!r}: {key!r} must be a mapping of anchor to node list")
+        for anchor, extra in spec.items():
+            if not isinstance(extra, list) or not all(isinstance(n, dict) for n in extra):
+                raise RegistryError(
+                    f"template {tid!r}: {key!r}[{anchor!r}] must be a list of node dicts"
+                )
+            ids_now = [n.get("id") for n in nodes]
+            if anchor not in ids_now:
+                raise RegistryError(
+                    f"template {tid!r}: {key!r} names unknown anchor node id {anchor!r}"
+                )
+            idx = ids_now.index(anchor)
+            offset = idx if key == "insert_before" else idx + 1
+            nodes[offset:offset] = [dict(n) for n in extra]
+
+    ids = [n.get("id") for n in nodes]
+    dupes = sorted({i for i in ids if ids.count(i) > 1})
+    if dupes:
+        raise RegistryError(f"template {tid!r}: duplicate node id(s) {dupes}")
+
+    return nodes
+
+
 def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
     valid: dict[str, Template] = {}
     invalid: dict[str, str] = {}
+    raw_by_id: dict[str, dict] = {}
 
     for path in sorted(Path(dir).glob("*.yaml")):
         if path.name in CONFIG_FILES:
@@ -660,13 +739,16 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
             invalid[stem] = f"{path.name}: missing a string 'id'"
             continue
         tid = data["id"]
-        if tid in valid or tid in invalid:
+        if tid in raw_by_id or tid in invalid:
             invalid[stem] = f"{path.name}: duplicate template id {tid!r}"
             continue
+        raw_by_id[tid] = data
 
-        nodes = data.get("nodes")
-        if not isinstance(nodes, list) or not nodes:
-            invalid[tid] = f"template {tid!r}: 'nodes' must be a non-empty list"
+    for tid, data in raw_by_id.items():
+        try:
+            nodes = _resolve_template_dict(tid, raw_by_id)
+        except RegistryError as exc:
+            invalid[tid] = str(exc)
             continue
 
         node_errors = validate_nodes(nodes, registry)

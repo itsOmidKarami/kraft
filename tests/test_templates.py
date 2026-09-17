@@ -275,6 +275,152 @@ def test_validate_nodes_is_what_load_templates_calls_for_its_own_nodes(tmp_path)
     assert direct[0] in ts.invalid["weirdgate"]
 
 
+# ── template composition: extends/remove/insert_before/insert_after ───────
+
+_BASE_TEMPLATE = (
+    "id: base\n"
+    "nodes:\n"
+    "  - { id: env_setup,      tasks: [on.env.prepare],         gate_after: null }\n"
+    "  - { id: implementation, tasks: [on.implementation.start], gate_after: null }\n"
+    "  - { id: verify,         tasks: [on.test.run],            gate_after: null }\n"
+)
+
+
+def test_extends_inherits_the_base_templates_nodes(tmp_path):
+    d = _dir(
+        tmp_path,
+        **{"registry.yaml": REGISTRY_YAML, "base.yaml": _BASE_TEMPLATE, "child.yaml": "id: child\nextends: base\n"},
+    )
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert "child" in ts.valid, ts.invalid
+    assert [n["id"] for n in ts.valid["child"].nodes] == ["env_setup", "implementation", "verify"]
+
+
+def test_extends_leaves_the_base_template_itself_untouched(tmp_path):
+    """Resolving `child` must not mutate `base`'s own node list -- two
+    templates extending the same base must not see each other's edits."""
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "base.yaml": _BASE_TEMPLATE,
+            "child.yaml": "id: child\nextends: base\nremove: [env_setup]\n",
+        },
+    )
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert [n["id"] for n in ts.valid["base"].nodes] == ["env_setup", "implementation", "verify"]
+    assert [n["id"] for n in ts.valid["child"].nodes] == ["implementation", "verify"]
+
+
+def test_extends_remove_rejects_an_unknown_node_id(tmp_path):
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "base.yaml": _BASE_TEMPLATE,
+            "child.yaml": "id: child\nextends: base\nremove: [bogus]\n",
+        },
+    )
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert "bogus" in ts.invalid["child"]
+
+
+def test_extends_insert_before_and_after_an_anchor(tmp_path):
+    child = (
+        "id: child\n"
+        "extends: base\n"
+        "insert_before: { verify: [{ id: pre, tasks: [on.env.prepare] }] }\n"
+        "insert_after:  { verify: [{ id: post, tasks: [on.env.prepare] }] }\n"
+    )
+    d = _dir(tmp_path, **{"registry.yaml": REGISTRY_YAML, "base.yaml": _BASE_TEMPLATE, "child.yaml": child})
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert [n["id"] for n in ts.valid["child"].nodes] == [
+        "env_setup",
+        "implementation",
+        "pre",
+        "verify",
+        "post",
+    ]
+
+
+def test_extends_insert_before_rejects_an_unknown_anchor(tmp_path):
+    child = "id: child\nextends: base\ninsert_before: { bogus: [{ id: pre, tasks: [on.env.prepare] }] }\n"
+    d = _dir(tmp_path, **{"registry.yaml": REGISTRY_YAML, "base.yaml": _BASE_TEMPLATE, "child.yaml": child})
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert "bogus" in ts.invalid["child"]
+
+
+def test_extends_and_nodes_together_is_a_load_error(tmp_path):
+    child = "id: child\nextends: base\nnodes:\n  - { id: x, tasks: [on.env.prepare], gate_after: null }\n"
+    d = _dir(tmp_path, **{"registry.yaml": REGISTRY_YAML, "base.yaml": _BASE_TEMPLATE, "child.yaml": child})
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert "child" in ts.invalid
+
+
+def test_extends_unknown_base_is_a_load_error(tmp_path):
+    d = _dir(tmp_path, **{"registry.yaml": REGISTRY_YAML, "child.yaml": "id: child\nextends: bogus\n"})
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert "bogus" in ts.invalid["child"]
+
+
+def test_extends_cycle_is_a_load_error(tmp_path):
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "a.yaml": "id: a\nextends: b\n",
+            "b.yaml": "id: b\nextends: a\n",
+        },
+    )
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert "cycle" in ts.invalid["a"]
+    assert "cycle" in ts.invalid["b"]
+
+
+def test_remove_without_extends_is_a_load_error(tmp_path):
+    tmpl = "id: solo\nnodes:\n  - { id: x, tasks: [on.env.prepare], gate_after: null }\nremove: [x]\n"
+    d = _dir(tmp_path, **{"registry.yaml": REGISTRY_YAML, "solo.yaml": tmpl})
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert "extends" in ts.invalid["solo"]
+
+
+def test_insert_introducing_a_duplicate_node_id_is_a_load_error(tmp_path):
+    child = "id: child\nextends: base\ninsert_after: { verify: [{ id: verify, tasks: [on.env.prepare] }] }\n"
+    d = _dir(tmp_path, **{"registry.yaml": REGISTRY_YAML, "base.yaml": _BASE_TEMPLATE, "child.yaml": child})
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert "duplicate" in ts.invalid["child"]
+
+
+def test_a_deep_extends_chain_resolves(tmp_path):
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "base.yaml": _BASE_TEMPLATE,
+            "child.yaml": "id: child\nextends: base\nremove: [env_setup]\n",
+            "grandchild.yaml": "id: grandchild\nextends: child\n",
+        },
+    )
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert [n["id"] for n in ts.valid["grandchild"].nodes] == ["implementation", "verify"]
+
+
+def test_extending_a_template_whose_own_nodes_fail_validation_still_reports_the_root_cause(tmp_path):
+    """A child inherits its base's problems too -- each template is still
+    validated independently, so the child's own error names the real defect
+    rather than a generic 'base is broken'."""
+    d = _dir(
+        tmp_path,
+        **{
+            "registry.yaml": REGISTRY_YAML,
+            "base.yaml": "id: base\nnodes:\n  - { id: x, tasks: [on.bogus], gate_after: null }\n",
+            "child.yaml": "id: child\nextends: base\n",
+        },
+    )
+    ts = templates.load_templates(d, templates.load_registry(d / "registry.yaml"))
+    assert "on.bogus" in ts.invalid["child"]
+
+
 def test_validate_agent_overrides_rejects_unknown_effort():
     errs = templates.validate_agent_overrides({"effort": "turbo"})
     assert errs and "effort" in errs[0]
