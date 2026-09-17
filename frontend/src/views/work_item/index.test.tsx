@@ -96,7 +96,6 @@ const renderDetail = (hash = "") =>
   render(
     <MemoryRouter
       initialEntries={[`/work-items/w1${hash}`]}
-      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
       <Routes>
         <Route path="/work-items/:id" element={<><GoBack /><HashProbe /><WorkItemDetail /></>} />
@@ -113,7 +112,6 @@ const renderDetailFromBoard = (hash = "") =>
     <MemoryRouter
       initialEntries={["/", `/work-items/w1${hash}`]}
       initialIndex={1}
-      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
       <Routes>
         <Route path="/" element={<span data-testid="board-stub">board</span>} />
