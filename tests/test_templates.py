@@ -101,6 +101,13 @@ nodes:
   - { id: verify,         tasks: [on.test.run],            gate_after: null }
 """
 
+_TWO_AGENT_HOOKS_REGISTRY = """\
+hooks:
+  on.a: { kind: agent, command: claude }
+  on.b: { kind: agent, command: claude, steering: [own] }
+  on.c: { kind: subprocess, command: [pytest] }
+"""
+
 BAD_HOOK_TEMPLATE = """\
 id: broken
 nodes:
@@ -470,6 +477,99 @@ def test_load_registry_rejects_bad_bindings(tmp_path, body):
     (tmp_path / "registry.yaml").write_text(body)
     with pytest.raises(templates.RegistryError):
         templates.load_registry(tmp_path / "registry.yaml")
+
+
+# ── registry `defaults:` (Kraft-6m2x6 phase 1) ─────────────────────────────
+
+
+def _steering_dir_with(tmp_path, *names):
+    d = tmp_path / "steering"
+    d.mkdir(exist_ok=True)
+    for name in names:
+        (d / f"{name}.md").write_text("# House style\nBe direct.\n")
+    return d
+
+
+def test_defaults_agent_steering_merges_into_a_hook_with_none(tmp_path):
+    _steering_dir_with(tmp_path, "shared", "own")
+    (tmp_path / "registry.yaml").write_text(
+        "defaults:\n  agent: { steering: [shared] }\n" + _TWO_AGENT_HOOKS_REGISTRY
+    )
+    reg = templates.load_registry(tmp_path / "registry.yaml", steering_dir=tmp_path / "steering")
+    assert reg.hooks["on.a"]["steering"] == ["shared"]
+
+
+def test_defaults_agent_steering_prepends_before_the_bindings_own(tmp_path):
+    _steering_dir_with(tmp_path, "shared", "own")
+    (tmp_path / "registry.yaml").write_text(
+        "defaults:\n  agent: { steering: [shared] }\n" + _TWO_AGENT_HOOKS_REGISTRY
+    )
+    reg = templates.load_registry(tmp_path / "registry.yaml", steering_dir=tmp_path / "steering")
+    assert reg.hooks["on.b"]["steering"] == ["shared", "own"]
+
+
+def test_defaults_agent_steering_dedupes_a_repeated_entry(tmp_path):
+    _steering_dir_with(tmp_path, "shared")
+    (tmp_path / "registry.yaml").write_text(
+        "defaults:\n  agent: { steering: [shared] }\n"
+        "hooks:\n  on.a: { kind: agent, command: claude, steering: [shared] }\n"
+    )
+    reg = templates.load_registry(tmp_path / "registry.yaml", steering_dir=tmp_path / "steering")
+    assert reg.hooks["on.a"]["steering"] == ["shared"]
+
+
+def test_defaults_agent_scalar_does_not_override_the_bindings_own_value(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "defaults:\n  agent: { model: opus }\n"
+        "hooks:\n"
+        "  on.a: { kind: agent, command: claude, model: sonnet }\n"
+        "  on.b: { kind: agent, command: claude }\n"
+    )
+    reg = templates.load_registry(tmp_path / "registry.yaml")
+    assert reg.hooks["on.a"]["model"] == "sonnet"
+    assert reg.hooks["on.b"]["model"] == "opus"
+
+
+def test_defaults_do_not_apply_to_a_non_agent_kind(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "defaults:\n  agent: { model: opus }\n"
+        "hooks:\n  on.a: { kind: builtin, handler: env_setup }\n"
+    )
+    reg = templates.load_registry(tmp_path / "registry.yaml")
+    assert "model" not in reg.hooks["on.a"]
+
+
+def test_defaults_rejects_an_unknown_top_level_key(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "defaults:\n  subprocess: {}\nhooks:\n  on.a: { kind: builtin, handler: env_setup }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="defaults"):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_defaults_agent_rejects_an_unknown_key(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "defaults:\n  agent: { handler: nope }\nhooks:\n  on.a: { kind: builtin, handler: env_setup }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="defaults.agent"):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_defaults_agent_steering_must_be_a_list_of_strings(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "defaults:\n  agent: { steering: not-a-list }\n"
+        "hooks:\n  on.a: { kind: agent, command: claude }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="steering"):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_defaults_missing_entirely_is_fine(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.a: { kind: agent, command: claude }\n"
+    )
+    reg = templates.load_registry(tmp_path / "registry.yaml")
+    assert reg.hooks["on.a"] == {"kind": "agent", "command": "claude"}
 
 
 # ── new agent-hook keys: profile, model, deny_tools, steering ──────────────────

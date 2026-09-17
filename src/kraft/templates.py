@@ -116,6 +116,28 @@ _EFFORT_LEVELS = {"low", "medium", "high", "xhigh", "max"}
 #: session.
 _PERMISSION_MODES = {"default", "auto", "acceptEdits", "plan", "bypassPermissions"}
 
+#: The keys a `defaults.agent` block may set -- the same closed set an agent
+#: hook's own binding is checked against below, hoisted to module scope so
+#: this list and the defaults-merge pre-pass share one definition instead of
+#: drifting into two.
+_AGENT_ONLY_KEYS = frozenset(
+    {
+        "profile",
+        "model",
+        "escalate_model",
+        "deny_tools",
+        "steering",
+        "skill",
+        "artifact",
+        "effort",
+        "allowed_tools",
+        "permission_mode",
+    }
+)
+#: The `_AGENT_ONLY_KEYS` that merge as a list -- default's items first, then
+#: the binding's own, deduped -- rather than binding-wins-or-not.
+_AGENT_LIST_KEYS = frozenset({"deny_tools", "steering", "allowed_tools"})
+
 
 class RegistryError(Exception):
     pass
@@ -146,6 +168,46 @@ def _agent_profiles() -> dict:
     return PROFILES
 
 
+def _merge_agent_defaults(data: dict, path: Path) -> None:
+    """Merge a registry's `defaults.agent` block into every `kind: agent`
+    binding under `hooks`, in place, before `load_registry`'s own per-binding
+    validation runs below -- so a typo in a default fails at load, the same
+    as a typo in the binding itself already does. Scalars: the binding's own
+    value wins over the default. Lists: the default's items first, then the
+    binding's own, deduped.
+    """
+    defaults = data.get("defaults") or {}
+    if not isinstance(defaults, dict) or (set(defaults) - {"agent"}):
+        raise RegistryError(f"{path.name}: 'defaults' takes only an 'agent' key")
+    agent_defaults = defaults.get("agent") or {}
+    if not isinstance(agent_defaults, dict):
+        raise RegistryError(f"{path.name}: 'defaults.agent' must be a mapping")
+    unknown = sorted(set(agent_defaults) - _AGENT_ONLY_KEYS)
+    if unknown:
+        raise RegistryError(f"{path.name}: 'defaults.agent' has unknown key(s) {unknown}")
+    for key in _AGENT_LIST_KEYS:
+        if key in agent_defaults and not (
+            isinstance(agent_defaults[key], list)
+            and all(isinstance(x, str) for x in agent_defaults[key])
+        ):
+            raise RegistryError(f"{path.name}: 'defaults.agent' {key!r} must be a list of strings")
+    if not agent_defaults:
+        return
+    for binding in data["hooks"].values():
+        if not isinstance(binding, dict) or binding.get("kind") != "agent":
+            continue
+        for key, dval in agent_defaults.items():
+            if key in _AGENT_LIST_KEYS:
+                own = binding.get(key, [])
+                merged = list(dval)
+                for x in own if isinstance(own, list) else []:
+                    if x not in merged:
+                        merged.append(x)
+                binding[key] = merged
+            elif key not in binding:
+                binding[key] = dval
+
+
 def load_registry(
     path: str | Path,
     *,
@@ -166,6 +228,7 @@ def load_registry(
         raise RegistryError(f"{path.name}: cannot read/parse: {exc}") from exc
     if not isinstance(data, dict) or not isinstance(data.get("hooks"), dict):
         raise RegistryError(f"{path.name}: expected a top-level 'hooks' mapping")
+    _merge_agent_defaults(data, path)
     for hook, binding in data["hooks"].items():
         if not isinstance(binding, dict) or "kind" not in binding:
             raise RegistryError(f"{path.name}: hook {hook!r} is missing 'kind'")
@@ -227,18 +290,6 @@ def load_registry(
                 f"{path.name}: subprocess hook {hook!r} needs a list-of-strings 'command'"
             )
 
-        agent_only = (
-            "profile",
-            "model",
-            "escalate_model",
-            "deny_tools",
-            "steering",
-            "skill",
-            "artifact",
-            "effort",
-            "allowed_tools",
-            "permission_mode",
-        )
         if kind == "agent":
             profiles = _agent_profiles()
             profile = binding.get("profile", "claude")
@@ -283,7 +334,7 @@ def load_registry(
                         f"kind like 'spec' or 'plan'; got {art!r}"
                     )
         else:
-            for key in agent_only:
+            for key in _AGENT_ONLY_KEYS:
                 if key in binding:
                     raise RegistryError(
                         f"{path.name}: hook {hook!r} is kind {kind!r}; {key!r} applies "
@@ -356,7 +407,7 @@ def load_registry(
         # superset with no behaviour change for `builtin`.
         known |= {"interactive", "timeout", "repos", "sandbox"}
         if kind == "agent":
-            known |= set(agent_only)
+            known |= _AGENT_ONLY_KEYS
         if "interactive" in binding and not isinstance(binding["interactive"], bool):
             raise RegistryError(f"{path.name}: hook {hook!r} 'interactive' must be a boolean")
         unknown = sorted(set(binding) - known)
