@@ -190,9 +190,37 @@ def test_perform_downloads_the_wheel_and_installs_the_local_copy(monkeypatch):
     assert code == 0
     command = seen["command"]
     assert command[:5] == ["uv", "tool", "install", "--force", "--from"]
-    assert command[6] == "kraft"
+    assert command[6] == "kraft-sdlc"
     assert pathlib.Path(command[5]).name == "w.whl"
     assert seen["wheel_bytes"] == b"WHEEL BYTES"
+
+
+def test_perform_installs_under_the_pyproject_package_name(monkeypatch):
+    """A future PyPI rename that misses this call site should fail loudly, not silently."""
+    import tomllib
+
+    monkeypatch.setattr(update, "_request", lambda _url, _timeout: b"")
+    seen = {}
+
+    def run(command, **_kwargs):
+        seen["command"] = command
+        return type("R", (), {"returncode": 0})()
+
+    update.perform(update.Release(tag="v0.4.0", wheel_url="u/w.whl"), run=run)
+
+    repo_root = pathlib.Path(__file__).parent.parent
+    package_name = tomllib.loads((repo_root / "pyproject.toml").read_text())["project"]["name"]
+    assert seen["command"][-1] == package_name
+
+
+def test_just_install_uses_the_pyproject_package_name():
+    import tomllib
+
+    repo_root = pathlib.Path(__file__).parent.parent
+    package_name = tomllib.loads((repo_root / "pyproject.toml").read_text())["project"]["name"]
+    lines = (repo_root / "justfile").read_text().splitlines()
+    install_line = next(line for line in lines if "uv tool install" in line)
+    assert package_name in install_line.split()
 
 
 def test_perform_downloads_with_the_long_timeout_not_the_check_timeout(monkeypatch):
