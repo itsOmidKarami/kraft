@@ -242,6 +242,26 @@ def load_repos(
                 raise ConfigError(
                     f"repos.yaml: 'local_files' entry {rel!r} must be a literal path, not a glob"
                 )
+        # How this repo's worktree is prepared. No default and no fallback:
+        # an absent key is "nobody has decided yet" and stops the chain when
+        # the worktree is built, while `""` is a deliberate "nothing to do"
+        # (Kraft-kji8w). Validated for shape here; required at use, because a
+        # ConfigError raised at load would take down every repo at once.
+        r.setdefault("setup_command", None)
+        if r.get("setup_command") is not None and not isinstance(r["setup_command"], str):
+            raise ConfigError("repos.yaml: 'setup_command' must be a string")
+        # Layered onto the worker baseline, which is an allowlist rather than
+        # the daemon's inherited environment (Kraft-69atv).
+        r.setdefault("env", {})
+        if not isinstance(r["env"], dict) or not all(
+            isinstance(k, str) and isinstance(v, str) for k, v in r["env"].items()
+        ):
+            raise ConfigError("repos.yaml: 'env' must be a map of string to string")
+        r.setdefault("env_passthrough", [])
+        if not isinstance(r["env_passthrough"], list) or not all(
+            isinstance(x, str) and x for x in r["env_passthrough"]
+        ):
+            raise ConfigError("repos.yaml: 'env_passthrough' must be a list of non-empty strings")
         for key in ("deny_tools", "steering"):
             v = r.setdefault(key, [])
             if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
