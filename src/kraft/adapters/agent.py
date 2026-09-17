@@ -429,24 +429,44 @@ async def run_agent_task(
         method_text=method_text,
         steering_texts=steering_texts,
     )
+    options = {
+        k: v
+        for k, v in (
+            ("model", model),
+            ("effort", effort),
+            ("permission_mode", permission_mode),
+            ("deny_tools", tuple(deny_tools) or None),
+            ("allowed_tools", tuple(allowed_tools) or None),
+            ("autocompact", autocompact),
+        )
+        if v
+    }
+    # `load_registry` checks that a binding's own model/effort/deny_tools/etc.
+    # names a capability its harness declares, at config load -- but
+    # `resolve_invocation` folds in values `load_registry` never sees: a
+    # repo's `deny_tools`/`default_model` (repos.yaml, editable in Settings ->
+    # Repos) and a work item's own `agent_overrides` (model/effort). This is
+    # the one place the fully merged value and the resolved harness are both
+    # in hand, so a capability the harness does not declare is refused loudly
+    # here rather than dropped flagless by `build_argv`. Not a value-pattern
+    # check (`h.value_ok`): unlike a binding's own fields, an override's
+    # value is never checked against a harness's `values:` pattern anywhere
+    # in this codebase -- only that the capability itself exists.
+    for name, value in options.items():
+        if name == "autocompact":
+            continue
+        if not h.supports(name):
+            raise ValueError(
+                f"harness {harness!r} ({h.path}) declares no {name!r} capability, "
+                f"but this launch asked for {name}={value!r}"
+            )
     cmd = _harness.build_argv(
         h,
         command=command or None,
         prompt=task_instruction,
         context=ctx,
         resume=resume_session_id,
-        options={
-            k: v
-            for k, v in (
-                ("model", model),
-                ("effort", effort),
-                ("permission_mode", permission_mode),
-                ("deny_tools", tuple(deny_tools) or None),
-                ("allowed_tools", tuple(allowed_tools) or None),
-                ("autocompact", autocompact),
-            )
-            if v
-        },
+        options=options,
     )
     # One name serves usage-envelope reading, live progress and rate-limit
     # detection alike (usage.READERS): every shipped harness that declares

@@ -636,6 +636,41 @@ def test_unknown_harness_raises_naming_the_harness(monkeypatch):
         _run(harness="nope")
 
 
+# `load_registry` only ever sees a binding's own keys. `resolve_invocation`
+# folds in a repo's `deny_tools`/`default_model` and an item's
+# `agent_overrides` afterwards, so these are the capabilities that reach a
+# launch without passing the load-time check -- the one gap the work item says
+# must not be a silent drop.
+
+
+def test_a_repo_wide_deny_list_is_refused_by_a_harness_without_deny_tools(monkeypatch):
+    _capture_cmd(monkeypatch)
+    with pytest.raises(ValueError, match="deny_tools"):
+        _run(harness="codex", command="codex", deny_tools=("Monitor",))
+
+
+def test_an_effort_override_is_refused_by_a_harness_without_effort(monkeypatch):
+    _capture_cmd(monkeypatch)
+    with pytest.raises(ValueError, match="effort"):
+        _run(harness="gemini", command="gemini", effort="high")
+
+
+def test_a_capability_the_harness_declares_still_launches(monkeypatch):
+    seen = _capture_cmd(monkeypatch)
+    _run(harness="codex", command="codex", model="gpt-5", effort="high")
+    cmd = seen["cmd"]
+    assert cmd[cmd.index("-m") + 1] == "gpt-5"
+
+
+def test_autocompact_is_exempt_because_it_rides_along_with_resume(monkeypatch):
+    """`escalate.dispatch` pairs `autocompact` with resume unconditionally, and
+    the spec calls a harness that declares neither a capability fact rather than
+    a failure -- so this one is dropped, not raised over."""
+    seen = _capture_cmd(monkeypatch)
+    _run(harness="gemini", command="gemini", autocompact="auto")
+    assert "--autocompact" not in seen["cmd"]
+
+
 def _system_prompt(cmd):
     return cmd[cmd.index("--append-system-prompt") + 1]
 

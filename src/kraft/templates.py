@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import math
 import re
 from dataclasses import dataclass
@@ -151,6 +152,13 @@ class RegistryError(Exception):
 @dataclass(frozen=True)
 class Registry:
     hooks: dict
+    #: `hooks`, before the per-binding defaults (`harness: claude`, etc.) this
+    #: loader normalises in -- what the settings API hands back so a GET/PUT
+    #: round trip, and a `reload` that keeps the last good config, both echo
+    #: exactly what was on disk rather than growing keys nobody wrote. `None`
+    #: for a `Registry` built by hand (most tests): dispatch and doctor never
+    #: read this field, only the settings routes do.
+    raw: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -253,6 +261,11 @@ def load_registry(
         raise RegistryError(f"{path.name}: cannot read/parse: {exc}") from exc
     if not isinstance(data, dict) or not isinstance(data.get("hooks"), dict):
         raise RegistryError(f"{path.name}: expected a top-level 'hooks' mapping")
+    # Snapshot before anything below normalises defaults into each binding in
+    # place -- `defaults.agent` here, `harness: claude` in the loop. This is
+    # what `raw` hands back untouched, and the registry PUT carries the
+    # `defaults` block over from disk itself, so the round trip stays exact.
+    raw = copy.deepcopy(data["hooks"])
     _merge_agent_defaults(data, path)
     for hook, binding in data["hooks"].items():
         if not isinstance(binding, dict) or "kind" not in binding:
@@ -469,7 +482,7 @@ def load_registry(
                 f"{path.name}: hook {hook!r} has unknown key(s) {unknown}; "
                 f"a {kind} hook takes {sorted(known)}"
             )
-    return Registry(hooks=data["hooks"])
+    return Registry(hooks=data["hooks"], raw=raw)
 
 
 def validate_nodes(
