@@ -117,7 +117,7 @@ def main() -> int:
     except httpx.HTTPError as exc:
         sys.exit(f"seed: no dev server on {BASE} ({exc}). Start one with `just dev`.")
 
-    resp = client.post("/repos", json={"path": str(REPO)})
+    resp = client.post("/repos", json={"path": str(REPO), "setup_command": ""})
     if resp.status_code not in (201, 409):
         resp.raise_for_status()
 

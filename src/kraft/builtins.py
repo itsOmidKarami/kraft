@@ -464,6 +464,15 @@ async def ensure_worktree(
     worktree = run_dirs.worktrees / work_item_id
     if worktree.is_dir():
         return worktree
+    # Read from repo_entry before `git worktree add` runs, not after: a
+    # poisoned entry (malformed repos.yaml) raises ConfigError on `.get`, and
+    # reading it only after the worktree exists would leave that worktree
+    # behind for a later `kraft item retry` to find via the early return
+    # above -- skipping setup_command entirely and dispatching into an
+    # unprepared worktree.
+    entry = repo_entry or {}
+    local_files = entry.get("local_files") or []
+    cmd = entry.get("setup_command")
     # Pin the base before the worktree exists, so the early return above
     # guarantees a crashed-and-retried run never re-pins to a moved HEAD.
     row = db.read(
@@ -519,10 +528,7 @@ async def ensure_worktree(
     )
     # Before the sync, not after: uv chooses an interpreter when it runs, so a
     # pin that lands later is a pin that changed nothing (Kraft-gxcmy).
-    entry = repo_entry or {}
-    _, refused = await asyncio.to_thread(
-        _carry_local_files, Path(repo), worktree, entry.get("local_files") or []
-    )
+    _, refused = await asyncio.to_thread(_carry_local_files, Path(repo), worktree, local_files)
     if refused:
         logger.warning(
             "not carried into %s (the worktree would not ignore them, so Kraft "
@@ -537,7 +543,6 @@ async def ensure_worktree(
     # (Kraft-kji8w). A failure here used to be a log warning, which dispatched
     # a node into a known-broken environment and let the verify node retry a
     # deterministic failure ten times over (Kraft-s0w2l).
-    cmd = (repo_entry or {}).get("setup_command")
     if cmd is None:
         await _discard_worktree(Path(repo), worktree)
         raise RuntimeError(
