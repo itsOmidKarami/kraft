@@ -253,3 +253,37 @@ def test_perform_without_uv_is_a_readable_failure(monkeypatch):
 
     with pytest.raises(SystemExit, match="uv"):
         update.perform(update.Release(tag="v0.4.0", wheel_url="u/w.whl"), run=run)
+
+
+def test_perform_under_homebrew_calls_brew_upgrade_not_uv(monkeypatch):
+    monkeypatch.setattr(update.sys, "prefix", "/opt/homebrew/Cellar/kraft/0.65.0/libexec")
+
+    def request(_url, _timeout):
+        raise AssertionError("a homebrew install must not download the wheel itself")
+
+    monkeypatch.setattr(update, "_request", request)
+    seen = {}
+
+    def run(command, **_kwargs):
+        seen["command"] = command
+        return type("R", (), {"returncode": 0})()
+
+    code = update.perform(update.Release(tag="v0.4.0", wheel_url="https://x/w.whl"), run=run)
+    assert code == 0
+    assert seen["command"] == ["brew", "upgrade", "kraft"]
+
+
+def test_perform_under_homebrew_without_brew_is_a_readable_failure(monkeypatch):
+    monkeypatch.setattr(update.sys, "prefix", "/opt/homebrew/Cellar/kraft/0.65.0/libexec")
+    monkeypatch.setattr(update, "_request", lambda _url, _timeout: b"")
+
+    def run(_command, **_kwargs):
+        raise FileNotFoundError("brew")
+
+    with pytest.raises(SystemExit, match="brew"):
+        update.perform(update.Release(tag="v0.4.0", wheel_url="u/w.whl"), run=run)
+
+
+def test_is_homebrew_install_is_false_for_a_uv_tool_prefix(monkeypatch):
+    monkeypatch.setattr(update.sys, "prefix", "/Users/x/.local/share/uv/tools/kraft-sdlc")
+    assert update._is_homebrew_install() is False
