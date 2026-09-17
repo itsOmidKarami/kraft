@@ -24,9 +24,9 @@ PLAN = """# Land it
 
 def test_parse_tasks_reads_both_heading_depths_and_separators():
     assert progress.parse_tasks(PLAN) == [
-        "the repo stops forbidding commits (Kraft-f3mv)",
-        "one commit contract",
-        "open_mr refuses a dirty worktree",
+        ("the repo stops forbidding commits (Kraft-f3mv)", False),
+        ("one commit contract", False),
+        ("open_mr refuses a dirty worktree", False),
     ]
 
 
@@ -35,7 +35,10 @@ def test_parse_tasks_without_task_headings_is_empty():
 
 
 def test_a_bare_task_heading_has_an_empty_title_and_does_not_eat_the_next_line():
-    assert progress.parse_tasks("## Task 1\nbody text\n## Task 2 — b\n") == ["", "b"]
+    assert progress.parse_tasks("## Task 1\nbody text\n## Task 2 — b\n") == [
+        ("", False),
+        ("b", False),
+    ]
 
 
 def test_parse_tasks_skips_headings_inside_a_fenced_code_block():
@@ -51,7 +54,28 @@ The fixture below is example text for a test, not real plan structure:
 
 ## Task 2 — also real
 """
-    assert progress.parse_tasks(plan) == ["real task", "also real"]
+    assert progress.parse_tasks(plan) == [
+        ("real task", False),
+        ("also real", False),
+    ]
+
+
+def test_parse_tasks_reads_the_done_marker():
+    plan = "## Task 1 — old work [DONE]\n## Task 2 — new work\n"
+    assert progress.parse_tasks(plan) == [
+        ("old work", True),
+        ("new work", False),
+    ]
+
+
+def test_parse_tasks_done_marker_is_exact_not_a_word_match():
+    plan = "## Task 1 — mark request as done\n"
+    assert progress.parse_tasks(plan) == [("mark request as done", False)]
+
+
+def test_parse_tasks_done_marker_strips_trailing_space_before_it():
+    plan = "## Task 1 — old work   [DONE]\n"
+    assert progress.parse_tasks(plan) == [("old work", True)]
 
 
 def test_committed_task_takes_the_highest_task_number_named():
@@ -124,10 +148,10 @@ def test_read_tasks_prefers_the_plan_attachment(tmp_path):
     artifact.parent.mkdir(parents=True)
     artifact.write_text("## Task 1 — artifact\n")
     assert progress.read_tasks(tmp_path, [{"kind": "plan", "path": "docs/p.md"}], "w1") == [
-        "attached"
+        ("attached", False)
     ]
     assert progress.read_tasks(tmp_path, [{"kind": "spec", "path": "docs/p.md"}], "w1") == [
-        "artifact"
+        ("artifact", False)
     ]
 
 
