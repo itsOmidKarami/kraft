@@ -415,6 +415,24 @@ def _first_test_command(directory: Path) -> str | None:
     return next((cmd for marker, cmd in _TEST_COMMANDS if (directory / marker).is_file()), None)
 
 
+#: Marker -> the command that prepares a checkout of this kind of repo. A
+#: *suggestion* written into repos.yaml at connect time for a human to check,
+#: never consulted at run time: the runtime runs what is declared and infers
+#: nothing. Ordered so a lockfile beats the manifest beside it.
+_SETUP_COMMANDS = [
+    ("package-lock.json", "npm ci"),
+    ("yarn.lock", "yarn install --frozen-lockfile"),
+    ("pnpm-lock.yaml", "pnpm install --frozen-lockfile"),
+    ("pyproject.toml", "uv sync"),
+    ("Cargo.toml", "cargo fetch"),
+    ("go.mod", "go mod download"),
+]
+
+
+def _first_setup_command(directory: Path) -> str | None:
+    return next((cmd for marker, cmd in _SETUP_COMMANDS if (directory / marker).is_file()), None)
+
+
 def _probe_test_scopes(
     root: Path, *, test_command: str | None = None
 ) -> tuple[str | None, list[dict]]:
@@ -521,6 +539,7 @@ def probe_repo(path: str | Path, *, test_command: str | None = None) -> dict:
         "has_engineering": (root / ".engineering").is_dir(),
         "test_command": test_command,
         "test_scopes": test_scopes,
+        "setup_command": _first_setup_command(root),
         "forge": forge,
         "project": project,
     }

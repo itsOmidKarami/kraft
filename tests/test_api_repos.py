@@ -670,7 +670,12 @@ def test_connected_repos_default_model_reaches_the_agent_launch(tmp_path, monkey
     with _client(tmp_path, monkeypatch, templates_dir) as client:
         added = client.post(
             "/api/repos",
-            json={"path": str(repo), "default_model": "haiku", "test_command": "pytest"},
+            json={
+                "path": str(repo),
+                "default_model": "haiku",
+                "test_command": "pytest",
+                "setup_command": "",
+            },
         )
         assert added.status_code == 201
 
@@ -708,7 +713,13 @@ def test_connected_repos_steering_reaches_the_agent_launch(tmp_path, monkeypatch
 
     with _client(tmp_path, monkeypatch, templates_dir) as client:
         added = client.post(
-            "/api/repos", json={"path": str(repo), "steering": ["house"], "test_command": "pytest"}
+            "/api/repos",
+            json={
+                "path": str(repo),
+                "steering": ["house"],
+                "test_command": "pytest",
+                "setup_command": "",
+            },
         )
         assert added.status_code == 201, added.text
 
@@ -904,6 +915,45 @@ def test_load_repos_defaults_setup_command_env_and_env_passthrough(tmp_path):
     assert entry["setup_command"] is None
     assert entry["env"] == {}
     assert entry["env_passthrough"] == []
+
+
+@pytest.mark.parametrize(
+    "marker, expected",
+    [
+        ("pyproject.toml", "uv sync"),
+        ("package-lock.json", "npm ci"),
+        ("yarn.lock", "yarn install --frozen-lockfile"),
+        ("pnpm-lock.yaml", "pnpm install --frozen-lockfile"),
+        ("Cargo.toml", "cargo fetch"),
+        ("go.mod", "go mod download"),
+    ],
+)
+def test_the_setup_probe_suggests_per_marker(tmp_path, marker, expected):
+    (tmp_path / marker).write_text("")
+    assert config._first_setup_command(tmp_path) == expected
+
+
+def test_the_setup_probe_suggests_nothing_for_an_unmarked_repo(tmp_path):
+    assert config._first_setup_command(tmp_path) is None
+
+
+def test_probe_repo_suggests_a_setup_command(tmp_path):
+    repo = make_repo(tmp_path)
+    (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
+    assert config.probe_repo(repo)["setup_command"] == "uv sync"
+
+
+def test_add_repo_writes_the_probed_setup_command(tmp_path, client):
+    repo = make_repo(tmp_path)
+    (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
+    entry = client.post("/api/repos", json={"path": str(repo)}).json()
+    assert entry["setup_command"] == "uv sync"
+
+
+def test_add_repo_leaves_setup_command_undeclared_with_no_marker(tmp_path, client):
+    repo = make_repo(tmp_path, name="plain")
+    entry = client.post("/api/repos", json={"path": str(repo)}).json()
+    assert entry["setup_command"] is None
 
 
 def test_a_configured_submodule_edge_becomes_a_child_repo_entry(tmp_path):
