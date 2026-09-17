@@ -1701,16 +1701,12 @@ def test_absent_harness_defaults_to_claude(tmp_path):
 
 
 def test_profile_is_accepted_as_a_deprecated_alias(tmp_path):
-    reg = templates.load_registry(
-        _bound(tmp_path, "kind: agent, command: claude, profile: codex")
-    )
+    reg = templates.load_registry(_bound(tmp_path, "kind: agent, command: claude, profile: codex"))
     assert reg.hooks["on.implementation.start"]["harness"] == "codex"
 
 
 def test_harness_wins_over_the_alias(tmp_path):
-    reg = templates.load_registry(
-        _bound(tmp_path, "kind: agent, harness: codex, profile: claude")
-    )
+    reg = templates.load_registry(_bound(tmp_path, "kind: agent, harness: codex, profile: claude"))
     assert reg.hooks["on.implementation.start"]["harness"] == "codex"
 
 
@@ -1731,9 +1727,7 @@ def test_a_quarantined_harness_is_not_usable(tmp_path):
     absent one."""
     hs = harness.HarnessSet(valid={}, invalid={"codex": "codex.yaml: boom"})
     with pytest.raises(templates.RegistryError, match="codex.yaml: boom"):
-        templates.load_registry(
-            _bound(tmp_path, "kind: agent, harness: codex"), harnesses=hs
-        )
+        templates.load_registry(_bound(tmp_path, "kind: agent, harness: codex"), harnesses=hs)
 
 
 def test_capability_a_harness_does_not_declare_is_rejected(tmp_path):
@@ -1748,32 +1742,22 @@ def test_capability_a_harness_does_not_declare_is_rejected(tmp_path):
 
 def test_value_outside_the_harnesss_own_values_is_rejected(tmp_path):
     with pytest.raises(templates.RegistryError, match="'effort'.*'ludicrous'"):
-        templates.load_registry(
-            _bound(tmp_path, "kind: agent, harness: claude, effort: ludicrous")
-        )
+        templates.load_registry(_bound(tmp_path, "kind: agent, harness: claude, effort: ludicrous"))
 
 
 def test_a_model_for_the_wrong_harness_is_rejected(tmp_path):
     """The point of harness-declared values: `model: sonnet` is right for
     claude and meaningless for codex."""
-    templates.load_registry(
-        _bound(tmp_path, "kind: agent, harness: claude, model: sonnet")
-    )
+    templates.load_registry(_bound(tmp_path, "kind: agent, harness: claude, model: sonnet"))
     with pytest.raises(templates.RegistryError, match="'model'.*'sonnet'"):
-        templates.load_registry(
-            _bound(tmp_path, "kind: agent, harness: codex, model: sonnet")
-        )
+        templates.load_registry(_bound(tmp_path, "kind: agent, harness: codex, model: sonnet"))
 
 
 def test_effort_is_no_longer_one_global_list(tmp_path):
     """Spec leak 10. `minimal` is real for codex and invalid for claude."""
-    templates.load_registry(
-        _bound(tmp_path, "kind: agent, harness: codex, effort: minimal")
-    )
+    templates.load_registry(_bound(tmp_path, "kind: agent, harness: codex, effort: minimal"))
     with pytest.raises(templates.RegistryError, match="'effort'.*'minimal'"):
-        templates.load_registry(
-            _bound(tmp_path, "kind: agent, harness: claude, effort: minimal")
-        )
+        templates.load_registry(_bound(tmp_path, "kind: agent, harness: claude, effort: minimal"))
 
 
 def test_binding_command_must_be_a_string(tmp_path):

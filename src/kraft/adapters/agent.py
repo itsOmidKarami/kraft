@@ -228,7 +228,15 @@ def resolve_invocation(
     )
 
 
-def _envelope_is_error(_base_status: str, log_path: Path, _returncode: int) -> str:
+def _envelope_is_error(
+    _base_status: str, log_path: Path, _returncode: int, reader: str | None
+) -> str:
+    # `reader is None` means this harness declared no log-based envelope
+    # schema -- there is nothing here to parse, and a harness with no
+    # envelope reports failure through its exit code and its result file,
+    # which `require_result_file=True` already enforces.
+    if reader is None:
+        return _base_status
     try:
         lines = [ln for ln in log_path.read_text().splitlines() if ln.strip()]
     except OSError:
@@ -244,7 +252,7 @@ def _envelope_is_error(_base_status: str, log_path: Path, _returncode: int) -> s
     return _base_status
 
 
-def _resolve_status(artifact: str | None, work_item_id: str, cwd: Path):
+def _resolve_status(artifact: str | None, work_item_id: str, cwd: Path, reader: str | None):
     """`post_resolve` for an agent task: a bad envelope *or* a missing artifact.
 
     A binding that declares `artifact:` is held to producing it — the contract
@@ -255,7 +263,7 @@ def _resolve_status(artifact: str | None, work_item_id: str, cwd: Path):
     """
 
     def resolve(base_status: str, log_path: Path, returncode: int) -> str:
-        status = _envelope_is_error(base_status, log_path, returncode)
+        status = _envelope_is_error(base_status, log_path, returncode, reader)
         # Only a *claim of success* is held to the artifact. A worker that
         # stopped to ask a question wrote nothing precisely because it
         # stopped, and `kraft.executor.dispatch.needs_context_question` matches
@@ -371,7 +379,7 @@ async def run_agent_task(
     cwd,
     round: int = 0,
     harness: str = "claude",
-    harnesses: "_harness.HarnessSet | None" = None,
+    harnesses: _harness.HarnessSet | None = None,
     model: str | None = None,
     deny_tools: tuple[str, ...] = (),
     effort: str | None = None,
@@ -440,6 +448,15 @@ async def run_agent_task(
             if v
         },
     )
+    # One name serves usage-envelope reading, live progress and rate-limit
+    # detection alike (usage.READERS): every shipped harness that declares
+    # either gives it the same reader, and `harness.parse` requires
+    # `structured_log` behind both, so there is one schema to pick from.
+    usage_cap = h.capabilities["usage"]
+    rate_limit_cap = h.capabilities.get("rate_limit_signal")
+    reader = usage_cap.reader if usage_cap.source == "envelope" else None
+    if reader is None and rate_limit_cap is not None:
+        reader = rate_limit_cap.reader
     return await _subprocess.run_task(
         db,
         run_dirs,
@@ -459,11 +476,12 @@ async def run_agent_task(
             "KRAFT_SESSION_ID": session_id,
             **({"KRAFT_REVIEW_PACKAGE": review_package} if review_package else {}),
         },
-        post_resolve=_resolve_status(artifact, work_item_id, cwd),
+        post_resolve=_resolve_status(artifact, work_item_id, cwd, reader),
         round=round,
         head_sha=head_sha,
         thread=thread,
         sandbox=sandbox,
         require_result_file=True,
         repo_entry=repo_entry,
+        reader=reader,
     )

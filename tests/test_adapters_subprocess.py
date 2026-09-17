@@ -781,6 +781,7 @@ def test_require_result_file_does_not_override_a_rate_limited_launch(tmp_path):
                 cmd=["sh", "-c", f"echo '{event}'"],
                 cwd=tmp_path,
                 require_result_file=True,
+                reader="claude-stream-json",
             )
             assert status == "rate_limited"
         finally:
@@ -1020,6 +1021,7 @@ def test_running_session_row_carries_tokens_before_exit(tmp_path):
                     cmd=["sh", "-c", script],
                     cwd=tmp_path,
                     progress_s=0.2,
+                    reader="claude-stream-json",
                 )
             )
             loop = asyncio.get_running_loop()
@@ -1057,7 +1059,7 @@ def test_rate_limit_rejection_reads_a_rejected_event(tmp_path):
         '"resetsAt":1788968400,"rateLimitType":"five_hour"}}\n'
         '{"type":"result","is_error":true}\n'
     )
-    got = sp._rate_limit_rejection(log)
+    got = sp._rate_limit_rejection(log, reader="claude-stream-json")
     assert got == {
         "rate_limit_type": "five_hour",
         "resets_at": 1788968400,
@@ -1074,17 +1076,30 @@ def test_rate_limit_rejection_ignores_allowed_events(tmp_path):
         '"overageStatus":"rejected","resetsAt":1788986400,"rateLimitType":"five_hour"}}\n'
         '{"type":"result","is_error":false}\n'
     )
-    assert sp._rate_limit_rejection(log) is None
+    assert sp._rate_limit_rejection(log, reader="claude-stream-json") is None
 
 
 def test_rate_limit_rejection_none_without_the_event(tmp_path):
     log = tmp_path / "s.log"
     log.write_text('{"type":"result","is_error":true}\n')
-    assert sp._rate_limit_rejection(log) is None
+    assert sp._rate_limit_rejection(log, reader="claude-stream-json") is None
 
 
 def test_rate_limit_rejection_best_effort_on_unreadable_log(tmp_path):
-    assert sp._rate_limit_rejection(tmp_path / "missing.log") is None
+    assert sp._rate_limit_rejection(tmp_path / "missing.log", reader="claude-stream-json") is None
+
+
+def test_rate_limit_is_not_looked_for_without_the_capability(tmp_path):
+    """A harness that never declared rate_limit_signal must not have its log
+    parsed against claude's schema -- the 'a check that SKIPS reads as a check
+    that PASSED' shape, made explicit."""
+    log = tmp_path / "s.log"
+    log.write_text(
+        '{"type":"rate_limit_event","rate_limit_info":'
+        '{"status":"rejected","resetsAt":1,"rateLimitType":"x"}}\n'
+    )
+    assert sp._rate_limit_rejection(log, reader=None) is None
+    assert sp._rate_limit_rejection(log, reader="claude-stream-json") is not None
 
 
 def test_run_task_aborts_before_popen_if_the_row_was_stopped_first(tmp_path, monkeypatch):
@@ -1391,6 +1406,7 @@ def test_run_task_records_usage_when_a_pause_cancels_it(tmp_path):
                     cmd=["sleep", "5"],
                     cwd=tmp_path,
                     flush_grace=0,
+                    reader="claude-stream-json",
                 )
             )
             for _ in range(200):

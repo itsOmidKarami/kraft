@@ -4,6 +4,7 @@ import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 
@@ -12,6 +13,9 @@ from kraft import skill as _skill
 from kraft import steering as _steering
 from kraft.paths import default_skills_dir
 from kraft.store import OVERRIDABLE_NODE_FIELDS
+
+if TYPE_CHECKING:
+    from kraft import harness
 
 _VALID_KINDS = {"builtin", "agent", "subprocess", "forge"}
 _FORGE_HANDLERS = {"open_mr", "sync_mr", "ci_poll", "merge", "merge_watch"}
@@ -161,7 +165,7 @@ class TemplateSet:
     invalid: dict
 
 
-def _harnesses() -> "harness.HarnessSet":
+def _harnesses() -> harness.HarnessSet:
     # Function-local, same reason the old `_agent_profiles` was: a config
     # loader importing the adapter layer at module scope invites a cycle.
     from kraft import harness
@@ -233,7 +237,7 @@ def load_registry(
     *,
     steering_dir: Path | None = None,
     skills_dir: Path | None = None,
-    harnesses: "harness.HarnessSet | None" = None,
+    harnesses: harness.HarnessSet | None = None,
 ) -> Registry:
     path = Path(path)
     steering_dir = steering_dir if steering_dir is not None else path.parent / "steering"

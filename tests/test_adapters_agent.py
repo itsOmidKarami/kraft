@@ -1200,9 +1200,7 @@ def test_ctx_asks_for_usage_only_when_the_log_cannot_be_read():
 def test_prompt_channel_still_delivers_the_whole_contract():
     """Gemini has no out-of-band channel, so the contract rides in the prompt.
     Nothing in it may be dropped on the way."""
-    ctx = agent.build_context(
-        usage_source="result_file", context_channel="prompt", **_ctx_kwargs()
-    )
+    ctx = agent.build_context(usage_source="result_file", context_channel="prompt", **_ctx_kwargs())
     for required in (
         "$KRAFT_RESULT_PATH",
         "needs_context",
@@ -1294,6 +1292,4 @@ def test_run_agent_task_still_builds_todays_claude_command_line(tmp_path, monkey
     assert argv[0] == "-p"
     assert "--append-system-prompt" in argv
     assert argv[argv.index("--disallowed-tools") + 1] == "Monitor"
-    assert (
-        argv[argv.index("--permission-prompt-tool") + 1] == "mcp__kraft__permission_request"
-    )
+    assert argv[argv.index("--permission-prompt-tool") + 1] == "mcp__kraft__permission_request"

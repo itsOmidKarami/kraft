@@ -28,8 +28,9 @@ token counts, not smeared across every session row at write time.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -261,8 +262,75 @@ def read_envelope(log_path: Path) -> dict | None:
     return fallback
 
 
-def read(log_path: Path, result_path: Path) -> Usage | None:
-    """Usage for a finished session: the result file wins, the log envelope backs it up."""
+def _rate_limit_claude(log_path: Path) -> dict | None:
+    """The rejected `rate_limit_info` from a claude stream-json log, or None.
+
+    The CLI emits a `rate_limit_event` line on most turns, nearly all of them
+    `status: "allowed"` -- an `overageStatus` of "rejected" on an otherwise
+    allowed turn means only that overage spend was refused, not that the turn
+    itself was blocked. Only a top-level `status: "rejected"` means the launch
+    was refused. Scanned across every line, not just the last: unlike the
+    result envelope, this event is not guaranteed to be the final line.
+    Best-effort like `agent._envelope_is_error`: a log Kraft cannot read yet is
+    "no rejection seen", not a crash.
+    """
+    try:
+        lines = [ln for ln in log_path.read_text().splitlines() if ln.strip()]
+    except OSError:
+        return None
+    for line in lines:
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict) or obj.get("type") != "rate_limit_event":
+            continue
+        info = obj.get("rate_limit_info")
+        if not isinstance(info, dict) or info.get("status") != "rejected":
+            continue
+        resets_at = info.get("resetsAt")
+        if not isinstance(resets_at, int | float):
+            continue
+        return {
+            "rate_limit_type": info.get("rateLimitType"),
+            "resets_at": resets_at,
+            "resets_at_iso": datetime.fromtimestamp(resets_at, UTC).isoformat(),
+        }
+    return None
+
+
+@dataclass(frozen=True)
+class Reader:
+    """A log schema Kraft knows how to parse.
+
+    In code, never in YAML: an operator must not be able to break a parser by
+    editing config. A harness file names one; adding one is a release
+    (Kraft-qh62w adds codex's).
+    """
+
+    name: str
+    stream: Callable[[Iterable[str], dict], Usage | None]
+    envelope: Callable[[Path], dict | None]
+    rate_limit: Callable[[Path], dict | None]
+
+
+READERS: dict[str, Reader] = {
+    "claude-stream-json": Reader(
+        name="claude-stream-json",
+        stream=from_stream,
+        envelope=read_envelope,
+        rate_limit=_rate_limit_claude,
+    ),
+}
+
+
+def read(log_path: Path, result_path: Path, reader: str | None = None) -> Usage | None:
+    """Usage for a finished session: the result file wins, the log envelope
+    backs it up -- but only when `reader` names a schema Kraft can parse.
+    `reader=None` means the harness declared no log-based usage reading
+    (`source: result_file`), so only the result file is consulted; an unknown
+    name is a config error, not a silent skip.
+    """
     try:
         result = json.loads(result_path.read_text())
     except OSError, json.JSONDecodeError:
@@ -271,4 +339,6 @@ def read(log_path: Path, result_path: Path) -> Usage | None:
         u = from_envelope(result)
         if u is not None:
             return u
-    return from_envelope(read_envelope(log_path))
+    if reader is None:
+        return None
+    return from_envelope(READERS[reader].envelope(log_path))

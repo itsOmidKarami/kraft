@@ -16,10 +16,7 @@ def test_claude_declares_the_leaked_claude_isms():
     not the chain's, so they must live in claude.yaml as `always:`."""
     claude = harness.load(None).valid["claude"]
     assert claude.capabilities["deny_tools"].always == ("Monitor",)
-    assert (
-        claude.capabilities["approval_channel"].always
-        == "mcp__kraft__permission_request"
-    )
+    assert claude.capabilities["approval_channel"].always == "mcp__kraft__permission_request"
 
 
 def test_codex_declares_no_deny_tools_and_gemini_no_resume():
@@ -41,7 +38,7 @@ def test_context_channel_is_explicit_per_harness():
 def test_values_are_fullmatch_patterns():
     claude = harness.load(None).valid["claude"]
     assert claude.value_ok("effort", "low")
-    assert not claude.value_ok("effort", "lower")      # fullmatch, not search
+    assert not claude.value_ok("effort", "lower")  # fullmatch, not search
     assert claude.value_ok("model", "claude-opus-5")
     assert claude.value_ok("model", "sonnet")
     assert not claude.value_ok("model", "gpt-5")
@@ -184,10 +181,7 @@ def test_claude_argv_matches_todays_invocation():
     # `always:` reaches argv with no binding asking -- spec leaks 1 and 2.
     assert argv[argv.index("--disallowed-tools") + 1] == "Monitor"
     assert argv[argv.index("--permission-mode") + 1] == "auto"
-    assert (
-        argv[argv.index("--permission-prompt-tool") + 1]
-        == "mcp__kraft__permission_request"
-    )
+    assert argv[argv.index("--permission-prompt-tool") + 1] == "mcp__kraft__permission_request"
 
 
 def test_codex_argv_puts_the_bare_prompt_last():
