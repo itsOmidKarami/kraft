@@ -12,7 +12,8 @@ import pytest
 import yaml
 from support.harness import make_repo
 
-from kraft import auth, cli, client, doctor
+from kraft import auth, cli, client, doctor, harness
+from kraft.templates import Registry
 
 # `app` fixture: tests/conftest.py. It wires client.transport.http() to the ASGI app.
 
@@ -42,7 +43,7 @@ def test_doctor_on_a_live_instance_reaches_every_check(app, tmp_path):
         "access.yaml",
         "pidfile",
         "mcp token",
-        "agent cli",
+        "agent: claude",
         "mcp server",
         "shell completion",
         "bd",
@@ -587,3 +588,54 @@ def test_mcp_check_fails_when_nothing_registers_kraft(app, tmp_path):
     check = _by_name(asyncio.run(doctor.run_checks()), "mcp server")
     assert check["ok"] is False
     assert "kraft admin init" in check["detail"]
+
+
+# ── _agent_checks: per-harness, not a single hardcoded claude check ─────────
+
+
+def _reg(**agents) -> Registry:
+    return Registry(hooks={hook: {"kind": "agent", "harness": hid} for hook, hid in agents.items()})
+
+
+def test_doctor_checks_every_referenced_harness():
+    """doctor.py used to hardcode `claude` and which() it once. A chain with a
+    codex node must be told about codex, not reassured about claude."""
+    rows = doctor._agent_checks(
+        _reg(**{"on.spec.requested": "claude", "on.implementation.start": "codex"}),
+        harness.load(None),
+    )
+    assert {r["name"] for r in rows} == {"agent: claude", "agent: codex"}
+
+
+def test_doctor_does_not_check_a_harness_nothing_references():
+    """gemini.yaml ships, but a registry that never names it is not degraded
+    by gemini being absent from PATH."""
+    rows = doctor._agent_checks(_reg(**{"on.spec.requested": "claude"}), harness.load(None))
+    assert not any(r["name"] == "agent: gemini" for r in rows)
+
+
+def test_a_quarantined_harness_file_is_reported():
+    hs = harness.HarnessSet(
+        valid=harness.load(None).valid,
+        invalid={"broken": "broken.yaml: unknown kind 'nope'"},
+    )
+    rows = doctor._agent_checks(_reg(**{"on.spec.requested": "claude"}), hs)
+    row = next(r for r in rows if r["name"] == "harness: broken")
+    assert not row["ok"]
+    assert "unknown kind" in row["detail"]
+
+
+def test_the_dev_fake_still_passes_loudly(monkeypatch, tmp_path):
+    """The existing `_agent_check` behaviour that must survive: a fixtures
+    symlink reads as OK *and says so*, because a dev instance looking like it
+    works is spending no tokens on purpose."""
+    fixtures = tmp_path / "fixtures" / "bin"
+    fixtures.mkdir(parents=True)
+    real = tmp_path / "fixtures" / "fake-claude.sh"
+    real.write_text("#!/bin/sh\n")
+    real.chmod(0o755)
+    (fixtures / "claude").symlink_to(real)
+    monkeypatch.setenv("PATH", str(fixtures))
+    row = doctor._agent_checks(_reg(**{"on.spec.requested": "claude"}), harness.load(None))[0]
+    assert row["ok"]
+    assert "spends no tokens" in row["detail"]
