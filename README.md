@@ -20,7 +20,7 @@
 | src/kraft/adapters/subprocess.py         |      230 |       12 |     95% |162-163, 177-178, 299, 346-347, 498-499, 528-529, 607 |
 | src/kraft/analytics.py                   |      229 |        4 |     98% |50-51, 148, 154 |
 | src/kraft/api/\_\_init\_\_.py            |       30 |        0 |    100% |           |
-| src/kraft/api/deps.py                    |       97 |        4 |     96% |56-57, 175-176 |
+| src/kraft/api/deps.py                    |       97 |        3 |     97% |57, 175-176 |
 | src/kraft/api/perimeter.py               |       70 |        0 |    100% |           |
 | src/kraft/api/routes/\_\_init\_\_.py     |        0 |        0 |    100% |           |
 | src/kraft/api/routes/artifacts.py        |       81 |        1 |     99% |       208 |
@@ -104,7 +104,7 @@
 | src/kraft/worker\_env.py                 |        8 |        0 |    100% |           |
 | src/kraft/worktree\_read.py              |       48 |        8 |     83% |82, 86-88, 91-95, 103-104 |
 | src/kraft/ws.py                          |       61 |        0 |    100% |           |
-| **TOTAL**                                | **10815** |  **767** | **93%** |           |
+| **TOTAL**                                | **10815** |  **766** | **93%** |           |
 
 
 ## Setup coverage badge
