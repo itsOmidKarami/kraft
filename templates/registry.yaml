@@ -1,22 +1,24 @@
+defaults:
+  agent: { steering: [never-signal-processes-you-didnt-start] }
 hooks:
   on.env.prepare:          { kind: builtin,    handler: env_setup }
-  on.spec.requested:       { kind: agent,      command: claude, skill: spec, artifact: spec, steering: [never-signal-processes-you-didnt-start] }
-  on.plan.requested:       { kind: agent,      command: claude, skill: plan, artifact: plan, steering: [never-signal-processes-you-didnt-start] }
-  on.implementation.start: { kind: agent,      command: claude, steering: [never-signal-processes-you-didnt-start] }
+  on.spec.requested:       { kind: agent,      command: claude, skill: spec, artifact: spec }
+  on.plan.requested:       { kind: agent,      command: claude, skill: plan, artifact: plan }
+  on.implementation.start: { kind: agent,      command: claude }
   # Design 3a: catch a submodule the agent touched but the item never
   # declared, right after implementation, before verify's green obscures it.
   on.repos.scan:           { kind: builtin,    handler: scan_submodules }
   on.test.run:             { kind: subprocess, command: [uv, run, pytest, -q] }
   # --- placeholder bindings: on.review.mr.run replaced by its plugin effort (see 03_plugin_adapters) ---
-  on.chain.review_ready:     { kind: agent, command: claude, skill: chain-review, artifact: chain_review, steering: [never-signal-processes-you-didnt-start] }
-  on.review.local.run:       { kind: agent, command: claude, skill: code-review, steering: [never-signal-processes-you-didnt-start] }
+  on.chain.review_ready:     { kind: agent, command: claude, skill: chain-review, artifact: chain_review }
+  on.review.local.run:       { kind: agent, command: claude, skill: code-review }
   # Registered but in no default chain: `chain_review` adds it to `verify` when a
   # plan touches auth, sessions, tokens, secrets or permission checks. Its own
   # rules already say to do that and to refuse to approximate with another hook
   # when the right one is missing (skills/chain-review/SKILL.md "When to add"),
   # so before this entry existed the only possible outcome for such a plan was a
   # rationale noting the gap and a chain that ran no security review (Kraft-l2cg).
-  on.review.security.run:    { kind: agent, command: claude, skill: security-review, steering: [never-signal-processes-you-didnt-start] }
+  on.review.security.run:    { kind: agent, command: claude, skill: security-review }
   # backend: auto resolves per repo, from the `forge` recorded on its
   # repos.yaml entry (Settings → Repos). A CLI name here pins every repo to one
   # forge, which is wrong for any install with repos on both. Never probed —
@@ -35,7 +37,7 @@ hooks:
   on.ci.poll:                { kind: forge, handler: ci_poll, backend: auto }
   on.review.mr.run:          { kind: builtin, handler: noop }
   on.mr.sync:                { kind: forge, handler: sync_mr, backend: auto }
-  on.human_review.requested: { kind: agent, command: claude, skill: review-brief, artifact: review_brief, steering: [never-signal-processes-you-didnt-start] }
+  on.human_review.requested: { kind: agent, command: claude, skill: review-brief, artifact: review_brief }
   on.merge:                  { kind: forge, handler: merge, backend: auto }
   # Kraft-43kw: watches the pipeline `on.merge` itself just triggered on the
   # target branch, so a break several near-simultaneous merges expose lands
@@ -46,10 +48,10 @@ hooks:
   # on.ci.poll went red and, when the reason is a fixable MR-level thing like
   # a missing label, applies the fix via set_mr_labels. Judgment, not a rules
   # table -- see the skill.
-  on.mr_checks.repair:       { kind: agent, command: claude, skill: mr-checks-repair, steering: [never-signal-processes-you-didnt-start] }
+  on.mr_checks.repair:       { kind: agent, command: claude, skill: mr-checks-repair }
   # Fix-loop judge (2026-09-12-verify-fix-loop-judge-design): asked before
   # every fix cycle after the first, for any node with a fix_loop, whether
   # that cycle is still worth spending. Dispatched directly by the executor,
   # not from a node's own `tasks` list -- the same way on.implementation.start
   # is -- so it is generic across every fix loop without a template change.
-  on.fix_loop.judge:         { kind: agent, command: claude, skill: fix-loop-judge, steering: [never-signal-processes-you-didnt-start] }
+  on.fix_loop.judge:         { kind: agent, command: claude, skill: fix-loop-judge }
