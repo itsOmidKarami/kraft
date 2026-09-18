@@ -93,10 +93,24 @@ async def ensure_repo(path: str | None = None) -> dict:
     path = path or os.getcwd()
     status, body = await transport._post("/repos", {"path": path})
     if status == 409:
+        # The probe still runs, and still first: it is what resolves the given
+        # path to the connected one, which is how `kraft repo list` marks the
+        # main checkout from inside a git worktree. What changes is what is
+        # returned -- the probe describes what Kraft WOULD configure, and
+        # handing that back for an already-connected repo gives the caller
+        # authoritative-looking `test_command`/`test_scopes`/`setup_command`
+        # values the repo does not run (Kraft-djk08).
         probe_status, probed = await transport._post("/repos/probe", {"path": path})
         if probe_status >= 400:
             raise ValueError(f"kraft {probe_status}: {probed.get('detail', probed)}")
-        return {**probed, "already_connected": True}
+        listing = await transport._get("/repos")
+        stored = next(
+            (r for r in listing.get("repos", []) if r.get("path") == probed.get("path")),
+            None,
+        )
+        # No match cannot happen after a 409 -- the entry is why it 409'd -- but
+        # a stale read must degrade to the old behaviour, not raise.
+        return {**(stored or probed), "already_connected": True}
     if status >= 400:
         raise ValueError(f"kraft {status}: {body.get('detail', body)}")
     return {**body, "already_connected": False}

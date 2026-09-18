@@ -17,7 +17,7 @@ from pathlib import Path
 
 import yaml
 
-from kraft import auth, client, config, harness, templates
+from kraft import auth, capabilities, client, config, harness, templates
 from kraft.adapters import forge
 from kraft.paths import BUNDLED, RunDirs, default_run_dir, default_templates_dir
 
@@ -113,6 +113,7 @@ def _config_checks() -> list[dict]:
             _hooks_check(),
             _dead_hooks_check(),
             _chain_templates_check(),
+            _capabilities_check(),
             _token_check(),
         ]
     checks = [_check("templates", True, str(templates))]
@@ -124,6 +125,7 @@ def _config_checks() -> list[dict]:
     checks.append(_hooks_check())
     checks.append(_dead_hooks_check())
     checks.append(_chain_templates_check())
+    checks.append(_capabilities_check())
     checks.append(_token_check())
     return checks
 
@@ -344,6 +346,38 @@ def _chain_templates_check() -> dict:
         f"{'; '.join(parts)} in {live_dir}, but shipped in this version's defaults — "
         "Settings → Chains, or edit those files",
     )
+
+
+def _capabilities_check() -> dict:
+    """What this version can do that the live seeded config cannot (Kraft-hxt6x).
+
+    Always `ok`, like `_hooks_check` and `_chain_templates_check`: whether to
+    adopt a capability is an operator's decision, not a fault. The row exists
+    because the alternative is silence -- `templates/` is seeded once and never
+    overwritten, and on a real install two capabilities shipped within a week
+    were both inactive with nothing anywhere saying so.
+
+    Reports adoption instructions, never a diff and never an applied change:
+    the live registry carries per-hook `model`/`effort` choices the shipped
+    defaults do not, so overwriting destroys operator intent.
+    """
+    live_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    stamp_path = live_dir / ".seeded-version"
+    try:
+        stamp = stamp_path.read_text().strip() or None
+    except OSError:
+        # Seeded before stamping existed, or unreadable. Either way the home
+        # knows nothing about itself; `added_since(None)` says everything.
+        stamp = None
+    missing = capabilities.added_since(stamp)
+    seeded = f"seeded at {stamp}" if stamp else "seeded before versions were recorded"
+    if not missing:
+        return _check("capabilities", True, f"{seeded}; up to date")
+    lines = [f"{seeded}; {len(missing)} capability(ies) added since"]
+    for c in missing:
+        lines.append(f"  {c.version}  {c.name}: {c.what}")
+        lines.append(f"      -> {c.how}")
+    return _check("capabilities", True, "\n".join(lines))
 
 
 def _token_check() -> dict:

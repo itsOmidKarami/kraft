@@ -16,7 +16,19 @@ narrate:
 - `hooks` - a hook this version ships a real binding for, still on
   `builtin:noop`, or missing from the live registry entirely.
 - `chain_templates` - a node a shipped chain template has that the live
-  installed copy of that template doesn't.
+  installed copy doesn't. Compares **resolved** node lists: a template using
+  `extends` has no `nodes:` key of its own, and its nodes only exist after the
+  loader composes it, so never reason about the raw YAML here. Note this row
+  compares node **ids only** — a live node that still lists an old task, or is
+  missing a field like `rebase_bounce_to`, is invisible to it. A clean row is
+  not proof the chain matches.
+- `capabilities` - capabilities this Kraft has that the operator's seeded
+  config predates. `templates/` is seeded once and never overwritten, so an
+  install keeps its original chain and registry forever. Read the row's
+  `-> ` lines out as the edit each one needs; they are adoption instructions,
+  not drift to be "fixed". Never offer to copy the shipped defaults over: a
+  live registry carries per-hook `model`/`escalate_model`/`effort` choices the
+  shipped defaults do not, and overwriting destroys them.
 - `setup <repo>` - a connected repo with no `setup_command` in `repos.yaml`.
   There is no default, so this repo's next work item stops when its worktree
   is built. The row carries a suggestion probed from the repo's own markers;

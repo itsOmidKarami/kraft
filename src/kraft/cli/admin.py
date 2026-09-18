@@ -208,6 +208,14 @@ def seed_home(templates_dir: Path) -> bool:
     shutil.copytree(BUNDLED / "templates", staging)
     (staging / "access.yaml").unlink(missing_ok=True)
     (staging / "notify.yaml").unlink(missing_ok=True)
+    # What this home was seeded from, for `capabilities.added_since` (Kraft-hxt6x).
+    # Written into `staging`, before the rename, so an interrupted seed can never
+    # leave a stamp describing config that is not there.
+    #
+    # Deliberately not `.yaml`: `templates.load_templates` globs `*.yaml`, and a
+    # YAML stamp would be read as a malformed template and surface as degraded
+    # health. A non-YAML name sidesteps that instead of documenting it.
+    (staging / ".seeded-version").write_text(f"{_version()}\n")
     staging.rename(templates_dir)
     return True
 
