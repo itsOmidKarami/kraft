@@ -335,3 +335,57 @@ def test_write_package_still_spans_base_to_working_tree(tmp_path):
     body = path.read_text()
     assert "landed paperwork" in body
     assert "in flight code" in body
+
+
+def _dispatch_subprocess_review(tmp_path, binding):
+    """Run a review-only chain whose review hook is a subprocess that dumps
+    its environment; returns that environment."""
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    out = tmp_path / "env.json"
+    dump = f"import os, json; json.dump(dict(os.environ), open({str(out)!r}, 'w'))"
+    base = fake_registry(sys.executable, _FAKE_AGENT)
+    registry = Registry(
+        hooks={
+            **base.hooks,
+            "on.review.local.run": {**binding, "command": [sys.executable, "-c", dump]},
+        }
+    )
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="review me",
+                repo=str(repo),
+                template=_review_template(),
+                bd_cwd=str(tracker),
+            )
+            await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    return json.loads(out.read_text())
+
+
+def test_a_subprocess_review_hook_is_given_the_package_by_env(tmp_path):
+    """A review hook bound to a CLI ran blind (Kraft-t3bny)."""
+    env = _dispatch_subprocess_review(
+        tmp_path,
+        {
+            "kind": "subprocess",
+            "inputs": {"review_package": {"channel": "env", "name": "KRAFT_REVIEW_PACKAGE"}},
+        },
+    )
+    assert Path(env["KRAFT_REVIEW_PACKAGE"]).is_file()
+
+
+def test_a_subprocess_hook_that_does_not_declare_it_gets_no_package(tmp_path):
+    env = _dispatch_subprocess_review(tmp_path, {"kind": "subprocess"})
+    assert "KRAFT_REVIEW_PACKAGE" not in env
