@@ -319,6 +319,16 @@ async def dispatch_node(
         if task_hook in prompts.REVIEW_HOOKS:
             previous, _, _ = last_measurement(db, work_item_row["id"], node["id"])
             instruction += prompts.carried_findings_note(previous or [])
+            # The reviewer's own last session, and the fix cycle that produced
+            # what it is about to read (Kraft-qzkux). Both by path, both "" on
+            # round 0. Order follows the conversation: findings, the
+            # reviewer's own reasoning, then the fixer's answer to it.
+            instruction += prompts.previous_review_note(
+                prompts._last_review_session(db, work_item_row["id"], task_hook)
+            )
+            instruction += prompts.fix_attempt_note(
+                previous_fix_session(db, work_item_row["id"], node["id"])
+            )
         # The findings that never entered the fix loop, for the brief the human
         # actually reads (Kraft-s7c04.4). `skills/review-brief/SKILL.md` already
         # promises them -- "the local review findings, including the ones ruled

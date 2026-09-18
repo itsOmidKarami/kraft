@@ -420,6 +420,61 @@ def carried_findings_note(previous: list[_findings.Finding]) -> str:
     return _CARRIED_FINDINGS.format(findings=format_findings(previous, repeats=set(), tags=True))
 
 
+#: The reviewer's own last session on this hook, by path (Kraft-qzkux). Not a
+#: resumed conversation and not a re-paste: `carried_findings_note` has already
+#: rendered the findings verbatim immediately above this, so what is left to
+#: hand over is the reasoning behind them -- which the agent wrote itself, to a
+#: file, knowing it was the durable record.
+#:
+#: Worded as evidence to check rather than a position to defend. A reviewer
+#: handed its own prior conclusions is anchored the same way a resumed session
+#: would be, only more weakly, and the `same_as` tag machinery exists precisely
+#: to get continuity without that anchoring.
+_PREVIOUS_REVIEW = (
+    "\n\nYour own last review of this node wrote a result file at {result_path}"
+    "{summary}\n"
+    "Read it if you need your earlier reasoning, not to defend it: a finding "
+    "you would now judge differently is a conclusion to change, not a record "
+    "to keep consistent."
+)
+_PREVIOUS_REVIEW_SUMMARY = ", and a session summary at {summary_ref}"
+
+#: The fix cycle that produced the change now under review (Kraft-qzkux). The
+#: asymmetry this closes was total and one-way: the fixer already receives the
+#: reviewer's findings, the round history, the regression warning and the
+#: judge's reasoning (`walk.py`), while the reviewer received nothing of the
+#: fixer's and inferred intent from commits.
+_FIX_ATTEMPT = (
+    "\n\nThe change since your last review is one fix cycle's work, dispatched "
+    "against the findings above. Its result file is at {result_path}{summary}\n"
+    "Read what it says it did before deciding a finding is still present. A "
+    "finding it deliberately did not fix is a disagreement to judge on the "
+    "merits, not an oversight to re-report unchanged."
+)
+_FIX_ATTEMPT_SUMMARY = ", and its session summary at {summary_ref}"
+
+
+def _session_note(row, template: str, summary_template: str) -> str:
+    """One session's artifacts, by path. "" for no row at all, and a missing
+    `session_summary_ref` drops that clause rather than interpolating a path
+    the agent would spend a tool call discovering does not exist."""
+    if row is None:
+        return ""
+    ref = row["session_summary_ref"]
+    return template.format(
+        result_path=row["result_path"],
+        summary=summary_template.format(summary_ref=ref) if ref else "",
+    )
+
+
+def previous_review_note(row) -> str:
+    return _session_note(row, _PREVIOUS_REVIEW, _PREVIOUS_REVIEW_SUMMARY)
+
+
+def fix_attempt_note(row) -> str:
+    return _session_note(row, _FIX_ATTEMPT, _FIX_ATTEMPT_SUMMARY)
+
+
 #: A review session that did not finish is not a head anything was reviewed at.
 #: Same "was this a real judgement" allowlist `dispatch._JUDGE_TRUSTED_STATUS`
 #: and `gate_review._UNTRUSTWORTHY` apply, for the same reason.

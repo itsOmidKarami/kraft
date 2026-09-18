@@ -690,3 +690,41 @@ def test_the_board_and_the_brief_read_one_function(tmp_path, monkeypatch):
     from kraft.api.routes import board
 
     assert "executor.deferred_findings" in inspect.getsource(board._deferred_findings)
+
+
+def test_previous_review_note_points_at_the_reviewers_own_last_session():
+    note = prompts.previous_review_note(
+        {
+            "result_path": "/run/results/abc.json",
+            "session_summary_ref": ".engineering/sessions/abc.md",
+        }
+    )
+    assert "/run/results/abc.json" in note
+    assert ".engineering/sessions/abc.md" in note
+
+
+def test_previous_review_note_drops_a_summary_it_does_not_have():
+    """A dangling path is worse than a missing line: the agent burns a tool
+    call discovering the file was never written."""
+    note = prompts.previous_review_note({"result_path": "/r.json", "session_summary_ref": None})
+    assert "/r.json" in note
+    assert "None" not in note
+    assert "summary" not in note.lower()
+
+
+def test_previous_review_note_does_not_re_paste_findings():
+    """carried_findings_note renders them verbatim immediately above."""
+    note = prompts.previous_review_note({"result_path": "/r.json", "session_summary_ref": None})
+    assert "severity" not in note.lower()
+    assert "[" not in note
+
+
+def test_fix_attempt_note_frames_a_skipped_finding_as_a_disagreement():
+    note = prompts.fix_attempt_note({"result_path": "/f.json", "session_summary_ref": None})
+    assert "/f.json" in note
+    assert "disagreement" in note.lower()
+
+
+def test_both_notes_are_empty_without_a_previous_session():
+    assert prompts.previous_review_note(None) == ""
+    assert prompts.fix_attempt_note(None) == ""
