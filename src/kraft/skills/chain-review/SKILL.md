@@ -115,7 +115,10 @@ concurrent within a group:
 a node's tasks have no ordering between them. Use `steps` only when the plan
 gives you a reason one task must finish before another starts — a rebase before
 the thing that reads the rebased tree, a scan after the agent that changes what
-it scans. A node may declare one or the other, never both.
+it scans. A node may declare one or the other, never both. A node whose id
+already existed keeps its `steps` only if you re-emit it with the same `tasks`
+list; change the `tasks` and the ordering is rebuilt as one concurrent group, so
+write `steps:` yourself when you change a stepped node.
 
 Omit a field on a node whose id already existed in the tail
 and the orchestrator carries its old value forward unchanged, exactly as it

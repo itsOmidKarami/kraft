@@ -121,6 +121,13 @@ def carry_forward_node_fields(old_nodes: list, new_nodes: list) -> list:
         for field in NODE_CARRYOVER_FIELDS:
             if field not in n:
                 n[field] = old.get(field)
+        # `steps` is not a NODE_CARRYOVER_FIELD: the reviewer may reshape `tasks`,
+        # and carrying old groups over a changed list would contradict it. But a
+        # node re-emitted with the same flat tasks is unchanged, ordering included.
+        old_steps = old.get("steps")
+        if old_steps and "steps" not in n and n.get("tasks") == [t for g in old_steps for t in g]:
+            n["steps"] = old_steps
+            n.pop("tasks")
     return new_nodes
 
 
