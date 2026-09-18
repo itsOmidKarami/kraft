@@ -1006,6 +1006,7 @@ def test_materialize_quick_task_from_shipped_templates():
             {
                 "id": "env_setup",
                 "tasks": ["on.env.prepare"],
+                "steps": [["on.env.prepare"]],
                 "gate_after": None,
                 "fix_loop": None,
                 "on_failure": None,
@@ -1018,6 +1019,7 @@ def test_materialize_quick_task_from_shipped_templates():
             {
                 "id": "implementation",
                 "tasks": ["on.implementation.start"],
+                "steps": [["on.implementation.start"]],
                 "gate_after": None,
                 "fix_loop": None,
                 "on_failure": None,
@@ -1030,6 +1032,7 @@ def test_materialize_quick_task_from_shipped_templates():
             {
                 "id": "verify",
                 "tasks": ["on.test.run"],
+                "steps": [["on.test.run"]],
                 "gate_after": None,
                 "fix_loop": None,
                 "on_failure": None,
@@ -1874,3 +1877,70 @@ def test_chain_review_skill_teaches_the_node_binding_split():
         "the on_failure paragraph must say a task-level repair lives on the "
         "registry binding, not on the node"
     )
+
+
+def _reg():
+    return templates.Registry(
+        hooks={f"on.{c}": {"kind": "builtin", "handler": "noop"} for c in "abcd"}, raw={}
+    )
+
+
+def test_with_steps_derives_groups_from_a_flat_task_list():
+    out = templates.with_steps({"id": "n", "tasks": ["on.a", "on.b"]})
+    assert out["steps"] == [["on.a", "on.b"]], "a flat list is one concurrent group"
+    assert out["tasks"] == ["on.a", "on.b"]
+
+
+def test_with_steps_derives_a_flat_task_list_from_groups_in_order():
+    out = templates.with_steps({"id": "n", "steps": [["on.a"], ["on.b", "on.c"]]})
+    assert out["steps"] == [["on.a"], ["on.b", "on.c"]]
+    assert out["tasks"] == ["on.a", "on.b", "on.c"], "flat union, in group order"
+
+
+def test_a_template_may_not_declare_both_steps_and_tasks(tmp_path):
+    (tmp_path / "t.yaml").write_text(
+        "id: t\nnodes:\n- id: n\n  tasks: [on.a]\n  steps: [[on.b]]\n  gate_after: null\n"
+    )
+    ts = templates.load_templates(tmp_path, _reg())
+    assert "t" in ts.invalid
+    assert "both" in ts.invalid["t"]
+
+
+def test_steps_must_be_a_non_empty_list_of_non_empty_string_lists(tmp_path):
+    for bad in ("[]", "[[]]", "[on.a]", "[[1]]"):
+        (tmp_path / "t.yaml").write_text(
+            f"id: t\nnodes:\n- id: n\n  steps: {bad}\n  gate_after: null\n"
+        )
+        ts = templates.load_templates(tmp_path, _reg())
+        assert "t" in ts.invalid, bad
+
+
+def test_steps_hooks_are_checked_against_the_registry(tmp_path):
+    (tmp_path / "t.yaml").write_text(
+        "id: t\nnodes:\n- id: n\n  steps: [[on.nope]]\n  gate_after: null\n"
+    )
+    ts = templates.load_templates(tmp_path, _reg())
+    assert "t" in ts.invalid
+    assert "not in the registry" in ts.invalid["t"]
+
+
+def test_materialize_emits_both_keys_for_a_steps_node(tmp_path):
+    (tmp_path / "t.yaml").write_text(
+        "id: t\nnodes:\n- id: n\n  steps: [[on.a], [on.b]]\n  gate_after: null\n"
+    )
+    ts = templates.load_templates(tmp_path, _reg())
+    node = templates.materialize(ts.valid["t"])["nodes"][0]
+    assert node["steps"] == [["on.a"], ["on.b"]]
+    assert node["tasks"] == ["on.a", "on.b"]
+
+
+def test_materialize_still_emits_steps_for_a_plain_tasks_node(tmp_path):
+    """The no-regression case: every existing template keeps working, and the
+    executor can read `steps` unconditionally."""
+    (tmp_path / "t.yaml").write_text(
+        "id: t\nnodes:\n- id: n\n  tasks: [on.a, on.b]\n  gate_after: null\n"
+    )
+    ts = templates.load_templates(tmp_path, _reg())
+    node = templates.materialize(ts.valid["t"])["nodes"][0]
+    assert node["tasks"] == ["on.a", "on.b"]
+    assert node["steps"] == [["on.a", "on.b"]]
