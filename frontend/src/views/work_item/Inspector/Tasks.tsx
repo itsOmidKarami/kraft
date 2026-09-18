@@ -135,7 +135,7 @@ export function Tasks({
       </p>
       {shown.length === 0 && (
         <p className="empty">
-          no tasks {scope === "node" ? "on this node" : "yet"}
+          no sessions {scope === "node" ? "on this node" : "yet"}
         </p>
       )}
       {shown.map((s) => {
