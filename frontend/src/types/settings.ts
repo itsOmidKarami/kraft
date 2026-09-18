@@ -55,7 +55,7 @@ export interface TemplateNode {
   auto_escalate_stuck?: boolean;
   auto_escalate_delay_s?: number;
   /** Any node key the form doesn't render (e.g. `rebase_bounce_to` on
-   *  `pre_mr_rebase` in `default.yaml`) still round-trips: the serializer
+   *  `open_mr` in `default.yaml`) still round-trips: the serializer
    *  writes every own-key of a node object, known or not, so editing one
    *  node never silently drops a key this form doesn't know about. */
   [key: string]: unknown;

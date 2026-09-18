@@ -76,7 +76,7 @@ label.chip select {
     var(--color-divider) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
 }
 /* W12.4: the name column is as wide as its longest name (at least 14ch), so
-   `pre_mr_rebase` reads whole; the share bar is the column that gives. One grid
+   `post_merge_watch` reads whole; the share bar is the column that gives. One grid
    per table, rows on a subgrid, so every row's columns line up. */
 .table-block.by-node {
   display: grid; column-gap: 10px;
