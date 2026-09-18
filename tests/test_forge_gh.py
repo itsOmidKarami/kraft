@@ -107,6 +107,27 @@ def test_gh_ci_status_fails_when_any_check_failed(tmp_path, monkeypatch):
     assert any("lint" in j for j in status.jobs)
 
 
+GH_PR_VIEW_RELABEL_DUPLICATE = (
+    '{"number":7,"url":"https://github.com/o/r/pull/7","statusCheckRollup":['
+    '{"name":"test","conclusion":"CANCELLED","startedAt":"2026-09-18T00:15:33Z"},'
+    '{"name":"test","conclusion":"SUCCESS","startedAt":"2026-09-18T00:17:03Z"}]}'
+)
+
+
+def test_gh_ci_status_keeps_only_the_latest_run_of_a_relabeled_check(tmp_path, monkeypatch):
+    """Kraft-n70: `test.yml` re-triggers on `labeled`/`unlabeled`, so a label
+    Kraft sets mid-check starts a second workflow run on the same PR --
+    `statusCheckRollup` then carries the superseded run's `CANCELLED` job
+    alongside the new run's real, later `SUCCESS`, same name. A stale entry
+    must not outvote the latest one."""
+    _stub(tmp_path, monkeypatch, "gh", GH_PR_VIEW_RELABEL_DUPLICATE)
+
+    status = asyncio.run(forge.GhCli().ci_status(repo=tmp_path, mr=forge.MR(7, "http://x/7")))
+
+    assert status.state == "success"
+    assert status.jobs == ("test: SUCCESS",)
+
+
 def _stub(tmp_path, monkeypatch, name: str, stdout: str, rc: int = 0):
     """Put a fake forge CLI first on PATH.
 
