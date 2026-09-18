@@ -106,29 +106,40 @@ export function Tasks({
           </ul>
         </>
       )}
-      {chainNode && (
-        <>
-          <p className="section-label">
-            NODE TASKS · {chainNode.tasks.length} · CONCURRENT
-          </p>
-          <ul className="plan-list" data-testid="node-task-list">
-            {chainNode.tasks.map((hook) => {
-              const s = latestFor(hook);
-              return (
-                <li key={hook} data-testid={`node-task-${hook}`}>
-                  {s ? (
-                    <StatusGlyph status={s.status} size={13} />
-                  ) : (
-                    <span className="plan-task-n" aria-hidden />
-                  )}
-                  <span className="plan-task-title">{hook}</span>
-                  <span className="row-sub">{s ? s.status : "not started"}</span>
-                </li>
-              );
-            })}
-          </ul>
-        </>
-      )}
+      {chainNode &&
+        (() => {
+          const groups = chainNode.steps?.length ? chainNode.steps : [chainNode.tasks];
+          return (
+            <>
+              <p className="section-label">
+                NODE TASKS · {chainNode.tasks.length}
+                {groups.length === 1 ? " · CONCURRENT" : ` · ${groups.length} STEPS`}
+              </p>
+              {groups.map((group, i) => (
+                <ul
+                  className="plan-list"
+                  key={i}
+                  data-testid={groups.length > 1 ? `node-step-${i}` : "node-task-list"}
+                >
+                  {group.map((hook) => {
+                    const s = latestFor(hook);
+                    return (
+                      <li key={hook} data-testid={`node-task-${hook}`}>
+                        {s ? (
+                          <StatusGlyph status={s.status} size={13} />
+                        ) : (
+                          <span className="plan-task-n" aria-hidden />
+                        )}
+                        <span className="plan-task-title">{hook}</span>
+                        <span className="row-sub">{s ? s.status : "not started"}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ))}
+            </>
+          );
+        })()}
       <p className="section-label">
         SESSIONS · {shown.length}
         <ScopeChips scope={scope} onScope={onScope} nodeId={nodeId} />
