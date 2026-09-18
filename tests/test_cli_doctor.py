@@ -12,7 +12,7 @@ import pytest
 import yaml
 from support.harness import make_repo
 
-from kraft import auth, cli, client, doctor, harness
+from kraft import auth, capabilities, cli, client, doctor, harness
 from kraft.templates import Registry
 
 # `app` fixture: tests/conftest.py. It wires client.transport.http() to the ASGI app.
@@ -639,3 +639,29 @@ def test_the_dev_fake_still_passes_loudly(monkeypatch, tmp_path):
     row = doctor._agent_checks(_reg(**{"on.spec.requested": "claude"}), harness.load(None))[0]
     assert row["ok"]
     assert "spends no tokens" in row["detail"]
+
+
+def test_capabilities_row_names_what_the_install_is_missing(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path))
+    (tmp_path / ".seeded-version").write_text("0.1.0\n")
+    row = doctor._capabilities_check()
+    assert row["ok"] is True, "not upgrading is a choice, not a failure"
+    assert "0.1.0" in row["detail"]
+    for c in capabilities.MANIFEST:
+        assert c.name in row["detail"]
+        assert c.how in row["detail"]
+
+
+def test_capabilities_row_is_quiet_when_the_stamp_is_current(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path))
+    (tmp_path / ".seeded-version").write_text(capabilities.MANIFEST[-1].version + "\n")
+    row = doctor._capabilities_check()
+    assert row["ok"] is True
+    assert "up to date" in row["detail"]
+
+
+def test_an_unstamped_home_is_told_everything_rather_than_erroring(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path))
+    row = doctor._capabilities_check()
+    assert row["ok"] is True
+    assert capabilities.MANIFEST[0].name in row["detail"]
