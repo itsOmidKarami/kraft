@@ -386,3 +386,10 @@ def test_load_policy_rejects_non_int_auto_escalate_delay_s(tmp_path):
     d.write_text("default: { attempts: 1, wall_clock_s: 1 }\nauto_escalate_delay_s: soon\n")
     with pytest.raises(policy.PolicyError):
         policy.load_policy(d)
+
+
+def test_a_cap_rejects_a_zero_attempt_count():
+    """`load_policy` checked this; it is now a field constraint that cannot be
+    bypassed by constructing a Cap directly, which the dataclass allowed."""
+    with pytest.raises(Exception):  # noqa: B017 -- pydantic's ValidationError
+        policy.Cap(attempts=0, wall_clock_s=60)
