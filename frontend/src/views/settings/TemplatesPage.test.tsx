@@ -36,6 +36,13 @@ beforeEach(() => {
 });
 
 describe("serializeNodes (task 8b)", () => {
+  it("keeps a stepped node's groups as nested lists", () => {
+    const nodes: TemplateNode[] = [
+      { id: "a", tasks: ["x", "y"], steps: [["x"], ["y"]], gate_after: null },
+    ];
+    expect(serializeNodes("t", nodes)).toContain("    steps: [[x], [y]]\n");
+  });
+
   it("serializes a node list to match write_yaml's own formatting for quick-task.yaml", () => {
     const nodes: TemplateNode[] = [
       { id: "env_setup", tasks: ["on.env.prepare"], gate_after: null },

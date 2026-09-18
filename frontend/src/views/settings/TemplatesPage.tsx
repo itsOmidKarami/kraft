@@ -29,7 +29,7 @@ export function serializeNodes(id: string, nodes: TemplateNode[]): string {
     if (v === null || v === undefined) return "null";
     if (typeof v === "boolean") return String(v);
     if (typeof v === "number") return String(v);
-    if (Array.isArray(v)) return `[${v.map((x) => String(x)).join(", ")}]`;
+    if (Array.isArray(v)) return `[${v.map(scalar).join(", ")}]`;
     return String(v);
   };
   const lines = [`id: ${id}`, "nodes:"];
@@ -197,7 +197,10 @@ function NodeForm({
 
   const addTask = () => {
     if (!pickedTask) return;
-    onChange({ tasks: [...tasks, pickedTask] });
+    onChange({
+      tasks: [...tasks, pickedTask],
+      ...(node.steps && { steps: [...node.steps, [pickedTask]] }),
+    });
     setAddingTask(false);
     setPickedTask("");
   };
@@ -229,7 +232,14 @@ function NodeForm({
           <button
             type="button"
             className="btn btn-ghost"
-            onClick={() => onChange({ tasks: tasks.filter((_, j) => j !== i) })}
+            onClick={() =>
+              onChange({
+                tasks: tasks.filter((_, j) => j !== i),
+                ...(node.steps && {
+                  steps: node.steps.map((g) => g.filter((t) => t !== hook)).filter((g) => g.length),
+                }),
+              })
+            }
           >
             remove
           </button>

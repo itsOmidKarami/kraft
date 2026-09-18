@@ -45,6 +45,8 @@ export interface RepoProbe {
 export interface TemplateNode {
   id: string;
   tasks: string[];
+  /** Ordered groups; `tasks` is the same list flattened (`templates.with_steps`). */
+  steps?: string[][];
   gate_after: string | null;
   fix_loop?: string | null;
   on_failure?: string[];
