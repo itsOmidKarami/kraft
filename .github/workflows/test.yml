@@ -20,6 +20,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Least-privilege default for every job below that doesn't declare its own
+# block (only `test` does, for its PR-comment and coverage-push steps).
+permissions:
+  contents: read
+
 env:
   BD_VERSION: "1.2.2"
 
