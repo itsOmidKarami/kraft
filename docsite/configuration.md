@@ -30,6 +30,7 @@ hooks:
   on.spec.requested:       { kind: agent,      harness: claude, skill: spec, artifact: spec }
   on.test.run:             { kind: subprocess, command: [uv, run, pytest, -q] }
   on.mr.open:              { kind: forge,      handler: open_mr, backend: auto }
+  on.ci.poll:              { kind: forge,      handler: ci_poll, backend: auto, on_failure: [on.ci.repair] }
 ```
 
 | Key | Applies to | Means |
@@ -42,6 +43,7 @@ hooks:
 | `model` / `effort` | `agent` | Per-hook overrides of the agent's model and effort, where the default isn't right for that step. |
 | `handler` | `builtin`, `forge` | Which Python function or forge operation runs. |
 | `backend` | `forge` | `auto` resolves per repo from the `forge` field on that repo's `repos.yaml` entry — never pin a forge here, or every repo on the install is forced onto one. |
+| `on_failure` | every entry | Hook points to run when *this task* fails, before the task is re-dispatched on its own. The repair travels with the binding, so every chain that runs the task gets it — `on.ci.poll` ships with `on_failure: [on.ci.repair]`. A repair is believed only when the task passes on the re-dispatch, never on the repair's own say-so. One layer deep: a repair hook's own `on_failure` is never dispatched, and a hook may not name itself. |
 | `defaults.agent.*` | top level | Applied to every `kind: agent` hook that doesn't set its own value. Any of `harness`, `profile`, `model`, `escalate_model`, `effort`, `permission_mode`, `skill`, `artifact`, plus three that merge as a list instead of binding-wins — `steering` (from `templates/steering/`), `deny_tools`, `allowed_tools` (default's items first, then the binding's own, deduped). |
 
 Rebinding a hook — say, pointing `on.test.run` at a different command, or
