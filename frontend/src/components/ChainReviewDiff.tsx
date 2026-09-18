@@ -1,5 +1,5 @@
 import { DraftDiff } from "./DraftDiff";
-import { carryForwardNodeFields, parseChainReviewArtifact } from "../chainReviewDiff";
+import { carryForwardNodeFields, nodesForDiff, parseChainReviewArtifact } from "../chainReviewDiff";
 import type { WorkItem } from "../types/work_item";
 
 /** The `chain_finalized` gate's artifact, as a structured diff instead of
@@ -23,8 +23,8 @@ export function ChainReviewDiff({ item, content }: { item: WorkItem; content: st
   return (
     <div data-testid="chain-review-diff">
       <DraftDiff
-        before={JSON.stringify(before, null, 2)}
-        after={JSON.stringify(after, null, 2)}
+        before={nodesForDiff(before as unknown as Record<string, unknown>[])}
+        after={nodesForDiff(after)}
       />
       {envelope.rationale && <p className="doc-modal-note">{envelope.rationale}</p>}
       {!!envelope.flags?.length && (
