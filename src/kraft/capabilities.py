@@ -71,6 +71,14 @@ MANIFEST: tuple[Capability, ...] = (
         how="add `on_failure: [on.ci.repair]` to the `on.ci.poll` binding in "
         "registry.yaml, and bind `on.ci.repair` beside it",
     ),
+    Capability(
+        version="0.71.0",
+        name="steps",
+        what="ordered groups of concurrent tasks inside one node, so sequencing "
+        "no longer needs a node of its own",
+        how="replace a node's `tasks: [a, b]` with `steps:` and one list per "
+        "ordered group, e.g. `steps:\\n  - [on.implementation.start]\\n  - [on.repos.scan]`",
+    ),
 )
 
 

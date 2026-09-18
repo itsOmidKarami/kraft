@@ -84,6 +84,19 @@ Every node you write is exactly:
   proposed_node_overrides?: { model?: string, escalate_model?: string, effort?: string } }
 ```
 
+A node may write `steps:` instead of `tasks:` — a list of groups, run in order,
+concurrent within a group:
+
+```
+{ id: string, steps: [[hook_point, ...], ...], gate_after: string|null, ... }
+```
+
+`tasks` is the one-group shorthand and stays perfectly valid; emit it whenever
+a node's tasks have no ordering between them. Use `steps` only when the plan
+gives you a reason one task must finish before another starts — a rebase before
+the thing that reads the rebased tree, a scan after the agent that changes what
+it scans. A node may declare one or the other, never both.
+
 The field above is node-level only; a task-level repair lives on that task's
 registry binding instead (see below).
 

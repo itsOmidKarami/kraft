@@ -30,3 +30,10 @@ def test_an_absent_stamp_means_everything_is_new():
 
 def test_an_unparseable_stamp_is_treated_as_oldest_rather_than_raising():
     assert capabilities.added_since("not-a-version") == list(capabilities.MANIFEST)
+
+
+def test_steps_is_advertised_to_installs_that_predate_it():
+    names = [c.name for c in capabilities.MANIFEST]
+    assert "steps" in names
+    entry = next(c for c in capabilities.MANIFEST if c.name == "steps")
+    assert "steps:" in entry.how
