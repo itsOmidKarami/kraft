@@ -1,34 +1,13 @@
+<!-- Mirrors ARCHITECTURE.md at the repo root; keep both in sync. -->
+
 # Architecture
 
 Kraft is one FastAPI process and a React SPA, running on your machine. It takes
 a unit of work, runs it through an ordered series of steps, and stops to ask you
 whenever a decision belongs to a person.
 
-## The model
-
-A **work item** is one unit of work and produces one merge request. It enters as
-a **chain**: an ordered list of **nodes** materialized from a YAML template in
-`templates/`. Each node names one or more **hook points** — `on.test.run`,
-`on.mr.open`, `on.review.local.run` — and each hook point is bound to an
-**adapter** by `templates/registry.yaml`.
-
-There are four kinds of adapter:
-
-- **agent** (`src/kraft/adapters/`) — runs a headless coding agent, on
-  whichever harness (`claude`, `codex`, `gemini`, ...) the binding names, in a
-  git worktree.
-- **subprocess** (`src/kraft/adapters/`) — runs a command.
-- **builtin** (`src/kraft/builtins.py`) — work Kraft does itself: preparing a
-  worktree, copying attachments, scanning for touched submodules.
-- **forge** (`src/kraft/adapters/forge/`) — talks to GitHub or GitLab: opening
-  a merge request, polling CI, syncing, merging.
-
-Two things make a chain stop:
-
-- A **gate** — a node declares `gate_after`, the chain halts, and the work item
-  becomes `needs_human`. You approve, reject with a note, or steer.
-- A **cap** — every retry loop is bounded. Hitting the bound escalates to you
-  with the full trace rather than looping.
+For the vocabulary this page uses — work item, chain, node, hook point, adapter,
+gate, cap — see [Concepts](concepts.md).
 
 ## The process
 
@@ -47,7 +26,8 @@ Two things make a chain stop:
 State lives in `$KRAFT_HOME` (default `~/.kraft`): `run/` holds the databases,
 logs, results and worktrees; `templates/` holds the YAML the Settings screens
 edit. `templates/` is seeded from the packaged defaults on first run and never
-overwritten after, so an upgrade cannot clobber an edited policy.
+overwritten after, so an upgrade cannot clobber an edited policy. See
+[Configuration](configuration.md) for what's in those files.
 
 ## Intended behaviour, written down separately
 

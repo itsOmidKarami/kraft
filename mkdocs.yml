@@ -8,6 +8,8 @@ docs_dir: docsite
 
 theme:
   name: material
+  logo: icon.svg
+  favicon: icon.svg
   palette:
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
@@ -34,12 +36,13 @@ nav:
   - Install: install.md
   - CLI reference: cli.md
   - Configuration: configuration.md
+  - Agent harnesses: harnesses.md
   - Agent integration: agent-integration.md
   - Remote access: remote-access.md
   - Inbound triggers: triggers.md
-  - Architecture: https://github.com/itsOmidKarami/kraft/blob/main/ARCHITECTURE.md
-  - Contributing: https://github.com/itsOmidKarami/kraft/blob/main/CONTRIBUTING.md
-  - Security: https://github.com/itsOmidKarami/kraft/blob/main/SECURITY.md
+  - Architecture: architecture.md
+  - Contributing: contributing.md
+  - Security: security.md
 
 markdown_extensions:
   - admonition

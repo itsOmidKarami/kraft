@@ -24,5 +24,4 @@ Point a tunnel at it:
 Signed one-shot approve/reject links and a Slack action endpoint were
 considered and dropped: this gives phone access to the real board, with the
 same auth, for no new code to secure. See
-[SECURITY.md](https://github.com/itsOmidKarami/kraft/blob/main/SECURITY.md)
-for the full threat model.
+[Security](security.md) for the full threat model.

@@ -24,7 +24,7 @@ incident.
 
 ## An HTTP call
 
-Via `POST /triggers` — the HTTP twin of the same cron entry, for anything that
+Via `POST /api/triggers` — the HTTP twin of the same cron entry, for anything that
 can fire a webhook (CI, an external scheduler, a script watching a queue) but
 can't wait for the next minute-tick:
 

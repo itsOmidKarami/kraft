@@ -1,3 +1,5 @@
+<!-- Mirrors CONTRIBUTING.md at the repo root; keep both in sync. -->
+
 # Contributing
 
 ## Getting set up
