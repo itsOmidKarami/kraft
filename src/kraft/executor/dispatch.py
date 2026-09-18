@@ -636,6 +636,12 @@ async def measure_node(
             )
             if r_status in _FAILING_STATUSES:
                 return status
+            # A pause, budget breach, config error or rate limit on the repair
+            # itself is not evidence about the original failure -- it must
+            # propagate as-is, not be swallowed by falling through to the
+            # re-measure below (whose own status would replace it).
+            if r_status in _SCOPE_STOP_STATUSES or r_status == BUDGET:
+                return r_status
         # The re-measure is the point: a repair is believed only when the task
         # it repaired passes on its own, not when the remediator says so. The
         # `_head()` read inside this call is why Task 2 had to land first --
