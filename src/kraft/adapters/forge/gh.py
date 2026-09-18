@@ -25,6 +25,28 @@ _GH_FAILURE_REASON = {
 _RUN_ID_RE = re.compile(r"/actions/runs/(\d+)")
 
 
+def _latest_by_name(rows: list[dict], *, name: str, started: str) -> list[dict]:
+    """Collapse to one row per check name, keeping the one with the latest
+    `started` timestamp.
+
+    `test.yml` deliberately re-triggers on `labeled`/`unlabeled` (release-impact
+    needs to see label changes), so a label Kraft sets mid-check starts a
+    second workflow run on the same PR. `statusCheckRollup` and `gh run list`
+    both then carry entries from *both* runs -- the superseded run's jobs
+    (often `CANCELLED` by the `cancel-in-progress` concurrency group) alongside
+    the new run's real result, same name, two conclusions. Without this, a
+    stale `CANCELLED`/`FAILURE` row outlives its own run and pins `ci_status`
+    red forever, however green the latest run finishes.
+    """
+    latest: dict[str, dict] = {}
+    for row in rows:
+        key = str(row.get(name) or "")
+        prev = latest.get(key)
+        if prev is None or str(row.get(started) or "") >= str(prev.get(started) or ""):
+            latest[key] = row
+    return list(latest.values())
+
+
 class GhCli:
     """GitHub through `gh`. For the public repo after the v0.1.0 split."""
 
@@ -112,7 +134,9 @@ class GhCli:
         # unchanged -- that is a precursor state (checks not yet registered),
         # not GitLab's *settled*-red-with-zero-jobs case Kraft-ddxn is about,
         # so it is not treated as infra here.
-        checks = data.get("statusCheckRollup") or []
+        checks = _latest_by_name(
+            data.get("statusCheckRollup") or [], name="name", started="startedAt"
+        )
         if not checks:
             return CIStatus(
                 state="pending",
