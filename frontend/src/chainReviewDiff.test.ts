@@ -1,5 +1,6 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { carryForwardNodeFields, parseChainReviewArtifact } from "./chainReviewDiff";
+import { carryForwardNodeFields, parseChainReviewArtifact, withSteps } from "./chainReviewDiff";
 import type { ChainNode } from "./types/work_item";
 
 describe("carryForwardNodeFields", () => {
@@ -54,5 +55,23 @@ describe("parseChainReviewArtifact", () => {
   it("returns null when revised_chain_nodes is not an array", () => {
     const content = '{"status":"ready_for_approval","revised_chain_nodes":{"verify":{}}}';
     expect(parseChainReviewArtifact(content)).toBeNull();
+  });
+});
+
+describe("splice parity with the Python", () => {
+  const fixture = JSON.parse(
+    readFileSync(new URL("../../tests/fixtures/chain_review_splice.json", import.meta.url), "utf8"),
+  ) as {
+    cases: {
+      name: string;
+      old_tail: ChainNode[];
+      revised: Record<string, unknown>[];
+      expected: Record<string, unknown>[];
+    }[];
+  };
+
+  it.each(fixture.cases.map((c) => [c.name, c] as const))("%s", (_name, c) => {
+    const merged = carryForwardNodeFields(c.old_tail, c.revised).map(withSteps);
+    expect(merged).toEqual(c.expected);
   });
 });

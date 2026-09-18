@@ -37,6 +37,19 @@ function stripNonProposableCarryoverFields(
   return nodes;
 }
 
+/** `templates.with_steps`, in TypeScript -- a node with both `steps` and
+ *  `tasks` populated, whichever it was given. Same reason as the Python: the
+ *  ordering has one consumer and the flat list has twenty, so the splice
+ *  stores both and the preview must show both. */
+export function withSteps(node: Record<string, unknown>): Record<string, unknown> {
+  const declared = node.steps as string[][] | undefined;
+  const groups =
+    declared && declared.length
+      ? declared.map((g) => [...g])
+      : [[...((node.tasks as string[] | undefined) ?? [])]];
+  return { ...node, steps: groups, tasks: groups.flat() };
+}
+
 /** `templates.carry_forward_node_fields`, in TypeScript -- the gate's
  *  preview must show the tail exactly as `_splice_chain_review` will apply
  *  it, not the reviewer's raw, schema-limited output (Kraft-df4tc). */
@@ -52,6 +65,20 @@ export function carryForwardNodeFields(
       if (!(field in filled)) {
         filled[field] = old ? ((old as unknown as Record<string, unknown>)[field] ?? null) : null;
       }
+    }
+    // `steps` is not a carryover field: the reviewer may reshape `tasks`, and
+    // carrying old groups over a changed list would contradict it. But a node
+    // re-emitted with the same flat tasks is unchanged, ordering included.
+    const oldSteps = (old as unknown as Record<string, unknown> | undefined)?.steps as
+      | string[][]
+      | undefined;
+    if (
+      oldSteps?.length &&
+      !("steps" in n) &&
+      JSON.stringify(filled.tasks) === JSON.stringify(oldSteps.flat())
+    ) {
+      filled.steps = oldSteps;
+      delete filled.tasks;
     }
     return filled;
   });
