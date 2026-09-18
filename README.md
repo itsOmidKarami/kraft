@@ -7,13 +7,19 @@
 [![Docs](https://img.shields.io/badge/docs-itsomidkarami.github.io%2Fkraft-blue)](https://itsomidkarami.github.io/kraft/)
 
 A local orchestrator for semi-autonomous software work. One FastAPI process plus a
-React SPA: work items enter as **chains** — ordered nodes materialized from a YAML
-template — and each node runs hook-point tasks through plugin adapters (a headless
-agent, a subprocess, a builtin). Every retry loop is capped; hitting a cap escalates
-to you with the full trace. Gates stop the chain where a human decision belongs.
+React SPA: work items enter as [**chains**](https://itsomidkarami.github.io/kraft/concepts/#chain)
+— ordered nodes materialized from a YAML template — and each node runs hook-point
+tasks through plugin adapters (a headless agent, a subprocess, a builtin). Every
+retry loop is capped; hitting a cap escalates to you with the full trace. Gates
+stop the chain where a human decision belongs.
 
 Runs on your machine, binds loopback by default, and edits your repos through git
 worktrees. How it fits together: [ARCHITECTURE.md](ARCHITECTURE.md).
+
+**[Full documentation](https://itsomidkarami.github.io/kraft/)**, including a
+[getting-started tutorial](https://itsomidkarami.github.io/kraft/getting-started/)
+and a [configuration reference](https://itsomidkarami.github.io/kraft/configuration/),
+lives on the docs site — this README stays a tour, not the whole map.
 
 ![The Kraft board: work items grouped by Needs you, Running, Not started, and Done](.github/assets/board.png)
 
@@ -225,7 +231,8 @@ pipeline.
 
 ## The `kraft` command
 
-`kraft` with no arguments serves. Subcommands talk to a running server.
+`kraft` with no arguments serves. Subcommands talk to a running server. Full
+reference: [docs → CLI reference](https://itsomidkarami.github.io/kraft/cli/).
 
 ```bash
 kraft view list                      # the board, scoped to the repo you are in
@@ -296,6 +303,7 @@ for it:
 
 `kraft repo connect` probes a `setup_command` from the repo's markers; check it
 before trusting it, and `kraft admin doctor` reports any repo still undeclared.
+Full field list: [docs → Configuration](https://itsomidkarami.github.io/kraft/configuration/#reposyaml-connected-repos).
 
 Editing a repo's settings stays in the UI.
 
