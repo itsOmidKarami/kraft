@@ -34,7 +34,12 @@ hooks:
   # so they have to exist before the first pipeline, not after.
   on.mr.describe:            { kind: agent, harness: claude, skill: mr-metadata, artifact: mr_meta, model: sonnet, effort: medium }
   on.mr.open:                { kind: forge, handler: open_mr, backend: auto }
-  on.ci.poll:                { kind: forge, handler: ci_poll, backend: auto }
+  # The repair travels with the task now, not with the node (spec §4). Its
+  # subject was always the pipeline, so it belongs to whichever chain polls
+  # one: a template that reaches `on.ci.poll` through `extends` gets the
+  # repair without declaring anything.
+  on.ci.poll:                { kind: forge, handler: ci_poll, backend: auto,
+                               on_failure: [on.ci.repair] }
   on.review.mr.run:          { kind: builtin, handler: noop }
   on.mr.sync:                { kind: forge, handler: sync_mr, backend: auto }
   on.human_review.requested: { kind: agent, harness: claude, skill: review-brief, artifact: review_brief }
@@ -44,11 +49,13 @@ hooks:
   # on this item's own tracking bead instead of silently becoming every other
   # item's rebase problem to re-diagnose independently.
   on.merge.watch:            { kind: forge, handler: merge_watch, backend: auto }
-  # mr_checks' on_failure repair pass (Kraft-xh0q layer 3): reads why
-  # on.ci.poll went red and, when the reason is a fixable MR-level thing like
-  # a missing label, applies the fix via set_mr_labels. Judgment, not a rules
-  # table -- see the skill.
-  on.mr_checks.repair:       { kind: agent, harness: claude, skill: mr-checks-repair }
+  # Reads why on.ci.poll went red and, when the reason is a fixable MR-level
+  # thing like a missing label, applies the fix via set_mr_labels. Judgment,
+  # not a rules table -- see the skill. Renamed from `on.mr_checks.repair`:
+  # it was named after the one node that happened to declare it. The skill
+  # directory keeps its old name on purpose -- skills are overlaid from
+  # $KRAFT_HOME and renaming the directory would strand an operator's copy.
+  on.ci.repair:              { kind: agent, harness: claude, skill: mr-checks-repair }
   # Fix-loop judge (2026-09-12-verify-fix-loop-judge-design): asked before
   # every fix cycle after the first, for any node with a fix_loop, whether
   # that cycle is still worth spending. Dispatched directly by the executor,

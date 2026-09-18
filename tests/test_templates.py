@@ -67,6 +67,7 @@ def test_shipped_yaml_parses_and_matches_spec():
         "kind": "forge",
         "handler": "ci_poll",
         "backend": "auto",
+        "on_failure": ["on.ci.repair"],
     }
     assert registry["hooks"]["on.human_review.requested"] == {
         "kind": "agent",
@@ -95,7 +96,7 @@ def test_shipped_registry_merges_its_own_defaults():
         "on.review.local.run",
         "on.review.security.run",
         "on.human_review.requested",
-        "on.mr_checks.repair",
+        "on.ci.repair",
         "on.fix_loop.judge",
         "on.mr.describe",
     ):
@@ -1175,7 +1176,9 @@ def test_a_node_may_have_both_fix_loop_and_on_failure(tmp_path):
 
 def test_default_templates_mr_checks_has_the_ci_fix_loop_shape(tmp_path):
     """The real `templates/default.yaml`/`registry.yaml` pair: `mr_checks`
-    carries `fix_loop`, `rebase_bounce_to`, and `on_failure` together."""
+    carries `fix_loop` and `rebase_bounce_to`. Its repair now lives on the
+    `on.ci.poll` binding, not on this node (Kraft-uhev1 phase 2) -- see
+    `test_shipped_registry_hangs_the_ci_repair_off_the_poll_binding`."""
     from pathlib import Path
 
     real_dir = Path(__file__).resolve().parents[1] / "templates"
@@ -1185,7 +1188,7 @@ def test_default_templates_mr_checks_has_the_ci_fix_loop_shape(tmp_path):
     node = next(n for n in ts.valid["default"].nodes if n["id"] == "mr_checks")
     assert node["fix_loop"] == "ci_fix_loop"
     assert node["rebase_bounce_to"] == "verify"
-    assert node["on_failure"] == ["on.mr_checks.repair"]
+    assert node.get("on_failure") in (None, [])
 
 
 def test_config_files_in_the_templates_dir_are_not_read_as_templates(tmp_path):
@@ -1829,6 +1832,25 @@ def test_binding_on_failure_rejects_naming_itself(tmp_path):
     )
     with pytest.raises(templates.RegistryError, match="its own repair"):
         templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_shipped_registry_hangs_the_ci_repair_off_the_poll_binding():
+    """The repair's whole job is reading a red pipeline, so it belongs to
+    `on.ci.poll`, not to whichever node happens to poll. Named for what it
+    knows about rather than for its old position in one chain."""
+    reg = templates.load_registry(Path("templates/registry.yaml"))
+    assert reg.hooks["on.ci.poll"]["on_failure"] == ["on.ci.repair"]
+    assert "on.ci.repair" in reg.hooks
+    assert "on.mr_checks.repair" not in reg.hooks
+
+
+def test_shipped_default_chain_no_longer_carries_a_node_level_on_failure():
+    reg = templates.load_registry(Path("templates/registry.yaml"))
+    ts = templates.load_templates(Path("templates"), reg)
+    nodes = ts.valid["default"].nodes
+    assert all(n.get("on_failure") in (None, []) for n in nodes), [
+        n["id"] for n in nodes if n.get("on_failure")
+    ]
 
 
 def test_defaults_agent_still_rejects_on_failure(tmp_path):

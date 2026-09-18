@@ -208,11 +208,24 @@ def test_chain_review_splice_keeps_on_failure_from_schema_only_nodes(tmp_path, m
     """Kraft-eod0: the skill's documented node schema is only 4 of a node's 8
     real keys. A reviewer following it to the letter emits nodes with just
     `{id, tasks, gate_after, fix_loop}` -- the splice must not read that as
-    "delete on_failure", or mr_checks's repair hook silently stops firing on
-    every chain review that says the chain is fine as-is."""
+    "delete on_failure", or a node-level repair hook silently stops firing on
+    every chain review that says the chain is fine as-is.
+
+    The shipped `default` chain no longer carries a node-level `on_failure`
+    itself (Kraft-uhev1 phase 2 moved the CI repair onto its binding), so
+    this test gives `mr_checks` one directly -- an install whose chain
+    predates that move still has one, and the splice must still preserve it.
+    """
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
+    templates_dir = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
+    default_path = templates_dir / "default.yaml"
+    default = yaml.safe_load(default_path.read_text())
+    for node in default["nodes"]:
+        if node["id"] == "mr_checks":
+            node["on_failure"] = ["on.mr_checks.repair"]
+    default_path.write_text(yaml.safe_dump(default, sort_keys=False))
+    with _client(tmp_path, monkeypatch, templates_dir=templates_dir) as client:
         wid = _post_default(client, repo)
         for gate in ("spec_approval", "plan_approval"):
             _await_gate(client, wid, gate)
