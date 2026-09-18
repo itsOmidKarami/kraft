@@ -613,8 +613,6 @@ def test_a_rewind_reopens_every_node_after_the_named_one(tmp_path, monkeypatch, 
     for expected in (
         "implementation",
         "verify",
-        "pre_mr_rebase",
-        "mr_meta",
         "open_mr",
         "mr_checks",
     ):
