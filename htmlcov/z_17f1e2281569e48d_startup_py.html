@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_323e79e8bb4dca6e_archive_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.15.4">coverage.py v7.15.4</a>,
-            created at 2026-09-18 22:11 +0000
+            created at 2026-09-18 23:37 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -158,11 +158,11 @@
     <p class="pln"><span class="n"><a id="t76" href="#t76">76</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t77" href="#t77">77</a></span><span class="t">    <span class="com"># Config the Settings screens edit. Read once here and re-read on every save,</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t78" href="#t78">78</a></span><span class="t">    <span class="com"># so a hand edit and a UI edit are the same operation to the rest of the app.</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t79" href="#t79">79</a></span><span class="t">    <span class="nam">access</span> <span class="op">=</span> <span class="nam">config_mod</span><span class="op">.</span><span class="nam">load_access</span><span class="op">(</span><span class="nam">templates_dir</span> <span class="op">/</span> <span class="str">&quot;access.yaml&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t79" href="#t79">79</a></span><span class="t">    <span class="nam">access</span> <span class="op">=</span> <span class="nam">config_mod</span><span class="op">.</span><span class="nam">load_access</span><span class="op">(</span><span class="nam">templates_dir</span> <span class="op">/</span> <span class="str">&quot;access.yaml&quot;</span><span class="op">)</span><span class="op">.</span><span class="nam">model_dump</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t80" href="#t80">80</a></span><span class="t">    <span class="com"># A hand-edit typo must not refuse the boot: degrade to the default &#8212; off &#8212;</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t81" href="#t81">81</a></span><span class="t">    <span class="com"># so Settings &#8594; Auto-intake comes up and can be used to fix the file.</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t82" href="#t82">82</a></span><span class="t">    <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t83" href="#t83">83</a></span><span class="t">        <span class="nam">app</span><span class="op">.</span><span class="nam">state</span><span class="op">.</span><span class="nam">intake</span> <span class="op">=</span> <span class="nam">config_mod</span><span class="op">.</span><span class="nam">load_intake</span><span class="op">(</span><span class="nam">templates_dir</span> <span class="op">/</span> <span class="str">&quot;intake.yaml&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t83" href="#t83">83</a></span><span class="t">        <span class="nam">app</span><span class="op">.</span><span class="nam">state</span><span class="op">.</span><span class="nam">intake</span> <span class="op">=</span> <span class="nam">config_mod</span><span class="op">.</span><span class="nam">load_intake</span><span class="op">(</span><span class="nam">templates_dir</span> <span class="op">/</span> <span class="str">&quot;intake.yaml&quot;</span><span class="op">)</span><span class="op">.</span><span class="nam">model_dump</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t84" href="#t84">84</a></span><span class="t">    <span class="key">except</span> <span class="nam">config_mod</span><span class="op">.</span><span class="nam">ConfigError</span> <span class="key">as</span> <span class="nam">exc</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t85" href="#t85">85</a></span><span class="t">        <span class="nam">logger</span><span class="op">.</span><span class="nam">warning</span><span class="op">(</span><span class="str">&quot;intake.yaml is unreadable, auto-intake stays off: %s&quot;</span><span class="op">,</span> <span class="nam">exc</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t86" href="#t86">86</a></span><span class="t">        <span class="nam">app</span><span class="op">.</span><span class="nam">state</span><span class="op">.</span><span class="nam">intake</span> <span class="op">=</span> <span class="nam">dict</span><span class="op">(</span><span class="nam">config_mod</span><span class="op">.</span><span class="nam">INTAKE_DEFAULT</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
@@ -348,7 +348,7 @@
             <a class="nav" href="z_323e79e8bb4dca6e_archive_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.15.4">coverage.py v7.15.4</a>,
-            created at 2026-09-18 22:11 +0000
+            created at 2026-09-18 23:37 +0000
         </p>
     </div>
 </footer>
