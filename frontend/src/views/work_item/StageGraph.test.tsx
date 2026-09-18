@@ -76,3 +76,11 @@ describe("StageGraph (Kraft-1brd: trimmed-node placeholders)", () => {
     expect(screen.getAllByRole("button")).toHaveLength(2);
   });
 });
+
+describe("StageGraph · vocabulary (Kraft-snz7s)", () => {
+  it("labels the nav 'chain nodes', the settled word", () => {
+    render(<StageGraph item={item()} selected={null} onSelect={() => {}} />);
+    expect(document.querySelector('nav[aria-label="chain nodes"]')).toBeTruthy();
+    expect(document.querySelector('nav[aria-label="chain stages"]')).toBeNull();
+  });
+});

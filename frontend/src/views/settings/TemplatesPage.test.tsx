@@ -341,3 +341,13 @@ describe("Settings · route rename (UI v2 · 01)", () => {
     expect(await screen.findByText("spec")).toBeInTheDocument();
   });
 });
+
+describe("Settings · chains editor · task ordering (Kraft-7ifcj)", () => {
+  it("does not tell the operator a node's tasks run in order", async () => {
+    renderAt("/settings/chains");
+    await userEvent.click(await screen.findByText("verify"));
+    const text = document.body.textContent ?? "";
+    expect(text).not.toMatch(/hook points, in order/i);
+    expect(text).toMatch(/concurrent/i);
+  });
+});

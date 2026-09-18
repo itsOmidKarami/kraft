@@ -217,7 +217,11 @@ function NodeForm({
         />
       </div>
 
-      <SectionLabel>Tasks · hook points, in order</SectionLabel>
+      {/* Kraft-7ifcj: these run concurrently (`asyncio.gather` in
+          executor/dispatch.py's `measure_node`), and this editor offers no
+          reorder control. The old "in order" taught the wrong execution model
+          to exactly the person configuring a chain. */}
+      <SectionLabel>Tasks · hook points, run concurrently</SectionLabel>
       {tasks.map((hook, i) => (
         <div key={`${hook}-${i}`} className="chain-task-row">
           <span className="mono">{hook}</span>

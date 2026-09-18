@@ -79,7 +79,7 @@ export function StageGraph({
   const liveNodes = (item.effective_chain ?? item.chain_definition).nodes;
   const nodes = useFullNodeList(item, liveNodes);
   return (
-    <nav className="stage-graph" aria-label="chain stages">
+    <nav className="stage-graph" aria-label="chain nodes">
       {nodes.map((n, i) => {
         if ("trimmed" in n) {
           return (
