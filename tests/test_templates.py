@@ -141,7 +141,7 @@ def test_policy_yaml_is_not_scanned_as_a_template():
     assert "policy" not in ts.valid
 
 
-def test_shipped_default_yaml_is_the_fifteen_node_chain():
+def test_shipped_default_yaml_is_the_fourteen_node_chain():
     reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
     ts = templates.load_templates(TEMPLATES_DIR, reg)
     assert "default" in ts.valid, ts.invalid
@@ -152,7 +152,6 @@ def test_shipped_default_yaml_is_the_fifteen_node_chain():
         "chain_review",
         "env_setup",
         "implementation",
-        "repos_scan",
         "verify",
         "pre_mr_rebase",
         "mr_meta",
@@ -172,12 +171,24 @@ def test_shipped_default_yaml_is_the_fifteen_node_chain():
     assert gates["post_merge_watch"] is None
 
     by_id = {n["id"]: n for n in nodes}
-    assert by_id["implementation"]["tasks"] == ["on.implementation.start"]
-    assert by_id["repos_scan"]["tasks"] == ["on.repos.scan"]
+    assert by_id["implementation"]["tasks"] == ["on.implementation.start", "on.repos.scan"]
     assert by_id["pre_mr_rebase"]["rebase_bounce_to"] == "verify"
     assert by_id["pre_mr_rebase"]["tasks"] == ["on.mr.rebase"]
     assert by_id["post_merge_watch"]["tasks"] == ["on.merge.watch"]
     assert "fix_loop" not in by_id["post_merge_watch"]
+
+
+def test_the_shipped_chain_scans_submodules_as_implementations_second_step():
+    """Kraft-ilff3's real fix. The interim repos_scan node was a stopgap for a
+    node that could not express 'after'."""
+    reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
+    ts = templates.load_templates(TEMPLATES_DIR, reg)
+    nodes = {n["id"]: n for n in ts.valid["default"].nodes}
+    assert "repos_scan" not in nodes, "the interim node is gone"
+    assert nodes["implementation"]["steps"] == [
+        ["on.implementation.start"],
+        ["on.repos.scan"],
+    ]
 
 
 def test_the_default_chain_syncs_the_mr_after_the_review_gate():

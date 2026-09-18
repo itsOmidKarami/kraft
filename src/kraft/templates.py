@@ -935,6 +935,12 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
         if node_errors:
             invalid[tid] = f"template {tid!r}: {node_errors[0]}"
             continue
+        # `validate_nodes` normalizes its own local copy to check a `steps`
+        # node's shape; `Template.nodes` needs that same normalization; a
+        # `steps`-only node otherwise reaches `materialize` (and every test
+        # or caller reading `n["tasks"]` directly off `Template.nodes`) with
+        # no `tasks` key at all.
+        nodes = [with_steps(n) for n in nodes]
 
         bad_loop = next(
             (
