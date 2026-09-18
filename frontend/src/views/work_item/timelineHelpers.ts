@@ -62,6 +62,9 @@ export function detailOf(e: KraftEvent): string | null {
     const failed = Array.isArray(p.failed_tasks) ? (p.failed_tasks as string[]).join(", ") : "";
     return `${failed} failed → ${(p.tasks as string[]).join(", ")}`;
   }
+  if (e.type === "loop_counters_reset" && p.reason === "rebase_bounce" && Array.isArray(p.nodes)) {
+    return `rebased onto latest main → re-running ${(p.nodes as string[]).join(", ")}`;
+  }
   // UI v2 · 04: the reset/override/budget events this MR adds get a plain
   // one-line rendering too, the same "don't ship a blank row" rule as above.
   if (e.type === "node_overrides_changed") {
