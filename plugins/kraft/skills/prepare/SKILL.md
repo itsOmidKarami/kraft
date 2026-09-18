@@ -46,6 +46,12 @@ same inline/handoff call - e.g. a plan that turns out to be one small task can
 downgrade an architectural spec to inline), and attach the plan alongside the
 spec if handing off.
 
+**Do not put a full-test-suite run in the plan.** A plan headed for Kraft runs
+under a chain whose `verify` node already runs the suite (and local review)
+after every task, with its own fix loop - a task step that re-runs it is
+redundant work the chain repeats anyway. Per-task targeted tests (the test the
+task itself is about) stay in the plan; only the suite-wide run is out.
+
 ## 4. Auto mode
 
 If the user said `auto` (as an argument, e.g. `/prepare auto ...`) or used

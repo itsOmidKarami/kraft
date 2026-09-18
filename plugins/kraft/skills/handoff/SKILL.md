@@ -45,3 +45,9 @@ absolute.
 Attaching a spec or plan trims the node whose gate it satisfies, so the person
 is not asked to re-approve what they just agreed with you, and the implementing
 agent is told to follow the documents rather than guess.
+
+Before attaching a plan, skim it for a full-test-suite step (e.g. "run the
+full test suite" / "run all tests" as a task, not a task's own targeted test).
+The chain's `verify` node already runs the suite after every task with its own
+fix loop, so a plan step doing the same is redundant. If you see one, mention
+to the user that it's not advised and offer to strip it before attaching.
