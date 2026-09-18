@@ -125,6 +125,8 @@ async def parse_template_yaml(body: ParseBody):
     try:
         data = yaml.safe_load(body.text)
     except yaml.YAMLError as exc:
+        # str(exc) is safe here: pyyaml's message is a parse-position
+        # description of the operator's own submitted text, not a traceback.
         return {"nodes": None, "error": str(exc)}
     if not isinstance(data, dict) or not isinstance(data.get("nodes"), list):
         return {"nodes": None, "error": "expected a mapping with a 'nodes' list"}
