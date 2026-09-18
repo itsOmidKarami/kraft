@@ -1787,3 +1787,56 @@ def test_the_shipped_registry_still_loads():
     """The one test that matters for every existing install."""
     reg = templates.load_registry(Path("templates/registry.yaml"))
     assert reg.hooks["on.implementation.start"]["harness"] == "claude"
+
+
+def test_binding_on_failure_is_accepted_on_a_non_agent_kind(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n"
+        "  on.poll:   { kind: builtin, handler: noop, on_failure: [on.repair] }\n"
+        "  on.repair: { kind: builtin, handler: noop }\n"
+    )
+    reg = templates.load_registry(tmp_path / "registry.yaml")
+    assert reg.hooks["on.poll"]["on_failure"] == ["on.repair"]
+
+
+def test_binding_on_failure_must_be_a_non_empty_list_of_strings(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.poll: { kind: builtin, handler: noop, on_failure: on.repair }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="non-empty list of strings"):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_binding_on_failure_rejects_an_empty_list(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.poll: { kind: builtin, handler: noop, on_failure: [] }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="non-empty list of strings"):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_binding_on_failure_rejects_an_unknown_hook(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.poll: { kind: builtin, handler: noop, on_failure: [on.nope] }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="unknown hook"):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_binding_on_failure_rejects_naming_itself(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.poll: { kind: builtin, handler: noop, on_failure: [on.poll] }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="its own repair"):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_defaults_agent_still_rejects_on_failure(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "defaults:\n  agent: { on_failure: [on.repair] }\n"
+        "hooks:\n"
+        "  on.a:      { kind: agent, command: claude }\n"
+        "  on.repair: { kind: builtin, handler: noop }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="defaults.agent"):
+        templates.load_registry(tmp_path / "registry.yaml")

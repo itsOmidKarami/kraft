@@ -471,7 +471,13 @@ def load_registry(
         # Settings today, ahead of the screen/executor that will read them.
         # `timeout` is rejected for `builtin` above, so this stays a plain
         # superset with no behaviour change for `builtin`.
-        known |= {"interactive", "timeout", "repos", "sandbox"}
+        #
+        # `on_failure` is kind-agnostic on purpose (spec §4): the motivating
+        # repair hangs off `on.ci.poll`, which is `kind: forge`. Deliberately
+        # NOT in `_AGENT_ONLY_KEYS`, and therefore not settable through
+        # `defaults.agent` either -- a repair silently inherited by every
+        # agent binding is the opposite of what a per-task repair is for.
+        known |= {"interactive", "timeout", "repos", "sandbox", "on_failure"}
         if kind == "agent":
             known |= _AGENT_ONLY_KEYS
         if "interactive" in binding and not isinstance(binding["interactive"], bool):
@@ -482,6 +488,39 @@ def load_registry(
                 f"{path.name}: hook {hook!r} has unknown key(s) {unknown}; "
                 f"a {kind} hook takes {sorted(known)}"
             )
+    # Binding-level `on_failure` (spec §4): a repair that travels with the task
+    # rather than with whichever node happens to run it. Validated here, after
+    # the per-binding loop rather than inside it, because a repair hook is
+    # itself a hook in this same file -- the names it points at are only all
+    # known once every binding has been read.
+    for hook, binding in data["hooks"].items():
+        repair = binding.get("on_failure")
+        if repair is None:
+            continue
+        if (
+            not isinstance(repair, list)
+            or not repair
+            or not all(isinstance(t, str) for t in repair)
+        ):
+            raise RegistryError(
+                f"{path.name}: hook {hook!r} 'on_failure' must be a non-empty list of strings"
+            )
+        # A hook naming itself would dispatch its own repair, fail again, and
+        # do it forever. The general cycle (a -> b -> a) is not checked: a
+        # repair's own `on_failure` is never dispatched (`dispatch.measure_node`
+        # runs one repair layer only), so self-reference is the only shape that
+        # can actually loop.
+        if hook in repair:
+            raise RegistryError(
+                f"{path.name}: hook {hook!r} names itself in 'on_failure'; "
+                "a hook cannot be its own repair"
+            )
+        missing = sorted(set(repair) - set(data["hooks"]))
+        if missing:
+            raise RegistryError(
+                f"{path.name}: hook {hook!r} 'on_failure' names unknown hook(s) {missing}"
+            )
+
     return Registry(hooks=data["hooks"], raw=raw)
 
 
