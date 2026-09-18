@@ -104,6 +104,41 @@ def with_steps(node: dict) -> dict:
     return {**node, "steps": groups, "tasks": [t for g in groups for t in g]}
 
 
+#: The one hook the repo's own test scopes may replace the command of. The
+#: legacy fallback in `with_inputs` is the only thing that still couples
+#: behavior to a hook's *name*; every other binding says what it wants in
+#: `inputs:`.
+TEST_HOOK = "on.test.run"
+
+#: What a binding may declare it is fed, and on which channel. A closed
+#: vocabulary: `load_registry` rejects anything else at config load.
+VALID_INPUTS = {
+    "review_package": {"env"},
+    "carried_findings": {"env"},
+    "test_scopes": {"argv"},
+}
+
+
+def with_inputs(binding: dict, task_hook: str) -> dict:
+    """The binding's resolved input table.
+
+    An explicit `inputs:` is authoritative: exactly what is declared, nothing
+    implied. Absent, today's hardcoded rules are reproduced, because
+    `registry.yaml` is seeded once and never overwritten, so every existing
+    install has an `on.test.run` with no `inputs:`; reading the table strictly
+    would run the registry's command against every repo (Kraft-579/9wzy).
+
+    The fallback is also the Kraft-ouoqx fix: a non-test subprocess hook
+    resolves to `{}` and runs its own command. What it carries forward is the
+    hook-*name* coupling; declaring `inputs:` is its remedy.
+    """
+    if "inputs" in binding:
+        return binding["inputs"] or {}
+    if binding.get("kind") == "subprocess" and task_hook == TEST_HOOK:
+        return {"test_scopes": {"channel": "argv"}}
+    return {}
+
+
 def carry_forward_node_fields(old_nodes: list, new_nodes: list) -> list:
     """Fill `NODE_CARRYOVER_FIELDS` on `new_nodes` from the old node sharing its
     `id`, for whichever fields the new node did not itself set. A node id with
@@ -506,8 +541,35 @@ def load_registry(
         # `defaults.agent` either -- a repair silently inherited by every
         # agent binding is the opposite of what a per-task repair is for.
         known |= {"interactive", "timeout", "repos", "sandbox", "on_failure"}
+        if kind == "subprocess":
+            known.add("inputs")
         if kind == "agent":
             known |= _AGENT_ONLY_KEYS
+        inputs = binding.get("inputs")
+        if inputs is not None:
+            if not isinstance(inputs, dict):
+                raise RegistryError(f"{path.name}: hook {hook!r} 'inputs' must be a mapping")
+            for name, cfg in inputs.items():
+                if name not in VALID_INPUTS:
+                    raise RegistryError(
+                        f"{path.name}: hook {hook!r} declares unknown input {name!r}; "
+                        f"known: {sorted(VALID_INPUTS)}"
+                    )
+                if not isinstance(cfg, dict):
+                    raise RegistryError(
+                        f"{path.name}: hook {hook!r} input {name!r} must be a mapping"
+                    )
+                channel = cfg.get("channel")
+                if channel not in VALID_INPUTS[name]:
+                    raise RegistryError(
+                        f"{path.name}: hook {hook!r} input {name!r} cannot use channel "
+                        f"{channel!r}; supported: {sorted(VALID_INPUTS[name])}"
+                    )
+                if channel == "env" and not isinstance(cfg.get("name"), str):
+                    raise RegistryError(
+                        f"{path.name}: hook {hook!r} input {name!r} on the env channel "
+                        "needs a string 'name'"
+                    )
         if "interactive" in binding and not isinstance(binding["interactive"], bool):
             raise RegistryError(f"{path.name}: hook {hook!r} 'interactive' must be a boolean")
         unknown = sorted(set(binding) - known)

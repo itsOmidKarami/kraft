@@ -37,3 +37,9 @@ def test_steps_is_advertised_to_installs_that_predate_it():
     assert "steps" in names
     entry = next(c for c in capabilities.MANIFEST if c.name == "steps")
     assert "steps:" in entry.how
+
+
+def test_the_inputs_capability_is_announced():
+    entry = next((c for c in capabilities.MANIFEST if c.name == "inputs"), None)
+    assert entry is not None
+    assert "inputs:" in entry.how
