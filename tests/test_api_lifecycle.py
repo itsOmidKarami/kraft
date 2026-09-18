@@ -475,7 +475,7 @@ def test_retry_rebase_conflict_bounces_to_verify_and_clears_the_span(tmp_path, m
         deadline = time.monotonic() + 5
         while not starts and time.monotonic() < deadline:
             time.sleep(0.05)
-        assert starts[-1] == 5, "did not bounce back to verify's index"
+        assert starts[-1] == 4, "did not bounce back to verify's index"
         conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
         try:
             rows = conn.execute(

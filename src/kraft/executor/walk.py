@@ -371,7 +371,7 @@ async def walk_node(
                 if not recovered:
                     question = dispatch.needs_context_question(db, work_item_id, node, round=1)
             if not recovered:
-                # A rebase conflict raised by `on.mr.rebase` (`pre_mr_rebase`)
+                # A rebase conflict raised by `on.mr.rebase` (any node that rebases)
                 # is not "for a human to resolve, not to dispatch an agent
                 # into" any more (Kraft-s7c04.23, by the human's own call at
                 # the design gate) -- the resolver re-creates the conflict and

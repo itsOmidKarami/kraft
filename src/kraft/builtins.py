@@ -442,14 +442,14 @@ async def ensure_worktree(
     attachments copied in.
 
     Called by the executor before the first node dispatches, not only by the
-    `env_setup` builtin: `default.yaml` runs `spec` and `plan` ahead of
-    `env_setup`, and an agent asked to write a file into a directory that does
+    `env_setup` builtin: `default.yaml` runs `spec` and `plan` before
+    the first `on.env.prepare`, and an agent asked to write a file into a directory that does
     not exist fails in a way no chain can recover from (Kraft-bmp). The
     attachment copy has to move with it: `plan/SKILL.md` tells a headless
     session to fall back to an attached spec when the chain skipped the spec
     node, and that document was not there yet if the copy waited for
-    `env_setup` (node 4) to run. `env_setup` still exists — it is this call,
-    now unconditionally carrying attachments, plus its own session bookkeeping.
+    `env_setup` to run. `env_setup` is this call, unconditionally carrying
+    attachments, plus its own session bookkeeping.
 
     Idempotent in both directions: an existing worktree is returned untouched
     *and uncopied-into* (attachments were copied whenever this worktree was
@@ -607,7 +607,7 @@ async def upstream_head(repo: Path) -> str | None:
     An item's MR targets origin's branch, and the connected checkout is only
     as fresh as its owner's last pull -- Kraft merges on the forge, so nothing
     here ever moves it (Kraft-k647). Forking and rebasing onto that checkout
-    started items behind and made every `pre_mr_rebase` answer "nothing to
+    started items behind and made every `open_mr` rebase answer "nothing to
     rebase". A failed fetch (offline, credentials the server process cannot
     reach, a concurrent fetch holding the ref lock) still prefers the stale
     remote-tracking ref over the checkout, which may be on another branch or

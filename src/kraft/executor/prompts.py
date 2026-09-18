@@ -540,7 +540,7 @@ def review_package(
     longer knows, which makes the range meaningless.
 
     Deliberately *not* guarded: a `since` that is no longer an ancestor of HEAD,
-    which is what a `pre_mr_rebase` bounce produces. `git diff <old_sha>` then
+    which is what an `open_mr` rebase bounce produces. `git diff <old_sha>` then
     shows a superset of the round's change -- the upstream commits included --
     which is noisy but never hides anything, and a bounce is exactly the case
     where a wider look is wanted (`rebase_bounce_to: verify` exists for it).
