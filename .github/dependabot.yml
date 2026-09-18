@@ -1,32 +1,13 @@
 version: 2
 updates:
-  # Split by dependency-type so each PR carries the release label the
-  # `release-impact` check in test.yml requires -- Dependabot never applies
-  # one itself, and that check has no exemption for same-repo bot PRs.
+  # Dependabot rejects two update configs with the same ecosystem+directory,
+  # so this can't split prod/dev bumps into separate labeled blocks. Default
+  # to release::patch -- a reviewer downgrades to release::none on the rare
+  # dev-only bump, same as any other PR's label is just the author's claim.
   - package-ecosystem: uv
     directory: /
     schedule:
       interval: weekly
-    allow:
-      - dependency-type: production
-    labels:
-      - release::patch
-
-  - package-ecosystem: uv
-    directory: /
-    schedule:
-      interval: weekly
-    allow:
-      - dependency-type: development
-    labels:
-      - release::none
-
-  - package-ecosystem: npm
-    directory: /frontend
-    schedule:
-      interval: weekly
-    allow:
-      - dependency-type: production
     labels:
       - release::patch
 
@@ -34,10 +15,8 @@ updates:
     directory: /frontend
     schedule:
       interval: weekly
-    allow:
-      - dependency-type: development
     labels:
-      - release::none
+      - release::patch
 
   # Keeps the SHA-pinned actions in .github/workflows/*.yml current -- those
   # pins have no other update path. Always CI-only, never shipped.
