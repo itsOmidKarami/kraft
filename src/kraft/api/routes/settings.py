@@ -61,7 +61,7 @@ async def get_template(tid: str, request: Request):
     template = st.templates.valid.get(tid)
     if template is None:
         raise HTTPException(404, f"unknown template {tid!r}")
-    return {"id": tid, "nodes": [dict(n.items()) for n in template.nodes]}
+    return {"id": tid, "nodes": [n.model_dump(exclude_unset=True) for n in template.authored]}
 
 
 def _validate_template(st, tid: str, nodes: list[dict]) -> dict:
