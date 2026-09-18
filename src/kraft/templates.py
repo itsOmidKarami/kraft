@@ -142,17 +142,20 @@ def with_inputs(binding: dict, task_hook: str) -> dict:
 def carry_forward_node_fields(old_nodes: list, new_nodes: list) -> list:
     """Fill `NODE_CARRYOVER_FIELDS` on `new_nodes` from the old node sharing its
     `id`, for whichever fields the new node did not itself set. A node id with
-    no old counterpart (one the reviewer added) is left alone -- the reviewer
-    cannot invent a repair task or a reject target the skill never taught it to
-    name, so a genuinely new node gets `None` for all of these, same as
+    no old counterpart (one the reviewer added) has nothing to inherit, so it
+    gets `None` for all of these written explicitly -- the same shape
     `materialize()` gives any node lacking them."""
     old_by_id = {
         n["id"]: n for n in old_nodes if isinstance(n, dict) and isinstance(n.get("id"), str)
     }
     for n in new_nodes:
-        old = old_by_id.get(n.get("id"))
-        if old is None:
-            continue
+        # `{}` rather than skipping: a node id the reviewer invented still gets
+        # every carryover field written explicitly as `None`, the shape
+        # `materialize` gives any node lacking them (Kraft-fdee6). Skipping
+        # left a reviewer-added node as the only node in `chain_definition`
+        # missing those keys, and the gate preview -- which fills `null` --
+        # promised a shape the splice did not store.
+        old = old_by_id.get(n.get("id")) or {}
         for field in NODE_CARRYOVER_FIELDS:
             if field not in n:
                 n[field] = old.get(field)

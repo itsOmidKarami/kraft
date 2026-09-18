@@ -77,7 +77,8 @@ changing one node, the other tail nodes still appear, unchanged, in your output
 Every node you write is exactly:
 
 ```
-{ id: string, tasks: [hook_point, ...], gate_after: string|null, fix_loop: string|null,
+{ id: string, tasks: [hook_point, ...] | steps: [[hook_point, ...], ...],
+  gate_after: string|null, fix_loop: string|null,
   on_failure?: [hook_point, ...] | null,
   reject_to?: string | null,
   rebase_bounce_to?: string | null,
@@ -86,6 +87,19 @@ Every node you write is exactly:
 
 The field above is node-level only; a task-level repair lives on that task's
 registry binding instead (see below).
+
+A node carries `tasks` **or** `steps`, never both. `tasks` is one group: every
+task in it is dispatched at once and the node is measured when they have all
+settled. `steps` is a list of those groups, run in order, and the node stops at
+the first group that fails — so `steps: [[on.test.run], [on.review.local.run]]`
+means a red suite stops the node before the review is dispatched at all, while
+`tasks: [on.test.run, on.review.local.run]` means the reviewer is dispatched
+while the suite is still running.
+
+The prompt shows you the tail's current shape. A node listed there with `steps`
+has ordering that somebody chose on purpose: re-emit it as `steps`. Re-emitting
+it as a flat `tasks` list is a proposal to make those tasks concurrent, and
+will be read as one.
 
 `on_failure`, `reject_to`, and `rebase_bounce_to` are yours to set directly —
 you are not limited to carrying them forward blind. Set one only when the spec
@@ -148,6 +162,10 @@ in the tail keeps its old value carried forward unchanged, exactly as
 - `tasks` — hook points, and **only names from the allowed hook set**. A name you
   invented is not a task the orchestrator can run; it is a chain that fails
   validation, or worse, a node that silently does nothing.
+- `steps` — the same hook points, in ordered groups, for a node whose sequence
+  matters. Adding a task to a node that has `steps` means choosing which group
+  it joins, or giving it one of its own: a security review added to `verify`
+  belongs after the suite, not beside it.
 - `gate_after` — one of `spec_approval`, `plan_approval`, `chain_finalized`,
   `human_review_approval`, or `null`. These four are the entire set. You cannot
   create a new gate.

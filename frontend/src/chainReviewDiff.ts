@@ -37,6 +37,19 @@ function stripNonProposableCarryoverFields(
   return nodes;
 }
 
+/** `templates.with_steps`, in TypeScript -- a node with both `steps` and
+ *  `tasks` populated, whichever it was given. Same reason as the Python: the
+ *  ordering has one consumer and the flat list has twenty, so the splice
+ *  stores both and the preview must show both. */
+export function withSteps(node: Record<string, unknown>): Record<string, unknown> {
+  const declared = node.steps as string[][] | undefined;
+  const groups =
+    declared && declared.length
+      ? declared.map((g) => [...g])
+      : [[...((node.tasks as string[] | undefined) ?? [])]];
+  return { ...node, steps: groups, tasks: groups.flat() };
+}
+
 /** `templates.carry_forward_node_fields`, in TypeScript -- the gate's
  *  preview must show the tail exactly as `_splice_chain_review` will apply
  *  it, not the reviewer's raw, schema-limited output (Kraft-df4tc). */
@@ -53,8 +66,53 @@ export function carryForwardNodeFields(
         filled[field] = old ? ((old as unknown as Record<string, unknown>)[field] ?? null) : null;
       }
     }
+    // `steps` is not a carryover field: the reviewer may reshape `tasks`, and
+    // carrying old groups over a changed list would contradict it. But a node
+    // re-emitted with the same flat tasks is unchanged, ordering included.
+    const oldSteps = (old as unknown as Record<string, unknown> | undefined)?.steps as
+      | string[][]
+      | undefined;
+    if (
+      oldSteps?.length &&
+      !("steps" in n) &&
+      JSON.stringify(filled.tasks) === JSON.stringify(oldSteps.flat())
+    ) {
+      filled.steps = oldSteps;
+      delete filled.tasks;
+    }
     return filled;
   });
+}
+
+/** The order node keys are rendered in on both sides of the gate diff. The
+ *  reviewer authors keys in whatever order it likes and `carryForwardNodeFields`
+ *  appends the ones it omitted, so without this a node that is semantically
+ *  identical still renders as moved lines. Display only -- the splice does not
+ *  care, and neither does the parity fixture, which compares by value. */
+const NODE_KEY_ORDER = [
+  "id",
+  "tasks",
+  "steps",
+  "gate_after",
+  "fix_loop",
+  "on_failure",
+  "reject_to",
+  "rebase_bounce_to",
+  "auto_escalate",
+  "auto_escalate_stuck",
+  "auto_escalate_delay_s",
+] as const;
+
+/** One side of the gate diff, as the text to render: every node normalised
+ *  through `withSteps` and printed with a stable key order. */
+export function nodesForDiff(nodes: Record<string, unknown>[]): string {
+  const ordered = nodes.map(withSteps).map((n) => {
+    const out: Record<string, unknown> = {};
+    for (const k of NODE_KEY_ORDER) if (k in n) out[k] = n[k];
+    for (const k of Object.keys(n)) if (!(k in out)) out[k] = n[k];
+    return out;
+  });
+  return JSON.stringify(ordered, null, 2);
 }
 
 /** One flagged permission-surface concern (design point 3) -- read-only,

@@ -11,8 +11,9 @@ on-disk edit without a restart).
 
 Any YAML file in `templates/` whose top level is `id:` + `nodes:` is a chain
 template, selectable by that `id` when creating a work item. See
-[Concepts](concepts.md#chain) for the node schema (`gate_after`, `fix_loop`,
-`on_failure`, `rebase_bounce_to`, `reject_to`, `auto_escalate`) with the
+[Concepts](concepts.md#chain) for the node schema (`tasks`/`steps`,
+`gate_after`, `fix_loop`, `on_failure`, `rebase_bounce_to`, `reject_to`,
+`auto_escalate`) with the
 shipped `default` and `quick-task` templates as worked examples, and
 [Concepts → Composing a template](concepts.md#composing-a-template) for
 building a custom one with `extends`/`remove`/`insert_before`/`insert_after`

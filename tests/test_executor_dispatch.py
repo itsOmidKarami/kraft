@@ -2845,3 +2845,34 @@ def test_an_agent_hook_resolves_to_no_inputs():
 
     binding = {"kind": "agent", "harness": "claude"}
     assert templates.with_inputs(binding, "on.review.local.run") == {}
+
+
+def test_chain_review_context_shows_the_tail_it_is_revising():
+    """The reviewer must re-emit the complete tail and, since Kraft-bcg25, may
+    group it -- and nothing told it what the tail currently is. It got the
+    grouping right on this repo only because the worker's worktree *is* this
+    repo and `templates/default.yaml` was there to read; on any other repo the
+    shape is not on disk anywhere it can reach."""
+    from kraft.executor import prompts
+    from kraft.templates import Registry
+
+    registry = Registry(
+        hooks={
+            "on.test.run": {"kind": "subprocess"},
+            "on.review.local.run": {"kind": "agent", "command": "claude"},
+            "on.mr.open": {"kind": "forge", "handler": "open_mr"},
+        }
+    )
+    text = prompts.chain_review_context(
+        [
+            {
+                "id": "verify",
+                "tasks": ["on.test.run", "on.review.local.run"],
+                "steps": [["on.test.run"], ["on.review.local.run"]],
+            },
+            {"id": "open_mr", "tasks": ["on.mr.open"], "steps": [["on.mr.open"]]},
+        ],
+        registry,
+    )
+    assert "steps: [on.test.run] -> [on.review.local.run]" in text
+    assert "tasks: [on.mr.open]" in text

@@ -62,8 +62,12 @@ export function Config({
         {node ? (
           <>
             <dl className="config-fields">
-              <dt>tasks</dt>
-              <dd>{node.tasks.join(", ")}</dd>
+              <dt>{node.steps && node.steps.length > 1 ? "steps" : "tasks"}</dt>
+              <dd>
+                {(node.steps?.length ? node.steps : [node.tasks])
+                  .map((g) => g.join(", "))
+                  .join(" → ")}
+              </dd>
               <dt>gate_after</dt>
               <dd>{node.gate_after ?? "—"}</dd>
               <dt>fix_loop</dt>

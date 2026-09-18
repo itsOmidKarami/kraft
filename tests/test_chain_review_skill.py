@@ -49,7 +49,7 @@ def test_every_hook_point_it_cites_is_registered(text):
 
 
 def test_it_states_the_node_schema_fields(text):
-    for field in ("id", "tasks", "gate_after", "fix_loop"):
+    for field in ("id", "tasks", "steps", "gate_after", "fix_loop"):
         assert f"{field}" in text, f"node schema field {field!r} undocumented"
 
 

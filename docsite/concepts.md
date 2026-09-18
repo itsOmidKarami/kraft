@@ -50,6 +50,17 @@ nodes:
   - { id: post_merge_watch,  tasks: [on.merge.watch],              gate_after: null }
 ```
 
+A node's work is one or more **groups** of tasks. `tasks: [a, b]` is a single
+group: `a` and `b` are dispatched together and the node is measured once both
+have settled. `steps: [[a], [b]]` is two groups, run in order — `b` is not
+dispatched at all if `a` fails, and it sees whatever `a` left behind. A node
+declares one key or the other, never both.
+
+Reach for `steps` when the second task needs the first task's result: the
+default chain's `implementation` node runs the implementing agent and then
+scans submodules, so the scan reads a worktree the agent has actually
+touched rather than one it has not started on.
+
 A node's optional fields change how the chain behaves around it:
 
 | Field | Means |
