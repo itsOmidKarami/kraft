@@ -38,8 +38,7 @@ nodes:
   - { id: plan,              tasks: [on.plan.requested],          gate_after: plan_approval }
   - { id: chain_review,      tasks: [on.chain.review_ready],      gate_after: chain_finalized, auto_escalate: true }
   - { id: env_setup,         tasks: [on.env.prepare],             gate_after: null }
-  - { id: implementation,    tasks: [on.implementation.start],    gate_after: null }
-  - { id: repos_scan,        tasks: [on.repos.scan],              gate_after: null }
+  - { id: implementation,    steps: [[on.implementation.start], [on.repos.scan]], gate_after: null }
   - { id: verify,            tasks: [on.test.run, on.review.local.run], fix_loop: verify_fix_loop, gate_after: null }
   - { id: pre_mr_rebase,     tasks: [on.mr.rebase],                gate_after: null, rebase_bounce_to: verify }
   - { id: mr_meta,           tasks: [on.mr.describe],              gate_after: null }

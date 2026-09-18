@@ -26,7 +26,13 @@ def render(chain_yaml: Path, policy_yaml: Path) -> dict:
         "nodes": [
             {
                 "id": node["id"],
-                "tasks": list(node.get("tasks") or []),
+                # Lite has no notion of ordered `steps` -- it runs one flat
+                # task list per node -- so a `steps` node's groups collapse to
+                # their flat union, in group order, same as
+                # `kraft.templates.with_steps` does for Kraft itself.
+                "tasks": list(node["tasks"])
+                if node.get("tasks")
+                else [t for group in node.get("steps") or [] for t in group],
                 "gate_after": node.get("gate_after"),
                 "fix_loop": node.get("fix_loop"),
             }
