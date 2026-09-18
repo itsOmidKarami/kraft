@@ -103,11 +103,12 @@ Editing a repo's settings stays in the UI. Full field list, including
 ```bash
 kraft admin start --port 9000  # the same as bare `kraft`; flag > env > access.yaml
 kraft admin stop               # SIGTERM to the pid in run/kraft.pid
+kraft admin restart            # stop, then start again the same way it was running
 kraft admin health             # exit 1 when degraded, reasons on stdout
 kraft admin doctor             # every check in one pass; exit 1 if any fails
 kraft admin reindex [--repo P] # rescan documents into the search index
 kraft admin reload             # reread templates/registry from disk, no restart
-kraft admin update             # install the newest release (brew upgrade, if that's how you installed)
+kraft admin update [--restart] # install the newest release (brew upgrade, if that's how you installed)
 kraft admin init [--repo]      # register the MCP server and skills; see Agent integration
 kraft admin mcp                # serve the MCP tools over stdio
 ```
@@ -119,7 +120,12 @@ against the same run directory is refused while the first is alive.
 
 `kraft admin install-service` and `kraft admin uninstall-service` register or
 remove Kraft as an OS service unit (`KeepAlive`/`Restart=always`), for a
-machine you want it running on without a terminal open.
+machine you want it running on without a terminal open. `kraft admin restart`
+remembers how the server was running: through the service manager if one is
+installed, back into the background if it was `--detach`ed, or — if it was
+running attached to a terminal — stopped with a note that only that terminal
+can bring it back. `kraft admin update --restart` chains the same restart
+onto a successful update.
 
 The verbs live in four groups — `item` acts, `view` reads, `repo` is
 repositories and their worktrees, `admin` is this machine's server. Typing an

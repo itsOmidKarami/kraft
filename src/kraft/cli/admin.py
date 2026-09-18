@@ -428,6 +428,12 @@ def _serve() -> None:
     # which `_read_pid` detects and clears on the next read -- so the gap
     # needs no handler of its own.
     pid_path.write_text(str(os.getpid()))
+    # So `kraft admin restart` starts it back up the same way it was running:
+    # `_start_detached` marks its child with KRAFT_DETACHED before exec'ing
+    # into this same function.
+    RunDirs(pid_path.parent).mode.write_text(
+        "detached" if os.environ.get("KRAFT_DETACHED") else "attached"
+    )
     # Every worker Kraft launches inherits these two names (they're in
     # `worker_env.BASELINE`, which `adapters/subprocess.py`'s `full_env`
     # copies out of `os.environ`): a leftover process found on a port can be
@@ -459,6 +465,7 @@ def _serve() -> None:
         raise
     finally:
         pid_path.unlink(missing_ok=True)
+        RunDirs(pid_path.parent).mode.unlink(missing_ok=True)
 
 
 def _cmd_start(ns: argparse.Namespace) -> None:
@@ -515,7 +522,7 @@ def _start_detached() -> None:
             stdout=log_file,
             stderr=log_file,
             start_new_session=True,
-            env={**os.environ, "KRAFT_LOG_REDIRECTED": "1"},
+            env={**os.environ, "KRAFT_LOG_REDIRECTED": "1", "KRAFT_DETACHED": "1"},
         )
 
     # Wait for the child to actually bind, not just fork: a bad config or a
@@ -565,6 +572,60 @@ def _cmd_stop(ns: argparse.Namespace) -> None:
         time.sleep(0.1)
     print(f"kraft: pid {pid} did not stop within 15s", file=sys.stderr)
     raise SystemExit(1)
+
+
+def _service_installed() -> bool:
+    if sys.platform == "darwin":
+        return _launchd_plist_path().is_file()
+    if sys.platform.startswith("linux"):
+        return _systemd_unit_path().is_file()
+    return False
+
+
+def _restart_service() -> None:
+    """Through the service manager, not SIGTERM+start -- a unit's own
+    `restart` verb is what keeps it a *managed* restart (systemd resets its
+    failure-count window; launchd has no equivalent, so unload+load is the
+    closest same thing) instead of one this process fakes by racing
+    KeepAlive/Restart=always for who starts the next process."""
+    if sys.platform == "darwin":
+        path = _launchd_plist_path()
+        subprocess.run(["launchctl", "unload", "-w", str(path)], check=False)
+        subprocess.run(["launchctl", "load", "-w", str(path)], check=True)
+    else:
+        subprocess.run(["systemctl", "--user", "restart", _SYSTEMD_UNIT], check=True)
+    print("kraft: restarted the service")
+
+
+def _cmd_restart(ns: argparse.Namespace) -> None:
+    """`stop` then `start` again the same way it was running.
+
+    A service (launchd/systemd) is restarted through its own manager, service
+    file untouched, never SIGTERM'd and left to KeepAlive/Restart=always to
+    notice -- explicit beats a race with the supervisor. Otherwise: stop, then
+    bring it back detached if it was detached. A server running attached to
+    someone's terminal can't be handed back to that terminal from here, so
+    this only stops it and says so -- restarting it is that terminal's job.
+    """
+    if _service_installed():
+        _restart_service()
+        return
+    pid_path = _pid_path()
+    pid = _read_pid(pid_path)
+    if pid is None:
+        print("kraft: no server running")
+        return
+    mode_path = RunDirs(pid_path.parent).mode
+    detached = mode_path.is_file() and mode_path.read_text().strip() == "detached"
+    _cmd_stop(ns)
+    if detached:
+        _start_detached()
+    else:
+        print(
+            "kraft: was running attached to a terminal - start it again there: kraft",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
 
 def _render_health(payload: dict) -> str:
@@ -656,7 +717,11 @@ def _cmd_update(ns: argparse.Namespace) -> None:
     code = update.perform(release)
     if code != 0:
         raise SystemExit(code)
-    print(f"kraft {release.tag} installed. Restart a running server: kraft admin stop && kraft")
+    print(f"kraft {release.tag} installed.")
+    if ns.restart:
+        _cmd_restart(ns)
+    else:
+        print("Restart a running server: kraft admin restart")
 
 
 def _add_admin(subs, common: argparse.ArgumentParser) -> None:
@@ -674,6 +739,9 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
 
     stop = subs.add_parser("stop", help="stop the running server")
     stop.set_defaults(func=_cmd_stop)
+
+    restart = subs.add_parser("restart", help="stop then start again, the same way it was running")
+    restart.set_defaults(func=_cmd_restart)
 
     install_service = subs.add_parser(
         "install-service", help="write and load an OS service unit (KeepAlive / Restart=always)"
@@ -693,6 +761,11 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
 
     update_p = subs.add_parser("update", help="install the newest released kraft")
     update_p.add_argument("--force", action="store_true", help="install even when already current")
+    update_p.add_argument(
+        "--restart",
+        action="store_true",
+        help="restart a running server after a successful update, the same way it was running",
+    )
     update_p.set_defaults(func=_cmd_update)
 
     reindex = subs.add_parser("reindex", parents=[common], help="rescan documents into the index")

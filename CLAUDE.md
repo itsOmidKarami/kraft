@@ -61,8 +61,10 @@ kraft repo connect [PATH] / kraft repo disconnect [PATH]
 kraft repo path [ID] (alias cd) / kraft repo open [ID]
 kraft admin start [--host H] [--port P]      # same as bare `kraft`
 kraft admin stop                             # SIGTERM to run/kraft.pid
+kraft admin restart                          # stop, then start again the same way it was running
 kraft admin health                           # exit 1 when degraded
 kraft admin doctor                           # every check at once; exit 1 on any
+kraft admin update [--restart]               # install the newest release; --restart also restarts
 kraft admin reindex [--repo PATH]
 kraft admin reload                           # reread templates/registry from disk, no restart
 kraft admin init [--repo] / kraft admin mcp  # register Kraft with an agent

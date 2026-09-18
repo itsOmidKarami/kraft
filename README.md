@@ -60,7 +60,8 @@ curl -fsSL https://raw.githubusercontent.com/itsOmidKarami/kraft/main/install.sh
 ```
 
 [`install.sh`](install.sh) is short and worth reading before you pipe it to a
-shell. `kraft admin update` installs the newest release later on, and
+shell. `kraft admin update` installs the newest release later on (`--restart`
+also restarts a running server, the same way it was running), and
 `kraft --version` says what you have.
 
 ### Homebrew (macOS)
@@ -312,6 +313,7 @@ Service and admin:
 ```bash
 kraft admin start --port 9000  # the same as bare `kraft`; flag > env > access.yaml
 kraft admin stop               # SIGTERM to the pid in run/kraft.pid
+kraft admin restart            # stop, then start again the same way it was running
 kraft admin health             # exit 1 when degraded, reasons on stdout
 kraft admin doctor             # every check in one pass; exit 1 if any fails
 kraft admin reindex [--repo P] # rescan documents into the search index
