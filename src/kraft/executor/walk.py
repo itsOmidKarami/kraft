@@ -176,6 +176,25 @@ def _carry_severity(
     ]
 
 
+def _failure_note(node: dict, failed: list[str]) -> str:
+    """What the orchestrator already knows and the repair would otherwise have
+    to go and rediscover (Kraft-s7c04.26: on work item 6c712ea8 a repair agent
+    spent 4 of its 16 tool calls hunting for a log it was told to read but
+    given no path to).
+
+    The re-measure sentence is not decoration. `recover_node` believes a repair
+    only when the node's own tasks pass afterwards -- that has been the design
+    since Kraft-rv6i -- but it was never said to the agent, and an agent that
+    does not know it will be checked has every incentive to declare success.
+    """
+    which = ", ".join(failed) if failed else "the node"
+    return (
+        f"The failing task(s) in node {node['id']}: {which}.\n"
+        f"After you finish, {which} will be re-measured and that result, not "
+        "your own report, decides whether this repair worked."
+    )
+
+
 async def recover_node(
     db,
     run_dirs,
@@ -228,20 +247,22 @@ async def recover_node(
         )
     )
     found, _reported = dispatch.collect_findings(db, work_item_id, node, measured_round, registry)
+    note = _failure_note(node, failed)
     seeded = prompts.seeded_findings_note(found) if found else None
-    if seeded and steer is not None and steer:
+    context = f"{note}\n\n{seeded}" if seeded else note
+    if steer is not None and steer:
         # A person's own instruction leads and keeps its own template;
         # `_SEEDED_FINDINGS_STEER`'s lead-in sentence ("Findings the last
         # review of this node left unresolved:") is what stops the bullets
         # below it reading as something that person wrote. `.take()` because
         # the incoming note is folded into the one replacing it -- leaving it
         # undelivered here would deliver it twice (Kraft-s7c04.58 covers the
-        # two-hook case this single Steer cannot serve).
-        repair_steer = Steer(f"{steer.take()}\n\n{seeded}", source=steer.source)
-    elif seeded:
-        repair_steer = Steer(seeded, source="seeded")
+        # two-hook case this single Steer cannot serve). The orchestrator's
+        # own context (`note`, and `seeded` when there are findings) is
+        # appended, never substituted for a human's steer.
+        repair_steer = Steer(f"{steer.take()}\n\n{context}", source=steer.source)
     else:
-        repair_steer = steer
+        repair_steer = Steer(context, source="seeded")
     verdict, r_failed, r_excs = await dispatch.measure_node(
         db,
         run_dirs,
