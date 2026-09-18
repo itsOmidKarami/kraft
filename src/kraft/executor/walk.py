@@ -263,11 +263,14 @@ async def recover_node(
         repair_steer = Steer(f"{steer.take()}\n\n{context}", source=steer.source)
     else:
         repair_steer = Steer(context, source="seeded")
+    # `steps`, not just `tasks`, must name the repair hooks -- `measure_node`
+    # reads `steps` first, and a stale `steps` here would re-run the node's
+    # own (still-failing) tasks instead of the repair.
     verdict, r_failed, r_excs = await dispatch.measure_node(
         db,
         run_dirs,
         work_item_id,
-        {**node, "tasks": hooks},
+        {**node, "tasks": hooks, "steps": [hooks]},
         row,
         registry,
         worktree,

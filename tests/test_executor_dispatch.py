@@ -2006,6 +2006,118 @@ def test_a_repair_is_not_run_for_a_pause_or_a_budget_stop(tmp_path, monkeypatch)
     asyncio.run(scenario())
 
 
+def test_steps_run_in_order_and_a_failing_group_stops_the_node(tmp_path, monkeypatch):
+    async def scenario():
+        database, rd, worktree, wid, row = await _setup_measure_node_scenario(tmp_path)
+        try:
+            calls = []
+
+            async def fake_dispatch_node(db_, run_dirs_, task_hook, node, row_, reg, wt, **kw):
+                calls.append(task_hook)
+                return "failed" if task_hook == "on.a" else "done"
+
+            monkeypatch.setattr(dispatch, "dispatch_node", fake_dispatch_node)
+            registry = Registry(
+                hooks={
+                    "on.a": {"kind": "builtin", "handler": "noop"},
+                    "on.b": {"kind": "builtin", "handler": "noop"},
+                },
+                raw={},
+            )
+            node = {
+                "id": "n",
+                "steps": [["on.a"], ["on.b"]],
+                "tasks": ["on.a", "on.b"],
+                "on_failure": None,
+            }
+
+            verdict, failed, excs = await dispatch.measure_node(
+                database, rd, wid, node, row, registry, worktree, round=0
+            )
+
+            assert verdict == "failed"
+            assert failed == ["on.a"], "names the task that actually failed"
+            assert "on.b" not in calls, "a later group must not run after an earlier one failed"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_a_later_group_runs_only_after_the_earlier_one_finishes(tmp_path, monkeypatch):
+    async def scenario():
+        database, rd, worktree, wid, row = await _setup_measure_node_scenario(tmp_path)
+        try:
+            order = []
+
+            async def fake_dispatch_node(db_, run_dirs_, task_hook, node, row_, reg, wt, **kw):
+                order.append(f"start:{task_hook}")
+                await asyncio.sleep(0.01 if task_hook == "on.a" else 0)
+                order.append(f"end:{task_hook}")
+                return "done"
+
+            monkeypatch.setattr(dispatch, "dispatch_node", fake_dispatch_node)
+            registry = Registry(
+                hooks={
+                    "on.a": {"kind": "builtin", "handler": "noop"},
+                    "on.b": {"kind": "builtin", "handler": "noop"},
+                },
+                raw={},
+            )
+            node = {
+                "id": "n",
+                "steps": [["on.a"], ["on.b"]],
+                "tasks": ["on.a", "on.b"],
+                "on_failure": None,
+            }
+
+            await dispatch.measure_node(database, rd, wid, node, row, registry, worktree, round=0)
+
+            assert order.index("end:on.a") < order.index("start:on.b")
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_one_group_still_runs_concurrently(tmp_path, monkeypatch):
+    """The no-regression case: every template today is one group."""
+
+    async def scenario():
+        database, rd, worktree, wid, row = await _setup_measure_node_scenario(tmp_path)
+        try:
+            order = []
+
+            async def fake_dispatch_node(db_, run_dirs_, task_hook, node, row_, reg, wt, **kw):
+                order.append(f"start:{task_hook}")
+                await asyncio.sleep(0.01 if task_hook == "on.a" else 0)
+                order.append(f"end:{task_hook}")
+                return "done"
+
+            monkeypatch.setattr(dispatch, "dispatch_node", fake_dispatch_node)
+            registry = Registry(
+                hooks={
+                    "on.a": {"kind": "builtin", "handler": "noop"},
+                    "on.b": {"kind": "builtin", "handler": "noop"},
+                },
+                raw={},
+            )
+            node = {
+                "id": "n",
+                "steps": [["on.a", "on.b"]],
+                "tasks": ["on.a", "on.b"],
+                "on_failure": None,
+            }
+
+            await dispatch.measure_node(database, rd, wid, node, row, registry, worktree, round=0)
+
+            assert order.index("start:on.b") < order.index("end:on.a"), "overlapped, not serialized"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 def test_a_repairs_own_on_failure_is_never_dispatched(tmp_path, monkeypatch):
     """One repair layer only. A repair that fails is a blocker Kraft does not
     understand; pulling a second lever on it is how a loop starts."""

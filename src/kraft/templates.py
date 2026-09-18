@@ -83,6 +83,27 @@ def strip_non_proposable_carryover_fields(nodes: list) -> list:
     return nodes
 
 
+def with_steps(node: dict) -> dict:
+    """`node` with both `steps` and `tasks` populated, whichever it was given.
+
+    The two keys are one fact in two shapes, on purpose. Ordering has exactly
+    one consumer (`executor.dispatch.measure_node`); the flat list has twenty,
+    across the backend and the SPA. Emitting both means the ordering consumer
+    reads `steps` and nothing else has to learn that groups exist -- a
+    `steps`-only node would make `n.tasks ?? []` evaluate to `[]` all over the
+    frontend, silently, and nesting inside `tasks` would make `n.tasks.length`
+    report a group count as a task count.
+
+    Mutates nothing: returns a new dict, because both callers (`materialize`
+    and the chain-review splice) are building fresh node dicts anyway.
+    """
+    if node.get("steps"):
+        groups = [list(g) for g in node["steps"]]
+    else:
+        groups = [list(node.get("tasks") or [])]
+    return {**node, "steps": groups, "tasks": [t for g in groups for t in g]}
+
+
 def carry_forward_node_fields(old_nodes: list, new_nodes: list) -> list:
     """Fill `NODE_CARRYOVER_FIELDS` on `new_nodes` from the old node sharing its
     `id`, for whichever fields the new node did not itself set. A node id with
@@ -100,6 +121,13 @@ def carry_forward_node_fields(old_nodes: list, new_nodes: list) -> list:
         for field in NODE_CARRYOVER_FIELDS:
             if field not in n:
                 n[field] = old.get(field)
+        # `steps` is not a NODE_CARRYOVER_FIELD: the reviewer may reshape `tasks`,
+        # and carrying old groups over a changed list would contradict it. But a
+        # node re-emitted with the same flat tasks is unchanged, ordering included.
+        old_steps = old.get("steps")
+        if old_steps and "steps" not in n and n.get("tasks") == [t for g in old_steps for t in g]:
+            n["steps"] = old_steps
+            n.pop("tasks")
     return new_nodes
 
 
@@ -548,11 +576,60 @@ def validate_nodes(
     if not isinstance(nodes, list) or not all(
         isinstance(n, dict)
         and isinstance(n.get("id"), str)
-        and isinstance(n.get("tasks"), list)
-        and all(isinstance(t, str) for t in n["tasks"])
+        and (
+            (isinstance(n.get("tasks"), list) and all(isinstance(t, str) for t in n["tasks"]))
+            or n.get("steps") is not None
+        )
         for n in nodes
     ):
-        return ["each node needs a string 'id' and a list-of-strings 'tasks'"]
+        return ["each node needs a string 'id' and a list-of-strings 'tasks' (or 'steps')"]
+
+    # A node already run through `with_steps` (the splice path re-validates a
+    # normalized tail) carries both keys in agreement, not in conflict -- only
+    # a `tasks` that diverges from the flattened `steps` means an author
+    # actually wrote both.
+    both = next(
+        (
+            n["id"]
+            for n in nodes
+            if n.get("steps")
+            and n.get("tasks")
+            and isinstance(n["steps"], list)
+            and n["tasks"] != [t for g in n["steps"] if isinstance(g, list) for t in g]
+        ),
+        None,
+    )
+    if both is not None:
+        return [
+            f"node {both!r} declares both 'steps' and 'tasks'; a node has one or "
+            "the other -- 'tasks' is the one-group shorthand"
+        ]
+    bad_steps = next(
+        (
+            n["id"]
+            for n in nodes
+            if "steps" in n
+            and n["steps"] is not None
+            and (
+                not isinstance(n["steps"], list)
+                or not n["steps"]
+                or not all(
+                    isinstance(g, list) and g and all(isinstance(t, str) for t in g)
+                    for g in n["steps"]
+                )
+            )
+        ),
+        None,
+    )
+    if bad_steps is not None:
+        return [
+            f"node {bad_steps!r} 'steps' must be a non-empty list of non-empty lists of strings"
+        ]
+
+    # One code path sees one shape from here on: a `steps` node's hooks reach
+    # the unknown-hook scan below via its normalized `tasks`, same as a plain
+    # `tasks` node's.
+    nodes = [with_steps(n) for n in nodes]
 
     bad_gates = sorted(
         {
@@ -865,6 +942,12 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
         if node_errors:
             invalid[tid] = f"template {tid!r}: {node_errors[0]}"
             continue
+        # `validate_nodes` normalizes its own local copy to check a `steps`
+        # node's shape; `Template.nodes` needs that same normalization; a
+        # `steps`-only node otherwise reaches `materialize` (and every test
+        # or caller reading `n["tasks"]` directly off `Template.nodes`) with
+        # no `tasks` key at all.
+        nodes = [with_steps(n) for n in nodes]
 
         bad_loop = next(
             (
@@ -989,18 +1072,21 @@ def materialize(
     return {
         "template_id": template.id,
         "nodes": [
-            {
-                "id": n["id"],
-                "tasks": list(n["tasks"]),
-                "gate_after": n.get("gate_after"),
-                "fix_loop": n.get("fix_loop"),
-                "on_failure": list(n["on_failure"]) if n.get("on_failure") else None,
-                "reject_to": n.get("reject_to"),
-                "rebase_bounce_to": n.get("rebase_bounce_to"),
-                "auto_escalate": n.get("auto_escalate"),
-                "auto_escalate_stuck": n.get("auto_escalate_stuck"),
-                "auto_escalate_delay_s": n.get("auto_escalate_delay_s"),
-            }
+            with_steps(
+                {
+                    "id": n["id"],
+                    "tasks": list(n.get("tasks") or []),
+                    "steps": [list(g) for g in n["steps"]] if n.get("steps") else None,
+                    "gate_after": n.get("gate_after"),
+                    "fix_loop": n.get("fix_loop"),
+                    "on_failure": list(n["on_failure"]) if n.get("on_failure") else None,
+                    "reject_to": n.get("reject_to"),
+                    "rebase_bounce_to": n.get("rebase_bounce_to"),
+                    "auto_escalate": n.get("auto_escalate"),
+                    "auto_escalate_stuck": n.get("auto_escalate_stuck"),
+                    "auto_escalate_delay_s": n.get("auto_escalate_delay_s"),
+                }
+            )
             for n in template.nodes
             if n.get("gate_after") not in satisfied_gates and n["id"] not in skip_nodes
         ],

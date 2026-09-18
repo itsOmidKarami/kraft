@@ -44,7 +44,11 @@ def test_template_put_validates_before_it_writes(client, templates_dir):
     assert yaml.safe_load((templates_dir / "scratch.yaml").read_text())["id"] == "scratch"
     # the new template is live without a restart
     assert any(t["id"] == "scratch" for t in client.get("/api/templates").json())
-    assert client.get("/api/templates/scratch").json()["nodes"] == NODES
+    # `load_templates` normalizes every node with `with_steps`, so a plain
+    # `tasks` node round-trips with a derived `steps` key too.
+    assert client.get("/api/templates/scratch").json()["nodes"] == [
+        {**n, "steps": [n["tasks"]]} for n in NODES
+    ]
     assert client.get("/api/templates/nope").status_code == 404
 
 
@@ -186,7 +190,7 @@ def test_parse_template_yaml_round_trips_default(client):
     body = client.post("/api/templates/parse", json={"text": text}).json()
     assert body["error"] is None
     assert body["nodes"][0]["id"] == "spec"
-    assert len(body["nodes"]) == 15
+    assert len(body["nodes"]) == 14
 
 
 def test_parse_template_yaml_reports_a_syntax_error(client):

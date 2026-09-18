@@ -96,4 +96,29 @@ describe("Tasks tab · a node's own tasks (Kraft-04fmo)", () => {
     renderTasks({ nodeId: null });
     expect(document.querySelector('[data-testid="node-task-list"]')).toBeNull();
   });
+
+  it("groups a stepped node's tasks and does not call them all concurrent", () => {
+    const stepped: ChainNode[] = [
+      { id: "verify", tasks: ["on.a", "on.b", "on.c"],
+        steps: [["on.a"], ["on.b", "on.c"]], gate_after: null },
+    ];
+    render(
+      <Tasks
+        item={{ ...item(), effective_chain: { template_id: "d", nodes: stepped },
+                chain_definition: { template_id: "d", nodes: stepped } } as WorkItem}
+        sessions={[]} events={[]} nodeId="verify" selected={null}
+        onSelect={() => {}} scope="node" onScope={() => {}}
+      />,
+    );
+    const list = document.querySelector('[data-testid="node-task-list"]');
+    expect(list?.textContent ?? "").not.toMatch(/·\s*CONCURRENT/i);
+    expect(document.querySelectorAll('[data-testid^="node-step-"]')).toHaveLength(2);
+  });
+
+  it("still labels a single-group node concurrent", () => {
+    renderTasks();
+    expect(
+      document.querySelector('[data-testid="node-task-list"]')?.parentElement?.textContent,
+    ).toMatch(/concurrent/i);
+  });
 });

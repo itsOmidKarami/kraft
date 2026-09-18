@@ -17,6 +17,7 @@ from kraft.templates import (
     strip_non_proposable_carryover_fields,
     validate_nodes,
     validate_proposed_node_overrides,
+    with_steps,
 )
 
 
@@ -122,7 +123,12 @@ def _splice_chain_review(st, row) -> tuple[dict | None, dict | None, str | None]
     # rebase_bounce_to the reviewer chose not to set explicitly -- forward
     # from the node each one replaces, or an "unchanged" node silently loses
     # config it had.
-    nodes = carry_forward_node_fields(chain["nodes"][tail_start:], nodes)
+    # `materialize` is not the only producer of chain_definition nodes: an
+    # approved chain review replaces the tail with agent-authored dicts, and
+    # the reviewer's schema only knows `tasks` (SKILL.md's node shape). Both
+    # producers run the same normalizer so `measure_node` never has to ask
+    # which path a node came from.
+    nodes = [with_steps(n) for n in carry_forward_node_fields(chain["nodes"][tail_start:], nodes)]
     # Validate once more over the *merged* tail: the check above only saw the
     # reviewer's own values, and a `reject_to`/`rebase_bounce_to` carried
     # forward from the node being replaced can dangle against the revised tail

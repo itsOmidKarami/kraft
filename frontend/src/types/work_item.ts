@@ -3,6 +3,10 @@ import type { RepoRow } from "./settings";
 export interface ChainNode {
   id: string;
   tasks: string[];
+  /** Ordered groups of concurrent tasks. Always present on a materialized
+   *  chain (`templates.with_steps`); `tasks` is the same list flattened, in
+   *  group order, and every other consumer reads that instead. */
+  steps?: string[][];
   gate_after: string | null;
   fix_loop?: string;
   /** Where rejecting this node's gate sends the chain; null re-runs this node. */

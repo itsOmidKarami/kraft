@@ -22,6 +22,7 @@ from kraft.adapters import forge as _forge
 from kraft.adapters import subprocess as _subprocess
 from kraft.executor import entry, prompts, stops
 from kraft.executor.context import (
+    _ADVANCING,
     BUDGET,
     CONFIG_ERROR,
     INFRA_STOP,
@@ -552,7 +553,6 @@ async def measure_node(
     loop_severities: frozenset[str] = _policy.DEFAULT_LOOP_SEVERITIES,
 ) -> tuple[str, list[str], list[BaseException]]:
     await db.write(lambda c, node=node: store.enter_node(c, work_item_id, node["id"]))
-    tasks = node["tasks"]
 
     # Kraft-37myi: read per dispatch, not once per node. The old single read
     # above this loop carried the comment "the worktree's HEAD does not move
@@ -648,7 +648,28 @@ async def measure_node(
         # the repair may well have committed.
         return await _measure(t, repair=False)
 
-    results = await asyncio.gather(*(_measure(t) for t in tasks), return_exceptions=True)
+    # One group at a time, concurrently within a group (spec: "Executor
+    # semantics"). `steps` is always present -- `templates.with_steps` puts it
+    # on every node both producers of `chain_definition` build -- but an older
+    # item materialized before this shipped has none, so fall back rather than
+    # KeyError a chain that is mid-flight across the upgrade.
+    groups = node.get("steps") or [list(node["tasks"])]
+
+    # (task, result) pairs, never positional indices into a flat task list: a
+    # group that stops the node leaves `results` shorter than `tasks`, and
+    # `tasks[i]` would then name the wrong task in `failed` -- silently, into
+    # the fix loop and the on_failure repair.
+    outcomes: list[tuple[str, object]] = []
+    for group in groups:
+        group_results = await asyncio.gather(*(_measure(t) for t in group), return_exceptions=True)
+        outcomes.extend(zip(group, group_results, strict=True))
+        # Anything but a clean pass stops the node: a later group exists
+        # precisely because it must not run against an unsettled earlier one.
+        # `_ADVANCING` (executor/context.py) is the existing definition of
+        # "this task moved the node forward": ("done", "done_with_concerns").
+        if any(isinstance(r, BaseException) or r not in _ADVANCING for r in group_results):
+            break
+    results = [r for _, r in outcomes]
     # A pause stops the walk where it stands: the node is neither done nor failed,
     # and resume relaunches it. It outranks a co-task's failure, which was almost
     # certainly the same SIGTERM arriving on a different row.
@@ -659,7 +680,7 @@ async def measure_node(
     # none of those are evidence about anything while a task in this node
     # could not even start (Kraft-579).
     if any(r == CONFIG_ERROR for r in results):
-        failed = [tasks[i] for i, r in enumerate(results) if r == CONFIG_ERROR]
+        failed = [t for t, r in outcomes if r == CONFIG_ERROR]
         return CONFIG_ERROR, failed, []
     if any(r == RATE_LIMITED for r in results):
         return RATE_LIMITED, [], []
@@ -680,8 +701,8 @@ async def measure_node(
     if any(r == BUDGET for r in results):
         return BUDGET, [], []
     failed = [
-        tasks[i]
-        for i, r in enumerate(results)
+        t
+        for t, r in outcomes
         if isinstance(r, BaseException) or r in ("failed", "needs_context", "conflict")
     ]
     if failed:

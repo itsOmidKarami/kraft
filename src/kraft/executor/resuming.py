@@ -7,13 +7,8 @@ from kraft import config as _config
 from kraft import policy as _policy
 from kraft import store
 from kraft.executor import entry, gates, walk
-from kraft.executor.context import RATE_LIMITED, WAITING, LaunchContext, OnApprove
+from kraft.executor.context import _ADVANCING, RATE_LIMITED, WAITING, LaunchContext, OnApprove
 from kraft.templates import Registry
-
-#: Statuses that let the chain advance. `done_with_concerns` is deliberately
-#: here: the agent finished the work — its doubts are information for the human
-#: at the next gate, not a control-flow change.
-_ADVANCING = ("done", "done_with_concerns")
 
 
 async def reconcile_current_node(
@@ -37,7 +32,9 @@ async def reconcile_current_node(
         ).fetchall()
     )
 
-    if node.get("fix_loop") or node.get("on_failure"):
+    # A multi-step node creates step 2's session row only after step 1 finishes,
+    # so a crash mid-step-1 leaves fewer rows than tasks; walk_node re-measures it.
+    if node.get("fix_loop") or node.get("on_failure") or len(node.get("steps") or []) > 1:
         # A node that can remediate itself is its own reconciliation: re-entering
         # `walk_node` re-measures it, and a failure then reaches the repair the
         # template declared. The session-count check below would instead read

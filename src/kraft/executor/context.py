@@ -28,6 +28,13 @@ CONFIG_ERROR = "config_error"
 #: `"paused"`, which is always a human's own instruction.
 WAITING = "waiting"
 
+#: Statuses that let the chain advance. `done_with_concerns` is deliberately
+#: here: the agent finished the work — its doubts are information for the human
+#: at the next gate, not a control-flow change. Shared by `resuming.py` (whole-
+#: node reconciliation) and `dispatch.measure_node` (per-group), so a status
+#: that counts as "moved the node forward" cannot drift between the two.
+_ADVANCING = ("done", "done_with_concerns")
+
 #: A settled pipeline whose every failed job is the forge's own fault
 #: (Kraft-h81i, Kraft-s8ul). `ci_poll` retries it internally, through the
 #: forge, up to a small cap; this is what it returns once retries are
