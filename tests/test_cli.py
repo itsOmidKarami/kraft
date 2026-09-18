@@ -94,6 +94,38 @@ def test_seed_home_leaves_no_half_seeded_home_behind(monkeypatch, tmp_path):
     assert (home / "registry.yaml").exists()
 
 
+def test_seeding_records_the_version_it_seeded_from(monkeypatch, tmp_path):
+    _bundle(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.admin, "_version", lambda: "9.9.9")
+    home = tmp_path / "home" / "templates"
+
+    assert cli.seed_home(home) is True
+    assert (home / ".seeded-version").read_text().strip() == "9.9.9"
+
+
+def test_the_stamp_is_not_yaml_so_load_templates_never_sees_it(monkeypatch, tmp_path):
+    """load_templates globs '*.yaml'. A YAML stamp would be read as a malformed
+    template and show up as degraded health -- the exact hazard CONFIG_FILES
+    exists for. Not being YAML is the fix."""
+    _bundle(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.admin, "_version", lambda: "9.9.9")
+    home = tmp_path / "home" / "templates"
+
+    cli.seed_home(home)
+    stamp = home / ".seeded-version"
+    assert stamp.exists()
+    assert stamp.suffix != ".yaml"
+    assert stamp not in set(home.glob("*.yaml"))
+
+
+def test_seeding_an_existing_home_still_does_nothing(tmp_path):
+    home = tmp_path / "home" / "templates"
+    home.mkdir(parents=True)
+
+    assert cli.seed_home(home) is False
+    assert not (home / ".seeded-version").exists()
+
+
 def test_unknown_subcommand_exits_with_a_usable_message(monkeypatch, capsys):
     """argparse owns usage errors now: exit 2, message on stderr, naming the verb."""
     monkeypatch.setattr(cli.admin, "_serve", lambda: pytest.fail("must not serve"))
