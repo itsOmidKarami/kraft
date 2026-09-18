@@ -84,19 +84,6 @@ Every node you write is exactly:
   proposed_node_overrides?: { model?: string, escalate_model?: string, effort?: string } }
 ```
 
-A node may write `steps:` instead of `tasks:` — a list of groups, run in order,
-concurrent within a group:
-
-```
-{ id: string, steps: [[hook_point, ...], ...], gate_after: string|null, ... }
-```
-
-`tasks` is the one-group shorthand and stays perfectly valid; emit it whenever
-a node's tasks have no ordering between them. Use `steps` only when the plan
-gives you a reason one task must finish before another starts — a rebase before
-the thing that reads the rebased tree, a scan after the agent that changes what
-it scans. A node may declare one or the other, never both.
-
 The field above is node-level only; a task-level repair lives on that task's
 registry binding instead (see below).
 
@@ -116,6 +103,19 @@ registry binding, where it travels with the task into every chain that runs it,
 and where it costs one task's re-dispatch instead of the whole node's. You
 cannot set that from here; say so in your rationale and name the task, and a
 human will put it in `registry.yaml`.
+
+A node may write `steps:` instead of `tasks:` — a list of groups, run in order,
+concurrent within a group:
+
+```
+{ id: string, steps: [[hook_point, ...], ...], gate_after: string|null, ... }
+```
+
+`tasks` is the one-group shorthand and stays perfectly valid; emit it whenever
+a node's tasks have no ordering between them. Use `steps` only when the plan
+gives you a reason one task must finish before another starts — a rebase before
+the thing that reads the rebased tree, a scan after the agent that changes what
+it scans. A node may declare one or the other, never both.
 
 Omit a field on a node whose id already existed in the tail
 and the orchestrator carries its old value forward unchanged, exactly as it
