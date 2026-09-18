@@ -2809,3 +2809,9 @@ def test_a_chain_can_run_two_harnesses(tmp_path, monkeypatch):
     records = _argv_lines(argv_log)
     assert any("--append-system-prompt" in r for r in records)
     assert any(any(a.startswith("developer_instructions=") for a in r) for r in records)
+
+
+def test_previous_fix_session_is_reachable_from_dispatch():
+    """WI-1 needs it at review dispatch, and walk imports dispatch rather than
+    the other way round -- so it cannot stay in walk."""
+    assert callable(dispatch.previous_fix_session)

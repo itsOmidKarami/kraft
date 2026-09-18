@@ -518,7 +518,7 @@ def test_judge_dispatch_failure_falls_open_to_continue(tmp_path, monkeypatch):
 
 def test_retry_fixes_freely_no_judge_call_on_the_first_post_retry_cycle(tmp_path, monkeypatch):
     """`/retry` (`store.retry_after_cap`) deletes the loop counter but leaves
-    the pre-retry `worker_sessions` rows in place, so `_previous_fix_session`
+    the pre-retry `worker_sessions` rows in place, so `previous_fix_session`
     (history-wide) is still non-None right after a retry. Gating the judge on
     that alone would call it before the steered post-retry cycle ever
     dispatches, discarding the human's steer on exactly the trend it retried
