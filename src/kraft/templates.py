@@ -5,9 +5,10 @@ import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import yaml
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from kraft import sandbox as _sandbox
 from kraft import skill as _skill
@@ -185,26 +186,117 @@ _ARTIFACT_KIND = re.compile(r"[a-z][a-z0-9_-]*")
 #: work item has already paid for a worktree and a session (Kraft-tff).
 _EFFORT_LEVELS = {"low", "medium", "high", "xhigh", "max"}
 
-#: The keys a `defaults.agent` block may set -- the same closed set an agent
-#: hook's own binding is checked against below, hoisted to module scope so
-#: this list and the defaults-merge pre-pass share one definition instead of
-#: drifting into two. No `_PERMISSION_MODES` beside it any more: the modes a
-#: binding may name are the named harness's own `values:` (leak 9 in the
-#: design spec), since `yolo` is real for gemini and invalid for claude.
-_AGENT_ONLY_KEYS = frozenset(
-    {
-        "profile",
-        "harness",
-        "model",
-        "escalate_model",
-        "deny_tools",
-        "steering",
-        "skill",
-        "artifact",
-        "effort",
-        "allowed_tools",
-        "permission_mode",
-    }
+
+class _Binding(BaseModel):
+    """One `registry.yaml` hook binding. The value checks that need the world
+    (a harness's declared capabilities, the steering and skill files, the forge
+    handler set) still run in `load_registry`; what a kind *may contain* is
+    here, so a new kind or key is one field, not an if/elif and a comment.
+
+    Reads like the dict it replaced -- `binding.get("kind")`, `binding["x"]`,
+    `"x" in binding` -- because dispatch, doctor and the routes were written
+    against dicts. Only keys the file (or `defaults.agent`) actually set count
+    as present, so `binding.get("steering", [])` still means "did the operator
+    say".
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    # `interactive`/`timeout`/`repos` are UI-facing rather than dispatch-facing
+    # (02 §13): the registry round-trips them through Settings ahead of the
+    # screen/executor that will read them.
+    interactive: bool | None = None
+    timeout: Any = None
+    repos: dict[str, dict] | None = None
+    sandbox: Any = None
+    #: Kind-agnostic on purpose (spec §4): the motivating repair hangs off
+    #: `on.ci.poll`, which is `kind: forge`. Not an agent-only key, so not
+    #: settable through `defaults.agent` either -- a repair silently inherited
+    #: by every agent binding is the opposite of what a per-task repair is for.
+    on_failure: Any = None
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, dict):
+            return dict(self.items()) == other
+        return super().__eq__(other)
+
+    __hash__ = None  # type: ignore[assignment]
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key) if key in self else default
+
+    def __getitem__(self, key: str) -> Any:
+        if key not in self:
+            raise KeyError(key)
+        return getattr(self, key)
+
+    def __contains__(self, key: object) -> bool:
+        return key in self.model_fields_set
+
+    def keys(self):
+        return [k for k in type(self).model_fields if k in self.model_fields_set]
+
+    def items(self):
+        return [(k, getattr(self, k)) for k in self.keys()]
+
+
+class BuiltinBinding(_Binding):
+    kind: Literal["builtin"]
+    handler: str
+
+
+class SubprocessBinding(_Binding):
+    kind: Literal["subprocess"]
+    command: list[str]
+    inputs: dict[str, dict] | None = None
+
+
+class ForgeBinding(_Binding):
+    kind: Literal["forge"]
+    handler: str
+    backend: str
+    poll_timeout: Any = None
+    poll_interval: Any = None
+
+
+class AgentBinding(_Binding):
+    kind: Literal["agent"]
+    command: str | None = None
+    profile: str | None = None
+    harness: str | None = None
+    model: Any = None
+    escalate_model: Any = None
+    deny_tools: list[str] | None = None
+    steering: list[str] | None = None
+    skill: Any = None
+    artifact: Any = None
+    #: A validator in `load_registry`, not a `Literal`: its legal values come
+    #: from the named harness's own `values:` (`minimal` is real for codex and
+    #: invalid for claude).
+    effort: Any = None
+    allowed_tools: list[str] | None = None
+    permission_mode: Any = None
+
+
+HookBinding = Annotated[
+    BuiltinBinding | AgentBinding | SubprocessBinding | ForgeBinding,
+    Field(discriminator="kind"),
+]
+_BINDING = TypeAdapter(HookBinding)
+_BINDING_MODELS = {
+    "builtin": BuiltinBinding,
+    "agent": AgentBinding,
+    "subprocess": SubprocessBinding,
+    "forge": ForgeBinding,
+}
+
+#: The keys a `defaults.agent` block may set -- the agent-only ones, derived
+#: from the model so this list and the defaults-merge pre-pass cannot drift. No
+#: `_PERMISSION_MODES` beside it: the modes a binding may name are the named
+#: harness's own `values:` (leak 9 in the design spec), since `yolo` is real
+#: for gemini and invalid for claude.
+_AGENT_ONLY_KEYS = (
+    frozenset(AgentBinding.model_fields) - frozenset(_Binding.model_fields) - {"kind"}
 )
 #: The `_AGENT_ONLY_KEYS` that merge as a list -- default's items first, then
 #: the binding's own, deduped -- rather than binding-wins-or-not.
@@ -465,13 +557,6 @@ def load_registry(
                             f"{path.name}: hook {hook!r} {key!r}={one!r} is not accepted "
                             f"by harness {hid!r} ({h.path})"
                         )
-        else:
-            for key in _AGENT_ONLY_KEYS:
-                if key in binding:
-                    raise RegistryError(
-                        f"{path.name}: hook {hook!r} is kind {kind!r}; {key!r} applies "
-                        "only to an agent hook"
-                    )
 
         if "timeout" in binding:
             if kind == "builtin":
@@ -522,32 +607,6 @@ def load_registry(
             except _sandbox.SandboxError as exc:
                 raise RegistryError(str(exc)) from exc
 
-        # Last, so the agent-only keys keep their own sharper message above: a
-        # key nobody reads is a setting that silently does nothing — a
-        # `deny_tool:` typo denies no tool and fails nowhere, the same failure
-        # an unknown *profile* is already rejected for.
-        if kind == "builtin":
-            known = {"kind", "handler"}
-        elif kind == "forge":
-            known = {"kind", "handler", "backend", "poll_timeout", "poll_interval"}
-        else:
-            known = {"kind", "command"}
-        # `interactive`/`timeout`/`repos` are UI-facing rather than
-        # dispatch-facing (02 §13): the registry round-trips them through
-        # Settings today, ahead of the screen/executor that will read them.
-        # `timeout` is rejected for `builtin` above, so this stays a plain
-        # superset with no behaviour change for `builtin`.
-        #
-        # `on_failure` is kind-agnostic on purpose (spec §4): the motivating
-        # repair hangs off `on.ci.poll`, which is `kind: forge`. Deliberately
-        # NOT in `_AGENT_ONLY_KEYS`, and therefore not settable through
-        # `defaults.agent` either -- a repair silently inherited by every
-        # agent binding is the opposite of what a per-task repair is for.
-        known |= {"interactive", "timeout", "repos", "sandbox", "on_failure"}
-        if kind == "subprocess":
-            known.add("inputs")
-        if kind == "agent":
-            known |= _AGENT_ONLY_KEYS
         inputs = binding.get("inputs")
         if inputs is not None:
             if not isinstance(inputs, dict):
@@ -575,12 +634,27 @@ def load_registry(
                     )
         if "interactive" in binding and not isinstance(binding["interactive"], bool):
             raise RegistryError(f"{path.name}: hook {hook!r} 'interactive' must be a boolean")
-        unknown = sorted(set(binding) - known)
-        if unknown:
-            raise RegistryError(
-                f"{path.name}: hook {hook!r} has unknown key(s) {unknown}; "
-                f"a {kind} hook takes {sorted(known)}"
-            )
+        try:
+            data["hooks"][hook] = _BINDING.validate_python(binding)
+        except ValidationError as exc:
+            extras = [e["loc"][-1] for e in exc.errors() if e["type"] == "extra_forbidden"]
+            if extras:
+                # A key nobody reads is a setting that silently does nothing --
+                # a `deny_tool:` typo denies no tool and fails nowhere.
+                agent_only = [k for k in extras if k in _AGENT_ONLY_KEYS]
+                if agent_only and kind != "agent":
+                    raise RegistryError(
+                        f"{path.name}: hook {hook!r} is kind {kind!r}; {agent_only[0]!r} "
+                        "applies only to an agent hook"
+                    ) from exc
+                takes = sorted({"kind", *_BINDING_MODELS[kind].model_fields})
+                raise RegistryError(
+                    f"{path.name}: hook {hook!r} has unknown key(s) {sorted(extras)}; "
+                    f"a {kind} hook takes {takes}"
+                ) from exc
+            err = exc.errors()[0]
+            key = ".".join(str(x) for x in err["loc"][1:])
+            raise RegistryError(f"{path.name}: hook {hook!r} {key!r}: {err['msg']}") from exc
     # Binding-level `on_failure` (spec §4): a repair that travels with the task
     # rather than with whichever node happens to run it. Validated here, after
     # the per-binding loop rather than inside it, because a repair hook is
