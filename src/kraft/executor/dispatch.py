@@ -7,7 +7,7 @@ import logging
 import shlex
 import sqlite3
 import uuid
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -129,7 +129,20 @@ def _last_own_round_head(
     return heads.pop() if len(heads) == 1 else None
 
 
-def _input_env(resolved: dict, *, review_package: str | None) -> dict:
+def _write_carried_findings(results_dir, session_id: str, found: list) -> str | None:
+    """The previous round's findings as JSON, for a hook that cannot read the
+    prose block. `asdict` over the same `Finding` objects `carried_findings_note`
+    renders, so the two channels differ in format and never in content."""
+    if not found:
+        return None
+    path = results_dir / f"{session_id}.findings.json"
+    path.write_text(json.dumps([asdict(f) for f in found], indent=2))
+    return str(path)
+
+
+def _input_env(
+    resolved: dict, *, review_package: str | None, carried_findings: str | None = None
+) -> dict:
     """The env vars a binding's `inputs:` asks for, for whichever of them this
     dispatch actually produced. An input declared but unavailable this round
     is simply absent -- an env var naming a file that was never written is
@@ -138,6 +151,9 @@ def _input_env(resolved: dict, *, review_package: str | None) -> dict:
     cfg = resolved.get("review_package")
     if cfg and cfg["channel"] == "env" and review_package:
         out[cfg["name"]] = review_package
+    cfg = resolved.get("carried_findings")
+    if cfg and cfg["channel"] == "env" and carried_findings:
+        out[cfg["name"]] = carried_findings
     return out
 
 
@@ -498,6 +514,10 @@ async def dispatch_node(
         # the code, and running further scopes after one can't be trusted
         # either (a human paused the item; the next scope's own binary might
         # be missing too; a rate limit applies to every scope alike).
+        carried_path = None
+        if "carried_findings" in resolved_inputs and task_hook in prompts.REVIEW_HOOKS:
+            previous, _, _ = last_measurement(db, work_item_row["id"], node["id"])
+            carried_path = _write_carried_findings(run_dirs.results, session_id, previous or [])
         status = "done"
         for scope in to_run:
             scope_status = await _subprocess.run_task(
@@ -514,7 +534,9 @@ async def dispatch_node(
                 # never see the fix. Never writing bytecode keeps every cycle honest.
                 env={
                     "PYTHONDONTWRITEBYTECODE": "1",
-                    **_input_env(resolved_inputs, review_package=pkg),
+                    **_input_env(
+                        resolved_inputs, review_package=pkg, carried_findings=carried_path
+                    ),
                 },
                 sandbox=sandbox,
                 **{**common, "session_id": uuid.uuid4().hex},

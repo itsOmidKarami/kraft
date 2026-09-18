@@ -9,11 +9,13 @@ import asyncio
 import json
 import subprocess
 import sys
+from dataclasses import asdict
 from pathlib import Path
 
 from support.harness import fake_registry, isolated_bd, make_repo
 
-from kraft import config, db, executor, review
+from kraft import config, db, events, executor, review
+from kraft.findings import Finding
 from kraft.paths import RunDirs
 from kraft.templates import Registry, Template
 
@@ -337,7 +339,7 @@ def test_write_package_still_spans_base_to_working_tree(tmp_path):
     assert "in flight code" in body
 
 
-def _dispatch_subprocess_review(tmp_path, binding):
+def _dispatch_subprocess_review(tmp_path, binding, previous=()):
     """Run a review-only chain whose review hook is a subprocess that dumps
     its environment; returns that environment."""
     tracker = isolated_bd(tmp_path)
@@ -364,6 +366,24 @@ def _dispatch_subprocess_review(tmp_path, binding):
                 template=_review_template(),
                 bd_cwd=str(tracker),
             )
+            if previous:
+                await database.write(
+                    lambda c: (
+                        events.append(
+                            c,
+                            wid,
+                            "findings_measured",
+                            {
+                                "node_id": "review",
+                                "cycle": 0,
+                                "findings": [asdict(f) for f in previous],
+                                "fingerprints": [],
+                                "noop_hooks": [],
+                            },
+                        ),
+                        c.commit(),
+                    )
+                )
             await executor.run(
                 database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
             )
@@ -389,3 +409,18 @@ def test_a_subprocess_review_hook_is_given_the_package_by_env(tmp_path):
 def test_a_subprocess_hook_that_does_not_declare_it_gets_no_package(tmp_path):
     env = _dispatch_subprocess_review(tmp_path, {"kind": "subprocess"})
     assert "KRAFT_REVIEW_PACKAGE" not in env
+
+
+def test_carried_findings_reach_a_cli_reviewer_as_json(tmp_path):
+    """Same data the prose block renders, in its native shape."""
+    env = _dispatch_subprocess_review(
+        tmp_path,
+        {
+            "kind": "subprocess",
+            "inputs": {"carried_findings": {"channel": "env", "name": "KRAFT_CARRIED_FINDINGS"}},
+        },
+        previous=[Finding("major", "leaks a handle", "a.py", 12, "code-review")],
+    )
+    payload = json.loads(Path(env["KRAFT_CARRIED_FINDINGS"]).read_text())
+    assert payload[0]["message"] == "leaks a handle"
+    assert payload[0]["severity"] == "major"
