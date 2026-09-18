@@ -1981,3 +1981,36 @@ def test_mr_rebase_reports_done_when_it_moved_nothing(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_env_setup_reruns_the_setup_command_on_a_second_dispatch(tmp_path):
+    """`on.env.prepare` is a step after the rebase because a rebase can land a
+    new lockfile (Kraft-zlsuk); that only helps if each dispatch runs setup."""
+    repo = make_repo(tmp_path)
+    marker = tmp_path / "setup-runs"
+    entry = {**NO_SETUP, "setup_command": f"echo run >> {marker}"}
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id="w1", repo_entry=entry
+            )
+            before = marker.read_text().count("run")
+            for n, sid in enumerate(("s1", "s2"), start=1):
+                await kraft_builtins.env_setup(
+                    database,
+                    rd,
+                    session_id=sid,
+                    work_item_id="w1",
+                    node_id="implementation",
+                    repo=str(repo),
+                    repo_entry=entry,
+                )
+                assert marker.read_text().count("run") == before + n
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
