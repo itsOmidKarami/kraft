@@ -149,7 +149,7 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          client-id: ${{ secrets.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: kraft
@@ -179,7 +179,9 @@ jobs:
           # actions/checkout persisted GITHUB_TOKEN's own auth header, which
           # takes precedence over any credential embedded in the remote URL --
           # drop it so the push below actually authenticates as the App.
-          git config --local --unset-all http.https://github.com/.extraheader
+          # Fails with exit 5 when the header was never set (e.g. a checkout
+          # config change upstream) -- that's not a reason to abort the stamp.
+          git config --local --unset-all http.https://github.com/.extraheader || true
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$BRANCH"
           gh pr create --base main --head "$BRANCH" \
             --title "chore: stamp plugin manifests for $TAG" \
