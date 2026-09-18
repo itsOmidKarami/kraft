@@ -1,9 +1,13 @@
 # The `kraft` command
 
 `kraft` with no arguments serves. Subcommands talk to a running server. Every
-verb takes `--json`, which prints the raw API payload — the same value
-`kraft admin mcp` hands an agent. An id is optional wherever the work item can
-be inferred from the directory you are standing in.
+verb accepts `--json`, which prints the raw API payload — the same value
+`kraft admin mcp` hands an agent — except `view watch` and `repo path`, which
+each refuse it for their own reason (`watch` streams a redrawn board rather
+than a value; use `kraft view events --json` instead, `path` already prints
+one plain line meant for `cd`, so `kraft view show --json` is the structured
+form). An id is optional wherever the work item can be inferred from the
+directory you are standing in.
 
 ## Everyday verbs
 
@@ -40,6 +44,7 @@ kraft view diff --name-only   # changed and untracked paths
 kraft view diff               # the coloured body, through $PAGER
 kraft view docs               # specs, plans and summaries linked to the item
 kraft view doc <id> --open    # open one in an editor on the server's machine
+kraft view artifact <id>      # the document a pending gate is actually about
 ```
 
 A truncated diff always says so on its last line, and files the agent wrote
@@ -67,7 +72,9 @@ for it:
 
 `kraft repo connect` probes a `setup_command` from the repo's markers; check it
 before trusting it, and `kraft admin doctor` reports any repo still undeclared.
-Editing a repo's settings stays in the UI.
+Editing a repo's settings stays in the UI. Full field list, including
+`test_scopes`, `forge`, and `default_chain_template`:
+[Configuration](configuration.md#reposyaml-connected-repos).
 
 ## Service and admin
 
@@ -77,12 +84,19 @@ kraft admin stop               # SIGTERM to the pid in run/kraft.pid
 kraft admin health             # exit 1 when degraded, reasons on stdout
 kraft admin doctor             # every check in one pass; exit 1 if any fails
 kraft admin reindex [--repo P] # rescan documents into the search index
+kraft admin reload             # reread templates/registry from disk, no restart
+kraft admin update             # install the newest release (brew upgrade, if that's how you installed)
+kraft admin init [--repo]      # register the MCP server and skills; see Agent integration
+kraft admin mcp                # serve the MCP tools over stdio
 ```
 
 A non-loopback bind still refuses to start without a password, flag or not. The
 server runs in the foreground, so Ctrl-C stops the one in front of you;
 `kraft admin stop` is for the one you started somewhere else. A second start
 against the same run directory is refused while the first is alive.
+
+`kraft admin install-service` / `uninstall-service` register Kraft as an OS
+service unit, for a machine you want it running on without a terminal open.
 
 The verbs live in four groups — `item` acts, `view` reads, `repo` is
 repositories and their worktrees, `admin` is this machine's server. Typing an
@@ -98,6 +112,7 @@ line to `~/.zshrc`:
 eval "$(register-python-argcomplete kraft)"
 ```
 
-then `kraft it<TAB>` completes to `kraft item`, `kraft item <TAB>` lists
-`create approve reject pause resume retry abandon`, and so on down the verb
-tree. Takes effect after your next `kraft` install or `uv sync`.
+then `kraft it<TAB>` completes to `kraft item`, `kraft item <TAB>` lists every
+`item` subcommand — `create approve reject pause resume retry skip progress
+escalate abandon`, and more — and so on down the verb tree. Takes effect after
+your next `kraft` install or `uv sync`.

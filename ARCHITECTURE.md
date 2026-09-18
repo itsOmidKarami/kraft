@@ -12,13 +12,16 @@ a **chain**: an ordered list of **nodes** materialized from a YAML template in
 `on.mr.open`, `on.review.local.run` — and each hook point is bound to an
 **adapter** by `templates/registry.yaml`.
 
-There are three kinds of adapter, in `src/kraft/adapters/`:
+There are four kinds of adapter:
 
-- **agent** — runs a headless coding agent in a git worktree.
-- **subprocess** — runs a command.
+- **agent** (`src/kraft/adapters/`) — runs a headless coding agent, on
+  whichever harness (`claude`, `codex`, `gemini`, ...) the binding names, in a
+  git worktree.
+- **subprocess** (`src/kraft/adapters/`) — runs a command.
 - **builtin** (`src/kraft/builtins.py`) — work Kraft does itself: preparing a
-  worktree, copying attachments, opening a merge request through `gh` or `glab`
-  (`adapters/forge/`).
+  worktree, copying attachments, scanning for touched submodules.
+- **forge** (`src/kraft/adapters/forge/`) — talks to GitHub or GitLab: opening
+  a merge request, polling CI, syncing, merging.
 
 Two things make a chain stop:
 

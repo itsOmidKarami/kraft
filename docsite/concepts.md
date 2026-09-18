@@ -14,7 +14,7 @@ one from the UI, the CLI (`kraft item create`), or an MCP tool
 
 A work item enters as a **chain**: an ordered list of **nodes**, materialized
 from a YAML template in `templates/`. Which template it uses is either named
-explicitly (`kraft item create "..." ` picks from the templates you have) or
+explicitly with `--chain` (`kraft item create "..." --chain quick-task`) or
 comes from the repo's `default_chain_template` in `repos.yaml`.
 
 The simplest shipped template, `quick-task`, is three nodes with no gates at all:
@@ -66,19 +66,21 @@ A node's optional fields change how the chain behaves around it:
 
 Each node names one or more **hook points** — `on.test.run`, `on.mr.open`,
 `on.review.local.run` — and each hook point is bound to an **adapter** by
-`templates/registry.yaml`. Four kinds of adapter exist, in `src/kraft/adapters/`:
+`templates/registry.yaml`. Four kinds of adapter exist:
 
-- **`agent`** — runs a headless coding agent (`claude`, and see
-  [Agent integration](agent-integration.md)) in a git worktree, optionally with
-  a named skill and an artifact it's expected to produce (a spec, a plan, a
-  review brief).
-- **`subprocess`** — runs a literal command, like `on.test.run`'s
-  `[uv, run, pytest, -q]`.
-- **`builtin`** — work Kraft does itself in Python: preparing a worktree,
-  scanning for touched submodules, rebasing before the merge request opens.
-- **`forge`** — talks to GitHub or GitLab (`backend: auto` resolves per repo
-  from the `forge` recorded in that repo's `repos.yaml` entry): opening the
-  merge request, polling CI, syncing, merging, watching the post-merge pipeline.
+- **`agent`** (`src/kraft/adapters/`) — runs a headless coding agent in a git
+  worktree, on whichever [harness](harnesses.md) the binding names (`claude`
+  by default; `codex` and `gemini` also ship), optionally with a named skill
+  and an artifact it's expected to produce (a spec, a plan, a review brief).
+- **`subprocess`** (`src/kraft/adapters/subprocess.py`) — runs a literal
+  command, like `on.test.run`'s `[uv, run, pytest, -q]`.
+- **`builtin`** (`src/kraft/builtins.py`) — work Kraft does itself in Python:
+  preparing a worktree, scanning for touched submodules, rebasing before the
+  merge request opens.
+- **`forge`** (`src/kraft/adapters/forge/`) — talks to GitHub or GitLab
+  (`backend: auto` resolves per repo from the `forge` recorded in that repo's
+  `repos.yaml` entry): opening the merge request, polling CI, syncing,
+  merging, watching the post-merge pipeline.
 
 Rebinding a hook point to a different adapter, or a different skill, is a
 `registry.yaml` edit — see [Configuration](configuration.md).
@@ -99,9 +101,11 @@ stops the chain the moment it finishes; the work item's status becomes
 
 Every retry loop is bounded. `policy.yaml`'s `loops:` map names each loop's
 `attempts` and `wall_clock_s` ceiling — `verify_fix_loop`, `ci_fix_loop`,
-`ci_wait`, `rebase_bounce`, and a `default` fallback for anything else. Hitting
-either bound stops the chain and escalates to a person with the full trace,
-rather than looping forever on a defect the agent can't actually fix.
+`ci_wait`, `rebase_bounce`, `rebase_conflict`. A top-level `default:` key,
+sibling to `loops:` rather than inside it, covers any `fix_loop` name not
+listed there. Hitting either bound stops the chain and escalates to a person
+with the full trace, rather than looping forever on a defect the agent can't
+actually fix.
 
 ## Where this is enforced
 

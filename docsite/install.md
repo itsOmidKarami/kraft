@@ -46,7 +46,7 @@ Releasing, and the labels a pull request needs:
 
 | | |
 |---|---|
-| `~/.kraft/run/` | `orchestrator.db`, `index.db`, `logs/`, `results/`, `worktrees/` |
+| `~/.kraft/run/` | `orchestrator.db`, `index.db`, `logs/`, `results/`, `worktrees/`, `attachments/` |
 | `~/.kraft/templates/` | the YAML the Settings screens edit — chain templates, `registry.yaml`, `policy.yaml`, `repos.yaml`, `access.yaml` |
 
 `templates/` is seeded from the packaged defaults on first run and never overwritten
@@ -66,6 +66,6 @@ another device.
 Python 3.14+, [uv](https://docs.astral.sh/uv/), Node 20+, git, and `claude` for
 real runs (not needed for `just dev`).
 [`bd`](https://github.com/gastownhall/beads) is optional: with it, every work
-item gets a tracked bead, and without it Kraft files work anyway and says so.
+item gets a tracked bead; without it Kraft still files the work anyway, saying so.
 Semantic search is opt-in: `just setup-vector` (downloads a ~130MB model on first
 search); without it `/search` still works in FTS mode.

@@ -28,7 +28,10 @@ The tools you'll reach for most, over the same local HTTP API the browser uses:
 |---|---|
 | read | `list_work_items`, `get_work_item`, `search` |
 | write | `create_work_item`, `ensure_repo` |
-| act | `approve_gate`, `reject_gate`, `pause_work_item`, `resume_work_item` |
+| act | `approve_gate`, `reject_gate`, `pause_work_item`, `resume_work_item`, `retry_work_item` |
+
+That's the everyday subset, not the full tool list — every `kraft` subcommand
+(see the [CLI reference](cli.md)) has an MCP twin.
 
 ## Two rules enforced in code, not in prose
 
@@ -37,9 +40,10 @@ board shows it as *Waiting to start* with a single Start button. Nothing spends
 tokens until a person clicks it.
 
 **A worker cannot act on itself.** Sessions Kraft starts carry
-`KRAFT_WORK_ITEM_ID`, and any attempt to approve, reject, pause, or resume the
-work item running that session is refused before a request is sent. A gate is
-where a human decides; an agent approving its own would make the gate decorative.
+`KRAFT_WORK_ITEM_ID`, and any attempt to approve, reject, pause, resume, retry,
+or abandon the work item running that session is refused before a request is
+sent. A gate is where a human decides; an agent approving its own would make
+the gate decorative.
 
 `kraft admin mcp` runs the server on stdio, and every tool is also a `kraft`
 subcommand, so hooks and non-MCP agents get the same surface — see the
