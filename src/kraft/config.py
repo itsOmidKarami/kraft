@@ -22,6 +22,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import yaml
+from pydantic import ValidationError
 
 from kraft import sandbox as _sandbox
 from kraft import steering as _steering
@@ -32,6 +33,24 @@ logger = logging.getLogger(__name__)
 
 class ConfigError(Exception):
     pass
+
+
+def first_error(exc: ValidationError, prefix: str) -> str:
+    """One operator-facing line from a `ValidationError`, prefixed with the file.
+
+    Every config loader here has always raised `ConfigError` with a single
+    string, and seven call sites read exactly one message (three in
+    `api/routes/gates.py`, three in `api/routes/work_items.py`, one in
+    `templates.py`). Models raise a list; this is the adapter, so modelling the
+    config does not become a rewrite of everything that reports on it.
+
+    The field path is included because the current messages name the offending
+    key, and an error that says only "value is not a valid boolean" is a
+    regression an operator pays for.
+    """
+    err = exc.errors()[0]
+    where = ".".join(str(p) for p in err["loc"]) or "<root>"
+    return f"{prefix}: {where}: {err['msg']}"
 
 
 def read_yaml(path: str | Path, default: dict | None = None) -> dict:
