@@ -54,6 +54,16 @@ describe("timelineHelpers: paused_by_broken_base", () => {
   });
 });
 
+describe("timelineHelpers: loop_counters_reset", () => {
+  it("names the rebase and which nodes are re-running", () => {
+    const e = ev({
+      type: "loop_counters_reset",
+      payload: { nodes: ["verify", "pre_mr_rebase"], reason: "rebase_bounce", bounce_to: "verify" },
+    });
+    expect(detailOf(e)).toBe("rebased onto latest main → re-running verify, pre_mr_rebase");
+  });
+});
+
 describe("timelineHelpers: groupByNode", () => {
   const ev = (seq: number, type: string, payload: Record<string, unknown> = {}): KraftEvent =>
     ({ seq, work_item_id: "w1", type, payload, created_at: `2026-09-14T10:00:0${seq}Z` }) as KraftEvent;
