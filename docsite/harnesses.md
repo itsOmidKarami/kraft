@@ -54,3 +54,45 @@ something in it.
 actually names (not every bundled one — an install with no `codex` binding
 anywhere isn't told to go install `codex`), plus a failure row for any
 harness file that failed to load at all.
+
+## Adding one
+
+A new harness is a YAML file at `$KRAFT_HOME/templates/harnesses/<id>.yaml`
+(the same override directory as above) — no Python change, no Kraft release.
+Required top level:
+
+```yaml
+id: mytool          # must match the filename's stem
+kind: cli            # the only kind implemented; a second kind gets its own adapter
+command: [mytool]    # argv prefix
+capabilities:
+  prompt:   { cli: ["-p", "{value}"] }
+  context:  { channel: prompt }   # or: { channel: system_prompt, cli: [...] }
+  usage:    { source: result_file }   # or: { source: envelope, reader: <a Python parser's name> }
+```
+
+`prompt`, `context`, and `usage` are required — nothing can dispatch without
+them. Every other capability (`model`, `effort`, `permission_mode`,
+`deny_tools`, `allowed_tools`, `approval_channel`, `resume`, `autocompact`,
+`structured_log`, `rate_limit_signal`) is optional: omit what the CLI can't
+do, and a binding naming it is rejected at load, pointing at this file.
+
+A capability needs a `cli:` argv fragment unless it's `usage`/
+`rate_limit_signal` (read back out, not invoked) or `context` with
+`channel: prompt` (folded into the prompt text itself, not a separate flag).
+`{value}` and `{csv}` are the whole placeholder language — a comma-joined
+list for `{csv}`, a single substituted string for `{value}`. Needing a third
+kind of substitution is a sign the harness belongs in code, not YAML.
+
+Two more fields keep a binding from doing something the CLI would reject:
+`values:` (a list of `re.fullmatch` patterns — a value outside them fails at
+load, not at launch) and `always:` (a value Kraft forces regardless of what a
+binding asks for, checked against `values:` too, since a default the CLI
+itself would reject is worse than no default). `resume` can bind `via:
+command_resume` instead of `cli:`, when a resume needs its own command
+prefix rather than a trailing flag (see `codex.yaml`'s `command_resume:
+[codex, exec, resume, "{value}"]`).
+
+Validate with `kraft admin doctor` — it loads every harness a live binding
+names and reports a PATH check for each, plus the load error for any file
+that failed outright.

@@ -13,7 +13,10 @@ Any YAML file in `templates/` whose top level is `id:` + `nodes:` is a chain
 template, selectable by that `id` when creating a work item. See
 [Concepts](concepts.md#chain) for the node schema (`gate_after`, `fix_loop`,
 `on_failure`, `rebase_bounce_to`, `reject_to`, `auto_escalate`) with the
-shipped `default` and `quick-task` templates as worked examples.
+shipped `default` and `quick-task` templates as worked examples, and
+[Concepts → Composing a template](concepts.md#composing-a-template) for
+building a custom one with `extends`/`remove`/`insert_before`/`insert_after`
+instead of restating a whole node list.
 
 ## `registry.yaml` — hook point bindings
 
@@ -39,7 +42,7 @@ hooks:
 | `model` / `effort` | `agent` | Per-hook overrides of the agent's model and effort, where the default isn't right for that step. |
 | `handler` | `builtin`, `forge` | Which Python function or forge operation runs. |
 | `backend` | `forge` | `auto` resolves per repo from the `forge` field on that repo's `repos.yaml` entry — never pin a forge here, or every repo on the install is forced onto one. |
-| `defaults.agent.steering` | top level | Steering docs (from `templates/steering/`) attached to every agent hook by default, layered under any a repo or work item adds. |
+| `defaults.agent.*` | top level | Applied to every `kind: agent` hook that doesn't set its own value. Any of `harness`, `profile`, `model`, `escalate_model`, `effort`, `permission_mode`, `skill`, `artifact`, plus three that merge as a list instead of binding-wins — `steering` (from `templates/steering/`), `deny_tools`, `allowed_tools` (default's items first, then the binding's own, deduped). |
 
 Rebinding a hook — say, pointing `on.test.run` at a different command, or
 `on.review.local.run` at a different skill — is an edit here, not a chain

@@ -85,6 +85,29 @@ Each node names one or more **hook points** — `on.test.run`, `on.mr.open`,
 Rebinding a hook point to a different adapter, or a different skill, is a
 `registry.yaml` edit — see [Configuration](configuration.md).
 
+## Composing a template
+
+A custom template doesn't have to restate the shipped ones. `extends: <id>`
+starts from another template's already-resolved node list, then `remove`,
+`insert_before`, and `insert_after` edit it — never both `extends` and a
+`nodes:` list on the same template:
+
+```yaml
+id: quick-task-with-security-review
+extends: quick-task
+insert_after: { verify: [{ id: security_review, tasks: [on.review.security.run] }] }
+```
+
+(`on.review.security.run` is a real hook, registered but in no shipped
+chain — see [Configuration](configuration.md#registryyaml-hook-point-bindings).)
+
+`remove` names node ids to drop (unknown ids reject at load); `insert_before`/
+`insert_after` are maps of an existing node id to a list of new node dicts
+spliced in beside it (an unknown anchor id, or a naming collision with an
+existing node, also rejects at load). A chain resolves `extends` recursively,
+so a template can extend a template that itself extends another — but not
+itself, directly or through a cycle.
+
 ## Gate
 
 A **gate** is where a human decision belongs. A node with `gate_after: <id>`
