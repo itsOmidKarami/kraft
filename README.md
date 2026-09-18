@@ -26,11 +26,11 @@
 | src/kraft/api/routes/artifacts.py        |       81 |        1 |     99% |       208 |
 | src/kraft/api/routes/auth.py             |       45 |        6 |     87% |     54-61 |
 | src/kraft/api/routes/board.py            |      105 |        1 |     99% |       126 |
-| src/kraft/api/routes/gates.py            |      136 |       17 |     88% |30, 51-52, 57, 85, 103-104, 242, 296, 298, 321, 337-338, 360-361, 385-386 |
+| src/kraft/api/routes/gates.py            |      136 |       16 |     88% |30, 51-52, 57, 85, 103-104, 296, 298, 321, 337-338, 360-361, 385-386 |
 | src/kraft/api/routes/lifecycle.py        |      475 |       38 |     92% |110, 113-114, 119-120, 199, 228, 243, 376, 447, 449, 451, 505-506, 539, 605-606, 643-644, 697, 720, 727, 758, 767, 865-866, 908-909, 964, 967, 1016, 1048-1049, 1127-1128, 1167, 1176-1177 |
 | src/kraft/api/routes/repos.py            |      125 |        4 |     97% |57-61, 182-183 |
 | src/kraft/api/routes/search.py           |      117 |       14 |     88% |47-48, 74-77, 80, 107-111, 134, 140-141, 171 |
-| src/kraft/api/routes/sessions.py         |      106 |        5 |     95% |69, 192, 197, 199, 202 |
+| src/kraft/api/routes/sessions.py         |      106 |        7 |     93% |69, 191-193, 197, 199, 202 |
 | src/kraft/api/routes/settings.py         |      369 |       25 |     93% |42, 134, 237, 239, 241, 359, 364-367, 382-383, 407-408, 410, 442-445, 448-449, 453-458, 515, 517 |
 | src/kraft/api/routes/work\_items.py      |      200 |        7 |     96% |112, 221, 224, 256-259, 354-355 |
 | src/kraft/api/startup.py                 |      117 |        4 |     97% |121-122, 247-248 |
@@ -58,13 +58,13 @@
 | src/kraft/events.py                      |       17 |        0 |    100% |           |
 | src/kraft/executor/\_\_init\_\_.py       |        8 |        0 |    100% |           |
 | src/kraft/executor/context.py            |       33 |        1 |     97% |       108 |
-| src/kraft/executor/dispatch.py           |      311 |        6 |     98% |205, 527, 644, 690, 1192, 1198 |
+| src/kraft/executor/dispatch.py           |      316 |        6 |     98% |205, 537, 654, 700, 1233, 1239 |
 | src/kraft/executor/entry.py              |       89 |        1 |     99% |       207 |
 | src/kraft/executor/gates.py              |      241 |       17 |     93% |63-64, 95, 157, 365, 373, 387, 428, 442, 532, 585-586, 810-813, 815 |
-| src/kraft/executor/prompts.py            |      167 |        2 |     99% |  179, 496 |
+| src/kraft/executor/prompts.py            |      181 |        1 |     99% |       180 |
 | src/kraft/executor/resuming.py           |       77 |       13 |     83% |54, 137, 168-171, 181-183, 219, 221, 223, 225 |
 | src/kraft/executor/stops.py              |       48 |        5 |     90% |67, 98-104 |
-| src/kraft/executor/walk.py               |      365 |       38 |     90% |284, 352, 354-359, 365, 391, 393, 422, 424, 433, 458, 498, 509, 511, 513, 515, 546, 561-568, 570, 574, 576, 802, 943, 945, 1026, 1090, 1095-1100, 1139, 1255, 1267 |
+| src/kraft/executor/walk.py               |      361 |       38 |     89% |252, 320, 322-327, 333, 359, 361, 390, 392, 401, 426, 466, 477, 479, 481, 483, 514, 529-536, 538, 542, 544, 770, 911, 913, 994, 1058, 1063-1068, 1107, 1223, 1235 |
 | src/kraft/findings.py                    |      108 |        0 |    100% |           |
 | src/kraft/gate\_review.py                |       31 |        2 |     94% |    65, 88 |
 | src/kraft/harness.py                     |      202 |       20 |     90% |116, 132, 135, 145, 149-150, 173, 176, 182, 185, 195, 211, 216, 233, 240, 247, 259, 304-306 |
@@ -106,7 +106,7 @@
 | src/kraft/worker\_env.py                 |        8 |        0 |    100% |           |
 | src/kraft/worktree\_read.py              |       48 |        8 |     83% |82, 86-88, 91-95, 103-104 |
 | src/kraft/ws.py                          |       61 |        0 |    100% |           |
-| **TOTAL**                                | **11223** |  **800** | **93%** |           |
+| **TOTAL**                                | **11238** |  **800** | **93%** |           |
 
 
 ## Setup coverage badge
