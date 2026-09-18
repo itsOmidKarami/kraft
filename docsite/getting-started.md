@@ -4,6 +4,13 @@ This walks through installing Kraft, connecting a repo, running a work item
 end to end, and approving the one gate that stands in its way. Fifteen
 minutes, most of it spent waiting on an agent.
 
+!!! tip "Doing this from a coding agent instead"
+    Once Kraft is installed (step 1), most of the rest has a `/kraft:*` slash
+    command twin — `/kraft:onboard` instead of `repo connect` + `admin init`,
+    `/kraft:board` instead of `view list`, `/kraft:gates` instead of `item
+    approve`. See [Agent integration](agent-integration.md) if that's closer
+    to how you already work.
+
 ## 1. Install and start the server
 
 ```bash

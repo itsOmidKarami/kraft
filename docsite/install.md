@@ -18,6 +18,12 @@ and worth reading before you pipe it to a shell. `kraft admin update` installs t
 newest release later on (`--restart` also restarts a running server, the same
 way it was running), and `kraft --version` says what you have.
 
+Prefer driving Kraft from a coding agent instead of this shell? `kraft admin
+init` above already installs the `/kraft:*` skills alongside the MCP server —
+see [Agent integration](agent-integration.md) for the slash commands
+(`/kraft:onboard`, `/kraft:board`, `/kraft:gates`, ...) and the Claude Code
+plugin marketplace as an alternative, self-updating way to install them.
+
 ## Homebrew (macOS)
 
 ```bash
