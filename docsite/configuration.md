@@ -54,6 +54,7 @@ loops:
   ci_fix_loop:       { attempts: 3, wall_clock_s: 3600 }
   ci_wait:           { attempts: 60, wall_clock_s: 1800 }
   rebase_bounce:     { attempts: 2, wall_clock_s: 3600 }
+  rebase_conflict:   { attempts: 3, wall_clock_s: 3600 }
 default:             { attempts: 3, wall_clock_s: 3600 }
 
 findings:
@@ -77,7 +78,7 @@ triggers:
 
 | Key | Means |
 |---|---|
-| `loops.<name>` | `attempts` and `wall_clock_s` ceiling for a named fix loop, referenced by a node's `fix_loop`. `default` covers anything not named explicitly. |
+| `loops.<name>` | `attempts` and `wall_clock_s` ceiling for a named fix loop, referenced by a node's `fix_loop`. `default` covers anything not named explicitly. `rebase_conflict` bounds the conflict-resolving agent `/resume`, `/retry`, or `pre_mr_rebase` can dispatch. |
 | `findings.loop_severities` | Which review-finding severities burn a fix cycle. Anything below that bar is recorded and shown at the human-review gate instead of silently discarded. |
 | `budget.work_item_usd` / `budget.daily_usd` | Spend caps in dollars, both off by default (`null`). A cap refuses to *start* the next agent task — it cannot interrupt one already running, since cost is only known when a session exits, so overshoot is bounded by one task's cost. |
 | `rate_limit_retries` | How many times Kraft auto-relaunches a work item after a rejected API rate limit before stopping for a human. Counts attempts, not wall-clock time — a rate-limit wait can run for hours. |

@@ -9,6 +9,9 @@ on:
     branches: [main]
     paths:
       - "docsite/**"
+      # docsite/assets is a symlink into here; every page's images resolve
+      # through it, so a screenshot-only change must still trigger a rebuild.
+      - ".github/assets/**"
       - "mkdocs.yml"
       - "pyproject.toml"
       - "uv.lock"
