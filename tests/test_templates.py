@@ -2015,3 +2015,23 @@ def test_a_binding_with_no_inputs_key_still_loads(tmp_path):
         tmp_path, {"on.test.run": {"kind": "subprocess", "command": ["uv", "run", "pytest"]}}
     )
     assert templates.load_registry(p).hooks["on.test.run"]["command"] == ["uv", "run", "pytest"]
+
+
+def test_chain_review_splice_fixture_matches_the_shared_cases():
+    """The gate preview (`frontend/src/chainReviewDiff.ts`) is a second
+    implementation of this pipeline, and nothing bound the two until this
+    fixture: ordered steps changed the Python side twice and the TypeScript
+    kept rendering a diff for a revision that was a no-op (Kraft-ukgsi).
+    Editing the behaviour means editing the fixture, which fails the vitest
+    that reads the same file."""
+    cases = json.loads(
+        (Path(__file__).parent / "fixtures" / "chain_review_splice.json").read_text()
+    )["cases"]
+    assert cases, "fixture carries no cases"
+    for case in cases:
+        revised = templates.strip_non_proposable_carryover_fields(case["revised"])
+        merged = [
+            templates.with_steps(n)
+            for n in templates.carry_forward_node_fields(case["old_tail"], revised)
+        ]
+        assert merged == case["expected"], case["name"]
