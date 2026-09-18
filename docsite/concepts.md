@@ -39,7 +39,7 @@ nodes:
   - { id: chain_review,      tasks: [on.chain.review_ready],      gate_after: chain_finalized, auto_escalate: true }
   - { id: env_setup,         tasks: [on.env.prepare],             gate_after: null }
   - { id: implementation,    steps: [[on.implementation.start], [on.repos.scan]], gate_after: null }
-  - { id: verify,            steps: [[on.test.run], [on.review.local.run]], fix_loop: verify_fix_loop, gate_after: null }
+  - { id: verify,            tasks: [on.test.run, on.review.local.run], fix_loop: verify_fix_loop, gate_after: null }
   - { id: pre_mr_rebase,     tasks: [on.mr.rebase],                gate_after: null, rebase_bounce_to: verify }
   - { id: mr_meta,           tasks: [on.mr.describe],              gate_after: null }
   - { id: open_mr,           tasks: [on.mr.open],                  gate_after: null }
@@ -57,9 +57,9 @@ dispatched at all if `a` fails, and it sees whatever `a` left behind. A node
 declares one key or the other, never both.
 
 Reach for `steps` when the second task needs the first task's result: the
-default chain runs the test suite and then the local review, so a red suite
-stops the node before a reviewer is paid for, and it scans submodules after the
-implementing agent has finished touching the worktree.
+default chain's `implementation` node runs the implementing agent and then
+scans submodules, so the scan reads a worktree the agent has actually
+touched rather than one it has not started on.
 
 A node's optional fields change how the chain behaves around it:
 
