@@ -4,7 +4,6 @@ import asyncio
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Literal
 from urllib.parse import urlsplit
 
 import yaml
@@ -252,38 +251,14 @@ async def put_policy(body: PolicyBody, request: Request):
     return data
 
 
-PALETTE_IDS = frozenset({"nocturne", "rose", "forest", "amber", "slate"})
-THEME_DEFAULT: dict = {
-    "palette": "nocturne",
-    "mode": "dark",
-    "density": "compact",
-    "board": {"group_by": "status", "show_done": 5, "open_in": "peek"},
-}
-
-
-class BoardPrefs(BaseModel):
-    group_by: Literal["status", "repo", "template"] = "status"
-    show_done: int = Field(default=5, ge=1)
-    open_in: Literal["peek", "full"] = "peek"
-
-
-class ThemeBody(BaseModel):
-    palette: str
-    mode: Literal["light", "dark", "system"]
-    density: Literal["compact", "comfortable"] = "compact"
-    board: BoardPrefs = Field(default_factory=BoardPrefs)
-
-
 @api_router.get("/theme")
 async def get_theme(request: Request):
     st = request.app.state
-    return {**THEME_DEFAULT, **config_mod.read_yaml(st.templates_dir / "theme.yaml", THEME_DEFAULT)}
+    return config_mod.load_theme(st.templates_dir / "theme.yaml").model_dump()
 
 
 @api_router.put("/theme")
-async def put_theme(body: ThemeBody, request: Request):
-    if body.palette not in PALETTE_IDS:
-        raise HTTPException(422, f"unknown palette: {body.palette!r}")
+async def put_theme(body: config_mod.Theme, request: Request):
     st = request.app.state
     data = body.model_dump()
     config_mod.write_yaml(st.templates_dir / "theme.yaml", data)
@@ -438,7 +413,7 @@ async def get_intake(request: Request):
     boot and let the next save overwrite it silently."""
     st = request.app.state
     try:
-        data = config_mod.load_intake(st.templates_dir / "intake.yaml")
+        data = config_mod.load_intake(st.templates_dir / "intake.yaml").model_dump()
     except config_mod.ConfigError:
         # Unreadable: show what the instance is actually running on, which
         # lifespan already degraded to the defaults. Saving replaces the file.
@@ -573,7 +548,7 @@ async def get_notify(request: Request):
     # closing it means a file watcher, which this task does not build.
     st = request.app.state
     return _notify_view(
-        config_mod.load_notify(st.templates_dir / "notify.yaml"), st.notifier.last_test
+        config_mod.load_notify(st.templates_dir / "notify.yaml").model_dump(), st.notifier.last_test
     )
 
 
@@ -581,7 +556,7 @@ async def get_notify(request: Request):
 async def put_notify(body: NotifyBody, request: Request):
     st = request.app.state
     path = st.templates_dir / "notify.yaml"
-    cfg = config_mod.load_notify(path)
+    cfg = config_mod.load_notify(path).model_dump()
     if body.enabled is not None:
         cfg["enabled"] = body.enabled
     if body.url is not None:

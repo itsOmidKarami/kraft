@@ -20,9 +20,10 @@ from configparser import ConfigParser
 from configparser import Error as ConfigParserError
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Literal
 
 import yaml
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from kraft import sandbox as _sandbox
 from kraft import steering as _steering
@@ -567,39 +568,59 @@ def probe_repo(path: str | Path, *, test_command: str | None = None) -> dict:
 
 # ── access ───────────────────────────────────────────────────────────────────
 
-ACCESS_DEFAULT: dict = {
-    "bind": "127.0.0.1",
-    "port": 8765,
-    "password_hash": None,
-    "session_expiry_days": 7,
-    "allowed_hosts": [],
-}
+
+class _Model(BaseModel):
+    """`extra="forbid"`: a key nobody reads is a typo an operator wants told about."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class Access(_Model):
+    bind: str = "127.0.0.1"
+    port: int = 8765
+    password_hash: str | None = None
+    session_expiry_days: int = 7
+    allowed_hosts: list[str] = []
+
+
+ACCESS_DEFAULT: dict = Access().model_dump()
 
 LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 
 
-def load_access(path: str | Path) -> dict:
-    return {**ACCESS_DEFAULT, **read_yaml(path, ACCESS_DEFAULT)}
+def _dict(cfg) -> dict:
+    return cfg.model_dump() if isinstance(cfg, BaseModel) else cfg
 
 
-def save_access(path: str | Path, access: dict) -> None:
+def load_access(path: str | Path) -> Access:
+    try:
+        return Access.model_validate(read_yaml(path, ACCESS_DEFAULT))
+    except ValidationError as exc:
+        raise ConfigError(first_error(exc, "access.yaml")) from exc
+
+
+def save_access(path: str | Path, access: dict | Access) -> None:
+    access = _dict(access)
     write_yaml(path, {k: access.get(k, v) for k, v in ACCESS_DEFAULT.items()})
 
 
 # ── notify ───────────────────────────────────────────────────────────────────
 
+
 #: `templates/notify.yaml`. Not bundled and not seeded, for `access.yaml`'s
 #: reason: it holds a secret and a hostname that belong to one machine. A
 #: missing file reads as this, and the first `PUT /notify` creates it.
-NOTIFY_DEFAULT: dict = {
-    "enabled": False,
-    "url": None,
-    "base_url": None,
-    "events": ["gate_requested", "work_item_needs_human"],
-}
+class Notify(_Model):
+    enabled: bool = False
+    url: str | None = None
+    base_url: str | None = None
+    events: list[str] = ["gate_requested", "work_item_needs_human"]
 
 
-def load_notify(path: str | Path) -> dict:
+NOTIFY_DEFAULT: dict = Notify().model_dump()
+
+
+def load_notify(path: str | Path) -> Notify:
     try:
         overrides = read_yaml(path, {})
     except ConfigError as exc:
@@ -618,25 +639,74 @@ def load_notify(path: str | Path) -> dict:
         if isinstance(cause, OSError):
             raise ConfigError(f"notify.yaml: cannot be read: {cause.strerror}") from None
         raise ConfigError("notify.yaml: not valid YAML") from None
-    return {**NOTIFY_DEFAULT, "events": list(NOTIFY_DEFAULT["events"]), **overrides}
+    try:
+        return Notify.model_validate(overrides)
+    except ValidationError as exc:
+        # `input` echoes the offending value, which for `url` is the secret --
+        # so name only the field and pydantic's message, never the value.
+        err = exc.errors()[0]
+        where = ".".join(str(p) for p in err["loc"])
+        raise ConfigError(f"notify.yaml: {where}: {err['msg']}") from None
 
 
-def save_notify(path: str | Path, notify: dict) -> None:
+def save_notify(path: str | Path, notify: dict | Notify) -> None:
     """Written 0600 — `write_yaml` stages through `mkstemp`, which creates at
     0600, and `os.replace` carries that mode onto the target."""
+    notify = _dict(notify)
     write_yaml(path, {k: notify.get(k, v) for k, v in NOTIFY_DEFAULT.items()})
 
 
 # ── auto-intake ──────────────────────────────────────────────────────────────
 
-INTAKE_DEFAULT: dict = {
-    "enabled": False,
-    "interval_s": 300,
-    "repos": [],
-    "priority_ceiling": 2,
-}
+
+class Intake(_Model):
+    enabled: bool = False
+    interval_s: int = 300
+    repos: list[str] = []
+    priority_ceiling: int = 2
+    # Moved to `policy.yaml` (`Policy.max_concurrent`); `PUT /intake` still
+    # writes it so an old client or a hand-edited file round-trips.
+    max_concurrent: int | None = None
 
 
-def load_intake(path: str | Path) -> dict:
+INTAKE_DEFAULT: dict = Intake().model_dump(exclude={"max_concurrent"})
+
+
+def load_intake(path: str | Path) -> Intake:
     """`intake.yaml`, with every missing key defaulted. A missing file is off."""
-    return {**INTAKE_DEFAULT, **read_yaml(path, INTAKE_DEFAULT)}
+    try:
+        return Intake.model_validate(read_yaml(path, INTAKE_DEFAULT))
+    except ValidationError as exc:
+        raise ConfigError(first_error(exc, "intake.yaml")) from exc
+
+
+# ── theme ────────────────────────────────────────────────────────────────────
+
+PALETTE_IDS = frozenset({"nocturne", "rose", "forest", "amber", "slate"})
+
+
+class BoardPrefs(_Model):
+    group_by: Literal["status", "repo", "template"] = "status"
+    show_done: int = Field(default=5, ge=1)
+    open_in: Literal["peek", "full"] = "peek"
+
+
+class Theme(_Model):
+    palette: str = "nocturne"
+    mode: Literal["light", "dark", "system"] = "dark"
+    density: Literal["compact", "comfortable"] = "compact"
+    board: BoardPrefs = BoardPrefs()
+
+    @field_validator("palette")
+    @classmethod
+    def _known_palette(cls, v: str) -> str:
+        if v not in PALETTE_IDS:
+            raise ValueError(f"unknown palette: {v!r}")
+        return v
+
+
+def load_theme(path: str | Path) -> Theme:
+    try:
+        return Theme.model_validate(read_yaml(path))
+    except ValidationError as exc:
+        raise ConfigError(first_error(exc, "theme.yaml")) from exc
