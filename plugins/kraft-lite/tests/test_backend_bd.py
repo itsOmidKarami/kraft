@@ -83,7 +83,7 @@ def test_start_then_state_reports_the_first_node(tmp_path, monkeypatch, capsys):
     kl.main(["state"])
     state = json.loads(capsys.readouterr().out)
     assert state["node"] == "spec"
-    assert state["hooks"] == ["on.spec.requested"]
+    assert state["hooks"] == ["on.mr.rebase", "on.spec.requested"]
     assert state["gate"] == "spec_approval"
     assert state["status"] == "open"
     assert state["backend"] == "jsonl"
@@ -111,7 +111,7 @@ def test_attempt_increments_and_reports_the_cap(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(kl.shutil, "which", lambda name: None)
     monkeypatch.chdir(tmp_path)
     kl.main(["start", "--title", "t"])
-    for node in ("spec", "plan", "chain_review", "env_setup", "implementation"):
+    for node in ("spec", "plan", "chain_review", "implementation"):
         kl.main(["approve"] if node in {"spec", "plan", "chain_review"} else ["close"])
     capsys.readouterr()
 
@@ -613,8 +613,6 @@ def test_a_rewind_reopens_every_node_after_the_named_one(tmp_path, monkeypatch, 
     for expected in (
         "implementation",
         "verify",
-        "pre_mr_rebase",
-        "mr_meta",
         "open_mr",
         "mr_checks",
     ):

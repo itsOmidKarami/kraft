@@ -525,7 +525,6 @@ def _budget_template() -> Template:
     return Template(
         id="budget-item",
         nodes=[
-            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None, "fix_loop": None},
             {
                 "id": "work",
                 "tasks": ["on.implementation.start"],

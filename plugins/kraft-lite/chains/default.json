@@ -4,6 +4,7 @@
     {
       "id": "spec",
       "tasks": [
+        "on.mr.rebase",
         "on.spec.requested"
       ],
       "gate_after": "spec_approval",
@@ -12,6 +13,7 @@
     {
       "id": "plan",
       "tasks": [
+        "on.mr.rebase",
         "on.plan.requested"
       ],
       "gate_after": "plan_approval",
@@ -26,16 +28,10 @@
       "fix_loop": null
     },
     {
-      "id": "env_setup",
-      "tasks": [
-        "on.env.prepare"
-      ],
-      "gate_after": null,
-      "fix_loop": null
-    },
-    {
       "id": "implementation",
       "tasks": [
+        "on.mr.rebase",
+        "on.env.prepare",
         "on.implementation.start",
         "on.repos.scan"
       ],
@@ -45,6 +41,8 @@
     {
       "id": "verify",
       "tasks": [
+        "on.mr.rebase",
+        "on.env.prepare",
         "on.test.run",
         "on.review.local.run"
       ],
@@ -52,24 +50,10 @@
       "fix_loop": "verify_fix_loop"
     },
     {
-      "id": "pre_mr_rebase",
-      "tasks": [
-        "on.mr.rebase"
-      ],
-      "gate_after": null,
-      "fix_loop": null
-    },
-    {
-      "id": "mr_meta",
-      "tasks": [
-        "on.mr.describe"
-      ],
-      "gate_after": null,
-      "fix_loop": null
-    },
-    {
       "id": "open_mr",
       "tasks": [
+        "on.mr.rebase",
+        "on.mr.describe",
         "on.mr.open"
       ],
       "gate_after": null,

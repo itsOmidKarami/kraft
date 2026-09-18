@@ -35,6 +35,14 @@ WAITING = "waiting"
 #: that counts as "moved the node forward" cannot drift between the two.
 _ADVANCING = ("done", "done_with_concerns")
 
+#: `on.mr.rebase` moved the branch onto a newer origin tip, in a node that
+#: declares `rebase_bounce_to`. Deliberately not in `_ADVANCING`, so
+#: `measure_node` stops the node before its later groups run: the whole point
+#: of the bounce is that they must not run against a base that just moved.
+#: Not a failure -- `walk_node` completes the node and `run_once`'s existing
+#: base-ref comparison does the bounce.
+BASE_MOVED = "base_moved"
+
 #: A settled pipeline whose every failed job is the forge's own fault
 #: (Kraft-h81i, Kraft-s8ul). `ci_poll` retries it internally, through the
 #: forge, up to a small cap; this is what it returns once retries are

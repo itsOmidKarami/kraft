@@ -2986,3 +2986,82 @@ def test_walk_attributes_a_config_error_to_the_first_node(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def _walk_single_node(tmp_path, node):
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="wi",
+                    bead_id="B",
+                    title="t",
+                    repo=str(tmp_path),
+                    chain_template="default",
+                    chain_definition=json.dumps({"template_id": "default", "nodes": [node]}),
+                )
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = 'wi'").fetchone()
+            )
+            return await executor.walk.walk_node(
+                database, rd, "wi", node, row, Registry(hooks={}), tmp_path
+            )
+        finally:
+            await database.close()
+
+    return asyncio.run(scenario())
+
+
+def test_walk_node_completes_on_a_moved_base_so_run_once_can_bounce(tmp_path, monkeypatch):
+    """`BASE_MOVED` is not a failure: the node stopped on purpose, and `run_once`
+    compares base_ref right after this returns and bounces."""
+    from kraft.executor import dispatch
+    from kraft.executor.context import BASE_MOVED
+
+    node = {
+        "id": "open_mr",
+        "steps": [["on.mr.rebase"], ["on.mr.describe"], ["on.mr.open"]],
+        "tasks": ["on.mr.rebase", "on.mr.describe", "on.mr.open"],
+        "gate_after": None,
+        "rebase_bounce_to": "verify",
+    }
+
+    async def fake_measure(*a, **kw):
+        return BASE_MOVED, [], []
+
+    monkeypatch.setattr(dispatch, "measure_node", fake_measure)
+    assert _walk_single_node(tmp_path, node) == "ok"
+
+
+def test_a_resolved_conflict_re_measures_a_node_that_has_more_steps(tmp_path, monkeypatch):
+    """The resolver completing the node is right while the rebase is its only
+    work; with the rebase as step 1 of `implementation` it would mark the node
+    done with the agent never dispatched."""
+    from kraft import builtins as kraft_builtins
+    from kraft.executor import dispatch, walk
+
+    node = {
+        "id": "implementation",
+        "steps": [["on.mr.rebase"], ["on.implementation.start"]],
+        "tasks": ["on.mr.rebase", "on.implementation.start"],
+        "gate_after": None,
+    }
+    calls = []
+
+    async def fake_measure(*a, **kw):
+        calls.append(1)
+        if len(calls) == 1:
+            return "failed", ["on.mr.rebase"], [kraft_builtins.RebaseConflict("both modified x")]
+        return "ok", [], []
+
+    async def fake_resolve(*a, **kw):
+        return "ok", None, "newsha"
+
+    monkeypatch.setattr(dispatch, "measure_node", fake_measure)
+    monkeypatch.setattr(walk, "resolve_rebase_conflict", fake_resolve)
+    assert _walk_single_node(tmp_path, node) == "ok"
+    assert len(calls) == 2, "the node must be measured again after the resolve"

@@ -13,6 +13,7 @@ from kraft.adapters import beads
 from kraft.adapters import subprocess as _subprocess
 from kraft.executor import dispatch, entry, gates, prompts, stops
 from kraft.executor.context import (
+    BASE_MOVED,
     BUDGET,
     CONFIG_ERROR,
     INFRA_STOP,
@@ -331,6 +332,13 @@ async def walk_node(
             return await stops.stop_for_waiting(db, work_item_id, node)
         if verdict == INFRA_STOP:
             return await stops.stop_for_infra(db, work_item_id, node)
+        if verdict == BASE_MOVED:
+            # Not a failure: the rebase stopped the node deliberately. Complete
+            # it like a clean pass -- `run_once` reads the moved base_ref right
+            # after this returns and bounces, re-running the node from its
+            # first step against the new base.
+            await db.write(lambda c: store.complete_node(c, work_item_id, node["id"]))
+            return "ok"
         if verdict == BUDGET:
             return await stops.stop_for_budget(db, work_item_id, node, budget)
         if verdict == "failed":
@@ -363,7 +371,7 @@ async def walk_node(
                 if not recovered:
                     question = dispatch.needs_context_question(db, work_item_id, node, round=1)
             if not recovered:
-                # A rebase conflict raised by `on.mr.rebase` (`pre_mr_rebase`)
+                # A rebase conflict raised by `on.mr.rebase` (any node that rebases)
                 # is not "for a human to resolve, not to dispatch an agent
                 # into" any more (Kraft-s7c04.23, by the human's own call at
                 # the design gate) -- the resolver re-creates the conflict and
@@ -391,12 +399,31 @@ async def walk_node(
                     if r_status == BUDGET:
                         return await stops.stop_for_budget(db, work_item_id, node, budget)
                     if r_status == "ok":
-                        # base_ref moved; `run_once`'s own `rebase_bounce_to`
-                        # check sees the movement and bounces this node back
-                        # to `verify` with no special casing, picking up
-                        # Task 2's counter clearing for free.
-                        await db.write(lambda c: store.complete_node(c, work_item_id, node["id"]))
-                        return "ok"
+                        # Completing here is right only when the rebase was the
+                        # node's whole job: `run_once`'s `rebase_bounce_to`
+                        # check sees the moved base_ref and bounces, and the
+                        # steps this node did not run are the ones the bounce
+                        # skips. A node with no bounce target wants the
+                        # opposite -- its rebase is hygiene, and completing
+                        # would mark it done with the later steps never
+                        # dispatched.
+                        if node.get("rebase_bounce_to"):
+                            await db.write(
+                                lambda c: store.complete_node(c, work_item_id, node["id"])
+                            )
+                            return "ok"
+                        return await walk_node(
+                            db,
+                            run_dirs,
+                            work_item_id,
+                            node,
+                            row,
+                            registry,
+                            worktree,
+                            policy=policy,
+                            steer=steer,
+                            launch=launch,
+                        )
                     # "needs_human": the resolver already recorded the stop.
                     return "needs_human"
                 if question is not None:

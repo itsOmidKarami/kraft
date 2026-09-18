@@ -31,10 +31,10 @@ def test_every_node_keeps_its_hooks_and_gate():
         ROOT / "templates" / "default.yaml", ROOT / "templates" / "policy.yaml"
     )
     by_id = {n["id"]: n for n in rendered["nodes"]}
-    assert by_id["spec"]["tasks"] == ["on.spec.requested"]
+    assert by_id["spec"]["tasks"] == ["on.mr.rebase", "on.spec.requested"]
     assert by_id["spec"]["gate_after"] == "spec_approval"
     assert by_id["verify"]["fix_loop"] == "verify_fix_loop"
-    assert by_id["env_setup"]["gate_after"] is None
+    assert by_id["open_mr"]["gate_after"] is None
 
 
 def test_the_fix_loop_cap_comes_along():

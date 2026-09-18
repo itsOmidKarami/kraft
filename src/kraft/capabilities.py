@@ -87,6 +87,20 @@ MANIFEST: tuple[Capability, ...] = (
         how="add `inputs:` to a subprocess binding in registry.yaml, e.g. "
         "`inputs:\\n  review_package: { channel: env, name: KRAFT_REVIEW_PACKAGE }`",
     ),
+    Capability(
+        version="0.74.0",
+        name="rebase steps",
+        what="every node that authors or measures code rebases onto the fetched "
+        "tip of the target branch first and re-prepares its environment "
+        "afterwards, and the three merge-request nodes became one that stops "
+        "when its rebase moves the base",
+        how="give `spec`, `plan`, `implementation` and `verify` a first step of "
+        "`[on.mr.rebase]`, and give `implementation` and `verify` a second "
+        "step of `[on.env.prepare]` (the `env_setup` node is then redundant "
+        "and goes); replace `pre_mr_rebase`, `mr_meta` and `open_mr` with one "
+        "`open_mr` whose steps are `[on.mr.rebase]`, `[on.mr.describe]`, "
+        "`[on.mr.open]` and which keeps `rebase_bounce_to: verify`",
+    ),
 )
 
 

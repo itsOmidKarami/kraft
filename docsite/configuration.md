@@ -90,7 +90,7 @@ triggers:
 
 | Key | Means |
 |---|---|
-| `loops.<name>` | `attempts` and `wall_clock_s` ceiling for a named fix loop, referenced by a node's `fix_loop`. `default` covers anything not named explicitly. `rebase_conflict` bounds the conflict-resolving agent `/resume`, `/retry`, or `pre_mr_rebase` can dispatch. |
+| `loops.<name>` | `attempts` and `wall_clock_s` ceiling for a named fix loop, referenced by a node's `fix_loop`. `default` covers anything not named explicitly. `rebase_conflict` bounds the conflict-resolving agent `/resume`, `/retry`, or any node's rebase can dispatch. |
 | `max_concurrent` | How many work items may be `active` at once, across every repo, however they were started (`resume`, `retry`, or auto-intake). Moved here from `intake.yaml` — that file's copy is now a legacy fallback `load_policy` reads only when this key is absent. |
 | `auto_escalate_stuck` | Whether a `needs_human` stop for a reason *other than* a pending gate (e.g. a stuck fix loop) auto-dispatches an escalation turn. Independent of a node's own `auto_escalate` (gate review) — different mechanism, different trigger. Defaults on. |
 | `auto_escalate_stuck_cap` | Attempts one `needs_human` run may be auto-escalated by `auto_escalate_stuck` before leaving it for a human — the stuck-escalation equivalent of a fix loop's `attempts`. |

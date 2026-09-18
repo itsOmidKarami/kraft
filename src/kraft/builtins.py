@@ -442,14 +442,14 @@ async def ensure_worktree(
     attachments copied in.
 
     Called by the executor before the first node dispatches, not only by the
-    `env_setup` builtin: `default.yaml` runs `spec` and `plan` ahead of
-    `env_setup`, and an agent asked to write a file into a directory that does
+    `env_setup` builtin: `default.yaml` runs `spec` and `plan` before
+    the first `on.env.prepare`, and an agent asked to write a file into a directory that does
     not exist fails in a way no chain can recover from (Kraft-bmp). The
     attachment copy has to move with it: `plan/SKILL.md` tells a headless
     session to fall back to an attached spec when the chain skipped the spec
     node, and that document was not there yet if the copy waited for
-    `env_setup` (node 4) to run. `env_setup` still exists — it is this call,
-    now unconditionally carrying attachments, plus its own session bookkeeping.
+    `env_setup` to run. `env_setup` is this call, unconditionally carrying
+    attachments, plus its own session bookkeeping.
 
     Idempotent in both directions: an existing worktree is returned untouched
     *and uncopied-into* (attachments were copied whenever this worktree was
@@ -472,7 +472,6 @@ async def ensure_worktree(
     # unprepared worktree.
     entry = repo_entry or {}
     local_files = entry.get("local_files") or []
-    cmd = entry.get("setup_command")
     # Pin the base before the worktree exists, so the early return above
     # guarantees a crashed-and-retried run never re-pins to a moved HEAD.
     row = db.read(
@@ -543,30 +542,14 @@ async def ensure_worktree(
     # (Kraft-kji8w). A failure here used to be a log warning, which dispatched
     # a node into a known-broken environment and let the verify node retry a
     # deterministic failure ten times over (Kraft-s0w2l).
-    if cmd is None:
-        await _discard_worktree(Path(repo), worktree)
-        raise RuntimeError(
-            f"no setup_command declared for {repo} in repos.yaml, so {work_item_id}'s "
-            'worktree cannot be prepared. Declare one (use "" for a repo that '
-            "deliberately needs no preparation)."
-        )
-    if cmd:
-        done = await asyncio.to_thread(
-            subprocess.run,
-            cmd,
-            shell=True,
-            cwd=worktree,
-            env=worker_env(repo_entry),
-            capture_output=True,
-            text=True,
-        )
-        if done.returncode != 0:
-            detail = done.stderr.strip() or done.stdout.strip()
-            left = await _discard_worktree(Path(repo), worktree)
-            suffix = f" (and its worktree could not be removed: {left})" if left else ""
-            raise RuntimeError(
-                f"setup command failed for {work_item_id}: {cmd!r}: {detail}{suffix}"
-            )
+    try:
+        await run_setup_command(worktree, Path(repo), repo_entry)
+    except RuntimeError as exc:
+        # Only the creating caller may throw away a worktree other nodes are
+        # already using, so the discard lives here and not in the helper.
+        left = await _discard_worktree(Path(repo), worktree)
+        suffix = f" (and its worktree could not be removed: {left})" if left else ""
+        raise RuntimeError(f"{exc}{suffix}") from exc
     decl = db.read(
         lambda c: c.execute(
             "SELECT submodules FROM work_items WHERE id = ?", (work_item_id,)
@@ -578,6 +561,44 @@ async def ensure_worktree(
     return worktree
 
 
+async def run_setup_command(worktree: Path, repo: Path, repo_entry: dict | None) -> str:
+    """Prepare `worktree` the way its repo declares, and say what happened.
+
+    Extracted from `ensure_worktree` so it can run more than once per item
+    (Kraft-zlsuk). `ensure_worktree` still calls it at creation -- every node
+    from `spec` on can commit and the shared pre-commit hook needs its tooling
+    on PATH before the first node dispatches (Kraft-i047) -- and `env_setup`
+    calls it on every dispatch, because a rebase can land a new lockfile and
+    nothing else rebuilds the environment.
+
+    There is no default and no marker sniffing: the repo declares how it is
+    prepared, or the chain stops (Kraft-kji8w). Raises `RuntimeError` when the
+    repo declares no `setup_command` at all, or when the command fails.
+    """
+    cmd = (repo_entry or {}).get("setup_command")
+    if cmd is None:
+        raise RuntimeError(
+            f"no setup_command declared for {repo} in repos.yaml, so {worktree.name}'s "
+            'worktree cannot be prepared. Declare one (use "" for a repo that '
+            "deliberately needs no preparation)."
+        )
+    if not cmd:
+        return ""
+    done = await asyncio.to_thread(
+        subprocess.run,
+        cmd,
+        shell=True,
+        cwd=worktree,
+        env=worker_env(repo_entry),
+        capture_output=True,
+        text=True,
+    )
+    if done.returncode != 0:
+        detail = done.stderr.strip() or done.stdout.strip()
+        raise RuntimeError(f"setup command failed for {worktree.name}: {cmd!r}: {detail}")
+    return f"$ {cmd}\n{done.stdout}{done.stderr}"
+
+
 async def upstream_head(repo: Path) -> str | None:
     """The tip of origin's default branch, fetched now; the last fetched tip
     when the fetch fails; `repo`'s own HEAD only when there is no `origin`
@@ -586,7 +607,7 @@ async def upstream_head(repo: Path) -> str | None:
     An item's MR targets origin's branch, and the connected checkout is only
     as fresh as its owner's last pull -- Kraft merges on the forge, so nothing
     here ever moves it (Kraft-k647). Forking and rebasing onto that checkout
-    started items behind and made every `pre_mr_rebase` answer "nothing to
+    started items behind and made every `open_mr` rebase answer "nothing to
     rebase". A failed fetch (offline, credentials the server process cannot
     reach, a concurrent fetch holding the ref lock) still prefers the stale
     remote-tracking ref over the checkout, which may be on another branch or
@@ -727,6 +748,7 @@ async def mr_rebase(
     worktree: str,
     branch: str,
     head_sha: str | None = None,
+    has_rebase_bounce: bool = False,
 ) -> str:
     """Rebase onto origin's default branch right before `open_mr`, so an item
     that ran straight through the chain -- no pause, no `/retry` -- doesn't
@@ -740,14 +762,20 @@ async def mr_rebase(
     and `/retry` reach by catching it and calling `mark_needs_human`
     themselves -- one behavior, this call site doesn't need its own copy of
     that catch.
+
+    When the node declares `rebase_bounce_to` and the rebase moved the base,
+    that is reported (`BASE_MOVED`) rather than swallowed, so the node stops
+    before its later steps run against a base nobody re-verified.
     """
+    from kraft.executor.context import BASE_MOVED  # executor imports this module
+
     new_head = await refresh_worktree_base(Path(worktree), Path(repo), branch)
     if new_head:
         await db.write(lambda c: store.set_base_ref(c, work_item_id, new_head))
         log = f"rebased {branch} onto {new_head}\n"
     else:
         log = "nothing to rebase\n"
-    return await _record_done(
+    recorded = await _record_done(
         db,
         run_dirs,
         session_id=session_id,
@@ -758,6 +786,8 @@ async def mr_rebase(
         log=log,
         head_sha=head_sha,
     )
+    # The session is `done` either way -- the rebase itself succeeded.
+    return BASE_MOVED if (new_head and has_rebase_bounce) else recorded
 
 
 async def mr_rebase_forced(worktree: Path, repo: Path, branch: str) -> str | None:
@@ -1041,8 +1071,13 @@ async def env_setup(
         attachments=attachments,
         repo_entry=repo_entry,
     )
+    # No entry, nothing declared to re-run: `ensure_worktree` already refused a
+    # repo without a `setup_command` when it cut this worktree.
+    setup_log = (
+        await run_setup_command(worktree, Path(repo), repo_entry) if repo_entry is not None else ""
+    )
     missing = await asyncio.to_thread(_uncarried_local_files, Path(repo), worktree)
-    report = f"worktree ready at {worktree}\n"
+    report = f"worktree ready at {worktree}\n{setup_log}"
     if missing:
         # Informational, not a to-do list: on most repos this names things
         # like `.DS_Store` or `.testmondata` that nobody would ever carry.

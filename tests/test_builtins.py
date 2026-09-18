@@ -1900,3 +1900,117 @@ def test_uncarried_local_files_omits_what_was_carried(tmp_path):
     kraft_builtins._carry_local_files(repo, wt, [".python-version"])
 
     assert kraft_builtins._uncarried_local_files(repo, wt) == []
+
+
+def test_mr_rebase_reports_a_moved_base_when_the_node_bounces(tmp_path):
+    """A node that declares `rebase_bounce_to` must not run its later steps
+    against a base the rebase just moved. A node with no bounce target wants the
+    opposite, which is why the flag decides."""
+    from kraft.executor.context import BASE_MOVED
+
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            worktree = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id="w1", repo_entry=NO_SETUP
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
+            )
+            (repo / "moved.txt").write_text("moved on\n")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "moved on")
+            status = await kraft_builtins.mr_rebase(
+                database,
+                rd,
+                session_id="s1",
+                work_item_id="w1",
+                node_id="open_mr",
+                hook_point="on.mr.rebase",
+                round=0,
+                repo=str(repo),
+                worktree=str(worktree),
+                branch=store.branch_for(row),
+                has_rebase_bounce=True,
+            )
+            assert status == BASE_MOVED
+            session = database.read(
+                lambda c: c.execute("SELECT status FROM worker_sessions WHERE id='s1'").fetchone()
+            )
+            assert session["status"] == "done"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_mr_rebase_reports_done_when_it_moved_nothing(tmp_path):
+    """No movement, no stop: otherwise every `open_mr` would bounce once."""
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            worktree = await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id="w1", repo_entry=NO_SETUP
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
+            )
+            status = await kraft_builtins.mr_rebase(
+                database,
+                rd,
+                session_id="s1",
+                work_item_id="w1",
+                node_id="open_mr",
+                hook_point="on.mr.rebase",
+                round=0,
+                repo=str(repo),
+                worktree=str(worktree),
+                branch=store.branch_for(row),
+                has_rebase_bounce=True,
+            )
+            assert status == "done"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_env_setup_reruns_the_setup_command_on_a_second_dispatch(tmp_path):
+    """`on.env.prepare` is a step after the rebase because a rebase can land a
+    new lockfile (Kraft-zlsuk); that only helps if each dispatch runs setup."""
+    repo = make_repo(tmp_path)
+    marker = tmp_path / "setup-runs"
+    entry = {**NO_SETUP, "setup_command": f"echo run >> {marker}"}
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _make_item(database, repo)
+            await kraft_builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id="w1", repo_entry=entry
+            )
+            before = marker.read_text().count("run")
+            for n, sid in enumerate(("s1", "s2"), start=1):
+                await kraft_builtins.env_setup(
+                    database,
+                    rd,
+                    session_id=sid,
+                    work_item_id="w1",
+                    node_id="implementation",
+                    repo=str(repo),
+                    repo_entry=entry,
+                )
+                assert marker.read_text().count("run") == before + n
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
