@@ -7,13 +7,8 @@ from kraft import config as _config
 from kraft import policy as _policy
 from kraft import store
 from kraft.executor import entry, gates, walk
-from kraft.executor.context import RATE_LIMITED, WAITING, LaunchContext, OnApprove
+from kraft.executor.context import _ADVANCING, RATE_LIMITED, WAITING, LaunchContext, OnApprove
 from kraft.templates import Registry
-
-#: Statuses that let the chain advance. `done_with_concerns` is deliberately
-#: here: the agent finished the work — its doubts are information for the human
-#: at the next gate, not a control-flow change.
-_ADVANCING = ("done", "done_with_concerns")
 
 
 async def reconcile_current_node(
