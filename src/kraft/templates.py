@@ -577,7 +577,21 @@ def validate_nodes(
     ):
         return ["each node needs a string 'id' and a list-of-strings 'tasks' (or 'steps')"]
 
-    both = next((n["id"] for n in nodes if n.get("steps") and n.get("tasks")), None)
+    # A node already run through `with_steps` (the splice path re-validates a
+    # normalized tail) carries both keys in agreement, not in conflict -- only
+    # a `tasks` that diverges from the flattened `steps` means an author
+    # actually wrote both.
+    both = next(
+        (
+            n["id"]
+            for n in nodes
+            if n.get("steps")
+            and n.get("tasks")
+            and isinstance(n["steps"], list)
+            and n["tasks"] != [t for g in n["steps"] if isinstance(g, list) for t in g]
+        ),
+        None,
+    )
     if both is not None:
         return [
             f"node {both!r} declares both 'steps' and 'tasks'; a node has one or "

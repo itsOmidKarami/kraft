@@ -266,6 +266,49 @@ def test_chain_review_splice_keeps_on_failure_from_schema_only_nodes(tmp_path, m
         assert mr_checks_after["on_failure"] == ["on.mr_checks.repair"]
 
 
+def test_a_spliced_schema_only_node_gets_its_steps_derived(tmp_path, monkeypatch):
+    """The reviewer's schema teaches `tasks`; `measure_node` reads `steps`.
+    `materialize` is not the only producer of chain_definition nodes, so
+    without the normalizer on the splice path a spliced node arrives with no
+    `steps` key at all."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    templates_dir = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
+    with _client(tmp_path, monkeypatch, templates_dir=templates_dir) as client:
+        wid = _post_default(client, repo)
+        for gate in ("spec_approval", "plan_approval"):
+            _await_gate(client, wid, gate)
+            assert _approve_gate(client, wid, gate).status_code == 200
+        _await_gate(client, wid, "chain_finalized")
+
+        before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
+        tail = [n for n in before if n["id"] not in ("spec", "plan", "chain_review")]
+        schema_only = [
+            {
+                "id": n["id"],
+                "tasks": n["tasks"],
+                "gate_after": n["gate_after"],
+                "fix_loop": n["fix_loop"],
+            }
+            for n in tail
+        ]
+        _write_chain_review(
+            client,
+            wid,
+            {
+                "status": "ready_for_approval",
+                "revised_chain_nodes": schema_only,
+                "rationale": "no change",
+            },
+        )
+        assert _approve_gate(client, wid, "chain_finalized").status_code == 200
+
+        after = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
+        for node in after:
+            assert node.get("steps"), f"{node['id']} spliced without steps"
+            assert node["tasks"] == [t for g in node["steps"] for t in g], node["id"]
+
+
 def test_chain_review_cannot_set_auto_escalate_directly(tmp_path, monkeypatch):
     """Kraft-df4tc: auto_escalate/auto_escalate_stuck/auto_escalate_delay_s are
     never the reviewer's to set -- only the human PATCH route's. A node dict
