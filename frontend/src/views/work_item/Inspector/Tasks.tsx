@@ -74,6 +74,21 @@ export function Tasks({
       ? ordered.filter((s) => s.node_id === nodeId)
       : ordered;
 
+  // Kraft-04fmo: what this node RUNS, whether or not it has run yet. The tab
+  // renders from `worker_sessions` alone, so an unstarted node used to show
+  // "no tasks on this node" -- false: there are tasks, none have started.
+  // `effective_chain` first, `chain_definition` as the fallback: the former has
+  // this item's own `node_overrides` folded in and is what actually runs.
+  const chainNode = nodeId
+    ? (item.effective_chain ?? item.chain_definition).nodes.find((n) => n.id === nodeId)
+    : undefined;
+  // Latest by created_at, not first: a task with several sessions has been
+  // retried, re-entered after a gate rejection, or repaired, and what a reader
+  // wants is where it stands now. `ordered` is already newest-first, so the
+  // first match is the latest.
+  const latestFor = (hook: string) =>
+    ordered.find((s) => s.node_id === nodeId && s.hook_point === hook);
+
   return (
     <div className="inspector-list" data-testid="inspector-tasks">
       {/* Kraft-qqz8: the implementer's own plan, task by task — only while
@@ -88,6 +103,29 @@ export function Tasks({
                 <span className="plan-task-title">{t.title}</span>
               </li>
             ))}
+          </ul>
+        </>
+      )}
+      {chainNode && (
+        <>
+          <p className="section-label">
+            NODE TASKS · {chainNode.tasks.length} · CONCURRENT
+          </p>
+          <ul className="plan-list" data-testid="node-task-list">
+            {chainNode.tasks.map((hook) => {
+              const s = latestFor(hook);
+              return (
+                <li key={hook} data-testid={`node-task-${hook}`}>
+                  {s ? (
+                    <StatusGlyph status={s.status} size={13} />
+                  ) : (
+                    <span className="plan-task-n" aria-hidden />
+                  )}
+                  <span className="plan-task-title">{hook}</span>
+                  <span className="row-sub">{s ? s.status : "not started"}</span>
+                </li>
+              );
+            })}
           </ul>
         </>
       )}
