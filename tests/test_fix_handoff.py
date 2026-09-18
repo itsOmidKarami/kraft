@@ -201,7 +201,7 @@ def test_the_path_is_passed_not_the_contents(tmp_path, monkeypatch):
 
 # --- round-independence: retry and resume ------------------------------------
 #
-# `_previous_fix_session` must not trust `_walk_node`'s local `round` counter,
+# `previous_fix_session` must not trust `_walk_node`'s local `round` counter,
 # which resets to 0 on every fresh entry into that function while the
 # persisted `worker_sessions` rows from before the re-entry are still there.
 # The tests above never re-enter `_walk_node` (one uninterrupted `executor.run`

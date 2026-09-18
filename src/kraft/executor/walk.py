@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -26,37 +25,6 @@ from kraft.executor.context import (
 from kraft.executor.dispatch import _current_base_ref
 from kraft.store import _now as _now
 from kraft.templates import Registry
-
-
-def _previous_fix_session(db, work_item_id: str, node_id: str) -> sqlite3.Row | None:
-    """The most recently dispatched fix task for this node, or None if none
-    has run yet.
-
-    Deliberately NOT scoped to a `round` passed in by the caller: `round` is
-    `walk_node`'s own local counter, and on a fresh entry into that function it
-    seeds from the persisted `retry_counters` row -- so it lands back on a
-    number a *previous* pass over this node already used (a gate rejection
-    walking back here, or the `ci_wait` poller, neither of which clears the
-    counter), or on 0 after a `/retry` that deleted the row so the next
-    `bump_counter` restarts at 1. Either way the `worker_sessions` rows from
-    before that re-entry are still in the table. A lookup keyed on the caller's
-    local round can therefore collide with an abandoned attempt that happens to
-    land on the same round number (worse than nothing: it hands over a
-    plausible-looking file from a cycle that was already exhausted), or, after
-    a retry reset, miss every previous attempt outright. Ordering by
-    `created_at` and taking the last row sidesteps both: whichever fix task
-    actually ran most recently for this node is always the right one to hand
-    forward, regardless of what round it or the caller's local counter think
-    they're at.
-    """
-    rows = db.read(
-        lambda c: c.execute(
-            "SELECT * FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
-            "AND hook_point = 'on.implementation.start' ORDER BY created_at",
-            (work_item_id, node_id),
-        ).fetchall()
-    )
-    return rows[-1] if rows else None
 
 
 async def _diagnosis_bundle(db, work_item_id: str, node: dict, worktree) -> dict:
@@ -606,7 +574,7 @@ async def walk_node(
             if previous_found is not None
             else None
         )
-        # `_previous_fix_session` is history-wide, not scoped to this
+        # `dispatch.previous_fix_session` is history-wide, not scoped to this
         # `walk_node` entry -- a `/retry` or an auto-escalation retry clears
         # the loop counter (`retry_counters` row deleted) but leaves the old
         # `worker_sessions` rows in place, so it alone can't tell "round 1 of
@@ -620,7 +588,7 @@ async def walk_node(
         # on, and a `stop_needs_human` here would discard it before the
         # steered cycle it was meant for ever dispatches, re-stranding the
         # item on the trend `/retry` was supposed to escape.
-        previous_fix = _previous_fix_session(db, work_item_id, node["id"])
+        previous_fix = dispatch.previous_fix_session(db, work_item_id, node["id"])
         counter_row = db.read(lambda c: store.read_counter(c, work_item_id, key))
         # Which steers get the free pass the comment above describes is
         # `Steer.exempts_judge`'s call, not a `human` test. A *seeded* steer

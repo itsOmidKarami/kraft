@@ -1348,7 +1348,7 @@ def test_select_scopes_reruns_everything_after_any_scope_failed_last_round(tmp_p
     """The C2/C7 interaction the spec calls out by name: round 0 fails
     backend and passes frontend, with frontend's row created *last* -- the
     same per-scope identity problem Task 1 fixed in `collect_findings`/
-    `reusable_session`, now showing up in `prompts._last_reviewed_head`'s own
+    `reusable_session`, now showing up in `prompts._last_review_session`'s own
     "most recent row" query once C7 reuses it for a multi-session hook. Round
     1's fix touches only frontend. Naive incremental selection would let a
     passing last-created row mark round 0 as fully reviewed and pick only
@@ -1413,7 +1413,7 @@ def test_select_scopes_reruns_everything_after_any_scope_failed_last_round(tmp_p
 def test_select_scopes_verify_round_0_ignores_a_same_head_c1_gate_dispatch(tmp_path):
     """C1 (`implementation`) and verify both dispatch `on.test.run` under the
     same hook_point. Before the review fix, verify's round 0 read the latest
-    `done` row for that hook_point via `prompts._last_reviewed_head` --
+    `done` row for that hook_point via `prompts._last_review_session` --
     node-blind -- and found C1's own clean gate dispatch at the same HEAD,
     so the diff since it was empty and `_matched_scopes` failed open to
     *every* scope. That is not the spec's first acceptance criterion ("the
@@ -2809,3 +2809,9 @@ def test_a_chain_can_run_two_harnesses(tmp_path, monkeypatch):
     records = _argv_lines(argv_log)
     assert any("--append-system-prompt" in r for r in records)
     assert any(any(a.startswith("developer_instructions=") for a in r) for r in records)
+
+
+def test_previous_fix_session_is_reachable_from_dispatch():
+    """WI-1 needs it at review dispatch, and walk imports dispatch rather than
+    the other way round -- so it cannot stay in walk."""
+    assert callable(dispatch.previous_fix_session)

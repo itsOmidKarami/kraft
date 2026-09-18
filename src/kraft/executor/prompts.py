@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 from kraft import findings as _findings
@@ -419,15 +420,71 @@ def carried_findings_note(previous: list[_findings.Finding]) -> str:
     return _CARRIED_FINDINGS.format(findings=format_findings(previous, repeats=set(), tags=True))
 
 
+#: The reviewer's own last session on this hook, by path (Kraft-qzkux). Not a
+#: resumed conversation and not a re-paste: `carried_findings_note` has already
+#: rendered the findings verbatim immediately above this, so what is left to
+#: hand over is the reasoning behind them -- which the agent wrote itself, to a
+#: file, knowing it was the durable record.
+#:
+#: Worded as evidence to check rather than a position to defend. A reviewer
+#: handed its own prior conclusions is anchored the same way a resumed session
+#: would be, only more weakly, and the `same_as` tag machinery exists precisely
+#: to get continuity without that anchoring.
+_PREVIOUS_REVIEW = (
+    "\n\nYour own last review of this node wrote a result file at {result_path}"
+    "{summary}\n"
+    "Read it if you need your earlier reasoning, not to defend it: a finding "
+    "you would now judge differently is a conclusion to change, not a record "
+    "to keep consistent."
+)
+_PREVIOUS_REVIEW_SUMMARY = ", and a session summary at {summary_ref}"
+
+#: The fix cycle that produced the change now under review (Kraft-qzkux). The
+#: asymmetry this closes was total and one-way: the fixer already receives the
+#: reviewer's findings, the round history, the regression warning and the
+#: judge's reasoning (`walk.py`), while the reviewer received nothing of the
+#: fixer's and inferred intent from commits.
+_FIX_ATTEMPT = (
+    "\n\nThe change since your last review is one fix cycle's work, dispatched "
+    "against the findings above. Its result file is at {result_path}{summary}\n"
+    "Read what it says it did before deciding a finding is still present. A "
+    "finding it deliberately did not fix is a disagreement to judge on the "
+    "merits, not an oversight to re-report unchanged."
+)
+_FIX_ATTEMPT_SUMMARY = ", and its session summary at {summary_ref}"
+
+
+def _session_note(row, template: str, summary_template: str) -> str:
+    """One session's artifacts, by path. "" for no row at all, and a missing
+    `session_summary_ref` drops that clause rather than interpolating a path
+    the agent would spend a tool call discovering does not exist."""
+    if row is None:
+        return ""
+    ref = row["session_summary_ref"]
+    return template.format(
+        result_path=row["result_path"],
+        summary=summary_template.format(summary_ref=ref) if ref else "",
+    )
+
+
+def previous_review_note(row) -> str:
+    return _session_note(row, _PREVIOUS_REVIEW, _PREVIOUS_REVIEW_SUMMARY)
+
+
+def fix_attempt_note(row) -> str:
+    return _session_note(row, _FIX_ATTEMPT, _FIX_ATTEMPT_SUMMARY)
+
+
 #: A review session that did not finish is not a head anything was reviewed at.
 #: Same "was this a real judgement" allowlist `dispatch._JUDGE_TRUSTED_STATUS`
 #: and `gate_review._UNTRUSTWORTHY` apply, for the same reason.
 _REVIEWED_STATUS = ("done", "done_with_concerns")
 
 
-def _last_reviewed_head(db, work_item_id: str, task_hook: str) -> str | None:
-    """The head the previous *completed* session on this hook was dispatched at,
-    or None (Kraft-s7c04.1).
+def _last_review_session(db, work_item_id: str, task_hook: str) -> sqlite3.Row | None:
+    """The previous *completed* session on this hook, or None (Kraft-s7c04.1).
+
+    Its `head_sha` is the head that session was dispatched at.
 
     `worker_sessions.head_sha` is stamped by `dispatch.dispatch_node` at
     dispatch, so it is the commit that review was actually about. Read from the
@@ -444,16 +501,22 @@ def _last_reviewed_head(db, work_item_id: str, task_hook: str) -> str | None:
     error, or was killed mid-run still carries a `head_sha`, and taking it would
     narrow the next review past code **no reviewer has ever seen** -- the one
     outcome worse than re-reading the whole branch.
+
+    Returns the row rather than `head_sha` alone because the same session's
+    `result_path` and `session_summary_ref` are what `previous_review_note`
+    hands the next reviewer. The status filter serves both: a session that
+    failed or was killed is the wrong diff bound *and* may never have written
+    its summary.
     """
-    row = db.read(
+    return db.read(
         lambda c: c.execute(
-            "SELECT head_sha FROM worker_sessions WHERE work_item_id = ? AND hook_point = ? "
+            "SELECT head_sha, result_path, session_summary_ref FROM worker_sessions "
+            "WHERE work_item_id = ? AND hook_point = ? "
             f"AND head_sha IS NOT NULL AND status IN ({','.join('?' * len(_REVIEWED_STATUS))}) "
             "ORDER BY created_at DESC LIMIT 1",
             (work_item_id, task_hook, *_REVIEWED_STATUS),
         ).fetchone()
     )
-    return row["head_sha"] if row else None
 
 
 def review_package(
@@ -491,7 +554,8 @@ def review_package(
     )
     if row is None or not row["base_ref"]:
         return None
-    since = _last_reviewed_head(db, work_item_id, task_hook)
+    previous = _last_review_session(db, work_item_id, task_hook)
+    since = previous["head_sha"] if previous else None
     if since and git_read(worktree, "rev-parse", "--verify", f"{since}^{{commit}}") is None:
         since = None
     path = _review.write_package(
