@@ -32,8 +32,9 @@ why it doesn't need one.
 ## Installing with `kraft admin init`
 
 Reach for this instead of the plugin when you want the plain-file form (no
-Claude Code plugin state to manage), the repo-scoped `.mcp.json` variant, or
-you're registering the MCP server for a host other than Claude Code:
+Claude Code plugin state to manage), a `.mcp.json` other tools can read
+straight out of the repo, or you're registering the MCP server for a host
+other than Claude Code:
 
 ```bash
 kraft admin init          # register the MCP server for your user, install the skills
