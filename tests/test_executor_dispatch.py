@@ -966,7 +966,7 @@ def test_the_implementer_is_told_which_commands_gate_its_paths(tmp_path, monkeyp
                 repo,
                 launch=launch,
             )
-            mr_node = next(n for n in chain["nodes"] if n["id"] == "mr_meta")
+            mr_node = next(n for n in chain["nodes"] if n["id"] == "open_mr")
             await dispatch.dispatch_node(
                 database, rd, "on.mr.describe", mr_node, row, registry, repo, launch=launch
             )

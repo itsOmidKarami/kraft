@@ -1071,7 +1071,11 @@ async def env_setup(
         attachments=attachments,
         repo_entry=repo_entry,
     )
-    setup_log = await run_setup_command(worktree, Path(repo), repo_entry)
+    # No entry, nothing declared to re-run: `ensure_worktree` already refused a
+    # repo without a `setup_command` when it cut this worktree.
+    setup_log = (
+        await run_setup_command(worktree, Path(repo), repo_entry) if repo_entry is not None else ""
+    )
     missing = await asyncio.to_thread(_uncarried_local_files, Path(repo), worktree)
     report = f"worktree ready at {worktree}\n{setup_log}"
     if missing:
