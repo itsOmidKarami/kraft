@@ -1,53 +1,59 @@
 id: default
 nodes:
+  # Every node that authors or measures code rebases first: a spec written
+  # against stale code propagates into the plan and the implementation, where a
+  # later rebase does not undo it (Kraft-yd6q4). No-op when already current.
   - id: spec
-    tasks: [on.spec.requested]
+    steps:
+      - [on.mr.rebase]
+      - [on.spec.requested]
     gate_after: spec_approval
   - id: plan
-    tasks: [on.plan.requested]
+    steps:
+      - [on.mr.rebase]
+      - [on.plan.requested]
     gate_after: plan_approval
   - id: chain_review
     tasks: [on.chain.review_ready]
     gate_after: chain_finalized
     auto_escalate: true
-  - id: env_setup
-    tasks: [on.env.prepare]
-    gate_after: null
   # Kraft-ilff3: the scan has to read a worktree the agent has actually touched,
   # so it is a second step, not a co-task. It was its own node between here and
   # `verify` until ordered steps existed to say this directly.
+  # `on.env.prepare` follows each rebase because a rebase can land a new
+  # lockfile and nothing else rebuilds the environment (Kraft-zlsuk).
   - id: implementation
     steps:
+      - [on.mr.rebase]
+      - [on.env.prepare]
       - [on.implementation.start]
       - [on.repos.scan]
     gate_after: null
   - id: verify
-    tasks: [on.test.run, on.review.local.run]
+    steps:
+      - [on.mr.rebase]
+      - [on.env.prepare]
+      - [on.test.run, on.review.local.run]
     fix_loop: verify_fix_loop
     gate_after: null
-  # Rebases onto origin's default branch (freshly fetched; the local checkout's
-  # HEAD when there is no origin) right before the MR opens, so an item
-  # that ran straight through the chain -- no pause, no /retry -- doesn't
-  # open one that's silently commits behind (Kraft-4bgg). If the rebase
-  # actually moves the branch, the chain bounces back to `verify` instead of
-  # proceeding, so the same fix_loop that already guards this chain's tests
-  # and local review also catches whatever landed upstream while this item
-  # was mid-flight.
-  - id: pre_mr_rebase
-    tasks: [on.mr.rebase]
+  # Kraft-bk16r: three nodes existed because a node could not hold an order.
+  # The rebase must stop the node when it moves the base -- otherwise the merge
+  # request is opened against a diff nobody re-verified and only then bounced --
+  # which `rebase_bounce_to` on this node now expresses directly. The bounce
+  # returns to `verify`, which re-prepares the environment and re-runs the
+  # tests over the rebased diff. The metadata is authored from the rebased diff
+  # before the MR is created rather than at the human_review gate.
+  - id: open_mr
+    steps:
+      - [on.mr.rebase]
+      - [on.mr.describe]
+      - [on.mr.open]
     gate_after: null
     rebase_bounce_to: verify
-  # Authors the merge request's metadata from the rebased diff, before
-  # `open_mr` creates it -- see the spec's "Where it runs" for why this has
-  # to happen before create rather than at the human_review gate.
-  - id: mr_meta
-    tasks: [on.mr.describe]
-    gate_after: null
-  - id: open_mr
-    tasks: [on.mr.open]
-    gate_after: null
   - id: mr_checks
-    tasks: [on.ci.poll, on.review.mr.run]
+    steps:
+      - [on.ci.poll]
+      - [on.review.mr.run]
     gate_after: null
     fix_loop: ci_fix_loop
     rebase_bounce_to: verify

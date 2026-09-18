@@ -141,7 +141,7 @@ def test_policy_yaml_is_not_scanned_as_a_template():
     assert "policy" not in ts.valid
 
 
-def test_shipped_default_yaml_is_the_fourteen_node_chain():
+def test_shipped_default_yaml_is_the_eleven_node_chain():
     reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
     ts = templates.load_templates(TEMPLATES_DIR, reg)
     assert "default" in ts.valid, ts.invalid
@@ -150,11 +150,8 @@ def test_shipped_default_yaml_is_the_fourteen_node_chain():
         "spec",
         "plan",
         "chain_review",
-        "env_setup",
         "implementation",
         "verify",
-        "pre_mr_rebase",
-        "mr_meta",
         "open_mr",
         "mr_checks",
         "human_review",
@@ -167,13 +164,17 @@ def test_shipped_default_yaml_is_the_fourteen_node_chain():
     assert gates["plan"] == "plan_approval"
     assert gates["chain_review"] == "chain_finalized"
     assert gates["human_review"] == "human_review_approval"
-    assert gates["env_setup"] is None and gates["merge"] is None and gates["mr_sync"] is None
+    assert gates["open_mr"] is None and gates["merge"] is None and gates["mr_sync"] is None
     assert gates["post_merge_watch"] is None
 
     by_id = {n["id"]: n for n in nodes}
-    assert by_id["implementation"]["tasks"] == ["on.implementation.start", "on.repos.scan"]
-    assert by_id["pre_mr_rebase"]["rebase_bounce_to"] == "verify"
-    assert by_id["pre_mr_rebase"]["tasks"] == ["on.mr.rebase"]
+    assert by_id["implementation"]["tasks"] == [
+        "on.mr.rebase",
+        "on.env.prepare",
+        "on.implementation.start",
+        "on.repos.scan",
+    ]
+    assert by_id["open_mr"]["rebase_bounce_to"] == "verify"
     assert by_id["post_merge_watch"]["tasks"] == ["on.merge.watch"]
     assert "fix_loop" not in by_id["post_merge_watch"]
 
@@ -185,7 +186,7 @@ def test_the_shipped_chain_scans_submodules_as_implementations_second_step():
     ts = templates.load_templates(TEMPLATES_DIR, reg)
     nodes = {n["id"]: n for n in ts.valid["default"].nodes}
     assert "repos_scan" not in nodes, "the interim node is gone"
-    assert nodes["implementation"]["steps"] == [
+    assert nodes["implementation"]["steps"][-2:] == [
         ["on.implementation.start"],
         ["on.repos.scan"],
     ]
@@ -213,10 +214,9 @@ def test_the_default_chain_syncs_the_mr_after_the_review_gate():
 def test_shipped_default_chain_describes_before_it_opens():
     reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
     nodes = templates.load_templates(TEMPLATES_DIR, reg).valid["default"].nodes
-    ids = [n["id"] for n in nodes]
-    assert ids.index("mr_meta") == ids.index("open_mr") - 1
-    assert ids.index("pre_mr_rebase") < ids.index("mr_meta")
-    assert nodes[ids.index("mr_meta")]["tasks"] == ["on.mr.describe"]
+    open_mr = next(n for n in nodes if n["id"] == "open_mr")
+    assert open_mr["tasks"].index("on.mr.rebase") < open_mr["tasks"].index("on.mr.describe")
+    assert open_mr["tasks"].index("on.mr.describe") < open_mr["tasks"].index("on.mr.open")
 
 
 def test_shipped_registry_binds_the_describe_hook():
@@ -1073,7 +1073,7 @@ def test_materialize_carries_fix_loop():
     mat = templates.materialize(tmpl)
     by_id = {n["id"]: n for n in mat["nodes"]}
     assert by_id["verify"]["fix_loop"] == "verify_fix_loop"
-    assert by_id["env_setup"]["fix_loop"] is None
+    assert by_id["open_mr"]["fix_loop"] is None
 
 
 def test_non_string_fix_loop_quarantines_template(tmp_path):
@@ -2035,3 +2035,55 @@ def test_chain_review_splice_fixture_matches_the_shared_cases():
             for n in templates.carry_forward_node_fields(case["old_tail"], revised)
         ]
         assert merged == case["expected"], case["name"]
+
+
+def test_the_default_chain_rebases_before_it_authors_or_measures_code():
+    """Kraft-yd6q4: a spec written against stale code propagates into the plan
+    and the implementation, where a later rebase does not undo it."""
+    chain = yaml.safe_load(Path("templates/default.yaml").read_text())
+    first = {n["id"]: (n.get("steps") or [n.get("tasks", [])])[0] for n in chain["nodes"]}
+    for node_id in ("spec", "plan", "implementation", "verify", "open_mr"):
+        assert first[node_id] == ["on.mr.rebase"], f"{node_id} must rebase first"
+    assert "on.mr.rebase" not in first["chain_review"]
+
+
+def test_the_environment_is_prepared_after_every_rebase_that_precedes_work():
+    """Kraft-zlsuk: a bounce target cannot fix this -- bouncing to env_setup
+    would re-run the implementing agent -- so the prep is a step."""
+    chain = yaml.safe_load(Path("templates/default.yaml").read_text())
+    by_id = {n["id"]: n for n in chain["nodes"]}
+    assert "env_setup" not in by_id
+    for node_id in ("implementation", "verify"):
+        steps = by_id[node_id]["steps"]
+        assert steps[0] == ["on.mr.rebase"]
+        assert steps[1] == ["on.env.prepare"], f"{node_id} must re-prepare after rebasing"
+
+
+def test_the_default_chain_has_one_mr_node():
+    chain = yaml.safe_load(Path("templates/default.yaml").read_text())
+    ids = [n["id"] for n in chain["nodes"]]
+    assert "pre_mr_rebase" not in ids and "mr_meta" not in ids
+    assert len(ids) == 11, ids
+    open_mr = next(n for n in chain["nodes"] if n["id"] == "open_mr")
+    assert open_mr["steps"] == [["on.mr.rebase"], ["on.mr.describe"], ["on.mr.open"]]
+    assert open_mr["rebase_bounce_to"] == "verify"
+
+
+def test_no_node_both_bounces_on_a_rebase_and_runs_a_fix_loop():
+    """`walk_node`'s BASE_MOVED rung lives on the no-fix-loop path only."""
+    chain = yaml.safe_load(Path("templates/default.yaml").read_text())
+    for n in chain["nodes"]:
+        tasks = [t for g in (n.get("steps") or [n.get("tasks", [])]) for t in g]
+        if "on.mr.rebase" in tasks and n.get("rebase_bounce_to"):
+            assert not n.get("fix_loop"), n["id"]
+
+
+def test_verify_keeps_the_suite_and_the_review_in_one_group():
+    """Separating them is Kraft-4m4zc, which is open and out of scope."""
+    chain = yaml.safe_load(Path("templates/default.yaml").read_text())
+    verify = next(n for n in chain["nodes"] if n["id"] == "verify")
+    assert verify["steps"] == [
+        ["on.mr.rebase"],
+        ["on.env.prepare"],
+        ["on.test.run", "on.review.local.run"],
+    ]
