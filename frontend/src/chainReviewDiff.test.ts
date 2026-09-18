@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { carryForwardNodeFields, parseChainReviewArtifact, withSteps } from "./chainReviewDiff";
 import type { ChainNode } from "./types/work_item";
@@ -60,7 +61,7 @@ describe("parseChainReviewArtifact", () => {
 
 describe("splice parity with the Python", () => {
   const fixture = JSON.parse(
-    readFileSync(new URL("../../tests/fixtures/chain_review_splice.json", import.meta.url), "utf8"),
+    readFileSync(resolve(process.cwd(), "../tests/fixtures/chain_review_splice.json"), "utf8"),
   ) as {
     cases: {
       name: string;
