@@ -7,7 +7,7 @@
 | src/kraft/\_\_init\_\_.py                |        0 |        0 |    100% |           |
 | src/kraft/\_\_main\_\_.py                |        4 |        4 |      0% |       1-6 |
 | src/kraft/adapters/\_\_init\_\_.py       |        0 |        0 |    100% |           |
-| src/kraft/adapters/agent.py              |      113 |        3 |     97% |301-302, 304 |
+| src/kraft/adapters/agent.py              |      105 |        4 |     96% |242-243, 245, 479 |
 | src/kraft/adapters/beads.py              |       62 |        8 |     87% |44, 83, 86-87, 125-126, 180-181 |
 | src/kraft/adapters/forge/\_\_init\_\_.py |        9 |        0 |    100% |           |
 | src/kraft/adapters/forge/ci.py           |       90 |        3 |     97% |74, 299-300 |
@@ -17,10 +17,10 @@
 | src/kraft/adapters/forge/models.py       |      100 |        0 |    100% |           |
 | src/kraft/adapters/forge/mr.py           |      108 |        5 |     95% |67, 190, 242, 295-296 |
 | src/kraft/adapters/forge/run.py          |      274 |       24 |     91% |304, 445, 685-686, 716-717, 952-979 |
-| src/kraft/adapters/subprocess.py         |      230 |       12 |     95% |162-163, 177-178, 299, 346-347, 498-499, 528-529, 607 |
+| src/kraft/adapters/subprocess.py         |      216 |       12 |     94% |162-163, 177-178, 205, 329-330, 486-487, 516-517, 595 |
 | src/kraft/analytics.py                   |      229 |        4 |     98% |50-51, 148, 154 |
 | src/kraft/api/\_\_init\_\_.py            |       30 |        0 |    100% |           |
-| src/kraft/api/deps.py                    |       97 |        4 |     96% |56-57, 175-176 |
+| src/kraft/api/deps.py                    |       98 |        4 |     96% |56-57, 175-176 |
 | src/kraft/api/perimeter.py               |       70 |        0 |    100% |           |
 | src/kraft/api/routes/\_\_init\_\_.py     |        0 |        0 |    100% |           |
 | src/kraft/api/routes/artifacts.py        |       81 |        1 |     99% |       208 |
@@ -30,8 +30,8 @@
 | src/kraft/api/routes/lifecycle.py        |      475 |       38 |     92% |110, 113-114, 119-120, 199, 228, 243, 376, 447, 449, 451, 505-506, 539, 605-606, 643-644, 697, 720, 727, 758, 767, 865-866, 908-909, 964, 967, 1016, 1048-1049, 1127-1128, 1167, 1176-1177 |
 | src/kraft/api/routes/repos.py            |      125 |        4 |     97% |57-61, 182-183 |
 | src/kraft/api/routes/search.py           |      117 |       14 |     88% |47-48, 74-77, 80, 107-111, 134, 140-141, 171 |
-| src/kraft/api/routes/sessions.py         |      106 |        5 |     95% |69, 192, 197, 199, 202 |
-| src/kraft/api/routes/settings.py         |      369 |       25 |     93% |42, 132, 231, 233, 235, 353, 358-361, 376-377, 401-402, 404, 436-439, 442-443, 447-452, 509, 511 |
+| src/kraft/api/routes/sessions.py         |      106 |        7 |     93% |69, 191-193, 197, 199, 202 |
+| src/kraft/api/routes/settings.py         |      369 |       25 |     93% |42, 132, 235, 237, 239, 357, 362-365, 380-381, 405-406, 408, 440-443, 446-447, 451-456, 513, 515 |
 | src/kraft/api/routes/work\_items.py      |      200 |        7 |     96% |112, 221, 224, 256-259, 354-355 |
 | src/kraft/api/startup.py                 |      117 |        4 |     97% |121-122, 247-248 |
 | src/kraft/archive.py                     |       29 |        6 |     79% |     52-57 |
@@ -52,7 +52,7 @@
 | src/kraft/client/transport.py            |       70 |        8 |     89% |52, 67-68, 114-115, 117, 127-128 |
 | src/kraft/config.py                      |      253 |       14 |     94% |52, 70-72, 120, 151, 154, 202, 213, 269, 461-462, 481-482 |
 | src/kraft/db.py                          |      108 |        0 |    100% |           |
-| src/kraft/doctor.py                      |      287 |       35 |     88% |100, 102, 126-127, 144-145, 155-157, 187-188, 220, 224-225, 269-270, 299, 303-304, 364-365, 380-383, 459-460, 480-481, 504, 519, 527, 552, 556-557 |
+| src/kraft/doctor.py                      |      305 |       33 |     89% |96, 98, 122-123, 140-141, 151-153, 183-184, 216, 220-221, 265-266, 295, 299-300, 360-361, 405-406, 504-505, 525-526, 549, 564, 572, 597, 601-602 |
 | src/kraft/escalate.py                    |       83 |        5 |     94% |114, 151, 176-177, 288 |
 | src/kraft/events.py                      |       17 |        0 |    100% |           |
 | src/kraft/executor/\_\_init\_\_.py       |        8 |        0 |    100% |           |
@@ -66,6 +66,7 @@
 | src/kraft/executor/walk.py               |      362 |       38 |     90% |260, 328, 330-335, 341, 367, 369, 398, 400, 409, 434, 474, 485, 487, 489, 491, 522, 537-544, 546, 550, 552, 778, 919, 921, 1002, 1066, 1071-1076, 1115, 1231, 1243 |
 | src/kraft/findings.py                    |      108 |        0 |    100% |           |
 | src/kraft/gate\_review.py                |       31 |        2 |     94% |    65, 88 |
+| src/kraft/harness.py                     |      202 |       20 |     90% |116, 132, 135, 145, 149-150, 173, 176, 182, 185, 195, 211, 216, 233, 240, 247, 259, 304-306 |
 | src/kraft/index/\_\_init\_\_.py          |        0 |        0 |    100% |           |
 | src/kraft/index/chunk.py                 |       44 |        1 |     98% |        65 |
 | src/kraft/index/db.py                    |       65 |        5 |     92% |149-150, 159-161 |
@@ -78,11 +79,11 @@
 | src/kraft/logs.py                        |      103 |        9 |     91% |60-61, 102, 107, 124, 134, 151, 166-167 |
 | src/kraft/mcp.py                         |       67 |       21 |     69% |30, 37, 42, 49, 78, 85, 93, 107, 114, 121, 128, 135, 143, 152, 160, 168, 183, 202, 220, 229-230 |
 | src/kraft/notify.py                      |      152 |       10 |     93% |186-187, 291-294, 319-322 |
-| src/kraft/paths.py                       |       41 |        0 |    100% |           |
+| src/kraft/paths.py                       |       43 |        0 |    100% |           |
 | src/kraft/policy.py                      |      182 |        9 |     95% |114, 137, 148, 151, 193, 203, 207, 223, 227 |
 | src/kraft/progress.py                    |       72 |        0 |    100% |           |
 | src/kraft/rate\_limit\_retry.py          |       56 |        9 |     84% |124-126, 134-139 |
-| src/kraft/reattach.py                    |      171 |       21 |     88% |60-61, 69-70, 103-104, 188, 236-246, 321-322, 380, 386-387 |
+| src/kraft/reattach.py                    |      171 |       21 |     88% |60-61, 69-70, 103-104, 194, 242-252, 332-333, 391, 397-398 |
 | src/kraft/render.py                      |      188 |       15 |     92% |46-47, 76, 83, 338-345, 373, 385, 411 |
 | src/kraft/review.py                      |       43 |        1 |     98% |        68 |
 | src/kraft/sandbox.py                     |       96 |        9 |     91% |236, 257-258, 283-284, 299-300, 411-412 |
@@ -97,14 +98,14 @@
 | src/kraft/store/repos.py                 |       17 |        0 |    100% |           |
 | src/kraft/store/sessions.py              |       89 |        0 |    100% |           |
 | src/kraft/store/work\_items.py           |      121 |        0 |    100% |           |
-| src/kraft/templates.py                   |      367 |       17 |     95% |184, 236, 358, 364, 374, 383, 418, 597, 641, 644, 677, 689, 699, 709, 714, 805-809 |
+| src/kraft/templates.py                   |      383 |       18 |     95% |210, 263, 393, 418, 424, 434, 443, 478, 657, 701, 704, 737, 749, 759, 769, 774, 865-869 |
 | src/kraft/triggers.py                    |       38 |       10 |     74% |48-49, 66-73 |
 | src/kraft/update.py                      |      102 |       10 |     90% |51-52, 64-68, 73, 89, 124-126 |
-| src/kraft/usage.py                       |      121 |        5 |     96% |84, 201, 208, 211, 256 |
+| src/kraft/usage.py                       |      151 |        5 |     97% |85, 202, 212, 257, 293 |
 | src/kraft/worker\_env.py                 |        8 |        0 |    100% |           |
 | src/kraft/worktree\_read.py              |       48 |        8 |     83% |82, 86-88, 91-95, 103-104 |
 | src/kraft/ws.py                          |       61 |        0 |    100% |           |
-| **TOTAL**                                | **10833** |  **769** | **93%** |           |
+| **TOTAL**                                | **11080** |  **791** | **93%** |           |
 
 
 ## Setup coverage badge
