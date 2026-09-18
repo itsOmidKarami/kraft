@@ -376,7 +376,7 @@ frontend/         React SPA (vite)
 templates/        default chain templates + registry/policy — the install seed
 dev/seed.py       dev-instance seeder
 fixtures/         fake agent + the PATH shim just dev uses
-docs/consolidated/  the design this implements
+docs/intent/      intended behaviour as pinned requirements, each tied to a test
 ```
 
 ## Requirements
