@@ -84,6 +84,12 @@ class RunDirs:
         return self.base / "kraft.pid"
 
     @property
+    def mode(self) -> Path:
+        """How the running server was started -- "detached" or "attached" --
+        so `kraft admin restart` can start it back up the same way."""
+        return self.base / "kraft.mode"
+
+    @property
     def worktrees(self) -> Path:
         return self.base / "worktrees"
 

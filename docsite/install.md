@@ -15,7 +15,8 @@ curl -fsSL https://raw.githubusercontent.com/itsOmidKarami/kraft/main/install.sh
 
 [`install.sh`](https://github.com/itsOmidKarami/kraft/blob/main/install.sh) is short
 and worth reading before you pipe it to a shell. `kraft admin update` installs the
-newest release later on, and `kraft --version` says what you have.
+newest release later on (`--restart` also restarts a running server, the same
+way it was running), and `kraft --version` says what you have.
 
 ## Homebrew (macOS)
 

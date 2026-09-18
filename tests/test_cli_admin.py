@@ -343,6 +343,133 @@ def test_serve_exports_its_identity_for_workers(tmp_path, monkeypatch):
     assert os.environ["KRAFT_DAEMON_PORT"] == "9321"
 
 
+def test_serve_records_attached_mode_by_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    monkeypatch.delenv("KRAFT_DETACHED", raising=False)
+    seen = {}
+    mode_path = RunDirs(tmp_path / "run").mode
+
+    def fake_run(self, *args, **kwargs):
+        seen["mode"] = mode_path.read_text().strip()
+
+    monkeypatch.setattr(cli.admin._SignalLoggingServer, "run", fake_run)
+    cli.admin._serve()
+    assert seen["mode"] == "attached"
+    assert not mode_path.exists()  # cleared alongside the pidfile on exit
+
+
+def test_serve_records_detached_mode_when_asked(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    monkeypatch.setenv("KRAFT_DETACHED", "1")
+    seen = {}
+    mode_path = RunDirs(tmp_path / "run").mode
+
+    def fake_run(self, *args, **kwargs):
+        seen["mode"] = mode_path.read_text().strip()
+
+    monkeypatch.setattr(cli.admin._SignalLoggingServer, "run", fake_run)
+    cli.admin._serve()
+    assert seen["mode"] == "detached"
+
+
+def test_restart_with_no_server_is_not_an_error(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setattr(cli.admin, "_service_installed", lambda: False)
+    cli.main(["admin", "restart"])
+    assert "no server running" in capsys.readouterr().out
+
+
+def test_restart_brings_a_detached_server_back_detached(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    run_dirs = RunDirs(tmp_path / "run")
+    run_dirs.pid.parent.mkdir(parents=True, exist_ok=True)
+    run_dirs.pid.write_text("4171")
+    run_dirs.mode.write_text("detached")
+    alive = [True]
+
+    def fake_kill(pid, sig):
+        if sig == 0 and not alive[0]:
+            raise ProcessLookupError
+        if sig != 0:
+            alive[0] = False
+
+    monkeypatch.setattr(os, "kill", fake_kill)
+    monkeypatch.setattr(cli.admin, "_service_installed", lambda: False)
+    started = []
+    monkeypatch.setattr(cli.admin, "_start_detached", lambda: started.append(True))
+    cli.main(["admin", "restart"])
+    assert started == [True]
+    assert "stopped (pid 4171)" in capsys.readouterr().out
+
+
+def test_restart_refuses_to_guess_at_an_attached_server(tmp_path, monkeypatch, capsys):
+    """It can't hand a foreground server back to the terminal it was running
+    in -- stop it, and say so, rather than silently starting it detached."""
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    run_dirs = RunDirs(tmp_path / "run")
+    run_dirs.pid.parent.mkdir(parents=True, exist_ok=True)
+    run_dirs.pid.write_text("4171")
+    run_dirs.mode.write_text("attached")
+    alive = [True]
+
+    def fake_kill(pid, sig):
+        if sig == 0 and not alive[0]:
+            raise ProcessLookupError
+        if sig != 0:
+            alive[0] = False
+
+    monkeypatch.setattr(os, "kill", fake_kill)
+    monkeypatch.setattr(cli.admin, "_service_installed", lambda: False)
+    monkeypatch.setattr(
+        cli.admin, "_start_detached", lambda: pytest.fail("started detached anyway")
+    )
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["admin", "restart"])
+    assert caught.value.code == 1
+    assert "attached to a terminal" in capsys.readouterr().err
+
+
+def test_restart_goes_through_the_service_manager_when_one_is_installed(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setattr(cli.admin, "_service_installed", lambda: True)
+    called = []
+    monkeypatch.setattr(cli.admin, "_restart_service", lambda: called.append(True))
+    monkeypatch.setattr(
+        cli.admin, "_read_pid", lambda *_a: pytest.fail("looked at the pidfile anyway")
+    )
+    cli.main(["admin", "restart"])
+    assert called == [True]
+
+
+def test_admin_update_with_restart_flag_restarts(monkeypatch, capsys):
+    from kraft import update
+
+    monkeypatch.setattr(update, "latest", lambda **_: update.Release("v0.4.0", "u"))
+    monkeypatch.setattr(update, "installed", lambda: "0.3.0")
+    monkeypatch.setattr(update, "perform", lambda *a, **k: 0)
+    called = []
+    monkeypatch.setattr(cli.admin, "_cmd_restart", lambda ns: called.append(True))
+    cli.main(["admin", "update", "--restart"])
+    assert called == [True]
+
+
+def test_admin_update_without_restart_flag_just_prints_the_hint(monkeypatch, capsys):
+    from kraft import update
+
+    monkeypatch.setattr(update, "latest", lambda **_: update.Release("v0.4.0", "u"))
+    monkeypatch.setattr(update, "installed", lambda: "0.3.0")
+    monkeypatch.setattr(update, "perform", lambda *a, **k: 0)
+    monkeypatch.setattr(
+        cli.admin, "_cmd_restart", lambda ns: pytest.fail("restarted without being asked")
+    )
+    cli.main(["admin", "update"])
+    assert "kraft admin restart" in capsys.readouterr().out
+
+
 def _wait_for(predicate, timeout=10.0, interval=0.05) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
