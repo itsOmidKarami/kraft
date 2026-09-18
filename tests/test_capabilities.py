@@ -43,3 +43,12 @@ def test_the_inputs_capability_is_announced():
     entry = next((c for c in capabilities.MANIFEST if c.name == "inputs"), None)
     assert entry is not None
     assert "inputs:" in entry.how
+
+
+def test_the_rebase_chain_shape_is_announced():
+    """doctor's node-id diff cannot see removed or reshaped nodes
+    (Kraft-rl34g); the manifest is the only thing that tells the operator."""
+    entry = next(c for c in capabilities.MANIFEST if c.name == "rebase steps")
+    assert entry.version == "0.74.0"
+    assert "on.mr.rebase" in entry.how
+    assert "on.env.prepare" in entry.how
