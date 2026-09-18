@@ -117,15 +117,26 @@ User scope shells out to `claude mcp add` rather than editing `~/.claude.json`
 itself — that file is large, shared, agent-owned state. If `claude` is not on
 `PATH`, `kraft admin init` prints the command for you to run instead of guessing.
 
-They also publish as a marketplace plugin, alongside Kraft Lite:
-`/plugin marketplace add itsOmidKarami/kraft`.
+They also publish as a Claude Code plugin marketplace, alongside Kraft Lite:
 
-The skills install as a plugin, so they namespace: `/kraft:handoff` to file work
-after a spec and plan are agreed, `/kraft:board` to see what is running or
-blocked, `/kraft:gates` to approve, reject, or steer. That is a plain directory
-tree under `.claude/skills/kraft/` with a `.claude-plugin/plugin.json` — nothing
-is registered in Claude Code's managed state, and uninstalling is `rm -rf` on the
-directory. It works the same at user and repo scope.
+```
+/plugin marketplace add itsOmidKarami/kraft
+/plugin install kraft@kraft
+```
+
+That installs the same skills `kraft admin init` writes as files, but managed
+(`/plugin update kraft`, `/plugin uninstall`) — it does **not** register the
+MCP server, so a repo using it still needs `kraft admin init` (or `claude mcp
+add`) run once. Installing directly instead writes a plain directory tree
+under `.claude/skills/kraft/` with its own `.claude-plugin/plugin.json` —
+nothing registered in Claude Code's managed state, uninstalling is `rm -rf`.
+Both forms produce the same namespaced commands and work at user and repo
+scope: `/kraft:onboard` to connect a repo, `/kraft:board` to see what's
+running or blocked, `/kraft:prepare` to spec and plan work, `/kraft:handoff`
+to file it, `/kraft:status` to see where it got to, `/kraft:gates` to
+approve, reject, or steer, `/kraft:check` to see if the repo's Kraft config
+has drifted. See [docsite/agent-integration.md](docsite/agent-integration.md)
+for the full breakdown, including Kraft Lite's `/kraft-lite:*` commands.
 
 The tools you'll reach for most, over the same local HTTP API the browser uses:
 
@@ -133,7 +144,7 @@ The tools you'll reach for most, over the same local HTTP API the browser uses:
 |---|---|
 | read | `list_work_items`, `get_work_item`, `search` |
 | write | `create_work_item`, `ensure_repo` |
-| act | `approve_gate`, `reject_gate`, `pause_work_item`, `resume_work_item` |
+| act | `approve_gate`, `reject_gate`, `pause_work_item`, `resume_work_item`, `retry_work_item` |
 
 Two rules are enforced in code, not in prose:
 

@@ -125,6 +125,7 @@ same pull request, not as a follow-up:
 | A chain template's node fields, or a new default chain | `docsite/concepts.md` |
 | A harness (`src/kraft/harnesses/*.yaml`, `harness.py`) | `docsite/harnesses.md` |
 | An MCP tool (`src/kraft/mcp.py`) | `docsite/agent-integration.md` |
+| A plugin skill (`plugins/kraft/skills/*`, `plugins/kraft-lite/skills/*`), or either `plugin.json` | `docsite/agent-integration.md`, and that plugin's own `README.md` |
 | `access.yaml` / remote-access behaviour | `docsite/remote-access.md`, and `SECURITY.md` if it's security-relevant |
 
 Run `uv run --group docs mkdocs build --strict` before you push — it fails

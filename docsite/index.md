@@ -21,8 +21,10 @@ worktrees.
 - **[CLI reference](cli.md)** — every `kraft` verb, grouped by what it does.
 - **[Configuration](configuration.md)** — every field in `repos.yaml`,
   `registry.yaml`, `policy.yaml`, `access.yaml`.
-- **[Agent integration](agent-integration.md)** — driving Kraft from an MCP-capable
-  coding agent instead of the browser.
+- **[Agent integration](agent-integration.md)** — driving Kraft with `/kraft:*`
+  slash commands from a coding agent instead of the browser: onboarding a repo,
+  checking its config, filing work, acting on gates. Install via the Claude
+  Code plugin marketplace or `kraft admin init`.
 - **[Remote access](remote-access.md)** — approving a gate from your phone.
 - **[Inbound triggers](triggers.md)** — starting a chain from a cron schedule or a
   webhook instead of typing into `kraft item create`.
