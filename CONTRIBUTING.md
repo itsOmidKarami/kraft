@@ -108,6 +108,31 @@ git cherry-pick <sha1> <sha2> ...
 git log --oneline "$old" --not mybranch   # non-empty means something is missing
 ```
 
+## User-facing docs
+
+`docsite/` is the published documentation site (`mkdocs build`, deployed to
+GitHub Pages by `.github/workflows/docs.yml` on every push to `main`) — not
+to be confused with `docs/intent/` below, which nobody but a contributor
+reads. If your change touches any of these, update the matching page in the
+same pull request, not as a follow-up:
+
+| Source | Docs page |
+|---|---|
+| A `kraft` subcommand or flag (`src/kraft/cli/*.py`) | `docsite/cli.md` |
+| A `registry.yaml` / `policy.yaml` / `repos.yaml` / `access.yaml` / `intake.yaml` field (`src/kraft/config.py`, `policy.py`) | `docsite/configuration.md` |
+| A chain template's node fields, or a new default chain | `docsite/concepts.md` |
+| A harness (`src/kraft/harnesses/*.yaml`, `harness.py`) | `docsite/harnesses.md` |
+| An MCP tool (`src/kraft/mcp.py`) | `docsite/agent-integration.md` |
+| `access.yaml` / remote-access behaviour | `docsite/remote-access.md`, and `SECURITY.md` if it's security-relevant |
+
+Run `uv run --group docs mkdocs build --strict` before you push — it fails
+on a broken internal link or anchor, though not on a page that's merely gone
+stale prose-wise. A stale-but-still-linking page is exactly the kind of gap
+`docs/intent/`'s `enforced-by:` pinning doesn't catch either; there is no
+automated backstop for "this paragraph no longer describes the code," only
+for "this file/anchor no longer exists." Read the page you're touching, not
+just the code.
+
 ## Design documents
 
 Specs and implementation plans are not committed. `.engineering/` and
