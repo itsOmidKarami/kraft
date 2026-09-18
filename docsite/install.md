@@ -20,9 +20,11 @@ way it was running), and `kraft --version` says what you have.
 
 Prefer driving Kraft from a coding agent instead of this shell? `kraft admin
 init` above already installs the `/kraft:*` skills alongside the MCP server —
-see [Agent integration](agent-integration.md) for the slash commands
-(`/kraft:onboard`, `/kraft:board`, `/kraft:gates`, ...) and the Claude Code
-plugin marketplace as an alternative, self-updating way to install them.
+or skip it and go straight to the [Claude Code plugin
+marketplace](agent-integration.md#installing-the-plugin), which installs both
+in one step and keeps itself updated. See [Agent
+integration](agent-integration.md) for the slash commands (`/kraft:onboard`,
+`/kraft:board`, `/kraft:gates`, ...) either way gives you.
 
 ## Homebrew (macOS)
 

@@ -9,5 +9,11 @@
   },
   "skills": [
     "./skills"
-  ]
+  ],
+  "mcpServers": {
+    "kraft": {
+      "command": "kraft",
+      "args": ["admin", "mcp"]
+    }
+  }
 }
