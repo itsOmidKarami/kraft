@@ -728,3 +728,89 @@ def test_fix_attempt_note_frames_a_skipped_finding_as_a_disagreement():
 def test_both_notes_are_empty_without_a_previous_session():
     assert prompts.previous_review_note(None) == ""
     assert prompts.fix_attempt_note(None) == ""
+
+
+# --------------------------------------------------------------------------
+# a repeat reviewer is handed the fix cycle and its own last session
+# (Kraft-qzkux)
+# --------------------------------------------------------------------------
+
+
+def _review_instruction(tmp_path, monkeypatch, sessions):
+    """Run a one-node review chain whose reviewer is a fake agent, after
+    seeding `sessions` -- `(hook, status, result_path)` rows on that node --
+    and return what the agent was launched with."""
+    from test_review_package import _review_template
+
+    fake_agent = Path(__file__).parent / "support" / "fake_agent.py"
+    argv_log = tmp_path / "argv.jsonl"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_ARGV_LOG", str(argv_log))
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    base = fake_registry(sys.executable, fake_agent)
+    registry = Registry(
+        hooks={**base.hooks, "on.review.local.run": base.hooks["on.implementation.start"]}
+    )
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="review me",
+                repo=str(repo),
+                template=_review_template(),
+                bd_cwd=str(tracker),
+            )
+            for i, (hook, status, result) in enumerate(sessions):
+                await database.write(
+                    lambda c, i=i, hook=hook, status=status, result=result: c.execute(
+                        "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, "
+                        "log_path, result_path, status, created_at, head_sha) "
+                        "VALUES (?, ?, 'review', ?, '/l', ?, ?, ?, 'deadbeef')",
+                        (f"seed{i}", wid, hook, result, status, f"2026-01-01T00:00:0{i}"),
+                    )
+                )
+            await executor.run(
+                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    return " ".join(a for ln in argv_log.read_text().splitlines() for a in json.loads(ln))
+
+
+def test_round_zero_review_gets_neither_continuity_note(tmp_path, monkeypatch):
+    """A work item's first and most important review is unchanged: no previous
+    session exists, so both notes are empty."""
+    instruction = _review_instruction(tmp_path, monkeypatch, sessions=[])
+    assert "Your own last review" not in instruction
+    assert "one fix cycle's work" not in instruction
+
+
+def test_a_repeat_review_is_handed_both_sessions(tmp_path, monkeypatch):
+    instruction = _review_instruction(
+        tmp_path,
+        monkeypatch,
+        sessions=[
+            ("on.review.local.run", "done", "/run/results/rev.json"),
+            ("on.implementation.start", "done", "/run/results/fix.json"),
+        ],
+    )
+    assert "/run/results/rev.json" in instruction
+    assert "/run/results/fix.json" in instruction
+
+
+def test_a_crashed_previous_review_yields_no_note(tmp_path, monkeypatch):
+    """`_REVIEWED_STATUS` excludes it: a session that died may never have
+    written the file the note would point at."""
+    instruction = _review_instruction(
+        tmp_path,
+        monkeypatch,
+        sessions=[("on.review.local.run", "failed", "/run/results/dead.json")],
+    )
+    assert "/run/results/dead.json" not in instruction
