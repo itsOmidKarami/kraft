@@ -2876,3 +2876,37 @@ def test_chain_review_context_shows_the_tail_it_is_revising():
     )
     assert "steps: [on.test.run] -> [on.review.local.run]" in text
     assert "tasks: [on.mr.open]" in text
+
+
+def test_measure_node_stops_at_a_rebase_that_moved_the_base(tmp_path, monkeypatch):
+    """The later groups must not run against a base the first group just moved."""
+    from kraft.executor.context import BASE_MOVED
+
+    async def scenario():
+        database, rd, worktree, wid, row = await _setup_measure_node_scenario(tmp_path)
+        try:
+            calls = []
+
+            async def fake_dispatch_node(db_, run_dirs_, task_hook, node, row_, reg, wt, **kw):
+                calls.append(task_hook)
+                return BASE_MOVED if task_hook == "on.a" else "done"
+
+            monkeypatch.setattr(dispatch, "dispatch_node", fake_dispatch_node)
+            registry = Registry(
+                hooks={
+                    "on.a": {"kind": "builtin", "handler": "noop"},
+                    "on.b": {"kind": "builtin", "handler": "noop"},
+                },
+                raw={},
+            )
+            node = {"id": "n", "steps": [["on.a"], ["on.b"]], "tasks": ["on.a", "on.b"]}
+            verdict, failed, _ = await dispatch.measure_node(
+                database, rd, wid, node, row, registry, worktree, round=0
+            )
+            assert verdict == BASE_MOVED
+            assert failed == []
+            assert calls == ["on.a"]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())

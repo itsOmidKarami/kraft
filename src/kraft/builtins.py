@@ -727,6 +727,7 @@ async def mr_rebase(
     worktree: str,
     branch: str,
     head_sha: str | None = None,
+    has_rebase_bounce: bool = False,
 ) -> str:
     """Rebase onto origin's default branch right before `open_mr`, so an item
     that ran straight through the chain -- no pause, no `/retry` -- doesn't
@@ -740,14 +741,20 @@ async def mr_rebase(
     and `/retry` reach by catching it and calling `mark_needs_human`
     themselves -- one behavior, this call site doesn't need its own copy of
     that catch.
+
+    When the node declares `rebase_bounce_to` and the rebase moved the base,
+    that is reported (`BASE_MOVED`) rather than swallowed, so the node stops
+    before its later steps run against a base nobody re-verified.
     """
+    from kraft.executor.context import BASE_MOVED  # executor imports this module
+
     new_head = await refresh_worktree_base(Path(worktree), Path(repo), branch)
     if new_head:
         await db.write(lambda c: store.set_base_ref(c, work_item_id, new_head))
         log = f"rebased {branch} onto {new_head}\n"
     else:
         log = "nothing to rebase\n"
-    return await _record_done(
+    recorded = await _record_done(
         db,
         run_dirs,
         session_id=session_id,
@@ -758,6 +765,8 @@ async def mr_rebase(
         log=log,
         head_sha=head_sha,
     )
+    # The session is `done` either way -- the rebase itself succeeded.
+    return BASE_MOVED if (new_head and has_rebase_bounce) else recorded
 
 
 async def mr_rebase_forced(worktree: Path, repo: Path, branch: str) -> str | None:

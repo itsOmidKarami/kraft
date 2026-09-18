@@ -24,6 +24,7 @@ from kraft.adapters import subprocess as _subprocess
 from kraft.executor import entry, prompts, stops
 from kraft.executor.context import (
     _ADVANCING,
+    BASE_MOVED,
     BUDGET,
     CONFIG_ERROR,
     INFRA_STOP,
@@ -337,6 +338,7 @@ async def dispatch_node(
             repo=work_item_row["repo"],
             worktree=str(worktree),
             branch=store.branch_for(work_item_row),
+            has_rebase_bounce=bool(node.get("rebase_bounce_to")),
             **common,
         )
     if kind == "agent":
@@ -743,6 +745,11 @@ async def measure_node(
         return WAITING, [], []
     if any(r == INFRA_STOP for r in results):
         return INFRA_STOP, [], []
+    # Not a failure, so it must not reach `failed` and open a fix loop or an
+    # on_failure repair. The node stopped on purpose: `run_once` sees the moved
+    # base_ref and bounces.
+    if any(r == BASE_MOVED for r in results):
+        return BASE_MOVED, [], []
     # Logged before the BUDGET rung returns: a co-task can raise in the same node
     # as a budget-refused agent, and that traceback is the only record of it.
     excs = [r for r in results if isinstance(r, BaseException)]
