@@ -50,21 +50,21 @@ def _key(version: str) -> tuple[int, ...]:
 #: Oldest first. `added_since` relies on this order for its output.
 MANIFEST: tuple[Capability, ...] = (
     Capability(
-        version="0.67.0",
+        version="0.65.0",
         name="extends",
         what="compose a chain template instead of copying all of its nodes",
         how="add `extends: default` to your template and delete the nodes you inherit; "
         "`remove`, `insert_before` and `insert_after` adjust what you got",
     ),
     Capability(
-        version="0.67.0",
+        version="0.65.0",
         name="defaults",
         what="settings applied to every `kind: agent` binding in registry.yaml",
         how="add a top-level `defaults:\\n  agent: { steering: [...] }` block and delete "
         "the per-hook copies it replaces",
     ),
     Capability(
-        version="0.67.2",
+        version="0.68.0",
         name="on_failure (binding-level)",
         what="a repair that travels with a task instead of with one node, and "
         "re-dispatches just that task",
