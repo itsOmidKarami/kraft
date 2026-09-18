@@ -11,6 +11,10 @@ uv tool install kraft-sdlc
 kraft
 ```
 
+On macOS, `brew tap itsOmidKarami/kraft && brew install kraft` works the same
+way — see [Install](install.md) for that path, the install script, and
+running from source.
+
 Leave that running — it's the server, in the foreground, on
 `http://127.0.0.1:8765`. Open that URL; you should see an empty board.
 
