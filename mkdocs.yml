@@ -24,25 +24,28 @@ theme:
         icon: material/weather-night
         name: Switch to dark mode
   features:
-    - navigation.tabs
     - navigation.top
+    - navigation.sections
     - content.code.copy
     - search.suggest
 
 nav:
   - Home: index.md
-  - Getting started: getting-started.md
-  - Concepts: concepts.md
-  - Install: install.md
-  - CLI reference: cli.md
-  - Configuration: configuration.md
-  - Agent harnesses: harnesses.md
-  - Agent integration: agent-integration.md
-  - Remote access: remote-access.md
-  - Inbound triggers: triggers.md
-  - Architecture: architecture.md
-  - Contributing: contributing.md
-  - Security: security.md
+  - Guide:
+      - Getting started: getting-started.md
+      - Concepts: concepts.md
+  - Reference:
+      - Install: install.md
+      - CLI reference: cli.md
+      - Configuration: configuration.md
+      - Agent harnesses: harnesses.md
+      - Agent integration: agent-integration.md
+      - Remote access: remote-access.md
+      - Inbound triggers: triggers.md
+  - Project:
+      - Architecture: architecture.md
+      - Contributing: contributing.md
+      - Security: security.md
 
 markdown_extensions:
   - admonition
