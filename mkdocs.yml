@@ -1,0 +1,54 @@
+site_name: Kraft
+site_description: A local orchestrator for semi-autonomous software work
+site_url: https://itsomidkarami.github.io/kraft/
+repo_url: https://github.com/itsOmidKarami/kraft
+repo_name: itsOmidKarami/kraft
+edit_uri: edit/main/docsite/
+docs_dir: docsite
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+  features:
+    - navigation.tabs
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Concepts: concepts.md
+  - Install: install.md
+  - CLI reference: cli.md
+  - Configuration: configuration.md
+  - Agent integration: agent-integration.md
+  - Remote access: remote-access.md
+  - Inbound triggers: triggers.md
+  - Architecture: https://github.com/itsOmidKarami/kraft/blob/main/ARCHITECTURE.md
+  - Contributing: https://github.com/itsOmidKarami/kraft/blob/main/CONTRIBUTING.md
+  - Security: https://github.com/itsOmidKarami/kraft/blob/main/SECURITY.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/itsOmidKarami/kraft
