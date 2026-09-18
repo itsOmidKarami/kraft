@@ -108,35 +108,42 @@ on `127.0.0.1`. The process refuses to start on a LAN address without one.
 Kraft can also be driven from a coding-agent session over MCP, so work can be
 filed, read, and unblocked without switching to the browser.
 
-```bash
-kraft admin init          # register the MCP server for your user, install the skills
-kraft admin init --repo   # or write .mcp.json + .claude/skills/ into this repo
-```
-
-User scope shells out to `claude mcp add` rather than editing `~/.claude.json`
-itself — that file is large, shared, agent-owned state. If `claude` is not on
-`PATH`, `kraft admin init` prints the command for you to run instead of guessing.
-
-They also publish as a Claude Code plugin marketplace, alongside Kraft Lite:
+They publish as a Claude Code plugin marketplace, alongside Kraft Lite:
 
 ```
 /plugin marketplace add itsOmidKarami/kraft
 /plugin install kraft@kraft
 ```
 
-That installs the same skills `kraft admin init` writes as files, but managed
-(`/plugin update kraft`, `/plugin uninstall`) — it does **not** register the
-MCP server, so a repo using it still needs `kraft admin init` (or `claude mcp
-add`) run once. Installing directly instead writes a plain directory tree
-under `.claude/skills/kraft/` with its own `.claude-plugin/plugin.json` —
-nothing registered in Claude Code's managed state, uninstalling is `rm -rf`.
-Both forms produce the same namespaced commands and work at user and repo
-scope: `/kraft:onboard` to connect a repo, `/kraft:board` to see what's
-running or blocked, `/kraft:prepare` to spec and plan work, `/kraft:handoff`
-to file it, `/kraft:status` to see where it got to, `/kraft:gates` to
-approve, reject, or steer, `/kraft:check` to see if the repo's Kraft config
-has drifted. See [docsite/agent-integration.md](docsite/agent-integration.md)
-for the full breakdown, including Kraft Lite's `/kraft-lite:*` commands.
+That's the one-step path: the plugin manifest bundles `kraft admin mcp` as an
+`mcpServers` entry, so it registers the MCP server *and* the skills —
+`/kraft:onboard` to connect a repo, `/kraft:board` to see what's running or
+blocked, `/kraft:prepare` to spec and plan work, `/kraft:handoff` to file it,
+`/kraft:status` to see where it got to, `/kraft:gates` to approve, reject, or
+steer, `/kraft:check` to see if the repo's Kraft config has drifted — in the
+same step, as long as `kraft` is already on `PATH`. It's managed too:
+`/plugin update kraft`, `/plugin uninstall`. Kraft Lite's plugin doesn't
+bundle an MCP server since it doesn't need `kraft` installed at all.
+
+`kraft admin init` remains for the plain-file form, the repo-scoped
+`.mcp.json` variant, or registering the MCP server for a host other than
+Claude Code:
+
+```bash
+kraft admin init          # register the MCP server for your user, install the skills
+kraft admin init --repo   # or write .mcp.json + .claude/skills/ into this repo
+```
+
+User scope shells out to `claude mcp add` rather than editing `~/.claude.json`
+itself — that file is large, shared, agent-owned state, and is the closest
+thing to a global install today, same as the plugin: every repo you open sees
+Kraft's tools, not just the one you ran it from. If `claude` is not on
+`PATH`, `kraft admin init` prints the command for you to run instead of
+guessing. It writes the skill files under `.claude/skills/kraft/` directly,
+with nothing registered in Claude Code's managed state — uninstalling is
+`rm -rf`. Both forms produce the same namespaced commands. See
+[docsite/agent-integration.md](docsite/agent-integration.md) for the full
+breakdown, including Kraft Lite's `/kraft-lite:*` commands.
 
 The tools you'll reach for most, over the same local HTTP API the browser uses:
 
