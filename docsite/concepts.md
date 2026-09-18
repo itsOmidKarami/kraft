@@ -28,22 +28,19 @@ nodes:
 ```
 
 The shipped `default` template is the real one — spec and plan gates, a fix
-loop on test failures, a rebase right before the merge request opens, CI
+loop on test failures, a rebase at the start of every node that writes or measures code, CI
 watched with its own fix loop, a human-review gate, then merge:
 
 ```yaml
 id: default
 nodes:
-  - { id: spec,             tasks: [on.spec.requested],          gate_after: spec_approval }
-  - { id: plan,              tasks: [on.plan.requested],          gate_after: plan_approval }
-  - { id: chain_review,      tasks: [on.chain.review_ready],      gate_after: chain_finalized, auto_escalate: true }
-  - { id: env_setup,         tasks: [on.env.prepare],             gate_after: null }
-  - { id: implementation,    steps: [[on.implementation.start], [on.repos.scan]], gate_after: null }
-  - { id: verify,            tasks: [on.test.run, on.review.local.run], fix_loop: verify_fix_loop, gate_after: null }
-  - { id: pre_mr_rebase,     tasks: [on.mr.rebase],                gate_after: null, rebase_bounce_to: verify }
-  - { id: mr_meta,           tasks: [on.mr.describe],              gate_after: null }
-  - { id: open_mr,           tasks: [on.mr.open],                  gate_after: null }
-  - { id: mr_checks,         tasks: [on.ci.poll, on.review.mr.run], fix_loop: ci_fix_loop, gate_after: null, rebase_bounce_to: verify }
+  - { id: spec,             steps: [[on.mr.rebase], [on.spec.requested]], gate_after: spec_approval }
+  - { id: plan,             steps: [[on.mr.rebase], [on.plan.requested]], gate_after: plan_approval }
+  - { id: chain_review,     tasks: [on.chain.review_ready],      gate_after: chain_finalized, auto_escalate: true }
+  - { id: implementation,   steps: [[on.mr.rebase], [on.env.prepare], [on.implementation.start], [on.repos.scan]], gate_after: null }
+  - { id: verify,           steps: [[on.mr.rebase], [on.env.prepare], [on.test.run, on.review.local.run]], fix_loop: verify_fix_loop, gate_after: null }
+  - { id: open_mr,          steps: [[on.mr.rebase], [on.mr.describe], [on.mr.open]], gate_after: null, rebase_bounce_to: verify }
+  - { id: mr_checks,        steps: [[on.ci.poll], [on.review.mr.run]], fix_loop: ci_fix_loop, gate_after: null, rebase_bounce_to: verify }
   - { id: human_review,      tasks: [on.human_review.requested],   gate_after: human_review_approval, reject_to: implementation }
   - { id: mr_sync,           tasks: [on.mr.sync],                  gate_after: null }
   - { id: merge,             tasks: [on.merge],                    gate_after: null, rebase_bounce_to: verify }
@@ -60,6 +57,17 @@ Reach for `steps` when the second task needs the first task's result: the
 default chain's `implementation` node runs the implementing agent and then
 scans submodules, so the scan reads a worktree the agent has actually
 touched rather than one it has not started on.
+
+Every node that authors or measures code rebases onto the fetched tip of the
+target branch as its first step. A work item can run for hours while other work
+merges, and a spec written against stale code propagates into the plan and the
+implementation, where a later rebase does not undo it. The rebase is cheap and
+does nothing when the branch is already current. `implementation` and `verify`
+then re-run `on.env.prepare`, because a rebase can land a new lockfile.
+
+`open_mr` is the one node that stops on it: if its rebase moves the branch, the
+merge request is not opened and the chain returns to `verify`, because the tests
+that passed measured a base that no longer exists.
 
 A node's optional fields change how the chain behaves around it:
 
