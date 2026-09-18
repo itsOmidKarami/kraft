@@ -616,7 +616,9 @@ def chain_review_context(
     appended to `on.chain.review_ready`'s own instruction. Read-only context:
     lets the reviewer name a real `flags` concern or a real
     `proposed_node_overrides` value instead of guessing, from inside a
-    worktree that carries no copy of `registry.yaml` itself.
+    worktree that carries no copy of `registry.yaml` itself. The tail's current
+    shape is sent alongside the bindings; a node with more than one group is
+    shown as `steps`, because that is the key the reviewer must use to keep it.
 
     `preceding_ids` names the already-run nodes, listed so a backward
     escalation target can be spelled correctly.
@@ -625,6 +627,15 @@ def chain_review_context(
     costs nothing in the prompt.
     """
     lines = []
+    if tail_nodes:
+        lines.append("\n\nThe tail you are revising, as it stands:")
+        for n in tail_nodes:
+            groups = n.get("steps") or [n.get("tasks") or []]
+            if len(groups) > 1:
+                shape = "steps: " + " -> ".join("[" + ", ".join(g) + "]" for g in groups)
+            else:
+                shape = "tasks: [" + ", ".join(groups[0]) + "]"
+            lines.append(f"- {n['id']}: {shape}")
     hooks = sorted({t for n in tail_nodes for t in n.get("tasks", [])})
     if hooks:
         lines.append("\n\nResolved hook bindings for the current tail (context only):")
