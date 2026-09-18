@@ -8,11 +8,21 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    ValidationInfo,
+    model_validator,
+)
+from pydantic_core import PydanticCustomError
 
 from kraft import sandbox as _sandbox
 from kraft import skill as _skill
 from kraft import steering as _steering
+from kraft.config import first_error
 from kraft.paths import default_skills_dir
 from kraft.store import OVERRIDABLE_NODE_FIELDS
 
@@ -115,6 +125,9 @@ class _DictLike(BaseModel):
         return [(k, getattr(self, k)) for k in self.keys()]
 
 
+_ORDERED_REFS = ("reject_to", "rebase_bounce_to")
+
+
 class ChainNodeIn(_DictLike):
     """A chain node as an operator writes it: `tasks` XOR `steps`, never both.
     Unknown keys ride along -- chain-review artifacts carry a few this layer
@@ -178,6 +191,44 @@ class ChainNode(ChainNodeIn):
 
     @model_validator(mode="after")
     def _one_or_the_other(self) -> ChainNode:
+        return self
+
+    @model_validator(mode="after")
+    def _cross_document(self, info: ValidationInfo) -> ChainNode:
+        """The two rules a shape cannot express, read from validation context:
+        `registry` (every hook the node names must exist) and `preceding` (the
+        ids `reject_to`/`rebase_bounce_to` may name -- the caller includes the
+        node's own id). A key absent from the context skips its rule, so a
+        node built by hand in a test validates as it always did."""
+        ctx = info.context or {}
+        registry = ctx.get("registry")
+        if registry is not None:
+            # A malformed `on_failure` fails its own shape check first; the
+            # `isinstance` only keeps a bare string from being misread as a
+            # list of one-character "hooks".
+            named = [*self.tasks, *(self.on_failure if isinstance(self.on_failure, list) else [])]
+            unknown = sorted({t for t in named if t not in registry.hooks})
+            if unknown:
+                raise PydanticCustomError(
+                    "unknown_hooks",
+                    "hook(s) {hooks} are not in the registry",
+                    {"hooks": unknown},
+                )
+        preceding = ctx.get("preceding")
+        if preceding is not None:
+            for field in _ORDERED_REFS:
+                ref = getattr(self, field)
+                if ref is not None and (not isinstance(ref, str) or ref not in preceding):
+                    raise PydanticCustomError(
+                        "ordered_ref",
+                        "{detail}",
+                        {
+                            "field": field,
+                            "detail": (
+                                f"node {self.id!r} {field!r} must name a node at or before it"
+                            ),
+                        },
+                    )
         return self
 
 
@@ -869,40 +920,28 @@ def validate_nodes(
     if bad_on_failure is not None:
         return [f"node {bad_on_failure!r} 'on_failure' must be a non-empty list of strings"]
 
-    unknown = sorted(
-        {
-            t
-            for n in nodes
-            # A malformed `on_failure` already failed the shape check above,
-            # so this `isinstance` guard only matters for `load_templates`'s
-            # own not-yet-validated call: without it, a bare string would be
-            # misread as a list of one-character "hooks".
-            for t in [
-                *n["tasks"],
-                *(n["on_failure"] if isinstance(n.get("on_failure"), list) else []),
-            ]
-            if t not in registry.hooks
-        }
-    )
+    # The registry and ordering rules live on `ChainNode`; each node is checked
+    # with the ids it may point back at, and the results are folded into the
+    # same one-message shape this function has always returned.
+    ids = [n["id"] for n in nodes]
+    unknown: set[str] = set()
+    misordered: list[tuple[int, int, str]] = []
+    for i, n in enumerate(nodes):
+        context = {"registry": registry, "preceding": {*preceding_ids, *ids[: i + 1]}}
+        try:
+            ChainNode.model_validate(n, context=context)
+        except ValidationError as exc:
+            for err in exc.errors():
+                if err["type"] == "unknown_hooks":
+                    unknown.update(err["ctx"]["hooks"])
+                elif err["type"] == "ordered_ref":
+                    misordered.append((_ORDERED_REFS.index(err["ctx"]["field"]), i, err["msg"]))
+                else:
+                    return [first_error(exc, "node")]
     if unknown:
-        return [f"hook(s) {unknown} are not in the registry"]
-
-    at = {n["id"]: i for i, n in enumerate(nodes)}
-    for field in ("reject_to", "rebase_bounce_to"):
-        bad = next(
-            (
-                n["id"]
-                for i, n in enumerate(nodes)
-                if n.get(field) is not None
-                and (
-                    not isinstance(n[field], str)
-                    or (n[field] not in preceding_ids and at.get(n[field], len(nodes)) > i)
-                )
-            ),
-            None,
-        )
-        if bad is not None:
-            return [f"node {bad!r} {field!r} must name a node at or before it"]
+        return [f"hook(s) {sorted(unknown)} are not in the registry"]
+    if misordered:
+        return [min(misordered)[2]]
 
     return []
 

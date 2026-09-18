@@ -2108,3 +2108,23 @@ def test_an_authored_node_may_not_declare_both_keys():
     with pytest.raises(ValidationError) as exc:
         ChainNodeIn.model_validate({"id": "verify", "tasks": ["a"], "steps": [["a"]]})
     assert "steps" in str(exc.value) and "tasks" in str(exc.value)
+
+
+def test_a_node_naming_an_unregistered_hook_is_rejected_with_the_hook_named():
+    from kraft.templates import ChainNode, Registry
+
+    with pytest.raises(Exception) as exc:  # noqa: B017 -- pydantic's ValidationError
+        ChainNode.model_validate(
+            {"id": "verify", "tasks": ["on.nope"]},
+            context={"registry": Registry(hooks={})},
+        )
+    assert "on.nope" in str(exc.value)
+
+
+def test_a_backward_reject_to_may_name_an_earlier_node_but_not_a_later_one():
+    from kraft.templates import ChainNode
+
+    ctx = {"preceding": ("spec", "plan")}
+    ChainNode.model_validate({"id": "verify", "tasks": [], "reject_to": "plan"}, context=ctx)
+    with pytest.raises(Exception):  # noqa: B017 -- pydantic's ValidationError
+        ChainNode.model_validate({"id": "verify", "tasks": [], "reject_to": "merge"}, context=ctx)
