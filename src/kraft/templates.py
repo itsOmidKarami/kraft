@@ -541,8 +541,35 @@ def load_registry(
         # `defaults.agent` either -- a repair silently inherited by every
         # agent binding is the opposite of what a per-task repair is for.
         known |= {"interactive", "timeout", "repos", "sandbox", "on_failure"}
+        if kind == "subprocess":
+            known.add("inputs")
         if kind == "agent":
             known |= _AGENT_ONLY_KEYS
+        inputs = binding.get("inputs")
+        if inputs is not None:
+            if not isinstance(inputs, dict):
+                raise RegistryError(f"{path.name}: hook {hook!r} 'inputs' must be a mapping")
+            for name, cfg in inputs.items():
+                if name not in VALID_INPUTS:
+                    raise RegistryError(
+                        f"{path.name}: hook {hook!r} declares unknown input {name!r}; "
+                        f"known: {sorted(VALID_INPUTS)}"
+                    )
+                if not isinstance(cfg, dict):
+                    raise RegistryError(
+                        f"{path.name}: hook {hook!r} input {name!r} must be a mapping"
+                    )
+                channel = cfg.get("channel")
+                if channel not in VALID_INPUTS[name]:
+                    raise RegistryError(
+                        f"{path.name}: hook {hook!r} input {name!r} cannot use channel "
+                        f"{channel!r}; supported: {sorted(VALID_INPUTS[name])}"
+                    )
+                if channel == "env" and not isinstance(cfg.get("name"), str):
+                    raise RegistryError(
+                        f"{path.name}: hook {hook!r} input {name!r} on the env channel "
+                        "needs a string 'name'"
+                    )
         if "interactive" in binding and not isinstance(binding["interactive"], bool):
             raise RegistryError(f"{path.name}: hook {hook!r} 'interactive' must be a boolean")
         unknown = sorted(set(binding) - known)

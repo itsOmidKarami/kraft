@@ -1955,3 +1955,63 @@ def test_materialize_still_emits_steps_for_a_plain_tasks_node(tmp_path):
     node = templates.materialize(ts.valid["t"])["nodes"][0]
     assert node["tasks"] == ["on.a", "on.b"]
     assert node["steps"] == [["on.a", "on.b"]]
+
+
+def _write_inputs_registry(tmp_path, hooks):
+    import yaml
+
+    p = tmp_path / "registry.yaml"
+    p.write_text(yaml.safe_dump({"hooks": hooks}))
+    return p
+
+
+def test_an_unknown_input_name_is_rejected_at_load(tmp_path):
+    p = _write_inputs_registry(
+        tmp_path,
+        {
+            "on.review.local.run": {
+                "kind": "subprocess",
+                "command": ["x"],
+                "inputs": {"nonsense": {"channel": "env", "name": "X"}},
+            }
+        },
+    )
+    with pytest.raises(templates.RegistryError, match="unknown input 'nonsense'"):
+        templates.load_registry(p)
+
+
+def test_an_input_on_a_channel_it_does_not_support_is_rejected(tmp_path):
+    p = _write_inputs_registry(
+        tmp_path,
+        {
+            "on.test.run": {
+                "kind": "subprocess",
+                "command": ["x"],
+                "inputs": {"test_scopes": {"channel": "env", "name": "X"}},
+            }
+        },
+    )
+    with pytest.raises(templates.RegistryError, match="channel 'env'"):
+        templates.load_registry(p)
+
+
+def test_an_env_input_without_a_name_is_rejected(tmp_path):
+    p = _write_inputs_registry(
+        tmp_path,
+        {
+            "on.review.local.run": {
+                "kind": "subprocess",
+                "command": ["x"],
+                "inputs": {"review_package": {"channel": "env"}},
+            }
+        },
+    )
+    with pytest.raises(templates.RegistryError, match="needs a string 'name'"):
+        templates.load_registry(p)
+
+
+def test_a_binding_with_no_inputs_key_still_loads(tmp_path):
+    p = _write_inputs_registry(
+        tmp_path, {"on.test.run": {"kind": "subprocess", "command": ["uv", "run", "pytest"]}}
+    )
+    assert templates.load_registry(p).hooks["on.test.run"]["command"] == ["uv", "run", "pytest"]
