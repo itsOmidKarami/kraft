@@ -128,6 +128,26 @@ def test_gh_ci_status_keeps_only_the_latest_run_of_a_relabeled_check(tmp_path, m
     assert status.jobs == ("test: SUCCESS",)
 
 
+GH_PR_VIEW_WITH_SKIPPED = (
+    '{"number":7,"url":"https://github.com/o/r/pull/7","statusCheckRollup":['
+    '{"name":"test","conclusion":"SUCCESS"},'
+    '{"name":"deploy","conclusion":"SKIPPED"}]}'
+)
+
+
+def test_gh_ci_status_treats_a_skipped_job_as_settled(tmp_path, monkeypatch):
+    """Kraft-4pqnf: a job skipped by its own `if:` (e.g. `deploy` only running
+    on main) is neither `SUCCESS`/`NEUTRAL` nor a failure conclusion -- without
+    `SKIPPED` in the success set, one such job pinned every PR carrying it to
+    `"pending"` forever, so `mr_checks` never settled however green the rest
+    of the rollup was."""
+    _stub(tmp_path, monkeypatch, "gh", GH_PR_VIEW_WITH_SKIPPED)
+
+    status = asyncio.run(forge.GhCli().ci_status(repo=tmp_path, mr=forge.MR(7, "http://x/7")))
+
+    assert status.state == "success"
+
+
 def _stub(tmp_path, monkeypatch, name: str, stdout: str, rc: int = 0):
     """Put a fake forge CLI first on PATH.
 

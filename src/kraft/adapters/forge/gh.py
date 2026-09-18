@@ -154,7 +154,7 @@ class GhCli:
             for c in conclusions
         ):
             state: CIState = "failed"
-        elif all(c in ("SUCCESS", "NEUTRAL") for c in conclusions):
+        elif all(c in ("SUCCESS", "NEUTRAL", "SKIPPED") for c in conclusions):
             state = "success"
         else:
             state = "pending"
