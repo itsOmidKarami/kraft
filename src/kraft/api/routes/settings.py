@@ -46,7 +46,11 @@ def _template_path(st, tid: str) -> Path:
 async def list_templates(request: Request):
     st = request.app.state
     return [
-        {"id": tid, "nodes": t.nodes, "gates": sum(1 for n in t.nodes if n.get("gate_after"))}
+        {
+            "id": tid,
+            "nodes": [dict(n.items()) for n in t.nodes],
+            "gates": sum(1 for n in t.nodes if n.get("gate_after")),
+        }
         for tid, t in sorted(st.templates.valid.items())
     ]
 
@@ -57,7 +61,7 @@ async def get_template(tid: str, request: Request):
     template = st.templates.valid.get(tid)
     if template is None:
         raise HTTPException(404, f"unknown template {tid!r}")
-    return {"id": tid, "nodes": template.nodes}
+    return {"id": tid, "nodes": [dict(n.items()) for n in template.nodes]}
 
 
 def _validate_template(st, tid: str, nodes: list[dict]) -> dict:

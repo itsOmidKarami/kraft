@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
 
 from kraft import sandbox as _sandbox
 from kraft import skill as _skill
@@ -84,8 +84,69 @@ def strip_non_proposable_carryover_fields(nodes: list) -> list:
     return nodes
 
 
-def with_steps(node: dict) -> dict:
-    """`node` with both `steps` and `tasks` populated, whichever it was given.
+class _DictLike(BaseModel):
+    """A model that reads like the dict it replaced -- `x.get("kind")`, `x["k"]`,
+    `"k" in x`, `x == {...}` -- because dispatch, doctor, the routes and most
+    tests were written against dicts. Only keys the file actually set count as
+    present, so `x.get("steering", [])` still means "did the operator say"."""
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, dict):
+            return dict(self.items()) == other
+        return super().__eq__(other)
+
+    __hash__ = None  # type: ignore[assignment]
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key) if key in self else default
+
+    def __getitem__(self, key: str) -> Any:
+        if key not in self:
+            raise KeyError(key)
+        return getattr(self, key)
+
+    def __contains__(self, key: object) -> bool:
+        return key in self.model_fields_set
+
+    def keys(self):
+        return [k for k in [*type(self).model_fields, *(self.model_extra or {})] if k in self]
+
+    def items(self):
+        return [(k, getattr(self, k)) for k in self.keys()]
+
+
+class ChainNodeIn(_DictLike):
+    """A chain node as an operator writes it: `tasks` XOR `steps`, never both.
+    Unknown keys ride along -- chain-review artifacts carry a few this layer
+    has never read, and a round trip must not drop them."""
+
+    model_config = ConfigDict(frozen=True, extra="allow")
+
+    id: str
+    tasks: list[str] | None = None
+    steps: list[list[str]] | None = None
+    gate_after: str | None = None
+    fix_loop: Any = None
+    on_failure: Any = None
+    reject_to: Any = None
+    rebase_bounce_to: Any = None
+    auto_escalate: Any = None
+    auto_escalate_stuck: Any = None
+    auto_escalate_delay_s: Any = None
+
+    @model_validator(mode="after")
+    def _one_or_the_other(self) -> ChainNodeIn:
+        if self.tasks is not None and self.steps is not None:
+            raise ValueError(
+                f"node {self.id!r} declares both 'steps' and 'tasks'; a node has one or "
+                "the other -- 'tasks' is the one-group shorthand"
+            )
+        return self
+
+
+class ChainNode(ChainNodeIn):
+    """A chain node as everything downstream reads it: `steps` and `tasks` both
+    always set, in agreement.
 
     The two keys are one fact in two shapes, on purpose. Ordering has exactly
     one consumer (`executor.dispatch.measure_node`); the flat list has twenty,
@@ -95,14 +156,35 @@ def with_steps(node: dict) -> dict:
     frontend, silently, and nesting inside `tasks` would make `n.tasks.length`
     report a group count as a task count.
 
-    Mutates nothing: returns a new dict, because both callers (`materialize`
-    and the chain-review splice) are building fresh node dicts anyway.
+    Normalizes on construction, so a call site cannot forget to. Unlike
+    `ChainNodeIn` it accepts both keys when they agree -- that is what an
+    already-normalized node (the chain-review splice re-validates a normalized
+    tail) looks like.
     """
-    if node.get("steps"):
-        groups = [list(g) for g in node["steps"]]
-    else:
-        groups = [list(node.get("tasks") or [])]
-    return {**node, "steps": groups, "tasks": [t for g in groups for t in g]}
+
+    steps: list[list[str]]
+    tasks: list[str]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        if data.get("steps"):
+            groups = [list(g) for g in data["steps"]]
+        else:
+            groups = [list(data.get("tasks") or [])]
+        return {**data, "steps": groups, "tasks": [t for g in groups for t in g]}
+
+    @model_validator(mode="after")
+    def _one_or_the_other(self) -> ChainNode:
+        return self
+
+
+def with_steps(node: dict) -> dict:
+    """`node` with both `steps` and `tasks` populated, whichever it was given.
+    A thin wrapper over `ChainNode`, kept for the callers that hold dicts."""
+    return ChainNode.model_validate(node).model_dump(exclude_unset=True)
 
 
 #: The one hook the repo's own test scopes may replace the command of. The
@@ -187,17 +269,13 @@ _ARTIFACT_KIND = re.compile(r"[a-z][a-z0-9_-]*")
 _EFFORT_LEVELS = {"low", "medium", "high", "xhigh", "max"}
 
 
-class _Binding(BaseModel):
+class _Binding(_DictLike):
     """One `registry.yaml` hook binding. The value checks that need the world
     (a harness's declared capabilities, the steering and skill files, the forge
     handler set) still run in `load_registry`; what a kind *may contain* is
     here, so a new kind or key is one field, not an if/elif and a comment.
 
-    Reads like the dict it replaced -- `binding.get("kind")`, `binding["x"]`,
-    `"x" in binding` -- because dispatch, doctor and the routes were written
-    against dicts. Only keys the file (or `defaults.agent`) actually set count
-    as present, so `binding.get("steering", [])` still means "did the operator
-    say".
+    See `_DictLike` for why it reads like a dict.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -214,30 +292,6 @@ class _Binding(BaseModel):
     #: settable through `defaults.agent` either -- a repair silently inherited
     #: by every agent binding is the opposite of what a per-task repair is for.
     on_failure: Any = None
-
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, dict):
-            return dict(self.items()) == other
-        return super().__eq__(other)
-
-    __hash__ = None  # type: ignore[assignment]
-
-    def get(self, key: str, default: Any = None) -> Any:
-        return getattr(self, key) if key in self else default
-
-    def __getitem__(self, key: str) -> Any:
-        if key not in self:
-            raise KeyError(key)
-        return getattr(self, key)
-
-    def __contains__(self, key: object) -> bool:
-        return key in self.model_fields_set
-
-    def keys(self):
-        return [k for k in type(self).model_fields if k in self.model_fields_set]
-
-    def items(self):
-        return [(k, getattr(self, k)) for k in self.keys()]
 
 
 class BuiltinBinding(_Binding):
@@ -323,6 +377,14 @@ class Registry:
 class Template:
     id: str
     nodes: list
+    #: What the file actually says (`list[ChainNodeIn]`), for
+    #: `GET /templates/{tid}`. The same job `Registry.raw` does for
+    #: `GET /registry` -- a round trip must echo what was on disk rather than
+    #: growing keys nobody wrote -- with a type instead of an untyped dict.
+    #: `None` for a `Template` built by hand (most tests). Note
+    #: `_resolve_template_dict` applies `extends`/`remove`/`insert_*` *before*
+    #: this, so it is the resolved-but-not-normalized form.
+    authored: list | None = None
 
 
 @dataclass(frozen=True)
@@ -1081,12 +1143,20 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
         if node_errors:
             invalid[tid] = f"template {tid!r}: {node_errors[0]}"
             continue
+        # A file carrying both keys in agreement loads (it always did); its
+        # authored form is the `steps` one.
+        authored = [
+            ChainNodeIn.model_validate(
+                {k: v for k, v in n.items() if not (k == "tasks" and n.get("steps"))}
+            )
+            for n in nodes
+        ]
         # `validate_nodes` normalizes its own local copy to check a `steps`
         # node's shape; `Template.nodes` needs that same normalization; a
         # `steps`-only node otherwise reaches `materialize` (and every test
         # or caller reading `n["tasks"]` directly off `Template.nodes`) with
         # no `tasks` key at all.
-        nodes = [with_steps(n) for n in nodes]
+        nodes = [ChainNode.model_validate(n) for n in nodes]
 
         bad_loop = next(
             (
@@ -1189,7 +1259,7 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
             )
             continue
 
-        valid[tid] = Template(id=tid, nodes=nodes)
+        valid[tid] = Template(id=tid, nodes=nodes, authored=authored)
 
     return TemplateSet(valid=valid, invalid=invalid)
 

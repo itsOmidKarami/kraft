@@ -2087,3 +2087,24 @@ def test_verify_keeps_the_suite_and_the_review_in_one_group():
         ["on.env.prepare"],
         ["on.test.run", "on.review.local.run"],
     ]
+
+
+def test_a_normalized_node_cannot_be_built_without_both_keys():
+    """`with_steps` was called from five places; a model normalizes on
+    construction, so a sixth call site cannot forget."""
+    from kraft.templates import ChainNode
+
+    n = ChainNode.model_validate({"id": "verify", "steps": [["a"], ["b"]]})
+    assert n.tasks == ["a", "b"]
+    n2 = ChainNode.model_validate({"id": "verify", "tasks": ["a", "b"]})
+    assert n2.steps == [["a", "b"]]
+
+
+def test_an_authored_node_may_not_declare_both_keys():
+    from pydantic import ValidationError
+
+    from kraft.templates import ChainNodeIn
+
+    with pytest.raises(ValidationError) as exc:
+        ChainNodeIn.model_validate({"id": "verify", "tasks": ["a"], "steps": [["a"]]})
+    assert "steps" in str(exc.value) and "tasks" in str(exc.value)
