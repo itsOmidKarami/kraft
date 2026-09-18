@@ -84,11 +84,27 @@ Every node you write is exactly:
   proposed_node_overrides?: { model?: string, escalate_model?: string, effort?: string } }
 ```
 
-`on_failure`, `reject_to`, and `rebase_bounce_to` are now yours to set
-directly — you are not limited to carrying them forward blind. Set one only
-when the spec or plan gives you a reason to (a repair task the tail is
-missing, a reject target that should route somewhere other than where it
-already does). Omit a field on a node whose id already existed in the tail
+The field above is node-level only; a task-level repair lives on that task's
+registry binding instead (see below).
+
+`on_failure`, `reject_to`, and `rebase_bounce_to` are yours to set directly —
+you are not limited to carrying them forward blind. Set one only when the spec
+or plan gives you a reason to (a reject target that should route somewhere
+other than where it already does).
+
+`on_failure` on a **node** is the outer repair: it runs once, after every task
+in the node has settled and the node still failed, and the whole node is then
+re-measured. It is the right place only for a repair that is about this node's
+combination of tasks.
+
+A repair that is really about **one task** — reading a red pipeline, triaging a
+failing test suite — does not belong here at all. It lives on that task's
+registry binding, where it travels with the task into every chain that runs it,
+and where it costs one task's re-dispatch instead of the whole node's. You
+cannot set that from here; say so in your rationale and name the task, and a
+human will put it in `registry.yaml`.
+
+Omit a field on a node whose id already existed in the tail
 and the orchestrator carries its old value forward unchanged, exactly as it
 always has; a node id you invented (one you are adding) gets `null` for
 whichever of these you omit — you cannot give a brand-new node a reject

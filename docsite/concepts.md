@@ -44,7 +44,7 @@ nodes:
   - { id: pre_mr_rebase,     tasks: [on.mr.rebase],                gate_after: null, rebase_bounce_to: verify }
   - { id: mr_meta,           tasks: [on.mr.describe],              gate_after: null }
   - { id: open_mr,           tasks: [on.mr.open],                  gate_after: null }
-  - { id: mr_checks,         tasks: [on.ci.poll, on.review.mr.run], fix_loop: ci_fix_loop, gate_after: null, rebase_bounce_to: verify, on_failure: [on.mr_checks.repair] }
+  - { id: mr_checks,         tasks: [on.ci.poll, on.review.mr.run], fix_loop: ci_fix_loop, gate_after: null, rebase_bounce_to: verify }
   - { id: human_review,      tasks: [on.human_review.requested],   gate_after: human_review_approval, reject_to: implementation }
   - { id: mr_sync,           tasks: [on.mr.sync],                  gate_after: null }
   - { id: merge,             tasks: [on.merge],                    gate_after: null, rebase_bounce_to: verify }
@@ -57,7 +57,7 @@ A node's optional fields change how the chain behaves around it:
 |---|---|
 | `gate_after` | Names a gate id. After this node runs, the chain halts and the work item becomes `needs_human` until someone approves, rejects, or steers. |
 | `fix_loop` | Names a loop in `policy.yaml`'s `loops:` map. A failure here re-runs the node instead of escalating, up to that loop's `attempts`/`wall_clock_s` cap. |
-| `on_failure` | Extra hook points dispatched before the next fix-loop attempt — a repair pass, not a retry. |
+| `on_failure` | A repair pass for *this node* — extra hook points dispatched once, after every task in the node has settled and the node still failed, before the next fix-loop attempt. Not a retry. A repair that is really about one task belongs on that task's binding instead (see [Configuration](configuration.md#registryyaml-hook-point-bindings)) — it travels with the task into every chain and costs one task's re-dispatch rather than the whole node's. |
 | `rebase_bounce_to` | If this node's own git operation actually moves the branch, the chain jumps back to the named node (almost always `verify`) instead of continuing over a diff nothing has re-tested. |
 | `reject_to` | Where a gate's "reject with a note" re-enters the chain — `human_review`'s rejection walks back to `implementation` with the reviewer's note as the steer. |
 | `auto_escalate` | Notifies a person immediately when this node's gate opens, instead of waiting quietly on the board for someone to notice. |

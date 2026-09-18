@@ -2010,7 +2010,9 @@ def test_recover_node_reads_findings_from_the_round_the_failure_measured_at(tmp_
         )
     )
 
-    assert not repair_steer, "recover_node seeded a finding from the wrong round"
+    assert "stale round 2 finding" not in repair_steer.take(), (
+        "recover_node seeded a finding from the wrong round"
+    )
 
 
 def test_recover_node_merges_an_incoming_human_steer_ahead_of_the_seeded_note(
@@ -2047,13 +2049,81 @@ def test_recover_node_merges_an_incoming_human_steer_ahead_of_the_seeded_note(
 def test_recover_node_with_no_findings_for_the_round_passes_the_steer_through(
     tmp_path, monkeypatch
 ):
-    """A node with no findings for this round dispatches exactly as today --
-    no seeded note invented out of nothing."""
+    """A node with no findings for this round still gets the orchestrator's
+    failure note (Task 4) -- no seeded *findings* note invented out of
+    nothing, but the note naming what failed is always present."""
     repair_steer = asyncio.run(
         _call_recover_node(tmp_path, monkeypatch, measured_round=0, steer=None, collect_at={})
     )
 
-    assert not repair_steer
+    assert repair_steer
+    text = repair_steer.take()
+    assert "on.ci.poll" in text
+    assert "re-measured" in text
+
+
+def test_node_level_repair_is_told_which_tasks_failed_and_that_it_is_re_measured(
+    tmp_path, monkeypatch
+):
+    from kraft import policy
+    from kraft.executor import dispatch, walk
+
+    seen = {}
+
+    async def fake_measure_node(db_, run_dirs_, item, node, row_, reg, wt, **kw):
+        if node["tasks"] == ["on.fix"]:
+            seen["steer"] = kw.get("steer")
+        return "ok", [], []
+
+    def fake_collect(db_, wid, node, round, registry):
+        return [], set()
+
+    monkeypatch.setattr(dispatch, "measure_node", fake_measure_node)
+    monkeypatch.setattr(dispatch, "collect_findings", fake_collect)
+
+    node = {"id": "n", "tasks": ["on.a", "on.b"], "on_failure": ["on.fix"]}
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="wi",
+                    bead_id="B",
+                    title="t",
+                    repo=str(tmp_path),
+                    chain_template="t",
+                    chain_definition=json.dumps({"template_id": "t", "nodes": [node]}),
+                )
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = 'wi'").fetchone()
+            )
+            await walk.recover_node(
+                database,
+                rd,
+                "wi",
+                node,
+                row,
+                Registry(hooks={}),
+                tmp_path,
+                failed=["on.a"],
+                steer=None,
+                launch=None,
+                budget=policy.NO_BUDGET,
+                measured_round=0,
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+    text = seen["steer"].take()
+    assert "on.a" in text, "names the task that failed"
+    assert "on.b" not in text, "does not name a task that passed"
+    assert "re-measured" in text, "says its own report is not the verdict"
 
 
 async def _resolver_scenario(tmp_path, tracker, agent_env, call_resolver):
