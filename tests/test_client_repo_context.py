@@ -163,3 +163,40 @@ def test_resolve_repo_is_none_outside_any_git_repo(wired, tmp_path):
         return await client.resolve_repo(plain)
 
     assert run_with_app(wired, scenario) is None
+
+
+def test_ensure_repo_returns_the_stored_entry_not_the_probe(wired, tmp_path):
+    """The probe says what Kraft WOULD configure. Returning it for an already-
+    connected repo hands the caller plausible values the repo does not run --
+    acted on wrongly twice while this was being designed."""
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        await client.ensure_repo(str(repo))
+        # A stored value the probe would never produce for this layout. `path`
+        # is a query parameter on this endpoint, not a body field
+        # (api/routes/repos.py:223, and every PATCH in tests/test_api_repos.py).
+        await client.transport._patch(
+            f"/repos?path={quote(str(repo))}", {"test_command": "just ci-test"}
+        )
+        return await client.ensure_repo(str(repo))
+
+    out = run_with_app(wired, scenario)
+    assert out["already_connected"] is True
+    assert out["test_command"] == "just ci-test", "got the probed command, not the stored one"
+
+
+def test_ensure_repo_still_resolves_a_worktree_to_its_main_checkout(wired, tmp_path):
+    """The probe is why this works, and the fix must keep it: `kraft repo list`
+    marks the main checkout from inside a git worktree only because of it."""
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        await client.ensure_repo(str(repo))
+        inner = repo / "sub" / "dir"
+        inner.mkdir(parents=True, exist_ok=True)
+        return await client.ensure_repo(str(inner))
+
+    out = run_with_app(wired, scenario)
+    assert out["path"] == str(repo)
+    assert out["already_connected"] is True
