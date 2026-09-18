@@ -528,6 +528,14 @@ async def dispatch_node(
     )
 
 
+#: The round a task-level repair and its re-dispatch write their sessions
+#: under. Distinct from `walk._REPAIR_ROUND` (-1, the node-level repair) and
+#: `walk._RESOLVE_ROUND` (-2) so a node carrying both layers cannot alias one
+#: layer's sessions onto the other's in `sessions_for_round`. Never a value
+#: `bump_counter` can produce -- those start at 1 and only climb.
+_TASK_REPAIR_ROUND = -3
+
+
 async def measure_node(
     db,
     run_dirs,
@@ -557,7 +565,7 @@ async def measure_node(
     def _head() -> str | None:
         return _config.git_read(Path(worktree), "rev-parse", "HEAD") if worktree else None
 
-    async def _measure(t: str) -> str:
+    async def _measure(t: str, *, repair: bool = True) -> str:
         # Kraft-gl9d: a crash/resume re-entry into this same (node, round) must
         # not re-spend an agent session on a task whose session already reached
         # 'done' against the worktree as it stands right now.
@@ -574,7 +582,7 @@ async def measure_node(
         )
         if reused is not None:
             return reused["status"]
-        return await dispatch_node(
+        status = await dispatch_node(
             db,
             run_dirs,
             t,
@@ -588,6 +596,51 @@ async def measure_node(
             launch=launch,
             budget=budget,
         )
+        # Layer 1 of the two-layer repair (spec §4). Only `_FAILING_STATUSES`
+        # counts: a pause is a human's instruction, and a rate limit or a
+        # budget breach is a refusal to start, so none of them is evidence
+        # about this task and none may spend a repair.
+        #
+        # `repair=False` on the re-dispatch is what keeps this one layer deep,
+        # and is also why a repair hook's own `on_failure` is never reached: a
+        # repair that did not take is a blocker Kraft does not understand, and
+        # the honest move is to report the original failure and let layer 2 or
+        # a human look at it, not to keep pulling levers.
+        if not repair or status not in _FAILING_STATUSES:
+            return status
+        repair_hooks = registry.hooks.get(t, {}).get("on_failure")
+        if not repair_hooks:
+            return status
+        await db.write(
+            lambda c, t=t, h=list(repair_hooks): events.append(
+                c,
+                work_item_id,
+                "task_recovery_started",
+                {"node_id": node["id"], "failed_task": t, "tasks": h},
+            )
+        )
+        for r in repair_hooks:
+            r_status = await dispatch_node(
+                db,
+                run_dirs,
+                r,
+                node,
+                row,
+                registry,
+                worktree,
+                loop_severities=loop_severities,
+                round=_TASK_REPAIR_ROUND,
+                steer=steer,
+                launch=launch,
+                budget=budget,
+            )
+            if r_status in _FAILING_STATUSES:
+                return status
+        # The re-measure is the point: a repair is believed only when the task
+        # it repaired passes on its own, not when the remediator says so. The
+        # `_head()` read inside this call is why Task 2 had to land first --
+        # the repair may well have committed.
+        return await _measure(t, repair=False)
 
     results = await asyncio.gather(*(_measure(t) for t in tasks), return_exceptions=True)
     # A pause stops the walk where it stands: the node is neither done nor failed,

@@ -1875,6 +1875,172 @@ def test_measure_node_reuses_a_done_session_at_the_current_head(tmp_path, monkey
     asyncio.run(scenario())
 
 
+async def _setup_measure_node_scenario(tmp_path):
+    """Shared plumbing for the task-repair tests below: a real db, a real
+    worktree (dispatch_node is stubbed out, but `_head()` still reads it),
+    and the row `measure_node` expects."""
+    rd = RunDirs(tmp_path / "run").ensure()
+    database = await db.Database.open(rd.db)
+    worktree = make_repo(tmp_path)
+    wid = "w1"
+    await database.write(
+        lambda c: store.create_work_item(
+            c,
+            id=wid,
+            bead_id="B",
+            title="t",
+            repo=str(worktree),
+            chain_template="x",
+            chain_definition="{}",
+        )
+    )
+    row = database.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+    )
+    return database, rd, worktree, wid, row
+
+
+def test_a_failing_task_runs_its_bindings_repair_then_retries_that_task_alone(
+    tmp_path, monkeypatch
+):
+    async def scenario():
+        database, rd, worktree, wid, row = await _setup_measure_node_scenario(tmp_path)
+        try:
+            calls = []
+
+            async def fake_dispatch_node(db_, run_dirs_, task_hook, node, row_, reg, wt, **kw):
+                calls.append(task_hook)
+                if task_hook == "on.a" and calls.count("on.a") == 1:
+                    return "failed"
+                return "done"
+
+            monkeypatch.setattr(dispatch, "dispatch_node", fake_dispatch_node)
+            registry = Registry(
+                hooks={
+                    "on.a": {"kind": "builtin", "handler": "noop", "on_failure": ["on.fix"]},
+                    "on.b": {"kind": "builtin", "handler": "noop"},
+                    "on.fix": {"kind": "builtin", "handler": "noop"},
+                },
+                raw={},
+            )
+            node = {"id": "n", "tasks": ["on.a", "on.b"], "on_failure": None}
+
+            verdict, failed, excs = await dispatch.measure_node(
+                database, rd, wid, node, row, registry, worktree, round=0
+            )
+
+            assert verdict == "ok"
+            assert failed == []
+            assert calls.count("on.fix") == 1
+            assert calls.count("on.a") == 2, "the repaired task is re-dispatched"
+            assert calls.count("on.b") == 1, "a passing sibling is never re-dispatched"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_a_task_repair_that_does_not_take_reports_the_original_failure(tmp_path, monkeypatch):
+    async def scenario():
+        database, rd, worktree, wid, row = await _setup_measure_node_scenario(tmp_path)
+        try:
+
+            async def fake_dispatch_node(db_, run_dirs_, task_hook, node, row_, reg, wt, **kw):
+                return "done" if task_hook == "on.fix" else "failed"
+
+            monkeypatch.setattr(dispatch, "dispatch_node", fake_dispatch_node)
+            registry = Registry(
+                hooks={
+                    "on.a": {"kind": "builtin", "handler": "noop", "on_failure": ["on.fix"]},
+                    "on.fix": {"kind": "builtin", "handler": "noop"},
+                },
+                raw={},
+            )
+            node = {"id": "n", "tasks": ["on.a"], "on_failure": None}
+
+            verdict, failed, excs = await dispatch.measure_node(
+                database, rd, wid, node, row, registry, worktree, round=0
+            )
+
+            assert verdict == "failed"
+            assert failed == ["on.a"]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_a_repair_is_not_run_for_a_pause_or_a_budget_stop(tmp_path, monkeypatch):
+    """Only `_FAILING_STATUSES` is a task failing. A pause is a human's
+    instruction and a budget breach is Kraft refusing to start -- neither is
+    evidence about the task, so neither may spend a repair."""
+
+    async def scenario():
+        for i, stop in enumerate(("paused", dispatch.BUDGET, dispatch.RATE_LIMITED)):
+            database, rd, worktree, wid, row = await _setup_measure_node_scenario(tmp_path / str(i))
+            try:
+                calls = []
+
+                async def fake_dispatch_node(
+                    db_, run_dirs_, task_hook, node, row_, reg, wt, _s=stop, _c=calls, **kw
+                ):
+                    _c.append(task_hook)
+                    return _s
+
+                monkeypatch.setattr(dispatch, "dispatch_node", fake_dispatch_node)
+                registry = Registry(
+                    hooks={
+                        "on.a": {"kind": "builtin", "handler": "noop", "on_failure": ["on.fix"]},
+                        "on.fix": {"kind": "builtin", "handler": "noop"},
+                    },
+                    raw={},
+                )
+                node = {"id": "n", "tasks": ["on.a"], "on_failure": None}
+                await dispatch.measure_node(
+                    database, rd, wid, node, row, registry, worktree, round=0
+                )
+                assert "on.fix" not in calls, f"{stop} must not spend a repair"
+            finally:
+                await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_a_repairs_own_on_failure_is_never_dispatched(tmp_path, monkeypatch):
+    """One repair layer only. A repair that fails is a blocker Kraft does not
+    understand; pulling a second lever on it is how a loop starts."""
+
+    async def scenario():
+        database, rd, worktree, wid, row = await _setup_measure_node_scenario(tmp_path)
+        try:
+            calls = []
+
+            async def fake_dispatch_node(db_, run_dirs_, task_hook, node, row_, reg, wt, **kw):
+                calls.append(task_hook)
+                return "failed"
+
+            monkeypatch.setattr(dispatch, "dispatch_node", fake_dispatch_node)
+            registry = Registry(
+                hooks={
+                    "on.a": {"kind": "builtin", "handler": "noop", "on_failure": ["on.fix"]},
+                    "on.fix": {
+                        "kind": "builtin",
+                        "handler": "noop",
+                        "on_failure": ["on.fix2"],
+                    },
+                    "on.fix2": {"kind": "builtin", "handler": "noop"},
+                },
+                raw={},
+            )
+            node = {"id": "n", "tasks": ["on.a"], "on_failure": None}
+            await dispatch.measure_node(database, rd, wid, node, row, registry, worktree, round=0)
+            assert "on.fix2" not in calls
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 def test_measure_node_reads_head_once_per_task_not_once_per_node(tmp_path, monkeypatch):
     """Kraft-37myi: the node-entry snapshot is wrong the moment anything
     dispatched inside the node moves HEAD -- a task-level repair's commit
