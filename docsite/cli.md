@@ -50,6 +50,28 @@ kraft view artifact <id>      # the document a pending gate is actually about
 A truncated diff always says so on its last line, and files the agent wrote
 without `git add` are listed separately — they are invisible in a unified diff.
 
+## Less common item verbs
+
+```bash
+kraft item skip --note "already fixed upstream"   # advance past the current node/gate, unrun
+kraft item progress 3        # a worker saying it started plan task 3 -- not one you type by hand
+kraft item escalate --message "the fix loop keeps missing the same edge case"
+kraft item escalate --message "..." --new-thread  # a fresh agent session, not the latest thread
+kraft item set-chain --template quick-task        # switch a not-yet-started item's chain
+kraft item set-overrides --model opus --effort high
+kraft item set-overrides --clear                  # back to the template's own binding
+kraft item set-node-override --node verify --auto-escalate-stuck
+kraft item mr-label --id <id> release::patch      # relabel the MR; re-creates its pipeline
+kraft item abandon --yes                          # drops the item, reclaims its worktree
+```
+
+`progress` is what a worker session itself calls to report which plan task it
+started — you'll see it in logs more than type it. `escalate` is the manual
+door onto the same path `kraft admin` and the board's own auto-escalation use
+to ask an agent to help resolve a `needs_human` stop. `abandon` destroys
+uncommitted work in the item's worktree; `--yes` is required, not optional,
+on purpose.
+
 ## Repos and worktrees
 
 ```bash
@@ -95,8 +117,9 @@ server runs in the foreground, so Ctrl-C stops the one in front of you;
 `kraft admin stop` is for the one you started somewhere else. A second start
 against the same run directory is refused while the first is alive.
 
-`kraft admin install-service` / `uninstall-service` register Kraft as an OS
-service unit, for a machine you want it running on without a terminal open.
+`kraft admin install-service` and `kraft admin uninstall-service` register or
+remove Kraft as an OS service unit (`KeepAlive`/`Restart=always`), for a
+machine you want it running on without a terminal open.
 
 The verbs live in four groups — `item` acts, `view` reads, `repo` is
 repositories and their worktrees, `admin` is this machine's server. Typing an

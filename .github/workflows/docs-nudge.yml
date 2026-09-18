@@ -1,0 +1,69 @@
+# A reminder, not a gate: dev/check_docs_coverage.py (run in test.yml) can
+# only catch a *new, distinctively-named* thing with zero doc mentions. It
+# cannot catch a behavior change under an unchanged name (Kraft-n70's
+# command -> harness rename this session found by hand, or the extends/
+# composition feature that shipped with no docs at all for months) -- that
+# needs a human or an agent to actually read the page. This nudges instead
+# of blocking, because plenty of source changes to these paths genuinely
+# don't need a docs update, and a check that's wrong half the time trains
+# everyone to ignore it.
+name: docs nudge
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: docs-nudge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  nudge:
+    # Skipped for forks: their GITHUB_TOKEN is read-only, so posting a
+    # comment would just fail -- same guard test.yml uses for the same reason.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: check whether source moved without docs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD")
+          SOURCE=$(echo "$CHANGED" | grep -E '^(src/kraft/(cli/|config\.py|policy\.py|templates\.py|harness\.py|harnesses/|mcp\.py)|templates/(default|quick-task)\.yaml)' || true)
+          DOCS=$(echo "$CHANGED" | grep -E '^docsite/' || true)
+
+          if [ -z "$SOURCE" ] || [ -n "$DOCS" ]; then
+            echo "nothing to nudge about"
+            exit 0
+          fi
+
+          MARKER="<!-- docs-nudge -->"
+          ALREADY=$(gh pr view "$PR" --json comments -q ".comments[].body" | grep -qF "$MARKER" && echo yes || echo no)
+          if [ "$ALREADY" = "yes" ]; then
+            echo "already nudged this PR once; not repeating on every push"
+            exit 0
+          fi
+
+          gh pr comment "$PR" --body "$(cat <<EOF
+          $MARKER
+          This touches:
+          \`\`\`
+          $SOURCE
+          \`\`\`
+          but no \`docsite/\` page. If this changes a CLI flag, a config field, a
+          chain template, or a harness, update the matching page in the same PR
+          -- see CONTRIBUTING.md's [User-facing docs](https://github.com/${{ github.repository }}/blob/main/CONTRIBUTING.md#user-facing-docs)
+          table. If it doesn't, ignore this.
+          EOF
+          )"
