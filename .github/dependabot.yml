@@ -1,18 +1,49 @@
 version: 2
 updates:
+  # Split by dependency-type so each PR carries the release label the
+  # `release-impact` check in test.yml requires -- Dependabot never applies
+  # one itself, and that check has no exemption for same-repo bot PRs.
   - package-ecosystem: uv
     directory: /
     schedule:
       interval: weekly
+    allow:
+      - dependency-type: production
+    labels:
+      - release::patch
+
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    allow:
+      - dependency-type: development
+    labels:
+      - release::none
 
   - package-ecosystem: npm
     directory: /frontend
     schedule:
       interval: weekly
+    allow:
+      - dependency-type: production
+    labels:
+      - release::patch
 
-  # Keeps the SHA-pinned actions in .github/workflows/*.yml current --
-  # those pins have no other update path.
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    allow:
+      - dependency-type: development
+    labels:
+      - release::none
+
+  # Keeps the SHA-pinned actions in .github/workflows/*.yml current -- those
+  # pins have no other update path. Always CI-only, never shipped.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    labels:
+      - release::none
