@@ -79,6 +79,14 @@ MANIFEST: tuple[Capability, ...] = (
         how="replace a node's `tasks: [a, b]` with `steps:` and one list per "
         "ordered group, e.g. `steps:\\n  - [on.implementation.start]\\n  - [on.repos.scan]`",
     ),
+    Capability(
+        version="0.72.0",
+        name="inputs",
+        what="a hook binding declares what it is fed and on which channel, so a "
+        "review hook bound to a CLI gets the same diff and findings an agent one does",
+        how="add `inputs:` to a subprocess binding in registry.yaml, e.g. "
+        "`inputs:\\n  review_package: { channel: env, name: KRAFT_REVIEW_PACKAGE }`",
+    ),
 )
 
 
