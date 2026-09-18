@@ -58,7 +58,7 @@ def test_the_hook_is_bound_to_this_skill():
     hooks = yaml.safe_load(REGISTRY.read_text())["hooks"]
     assert hooks["on.review.local.run"] == {
         "kind": "agent",
-        "command": "claude",
+        "harness": "claude",
         "skill": "code-review",
     }
 

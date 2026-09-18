@@ -119,7 +119,13 @@ async def _exit_from_file(
     (Kraft-k3d) — this and `adapters.subprocess.run_task` both call it rather
     than each enumerating the fields by hand."""
     fields = read_result_fields(result_path)
-    seen = _usage.read(log_path, result_path)
+    # `worker_sessions` does not record which harness ran a session
+    # (Kraft-cvnx1, filed and blocked on this work), so an adopted session has
+    # no way to name its own reader here. `claude-stream-json` is every
+    # existing install's only harness today; a non-claude session adopted
+    # across a restart still gets the result file `usage.read` always tries
+    # first, and this reader simply finds nothing in a log it cannot parse.
+    seen = _usage.read(log_path, result_path, "claude-stream-json")
     await db.write(
         lambda c: store.session_exited(
             c,
@@ -315,7 +321,12 @@ async def _adopt(
             continue
         next_progress = time.monotonic() + progress_s
         try:
-            log_offset, live = _progress_usage(log_path, log_offset, seen_usage)
+            # Same reasoning as `_exit_from_file`'s reader choice above: the
+            # adopted session's harness is unrecorded, so this assumes the
+            # only harness in production today.
+            log_offset, live = _progress_usage(
+                log_path, log_offset, seen_usage, "claude-stream-json"
+            )
             if live is not None:
                 await db.write(lambda c, u=live: store.session_progress(c, session_id, u))
         except Exception:

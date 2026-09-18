@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from kraft import skill, templates
+from kraft import harness, skill, templates
 from kraft.templates import (
     ATTACHMENT_GATES,
     GATE_NAMES,
@@ -39,13 +39,13 @@ def test_shipped_yaml_parses_and_matches_spec():
     } <= set(registry["hooks"])
     assert registry["hooks"]["on.spec.requested"] == {
         "kind": "agent",
-        "command": "claude",
+        "harness": "claude",
         "skill": "spec",
         "artifact": "spec",
     }
     assert registry["hooks"]["on.plan.requested"] == {
         "kind": "agent",
-        "command": "claude",
+        "harness": "claude",
         "skill": "plan",
         "artifact": "plan",
     }
@@ -70,14 +70,14 @@ def test_shipped_yaml_parses_and_matches_spec():
     }
     assert registry["hooks"]["on.human_review.requested"] == {
         "kind": "agent",
-        "command": "claude",
+        "harness": "claude",
         "skill": "review-brief",
         "artifact": "review_brief",
     }
     assert registry["hooks"]["on.env.prepare"] == {"kind": "builtin", "handler": "env_setup"}
     assert registry["hooks"]["on.implementation.start"] == {
         "kind": "agent",
-        "command": "claude",
+        "harness": "claude",
     }
     assert registry["hooks"]["on.test.run"] == {
         "kind": "subprocess",
@@ -807,7 +807,7 @@ def test_defaults_agent_merge_rejects_a_bindings_own_non_list_value(tmp_path):
 def test_defaults_missing_entirely_is_fine(tmp_path):
     (tmp_path / "registry.yaml").write_text("hooks:\n  on.a: { kind: agent, command: claude }\n")
     reg = templates.load_registry(tmp_path / "registry.yaml")
-    assert reg.hooks["on.a"] == {"kind": "agent", "command": "claude"}
+    assert reg.hooks["on.a"] == {"kind": "agent", "command": "claude", "harness": "claude"}
 
 
 # ── new agent-hook keys: profile, model, deny_tools, steering ──────────────────
@@ -816,7 +816,11 @@ def test_defaults_missing_entirely_is_fine(tmp_path):
 def test_agent_hook_without_new_keys_loads_exactly_as_before(tmp_path):
     d = _dir(tmp_path, **{"registry.yaml": REGISTRY_YAML})
     reg = templates.load_registry(d / "registry.yaml")
-    assert reg.hooks["on.implementation.start"] == {"kind": "agent", "command": "claude"}
+    assert reg.hooks["on.implementation.start"] == {
+        "kind": "agent",
+        "command": "claude",
+        "harness": "claude",
+    }
 
 
 def test_load_registry_rejects_unknown_profile(tmp_path):
@@ -836,13 +840,39 @@ def test_load_registry_rejects_non_string_model(tmp_path):
         templates.load_registry(tmp_path / "registry.yaml")
 
 
-def test_load_registry_accepts_any_model_string(tmp_path):
-    """Kraft has no model list; an unknown-looking model string is not its job to reject."""
+def test_load_registry_accepts_a_model_matching_its_harness(tmp_path):
+    """Superseded by harness-declared `values:` (design leak 10): a model
+    string is validated against the named harness's own patterns rather than
+    accepted unconditionally."""
     (tmp_path / "registry.yaml").write_text(
-        "hooks:\n  on.x: { kind: agent, command: claude, model: anything-at-all }\n"
+        "hooks:\n  on.x: { kind: agent, command: claude, model: claude-opus-5 }\n"
     )
     reg = templates.load_registry(tmp_path / "registry.yaml")
-    assert reg.hooks["on.x"]["model"] == "anything-at-all"
+    assert reg.hooks["on.x"]["model"] == "claude-opus-5"
+
+
+def test_load_registry_rejects_a_model_not_matching_its_harness(tmp_path):
+    """Checked against codex, not claude: a model id is an open set Anthropic
+    owns, so `claude.yaml` declares no `model` `values:` at all and anything
+    is accepted there. codex keeps a real pattern, so it is what still pins
+    load_registry's model check.
+    """
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.x: { kind: agent, harness: codex, model: anything-at-all }\n"
+    )
+    with pytest.raises(templates.RegistryError, match="'model'.*'anything-at-all'"):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_load_registry_accepts_any_model_for_a_harness_without_values(tmp_path):
+    """The upgrade case: `model: fable` was valid before harnesses existed and
+    must stay valid, because load_registry raising here stops the daemon
+    booting (api/startup.py does not catch RegistryError).
+    """
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n  on.x: { kind: agent, harness: claude, model: fable }\n"
+    )
+    assert templates.load_registry(tmp_path / "registry.yaml").hooks["on.x"]["model"] == "fable"
 
 
 def test_load_registry_rejects_deny_tools_not_a_list(tmp_path):
@@ -899,7 +929,9 @@ def test_load_registry_rejects_steering_naming_a_missing_file(tmp_path):
 def test_load_registry_does_not_mutate_the_binding(tmp_path):
     """Regression guard: `GET /registry` hands out this exact dict and Settings
     -> Plugins PUTs it back unedited. Any key load_registry writes into it gets
-    inlined into the operator's config on the next save."""
+    inlined into the operator's config on the next save -- except `harness`,
+    which is deliberately normalised into every agent binding so no consumer
+    has to re-derive the `claude` default (Task 3)."""
     (tmp_path / "steering").mkdir()
     (tmp_path / "steering" / "house-style.md").write_text("# House style\nBe direct.\n")
     (tmp_path / "registry.yaml").write_text(
@@ -907,7 +939,12 @@ def test_load_registry_does_not_mutate_the_binding(tmp_path):
     )
     reg = templates.load_registry(tmp_path / "registry.yaml")
     binding = reg.hooks["on.x"]
-    assert binding == {"kind": "agent", "command": "claude", "steering": ["house-style"]}
+    assert binding == {
+        "kind": "agent",
+        "command": "claude",
+        "steering": ["house-style"],
+        "harness": "claude",
+    }
     assert "steering_texts" not in binding
     assert binding["steering"] == ["house-style"]
     assert "profile" not in binding
@@ -1665,3 +1702,88 @@ def test_load_registry_rejects_a_malformed_sandbox(tmp_path):
     )
     with pytest.raises(templates.RegistryError, match="podman"):
         templates.load_registry(tmp_path / "registry.yaml")
+
+
+def _bound(tmp_path, binding: str) -> Path:
+    p = tmp_path / "registry.yaml"
+    p.write_text(f"hooks:\n  on.implementation.start: {{ {binding} }}\n")
+    return p
+
+
+def test_absent_harness_defaults_to_claude(tmp_path):
+    """Every existing install writes `command: claude` and no `harness:`."""
+    reg = templates.load_registry(_bound(tmp_path, "kind: agent, command: claude"))
+    assert reg.hooks["on.implementation.start"]["harness"] == "claude"
+
+
+def test_profile_is_accepted_as_a_deprecated_alias(tmp_path):
+    reg = templates.load_registry(_bound(tmp_path, "kind: agent, command: claude, profile: codex"))
+    assert reg.hooks["on.implementation.start"]["harness"] == "codex"
+
+
+def test_harness_wins_over_the_alias(tmp_path):
+    reg = templates.load_registry(_bound(tmp_path, "kind: agent, harness: codex, profile: claude"))
+    assert reg.hooks["on.implementation.start"]["harness"] == "codex"
+
+
+def test_agent_hook_needs_neither_command_nor_harness(tmp_path):
+    """`templates.py:178` used to require a string `command`; a binding may
+    now name only a harness."""
+    reg = templates.load_registry(_bound(tmp_path, "kind: agent, harness: codex"))
+    assert reg.hooks["on.implementation.start"]["harness"] == "codex"
+
+
+def test_unknown_harness_is_rejected(tmp_path):
+    with pytest.raises(templates.RegistryError, match="unknown harness 'nope'"):
+        templates.load_registry(_bound(tmp_path, "kind: agent, harness: nope"))
+
+
+def test_a_quarantined_harness_is_not_usable(tmp_path):
+    """A harness file that failed validation must not silently behave like an
+    absent one."""
+    hs = harness.HarnessSet(valid={}, invalid={"codex": "codex.yaml: boom"})
+    with pytest.raises(templates.RegistryError, match="codex.yaml: boom"):
+        templates.load_registry(_bound(tmp_path, "kind: agent, harness: codex"), harnesses=hs)
+
+
+def test_capability_a_harness_does_not_declare_is_rejected(tmp_path):
+    with pytest.raises(
+        templates.RegistryError,
+        match=r"hook 'on.implementation.start'.*harness 'codex'.*'deny_tools'",
+    ):
+        templates.load_registry(
+            _bound(tmp_path, "kind: agent, harness: codex, deny_tools: [Write]")
+        )
+
+
+def test_value_outside_the_harnesss_own_values_is_rejected(tmp_path):
+    with pytest.raises(templates.RegistryError, match="'effort'.*'ludicrous'"):
+        templates.load_registry(_bound(tmp_path, "kind: agent, harness: claude, effort: ludicrous"))
+
+
+def test_a_model_for_the_wrong_harness_is_rejected(tmp_path):
+    """The point of harness-declared values: `model: sonnet` is right for
+    claude and meaningless for codex."""
+    templates.load_registry(_bound(tmp_path, "kind: agent, harness: claude, model: sonnet"))
+    with pytest.raises(templates.RegistryError, match="'model'.*'sonnet'"):
+        templates.load_registry(_bound(tmp_path, "kind: agent, harness: codex, model: sonnet"))
+
+
+def test_effort_is_no_longer_one_global_list(tmp_path):
+    """Spec leak 10. `minimal` is real for codex and invalid for claude."""
+    templates.load_registry(_bound(tmp_path, "kind: agent, harness: codex, effort: minimal"))
+    with pytest.raises(templates.RegistryError, match="'effort'.*'minimal'"):
+        templates.load_registry(_bound(tmp_path, "kind: agent, harness: claude, effort: minimal"))
+
+
+def test_binding_command_must_be_a_string(tmp_path):
+    with pytest.raises(templates.RegistryError, match="'command' must be a string"):
+        templates.load_registry(
+            _bound(tmp_path, "kind: agent, harness: claude, command: [claude, x]")
+        )
+
+
+def test_the_shipped_registry_still_loads():
+    """The one test that matters for every existing install."""
+    reg = templates.load_registry(Path("templates/registry.yaml"))
+    assert reg.hooks["on.implementation.start"]["harness"] == "claude"

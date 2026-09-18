@@ -1,0 +1,25 @@
+# Verified against codex-cli 0.144.6 on 2026-09-17. `-c developer_instructions=`
+# is a real config field (probed with --strict-config, which rejects unknown
+# keys without calling a model), which is what settled Kraft-n70's blocking
+# research question.
+id: codex
+kind: cli
+command: [codex, exec]
+# `codex exec resume <SESSION_ID> [PROMPT]` -- the id must precede the prompt,
+# which a trailing-flag model cannot express, so resume gets its own prefix.
+command_resume: [codex, exec, resume, "{value}"]
+
+capabilities:
+  context:         { channel: system_prompt, cli: ["-c", "developer_instructions={value}"] }
+  structured_log:  { cli: ["--json"] }
+  model:           { cli: ["-m", "{value}"], values: ['(gpt|o[0-9]|codex).*'] }
+  effort:          { cli: ["-c", "model_reasoning_effort={value}"], values: [minimal, low, medium, high] }
+  permission_mode: { cli: ["-s", "{value}"], values: [read-only, workspace-write, danger-full-access], always: workspace-write }
+  resume:          { via: command_resume }
+  usage:           { source: result_file }
+  # Bare positional -> declared last, or a preceding flag swallows it.
+  prompt:          { cli: ["{value}"] }
+
+# Absent, deliberately: deny_tools, allowed_tools, approval_channel,
+# autocompact, rate_limit_signal. A binding naming one of those is rejected
+# at load, naming this file.

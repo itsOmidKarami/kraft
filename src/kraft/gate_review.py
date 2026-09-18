@@ -123,7 +123,7 @@ async def review(
         node_id=node["id"],
         hook_point="gate_review",
         command=inv.command,
-        profile=inv.profile,
+        harness=inv.harness,
         model=inv.model,
         effort=inv.effort,
         deny_tools=inv.deny_tools,

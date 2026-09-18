@@ -17,13 +17,9 @@ from pathlib import Path
 
 import yaml
 
-from kraft import auth, client, config
+from kraft import auth, client, config, harness, templates
 from kraft.adapters import forge
 from kraft.paths import BUNDLED, RunDirs, default_run_dir, default_templates_dir
-
-#: The agent CLI a chain launches. A fact about the shipped registry, not
-#: configuration — `adapters/agent.py` has one profile and it is this one.
-AGENT_COMMAND = "claude"
 
 #: The work-graph CLI. Optional by design (Kraft-7gy): intake files a work item
 #: with no bead when it is absent, and nothing else about an item needs one.
@@ -63,7 +59,7 @@ async def run_checks() -> list[dict]:
     )
     checks.extend(_config_checks())
     checks.append(_pidfile_check())
-    checks.append(_agent_check())
+    checks.extend(_agent_checks(*_loaded_registry()))
     checks.append(await _mcp_check(health is not None))
     checks.append(_completion_check())
     checks.append(_bundle_check())
@@ -370,17 +366,66 @@ def _token_check() -> dict:
     return _check("mcp token", True, f"{path} ({mode:04o})")
 
 
-def _agent_check() -> dict:
-    """Passing loudly on the fake is the point: a dev instance that looks like it
-    is working is spending no tokens on purpose, and that is worth reading once
-    before you wonder why nothing real happened."""
-    found = shutil.which(AGENT_COMMAND)
-    if not found:
-        return _check("agent cli", False, f"`{AGENT_COMMAND}` is not on PATH — no chain can run")
-    real = os.path.realpath(found)
-    if "fixtures" in Path(real).parts:
-        return _check("agent cli", True, f"{found} -> {real} (the dev fake: it spends no tokens)")
-    return _check("agent cli", True, found)
+def _loaded_registry() -> tuple[templates.Registry, harness.HarnessSet]:
+    """The live registry and harness set, for `_agent_checks` -- the same
+    `KRAFT_TEMPLATES_DIR` precedence `_hooks_check` reads by. A registry that
+    fails to load is reported as no agent bindings at all rather than
+    crashing doctor: some other check names the real problem."""
+    hs = harness.load(None)
+    live_path = (
+        Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir()) / "registry.yaml"
+    )
+    try:
+        reg = templates.load_registry(live_path, harnesses=hs)
+    except templates.RegistryError:
+        reg = templates.Registry(hooks={})
+    return reg, hs
+
+
+def _agent_checks(registry: templates.Registry, harnesses: harness.HarnessSet) -> list[dict]:
+    """One PATH check per harness the live registry actually names, plus one
+    failure row per harness file that failed to load.
+
+    Every existing install ships one harness (claude), so this used to be a
+    single hardcoded check (`AGENT_COMMAND`) — a chain with a codex node must
+    be told about codex, not reassured about claude. A shipped harness
+    nothing references is not a missing dependency and gets no row.
+    """
+    checks: list[dict] = []
+    referenced = sorted(
+        {
+            b["harness"]
+            for b in registry.hooks.values()
+            if b.get("kind") == "agent" and b.get("harness")
+        }
+    )
+    for hid in referenced:
+        h = harnesses.valid.get(hid)
+        if h is None:
+            checks.append(_check(f"agent: {hid}", False, harnesses.invalid.get(hid, "not found")))
+            continue
+        # argv[0] of the harness's own prefix; a binding may override it per
+        # hook, and that override is checked with the binding, not here.
+        exe = h.command[0]
+        found = shutil.which(exe)
+        if not found:
+            checks.append(
+                _check(f"agent: {hid}", False, f"`{exe}` is not on PATH — no chain can run")
+            )
+            continue
+        real = os.path.realpath(found)
+        # Passing loudly on the fake is the point: a dev instance that looks
+        # like it is working is spending no tokens on purpose, and that is
+        # worth reading once before you wonder why nothing real happened.
+        detail = (
+            f"{found} -> {real} (the dev fake: it spends no tokens)"
+            if "fixtures" in Path(real).parts
+            else found
+        )
+        checks.append(_check(f"agent: {hid}", True, detail))
+    for hid, reason in sorted(harnesses.invalid.items()):
+        checks.append(_check(f"harness: {hid}", False, reason))
+    return checks
 
 
 #: Where `claude mcp add --scope user` records its servers -- what
@@ -404,7 +449,7 @@ def _names_kraft(path: Path) -> bool:
 async def _mcp_check(server_up: bool) -> dict:
     """Is the Kraft MCP server registered with the agent CLI?
 
-    Next to `_agent_check` because it answers the same question: can this
+    Next to `_agent_checks` because it answers the same question: can this
     machine actually launch a worker. Every launch passes
     `--permission-prompt-tool mcp__kraft__permission_request`
     (`adapters/agent.py`), and on an install where `kraft admin init` was never

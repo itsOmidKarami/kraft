@@ -493,7 +493,9 @@ def test_default_profile_reproduces_todays_command_line(monkeypatch):
     """The whole argv for a binding that sets none of the optional keys.
 
     Pinned in full rather than by flag, so a change to what every worker is
-    launched with cannot land without being read.
+    launched with cannot land without being read. Order is claude.yaml's own
+    `capabilities:` declaration order (harness.build_argv), not the old
+    hand-assembled sequence.
     """
     seen = _capture_cmd(monkeypatch)
     _run(command="claude", task_instruction="do the thing")
@@ -515,12 +517,12 @@ def test_default_profile_reproduces_todays_command_line(monkeypatch):
         "--output-format",
         "stream-json",
         "--verbose",
+        "--disallowed-tools",
+        "Monitor",
         "--permission-mode",
         "auto",
         "--permission-prompt-tool",
         "mcp__kraft__permission_request",
-        "--disallowed-tools",
-        "Monitor",
     ]
 
 
@@ -555,7 +557,9 @@ def test_no_model_emits_no_model_flag(monkeypatch):
 def test_deny_tools_become_one_comma_joined_flag(monkeypatch):
     seen = _capture_cmd(monkeypatch)
     _run(deny_tools=("WebFetch", "Bash"))
-    assert seen["cmd"][-2:] == ["--disallowed-tools", "WebFetch,Bash,Monitor"]
+    cmd = seen["cmd"]
+    # `always: [Monitor]` is unioned first, per harness.build_argv.
+    assert cmd[cmd.index("--disallowed-tools") + 1] == "Monitor,WebFetch,Bash"
 
 
 def test_monitor_is_always_denied(monkeypatch):
@@ -564,13 +568,15 @@ def test_monitor_is_always_denied(monkeypatch):
     a prompt an agent can read narrowly."""
     seen = _capture_cmd(monkeypatch)
     _run()
-    assert seen["cmd"][-2:] == ["--disallowed-tools", "Monitor"]
+    cmd = seen["cmd"]
+    assert cmd[cmd.index("--disallowed-tools") + 1] == "Monitor"
 
 
 def test_monitor_is_not_duplicated_when_a_caller_already_denies_it(monkeypatch):
     seen = _capture_cmd(monkeypatch)
     _run(deny_tools=("Monitor", "Bash"))
-    assert seen["cmd"][-2:] == ["--disallowed-tools", "Monitor,Bash"]
+    cmd = seen["cmd"]
+    assert cmd[cmd.index("--disallowed-tools") + 1] == "Monitor,Bash"
 
 
 def test_allowed_tools_and_permission_mode_come_from_the_binding(monkeypatch):
@@ -624,10 +630,45 @@ def test_permission_prompt_tool_is_passed(monkeypatch):
     assert cmd[cmd.index("--permission-prompt-tool") + 1] == "mcp__kraft__permission_request"
 
 
-def test_unknown_profile_raises_naming_the_profile(monkeypatch):
+def test_unknown_harness_raises_naming_the_harness(monkeypatch):
     _capture_cmd(monkeypatch)
     with pytest.raises(ValueError, match="nope"):
-        _run(profile="nope")
+        _run(harness="nope")
+
+
+# `load_registry` only ever sees a binding's own keys. `resolve_invocation`
+# folds in a repo's `deny_tools`/`default_model` and an item's
+# `agent_overrides` afterwards, so these are the capabilities that reach a
+# launch without passing the load-time check -- the one gap the work item says
+# must not be a silent drop.
+
+
+def test_a_repo_wide_deny_list_is_refused_by_a_harness_without_deny_tools(monkeypatch):
+    _capture_cmd(monkeypatch)
+    with pytest.raises(ValueError, match="deny_tools"):
+        _run(harness="codex", command="codex", deny_tools=("Monitor",))
+
+
+def test_an_effort_override_is_refused_by_a_harness_without_effort(monkeypatch):
+    _capture_cmd(monkeypatch)
+    with pytest.raises(ValueError, match="effort"):
+        _run(harness="gemini", command="gemini", effort="high")
+
+
+def test_a_capability_the_harness_declares_still_launches(monkeypatch):
+    seen = _capture_cmd(monkeypatch)
+    _run(harness="codex", command="codex", model="gpt-5", effort="high")
+    cmd = seen["cmd"]
+    assert cmd[cmd.index("-m") + 1] == "gpt-5"
+
+
+def test_autocompact_is_exempt_because_it_rides_along_with_resume(monkeypatch):
+    """`escalate.dispatch` pairs `autocompact` with resume unconditionally, and
+    the spec calls a harness that declares neither a capability fact rather than
+    a failure -- so this one is dropped, not raised over."""
+    seen = _capture_cmd(monkeypatch)
+    _run(harness="gemini", command="gemini", autocompact="auto")
+    assert "--autocompact" not in seen["cmd"]
 
 
 def _system_prompt(cmd):
@@ -737,14 +778,14 @@ def test_no_model_anywhere_leaves_it_unset():
     assert inv.model is None
 
 
-def test_command_and_profile_vary_independently():
-    """Spec §6: the profile says how a CLI is spoken to, the command says which
+def test_command_and_harness_vary_independently():
+    """Spec §6: the harness says how a CLI is spoken to, the command says which
     binary is spoken to — one hook can change either without the other."""
-    same_profile = agent.resolve_invocation({"command": "claude-next"}, None, None)
-    assert (same_profile.command, same_profile.profile) == ("claude-next", "claude")
+    same_harness = agent.resolve_invocation({"command": "claude-next"}, None, None)
+    assert (same_harness.command, same_harness.harness) == ("claude-next", "claude")
 
-    same_command = agent.resolve_invocation({"command": "claude", "profile": "claude"}, None, None)
-    assert (same_command.command, same_command.profile) == ("claude", "claude")
+    same_command = agent.resolve_invocation({"command": "claude", "harness": "claude"}, None, None)
+    assert (same_command.command, same_command.harness) == ("claude", "claude")
 
 
 def test_deny_tools_union_repo_first_deduplicated():
@@ -1044,7 +1085,8 @@ def test_no_effort_anywhere_leaves_it_unset():
 def test_effort_becomes_a_flag(monkeypatch):
     seen = _capture_cmd(monkeypatch)
     _run(effort="high")
-    assert seen["cmd"][-2:] == ["--effort", "high"]
+    cmd = seen["cmd"]
+    assert cmd[cmd.index("--effort") + 1] == "high"
 
 
 def test_no_effort_emits_no_flag(monkeypatch):
@@ -1160,3 +1202,129 @@ def test_identify_as_worker_defaults_true(monkeypatch):
     monkeypatch.setattr("kraft.adapters.agent._subprocess.run_task", fake_run_task)
     _run()
     assert seen["env"]["KRAFT_WORK_ITEM_ID"] == "w1"
+
+
+# --- build_context ------------------------------------------------------------
+
+
+def _ctx_kwargs():
+    return dict(
+        title="t",
+        task_instruction="do it",
+        repo_path="/r",
+        work_item_id="w1",
+        node_id="implementation",
+        hook_point="on.implementation.start",
+        session_id="s1",
+    )
+
+
+def test_ctx_asks_for_usage_only_when_the_log_cannot_be_read():
+    """`source: result_file` is half an answer unless the agent is asked."""
+    envelope = agent.build_context(
+        usage_source="envelope", context_channel="system_prompt", **_ctx_kwargs()
+    )
+    result_file = agent.build_context(
+        usage_source="result_file", context_channel="system_prompt", **_ctx_kwargs()
+    )
+    assert "input_tokens" not in envelope
+    assert "input_tokens" in result_file
+    assert "cost_usd" in result_file
+
+
+def test_prompt_channel_still_delivers_the_whole_contract():
+    """Gemini has no out-of-band channel, so the contract rides in the prompt.
+    Nothing in it may be dropped on the way."""
+    ctx = agent.build_context(usage_source="result_file", context_channel="prompt", **_ctx_kwargs())
+    for required in (
+        "$KRAFT_RESULT_PATH",
+        "needs_context",
+        "git commit",
+        ".engineering/",
+        "Monitor tool is",
+    ):
+        assert required in ctx
+
+
+# --- harness selection --------------------------------------------------------
+
+
+def _argv_records(path: Path) -> list[list[str]]:
+    return [json.loads(ln) for ln in path.read_text().splitlines() if ln.strip()]
+
+
+def test_run_agent_task_builds_a_codex_command_line(tmp_path, monkeypatch):
+    """A node bound to codex must launch codex, with codex's own spellings."""
+    repo = make_repo(tmp_path)
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    argv_log = tmp_path / "argv.jsonl"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_ARGV_LOG", str(argv_log))
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database, repo)
+            return await agent.run_agent_task(
+                database,
+                rd,
+                session_id="s1",
+                work_item_id="w1",
+                node_id="implementation",
+                hook_point="on.implementation.start",
+                command=f"{sys.executable} {_FAKE}",
+                harness="codex",
+                title="t",
+                task_instruction="make the failing test pass",
+                repo_path=str(repo),
+                cwd=repo,
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    argv = _argv_records(argv_log)[-1]
+    # `exec` survives the multiword command override (Task 2).
+    assert argv[0] == "exec"
+    assert any(a.startswith("developer_instructions=") for a in argv)
+    assert "--append-system-prompt" not in argv
+    # Spec leak 1: Monitor was unconditional, so it would have reached codex.
+    assert "Monitor" not in argv
+    assert "--permission-prompt-tool" not in argv
+
+
+def test_run_agent_task_still_builds_todays_claude_command_line(tmp_path, monkeypatch):
+    """Same call with the default harness must produce today's flags."""
+    repo = make_repo(tmp_path)
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    argv_log = tmp_path / "argv.jsonl"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_ARGV_LOG", str(argv_log))
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await _seed(database, repo)
+            return await agent.run_agent_task(
+                database,
+                rd,
+                session_id="s1",
+                work_item_id="w1",
+                node_id="implementation",
+                hook_point="on.implementation.start",
+                command=f"{sys.executable} {_FAKE}",
+                harness="claude",
+                title="t",
+                task_instruction="make the failing test pass",
+                repo_path=str(repo),
+                cwd=repo,
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    argv = _argv_records(argv_log)[-1]
+    assert argv[0] == "-p"
+    assert "--append-system-prompt" in argv
+    assert argv[argv.index("--disallowed-tools") + 1] == "Monitor"
+    assert argv[argv.index("--permission-prompt-tool") + 1] == "mcp__kraft__permission_request"

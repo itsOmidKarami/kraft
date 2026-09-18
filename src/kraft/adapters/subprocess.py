@@ -183,7 +183,7 @@ def _read_new(path: Path, offset: int) -> tuple[str, int]:
 
 
 def _progress_usage(
-    log_path: Path, offset: int, seen: dict[str, _usage.Usage]
+    log_path: Path, offset: int, seen: dict[str, _usage.Usage], reader: str | None = None
 ) -> tuple[int, _usage.Usage | None]:
     """One tick: new lines since `offset` folded into `seen`, the new offset, and
     the running total (or None if nothing has been seen at all).
@@ -194,9 +194,16 @@ def _progress_usage(
     freeze at whatever `run_task` last wrote before the restart and never move
     again until the process finally exits -- Kraft-jgs6, the sequel to
     Kraft-41f7 (same frozen-tokens symptom, a different loop missing it).
+
+    `reader=None` means the harness declared no log-based usage schema
+    (`source: result_file`) -- there is nothing here to parse, so live
+    progress simply never updates for it; the result file still lands at
+    session end.
     """
     chunk, offset = _read_new(log_path, offset)
-    return offset, _usage.from_stream(logs.split_lines(chunk), seen)
+    if reader is None:
+        return offset, None
+    return offset, _usage.READERS[reader].stream(logs.split_lines(chunk), seen)
 
 
 def _resolve(result_path: Path, returncode: int) -> str:
@@ -268,41 +275,17 @@ def _wrap_with_exit_file(cmd: list[str], exit_path: Path) -> list[str]:
     ]
 
 
-def _rate_limit_rejection(log_path: Path) -> dict | None:
-    """The rejected `rate_limit_info` from a stream-json log, or None.
+def _rate_limit_rejection(log_path: Path, *, reader: str | None) -> dict | None:
+    """A rate-limit rejection, if this harness's log can express one.
 
-    The CLI emits a `rate_limit_event` line on most turns, nearly all of them
-    `status: "allowed"` -- an `overageStatus` of "rejected" on an otherwise
-    allowed turn means only that overage spend was refused, not that the turn
-    itself was blocked. Only a top-level `status: "rejected"` means the launch
-    was refused. Scanned across every line, not just the last: unlike the
-    result envelope, this event is not guaranteed to be the final line.
-    Best-effort like `agent._envelope_is_error`: a log Kraft cannot read yet is
-    "no rejection seen", not a crash.
+    `reader is None` means the harness never declared `rate_limit_signal`, so
+    there is no schema to match and the honest answer is "not detectable" --
+    not "none found". Parsing a foreign log against claude's schema anyway is
+    how a skipped check starts reading like a passed one.
     """
-    try:
-        lines = [ln for ln in log_path.read_text().splitlines() if ln.strip()]
-    except OSError:
+    if reader is None:
         return None
-    for line in lines:
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(obj, dict) or obj.get("type") != "rate_limit_event":
-            continue
-        info = obj.get("rate_limit_info")
-        if not isinstance(info, dict) or info.get("status") != "rejected":
-            continue
-        resets_at = info.get("resetsAt")
-        if not isinstance(resets_at, int | float):
-            continue
-        return {
-            "rate_limit_type": info.get("rateLimitType"),
-            "resets_at": resets_at,
-            "resets_at_iso": datetime.fromtimestamp(resets_at, UTC).isoformat(),
-        }
-    return None
+    return _usage.READERS[reader].rate_limit(log_path)
 
 
 async def _kill_group(pgid: int, grace: float, reap: Callable[[], object] | None = None) -> None:
@@ -376,6 +359,11 @@ async def run_task(
     head_sha: str | None = None,
     thread: int = 1,
     sandbox: dict | None = None,
+    #: Names a log schema in `usage.READERS`, or `None` when the harness
+    #: declared no log-based reading (`source: result_file`, no
+    #: `rate_limit_signal`). Resolved by the caller from the harness, never
+    #: guessed here -- this adapter stays harness-agnostic.
+    reader: str | None = None,
     #: Every agent hook is told by `_CTX` to write $KRAFT_RESULT_PATH,
     #: regardless of whether it also declares `artifact:` -- this holds it to
     #: that half of the contract on its own (Kraft-avpe). Only run_agent_task
@@ -522,7 +510,7 @@ async def run_task(
             # loop silently freezes tokens_in/out for the rest of the session with
             # nothing to show it happened (Kraft-41f7).
             try:
-                log_offset, live = _progress_usage(log_path, log_offset, seen_usage)
+                log_offset, live = _progress_usage(log_path, log_offset, seen_usage, reader)
                 if live is not None:
                     await db.write(lambda c, u=live: store.session_progress(c, session_id, u))
             except Exception:
@@ -574,7 +562,7 @@ async def run_task(
             # both are guarded on the row still being paused.
             await db.write(
                 lambda c: store.record_pause_usage(
-                    c, session_id, _usage.read(log_path, result_path)
+                    c, session_id, _usage.read(log_path, result_path, reader)
                 )
             )
     returncode = proc.returncode
@@ -588,7 +576,7 @@ async def run_task(
     # unconditional overwrite is what protects it, not an exclusion here.
     if require_result_file and status == "done" and _resolve_result_file(result_path) is None:
         status = "failed"
-    rate_limit = _rate_limit_rejection(log_path)
+    rate_limit = _rate_limit_rejection(log_path, reader=reader)
     if rate_limit is not None:
         # A rejected launch produced no artifact by construction, so this
         # skips `post_resolve` (agent.py's artifact-presence check) entirely
@@ -606,7 +594,7 @@ async def run_task(
     if await db.write(lambda c: store.session_status(c, session_id)) == "paused":
         return "paused"
     fields = read_result_fields(result_path)
-    seen = _usage.read(log_path, result_path)
+    seen = _usage.read(log_path, result_path, reader)
     await db.write(
         lambda c: store.session_exited(
             c,

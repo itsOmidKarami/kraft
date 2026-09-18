@@ -139,7 +139,11 @@ class RegistryBody(BaseModel):
 
 @api_router.get("/registry")
 async def get_registry(request: Request):
-    return {"hooks": request.app.state.registry.hooks}
+    # `raw`, not `hooks`: `hooks` has load-time defaults (`harness: claude`)
+    # normalised into every binding for dispatch/doctor to read without
+    # re-deriving them, which would show up here as keys nobody wrote and
+    # break the GET/PUT round trip.
+    return {"hooks": request.app.state.registry.raw}
 
 
 @api_router.put("/registry")

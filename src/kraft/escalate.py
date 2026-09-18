@@ -346,7 +346,7 @@ async def dispatch(
         node_id=row["current_node_id"],
         hook_point="escalation",
         command=inv.command,
-        profile=inv.profile,
+        harness=inv.harness,
         model=inv.model,
         deny_tools=inv.deny_tools,
         steering_texts=inv.steering_texts,

@@ -55,12 +55,20 @@ if [ "$mode" = "fix" ] && [ -f calc.py ]; then
   sed 's/a - b/a + b/' calc.py > "$tmp" && mv "$tmp" calc.py
 fi
 
-# The agent adapter injects the work-item/node/session linkage into the system
-# prompt and asks for a session summary (04 §6). Obey it when those fields are
-# present, so integration tests exercise the real ingestion inputs.
+# The agent adapter injects the work-item/node/session linkage through
+# whichever context channel the harness declares: claude's
+# --append-system-prompt, or codex's `-c developer_instructions=<text>`
+# (src/kraft/harnesses/*.yaml `context.channel`). Obey either, so integration
+# tests exercise the real ingestion inputs regardless of which fake this
+# script is playing (`fixtures/bin/codex` symlinks here too).
 ctx=""
+prev=""
 while [ "$#" -gt 0 ]; do
   if [ "$1" = "--append-system-prompt" ] && [ "$#" -gt 1 ]; then ctx="$2"; fi
+  case "$prev" in
+    -c) case "$1" in developer_instructions=*) ctx="${1#developer_instructions=}" ;; esac ;;
+  esac
+  prev="$1"
   shift
 done
 field() { printf '%s\n' "$ctx" | sed -n "s/^$1: //p" | head -1; }

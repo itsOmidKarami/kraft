@@ -162,7 +162,7 @@ def test_read_prefers_the_result_file_over_the_log_envelope(tmp_path):
     result = tmp_path / "s.json"
     log.write_text(json.dumps({"usage": {"input_tokens": 1, "output_tokens": 1}}) + "\n")
     result.write_text(json.dumps({"usage": {"tokens_in": 99, "tokens_out": 98}}))
-    assert usage.read(log, result).tokens_in == 99
+    assert usage.read(log, result, "claude-stream-json").tokens_in == 99
 
 
 def test_read_falls_back_to_the_last_line_of_the_log(tmp_path):
@@ -172,7 +172,7 @@ def test_read_falls_back_to_the_last_line_of_the_log(tmp_path):
         "building...\nsome noise\n" + json.dumps({"usage": {"input_tokens": 7, "output_tokens": 3}})
     )
     result.write_text(json.dumps({"status": "done"}))
-    assert usage.read(log, result) == Usage(7, 3)
+    assert usage.read(log, result, "claude-stream-json") == Usage(7, 3)
 
 
 def test_read_finds_usage_behind_a_trailing_line_that_has_none(tmp_path):
@@ -187,14 +187,31 @@ def test_read_finds_usage_behind_a_trailing_line_that_has_none(tmp_path):
         + json.dumps({"type": "system", "subtype": "task_summary"})
     )
     result.write_text(json.dumps({"status": "done"}))
-    assert usage.read(log, result) == Usage(7, 3, 0.42)
+    assert usage.read(log, result, "claude-stream-json") == Usage(7, 3, 0.42)
 
 
 def test_read_survives_missing_and_unparseable_files(tmp_path):
-    assert usage.read(tmp_path / "nope.log", tmp_path / "nope.json") is None
+    assert usage.read(tmp_path / "nope.log", tmp_path / "nope.json", "claude-stream-json") is None
     (tmp_path / "bad.log").write_text("not json at all")
     (tmp_path / "bad.json").write_text("{{{")
-    assert usage.read(tmp_path / "bad.log", tmp_path / "bad.json") is None
+    assert usage.read(tmp_path / "bad.log", tmp_path / "bad.json", "claude-stream-json") is None
+
+
+def test_reader_none_reads_only_the_result_file(tmp_path):
+    log = tmp_path / "s.log"
+    log.write_text('{"type":"result","is_error":false,"usage":{"input_tokens":9}}\n')
+    result = tmp_path / "s.json"
+    result.write_text('{"status":"done","usage":{"input_tokens":4,"output_tokens":2}}')
+    u = usage.read(log, result, reader=None)
+    # The claude-shaped envelope in the log is ignored: this harness never
+    # promised that schema, and parsing it anyway is how a wrong number
+    # becomes a confident one.
+    assert (u.tokens_in, u.tokens_out) == (4, 2)
+
+
+def test_unknown_reader_is_a_config_error_not_a_silent_skip(tmp_path):
+    with pytest.raises(KeyError):
+        usage.read(tmp_path / "s.log", tmp_path / "s.json", reader="codex-jsonl")
 
 
 # ── cost is the agent's, never Kraft's ───────────────────────────────────────

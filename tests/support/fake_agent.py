@@ -26,10 +26,24 @@ import subprocess
 import sys
 
 
+def _context(argv: list[str]) -> str:
+    """The injected context, from either declared channel (see
+    src/kraft/harnesses/*.yaml `context.channel`): claude's
+    `--append-system-prompt <ctx>`, or codex's `-c developer_instructions=<ctx>`.
+    """
+    for i, a in enumerate(argv):
+        if a == "--append-system-prompt" and i + 1 < len(argv):
+            return argv[i + 1]
+        if a == "-c" and i + 1 < len(argv):
+            key, sep, value = argv[i + 1].partition("=")
+            if sep and key == "developer_instructions":
+                return value
+    # channel: prompt -- the contract is prepended to the instruction itself.
+    return argv[-1] if argv else ""
+
+
 def _ctx_fields(argv: list[str]) -> dict[str, str]:
-    if "--append-system-prompt" not in argv:
-        return {}
-    ctx = argv[argv.index("--append-system-prompt") + 1]
+    ctx = _context(argv)
     fields = {}
     for line in ctx.splitlines():
         key, sep, value = line.partition(": ")
@@ -70,9 +84,7 @@ def _write_artifact(argv: list[str]) -> None:
     """
     if os.environ.get("KRAFT_FAKE_AGENT_SKIP_ARTIFACT"):
         return
-    if "--append-system-prompt" not in argv:
-        return
-    ctx = argv[argv.index("--append-system-prompt") + 1]
+    ctx = _context(argv)
     match = re.search(r"Write your (\w+) to (\S+?), relative to the repo root", ctx)
     if not match:
         return
@@ -91,17 +103,23 @@ def _write_artifact(argv: list[str]) -> None:
     )
 
 
+def _prompt(argv: list[str]) -> str:
+    """The task instruction: claude/gemini's `-p <value>`, or codex's bare
+    trailing positional (`harnesses/codex.yaml` declares `prompt` last)."""
+    for i, a in enumerate(argv):
+        if a == "-p" and i + 1 < len(argv):
+            return argv[i + 1]
+    return argv[-1] if argv else ""
+
+
 def _record_prompt(argv: list[str]) -> None:
-    """Append the -p instruction to KRAFT_FAKE_AGENT_PROMPT_LOG, so a test can
-    assert on what the executor actually asked the agent to do."""
+    """Append the task instruction to KRAFT_FAKE_AGENT_PROMPT_LOG, so a test
+    can assert on what the executor actually asked the agent to do."""
     dest = os.environ.get("KRAFT_FAKE_AGENT_PROMPT_LOG")
     if not dest:
         return
-    for i, a in enumerate(argv):
-        if a == "-p" and i + 1 < len(argv):
-            with open(dest, "a") as fh:
-                fh.write(argv[i + 1] + "\n\x00\n")
-            return
+    with open(dest, "a") as fh:
+        fh.write(_prompt(argv) + "\n\x00\n")
 
 
 def _plan_entry() -> dict:
