@@ -1875,6 +1875,59 @@ def test_measure_node_reuses_a_done_session_at_the_current_head(tmp_path, monkey
     asyncio.run(scenario())
 
 
+def test_measure_node_reads_head_once_per_task_not_once_per_node(tmp_path, monkeypatch):
+    """Kraft-37myi: the node-entry snapshot is wrong the moment anything
+    dispatched inside the node moves HEAD -- a task-level repair's commit
+    (Task 3) or, later, an ordered step that rebases."""
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            worktree = make_repo(tmp_path)
+
+            wid = "w1"
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id=wid,
+                    bead_id="B",
+                    title="t",
+                    repo=str(worktree),
+                    chain_template="x",
+                    chain_definition="{}",
+                )
+            )
+            node = {"id": "n", "tasks": ["on.a", "on.b"]}
+
+            reads = []
+            real_git_read = dispatch._config.git_read
+
+            def counting_git_read(path, *args, **kwargs):
+                if args[:1] == ("rev-parse",):
+                    reads.append(args)
+                return real_git_read(path, *args, **kwargs)
+
+            monkeypatch.setattr(dispatch._config, "git_read", counting_git_read)
+
+            async def fake_dispatch_node(db_, run_dirs_, task_hook, *a, **kw):
+                return "done"
+
+            monkeypatch.setattr(dispatch, "dispatch_node", fake_dispatch_node)
+
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+            await dispatch.measure_node(
+                database, rd, wid, node, row, Registry(hooks={}), worktree, round=0
+            )
+            assert len(reads) == 2, f"expected one HEAD read per task, got {len(reads)}"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 def test_unresolved_findings_steer_uses_the_latest_measurements_findings(tmp_path):
     async def scenario():
         rd = RunDirs(tmp_path / "run").ensure()

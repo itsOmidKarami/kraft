@@ -545,16 +545,23 @@ async def measure_node(
 ) -> tuple[str, list[str], list[BaseException]]:
     await db.write(lambda c, node=node: store.enter_node(c, work_item_id, node["id"]))
     tasks = node["tasks"]
-    # Kraft-gl9d: a crash/resume re-entry into this same (node, round) must not
-    # re-spend an agent session on a task whose session already reached 'done'
-    # against the worktree as it stands right now. Read once, ahead of the
-    # per-task loop below -- the worktree's HEAD does not move while this
-    # node's own tasks are still being measured. `worktree` is None only in a
-    # unit test that stubs `dispatch_node` out entirely (no git to read); a
-    # null head_sha just means "never reusable", same as any other.
-    head_sha = _config.git_read(Path(worktree), "rev-parse", "HEAD") if worktree else None
+
+    # Kraft-37myi: read per dispatch, not once per node. The old single read
+    # above this loop carried the comment "the worktree's HEAD does not move
+    # while this node's own tasks are still being measured", which stopped
+    # being true the moment a task-level repair (spec §4) could commit a fix
+    # mid-node -- and stops being true again when an ordered step rebases.
+    # `git_read` never raises; None just means "never reusable", same as
+    # before. `worktree` is None only in a unit test that stubs `dispatch_node`
+    # out entirely.
+    def _head() -> str | None:
+        return _config.git_read(Path(worktree), "rev-parse", "HEAD") if worktree else None
 
     async def _measure(t: str) -> str:
+        # Kraft-gl9d: a crash/resume re-entry into this same (node, round) must
+        # not re-spend an agent session on a task whose session already reached
+        # 'done' against the worktree as it stands right now.
+        head_sha = _head()
         # A null head_sha is never reusable (`reusable_session` itself would
         # say so) -- skip the read entirely rather than asking a test double
         # that has no worktree, and thus no HEAD, to answer it.
