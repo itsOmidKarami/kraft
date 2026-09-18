@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 from kraft import findings as _findings
@@ -425,9 +426,10 @@ def carried_findings_note(previous: list[_findings.Finding]) -> str:
 _REVIEWED_STATUS = ("done", "done_with_concerns")
 
 
-def _last_reviewed_head(db, work_item_id: str, task_hook: str) -> str | None:
-    """The head the previous *completed* session on this hook was dispatched at,
-    or None (Kraft-s7c04.1).
+def _last_review_session(db, work_item_id: str, task_hook: str) -> sqlite3.Row | None:
+    """The previous *completed* session on this hook, or None (Kraft-s7c04.1).
+
+    Its `head_sha` is the head that session was dispatched at.
 
     `worker_sessions.head_sha` is stamped by `dispatch.dispatch_node` at
     dispatch, so it is the commit that review was actually about. Read from the
@@ -444,16 +446,22 @@ def _last_reviewed_head(db, work_item_id: str, task_hook: str) -> str | None:
     error, or was killed mid-run still carries a `head_sha`, and taking it would
     narrow the next review past code **no reviewer has ever seen** -- the one
     outcome worse than re-reading the whole branch.
+
+    Returns the row rather than `head_sha` alone because the same session's
+    `result_path` and `session_summary_ref` are what `previous_review_note`
+    hands the next reviewer. The status filter serves both: a session that
+    failed or was killed is the wrong diff bound *and* may never have written
+    its summary.
     """
-    row = db.read(
+    return db.read(
         lambda c: c.execute(
-            "SELECT head_sha FROM worker_sessions WHERE work_item_id = ? AND hook_point = ? "
+            "SELECT head_sha, result_path, session_summary_ref FROM worker_sessions "
+            "WHERE work_item_id = ? AND hook_point = ? "
             f"AND head_sha IS NOT NULL AND status IN ({','.join('?' * len(_REVIEWED_STATUS))}) "
             "ORDER BY created_at DESC LIMIT 1",
             (work_item_id, task_hook, *_REVIEWED_STATUS),
         ).fetchone()
     )
-    return row["head_sha"] if row else None
 
 
 def review_package(
@@ -491,7 +499,8 @@ def review_package(
     )
     if row is None or not row["base_ref"]:
         return None
-    since = _last_reviewed_head(db, work_item_id, task_hook)
+    previous = _last_review_session(db, work_item_id, task_hook)
+    since = previous["head_sha"] if previous else None
     if since and git_read(worktree, "rev-parse", "--verify", f"{since}^{{commit}}") is None:
         since = None
     path = _review.write_package(

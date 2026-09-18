@@ -95,7 +95,7 @@ def _last_own_round_head(
     ran at, if every scope in that dispatch finished `done` -- otherwise
     `None` (C7 review fix, Kraft-s7c04.14).
 
-    `prompts._last_reviewed_head` is the wrong source for this: it is keyed
+    `prompts._last_review_session` is the wrong source for this: it is keyed
     on `(work_item_id, hook_point)` alone, not `node_id`, and takes the
     latest `done` row regardless of its siblings. For a while (C1,
     Kraft-s7c04.8, reverted 2026-09-16) `on.test.run` was dispatched by both

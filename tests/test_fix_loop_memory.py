@@ -353,9 +353,10 @@ def test_a_tag_the_reviewer_was_never_shown_is_not_honoured(tmp_path, monkeypatc
 # --------------------------------------------------------------------------
 
 
-def _seed_session(tmp_path, rows):
+def _seed_session(tmp_path, rows, whole_row=False):
     """Insert worker_sessions rows straight, then ask what head was last
-    reviewed on `on.review.local.run`."""
+    reviewed on `on.review.local.run`. `whole_row` returns the row itself,
+    which is what `previous_review_note` needs."""
 
     async def scenario():
         database = await open_db(tmp_path)
@@ -370,11 +371,31 @@ def _seed_session(tmp_path, rows):
                         (f"s{i}", hook, status, created, head),
                     )
                 )
-            return prompts._last_reviewed_head(database, "w1", "on.review.local.run")
+            row = prompts._last_review_session(database, "w1", "on.review.local.run")
+            if whole_row:
+                return row
+            return row["head_sha"] if row else None
         finally:
             await database.close()
 
     return asyncio.run(scenario())
+
+
+def _seed_row(tmp_path, rows):
+    """`_seed_session`, but handing back the whole row rather than the head."""
+    return _seed_session(tmp_path, rows, whole_row=True)
+
+
+def test_the_last_review_session_carries_its_own_artifacts(tmp_path):
+    """The reviewer is handed its own previous result file and summary, so the
+    row -- not just the head -- is what the lookup must return."""
+    row = _seed_row(
+        tmp_path,
+        [("on.review.local.run", "done", "aaa111", "2026-01-01T00:00:00")],
+    )
+    assert row["head_sha"] == "aaa111"
+    assert row["result_path"] == "/r"
+    assert row["session_summary_ref"] is None
 
 
 def test_since_comes_from_the_last_session_that_ran_this_hook(tmp_path):
