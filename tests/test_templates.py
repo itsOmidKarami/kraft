@@ -1862,3 +1862,15 @@ def test_defaults_agent_still_rejects_on_failure(tmp_path):
     )
     with pytest.raises(templates.RegistryError, match="defaults.agent"):
         templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_chain_review_skill_teaches_the_node_binding_split():
+    """The skill is the schema the chain-review agent writes nodes from. If it
+    still presents on_failure as a plain node field, the agent will keep
+    proposing one (templates.py's NODE_CARRYOVER_FIELDS comment is about
+    exactly this class of drift)."""
+    text = Path("src/kraft/skills/chain-review/SKILL.md").read_text()
+    assert "binding" in text.lower().split("on_failure")[1][:400], (
+        "the on_failure paragraph must say a task-level repair lives on the "
+        "registry binding, not on the node"
+    )
