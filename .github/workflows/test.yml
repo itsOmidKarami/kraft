@@ -147,7 +147,7 @@ jobs:
     name: playwright
     runs-on: ubuntu-latest
     container:
-      image: mcr.microsoft.com/playwright:v1.62.1-noble
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
