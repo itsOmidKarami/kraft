@@ -38,6 +38,7 @@ dev = [
     "pytest-xdist>=3.6",
     "pytest-cov>=6",
 ]
+docs = ["mkdocs-material>=9"]
 
 [project.scripts]
 kraft = "kraft.cli:main"
@@ -74,12 +75,13 @@ relative_files = true
 
 [tool.ruff]
 line-length = 100
-extend-exclude = ["docs"]
+extend-exclude = ["docs", "docsite"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
 
 [project.urls]
-Homepage = "https://github.com/itsOmidKarami/kraft"
+Homepage = "https://itsomidkarami.github.io/kraft/"
+Documentation = "https://itsomidkarami.github.io/kraft/"
 Source = "https://github.com/itsOmidKarami/kraft"
 Issues = "https://github.com/itsOmidKarami/kraft/issues"

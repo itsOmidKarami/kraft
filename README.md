@@ -1,5 +1,11 @@
 # Kraft
 
+[![test](https://github.com/itsOmidKarami/kraft/actions/workflows/test.yml/badge.svg)](https://github.com/itsOmidKarami/kraft/actions/workflows/test.yml)
+[![PyPI](https://img.shields.io/pypi/v/kraft-sdlc)](https://pypi.org/project/kraft-sdlc/)
+[![Latest release](https://img.shields.io/github/v/release/itsOmidKarami/kraft)](https://github.com/itsOmidKarami/kraft/releases)
+[![License](https://img.shields.io/github/license/itsOmidKarami/kraft)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-itsomidkarami.github.io%2Fkraft-blue)](https://itsomidkarami.github.io/kraft/)
+
 A local orchestrator for semi-autonomous software work. One FastAPI process plus a
 React SPA: work items enter as **chains** — ordered nodes materialized from a YAML
 template — and each node runs hook-point tasks through plugin adapters (a headless
@@ -8,6 +14,29 @@ to you with the full trace. Gates stop the chain where a human decision belongs.
 
 Runs on your machine, binds loopback by default, and edits your repos through git
 worktrees. How it fits together: [ARCHITECTURE.md](ARCHITECTURE.md).
+
+![The Kraft board: work items grouped by Needs you, Running, Not started, and Done](.github/assets/board.png)
+
+<table>
+<tr>
+<td width="65%">
+
+**A gate stops the chain where a human decides.** Approve, reject with a note
+that re-runs the producing node, or open the full detail view.
+
+![Approving a spec_approval gate from the board's side panel](.github/assets/gate.png)
+
+</td>
+<td width="35%">
+
+**Same board, phone-sized.** Approving from a tunnel doesn't need new code —
+see [Remote access](#remote-access) below.
+
+![The board at a 390px phone viewport, with bottom tab navigation](.github/assets/mobile.png)
+
+</td>
+</tr>
+</table>
 
 ## Install and run
 
@@ -186,6 +215,14 @@ outside it, because they are the seam between the two repos.
 
 See [`plugins/kraft-lite/README.md`](plugins/kraft-lite/README.md).
 
+## Analytics
+
+Lead time, cost, and where both go — by node, by repo, over whatever window
+you pick. Built from the same events the board renders live, not a separate
+pipeline.
+
+![The Analytics view: completed count, median lead time, cost; throughput by week; cost share by node; per-repo totals; why items stopped for a person](.github/assets/analytics.png)
+
 ## The `kraft` command
 
 `kraft` with no arguments serves. Subcommands talk to a running server.
@@ -202,6 +239,11 @@ kraft item pause / kraft item resume --steer "try the other adapter"
 kraft item retry                     # re-run the node a stopped item stopped on
 kraft view search "retry policy"
 ```
+
+The same search — hybrid FTS + vector, jumping straight to a pending action,
+a work item, or a document — is one keystroke away in the UI (⌘K):
+
+![The search overlay: a query for "caching" surfacing a pending gate action, the matching work item, and a source-repo attribution](.github/assets/search.png)
 
 Every verb takes `--json`, which prints the raw API payload — the same value
 `kraft admin mcp` hands an agent. An id is optional wherever the work item can be

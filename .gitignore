@@ -87,3 +87,4 @@ docs/consolidated/
 # on them. The issue database itself is not in git at all -- it lives in
 # .beads/embeddeddolt/ and syncs over refs/dolt/data to a private remote.
 .beads/interactions.jsonl
+site/
