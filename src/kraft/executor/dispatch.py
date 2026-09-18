@@ -17,6 +17,7 @@ from kraft import events, store
 from kraft import findings as _findings
 from kraft import policy as _policy
 from kraft import sandbox as _sandbox
+from kraft import templates as _templates
 from kraft.adapters import agent as _agent
 from kraft.adapters import forge as _forge
 from kraft.adapters import subprocess as _subprocess
@@ -178,8 +179,13 @@ def _select_scopes(
     scope that passed.
     """
     sandbox = _sandbox.resolve(binding, repo_entry)
-    repo_scopes = repo_entry.get("test_scopes")
-    if not repo_scopes and repo_entry.get("test_command"):
+    # Kraft-ouoqx: keyed on what the binding asks for, not on its `kind`. The
+    # repo's command beating the registry's is right for the *test* hook and
+    # wrong for every other subprocess hook, whose own command was silently
+    # discarded on any repo that declares test_scopes.
+    wants_scopes = "test_scopes" in _templates.with_inputs(binding, task_hook)
+    repo_scopes = repo_entry.get("test_scopes") if wants_scopes else None
+    if wants_scopes and not repo_scopes and repo_entry.get("test_command"):
         # `config.load_repos` already wraps a bare `test_command` into a
         # `test_scopes` entry for any repo it reads off disk -- this mirrors
         # that for a `LaunchContext` built by hand (tests, or any future

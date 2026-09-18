@@ -104,6 +104,41 @@ def with_steps(node: dict) -> dict:
     return {**node, "steps": groups, "tasks": [t for g in groups for t in g]}
 
 
+#: The one hook the repo's own test scopes may replace the command of. The
+#: legacy fallback in `with_inputs` is the only thing that still couples
+#: behavior to a hook's *name*; every other binding says what it wants in
+#: `inputs:`.
+TEST_HOOK = "on.test.run"
+
+#: What a binding may declare it is fed, and on which channel. A closed
+#: vocabulary: `load_registry` rejects anything else at config load.
+VALID_INPUTS = {
+    "review_package": {"env"},
+    "carried_findings": {"env"},
+    "test_scopes": {"argv"},
+}
+
+
+def with_inputs(binding: dict, task_hook: str) -> dict:
+    """The binding's resolved input table.
+
+    An explicit `inputs:` is authoritative: exactly what is declared, nothing
+    implied. Absent, today's hardcoded rules are reproduced, because
+    `registry.yaml` is seeded once and never overwritten, so every existing
+    install has an `on.test.run` with no `inputs:`; reading the table strictly
+    would run the registry's command against every repo (Kraft-579/9wzy).
+
+    The fallback is also the Kraft-ouoqx fix: a non-test subprocess hook
+    resolves to `{}` and runs its own command. What it carries forward is the
+    hook-*name* coupling; declaring `inputs:` is its remedy.
+    """
+    if "inputs" in binding:
+        return binding["inputs"] or {}
+    if binding.get("kind") == "subprocess" and task_hook == TEST_HOOK:
+        return {"test_scopes": {"channel": "argv"}}
+    return {}
+
+
 def carry_forward_node_fields(old_nodes: list, new_nodes: list) -> list:
     """Fill `NODE_CARRYOVER_FIELDS` on `new_nodes` from the old node sharing its
     `id`, for whichever fields the new node did not itself set. A node id with

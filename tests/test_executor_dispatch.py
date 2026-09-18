@@ -2815,3 +2815,33 @@ def test_previous_fix_session_is_reachable_from_dispatch():
     """WI-1 needs it at review dispatch, and walk imports dispatch rather than
     the other way round -- so it cannot stay in walk."""
     assert callable(dispatch.previous_fix_session)
+
+
+def test_a_non_test_subprocess_hook_runs_its_own_command():
+    """Kraft-ouoqx: repo test scopes must not replace a reviewer's command."""
+    from kraft import templates
+
+    binding = {"kind": "subprocess", "command": ["my-reviewer"]}
+    assert templates.with_inputs(binding, "on.review.local.run") == {}
+
+
+def test_the_test_hook_still_takes_repo_scopes_without_an_inputs_key():
+    from kraft import templates
+
+    binding = {"kind": "subprocess", "command": ["uv", "run", "pytest", "-q"]}
+    resolved = templates.with_inputs(binding, templates.TEST_HOOK)
+    assert resolved == {"test_scopes": {"channel": "argv"}}
+
+
+def test_an_explicit_inputs_table_is_authoritative():
+    from kraft import templates
+
+    binding = {"kind": "subprocess", "command": ["x"], "inputs": {}}
+    assert templates.with_inputs(binding, templates.TEST_HOOK) == {}
+
+
+def test_an_agent_hook_resolves_to_no_inputs():
+    from kraft import templates
+
+    binding = {"kind": "agent", "harness": "claude"}
+    assert templates.with_inputs(binding, "on.review.local.run") == {}
