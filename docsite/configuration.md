@@ -7,6 +7,13 @@ these same files; hand-editing is equally supported (`kraft admin doctor`
 reports anything that doesn't parse, and `kraft admin reload` picks up an
 on-disk edit without a restart).
 
+Every file in `templates/` is validated when it is loaded, against a model that
+describes both its shape and its references — a chain node may only name a hook
+the registry defines, and a `reject_to` may only name a node at or before the
+one declaring it. A file that does not load is reported with the offending key
+named, and the rest of the configuration keeps working: one broken chain
+template does not stop the server.
+
 ## Chain templates (`*.yaml`)
 
 Any YAML file in `templates/` whose top level is `id:` + `nodes:` is a chain

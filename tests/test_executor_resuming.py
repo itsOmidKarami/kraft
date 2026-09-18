@@ -168,9 +168,13 @@ def test_reconcile_reuses_a_done_measuring_session_after_a_crash(tmp_path):
             )
             await database.write(lambda c: store.session_exited(c, "s-failed", "failed"))
 
+            # A zero cap cannot be built through the constructor (nor written in
+            # a policy.yaml); force one so the first bump breaches.
+            zero = policy.Cap(1, 3600)
+            object.__setattr__(zero, "attempts", 0)
             pol = policy.Policy(
-                loops={"verify_fix_loop": policy.Cap(0, 3600)},
-                default=policy.Cap(0, 3600),
+                loops={"verify_fix_loop": zero},
+                default=zero,
                 auto_escalate_stuck=False,
             )
             result = await executor.resume(

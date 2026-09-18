@@ -136,7 +136,7 @@ async def add_repo(body: RepoBody, request: Request):
     # A single-stack repo has no nested scopes, so probe_repo hands back one
     # root `["**"]` scope that just repeats test_command. Persisting that
     # would shadow every later test_command edit forever, the same
-    # stale-override bug _normalize_test_scopes's docstring describes
+    # stale-override bug config.TestScope's comment describes
     # (Kraft-9wzy) -- so only a probe that actually found a nested scope (one
     # whose paths are not the root `["**"]`) is worth persisting here.
     # Counting the scopes would be wrong: a repo whose only marker is nested

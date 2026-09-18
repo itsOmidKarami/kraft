@@ -318,7 +318,7 @@ def test_add_repo_without_nested_scopes_does_not_persist_a_root_scope(tmp_path, 
     """A single-stack repo has no nested scopes to probe, so the only thing
     _probe_test_scopes finds is a root `["**"]` scope that just repeats
     test_command. Persisting it would shadow every later test_command edit
-    forever -- the stale-override bug `_normalize_test_scopes`'s docstring
+    forever -- the stale-override bug `config.TestScope`'s comment
     describes (Kraft-9wzy) -- so add_repo must leave test_scopes unset here."""
     repo = make_repo(tmp_path, name="plainscoperepo")
     (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
@@ -423,7 +423,7 @@ def test_an_explicit_project_survives_a_legacy_key_beside_it():
     """A hand-edited half-migrated entry: `project` set, `forge` absent, and the
     pre-rename `gitlab_project` still present. The explicit value wins."""
     repo = {"path": "/r", "project": "group/kept", "gitlab_project": "group/legacy"}
-    config._normalize_forge(repo)
+    repo = config.RepoEntry.model_validate(repo).model_dump()
     assert repo["project"] == "group/kept"
     assert repo["forge"] is None
     assert "gitlab_project" not in repo
@@ -431,8 +431,9 @@ def test_an_explicit_project_survives_a_legacy_key_beside_it():
 
 def test_the_legacy_key_still_migrates_when_nothing_else_is_set():
     repo = {"path": "/r", "gitlab_project": "group/legacy"}
-    config._normalize_forge(repo)
-    assert repo == {"path": "/r", "forge": "gitlab", "project": "group/legacy"}
+    repo = config.RepoEntry.model_validate(repo).model_dump()
+    assert (repo["forge"], repo["project"]) == ("gitlab", "group/legacy")
+    assert "gitlab_project" not in repo
 
 
 def test_probe_detects_no_forge_without_remote(tmp_path):
@@ -1159,3 +1160,23 @@ def test_startup_hardens_the_git_env_for_everything_the_server_spawns(tmp_path, 
             for i in range(count)
         }
     assert pinned["core.hooksPath"] == os.devnull
+
+
+def test_repo_entry_keeps_the_messages_the_hand_rolled_loader_gave(tmp_path):
+    """Thirteen of repos.yaml's fourteen ConfigError messages name the offending key.
+    A model that says 'Input should be a valid boolean' instead is a regression
+    an operator pays for at 3am. (Characterization: pinned before the rewrite.)"""
+    p = tmp_path / "repos.yaml"
+    p.write_text("repos:\n  - path: /r\n    managed: sometimes\n")
+    with pytest.raises(config.ConfigError) as exc:
+        config.load_repos(p)
+    assert "managed" in str(exc.value)
+    assert "repos.yaml" in str(exc.value)
+
+
+def test_test_scopes_entry_needs_a_command(tmp_path):
+    p = tmp_path / "repos.yaml"
+    p.write_text("repos:\n  - path: /r\n    test_scopes:\n      - paths: ['src/**']\n")
+    with pytest.raises(config.ConfigError) as exc:
+        config.load_repos(p)
+    assert "command" in str(exc.value)

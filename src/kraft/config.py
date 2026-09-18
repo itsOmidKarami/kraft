@@ -20,8 +20,18 @@ from configparser import ConfigParser
 from configparser import Error as ConfigParserError
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any, Literal
 
 import yaml
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from kraft import sandbox as _sandbox
 from kraft import steering as _steering
@@ -32,6 +42,36 @@ logger = logging.getLogger(__name__)
 
 class ConfigError(Exception):
     pass
+
+
+#: The hand-rolled loaders said "'managed' must be a boolean"; pydantic says
+#: "Input should be a valid boolean". Operators (and tests) know the former.
+_SHAPE_PROSE = {
+    "bool_type": "must be a boolean",
+    "string_type": "must be a string",
+    "list_type": "must be a list",
+    "dict_type": "must be a mapping",
+}
+
+
+def first_error(exc: ValidationError, prefix: str) -> str:
+    """One operator-facing line from a `ValidationError`, prefixed with the file.
+
+    Every config loader here has always raised `ConfigError` with a single
+    string, and seven call sites read exactly one message (three in
+    `api/routes/gates.py`, three in `api/routes/work_items.py`, one in
+    `templates.py`). Models raise a list; this is the adapter, so modelling the
+    config does not become a rewrite of everything that reports on it.
+
+    The field path is included because the current messages name the offending
+    key, and an error that says only "value is not a valid boolean" is a
+    regression an operator pays for.
+    """
+    err = exc.errors()[0]
+    head, *rest = (str(p) for p in err["loc"]) or ["<root>"]
+    where = f"'{head}'" + "".join(f".{p}" for p in rest)
+    shape = _SHAPE_PROSE.get(err["type"])
+    return f"{prefix}: {where} {shape}" if shape else f"{prefix}: {where}: {err['msg']}"
 
 
 def read_yaml(path: str | Path, default: dict | None = None) -> dict:
@@ -81,52 +121,126 @@ def write_yaml(path: str | Path, data: dict) -> None:
 REPOS_DEFAULT: dict = {"repos": []}
 
 
-def _normalize_forge(repo: dict) -> None:
-    """Read a pre-forge repos.yaml entry in place.
+class TestScope(BaseModel):
+    """One `test_scopes` entry. Not asserted as a pytest class."""
 
-    `templates/` is seeded once and never overwritten, so compatibility for the
-    `gitlab_project` -> `forge`/`project` rename lives in the reader rather than
-    in a migration that would rewrite a file the user owns.
-    """
-    legacy = repo.pop("gitlab_project", None)
-    # Both `forge` and `project` must be absent: a hand-edited half-migrated
-    # entry carrying an explicit `project` beside the legacy key keeps its own.
-    if repo.get("forge") is None and repo.get("project") is None and legacy:
-        repo["forge"] = "gitlab"
-        repo["project"] = legacy
-    repo.setdefault("forge", None)
-    repo.setdefault("project", None)
+    __test__ = False
+    model_config = ConfigDict(strict=True, extra="allow")
+
+    paths: list[str] = Field(min_length=1)
+    command: str = Field(min_length=1)
+
+    # Deliberately does *not* synthesize a `["**"]` scope from a legacy
+    # `test_command`: that synthesis used to be written into the loaded entry,
+    # and any route that then re-saved repos.yaml (`PATCH`/`DELETE /repos`)
+    # persisted it -- baking in whatever `test_command` was current at load
+    # time (Kraft-9wzy). Callers that need the wrap do it at the point of use.
 
 
-def _normalize_test_scopes(scopes: object) -> list[dict] | None:
-    """Validated `test_scopes`, or None if the entry has none of its own.
+class RepoEntry(BaseModel):
+    """One `repos.yaml` entry. Strict, so `managed: "true"` is rejected as the
+    hand-rolled loader rejected it; unknown keys ride along (`extra="allow"`)
+    because entries carry keys this loader never read (`name`, `enabled`,
+    `default_chain_template`, ...) and a re-save must not drop them."""
 
-    Deliberately does *not* synthesize a `["**"]` scope from a legacy
-    `test_command` here: that synthesis used to be written into the loaded
-    entry, and any route that then re-saved repos.yaml (`PATCH`/`DELETE
-    /repos`) persisted it -- baking in whatever `test_command` was current at
-    load time. A later edit to `test_command` left that stale synthesized
-    scope in place, silently overriding the edit forever (verify finding,
-    Kraft-9wzy). Callers that need the wrap (`executor.py`) do it themselves
-    at the point of use instead, from the un-synthesized `test_command` this
-    function leaves untouched.
-    """
-    if scopes is None:
-        return None
-    if not isinstance(scopes, list) or not scopes:
-        raise ConfigError("repos.yaml: 'test_scopes' must be a non-empty list of mappings")
-    for s in scopes:
-        if not isinstance(s, dict):
-            raise ConfigError("repos.yaml: 'test_scopes' entries must be mappings")
-        paths = s.get("paths")
-        if not isinstance(paths, list) or not paths or not all(isinstance(x, str) for x in paths):
-            raise ConfigError(
-                "repos.yaml: 'test_scopes' entry needs a non-empty list of string 'paths'"
-            )
-        command = s.get("command")
-        if not isinstance(command, str) or not command:
-            raise ConfigError("repos.yaml: 'test_scopes' entry needs a non-empty string 'command'")
-    return scopes
+    model_config = ConfigDict(strict=True, extra="allow")
+
+    path: str = Field(min_length=1)
+    forge: str | None = None
+    project: str | None = None
+    # True, not False: every entry that predates this field was connected by a
+    # human, and `managed` is what keeps a human-connected repo out of
+    # Settings' "Detected" section. Auto-connected children are written with an
+    # explicit `managed: false` instead of relying on a default.
+    managed: bool = True
+    default_model: str | None = None
+    # The command CI runs for this repo. The registry's `on.test.run` binding
+    # is one command for every repo on the install, which is what lets verify
+    # and CI drift apart (Kraft-579). None keeps the registry's command.
+    test_command: str | None = None
+    test_scopes: list[TestScope] | None = Field(default=None, min_length=1)
+    # Files `git worktree add` cannot carry: it checks out tracked content at
+    # HEAD, so an untracked `.python-version` never reaches the worktree
+    # (Kraft-gxcmy). Relative file paths only: a directory here is how a list
+    # like this starts dragging `.venv` and `node_modules` into every worktree,
+    # and a glob is the same trap with extra steps.
+    local_files: list[str] = []
+    # How this repo's worktree is prepared. No default and no fallback: an
+    # absent key is "nobody has decided yet" and stops the chain when the
+    # worktree is built, while `""` is a deliberate "nothing to do"
+    # (Kraft-kji8w). Validated for shape here; required at use, because a
+    # ConfigError raised at load would take down every repo at once.
+    setup_command: str | None = None
+    # Layered onto the worker baseline, which is an allowlist rather than the
+    # daemon's inherited environment (Kraft-69atv).
+    env: dict[str, str] = {}
+    env_passthrough: list[str] = []
+    deny_tools: list[str] = []
+    steering: list[str] = []
+    default_root_merge_policy: str = "bump"
+    sandbox: Any = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_forge(cls, data: Any) -> Any:
+        """Read a pre-forge entry: `templates/` is seeded once and never
+        overwritten, so the `gitlab_project` -> `forge`/`project` rename lives
+        in the reader rather than in a migration that rewrites a user's file."""
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        legacy = data.pop("gitlab_project", None)
+        # Both `forge` and `project` must be absent: a hand-edited
+        # half-migrated entry carrying an explicit `project` beside the legacy
+        # key keeps its own.
+        if data.get("forge") is None and data.get("project") is None and legacy:
+            data["forge"] = "gitlab"
+            data["project"] = legacy
+        return data
+
+    @field_validator("env_passthrough", "local_files")
+    @classmethod
+    def _non_empty_strings(cls, v: list[str], info) -> list[str]:
+        if not all(v):
+            raise ValueError("must be a list of non-empty strings")
+        if info.field_name == "local_files":
+            for rel in v:
+                if rel.endswith("/"):
+                    raise ValueError(f"entry {rel!r} must name a file")
+                if Path(rel).is_absolute() or ".." in Path(rel).parts:
+                    raise ValueError(f"entry {rel!r} must be a relative path inside the repo")
+                if any(c in rel for c in "*?["):
+                    raise ValueError(f"entry {rel!r} must be a literal path, not a glob")
+        return v
+
+    @field_validator("default_root_merge_policy")
+    @classmethod
+    def _known_merge_policy(cls, v: str) -> str:
+        if v not in ROOT_MERGE_POLICIES:
+            raise ValueError(f"must be one of {sorted(ROOT_MERGE_POLICIES)}")
+        return v
+
+    @field_validator("sandbox")
+    @classmethod
+    def _valid_sandbox(cls, v: Any) -> Any:
+        if v not in (None, False):
+            try:
+                _sandbox.validate(v, where="repos.yaml")
+            except _sandbox.SandboxError as exc:
+                raise ValueError(str(exc)) from exc
+        return v
+
+    @model_validator(mode="after")
+    def _steering_exists(self, info: ValidationInfo) -> RepoEntry:
+        # The context carries `steering_dir` only when the caller wants steering
+        # checked (`load_repos(validate_steering=True)`).
+        steering_dir = (info.context or {}).get("steering_dir")
+        if steering_dir is not None:
+            try:
+                _steering.validate(steering_dir, self.steering, where="repos.yaml")
+            except _steering.SteeringError as exc:
+                raise ValueError(str(exc)) from exc
+        return self
 
 
 def _migrate_submodule_edges(repos: list[dict]) -> list[dict]:
@@ -196,95 +310,20 @@ def load_repos(
     repos = data.get("repos") or []
     if not isinstance(repos, list) or not all(isinstance(r, dict) for r in repos):
         raise ConfigError("repos.yaml: 'repos' must be a list of mappings")
-    repos = _migrate_submodule_edges(repos)
-    for r in repos:
-        if not isinstance(r.get("path"), str) or not r["path"]:
-            raise ConfigError("repos.yaml: every repo needs a string 'path'")
-        _normalize_forge(r)
-        # True, not False: every entry that predates this field was connected
-        # by a human, and `managed` is what keeps a human-connected repo out of
-        # Settings' "Detected" section. Auto-connected children are written
-        # with an explicit `managed: false` instead of relying on a default.
-        r.setdefault("managed", True)
-        if not isinstance(r["managed"], bool):
-            raise ConfigError("repos.yaml: 'managed' must be a boolean")
-        r.setdefault("default_model", None)
-        if r.get("default_model") is not None and not isinstance(r["default_model"], str):
-            raise ConfigError("repos.yaml: 'default_model' must be a string")
-        # The command CI runs for this repo. The registry's `on.test.run`
-        # binding is one command for every repo on the install, which is what
-        # lets verify and CI drift apart (Kraft-579). None keeps the registry's
-        # command, so an install that never sets one is unchanged.
-        r.setdefault("test_command", None)
-        if r.get("test_command") is not None and not isinstance(r["test_command"], str):
-            raise ConfigError("repos.yaml: 'test_command' must be a string")
-        r["test_scopes"] = _normalize_test_scopes(r.get("test_scopes"))
-        # Files `git worktree add` cannot carry: it checks out tracked content
-        # at HEAD, so an untracked `.python-version` never reaches the worktree
-        # and uv resolves an interpreter off PATH instead -- 3.14 against a repo
-        # that wanted 3.11, with nothing to say so (Kraft-gxcmy). Relative file
-        # paths only: a directory here is how a list like this starts dragging
-        # `.venv` and `node_modules` into every worktree, and a glob is the same
-        # trap with extra steps.
-        r.setdefault("local_files", [])
-        if not isinstance(r["local_files"], list) or not all(
-            isinstance(x, str) and x for x in r["local_files"]
-        ):
-            raise ConfigError("repos.yaml: 'local_files' must be a list of non-empty strings")
-        for rel in r["local_files"]:
-            if rel.endswith("/"):
-                raise ConfigError(f"repos.yaml: 'local_files' entry {rel!r} must name a file")
-            if Path(rel).is_absolute() or ".." in Path(rel).parts:
-                raise ConfigError(
-                    f"repos.yaml: 'local_files' entry {rel!r} must be a relative path "
-                    "inside the repo"
-                )
-            if any(c in rel for c in "*?["):
-                raise ConfigError(
-                    f"repos.yaml: 'local_files' entry {rel!r} must be a literal path, not a glob"
-                )
-        # How this repo's worktree is prepared. No default and no fallback:
-        # an absent key is "nobody has decided yet" and stops the chain when
-        # the worktree is built, while `""` is a deliberate "nothing to do"
-        # (Kraft-kji8w). Validated for shape here; required at use, because a
-        # ConfigError raised at load would take down every repo at once.
-        r.setdefault("setup_command", None)
-        if r.get("setup_command") is not None and not isinstance(r["setup_command"], str):
-            raise ConfigError("repos.yaml: 'setup_command' must be a string")
-        # Layered onto the worker baseline, which is an allowlist rather than
-        # the daemon's inherited environment (Kraft-69atv).
-        r.setdefault("env", {})
-        if not isinstance(r["env"], dict) or not all(
-            isinstance(k, str) and isinstance(v, str) for k, v in r["env"].items()
-        ):
-            raise ConfigError("repos.yaml: 'env' must be a map of string to string")
-        r.setdefault("env_passthrough", [])
-        if not isinstance(r["env_passthrough"], list) or not all(
-            isinstance(x, str) and x for x in r["env_passthrough"]
-        ):
-            raise ConfigError("repos.yaml: 'env_passthrough' must be a list of non-empty strings")
-        for key in ("deny_tools", "steering"):
-            v = r.setdefault(key, [])
-            if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
-                raise ConfigError(f"repos.yaml: {key!r} must be a list of strings")
-        r.setdefault("default_root_merge_policy", "bump")
-        if r["default_root_merge_policy"] not in ROOT_MERGE_POLICIES:
-            raise ConfigError(
-                f"repos.yaml: 'default_root_merge_policy' must be one of "
-                f"{sorted(ROOT_MERGE_POLICIES)}"
-            )
-        r.setdefault("sandbox", None)
-        if r["sandbox"] not in (None, False):
-            try:
-                _sandbox.validate(r["sandbox"], where="repos.yaml")
-            except _sandbox.SandboxError as exc:
-                raise ConfigError(str(exc)) from exc
-        if validate_steering:
-            try:
-                _steering.validate(steering_dir, r.get("steering", []), where="repos.yaml")
-            except _steering.SteeringError as exc:
-                raise ConfigError(str(exc)) from exc
-    return repos
+    ctx = {"steering_dir": steering_dir} if validate_steering else None
+    out: list[dict] = []
+    for r in _migrate_submodule_edges(repos):
+        try:
+            out.append(RepoEntry.model_validate(r, context=ctx).model_dump())
+        except ValidationError as exc:
+            err = exc.errors()[0]
+            # A custom validator's message is already a whole sentence naming
+            # the file (`_sandbox`, `_steering`); do not wrap it twice.
+            msg = err["msg"].removeprefix("Value error, ")
+            if msg.startswith("repos.yaml"):
+                raise ConfigError(msg) from exc
+            raise ConfigError(first_error(exc, "repos.yaml")) from exc
+    return out
 
 
 def save_repos(path: str | Path, repos: list[dict]) -> None:
@@ -548,39 +587,59 @@ def probe_repo(path: str | Path, *, test_command: str | None = None) -> dict:
 
 # ── access ───────────────────────────────────────────────────────────────────
 
-ACCESS_DEFAULT: dict = {
-    "bind": "127.0.0.1",
-    "port": 8765,
-    "password_hash": None,
-    "session_expiry_days": 7,
-    "allowed_hosts": [],
-}
+
+class _Model(BaseModel):
+    """`extra="forbid"`: a key nobody reads is a typo an operator wants told about."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class Access(_Model):
+    bind: str = "127.0.0.1"
+    port: int = 8765
+    password_hash: str | None = None
+    session_expiry_days: int = 7
+    allowed_hosts: list[str] = []
+
+
+ACCESS_DEFAULT: dict = Access().model_dump()
 
 LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 
 
-def load_access(path: str | Path) -> dict:
-    return {**ACCESS_DEFAULT, **read_yaml(path, ACCESS_DEFAULT)}
+def _dict(cfg) -> dict:
+    return cfg.model_dump() if isinstance(cfg, BaseModel) else cfg
 
 
-def save_access(path: str | Path, access: dict) -> None:
+def load_access(path: str | Path) -> Access:
+    try:
+        return Access.model_validate(read_yaml(path, ACCESS_DEFAULT))
+    except ValidationError as exc:
+        raise ConfigError(first_error(exc, "access.yaml")) from exc
+
+
+def save_access(path: str | Path, access: dict | Access) -> None:
+    access = _dict(access)
     write_yaml(path, {k: access.get(k, v) for k, v in ACCESS_DEFAULT.items()})
 
 
 # ── notify ───────────────────────────────────────────────────────────────────
 
+
 #: `templates/notify.yaml`. Not bundled and not seeded, for `access.yaml`'s
 #: reason: it holds a secret and a hostname that belong to one machine. A
 #: missing file reads as this, and the first `PUT /notify` creates it.
-NOTIFY_DEFAULT: dict = {
-    "enabled": False,
-    "url": None,
-    "base_url": None,
-    "events": ["gate_requested", "work_item_needs_human"],
-}
+class Notify(_Model):
+    enabled: bool = False
+    url: str | None = None
+    base_url: str | None = None
+    events: list[str] = ["gate_requested", "work_item_needs_human"]
 
 
-def load_notify(path: str | Path) -> dict:
+NOTIFY_DEFAULT: dict = Notify().model_dump()
+
+
+def load_notify(path: str | Path) -> Notify:
     try:
         overrides = read_yaml(path, {})
     except ConfigError as exc:
@@ -599,25 +658,74 @@ def load_notify(path: str | Path) -> dict:
         if isinstance(cause, OSError):
             raise ConfigError(f"notify.yaml: cannot be read: {cause.strerror}") from None
         raise ConfigError("notify.yaml: not valid YAML") from None
-    return {**NOTIFY_DEFAULT, "events": list(NOTIFY_DEFAULT["events"]), **overrides}
+    try:
+        return Notify.model_validate(overrides)
+    except ValidationError as exc:
+        # `input` echoes the offending value, which for `url` is the secret --
+        # so name only the field and pydantic's message, never the value.
+        err = exc.errors()[0]
+        where = ".".join(str(p) for p in err["loc"])
+        raise ConfigError(f"notify.yaml: {where}: {err['msg']}") from None
 
 
-def save_notify(path: str | Path, notify: dict) -> None:
+def save_notify(path: str | Path, notify: dict | Notify) -> None:
     """Written 0600 — `write_yaml` stages through `mkstemp`, which creates at
     0600, and `os.replace` carries that mode onto the target."""
+    notify = _dict(notify)
     write_yaml(path, {k: notify.get(k, v) for k, v in NOTIFY_DEFAULT.items()})
 
 
 # ── auto-intake ──────────────────────────────────────────────────────────────
 
-INTAKE_DEFAULT: dict = {
-    "enabled": False,
-    "interval_s": 300,
-    "repos": [],
-    "priority_ceiling": 2,
-}
+
+class Intake(_Model):
+    enabled: bool = False
+    interval_s: int = 300
+    repos: list[str] = []
+    priority_ceiling: int = 2
+    # Moved to `policy.yaml` (`Policy.max_concurrent`); `PUT /intake` still
+    # writes it so an old client or a hand-edited file round-trips.
+    max_concurrent: int | None = None
 
 
-def load_intake(path: str | Path) -> dict:
+INTAKE_DEFAULT: dict = Intake().model_dump(exclude={"max_concurrent"})
+
+
+def load_intake(path: str | Path) -> Intake:
     """`intake.yaml`, with every missing key defaulted. A missing file is off."""
-    return {**INTAKE_DEFAULT, **read_yaml(path, INTAKE_DEFAULT)}
+    try:
+        return Intake.model_validate(read_yaml(path, INTAKE_DEFAULT))
+    except ValidationError as exc:
+        raise ConfigError(first_error(exc, "intake.yaml")) from exc
+
+
+# ── theme ────────────────────────────────────────────────────────────────────
+
+PALETTE_IDS = frozenset({"nocturne", "rose", "forest", "amber", "slate"})
+
+
+class BoardPrefs(_Model):
+    group_by: Literal["status", "repo", "template"] = "status"
+    show_done: int = Field(default=5, ge=1)
+    open_in: Literal["peek", "full"] = "peek"
+
+
+class Theme(_Model):
+    palette: str = "nocturne"
+    mode: Literal["light", "dark", "system"] = "dark"
+    density: Literal["compact", "comfortable"] = "compact"
+    board: BoardPrefs = BoardPrefs()
+
+    @field_validator("palette")
+    @classmethod
+    def _known_palette(cls, v: str) -> str:
+        if v not in PALETTE_IDS:
+            raise ValueError(f"unknown palette: {v!r}")
+        return v
+
+
+def load_theme(path: str | Path) -> Theme:
+    try:
+        return Theme.model_validate(read_yaml(path))
+    except ValidationError as exc:
+        raise ConfigError(first_error(exc, "theme.yaml")) from exc

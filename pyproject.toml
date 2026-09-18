@@ -9,6 +9,10 @@ authors = [{ name = "Omid Karami", email = "itsomidkarami@gmail.com" }]
 requires-python = ">=3.14"
 dependencies = [
     "pyyaml>=6",
+    # Config is modelled in pydantic and every entry point loads config --
+    # `kraft mcp` and the CLI must not reach it through a web framework's
+    # transitive dependency.
+    "pydantic>=2.9",
     "psutil>=5",
     "argcomplete>=3",
     "fastapi>=0.141.1",

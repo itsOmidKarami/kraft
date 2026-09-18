@@ -22,7 +22,7 @@ from kraft.templates import CONFIG_FILES
 
 def test_missing_notify_yaml_reads_as_the_shipped_default(tmp_path):
     cfg = config.load_notify(tmp_path / "notify.yaml")
-    assert cfg == {
+    assert cfg.model_dump() == {
         "enabled": False,
         "url": None,
         "base_url": None,
@@ -34,9 +34,9 @@ def test_partial_notify_yaml_fills_in_the_rest(tmp_path):
     path = tmp_path / "notify.yaml"
     path.write_text("enabled: true\n")
     cfg = config.load_notify(path)
-    assert cfg["enabled"] is True
-    assert cfg["url"] is None
-    assert cfg["events"] == ["gate_requested", "work_item_needs_human"]
+    assert cfg.enabled is True
+    assert cfg.url is None
+    assert cfg.events == ["gate_requested", "work_item_needs_human"]
 
 
 def test_saved_notify_yaml_is_0600_because_it_holds_a_token(tmp_path):
@@ -48,7 +48,7 @@ def test_saved_notify_yaml_is_0600_because_it_holds_a_token(tmp_path):
 def test_save_notify_writes_only_the_known_keys(tmp_path):
     path = tmp_path / "notify.yaml"
     config.save_notify(path, {**config.NOTIFY_DEFAULT, "nonsense": 1})
-    assert set(config.load_notify(path)) == set(config.NOTIFY_DEFAULT)
+    assert set(config.load_notify(path).model_dump()) == set(config.NOTIFY_DEFAULT)
 
 
 def test_notify_yaml_is_not_read_as_a_chain_template():
@@ -459,11 +459,10 @@ def test_base_url_from_config_wins_over_the_bind_fallback(tmp_path):
     asyncio.run(scenario())
 
 
-def test_a_malformed_base_url_still_records_the_failure(tmp_path):
-    """notify.yaml has no schema validation (`config.load_notify` does none),
-    so an operator typo like `base_url: 8080` (a YAML int) must not vanish
-    silently -- it has to land as `notification_failed` like any other send
-    failure, not raise unnoticed out of a detached task."""
+def test_a_malformed_base_url_is_rejected_at_load_and_sends_nothing(tmp_path):
+    """An operator typo like `base_url: 8080` (a YAML int) used to survive load
+    and fail at send time. The model rejects it at load; the notifier then falls
+    back to disabled, which is the same "sends nothing" failure mode."""
 
     async def scenario():
         database = await _database(tmp_path)
@@ -479,21 +478,18 @@ def test_a_malformed_base_url_still_records_the_failure(tmp_path):
                 "base_url": 8080,
             },
         )
+        with pytest.raises(config.ConfigError, match="base_url"):
+            config.load_notify(tmp_path / "notify.yaml")
         n.reload()
         await n.start()
         await database.write(
             lambda c: events.append(c, "w1", "gate_requested", {"gate": "spec_approval"})
         )
         await _drain(database, n)
-        rows = database.read(lambda c: events.read_after(c, 0))
         await n.stop()
         await database.close()
 
         assert sends == []
-        failed = [r for r in rows if r["type"] == "notification_failed"]
-        assert len(failed) == 1
-        assert failed[0]["payload"]["event_type"] == "gate_requested"
-        assert failed[0]["payload"]["host"] == "hook.invalid"
 
     asyncio.run(scenario())
 
@@ -579,9 +575,9 @@ def test_put_omitting_url_preserves_the_stored_secret(api_client):
     api_client.put("/api/notify", json={"events": ["gate_requested"]})
     templates_dir = Path(api_client.app.state.templates_dir)
     saved = config.load_notify(templates_dir / "notify.yaml")
-    assert saved["url"] == "https://hook.invalid/t0ken"
-    assert saved["events"] == ["gate_requested"]
-    assert saved["enabled"] is True
+    assert saved.url == "https://hook.invalid/t0ken"
+    assert saved.events == ["gate_requested"]
+    assert saved.enabled is True
 
 
 def test_put_empty_string_clears_the_url(api_client):
@@ -607,8 +603,8 @@ def test_clearing_the_url_while_enabled_disables_instead_of_422ing(api_client):
 
     templates_dir = Path(api_client.app.state.templates_dir)
     saved = config.load_notify(templates_dir / "notify.yaml")
-    assert saved["url"] is None
-    assert saved["enabled"] is False
+    assert saved.url is None
+    assert saved.enabled is False
 
 
 def test_put_refuses_a_non_http_url(api_client):
@@ -631,8 +627,8 @@ def test_put_refuses_enabling_without_a_url(api_client):
     # it was the only field the request set.
     templates_dir = Path(api_client.app.state.templates_dir)
     saved = config.load_notify(templates_dir / "notify.yaml")
-    assert saved["enabled"] is False
-    assert saved["url"] is None
+    assert saved.enabled is False
+    assert saved.url is None
 
 
 def test_put_reloads_the_running_notifier(api_client):

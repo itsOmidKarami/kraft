@@ -750,8 +750,12 @@ def test_reattach_resumes_a_deferred_self_retry_left_by_an_escalation_turn(tmp_p
     async def scenario():
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
+        # Held open until this test lets go: a timed sleep raced the scan
+        # below -- under a loaded parallel run the child was already gone by
+        # the time `_identity_ok` looked, and the row tore down instead.
         proc = subprocess.Popen(
-            [sys.executable, "-c", "import time; time.sleep(0.3)"],
+            [sys.executable, "-c", "import sys; sys.stdin.read()"],
+            stdin=subprocess.PIPE,
             start_new_session=True,
         )
         try:
@@ -808,6 +812,7 @@ def test_reattach_resumes_a_deferred_self_retry_left_by_an_escalation_turn(tmp_p
                 database, rd, _REG, launch_factory=lambda repo: None
             )
             assert summary.adopted == ["esc1"]
+            proc.stdin.close()
             await adopted["esc1"]
             proc.wait()
 
@@ -1018,8 +1023,13 @@ def test_an_adopted_session_kills_its_container_when_it_ends(tmp_path, monkeypat
     async def scenario():
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
+        # Held open until this test lets go: a timed sleep raced the scan
+        # below -- under a loaded parallel run the child was already gone by
+        # the time `_identity_ok` looked, and the row tore down instead.
         proc = subprocess.Popen(
-            [sys.executable, "-c", "import time; time.sleep(0.2)"], start_new_session=True
+            [sys.executable, "-c", "import sys; sys.stdin.read()"],
+            stdin=subprocess.PIPE,
+            start_new_session=True,
         )
         try:
             import psutil
@@ -1041,6 +1051,7 @@ def test_an_adopted_session_kills_its_container_when_it_ends(tmp_path, monkeypat
             await database.write(lambda c: store.session_running(c, "s1", proc.pid, pst))
             _, adopted = await reattach.reattach(database, rd, _REG)
             assert rm_log.exists() is False  # still running: nothing to tear down yet
+            proc.stdin.close()
             await adopted["s1"]
         finally:
             proc.wait()

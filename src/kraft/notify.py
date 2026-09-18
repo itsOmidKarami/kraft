@@ -110,7 +110,7 @@ class Notifier:
         below is the record. `config_mod.load_notify` already sanitizes the
         message before it ever reaches here, so logging it is not a leak."""
         try:
-            return config_mod.load_notify(self._config_path)
+            return config_mod.load_notify(self._config_path).model_dump()
         except config_mod.ConfigError as exc:
             logger.warning("%s -- notifications disabled until it is fixed", exc)
             return {

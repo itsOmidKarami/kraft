@@ -5,13 +5,24 @@ import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import yaml
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    ValidationInfo,
+    model_validator,
+)
+from pydantic_core import PydanticCustomError
 
 from kraft import sandbox as _sandbox
 from kraft import skill as _skill
 from kraft import steering as _steering
+from kraft.config import first_error
 from kraft.paths import default_skills_dir
 from kraft.store import OVERRIDABLE_NODE_FIELDS
 
@@ -83,8 +94,72 @@ def strip_non_proposable_carryover_fields(nodes: list) -> list:
     return nodes
 
 
-def with_steps(node: dict) -> dict:
-    """`node` with both `steps` and `tasks` populated, whichever it was given.
+class _DictLike(BaseModel):
+    """A model that reads like the dict it replaced -- `x.get("kind")`, `x["k"]`,
+    `"k" in x`, `x == {...}` -- because dispatch, doctor, the routes and most
+    tests were written against dicts. Only keys the file actually set count as
+    present, so `x.get("steering", [])` still means "did the operator say"."""
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, dict):
+            return dict(self.items()) == other
+        return super().__eq__(other)
+
+    __hash__ = None  # type: ignore[assignment]
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key) if key in self else default
+
+    def __getitem__(self, key: str) -> Any:
+        if key not in self:
+            raise KeyError(key)
+        return getattr(self, key)
+
+    def __contains__(self, key: object) -> bool:
+        return key in self.model_fields_set
+
+    def keys(self):
+        return [k for k in [*type(self).model_fields, *(self.model_extra or {})] if k in self]
+
+    def items(self):
+        return [(k, getattr(self, k)) for k in self.keys()]
+
+
+_ORDERED_REFS = ("reject_to", "rebase_bounce_to")
+
+
+class ChainNodeIn(_DictLike):
+    """A chain node as an operator writes it: `tasks` XOR `steps`, never both.
+    Unknown keys ride along -- chain-review artifacts carry a few this layer
+    has never read, and a round trip must not drop them."""
+
+    model_config = ConfigDict(frozen=True, extra="allow")
+
+    id: str
+    tasks: list[str] | None = None
+    steps: list[list[str]] | None = None
+    gate_after: str | None = None
+    fix_loop: Any = None
+    on_failure: Any = None
+    reject_to: Any = None
+    rebase_bounce_to: Any = None
+    auto_escalate: Any = None
+    auto_escalate_stuck: Any = None
+    auto_escalate_delay_s: Any = None
+
+    @model_validator(mode="after")
+    def _one_or_the_other(self) -> ChainNodeIn:
+        if self.tasks is not None and self.steps is not None:
+            raise ValueError(
+                f"node {self.id!r} declares both 'steps' and 'tasks'; a node has one or "
+                "the other -- 'tasks' is the one-group shorthand"
+            )
+        return self
+
+
+class ChainNode(ChainNodeIn):
+    """A chain node as everything downstream reads it: `steps` and `tasks` both
+    always set, in agreement.
 
     The two keys are one fact in two shapes, on purpose. Ordering has exactly
     one consumer (`executor.dispatch.measure_node`); the flat list has twenty,
@@ -94,14 +169,73 @@ def with_steps(node: dict) -> dict:
     frontend, silently, and nesting inside `tasks` would make `n.tasks.length`
     report a group count as a task count.
 
-    Mutates nothing: returns a new dict, because both callers (`materialize`
-    and the chain-review splice) are building fresh node dicts anyway.
+    Normalizes on construction, so a call site cannot forget to. Unlike
+    `ChainNodeIn` it accepts both keys when they agree -- that is what an
+    already-normalized node (the chain-review splice re-validates a normalized
+    tail) looks like.
     """
-    if node.get("steps"):
-        groups = [list(g) for g in node["steps"]]
-    else:
-        groups = [list(node.get("tasks") or [])]
-    return {**node, "steps": groups, "tasks": [t for g in groups for t in g]}
+
+    steps: list[list[str]]
+    tasks: list[str]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        if data.get("steps"):
+            groups = [list(g) for g in data["steps"]]
+        else:
+            groups = [list(data.get("tasks") or [])]
+        return {**data, "steps": groups, "tasks": [t for g in groups for t in g]}
+
+    @model_validator(mode="after")
+    def _one_or_the_other(self) -> ChainNode:
+        return self
+
+    @model_validator(mode="after")
+    def _cross_document(self, info: ValidationInfo) -> ChainNode:
+        """The two rules a shape cannot express, read from validation context:
+        `registry` (every hook the node names must exist) and `preceding` (the
+        ids `reject_to`/`rebase_bounce_to` may name -- the caller includes the
+        node's own id). A key absent from the context skips its rule, so a
+        node built by hand in a test validates as it always did."""
+        ctx = info.context or {}
+        registry = ctx.get("registry")
+        if registry is not None:
+            # A malformed `on_failure` fails its own shape check first; the
+            # `isinstance` only keeps a bare string from being misread as a
+            # list of one-character "hooks".
+            named = [*self.tasks, *(self.on_failure if isinstance(self.on_failure, list) else [])]
+            unknown = sorted({t for t in named if t not in registry.hooks})
+            if unknown:
+                raise PydanticCustomError(
+                    "unknown_hooks",
+                    "hook(s) {hooks} are not in the registry",
+                    {"hooks": unknown},
+                )
+        preceding = ctx.get("preceding")
+        if preceding is not None:
+            for field in _ORDERED_REFS:
+                ref = getattr(self, field)
+                if ref is not None and (not isinstance(ref, str) or ref not in preceding):
+                    raise PydanticCustomError(
+                        "ordered_ref",
+                        "{detail}",
+                        {
+                            "field": field,
+                            "detail": (
+                                f"node {self.id!r} {field!r} must name a node at or before it"
+                            ),
+                        },
+                    )
+        return self
+
+
+def with_steps(node: dict) -> dict:
+    """`node` with both `steps` and `tasks` populated, whichever it was given.
+    A thin wrapper over `ChainNode`, kept for the callers that hold dicts."""
+    return ChainNode.model_validate(node).model_dump(exclude_unset=True)
 
 
 #: The one hook the repo's own test scopes may replace the command of. The
@@ -185,26 +319,89 @@ _ARTIFACT_KIND = re.compile(r"[a-z][a-z0-9_-]*")
 #: work item has already paid for a worktree and a session (Kraft-tff).
 _EFFORT_LEVELS = {"low", "medium", "high", "xhigh", "max"}
 
-#: The keys a `defaults.agent` block may set -- the same closed set an agent
-#: hook's own binding is checked against below, hoisted to module scope so
-#: this list and the defaults-merge pre-pass share one definition instead of
-#: drifting into two. No `_PERMISSION_MODES` beside it any more: the modes a
-#: binding may name are the named harness's own `values:` (leak 9 in the
-#: design spec), since `yolo` is real for gemini and invalid for claude.
-_AGENT_ONLY_KEYS = frozenset(
-    {
-        "profile",
-        "harness",
-        "model",
-        "escalate_model",
-        "deny_tools",
-        "steering",
-        "skill",
-        "artifact",
-        "effort",
-        "allowed_tools",
-        "permission_mode",
-    }
+
+class _Binding(_DictLike):
+    """One `registry.yaml` hook binding. The value checks that need the world
+    (a harness's declared capabilities, the steering and skill files, the forge
+    handler set) still run in `load_registry`; what a kind *may contain* is
+    here, so a new kind or key is one field, not an if/elif and a comment.
+
+    See `_DictLike` for why it reads like a dict.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    # `interactive`/`timeout`/`repos` are UI-facing rather than dispatch-facing
+    # (02 §13): the registry round-trips them through Settings ahead of the
+    # screen/executor that will read them.
+    interactive: bool | None = None
+    timeout: Any = None
+    repos: dict[str, dict] | None = None
+    sandbox: Any = None
+    #: Kind-agnostic on purpose (spec §4): the motivating repair hangs off
+    #: `on.ci.poll`, which is `kind: forge`. Not an agent-only key, so not
+    #: settable through `defaults.agent` either -- a repair silently inherited
+    #: by every agent binding is the opposite of what a per-task repair is for.
+    on_failure: Any = None
+
+
+class BuiltinBinding(_Binding):
+    kind: Literal["builtin"]
+    handler: str
+
+
+class SubprocessBinding(_Binding):
+    kind: Literal["subprocess"]
+    command: list[str]
+    inputs: dict[str, dict] | None = None
+
+
+class ForgeBinding(_Binding):
+    kind: Literal["forge"]
+    handler: str
+    backend: str
+    poll_timeout: Any = None
+    poll_interval: Any = None
+
+
+class AgentBinding(_Binding):
+    kind: Literal["agent"]
+    command: str | None = None
+    profile: str | None = None
+    harness: str | None = None
+    model: Any = None
+    escalate_model: Any = None
+    deny_tools: list[str] | None = None
+    steering: list[str] | None = None
+    skill: Any = None
+    artifact: Any = None
+    #: A validator in `load_registry`, not a `Literal`: its legal values come
+    #: from the named harness's own `values:` (`minimal` is real for codex and
+    #: invalid for claude).
+    effort: Any = None
+    allowed_tools: list[str] | None = None
+    permission_mode: Any = None
+
+
+HookBinding = Annotated[
+    BuiltinBinding | AgentBinding | SubprocessBinding | ForgeBinding,
+    Field(discriminator="kind"),
+]
+_BINDING = TypeAdapter(HookBinding)
+_BINDING_MODELS = {
+    "builtin": BuiltinBinding,
+    "agent": AgentBinding,
+    "subprocess": SubprocessBinding,
+    "forge": ForgeBinding,
+}
+
+#: The keys a `defaults.agent` block may set -- the agent-only ones, derived
+#: from the model so this list and the defaults-merge pre-pass cannot drift. No
+#: `_PERMISSION_MODES` beside it: the modes a binding may name are the named
+#: harness's own `values:` (leak 9 in the design spec), since `yolo` is real
+#: for gemini and invalid for claude.
+_AGENT_ONLY_KEYS = (
+    frozenset(AgentBinding.model_fields) - frozenset(_Binding.model_fields) - {"kind"}
 )
 #: The `_AGENT_ONLY_KEYS` that merge as a list -- default's items first, then
 #: the binding's own, deduped -- rather than binding-wins-or-not.
@@ -231,6 +428,14 @@ class Registry:
 class Template:
     id: str
     nodes: list
+    #: What the file actually says (`list[ChainNodeIn]`), for
+    #: `GET /templates/{tid}`. The same job `Registry.raw` does for
+    #: `GET /registry` -- a round trip must echo what was on disk rather than
+    #: growing keys nobody wrote -- with a type instead of an untyped dict.
+    #: `None` for a `Template` built by hand (most tests). Note
+    #: `_resolve_template_dict` applies `extends`/`remove`/`insert_*` *before*
+    #: this, so it is the resolved-but-not-normalized form.
+    authored: list | None = None
 
 
 @dataclass(frozen=True)
@@ -465,13 +670,6 @@ def load_registry(
                             f"{path.name}: hook {hook!r} {key!r}={one!r} is not accepted "
                             f"by harness {hid!r} ({h.path})"
                         )
-        else:
-            for key in _AGENT_ONLY_KEYS:
-                if key in binding:
-                    raise RegistryError(
-                        f"{path.name}: hook {hook!r} is kind {kind!r}; {key!r} applies "
-                        "only to an agent hook"
-                    )
 
         if "timeout" in binding:
             if kind == "builtin":
@@ -522,32 +720,6 @@ def load_registry(
             except _sandbox.SandboxError as exc:
                 raise RegistryError(str(exc)) from exc
 
-        # Last, so the agent-only keys keep their own sharper message above: a
-        # key nobody reads is a setting that silently does nothing — a
-        # `deny_tool:` typo denies no tool and fails nowhere, the same failure
-        # an unknown *profile* is already rejected for.
-        if kind == "builtin":
-            known = {"kind", "handler"}
-        elif kind == "forge":
-            known = {"kind", "handler", "backend", "poll_timeout", "poll_interval"}
-        else:
-            known = {"kind", "command"}
-        # `interactive`/`timeout`/`repos` are UI-facing rather than
-        # dispatch-facing (02 §13): the registry round-trips them through
-        # Settings today, ahead of the screen/executor that will read them.
-        # `timeout` is rejected for `builtin` above, so this stays a plain
-        # superset with no behaviour change for `builtin`.
-        #
-        # `on_failure` is kind-agnostic on purpose (spec §4): the motivating
-        # repair hangs off `on.ci.poll`, which is `kind: forge`. Deliberately
-        # NOT in `_AGENT_ONLY_KEYS`, and therefore not settable through
-        # `defaults.agent` either -- a repair silently inherited by every
-        # agent binding is the opposite of what a per-task repair is for.
-        known |= {"interactive", "timeout", "repos", "sandbox", "on_failure"}
-        if kind == "subprocess":
-            known.add("inputs")
-        if kind == "agent":
-            known |= _AGENT_ONLY_KEYS
         inputs = binding.get("inputs")
         if inputs is not None:
             if not isinstance(inputs, dict):
@@ -575,12 +747,27 @@ def load_registry(
                     )
         if "interactive" in binding and not isinstance(binding["interactive"], bool):
             raise RegistryError(f"{path.name}: hook {hook!r} 'interactive' must be a boolean")
-        unknown = sorted(set(binding) - known)
-        if unknown:
-            raise RegistryError(
-                f"{path.name}: hook {hook!r} has unknown key(s) {unknown}; "
-                f"a {kind} hook takes {sorted(known)}"
-            )
+        try:
+            data["hooks"][hook] = _BINDING.validate_python(binding)
+        except ValidationError as exc:
+            extras = [e["loc"][-1] for e in exc.errors() if e["type"] == "extra_forbidden"]
+            if extras:
+                # A key nobody reads is a setting that silently does nothing --
+                # a `deny_tool:` typo denies no tool and fails nowhere.
+                agent_only = [k for k in extras if k in _AGENT_ONLY_KEYS]
+                if agent_only and kind != "agent":
+                    raise RegistryError(
+                        f"{path.name}: hook {hook!r} is kind {kind!r}; {agent_only[0]!r} "
+                        "applies only to an agent hook"
+                    ) from exc
+                takes = sorted({"kind", *_BINDING_MODELS[kind].model_fields})
+                raise RegistryError(
+                    f"{path.name}: hook {hook!r} has unknown key(s) {sorted(extras)}; "
+                    f"a {kind} hook takes {takes}"
+                ) from exc
+            err = exc.errors()[0]
+            key = ".".join(str(x) for x in err["loc"][1:])
+            raise RegistryError(f"{path.name}: hook {hook!r} {key!r}: {err['msg']}") from exc
     # Binding-level `on_failure` (spec §4): a repair that travels with the task
     # rather than with whichever node happens to run it. Validated here, after
     # the per-binding loop rather than inside it, because a repair hook is
@@ -733,40 +920,28 @@ def validate_nodes(
     if bad_on_failure is not None:
         return [f"node {bad_on_failure!r} 'on_failure' must be a non-empty list of strings"]
 
-    unknown = sorted(
-        {
-            t
-            for n in nodes
-            # A malformed `on_failure` already failed the shape check above,
-            # so this `isinstance` guard only matters for `load_templates`'s
-            # own not-yet-validated call: without it, a bare string would be
-            # misread as a list of one-character "hooks".
-            for t in [
-                *n["tasks"],
-                *(n["on_failure"] if isinstance(n.get("on_failure"), list) else []),
-            ]
-            if t not in registry.hooks
-        }
-    )
+    # The registry and ordering rules live on `ChainNode`; each node is checked
+    # with the ids it may point back at, and the results are folded into the
+    # same one-message shape this function has always returned.
+    ids = [n["id"] for n in nodes]
+    unknown: set[str] = set()
+    misordered: list[tuple[int, int, str]] = []
+    for i, n in enumerate(nodes):
+        context = {"registry": registry, "preceding": {*preceding_ids, *ids[: i + 1]}}
+        try:
+            ChainNode.model_validate(n, context=context)
+        except ValidationError as exc:
+            for err in exc.errors():
+                if err["type"] == "unknown_hooks":
+                    unknown.update(err["ctx"]["hooks"])
+                elif err["type"] == "ordered_ref":
+                    misordered.append((_ORDERED_REFS.index(err["ctx"]["field"]), i, err["msg"]))
+                else:
+                    return [first_error(exc, "node")]
     if unknown:
-        return [f"hook(s) {unknown} are not in the registry"]
-
-    at = {n["id"]: i for i, n in enumerate(nodes)}
-    for field in ("reject_to", "rebase_bounce_to"):
-        bad = next(
-            (
-                n["id"]
-                for i, n in enumerate(nodes)
-                if n.get(field) is not None
-                and (
-                    not isinstance(n[field], str)
-                    or (n[field] not in preceding_ids and at.get(n[field], len(nodes)) > i)
-                )
-            ),
-            None,
-        )
-        if bad is not None:
-            return [f"node {bad!r} {field!r} must name a node at or before it"]
+        return [f"hook(s) {sorted(unknown)} are not in the registry"]
+    if misordered:
+        return [min(misordered)[2]]
 
     return []
 
@@ -1007,12 +1182,20 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
         if node_errors:
             invalid[tid] = f"template {tid!r}: {node_errors[0]}"
             continue
+        # A file carrying both keys in agreement loads (it always did); its
+        # authored form is the `steps` one.
+        authored = [
+            ChainNodeIn.model_validate(
+                {k: v for k, v in n.items() if not (k == "tasks" and n.get("steps"))}
+            )
+            for n in nodes
+        ]
         # `validate_nodes` normalizes its own local copy to check a `steps`
         # node's shape; `Template.nodes` needs that same normalization; a
         # `steps`-only node otherwise reaches `materialize` (and every test
         # or caller reading `n["tasks"]` directly off `Template.nodes`) with
         # no `tasks` key at all.
-        nodes = [with_steps(n) for n in nodes]
+        nodes = [ChainNode.model_validate(n) for n in nodes]
 
         bad_loop = next(
             (
@@ -1115,7 +1298,7 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
             )
             continue
 
-        valid[tid] = Template(id=tid, nodes=nodes)
+        valid[tid] = Template(id=tid, nodes=nodes, authored=authored)
 
     return TemplateSet(valid=valid, invalid=invalid)
 

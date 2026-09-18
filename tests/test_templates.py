@@ -2087,3 +2087,44 @@ def test_verify_keeps_the_suite_and_the_review_in_one_group():
         ["on.env.prepare"],
         ["on.test.run", "on.review.local.run"],
     ]
+
+
+def test_a_normalized_node_cannot_be_built_without_both_keys():
+    """`with_steps` was called from five places; a model normalizes on
+    construction, so a sixth call site cannot forget."""
+    from kraft.templates import ChainNode
+
+    n = ChainNode.model_validate({"id": "verify", "steps": [["a"], ["b"]]})
+    assert n.tasks == ["a", "b"]
+    n2 = ChainNode.model_validate({"id": "verify", "tasks": ["a", "b"]})
+    assert n2.steps == [["a", "b"]]
+
+
+def test_an_authored_node_may_not_declare_both_keys():
+    from pydantic import ValidationError
+
+    from kraft.templates import ChainNodeIn
+
+    with pytest.raises(ValidationError) as exc:
+        ChainNodeIn.model_validate({"id": "verify", "tasks": ["a"], "steps": [["a"]]})
+    assert "steps" in str(exc.value) and "tasks" in str(exc.value)
+
+
+def test_a_node_naming_an_unregistered_hook_is_rejected_with_the_hook_named():
+    from kraft.templates import ChainNode, Registry
+
+    with pytest.raises(Exception) as exc:  # noqa: B017 -- pydantic's ValidationError
+        ChainNode.model_validate(
+            {"id": "verify", "tasks": ["on.nope"]},
+            context={"registry": Registry(hooks={})},
+        )
+    assert "on.nope" in str(exc.value)
+
+
+def test_a_backward_reject_to_may_name_an_earlier_node_but_not_a_later_one():
+    from kraft.templates import ChainNode
+
+    ctx = {"preceding": ("spec", "plan")}
+    ChainNode.model_validate({"id": "verify", "tasks": [], "reject_to": "plan"}, context=ctx)
+    with pytest.raises(Exception):  # noqa: B017 -- pydantic's ValidationError
+        ChainNode.model_validate({"id": "verify", "tasks": [], "reject_to": "merge"}, context=ctx)

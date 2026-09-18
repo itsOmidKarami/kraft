@@ -44,11 +44,8 @@ def test_template_put_validates_before_it_writes(client, templates_dir):
     assert yaml.safe_load((templates_dir / "scratch.yaml").read_text())["id"] == "scratch"
     # the new template is live without a restart
     assert any(t["id"] == "scratch" for t in client.get("/api/templates").json())
-    # `load_templates` normalizes every node with `with_steps`, so a plain
-    # `tasks` node round-trips with a derived `steps` key too.
-    assert client.get("/api/templates/scratch").json()["nodes"] == [
-        {**n, "steps": [n["tasks"]]} for n in NODES
-    ]
+    # GET echoes the nodes as written -- no derived `steps` key.
+    assert client.get("/api/templates/scratch").json()["nodes"] == NODES
     assert client.get("/api/templates/nope").status_code == 404
 
 
@@ -252,3 +249,34 @@ def test_hook_runs_lists_recent_sessions_for_the_hook(tmp_path, client, template
     runs = client.get("/api/registry/on.test.run/runs").json()["runs"]
     assert runs[0]["node_id"] == "verify"  # newest first
     assert len(runs) == 2
+
+
+@pytest.fixture
+def shapes(client, templates_dir):
+    authored = [
+        {"id": "env_setup", "tasks": ["on.env.prepare"]},
+        {"id": "verify", "steps": [["on.test.run"]]},
+    ]
+    (templates_dir / "shapes.yaml").write_text(
+        yaml.safe_dump({"id": "shapes", "nodes": authored}, sort_keys=False)
+    )
+    assert client.post("/api/templates/reload").status_code == 200
+    return authored
+
+
+def test_get_template_returns_the_authored_nodes_not_the_normalized_ones(client, shapes):
+    """The Templates page rendered a node carrying BOTH tasks and steps -- a
+    shape the chain-review skill and docsite both call illegal and no operator
+    wrote -- because GET returned the normalized nodes. PUT writes what it is
+    handed straight back to disk, so one save rewrote the operator's file."""
+    by_id = {n["id"]: n for n in client.get("/api/templates/shapes").json()["nodes"]}
+    assert "steps" not in by_id["env_setup"], "a tasks-only node must round-trip as tasks-only"
+    assert "tasks" not in by_id["verify"], "a steps-only node must round-trip as steps-only"
+
+
+def test_a_template_survives_a_get_then_put_round_trip(client, templates_dir, shapes):
+    """Open the page, save: an untouched round trip must be a no-op."""
+    nodes = client.get("/api/templates/shapes").json()["nodes"]
+    assert client.put("/api/templates/shapes", json={"nodes": nodes}).status_code == 200
+    after = yaml.safe_load((templates_dir / "shapes.yaml").read_text())
+    assert after["nodes"] == shapes
