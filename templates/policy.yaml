@@ -38,6 +38,11 @@ budget:
 # limit wait can run for hours, this only counts attempts.
 rate_limit_retries: 5
 
+# Seconds one forge CLI call (gh/glab/git) may run before it is killed and
+# reported as a forge error. Bounds a single call, not a pipeline wait (that is
+# loops.ci_wait). Raise it on a slow forge. Read at startup.
+forge_cli_timeout_s: 120
+
 # Completed/abandoned items older than this get auto-archived (UI v2 · 03).
 # The board's Done group header states this number, so keep them in sync.
 archive:

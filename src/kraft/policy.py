@@ -113,6 +113,10 @@ class Policy:
     #: anyway isn't preempted by the agent (Kraft-vyk8). 0, the default, is
     #: today's immediate-fire behaviour, unchanged.
     auto_escalate_delay_s: int = 0
+    #: Seconds one forge CLI call (`gh`/`glab`/`git`) may run before it is killed
+    #: and raised as a `ForgeError`. Bounds a single invocation, not a pipeline
+    #: wait -- that is `loops.ci_wait`.
+    forge_cli_timeout_s: float = 120.0
 
 
 def _field_error(name: str, exc: ValidationError) -> PolicyError:
@@ -279,6 +283,9 @@ def load_policy(path: str | Path) -> Policy:
     raw_delay = data.get("auto_escalate_delay_s", 0)
     if not isinstance(raw_delay, int) or isinstance(raw_delay, bool) or raw_delay < 0:
         raise PolicyError(f"{path.name}: 'auto_escalate_delay_s' must be a non-negative int")
+    raw_fct = data.get("forge_cli_timeout_s", 120)
+    if not isinstance(raw_fct, int | float) or isinstance(raw_fct, bool) or raw_fct <= 0:
+        raise PolicyError(f"{path.name}: 'forge_cli_timeout_s' must be a positive number")
     return Policy(
         loops=loops,
         default=_cap("default", data["default"]),
@@ -291,6 +298,7 @@ def load_policy(path: str | Path) -> Policy:
         auto_escalate_stuck=raw_aes,
         auto_escalate_stuck_cap=raw_aes_cap,
         auto_escalate_delay_s=raw_delay,
+        forge_cli_timeout_s=float(raw_fct),
     )
 
 

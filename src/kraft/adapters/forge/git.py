@@ -12,8 +12,19 @@ from kraft import sandbox
 from kraft.adapters.forge.models import ForgeError
 from kraft.config import git_read, main_ignore_args
 
+#: Per-call cap, set from `policy.forge_cli_timeout_s` at startup. `subprocess.run`
+#: with no timeout blocks its thread forever on a stalled `gh`, and no deadline
+#: in `poll_ci` reaches into that thread.
+CLI_TIMEOUT_S = 120.0
 
-async def run_git(repo: Path, args: list[str], *, env: dict[str, str] | None = None) -> str:
+
+async def run_git(
+    repo: Path,
+    args: list[str],
+    *,
+    env: dict[str, str] | None = None,
+    timeout: float | None = None,
+) -> str:
     """One forge CLI call.
 
     FileNotFoundError becomes ForgeError so a binary that is missing, or a
@@ -24,10 +35,22 @@ async def run_git(repo: Path, args: list[str], *, env: dict[str, str] | None = N
     which carries `sandbox.harden_host_git_env`'s pinned `core.hooksPath`.
     `push` is the one caller that overrides it.
     """
+    if timeout is None:
+        timeout = CLI_TIMEOUT_S
     try:
+        # `to_thread` can't be cancelled, so the kill has to be subprocess.run's
+        # own. Every call here is a read or idempotent, so abandoning one is safe.
         done = await asyncio.to_thread(
-            subprocess.run, args, cwd=repo, capture_output=True, text=True, env=env
+            subprocess.run,
+            args,
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=timeout,
         )
+    except subprocess.TimeoutExpired as exc:
+        raise ForgeError(f"{' '.join(args)} timed out after {timeout:g}s") from exc
     except FileNotFoundError as exc:
         raise ForgeError(f"{args[0]} is not installed or not on PATH") from exc
     if done.returncode != 0:

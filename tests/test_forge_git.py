@@ -431,3 +431,12 @@ def test_commits_on_a_branch_without_origin_main_is_empty_not_an_error(tmp_path)
     repo = make_repo(tmp_path)
 
     assert asyncio.run(forge.commits_on(repo, "kraft/nope")) == ()
+
+
+def test_a_hanging_cli_call_is_killed_and_raises(tmp_path):
+    """poll_ci's deadline gates asyncio.sleep, never the subprocess inside the
+    loop; a stalled gh blocked forever and a 300s cap ran for 16 minutes."""
+    from kraft.adapters.forge import git as forge_git
+
+    with pytest.raises(forge.ForgeError, match="timed out"):
+        asyncio.run(forge_git.run_git(tmp_path, ["sleep", "30"], timeout=0.5))

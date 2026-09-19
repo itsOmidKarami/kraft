@@ -7,7 +7,7 @@ from pathlib import Path
 
 from kraft.adapters.forge import git
 from kraft.adapters.forge import mr as mr_ops
-from kraft.adapters.forge.models import MR, CIState, CIStatus, FailedJob, MRRef
+from kraft.adapters.forge.models import MR, CIState, CIStatus, FailedJob, ForgeError, MRRef
 
 _GH_MR_STATES: dict[str, str] = {"OPEN": "open", "MERGED": "merged", "CLOSED": "closed"}
 
@@ -129,7 +129,10 @@ class GhCli:
         mergeable = mr_ops.mergeable(*states)
         block_reason = mr_ops.classify_block_reason(*states)
         detail = "/".join(s for s in states if s)
-        sha = str(data.get("headRefOid") or "")
+        # Not `headRefOid`: that is the PR's own head, the very value render_ci's
+        # freshness guard compares against, so it could never disagree. The sha
+        # is the one the checks' runs belong to, or "" when that can't be told.
+        sha = await self._checks_sha(repo, data.get("statusCheckRollup") or [])
         # gh's "no checks yet" (empty statusCheckRollup) stays "pending",
         # unchanged -- that is a precursor state (checks not yet registered),
         # not GitLab's *settled*-red-with-zero-jobs case Kraft-ddxn is about,
@@ -179,6 +182,34 @@ class GhCli:
             sha=sha,
             failed_jobs=failed_jobs,
         )
+
+    async def _checks_sha(self, repo: Path, rollup: list[dict]) -> str:
+        """The single head sha the rollup's Actions runs were built from.
+
+        `statusCheckRollup` entries carry no sha, only a `detailsUrl` naming the
+        run, so `gh run list` maps run id to `headSha`. `""` -- the guard stays
+        inert -- when the checks span shas, name no run, or the lookup fails.
+        """
+        ids = {
+            m.group(1) for c in rollup if (m := _RUN_ID_RE.search(str(c.get("detailsUrl") or "")))
+        }
+        if not ids:
+            return ""
+        try:
+            raw = await git.run_git(
+                repo, ["gh", "run", "list", "-L", "100", "--json", "databaseId,headSha"]
+            )
+            rows = mr_ops.parse_json(raw, "gh run list")
+        except ForgeError:
+            return ""
+        if not isinstance(rows, list):
+            return ""
+        shas = {
+            str(r.get("headSha") or "")
+            for r in rows
+            if isinstance(r, dict) and str(r.get("databaseId")) in ids
+        }
+        return shas.pop() if len(shas) == 1 else ""
 
     async def branch_ci_status(
         self, *, repo: Path, branch: str, head_sha: str, pipeline_id: str = ""

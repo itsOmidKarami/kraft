@@ -23,6 +23,7 @@ from kraft import intake as intake_mod
 from kraft import notify as notify_mod
 from kraft import policy as policy_mod
 from kraft import triggers as triggers_mod
+from kraft.adapters.forge import git as forge_git
 from kraft.api import deps
 from kraft.db import Database
 from kraft.index import db as index_db
@@ -151,6 +152,8 @@ async def lifespan(app: FastAPI):
     app.state.registry = registry
     app.state.templates = templates
     app.state.policy = policy_obj
+    if policy_obj:
+        forge_git.CLI_TIMEOUT_S = policy_obj.forge_cli_timeout_s
     app.state.access = access
     # What the server is really listening on. __main__ reads access.yaml for this,
     # so they normally agree — until someone saves a new bind and has not restarted.
