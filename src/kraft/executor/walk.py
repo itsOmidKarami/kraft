@@ -267,6 +267,17 @@ async def recover_node(
     )
 
 
+async def _stop_at_moved_base(db, work_item_id: str, node: dict) -> str:
+    """A step moved `base_ref` in a node that declares `rebase_bounce_to`: the
+    node stops there and completes like a clean pass -- the steps it did not run
+    are the ones the bounce skips, and `run_once` reads the moved base_ref right
+    after this returns and bounces, re-running from the target against the new
+    base. The one place that decision is made, for the step boundary and the
+    conflict resolver alike."""
+    await db.write(lambda c: store.complete_node(c, work_item_id, node["id"]))
+    return "ok"
+
+
 async def walk_node(
     db,
     run_dirs,
@@ -335,12 +346,7 @@ async def walk_node(
         if verdict == INFRA_STOP:
             return await stops.stop_for_infra(db, work_item_id, node)
         if verdict == BASE_MOVED:
-            # Not a failure: the rebase stopped the node deliberately. Complete
-            # it like a clean pass -- `run_once` reads the moved base_ref right
-            # after this returns and bounces, re-running the node from its
-            # first step against the new base.
-            await db.write(lambda c: store.complete_node(c, work_item_id, node["id"]))
-            return "ok"
+            return await _stop_at_moved_base(db, work_item_id, node)
         if verdict == BUDGET:
             return await stops.stop_for_budget(db, work_item_id, node, budget)
         if verdict == "failed":
@@ -410,10 +416,7 @@ async def walk_node(
                         # would mark it done with the later steps never
                         # dispatched.
                         if node.get("rebase_bounce_to"):
-                            await db.write(
-                                lambda c: store.complete_node(c, work_item_id, node["id"])
-                            )
-                            return "ok"
+                            return await _stop_at_moved_base(db, work_item_id, node)
                         return await walk_node(
                             db,
                             run_dirs,
@@ -520,6 +523,10 @@ async def walk_node(
             return await stops.stop_for_waiting(db, work_item_id, node)
         if verdict == INFRA_STOP:
             return await stops.stop_for_infra(db, work_item_id, node)
+        if verdict == BASE_MOVED:
+            # Same decision as the node without a fix loop: not a failure, so
+            # no fix cycle is spent on code the bounce is about to re-measure.
+            return await _stop_at_moved_base(db, work_item_id, node)
         if verdict == BUDGET:
             return await stops.stop_for_budget(db, work_item_id, node, budget)
 
