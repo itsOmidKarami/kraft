@@ -10,6 +10,7 @@ one moment the fix is cheap.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -60,4 +61,49 @@ def test_every_node_field_is_named_in_the_markdown_mirror(path: str) -> None:
     assert not missing, (
         f"ChainNodeIn has {missing} and {path} does not name them "
         f"({what}, the block starting {start!r}). Add them there."
+    )
+
+
+#: path -> (interface name, what it is)
+INTERFACES = {
+    "frontend/src/types/work_item.ts": ("ChainNode", "the board's node type"),
+    "frontend/src/types/settings.ts": ("TemplateNode", "the Settings editor's node type"),
+}
+
+
+def _interface_body(path: str, name: str) -> str:
+    text = (ROOT / path).read_text()
+    match = re.search(rf"export interface {name} \{{(.*?)\n\}}", text, re.S)
+    assert match, f"{path} no longer declares `export interface {name}`"
+    return match.group(1)
+
+
+@pytest.mark.parametrize("path", sorted(INTERFACES))
+def test_every_node_field_is_declared_or_named_in_the_interface(path: str) -> None:
+    """A field may be absent from the keys only if the block says why.
+
+    `settings.ts`'s `TemplateNode` leaves out `rebase_bounce_to` on purpose: it
+    carries `[key: string]: unknown`, so the serializer round-trips keys the
+    form does not render, and a comment names that exact field. That is a
+    better answer than listing it, so the rule is "declared or explained".
+    """
+    name, what = INTERFACES[path]
+    body = _interface_body(path, name)
+    keys = set(re.findall(r"^\s{2}(\w+)\??:", body, re.M))
+    missing = [f for f in FIELDS if f not in keys and f not in body]
+    assert not missing, (
+        f"ChainNodeIn has {missing} and {path}'s `{name}` ({what}) neither "
+        "declares them nor mentions them in a comment. Add the fields, or a "
+        "comment saying why they are left out."
+    )
+
+
+@pytest.mark.parametrize("path", sorted(INTERFACES))
+def test_the_interface_declares_no_field_the_model_dropped(path: str) -> None:
+    name, what = INTERFACES[path]
+    keys = set(re.findall(r"^\s{2}(\w+)\??:", _interface_body(path, name), re.M))
+    surplus = sorted(keys - set(FIELDS))
+    assert not surplus, (
+        f"{path}'s `{name}` ({what}) declares {surplus}, which ChainNodeIn "
+        "does not have. Remove them, or add them to the model."
     )
