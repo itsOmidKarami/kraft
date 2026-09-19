@@ -555,6 +555,26 @@ def test_validate_agent_overrides_still_rejects_non_string_model():
     assert errs == ["agent_overrides 'model' must be a string or null"]
 
 
+def test_node_override_schema_rejects_unknown_fields():
+    errs = templates.validate_node_override_fields({"not_a_setting": True})
+    assert errs == ["cannot override ['not_a_setting']"]
+
+
+def test_node_override_schema_rejects_explicit_invalid_bounds():
+    assert templates.validate_node_override_fields({"attempts": 0}) == [
+        "attempts must be a positive int"
+    ]
+    assert templates.validate_node_override_fields({"auto_escalate_delay_s": -1}) == [
+        "auto_escalate_delay_s must be a non-negative int"
+    ]
+
+
+def test_node_override_schema_preserves_sparse_explicit_nulls():
+    override = templates.NodeOverride.model_validate({"model": None, "effort": "high"})
+    assert override.model_fields_set == {"model", "effort"}
+    assert override.model_dump(exclude_unset=True) == {"model": None, "effort": "high"}
+
+
 def test_unknown_gate_after_quarantines_template(tmp_path):
     d = _dir(
         tmp_path,

@@ -4,7 +4,7 @@ import copy
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal, get_args
 
 import yaml
 from pydantic import (
@@ -27,7 +27,6 @@ from kraft import skill as _skill
 from kraft import steering as _steering
 from kraft.config import first_error
 from kraft.paths import default_skills_dir
-from kraft.store import OVERRIDABLE_NODE_FIELDS
 
 if TYPE_CHECKING:
     from kraft import harness
@@ -314,7 +313,8 @@ _ARTIFACT_KIND = re.compile(r"[a-z][a-z0-9_-]*")
 #: `minimal` is real for codex and invalid for claude. Checked at config load
 #: rather than at dispatch: a typo reaching the CLI fails the node *after* the
 #: work item has already paid for a worktree and a session (Kraft-tff).
-_EFFORT_LEVELS = {"low", "medium", "high", "xhigh", "max"}
+Effort = Literal["low", "medium", "high", "xhigh", "max"]
+_EFFORT_LEVELS = set(get_args(Effort))
 
 
 class _Binding(_DictLike):
@@ -899,28 +899,65 @@ def validate_nodes(
     return []
 
 
-def validate_model_effort_fields(overrides: dict) -> list[str]:
-    """The type/membership rules `model`, `escalate_model`, and `effort` are
-    held to wherever one appears as an override -- a work item's own
-    `agent_overrides` (`validate_agent_overrides` below) and a per-node
-    override (`kraft.api.routes.work_items._validate_node_overrides`,
-    Kraft-df4tc) and a chain-review-proposed `proposed_node_overrides`
-    (`kraft.api.routes.gates._splice_chain_review`, same bead). One field-
-    level check, three callers, so none of them can drift into a different
-    idea of a valid `effort` (Kraft-unk's reasoning, at the field level
-    rather than the whole-object level `validate_agent_overrides` already
-    applies it at).
+class ModelEffortOverride(BaseModel):
+    """The reusable model/effort override shape. Defaults are deliberately
+    omitted by callers with `exclude_unset=True`, so `None` means an explicit
+    reset for the model fields rather than an override that was not supplied."""
 
-    Returns error strings with no `agent_overrides`/node-id prefix -- each
-    caller's own message already carries the context a bare "'effort' must
-    be one of..." needs.
-    """
-    for key in ("model", "escalate_model"):
-        if key in overrides and overrides[key] is not None and not isinstance(overrides[key], str):
-            return [f"{key!r} must be a string or null"]
-    if "effort" in overrides and overrides["effort"] not in _EFFORT_LEVELS:
-        return [f"'effort' must be one of {sorted(_EFFORT_LEVELS)}; got {overrides['effort']!r}"]
+    model_config = ConfigDict(extra="forbid")
+
+    model: StrictStr | None = None
+    escalate_model: StrictStr | None = None
+    effort: Effort = Field(default=None)
+
+
+class AgentOverride(ModelEffortOverride):
+    pass
+
+
+class ProposedNodeOverride(ModelEffortOverride):
+    pass
+
+
+class NodeOverride(ModelEffortOverride):
+    auto_escalate: StrictBool = Field(default=None)
+    auto_escalate_stuck: StrictBool = Field(default=None)
+    auto_escalate_delay_s: Annotated[StrictInt, Field(ge=0)] = Field(default=None)
+    attempts: Annotated[StrictInt, Field(ge=1)] = Field(default=None)
+    wall_clock_s: Annotated[StrictInt, Field(ge=1)] = Field(default=None)
+
+
+def _override_errors(
+    schema: type[BaseModel], values: object, *, unknown: str, object_name: str | None = None
+) -> list[str]:
+    """Translate typed-schema errors into the terse, caller-owned API errors."""
+    try:
+        schema.model_validate(values)
+    except ValidationError as exc:
+        errors = exc.errors()
+        extras = sorted(
+            str(error["loc"][0]) for error in errors if error["type"] == "extra_forbidden"
+        )
+        if extras:
+            return [unknown.format(extras=extras)]
+        if not isinstance(values, dict):
+            return [f"{object_name} must be an object" if object_name else "must be an object"]
+        error = errors[0]
+        field = str(error["loc"][0])
+        if field in {"model", "escalate_model"}:
+            return [f"{field!r} must be a string or null"]
+        if field == "effort":
+            return [f"'effort' must be one of {sorted(_EFFORT_LEVELS)}; got {values[field]!r}"]
+        if field in {"auto_escalate", "auto_escalate_stuck"}:
+            return [f"{field} must be a boolean"]
+        if field == "auto_escalate_delay_s":
+            return ["auto_escalate_delay_s must be a non-negative int"]
+        return [f"{field} must be a positive int"]
     return []
+
+
+def validate_model_effort_fields(overrides: dict) -> list[str]:
+    return _override_errors(ModelEffortOverride, overrides, unknown="cannot override {extras}")
 
 
 #: The only fields a chain-review artifact's `proposed_node_overrides` may
@@ -938,10 +975,7 @@ def validate_proposed_node_overrides(proposed: dict) -> list[str]:
     type checks. Anything else -- `auto_escalate` included -- is never the
     reviewer's to set (Kraft-df4tc).
     """
-    extra = set(proposed) - PROPOSABLE_NODE_OVERRIDE_FIELDS
-    if extra:
-        return [f"cannot propose {sorted(extra)}"]
-    return validate_model_effort_fields(proposed)
+    return _override_errors(ProposedNodeOverride, proposed, unknown="cannot propose {extras}")
 
 
 def validate_node_override_fields(fields: dict) -> list[str]:
@@ -959,37 +993,7 @@ def validate_node_override_fields(fields: dict) -> list[str]:
     Returns error strings with no node-id prefix -- each caller's own message
     already carries that context.
     """
-    extra = set(fields) - OVERRIDABLE_NODE_FIELDS
-    if extra:
-        return [f"cannot override {sorted(extra)}"]
-    if "auto_escalate" in fields and not isinstance(fields["auto_escalate"], bool):
-        return ["auto_escalate must be a boolean"]
-    if "auto_escalate_stuck" in fields and not isinstance(fields["auto_escalate_stuck"], bool):
-        return ["auto_escalate_stuck must be a boolean"]
-    if "auto_escalate_delay_s" in fields and (
-        not isinstance(fields["auto_escalate_delay_s"], int)
-        or isinstance(fields["auto_escalate_delay_s"], bool)
-        or fields["auto_escalate_delay_s"] < 0
-    ):
-        return ["auto_escalate_delay_s must be a non-negative int"]
-    if "attempts" in fields and (
-        not isinstance(fields["attempts"], int)
-        or isinstance(fields["attempts"], bool)
-        or fields["attempts"] < 1
-    ):
-        return ["attempts must be a positive int"]
-    if "wall_clock_s" in fields and (
-        not isinstance(fields["wall_clock_s"], int)
-        or isinstance(fields["wall_clock_s"], bool)
-        or fields["wall_clock_s"] < 1
-    ):
-        return ["wall_clock_s must be a positive int"]
-    model_effort = {k: v for k, v in fields.items() if k in ("model", "escalate_model", "effort")}
-    if model_effort:
-        errs = validate_model_effort_fields(model_effort)
-        if errs:
-            return errs
-    return []
+    return _override_errors(NodeOverride, fields, unknown="cannot override {extras}")
 
 
 def validate_agent_overrides(overrides: dict) -> list[str]:
@@ -1006,15 +1010,19 @@ def validate_agent_overrides(overrides: dict) -> list[str]:
 
     Returns error strings, empty if valid.
     """
-    if not isinstance(overrides, dict):
-        return ["agent_overrides must be an object"]
-    unknown = sorted(set(overrides) - {"model", "escalate_model", "effort"})
-    if unknown:
-        return [
-            f"agent_overrides has unknown key(s) {unknown}; only model, "
+    errors = _override_errors(
+        AgentOverride,
+        overrides,
+        unknown=(
+            "agent_overrides has unknown key(s) {extras}; only model, "
             "escalate_model, effort are allowed"
-        ]
-    return [f"agent_overrides {e}" for e in validate_model_effort_fields(overrides)]
+        ),
+        object_name="agent_overrides",
+    )
+    return [
+        f"agent_overrides {error}" if not error.startswith("agent_overrides") else error
+        for error in errors
+    ]
 
 
 #: The keys `_resolve_template_dict` treats as composition -- meaningless,
