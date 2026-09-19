@@ -609,6 +609,7 @@ async def measure_node(
     launch: LaunchContext | None = None,
     budget: _policy.Budget = _policy.NO_BUDGET,
     loop_severities: frozenset[str] = _policy.DEFAULT_LOOP_SEVERITIES,
+    start_step: int = 0,
 ) -> tuple[str, list[str], list[BaseException]]:
     await db.write(lambda c, node=node: store.enter_node(c, work_item_id, node["id"]))
 
@@ -743,9 +744,16 @@ async def measure_node(
     # the fix loop and the on_failure repair.
     outcomes: list[tuple[str, object]] = []
     for index, group in enumerate(groups):
-        # Recorded before the group runs, not after, so a crash mid-group
-        # resumes at that group rather than past it.
-        await db.write(lambda c, i=index: store.set_current_step(c, work_item_id, i))
+        # A resumed node skips the groups before `start_step` -- they already
+        # passed -- EXCEPT its rebase step: detecting drift is that step's whole
+        # job, and skipping it is how a moved base goes unnoticed.
+        if index < start_step:
+            if not any(is_rebase_hook(registry, t) for t in group):
+                continue
+        else:
+            # Recorded before the group runs, not after, so a crash mid-group
+            # resumes at that group rather than past it.
+            await db.write(lambda c, i=index: store.set_current_step(c, work_item_id, i))
         group_results = await asyncio.gather(*(_measure(t) for t in group), return_exceptions=True)
         outcomes.extend(zip(group, group_results, strict=True))
         # Anything but a clean pass stops the node: a later group exists
@@ -798,6 +806,12 @@ async def measure_node(
     if failed:
         return "failed", failed, excs
     return "ok", [], []
+
+
+def is_rebase_hook(registry: Registry, hook: str) -> bool:
+    """Whether `hook` is bound to the rebase builtin. Read from the binding, not
+    the name, so a repo that rebinds `on.mr.rebase` keeps the resume exemption."""
+    return registry.hooks.get(hook, {}).get("handler") == "mr_rebase"
 
 
 #: A task in one of these states failed outright -- the same set

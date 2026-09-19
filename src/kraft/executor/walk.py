@@ -279,6 +279,7 @@ async def walk_node(
     policy: _policy.Policy | None = None,
     steer: Steer | None = None,
     launch: LaunchContext | None = None,
+    start_step: int = 0,
 ) -> str:
     key = node.get("fix_loop")
     # Which severities open a fix cycle -- and therefore, by subtraction, which
@@ -316,6 +317,7 @@ async def walk_node(
             launch=launch,
             budget=budget,
             loop_severities=loop_severities,
+            start_step=start_step,
         )
         if verdict == "paused":
             return "paused"
@@ -474,6 +476,10 @@ async def walk_node(
     # `round` now seeds from the counter the two are different questions, and
     # every site that meant the former needs saying so out loud.
     _first_iteration = True
+    # Where the next measurement resumes: the caller's step on the first pass,
+    # then the group that stopped the last one, so a retry does not re-run
+    # groups that already passed (the rebase step still does).
+    resume_step = start_step
     while True:
         verdict, failed, _excs = await dispatch.measure_node(
             db,
@@ -488,6 +494,14 @@ async def walk_node(
             launch=launch,
             budget=budget,
             loop_severities=loop_severities,
+            start_step=resume_step,
+        )
+        # Read before any repair runs: a repair measures a rewritten node and
+        # moves the cursor itself.
+        resume_step = db.read(
+            lambda c: c.execute(
+                "SELECT current_step FROM work_items WHERE id = ?", (work_item_id,)
+            ).fetchone()[0]
         )
         if verdict == "paused":
             return "paused"
@@ -1120,6 +1134,7 @@ async def run_once(
     registry: Registry,
     bd_cwd: str | None = None,
     start_index: int = 0,
+    start_step: int = 0,
     policy: _policy.Policy | None = None,
     steer: str | None = None,
     steer_source: str = "human",
@@ -1210,6 +1225,7 @@ async def run_once(
         return "needs_human"
 
     i = start_index
+    step = start_step
     while i < len(nodes):
         # Kraft-e7pm: a session verdict of "paused" is not the only way a walk
         # has to stop. Pausing between two nodes' dispatches leaves no live
@@ -1238,7 +1254,9 @@ async def run_once(
             # the next agent to run and no later one
             steer=carried,
             launch=launch,
+            start_step=step,
         )
+        step = 0  # only the entry node resumes mid-way
         if result in ("paused", "needs_human", RATE_LIMITED, WAITING):
             # This call is ending without giving `node` -- or any later node
             # in this same run_once, since none of these statuses continue
@@ -1318,6 +1336,7 @@ async def run(
     registry: Registry,
     bd_cwd: str | None = None,
     start_index: int = 0,
+    start_step: int = 0,
     policy: _policy.Policy | None = None,
     steer: str | None = None,
     steer_source: str = "human",
@@ -1331,6 +1350,7 @@ async def run(
         registry=registry,
         bd_cwd=bd_cwd,
         start_index=start_index,
+        start_step=start_step,
         policy=policy,
         steer=steer,
         steer_source=steer_source,

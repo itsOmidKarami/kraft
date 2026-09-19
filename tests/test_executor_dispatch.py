@@ -3003,3 +3003,44 @@ def test_measure_node_records_the_group_it_reached(tmp_path, monkeypatch):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_a_resumed_node_skips_passed_groups_but_still_runs_its_rebase_step(tmp_path, monkeypatch):
+    """Skipping the rebase on a resume is how a moved base goes unnoticed. The
+    rebase is found through its binding, not its name."""
+
+    async def scenario():
+        database, rd, worktree, wid, row = await _setup_measure_node_scenario(tmp_path)
+        try:
+            dispatched = []
+
+            async def fake_dispatch_node(db_, run_dirs_, task_hook, node, row_, reg, wt, **kw):
+                dispatched.append(task_hook)
+                return "done"
+
+            monkeypatch.setattr(dispatch, "dispatch_node", fake_dispatch_node)
+            registry = Registry(
+                hooks={
+                    "on.sync": {"kind": "builtin", "handler": "mr_rebase"},
+                    "on.prep": {"kind": "builtin", "handler": "noop"},
+                    "on.test": {"kind": "builtin", "handler": "noop"},
+                    "on.poll": {"kind": "builtin", "handler": "noop"},
+                },
+                raw={},
+            )
+            steps = [["on.sync"], ["on.prep"], ["on.test"], ["on.poll"]]
+            node = {"id": "n", "tasks": [t for g in steps for t in g], "steps": steps}
+            await dispatch.measure_node(
+                database, rd, wid, node, row, registry, worktree, round=0, start_step=3
+            )
+            assert dispatched == ["on.sync", "on.poll"]
+            cursor = database.read(
+                lambda c: c.execute(
+                    "SELECT current_step FROM work_items WHERE id = ?", (wid,)
+                ).fetchone()[0]
+            )
+            assert cursor == 3
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())

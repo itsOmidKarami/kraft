@@ -169,3 +169,28 @@ def test_tick_does_not_re_enter_a_row_its_own_previous_tick_already_claimed(tmp_
         assert _status(app) != "waiting"
 
     _run(lambda: _stub(tmp_path), body)
+
+
+def test_a_ci_wait_reentry_resumes_at_the_waiting_group(tmp_path, monkeypatch):
+    """Re-entry recomputed start from current_node_id alone, so a node whose
+    waiting step was its fourth re-ran the first three -- a paid agent session
+    per poll tick on a node that opens the MR."""
+    from kraft import executor
+
+    seen = {}
+
+    async def fake_run(*args, **kw):
+        seen.update(kw)
+        return "waiting"
+
+    monkeypatch.setattr(executor, "run", fake_run)
+    repo = make_repo(tmp_path)
+
+    async def body(app):
+        await _seed_waiting(app, retry_at="2000-01-01T00:00:00+00:00", repo=str(repo))
+        await app.state.db.write(lambda c: store.set_current_step(c, "w1", 3))
+        assert await ci_wait.tick(app) == ["w1"]
+        await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)
+        assert seen["start_step"] == 3
+
+    _run(lambda: _stub(tmp_path), body)

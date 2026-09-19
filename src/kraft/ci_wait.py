@@ -52,7 +52,7 @@ async def tick(app) -> list[str]:
     st = app.state
     due = st.db.read(
         lambda c: c.execute(
-            "SELECT id, repo, current_node_id, chain_definition FROM work_items "
+            "SELECT id, repo, current_node_id, current_step, chain_definition FROM work_items "
             "WHERE status = 'waiting' AND retry_at <= ?",
             (_now(),),
         ).fetchall()
@@ -110,6 +110,7 @@ async def _re_enter_one(app, row) -> bool:
                     registry=st.registry,
                     bd_cwd=deps.bd_cwd(),
                     start_index=start,
+                    start_step=row["current_step"],
                     policy=st.policy,
                     launch=deps.launch(st, row["repo"]),
                 ),
