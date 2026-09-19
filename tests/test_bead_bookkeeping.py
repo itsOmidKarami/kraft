@@ -17,7 +17,6 @@ from pathlib import Path
 from support.harness import fake_registry, make_repo
 
 from kraft import db, executor
-from kraft.executor.entry import _extract_beads
 from kraft.paths import RunDirs
 from kraft.templates import Template, load_registry, load_templates
 
@@ -52,30 +51,10 @@ def _bd_create(repo, title) -> str:
     return json.loads(out[out.index("{") :])["id"]
 
 
-def test_extract_beads_keeps_dotted_child_id_whole():
-    """Kraft-nen2: `re.findall` used to stop at `Kraft-a5ne`, dropping the
-    `.1` child suffix -- the parent epic got recorded instead of the child
-    that was actually implemented."""
-    assert _extract_beads("done: Kraft-a5ne.1") == ["Kraft-a5ne.1"]
-
-
-def test_extract_beads_treats_bare_and_dotted_id_as_distinct():
-    """A bare epic reference and one of its dotted children are different
-    beads, not duplicates of each other -- both must survive dedup."""
-    assert _extract_beads("- Kraft-a5ne — epic\n- Kraft-a5ne.1 — child") == [
-        "Kraft-a5ne",
-        "Kraft-a5ne.1",
-    ]
-
-
-def test_extract_beads_bare_id_still_matches():
-    assert _extract_beads("- Kraft-p8q1 — task") == ["Kraft-p8q1"]
-
-
-def test_completion_closes_every_sub_bead_the_description_names(tmp_path):
-    """Kraft-p8q1: today only the tracking bead ever closes. The sub-beads a
-    work item's own description lists as `- Kraft-xxxx — ...` bullets must
-    close too, not just drift open on the board forever."""
+def test_completion_closes_every_sub_bead_the_item_states(tmp_path):
+    """Kraft-p8q1: the sub-beads a work item states via `implements_beads` close
+    with it, not just the tracking bead. Passed explicitly: the description is
+    no longer parsed for ids."""
     tracker = make_repo(tmp_path)
     # `Kraft-` prefix so the ids the extractor regex matches (`Kraft-[a-z0-9]+`)
     # are the same ids this repo's own workspace actually has beads for.
@@ -93,7 +72,7 @@ def test_completion_closes_every_sub_bead_the_description_names(tmp_path):
                 database,
                 rd,
                 title="implements two sub-beads",
-                description=f"- {sub_a} — part one\n- {sub_b} — part two",
+                implements_beads=[sub_a, sub_b],
                 repo=str(tracker),
                 template=_quick_task(),
                 bd_cwd=str(tracker),

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import shutil
 import uuid
 from pathlib import Path
@@ -44,6 +43,12 @@ async def intake(
     #: autostart path) means "no cap enforced here" -- unchanged behaviour.
     limit: int | None = None,
     bead_id: str | None = None,
+    #: Bead ids this item implements and should close on completion. Explicit
+    #: on purpose: this was scraped out of `description` with a regex, so a
+    #: bead mentioned as context -- or in a sentence saying it was NOT in scope
+    #: -- was closed anyway, four times. There is no fallback to parsing prose;
+    #: a fallback is the trap.
+    implements_beads: list[str] | None = None,
     bead_cwd: str | None = None,
     #: The value to store in the row's `chain_template` column. `_UNSET`
     #: (default) stores `template.id`; `None` stores `None` -- the caller
@@ -104,7 +109,7 @@ async def intake(
     chain_definition = json.dumps(
         materialize(template, satisfied_gates=satisfied, skip_nodes=skip_nodes)
     )
-    implements_beads = _extract_beads(description, exclude=bead_id)
+    implements_beads = [b for b in (implements_beads or []) if b != bead_id] or None
 
     def _create(c):
         effective_status = status
@@ -181,24 +186,6 @@ def attachments_of(work_item_row) -> list[dict]:
         return []
     raw = work_item_row["attachments"]
     return json.loads(raw) if raw else []
-
-
-#: A sub-bead id as it appears in a work item's description, e.g. `Kraft-p8q1`.
-_BEAD_ID_RE = re.compile(r"Kraft-[a-z0-9]+(?:\.[0-9]+)*")
-
-
-def _extract_beads(description: str | None, *, exclude: str | None = None) -> list[str]:
-    """Sub-bead ids named in `description` (Kraft-p8q1), deduped, order preserved.
-
-    Free data: every item on the board already writes its beads as
-    `- Kraft-xxxx — ...` bullets. `exclude` drops the tracking bead itself, in
-    case it happens to be quoted back in its own description.
-    """
-    seen: list[str] = []
-    for match in _BEAD_ID_RE.findall(description or ""):
-        if match != exclude and match not in seen:
-            seen.append(match)
-    return seen
 
 
 def _implements_beads(work_item_row) -> list[str]:

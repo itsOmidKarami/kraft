@@ -1159,8 +1159,8 @@ async def run_once(
     # bead (plan-review finding 1): `entry.intake` files a *fresh* tracking
     # bead for every manually created item, and a brand-new bead has no `bd
     # dep` edges of its own -- `bead_id`'s own `blocked_by` is always `[]`.
-    # The real edges live on the source beads named in the description,
-    # extracted at intake into `implements_beads` (`entry._extract_beads`).
+    # The real edges live on the source beads the item states in
+    # `implements_beads` at intake.
     # Both go into the one `bd blocked --json` call.
     bead_ids = [i for i in (row["bead_id"], *entry._implements_beads(row)) if i]
     if bead_ids:

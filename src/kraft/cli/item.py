@@ -30,6 +30,7 @@ def _cmd_create(ns: argparse.Namespace) -> None:
                 ns.description,
                 attachments or None,
                 auto_gate=ns.auto_gate,
+                implements_beads=ns.implements or None,
             )
         ),
         common._render_action,
@@ -142,6 +143,14 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="let an agent review this item's auto-escalate gates before a human does",
+    )
+    create.add_argument(
+        "--implements",
+        action="append",
+        default=[],
+        metavar="BEAD",
+        help="a bead this item implements, closed on completion (repeatable); "
+        "ids in --description are not parsed",
     )
     create.set_defaults(func=_cmd_create, all=False)
 
