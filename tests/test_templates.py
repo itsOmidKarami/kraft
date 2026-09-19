@@ -827,6 +827,15 @@ def test_defaults_agent_steering_dedupes_a_repeated_entry(tmp_path):
     assert reg.hooks["on.a"]["steering"] == ["shared"]
 
 
+def test_defaults_agent_allowed_tools_dedupes_defaults_and_binding_entries(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "defaults:\n  agent: { allowed_tools: [read, read] }\n"
+        "hooks:\n  on.a: { kind: agent, command: claude, allowed_tools: [write, write] }\n"
+    )
+    reg = templates.load_registry(tmp_path / "registry.yaml")
+    assert reg.hooks["on.a"]["allowed_tools"] == ["read", "write"]
+
+
 def test_defaults_agent_scalar_does_not_override_the_bindings_own_value(tmp_path):
     (tmp_path / "registry.yaml").write_text(
         "defaults:\n  agent: { model: opus }\n"

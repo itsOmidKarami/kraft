@@ -435,9 +435,11 @@ class AgentDefaults(BaseModel):
             value = getattr(self, key)
             if key in list_keys:
                 own = result.get(key, [])
-                result[key] = list(value or []) + [
-                    item for item in own if item not in (value or [])
-                ]
+                merged = []
+                for item in [*(value or []), *own]:
+                    if item not in merged:
+                        merged.append(item)
+                result[key] = merged
             elif key not in result:
                 result[key] = value
         return result
