@@ -729,6 +729,30 @@ def test_load_registry_rejects_bad_bindings(tmp_path, body):
         templates.load_registry(tmp_path / "registry.yaml")
 
 
+def test_forge_binding_rejects_an_unknown_handler_at_the_model_boundary():
+    with pytest.raises(templates.ValidationError, match="Input should be"):
+        templates.ForgeBinding.model_validate(
+            {"kind": "forge", "handler": "teleport", "backend": "glab"}
+        )
+
+
+def test_subprocess_binding_rejects_non_string_command_items_at_the_model_boundary():
+    with pytest.raises(templates.ValidationError):
+        templates.SubprocessBinding.model_validate({"kind": "subprocess", "command": ["pytest", 1]})
+
+
+def test_forge_binding_rejects_a_negative_poll_timeout_at_the_model_boundary():
+    with pytest.raises(templates.ValidationError):
+        templates.ForgeBinding.model_validate(
+            {
+                "kind": "forge",
+                "handler": "ci_poll",
+                "backend": "glab",
+                "poll_timeout": -1,
+            }
+        )
+
+
 # ── registry `defaults:` (Kraft-6m2x6 phase 1) ─────────────────────────────
 
 

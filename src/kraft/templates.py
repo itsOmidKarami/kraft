@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +11,10 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
     TypeAdapter,
     ValidationError,
     ValidationInfo,
@@ -30,12 +33,6 @@ if TYPE_CHECKING:
     from kraft import harness
 
 _VALID_KINDS = {"builtin", "agent", "subprocess", "forge"}
-_FORGE_HANDLERS = {"open_mr", "sync_mr", "ci_poll", "merge", "merge_watch"}
-#: Duplicated in `adapters.forge.resolve`, deliberately: config validation must
-#: not import the adapter layer. Edit both together. `auto` is the exception —
-#: `adapters.forge.backend_for` translates it to one of the others at dispatch,
-#: so `resolve` never sees it.
-_FORGE_BACKENDS = {"auto", "glab", "gh", "fake"}
 # Config files that share the templates directory but are not chain templates.
 # One definition: `load_templates` skips them, and the registry save copies the
 # templates around them. Without this, every settings file the UI writes would be
@@ -334,52 +331,54 @@ class _Binding(_DictLike):
     # `interactive`/`timeout`/`repos` are UI-facing rather than dispatch-facing
     # (02 §13): the registry round-trips them through Settings ahead of the
     # screen/executor that will read them.
-    interactive: bool | None = None
-    timeout: Any = None
+    interactive: StrictBool | None = None
+    timeout: Annotated[StrictInt | StrictFloat, Field(gt=0, allow_inf_nan=False)] | None = None
     repos: dict[str, dict] | None = None
     sandbox: Any = None
     #: Kind-agnostic on purpose (spec §4): the motivating repair hangs off
     #: `on.ci.poll`, which is `kind: forge`. Not an agent-only key, so not
     #: settable through `defaults.agent` either -- a repair silently inherited
     #: by every agent binding is the opposite of what a per-task repair is for.
-    on_failure: Any = None
+    on_failure: Annotated[list[StrictStr], Field(min_length=1, strict=True)] | None = None
 
 
 class BuiltinBinding(_Binding):
     kind: Literal["builtin"]
-    handler: str
+    handler: StrictStr
 
 
 class SubprocessBinding(_Binding):
     kind: Literal["subprocess"]
-    command: list[str]
+    command: Annotated[list[StrictStr], Field(strict=True)]
     inputs: dict[str, dict] | None = None
 
 
 class ForgeBinding(_Binding):
     kind: Literal["forge"]
-    handler: str
-    backend: str
-    poll_timeout: Any = None
-    poll_interval: Any = None
+    handler: Literal["open_mr", "sync_mr", "ci_poll", "merge", "merge_watch"]
+    backend: Literal["auto", "glab", "gh", "fake"]
+    poll_timeout: Annotated[StrictInt | StrictFloat, Field(ge=0, allow_inf_nan=False)] | None = None
+    poll_interval: Annotated[StrictInt | StrictFloat, Field(gt=0, allow_inf_nan=False)] | None = (
+        None
+    )
 
 
 class AgentBinding(_Binding):
     kind: Literal["agent"]
-    command: str | None = None
+    command: StrictStr | None = None
     profile: str | None = None
     harness: str | None = None
-    model: Any = None
-    escalate_model: Any = None
-    deny_tools: list[str] | None = None
-    steering: list[str] | None = None
+    model: StrictStr | None = None
+    escalate_model: StrictStr | None = None
+    deny_tools: Annotated[list[StrictStr], Field(strict=True)] | None = None
+    steering: Annotated[list[StrictStr], Field(strict=True)] | None = None
     skill: Any = None
-    artifact: Any = None
+    artifact: Annotated[StrictStr, Field(pattern=f"^{_ARTIFACT_KIND.pattern}$")] | None = None
     #: A validator in `load_registry`, not a `Literal`: its legal values come
     #: from the named harness's own `values:` (`minimal` is real for codex and
     #: invalid for claude).
     effort: Any = None
-    allowed_tools: list[str] | None = None
+    allowed_tools: Annotated[list[StrictStr], Field(strict=True)] | None = None
     permission_mode: Any = None
 
 
@@ -544,26 +543,8 @@ def load_registry(
         kind = binding["kind"]
         if kind not in _VALID_KINDS:
             raise RegistryError(f"{path.name}: hook {hook!r} has unknown kind {kind!r}")
-        if kind == "builtin" and not isinstance(binding.get("handler"), str):
-            raise RegistryError(f"{path.name}: builtin hook {hook!r} needs a string 'handler'")
-        if kind == "agent" and "command" in binding and not isinstance(binding["command"], str):
-            raise RegistryError(
-                f"{path.name}: agent hook {hook!r} 'command' must be a string "
-                "(it overrides argv[0] only)"
-            )
         if kind == "forge":
             handler = binding.get("handler")
-            if handler not in _FORGE_HANDLERS:
-                raise RegistryError(
-                    f"{path.name}: forge hook {hook!r} has unknown handler {handler!r}; "
-                    f"known: {sorted(_FORGE_HANDLERS)}"
-                )
-            backend = binding.get("backend")
-            if backend not in _FORGE_BACKENDS:
-                raise RegistryError(
-                    f"{path.name}: forge hook {hook!r} has unknown backend {backend!r}; "
-                    f"known: {sorted(_FORGE_BACKENDS)}"
-                )
             for key in ("poll_timeout", "poll_interval"):
                 if key not in binding:
                     continue
@@ -572,35 +553,6 @@ def load_registry(
                         f"{path.name}: forge hook {hook!r} has {key!r}, which applies "
                         "only to a ci_poll handler"
                     )
-                value = binding[key]
-                # bool is an int in Python, and `poll_timeout: true` is a typo,
-                # not a one-second deadline.
-                bad = isinstance(value, bool) or not isinstance(value, int | float)
-                # .inf is a node that never returns and never frees its intake
-                # slot; .nan goes straight into asyncio.sleep.
-                bad = bad or not math.isfinite(value)
-                # A zero timeout is a meaningful single-shot check. A zero
-                # *interval* is a hot loop: it would re-run the forge CLI as
-                # fast as a thread can return for the whole timeout. Tests that
-                # want no wait pass it to `run_task` directly, not through here.
-                if key == "poll_timeout":
-                    bad = bad or value < 0
-                    wanted = "non-negative number"
-                else:
-                    bad = bad or value <= 0
-                    wanted = "positive number"
-                if bad:
-                    raise RegistryError(
-                        f"{path.name}: forge hook {hook!r} {key!r} must be a "
-                        f"{wanted}, not {value!r}"
-                    )
-        if kind == "subprocess" and not (
-            isinstance(binding.get("command"), list)
-            and all(isinstance(x, str) for x in binding["command"])
-        ):
-            raise RegistryError(
-                f"{path.name}: subprocess hook {hook!r} needs a list-of-strings 'command'"
-            )
 
         if kind == "agent":
             hs = harnesses if harnesses is not None else _harnesses()
@@ -621,15 +573,6 @@ def load_registry(
             h = hs.valid[hid]
             # Normalised here so no consumer re-derives the default.
             binding["harness"] = hid
-            for key in ("model", "escalate_model"):
-                if binding.get(key) is not None and not isinstance(binding[key], str):
-                    raise RegistryError(f"{path.name}: hook {hook!r} {key!r} must be a string")
-            for key in ("deny_tools", "steering", "allowed_tools"):
-                v = binding.get(key, [])
-                if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
-                    raise RegistryError(
-                        f"{path.name}: hook {hook!r} {key!r} must be a list of strings"
-                    )
             try:
                 _steering.validate(steering_dir, binding.get("steering", []), where=path.name)
             except _steering.SteeringError as exc:
@@ -639,13 +582,6 @@ def load_registry(
                     _skill.validate(skills_dir, binding["skill"], where=path.name)
                 except _skill.SkillError as exc:
                     raise RegistryError(str(exc)) from exc
-            if "artifact" in binding:
-                art = binding["artifact"]
-                if not isinstance(art, str) or not _ARTIFACT_KIND.fullmatch(art):
-                    raise RegistryError(
-                        f"{path.name}: hook {hook!r} 'artifact' must be a bare lowercase "
-                        f"kind like 'spec' or 'plan'; got {art!r}"
-                    )
             # Fail at load, no emulation: a binding naming a capability its
             # harness does not declare, or a value outside that capability's
             # own `values:`, is rejected here rather than at 3am.
@@ -676,11 +612,6 @@ def load_registry(
                 raise RegistryError(
                     f"{path.name}: hook {hook!r} is kind 'builtin'; 'timeout' applies only to "
                     "a subprocess, agent, or forge hook"
-                )
-            t = binding["timeout"]
-            if isinstance(t, bool) or not isinstance(t, int | float) or t <= 0:
-                raise RegistryError(
-                    f"{path.name}: hook {hook!r} 'timeout' must be a positive number of minutes"
                 )
         if "repos" in binding:
             repos_raw = binding["repos"]
@@ -745,8 +676,6 @@ def load_registry(
                         f"{path.name}: hook {hook!r} input {name!r} on the env channel "
                         "needs a string 'name'"
                     )
-        if "interactive" in binding and not isinstance(binding["interactive"], bool):
-            raise RegistryError(f"{path.name}: hook {hook!r} 'interactive' must be a boolean")
         try:
             data["hooks"][hook] = _BINDING.validate_python(binding)
         except ValidationError as exc:
@@ -767,6 +696,38 @@ def load_registry(
                 ) from exc
             err = exc.errors()[0]
             key = ".".join(str(x) for x in err["loc"][1:])
+            field = key.split(".")[0]
+            if field == "handler" and kind == "forge":
+                raise RegistryError(
+                    f"{path.name}: forge hook {hook!r} has unknown handler "
+                    f"{binding.get('handler')!r}"
+                ) from exc
+            if field == "backend" and kind == "forge":
+                raise RegistryError(
+                    f"{path.name}: forge hook {hook!r} has unknown backend "
+                    f"{binding.get('backend')!r}"
+                ) from exc
+            if field == "poll_timeout":
+                raise RegistryError(
+                    f"{path.name}: forge hook {hook!r} poll_timeout must be a non-negative number"
+                ) from exc
+            if field == "poll_interval":
+                raise RegistryError(
+                    f"{path.name}: forge hook {hook!r} poll_interval must be a positive number"
+                ) from exc
+            if field == "timeout":
+                raise RegistryError(
+                    f"{path.name}: hook {hook!r} 'timeout' must be a positive number of minutes"
+                ) from exc
+            if field == "command" and kind == "agent":
+                raise RegistryError(
+                    f"{path.name}: agent hook {hook!r} 'command' must be a string "
+                    "(it overrides argv[0] only)"
+                ) from exc
+            if field == "on_failure":
+                raise RegistryError(
+                    f"{path.name}: hook {hook!r} 'on_failure' must be a non-empty list of strings"
+                ) from exc
             raise RegistryError(f"{path.name}: hook {hook!r} {key!r}: {err['msg']}") from exc
     # Binding-level `on_failure` (spec §4): a repair that travels with the task
     # rather than with whichever node happens to run it. Validated here, after
@@ -777,14 +738,6 @@ def load_registry(
         repair = binding.get("on_failure")
         if repair is None:
             continue
-        if (
-            not isinstance(repair, list)
-            or not repair
-            or not all(isinstance(t, str) for t in repair)
-        ):
-            raise RegistryError(
-                f"{path.name}: hook {hook!r} 'on_failure' must be a non-empty list of strings"
-            )
         # A hook naming itself would dispatch its own repair, fail again, and
         # do it forever. The general cycle (a -> b -> a) is not checked: a
         # repair's own `on_failure` is never dispatched (`dispatch.measure_node`
