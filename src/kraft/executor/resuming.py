@@ -179,7 +179,7 @@ async def resume_once(
         start += 1
         if start >= len(nodes):
             await db.write(lambda c: store.mark_completed(c, work_item_id))
-            await entry.close_beads(db, row, bd_cwd)
+            await entry.close_beads(db, row, bd_cwd, run_dirs)
             return "completed"
         # fall through: reconcile from the post-gate node instead
 
@@ -225,7 +225,7 @@ async def resume_once(
             return "awaiting_gate"
 
     await db.write(lambda c: store.mark_completed(c, work_item_id))
-    await entry.close_beads(db, row, bd_cwd)
+    await entry.close_beads(db, row, bd_cwd, run_dirs)
     return "completed"
 
 

@@ -79,6 +79,8 @@ A node's optional fields change how the chain behaves around it:
 | `rebase_bounce_to` | If this node's own git operation actually moves the branch, the chain jumps back to the named node (almost always `verify`) instead of continuing over a diff nothing has re-tested. |
 | `reject_to` | Where a gate's "reject with a note" re-enters the chain — `human_review`'s rejection walks back to `implementation` with the reviewer's note as the steer. |
 | `auto_escalate` | Notifies a person immediately when this node's gate opens, instead of waiting quietly on the board for someone to notice. |
+| `auto_escalate_stuck` | Whether this node stopping for a reason that is *not* a pending gate — a fix loop out of attempts — dispatches an escalation turn before a human is asked. A different mechanism and a different trigger from `auto_escalate`; defaults on. |
+| `auto_escalate_delay_s` | Seconds to hold either escalation back after the event that triggered it, so a human already about to look at the board is not preempted by an agent. `0`, the default, fires immediately. |
 
 ## Hook point and adapter
 

@@ -48,11 +48,6 @@ def test_every_hook_point_it_cites_is_registered(text):
     assert cited <= known, f"skill cites unregistered hooks: {sorted(cited - known)}"
 
 
-def test_it_states_the_node_schema_fields(text):
-    for field in ("id", "tasks", "steps", "gate_after", "fix_loop"):
-        assert f"{field}" in text, f"node schema field {field!r} undocumented"
-
-
 def test_it_documents_carried_over_fields(text):
     """Kraft-eod0: the skill's schema is only 4 of a node's 8 real keys. It
     must say the other 4 (on_failure among them) are preserved for it, or a

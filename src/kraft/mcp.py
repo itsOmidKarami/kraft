@@ -56,6 +56,7 @@ def build() -> MCPServer:
         description: str | None = None,
         attachments: list[dict] | None = None,
         auto_gate: bool = True,
+        implements_beads: list[str] | None = None,
     ) -> dict:
         """File a new Kraft work item. It is created **paused** and does not run:
         a human starts it from the board. Use this to hand finished work off to
@@ -74,8 +75,20 @@ def build() -> MCPServer:
         the implementing agent is told to follow it rather than guess. A path
         is resolved against the repo and against the working tree you are
         standing in, so a spec you just wrote in a worktree can be attached as
-        it is — relative to that tree, or absolute."""
-        return await client.create_work_item(title, repo, chain_template, description, attachments)
+        it is — relative to that tree, or absolute.
+
+        `implements_beads` are bead ids this item implements; they are closed
+        when it completes. Ids mentioned in the description are not parsed —
+        naming a bead in prose promises nothing."""
+        return await client.create_work_item(
+            title,
+            repo=repo,
+            chain_template=chain_template,
+            description=description,
+            attachments=attachments,
+            auto_gate=auto_gate,
+            implements_beads=implements_beads,
+        )
 
     @server.tool()
     async def ensure_repo(path: str | None = None) -> dict:

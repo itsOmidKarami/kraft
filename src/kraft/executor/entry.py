@@ -9,6 +9,7 @@ from pathlib import Path
 
 from kraft import events, store
 from kraft.adapters import beads
+from kraft.config import git_read
 from kraft.templates import ATTACHMENT_GATES, Template, materialize
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,12 @@ async def intake(
     #: autostart path) means "no cap enforced here" -- unchanged behaviour.
     limit: int | None = None,
     bead_id: str | None = None,
+    #: Bead ids this item implements and should close on completion. Explicit
+    #: on purpose: this was scraped out of `description` with a regex, so a
+    #: bead mentioned as context -- or in a sentence saying it was NOT in scope
+    #: -- was closed anyway, four times. There is no fallback to parsing prose;
+    #: a fallback is the trap.
+    implements_beads: list[str] | None = None,
     bead_cwd: str | None = None,
     #: The value to store in the row's `chain_template` column. `_UNSET`
     #: (default) stores `template.id`; `None` stores `None` -- the caller
@@ -104,7 +111,7 @@ async def intake(
     chain_definition = json.dumps(
         materialize(template, satisfied_gates=satisfied, skip_nodes=skip_nodes)
     )
-    implements_beads = _extract_beads(description, exclude=bead_id)
+    implements_beads = [b for b in (implements_beads or []) if b != bead_id] or None
 
     def _create(c):
         effective_status = status
@@ -183,21 +190,21 @@ def attachments_of(work_item_row) -> list[dict]:
     return json.loads(raw) if raw else []
 
 
-#: A sub-bead id as it appears in a work item's description, e.g. `Kraft-p8q1`.
-_BEAD_ID_RE = re.compile(r"Kraft-[a-z0-9]+(?:\.[0-9]+)*")
+#: `Fixes Kraft-abc12` / `Closes: Kraft-abc12` in a commit message. Unlike a
+#: bare id anywhere in prose, this is a promise the author made deliberately,
+#: and it is the convention every forge already reads. It is also the signal
+#: that tracks implementation: a bead fixed by a merged commit stayed open for
+#: a day because nothing here read it.
+_TRAILER_RE = re.compile(r"\b(?:Fixes|Closes)\b:?\s+(Kraft-[a-z0-9]+(?:\.[0-9]+)*)", re.I)
 
 
-def _extract_beads(description: str | None, *, exclude: str | None = None) -> list[str]:
-    """Sub-bead ids named in `description` (Kraft-p8q1), deduped, order preserved.
-
-    Free data: every item on the board already writes its beads as
-    `- Kraft-xxxx — ...` bullets. `exclude` drops the tracking bead itself, in
-    case it happens to be quoted back in its own description.
-    """
+def _trailer_beads(messages: list[str]) -> list[str]:
+    """Bead ids promised by `Fixes`/`Closes` trailers, deduped, order preserved."""
     seen: list[str] = []
-    for match in _BEAD_ID_RE.findall(description or ""):
-        if match != exclude and match not in seen:
-            seen.append(match)
+    for message in messages:
+        for match in _TRAILER_RE.findall(message):
+            if match not in seen:
+                seen.append(match)
     return seen
 
 
@@ -209,8 +216,9 @@ def _implements_beads(work_item_row) -> list[str]:
     return json.loads(raw) if raw else []
 
 
-async def close_beads(db, row, bd_cwd: str | None) -> None:
-    """Close `row['bead_id']` plus every id in `row['implements_beads']`.
+async def close_beads(db, row, bd_cwd: str | None, run_dirs) -> None:
+    """Close `row['bead_id']`, every id in `row['implements_beads']`, and every id
+    a `Fixes`/`Closes` trailer on the item's own commits names.
 
     An item filed while bd was down has no `bead_id` (Kraft-7gy); this backfills
     one via a late `beads.intake` before closing, rather than leaving it open
@@ -232,7 +240,18 @@ async def close_beads(db, row, bd_cwd: str | None) -> None:
             await beads.complete(bead_id, cwd=cwd)
         except Exception as exc:  # noqa: BLE001
             logger.warning("bead close failed for %s: %r", bead_id, exc)
-    for sub_id in _implements_beads(row):
+    # `git_read` never raises, so a worktree already cleaned up, or a row with no
+    # `base_ref`, degrades to closing exactly the stated beads: a bead left open
+    # is found, a bead wrongly closed is not.
+    worktree = run_dirs.worktrees / row["id"]
+    log = (
+        git_read(worktree, "log", "--format=%B%x00", f"{row['base_ref']}..HEAD")
+        if row["base_ref"]
+        else None
+    )
+    trailers = _trailer_beads(log.split("\0") if log else [])
+    stated = _implements_beads(row)
+    for sub_id in [*stated, *(x for x in trailers if x != bead_id and x not in stated)]:
         try:
             await beads.complete(sub_id, cwd=cwd)
         except Exception as exc:  # noqa: BLE001

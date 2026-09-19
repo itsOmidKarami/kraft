@@ -122,3 +122,19 @@ describe("Tasks tab · a node's own tasks (Kraft-04fmo)", () => {
     ).toMatch(/concurrent/i);
   });
 });
+
+describe("a session's run number (Kraft-clzjr)", () => {
+  it("says run, not attempt: the number is a serial, not a retry count", () => {
+    renderTasks({ sessions: [session({ attempt: 15 })] });
+    const row = document.querySelector('[data-testid="task-row-s1"]');
+    expect(row?.textContent).toContain("run 15");
+    expect(row?.textContent).not.toContain("attempt");
+  });
+
+  it("still says turn N on an escalation row", () => {
+    renderTasks({ sessions: [session({ hook_point: "escalation", attempt: 2 })] });
+    expect(
+      document.querySelector('[data-testid="task-row-s1"]')?.textContent,
+    ).toContain("turn 2");
+  });
+});

@@ -56,6 +56,9 @@ class NewWorkItem(BaseModel):
     #: Arms agent gate review for this item's `auto_escalate` gates
     #: (Kraft-zr3s). On by default; `--no-auto-gate` opts out per item.
     auto_gate: bool = True
+    #: Bead ids this item implements, closed on completion. The description is
+    #: no longer parsed for them: naming a bead in prose promises nothing.
+    implements_beads: list[str] = []
     #: Node ids to drop from the materialized chain at intake (UI v2 · 04
     #: point 6; design 10/m09's click-to-skip). Rejected (422) if any name
     #: is not a node of the resolved template. A gated node may be named --
@@ -248,6 +251,7 @@ async def create_work_item(body: NewWorkItem, request: Request):
             # `status` is already "paused" and needs no capacity decision.
             limit=(st.policy.max_concurrent if st.policy else 1) if body.autostart else None,
             auto_gate=body.auto_gate,
+            implements_beads=body.implements_beads,
             skip_nodes=frozenset(body.skip_nodes),
             budget_set="budget_usd" in body.model_fields_set,
             budget_usd=body.budget_usd,

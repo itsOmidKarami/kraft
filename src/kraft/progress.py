@@ -130,9 +130,15 @@ def tasks_for(row, worktree: Path) -> list[tuple[str, bool]]:
     return read_tasks(worktree, json.loads(row["attachments"] or "[]"), row["id"])
 
 
-def run_state(conn, work_item_id: str, node_id: str) -> tuple[int, str | None]:
-    """(latest reported task, HEAD the implementer was dispatched on) for the
-    node's current run: everything after its latest `node_started`."""
+def run_state(conn, work_item_id: str, node_id: str) -> int:
+    """The latest task the implementer reported starting on this node's current
+    run -- everything after its latest `node_started`.
+
+    Per-run on purpose: a progress report is a statement about the run that
+    made it, and a bounced run has not reported anything yet. The *commit*
+    signal is not per-run -- see `for_item` -- because a task committed before
+    a bounce is still a task that is done.
+    """
     # ponytail: full event scan per call, for active implementation items only;
     # index events on (work_item_id, type) if the board gets slow (Kraft-iytv).
     evs = events.read_after(conn, 0, work_item_id)
@@ -144,25 +150,10 @@ def run_state(conn, work_item_id: str, node_id: str) -> tuple[int, str | None]:
         ),
         default=-1,
     )
-    run = evs[start + 1 :]
-    reported = next(
-        (e["payload"]["task"] for e in reversed(run) if e["type"] == "task_progress"), 0
+    return next(
+        (e["payload"]["task"] for e in reversed(evs[start + 1 :]) if e["type"] == "task_progress"),
+        0,
     )
-    session_id = next(
-        (
-            e["payload"]["session_id"]
-            for e in run
-            if e["type"] == "worker_session_created"
-            and e["payload"].get("hook_point") == IMPLEMENTATION_HOOK
-        ),
-        None,
-    )
-    if session_id is None:
-        return reported, None
-    row = conn.execute(
-        "SELECT head_sha FROM worker_sessions WHERE id = ?", (session_id,)
-    ).fetchone()
-    return reported, (row["head_sha"] if row else None)
 
 
 def for_item(db, row, worktree: Path) -> dict | None:
@@ -173,6 +164,11 @@ def for_item(db, row, worktree: Path) -> dict | None:
     tasks = tasks_for(row, worktree)
     if not tasks:
         return None
-    reported, base = db.read(lambda c: run_state(c, row["id"], node_id))
+    reported = db.read(lambda c: run_state(c, row["id"], node_id))
+    # The item's branch base, not this run's dispatch HEAD. `base_ref` is set at
+    # worktree creation and re-set after every rebase, so this range is exactly
+    # the commits this item has made -- across a reject bounce, which is when
+    # the per-run range was empty by construction and floored `current` at 1.
+    base = row["base_ref"]
     log = git_read(worktree, "log", "--format=%s", f"{base}..HEAD") if base else None
     return combine(tasks, reported, committed_task(log.splitlines() if log else []))

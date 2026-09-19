@@ -191,7 +191,9 @@ def test_create_carries_the_description(app, tmp_path, monkeypatch, capsys):
 def test_item_create_passes_auto_gate(monkeypatch):
     seen = {}
 
-    async def fake_create(title, repo, chain, description, attachments, auto_gate=False):
+    async def fake_create(
+        title, repo, chain, description, attachments, auto_gate=False, implements_beads=None
+    ):
         seen["auto_gate"] = auto_gate
         return {"id": "w1"}
 

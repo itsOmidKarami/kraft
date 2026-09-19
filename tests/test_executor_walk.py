@@ -2636,13 +2636,13 @@ def test_resuming_a_still_blocked_item_re_pauses_cheaply(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
-def test_a_blocked_sub_bead_named_in_the_description_pauses_the_walk(tmp_path, monkeypatch):
+def test_a_blocked_sub_bead_the_item_states_pauses_the_walk(tmp_path, monkeypatch):
     """The motivating case plan-review finding 1 named: a manually created
     item's own tracking bead is always edge-free (fresh from `entry.intake`),
     so only a check against `implements_beads` -- the sub-beads the
-    description names -- ever catches a real dependency for this path."""
+    item states -- ever catches a real dependency for this path."""
     monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
-    # `Kraft-` prefix, matching `entry._extract_beads`'s regex -- the same
+    # `Kraft-` prefix -- the same
     # setup `tests/test_bead_bookkeeping.py`'s own sub-bead test uses, since
     # `isolated_bd`'s shared template is prefixed `TEST` and would never match.
     tracker = make_repo(tmp_path, name="tracker")
@@ -2669,7 +2669,7 @@ def test_a_blocked_sub_bead_named_in_the_description_pauses_the_walk(tmp_path, m
                 database,
                 rd,
                 title="implements a blocked sub-bead",
-                description=f"- {sub} — part one",
+                implements_beads=[sub],
                 repo=str(repo),
                 template=_quick_task(),
                 bd_cwd=str(tracker),
@@ -2735,7 +2735,7 @@ def test_a_bead_blocked_only_by_its_own_bundlemate_dispatches(tmp_path, monkeypa
                 database,
                 rd,
                 title="implements two bundled beads",
-                description=f"- {sub} — part one\n- {bundlemate} — part two",
+                implements_beads=[sub, bundlemate],
                 repo=str(repo),
                 template=_quick_task(),
                 bd_cwd=str(tracker),

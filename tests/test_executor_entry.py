@@ -64,6 +64,46 @@ def test_intake_creates_bead_and_row(tmp_path):
     asyncio.run(scenario())
 
 
+def _intake_row(tmp_path, *, description=None, implements_beads=None):
+    tracker = isolated_bd(tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = await executor.intake(
+                database,
+                rd,
+                title="t",
+                repo="/some/repo",
+                template=_quick_task(),
+                bd_cwd=str(tracker),
+                description=description,
+                implements_beads=implements_beads,
+            )
+            return database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+        finally:
+            await database.close()
+
+    return asyncio.run(scenario())
+
+
+def test_a_bead_id_in_the_description_is_not_a_promise(tmp_path):
+    """The trap this removes: `_extract_beads` scraped every id out of the
+    description into `implements_beads`, which is closed on completion -- so a
+    sentence saying a bead was NOT in scope closed it anyway. Four items closed
+    a bead they never implemented that way, two of them P1s."""
+    row = _intake_row(tmp_path, description="Kraft-abc12 is context. Kraft-def34 is not in scope.")
+    assert row["implements_beads"] is None
+
+
+def test_implements_beads_is_taken_from_the_argument(tmp_path):
+    row = _intake_row(tmp_path, description="no ids here", implements_beads=["Kraft-abc12"])
+    assert json.loads(row["implements_beads"]) == ["Kraft-abc12"]
+
+
 def test_intake_bead_failure_still_writes_a_row(tmp_path):
     """Kraft-7gy: a bd failure degrades intake, it does not fail it — the row is
     written with bead_id NULL rather than raising. See tests/test_bd_workspace.py
@@ -318,3 +358,15 @@ def test_intake_refuses_an_attachment_it_cannot_copy(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_a_fixes_trailer_names_a_bead_to_close():
+    assert executor.entry._trailer_beads(
+        ["feat: x\n\nFixes Kraft-abc12.", "chore: y", "fix: z\n\nCloses: Kraft-def34"]
+    ) == ["Kraft-abc12", "Kraft-def34"]
+
+
+def test_a_bare_bead_id_in_a_commit_body_is_not_a_trailer():
+    """Same discipline as the description: mentioning an id promises nothing.
+    Only `Fixes`/`Closes` does."""
+    assert executor.entry._trailer_beads(["fix: touches Kraft-abc12 in passing"]) == []

@@ -17,6 +17,13 @@ export interface ChainNode {
   /** Whether an agent may review this node's gate before a human sees it
    *  (Kraft-zr3s). Only meaningful beside `gate_after`. */
   auto_escalate?: boolean | null;
+  /** Whether a `needs_human` stop that is *not* a pending gate — a fix loop
+   *  out of attempts — auto-dispatches an escalation turn. Independent of
+   *  `auto_escalate`: different mechanism, different trigger. */
+  auto_escalate_stuck?: boolean | null;
+  /** Seconds to hold either escalation back after its triggering event, so a
+   *  human already on the way isn't preempted. `0` fires immediately. */
+  auto_escalate_delay_s?: number | null;
   /** Hook points run to repair a red measurement before the fix loop retries
    *  (templates.py `NODE_CARRYOVER_FIELDS`). */
   on_failure?: string[] | null;
