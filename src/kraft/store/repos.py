@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+from typing import Literal, get_args
 
 from kraft.store import _now as _now  # test seam for wall-clock checks
 
 #: Root merge policies (design 1g). What happens to the root repo's submodule
 #: pointer once the submodule MRs land.
-ROOT_MERGE_POLICIES = ("bump", "skip", "bump_no_mr")
+RootMergePolicy = Literal["bump", "skip", "bump_no_mr"]
+ROOT_MERGE_POLICIES = get_args(RootMergePolicy)
 
 
 def merge_rank_order(paths: list[str]) -> list[str]:
