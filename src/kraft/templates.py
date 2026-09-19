@@ -320,6 +320,24 @@ class ChainNode(ChainNodeIn):
                     )
         return self
 
+    def materialized_dict(self) -> dict:
+        """Return the stable chain-definition shape with fresh mutable values."""
+        return with_steps(
+            {
+                "id": self.id,
+                "tasks": list(self.tasks),
+                "steps": [list(group) for group in self.steps],
+                "gate_after": self.gate_after,
+                "fix_loop": self.fix_loop,
+                "on_failure": list(self.on_failure) if self.on_failure else None,
+                "reject_to": self.reject_to,
+                "rebase_bounce_to": self.rebase_bounce_to,
+                "auto_escalate": self.auto_escalate,
+                "auto_escalate_stuck": self.auto_escalate_stuck,
+                "auto_escalate_delay_s": self.auto_escalate_delay_s,
+            }
+        )
+
 
 # Compatibility imports for callers that still hold node dicts.
 # Built-in template names retained for compatibility; gates are validated from
@@ -586,6 +604,21 @@ class Template:
     #: `TemplateDocument.resolve` applies `extends`/`remove`/`insert_*` *before*
     #: this, so it is the resolved-but-not-normalized form.
     authored: list | None = None
+
+    def materialize(
+        self,
+        *,
+        satisfied_gates: frozenset[str] = frozenset(),
+        skip_nodes: frozenset[str] = frozenset(),
+    ) -> dict:
+        return {
+            "template_id": self.id,
+            "nodes": [
+                ChainNode.model_validate(node).materialized_dict()
+                for node in self.nodes
+                if node.get("gate_after") not in satisfied_gates and node["id"] not in skip_nodes
+            ],
+        }
 
 
 @dataclass(frozen=True)
@@ -1365,25 +1398,4 @@ def materialize(
     though it gates) -- a human choosing this at intake is the same trust an
     attachment trim already gets, so a gate skipped this way is not a gate
     bypassed at runtime, it never existed for this item."""
-    return {
-        "template_id": template.id,
-        "nodes": [
-            with_steps(
-                {
-                    "id": n["id"],
-                    "tasks": list(n.get("tasks") or []),
-                    "steps": [list(g) for g in n["steps"]] if n.get("steps") else None,
-                    "gate_after": n.get("gate_after"),
-                    "fix_loop": n.get("fix_loop"),
-                    "on_failure": list(n["on_failure"]) if n.get("on_failure") else None,
-                    "reject_to": n.get("reject_to"),
-                    "rebase_bounce_to": n.get("rebase_bounce_to"),
-                    "auto_escalate": n.get("auto_escalate"),
-                    "auto_escalate_stuck": n.get("auto_escalate_stuck"),
-                    "auto_escalate_delay_s": n.get("auto_escalate_delay_s"),
-                }
-            )
-            for n in template.nodes
-            if n.get("gate_after") not in satisfied_gates and n["id"] not in skip_nodes
-        ],
-    }
+    return template.materialize(satisfied_gates=satisfied_gates, skip_nodes=skip_nodes)

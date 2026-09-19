@@ -1217,6 +1217,18 @@ def test_materialize_quick_task_from_shipped_templates():
     assert json.loads(json.dumps(chain)) == chain  # round-trips
 
 
+def test_template_materialize_returns_the_existing_chain_definition_shape():
+    template = Template(
+        id="t",
+        nodes=[{"id": "implementation", "tasks": ["on.implementation.start"]}],
+    )
+
+    chain = template.materialize(satisfied_gates=frozenset(), skip_nodes=frozenset())
+
+    assert chain == materialize(template)
+    assert set(chain) == {"template_id", "nodes"}
+
+
 def test_default_yaml_verify_node_has_fix_loop():
     reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
     ts = templates.load_templates(TEMPLATES_DIR, reg)
