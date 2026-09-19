@@ -180,10 +180,14 @@ export function Tasks({
             </Row>
           );
         }
-        const attempt =
+        // `attempt` is a per-(node, hook) serial, not a retry count: dispatch
+        // mints one session per matched test scope, and nothing resets it across
+        // ordered steps or a rebase bounce, so four verify passes read as
+        // "attempt 15". `run N` is the same number without the false claim.
+        const run =
           s.hook_point === "on.implementation.start" && item.fixCycle != null
             ? `cycle ${item.fixCycle}`
-            : `attempt ${s.attempt}`;
+            : `run ${s.attempt}`;
         const m = metricsOf(s);
         return (
           <Row
@@ -197,7 +201,7 @@ export function Tasks({
             <StatusGlyph status={s.status} size={16} />
             <RowText
               title={s.hook_point}
-              sub={`${s.node_id} · ${attempt}${m ? ` · ${m}` : ""}`}
+              sub={`${s.node_id} · ${run}${m ? ` · ${m}` : ""}`}
             />
             <RowState status={s.status} />
           </Row>
