@@ -2640,7 +2640,7 @@ def test_a_blocked_sub_bead_the_item_states_pauses_the_walk(tmp_path, monkeypatc
     """The motivating case plan-review finding 1 named: a manually created
     item's own tracking bead is always edge-free (fresh from `entry.intake`),
     so only a check against `implements_beads` -- the sub-beads the
-    description names -- ever catches a real dependency for this path."""
+    item states -- ever catches a real dependency for this path."""
     monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
     # `Kraft-` prefix -- the same
     # setup `tests/test_bead_bookkeeping.py`'s own sub-bead test uses, since
