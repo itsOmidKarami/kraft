@@ -33,9 +33,13 @@ def load_chain(conn: sqlite3.Connection, work_item_id, first_node_id) -> None:
 
 
 def enter_node(conn: sqlite3.Connection, work_item_id, node_id) -> None:
+    # A node always starts at group 0 unless something resumed it: the cursor
+    # survives re-entering the same node and resets when the node changes.
     conn.execute(
-        "UPDATE work_items SET current_node_id = ?, updated_at = ? WHERE id = ?",
-        (node_id, _now(), work_item_id),
+        "UPDATE work_items SET "
+        "current_step = CASE WHEN current_node_id IS ? THEN current_step ELSE 0 END, "
+        "current_node_id = ?, updated_at = ? WHERE id = ?",
+        (node_id, node_id, _now(), work_item_id),
     )
     events.append(conn, work_item_id, "node_started", {"node_id": node_id})
 

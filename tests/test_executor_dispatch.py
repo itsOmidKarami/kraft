@@ -2970,3 +2970,36 @@ def test_a_binding_repair_is_given_the_failure_it_is_repairing(tmp_path, monkeyp
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_measure_node_records_the_group_it_reached(tmp_path, monkeypatch):
+    """current_node_id alone cannot say 'step 3 of 4', so every re-entry
+    restarted the node."""
+
+    async def scenario():
+        database, rd, worktree, wid, row = await _setup_measure_node_scenario(tmp_path)
+        try:
+            seen = {}
+
+            async def fake_dispatch_node(db_, run_dirs_, task_hook, node, row_, reg, wt, **kw):
+                seen[task_hook] = database.read(
+                    lambda c: c.execute(
+                        "SELECT current_step FROM work_items WHERE id = ?", (wid,)
+                    ).fetchone()[0]
+                )
+                return "failed" if task_hook == "on.c" else "done"
+
+            monkeypatch.setattr(dispatch, "dispatch_node", fake_dispatch_node)
+            node = {
+                "id": "n",
+                "tasks": ["on.a", "on.b", "on.c"],
+                "steps": [["on.a"], ["on.b"], ["on.c"]],
+            }
+            await dispatch.measure_node(
+                database, rd, wid, node, row, Registry(hooks={}, raw={}), worktree, round=0
+            )
+            assert seen == {"on.a": 0, "on.b": 1, "on.c": 2}
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())

@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 31
+SCHEMA_VERSION = 32
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -98,6 +98,9 @@ CREATE TABLE work_items (
   -- "<head_sha>:<pipeline_id>" (Kraft-ivh1). Empty until the first poll,
   -- cleared on retry_after_cap alongside the ci_wait/ci_infra counters.
   ci_pipeline_ref  TEXT,
+  -- the step group `current_node_id` last began. 0 unless a wait or a retry
+  -- resumed the node past its first group. Reset whenever the node changes.
+  current_step     INTEGER NOT NULL DEFAULT 0,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
@@ -676,6 +679,9 @@ FROM worker_sessions""",
     # comparison across this line must exclude NULL, not average it in.
     29: ["UPDATE worker_sessions SET model = NULL"],
     30: ["ALTER TABLE worker_sessions ADD COLUMN command TEXT"],
+    # The step group a node last began, so a CI wait and a fix-loop retry resume
+    # at the group that stopped instead of at group zero.
+    31: ["ALTER TABLE work_items ADD COLUMN current_step INTEGER NOT NULL DEFAULT 0"],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins

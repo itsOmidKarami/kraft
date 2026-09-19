@@ -742,7 +742,10 @@ async def measure_node(
     # `tasks[i]` would then name the wrong task in `failed` -- silently, into
     # the fix loop and the on_failure repair.
     outcomes: list[tuple[str, object]] = []
-    for group in groups:
+    for index, group in enumerate(groups):
+        # Recorded before the group runs, not after, so a crash mid-group
+        # resumes at that group rather than past it.
+        await db.write(lambda c, i=index: store.set_current_step(c, work_item_id, i))
         group_results = await asyncio.gather(*(_measure(t) for t in group), return_exceptions=True)
         outcomes.extend(zip(group, group_results, strict=True))
         # Anything but a clean pass stops the node: a later group exists

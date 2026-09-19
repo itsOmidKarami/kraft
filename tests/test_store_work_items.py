@@ -795,3 +795,29 @@ def test_pause_for_broken_base_pauses_and_records_who_and_what(tmp_path):
     assert retry_at is None
     payload = next(e["payload"] for e in evts if e["type"] == "paused_by_broken_base")
     assert payload == {"broken_by": "w1", "follow_up_bead": "Kraft-xyz"}
+
+
+def test_current_step_round_trips_and_resets_when_the_node_moves(tmp_path):
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+
+            def step():
+                return database.read(
+                    lambda c: c.execute(
+                        "SELECT current_step FROM work_items WHERE id='w1'"
+                    ).fetchone()[0]
+                )
+
+            await database.write(lambda c: store.enter_node(c, "w1", "a"))
+            await database.write(lambda c: store.set_current_step(c, "w1", 3))
+            assert step() == 3
+            await database.write(lambda c: store.enter_node(c, "w1", "a"))
+            assert step() == 3, "re-entering the same node keeps the cursor"
+            await database.write(lambda c: store.enter_node(c, "w1", "b"))
+            assert step() == 0
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
