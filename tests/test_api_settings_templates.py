@@ -187,7 +187,7 @@ def test_parse_template_yaml_round_trips_default(client):
     body = client.post("/api/templates/parse", json={"text": text}).json()
     assert body["error"] is None
     assert body["nodes"][0]["id"] == "spec"
-    assert len(body["nodes"]) == 11
+    assert len(body["nodes"]) == 10
 
 
 def test_parse_template_yaml_reports_a_syntax_error(client):

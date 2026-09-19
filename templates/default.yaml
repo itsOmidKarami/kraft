@@ -68,13 +68,15 @@ nodes:
   # carries the review brief (`_gate_artifact` scans the gate node's own
   # tasks), and pushing after approval means the merged head includes the
   # brief commit and anything the human committed while reviewing.
-  - id: mr_sync
-    tasks: [on.mr.sync]
-    gate_after: null
+  #
+  # The sync is this node's own first step, not a node of its own: steps stop
+  # at the first failing group, so a failed sync never reaches the merge.
   - id: merge
-    tasks: [on.merge]
+    steps:
+      - [on.mr.sync]
+      - [on.merge]
     gate_after: null
-    # A conflict mr_sync's push (or a rebase since mr_checks last looked)
+    # A conflict the sync's push (or a rebase since mr_checks last looked)
     # turns up is handled the same way mr_checks handles one: a forced
     # rebase, then straight back to verify to re-run tests over the
     # rebased diff before anything is ever merged (draft-MR workflow spec).
