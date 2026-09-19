@@ -13,6 +13,7 @@ from kraft.templates import (
     Capability,
     Template,
     load_registry,
+    load_templates,
     materialize,
 )
 
@@ -124,6 +125,7 @@ hooks:
   on.env.prepare:          { kind: builtin,    handler: env_setup }
   on.implementation.start: { kind: agent,      command: claude }
   on.test.run:             { kind: subprocess, command: [pytest, -q] }
+  on.work:                 { kind: builtin,    handler: work }
 """
 
 GOOD_TEMPLATE = """\
@@ -314,7 +316,7 @@ def test_validate_nodes_is_what_load_templates_calls_for_its_own_nodes(tmp_path)
         tmp_path,
         **{
             "registry.yaml": REGISTRY_YAML,
-            "weirdgate.yaml": """\\
+            "weirdgate.yaml": """\
 id: weirdgate
 nodes:
   - { id: n1, tasks: [on.test.run], gate_after: '' }
@@ -338,6 +340,43 @@ _BASE_TEMPLATE = (
     "  - { id: implementation, tasks: [on.implementation.start], gate_after: null }\n"
     "  - { id: verify,         tasks: [on.test.run],            gate_after: null }\n"
 )
+
+
+def test_resolved_sibling_templates_do_not_share_mutable_nodes(tmp_path):
+    _write(tmp_path, "base.yaml", "id: base\nnodes: [{id: work, tasks: [on.work]}]\n")
+    _write(tmp_path, "left.yaml", "id: left\nextends: base\n")
+    _write(tmp_path, "right.yaml", "id: right\nextends: base\n")
+    templates = load_templates(tmp_path, _registry(tmp_path))
+    templates.valid["left"].nodes[0]["tasks"].append("on.extra")
+    assert "on.extra" not in templates.valid["right"].nodes[0]["tasks"]
+
+
+def test_custom_gate_name_is_valid_template_data(tmp_path):
+    _write(
+        tmp_path,
+        "release.yaml",
+        "id: release\nnodes: [{id: work, tasks: [on.work], gate_after: release_ready}]\n",
+    )
+    templates = load_templates(tmp_path, _registry(tmp_path))
+    assert templates.valid["release"].nodes[-1]["gate_after"] == "release_ready"
+
+
+def test_template_document_resolves_its_composition(tmp_path):
+    base = templates.TemplateDocument.model_validate(
+        {"id": "base", "nodes": [{"id": "work", "tasks": ["on.work"]}]}
+    )
+    child = templates.TemplateDocument.model_validate(
+        {
+            "id": "child",
+            "extends": "base",
+            "insert_after": {"work": [{"id": "verify", "tasks": ["on.test.run"]}]},
+        }
+    )
+
+    assert [node.id for node in child.resolve({"base": base, "child": child})] == [
+        "work",
+        "verify",
+    ]
 
 
 def test_extends_inherits_the_base_templates_nodes(tmp_path):
@@ -596,7 +635,7 @@ def test_empty_gate_after_quarantines_template(tmp_path):
         **{
             "registry.yaml": REGISTRY_YAML,
             "quick-task.yaml": GOOD_TEMPLATE,
-            "weirdgate.yaml": """\\
+            "weirdgate.yaml": """\
 id: weirdgate
 nodes:
   - { id: n1, tasks: [on.test.run], gate_after: '' }
@@ -725,10 +764,14 @@ def _dir(tmp_path, **files):
     return tmp_path
 
 
+def _write(tmp_path, name, body):
+    (tmp_path / name).write_text(body)
+
+
 def test_load_registry_ok(tmp_path):
     d = _dir(tmp_path, **{"registry.yaml": REGISTRY_YAML})
     reg = templates.load_registry(d / "registry.yaml")
-    assert set(reg.hooks) == {"on.env.prepare", "on.implementation.start", "on.test.run"}
+    assert set(reg.hooks) == {"on.env.prepare", "on.implementation.start", "on.test.run", "on.work"}
 
 
 def test_load_registry_rejects_an_unknown_key(tmp_path):
