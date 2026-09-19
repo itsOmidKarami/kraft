@@ -941,6 +941,25 @@ def test_defaults_missing_entirely_is_fine(tmp_path):
     assert reg.hooks["on.a"] == {"kind": "agent", "command": "claude", "harness": "claude"}
 
 
+@pytest.mark.parametrize("key", ["interactive", "timeout", "command", "artifact"])
+def test_load_registry_rejects_explicit_null_agent_values(tmp_path, key):
+    (tmp_path / "registry.yaml").write_text(
+        f"hooks:\n  on.a: {{ kind: agent, command: claude, {key}: null }}\n"
+    )
+    with pytest.raises(templates.RegistryError, match=key):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+@pytest.mark.parametrize("key", ["interactive", "timeout", "command", "artifact"])
+def test_defaults_agent_rejects_explicit_null_values(tmp_path, key):
+    (tmp_path / "registry.yaml").write_text(
+        f"defaults:\n  agent: {{ {key}: null }}\nhooks:\n"
+        "  on.a: { kind: agent, command: claude }\n"
+    )
+    with pytest.raises(templates.RegistryError, match=key):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
 # ── new agent-hook keys: profile, model, deny_tools, steering ──────────────────
 
 
@@ -2095,6 +2114,25 @@ def test_matching_tasks_and_steps_load_for_root_and_inserted_nodes(tmp_path):
     assert loaded.valid["base"].nodes[0]["tasks"] == ["on.a", "on.b"]
     assert loaded.valid["child"].nodes[1]["steps"] == [["on.c"]]
     assert loaded.valid["child"].nodes[1]["tasks"] == ["on.c"]
+
+
+def test_empty_flat_tasks_and_steps_load_for_root_and_inserted_nodes(tmp_path):
+    (tmp_path / "base.yaml").write_text(
+        "id: base\nnodes:\n- id: work\n  tasks: []\n  steps: [[on.a]]\n"
+    )
+    (tmp_path / "child.yaml").write_text(
+        "id: child\nextends: base\ninsert_after:\n  work:\n  - id: verify\n"
+        "    tasks: []\n    steps: [[on.b]]\n"
+    )
+
+    loaded = templates.load_templates(tmp_path, _reg())
+
+    assert [node.model_dump(exclude_unset=True) for node in loaded.valid["base"].authored] == [
+        {"id": "work", "steps": [["on.a"]]}
+    ]
+    assert loaded.valid["base"].nodes[0]["tasks"] == ["on.a"]
+    assert loaded.valid["child"].nodes[1]["steps"] == [["on.b"]]
+    assert loaded.valid["child"].nodes[1]["tasks"] == ["on.b"]
 
 
 def test_a_template_may_not_declare_both_steps_and_tasks(tmp_path):

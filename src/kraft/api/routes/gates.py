@@ -217,7 +217,7 @@ def _decided_by(request: Request) -> str:
     return "human"
 
 
-@api_router.post("/work-items/{wid}/gates/{gate}/approve")
+@api_router.post("/work-items/{wid}/gates/{gate:path}/approve")
 async def approve_gate(wid: str, gate: str, request: Request):
     st = request.app.state
     row = deps._work_item_row(st, wid)
@@ -282,7 +282,7 @@ async def approve_gate(wid: str, gate: str, request: Request):
     return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
 
 
-@api_router.post("/work-items/{wid}/gates/{gate}/reject")
+@api_router.post("/work-items/{wid}/gates/{gate:path}/reject")
 async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
     """Reject a gate and put the chain back to work (02 §7.2, backward motion).
 

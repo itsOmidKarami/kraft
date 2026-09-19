@@ -132,9 +132,10 @@ class TemplateDocument(BaseModel):
         if not isinstance(node, dict) or "tasks" not in node or "steps" not in node:
             return node
         steps = node["steps"]
-        if isinstance(steps, list) and node["tasks"] == [
-            task for group in steps if isinstance(group, list) for task in group
-        ]:
+        if not isinstance(steps, list):
+            return node
+        flattened = [task for group in steps if isinstance(group, list) for task in group]
+        if node["tasks"] == [] or node["tasks"] == flattened:
             return {key: value for key, value in node.items() if key != "tasks"}
         return node
 
@@ -455,6 +456,13 @@ class _Binding(_DictLike):
     #: by every agent binding is the opposite of what a per-task repair is for.
     on_failure: Annotated[list[StrictStr], Field(min_length=1, strict=True)] | None = None
 
+    @field_validator("interactive", "timeout", mode="before")
+    @classmethod
+    def _reject_explicit_null_values(cls, value, info):
+        if value is None:
+            raise ValueError(f"{info.field_name} may not be null")
+        return value
+
 
 class BuiltinBinding(_Binding):
     kind: Literal["builtin"]
@@ -502,6 +510,13 @@ class AgentBinding(_Binding):
     allowed_tools: Annotated[list[StrictStr], Field(strict=True)] = Field(default_factory=list)
     permission_mode: Any = None
 
+    @field_validator("command", "artifact", mode="before")
+    @classmethod
+    def _reject_explicit_null_agent_values(cls, value, info):
+        if value is None:
+            raise ValueError(f"{info.field_name} may not be null")
+        return value
+
     # The harness-facing requirements belong to the binding model, while the
     # loader remains responsible for checking them against the live harness.
     required_capabilities: ClassVar[dict[str, Capability]] = {
@@ -519,6 +534,8 @@ class AgentDefaults(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    interactive: StrictBool | None = None
+    timeout: Annotated[StrictInt | StrictFloat, Field(gt=0, allow_inf_nan=False)] | None = None
     command: StrictStr | None = None
     profile: str | None = None
     harness: str | None = None
@@ -531,6 +548,13 @@ class AgentDefaults(BaseModel):
     effort: Any = None
     allowed_tools: Annotated[list[StrictStr], Field(strict=True)] | None = None
     permission_mode: Any = None
+
+    @field_validator("interactive", "timeout", "command", "artifact", mode="before")
+    @classmethod
+    def _reject_explicit_null_values(cls, value, info):
+        if value is None:
+            raise ValueError(f"{info.field_name} may not be null")
+        return value
 
     def merge(self, binding: AgentBinding | dict) -> dict:
         result = (
