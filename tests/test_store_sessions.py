@@ -1511,3 +1511,34 @@ def test_a_pause_with_no_envelope_records_nothing_rather_than_zero(tmp_path):
     row = asyncio.run(scenario())
     assert row["cost_usd"] is None
     assert row["tokens_in"] is None
+
+
+def test_a_session_has_a_start_time_from_birth(tmp_path):
+    """Only the subprocess adapter calls session_running, so a forge or builtin
+    session went pending -> done with started_at NULL and its duration was
+    invisible."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await mk_item(database)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id="merge",
+                    hook_point="on.merge",
+                    log_path="/l",
+                    result_path="/r",
+                )
+            )
+            return database.read(
+                lambda c: c.execute(
+                    "SELECT started_at FROM worker_sessions WHERE id='s1'"
+                ).fetchone()
+            )["started_at"]
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario()) is not None

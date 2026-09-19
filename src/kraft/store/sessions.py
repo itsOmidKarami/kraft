@@ -54,6 +54,11 @@ def create_session(
         ).fetchone()
         if existing is not None:
             return existing["id"], existing["log_path"], existing["result_path"]
+    # started_at is stamped at birth: only the subprocess adapter ever calls
+    # session_running, so a forge or builtin session would otherwise go pending
+    # -> done with no start time, and a ten-second call and a sixteen-minute one
+    # would look alike. session_running overwrites it for a subprocess launch.
+    now = _now()
     # The attempt is the count of this (work item, node, hook point)'s sessions,
     # computed in the INSERT rather than passed in: no caller knows better than the
     # table does, and two callers would each re-implement the same query
@@ -62,10 +67,10 @@ def create_session(
     conn.execute(
         "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, pid, "
         "pid_start_time, log_path, result_path, status, attempt, created_at, exited_at, "
-        "round, head_sha, thread, command) "
+        "round, head_sha, thread, command, started_at) "
         "VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, 'pending', "
         "(SELECT COUNT(*) + 1 FROM worker_sessions "
-        "WHERE work_item_id = ? AND node_id = ? AND hook_point = ?), ?, NULL, ?, ?, ?, ?)",
+        "WHERE work_item_id = ? AND node_id = ? AND hook_point = ?), ?, NULL, ?, ?, ?, ?, ?)",
         (
             id,
             work_item_id,
@@ -76,11 +81,12 @@ def create_session(
             work_item_id,
             node_id,
             hook_point,
-            _now(),
+            now,
             round,
             head_sha,
             thread,
             command,
+            now,
         ),
     )
     (attempt,) = conn.execute("SELECT attempt FROM worker_sessions WHERE id = ?", (id,)).fetchone()
