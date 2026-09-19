@@ -97,27 +97,22 @@ item attachments instead:
 kraft item create "title" --spec PATH --plan PATH
 ```
 
-**An attachment is copied at run time, not at intake.** `builtins.ensure_worktree`
-copies the file into the worker's worktree when the item runs, reading the
-absolute `source` recorded at intake. That copy is a silent skip:
-
-```python
-if dest.exists() or not src.is_file():
-    continue
-```
-
-Gate trimming, by contrast, happens at *intake* — it is baked into
-`chain_definition`. So if the source file is gone by the time the item resumes,
-the item runs with its spec and plan gates removed **and no document**, with no
-error and no warning.
+**An attachment is snapshotted at intake, and frozen.** Intake copies the file
+into `~/.kraft/run/attachments/<work-item-id>/`, and that copy — not the path
+you passed — is what `builtins.ensure_worktree` reads into the worker's
+worktree when the item runs. A source that has gone missing raises rather than
+skipping silently, so an item can no longer run with its gates trimmed and no
+document.
 
 Two consequences worth remembering:
 
-- Write the spec and plan somewhere durable before attaching. A file authored in
-  a throwaway `.claude/worktrees/` worktree stops existing when that worktree is
-  cleaned up, and the attachment is only a path to it.
-- Do not attach and then move or delete the file. Resume the item first, or
-  re-file it.
+- Editing the original after filing changes nothing. The worker reads the
+  snapshot, and no endpoint refreshes it.
+- Revising an attached spec or plan therefore means abandoning the item and
+  re-filing it. There is a bead open for patching an attachment in place; until
+  it lands, re-filing is the whole mechanism. Get the document right before you
+  attach it — not because the file might vanish, but because changing it
+  afterwards is a no-op that looks like it worked.
 
 ### Marking a task already done in a reused plan
 
