@@ -82,6 +82,9 @@ Every node you write is exactly:
   on_failure?: [hook_point, ...] | null,
   reject_to?: string | null,
   rebase_bounce_to?: string | null,
+  auto_escalate?: boolean | null,
+  auto_escalate_stuck?: boolean | null,
+  auto_escalate_delay_s?: int | null,
   proposed_node_overrides?: { model?: string, escalate_model?: string, effort?: string } }
 ```
 
@@ -155,9 +158,14 @@ task just got heavier (add `effort: high`), or lighter (drop to a cheaper
 `model`). Applied atomically with the rest of your revision on approval, as
 a per-node override — it does not touch the registry binding itself.
 
-`auto_escalate` is still never yours to set: a node id that already existed
-in the tail keeps its old value carried forward unchanged, exactly as
-`on_failure` does when you omit it.
+The three escalation fields are yours too, and only `auto_escalate` is about
+this node's gate: it has an agent review the gate before a human is asked,
+which is worth setting on a gate whose artifact an agent can judge and wrong on
+one that is a human's decision. `auto_escalate_stuck` covers a stop that is not
+a gate at all -- a fix loop out of attempts -- and `auto_escalate_delay_s`
+holds either back that many seconds, so a human already on their way to the
+board is not preempted. Leave all three unset unless the spec or plan gives you
+a reason.
 
 - `tasks` — hook points, and **only names from the allowed hook set**. A name you
   invented is not a task the orchestrator can run; it is a chain that fails
