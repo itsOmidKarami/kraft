@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_323e79e8bb4dca6e_findings_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.15.4">coverage.py v7.15.4</a>,
-            created at 2026-09-18 23:51 +0000
+            created at 2026-09-19 06:14 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -1241,8 +1241,8 @@
     <p class="pln"><span class="n"><a id="t1159" href="#t1159">1159</a></span><span class="t">    <span class="com"># bead (plan-review finding 1): `entry.intake` files a *fresh* tracking</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t1160" href="#t1160">1160</a></span><span class="t">    <span class="com"># bead for every manually created item, and a brand-new bead has no `bd</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t1161" href="#t1161">1161</a></span><span class="t">    <span class="com"># dep` edges of its own -- `bead_id`&#x27;s own `blocked_by` is always `[]`.</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t1162" href="#t1162">1162</a></span><span class="t">    <span class="com"># The real edges live on the source beads named in the description,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t1163" href="#t1163">1163</a></span><span class="t">    <span class="com"># extracted at intake into `implements_beads` (`entry._extract_beads`).</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1162" href="#t1162">1162</a></span><span class="t">    <span class="com"># The real edges live on the source beads the item states in</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1163" href="#t1163">1163</a></span><span class="t">    <span class="com"># `implements_beads` at intake.</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t1164" href="#t1164">1164</a></span><span class="t">    <span class="com"># Both go into the one `bd blocked --json` call.</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t1165" href="#t1165">1165</a></span><span class="t">    <span class="nam">bead_ids</span> <span class="op">=</span> <span class="op">[</span><span class="nam">i</span> <span class="key">for</span> <span class="nam">i</span> <span class="key">in</span> <span class="op">(</span><span class="nam">row</span><span class="op">[</span><span class="str">&quot;bead_id&quot;</span><span class="op">]</span><span class="op">,</span> <span class="op">*</span><span class="nam">entry</span><span class="op">.</span><span class="nam">_implements_beads</span><span class="op">(</span><span class="nam">row</span><span class="op">)</span><span class="op">)</span> <span class="key">if</span> <span class="nam">i</span><span class="op">]</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t1166" href="#t1166">1166</a></span><span class="t">    <span class="key">if</span> <span class="nam">bead_ids</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
@@ -1388,7 +1388,7 @@
     <p class="pln"><span class="n"><a id="t1306" href="#t1306">1306</a></span><span class="t">    <span class="com"># only. Report it the same as every other exit (Kraft-s7c04.50).</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t1307" href="#t1307">1307</a></span><span class="t">    <span class="key">await</span> <span class="nam">_report_if_undelivered</span><span class="op">(</span><span class="nam">db</span><span class="op">,</span> <span class="nam">work_item_id</span><span class="op">,</span> <span class="nam">carried</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t1308" href="#t1308">1308</a></span><span class="t">    <span class="key">await</span> <span class="nam">db</span><span class="op">.</span><span class="nam">write</span><span class="op">(</span><span class="key">lambda</span> <span class="nam">c</span><span class="op">:</span> <span class="nam">store</span><span class="op">.</span><span class="nam">mark_completed</span><span class="op">(</span><span class="nam">c</span><span class="op">,</span> <span class="nam">work_item_id</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t1309" href="#t1309">1309</a></span><span class="t">    <span class="key">await</span> <span class="nam">entry</span><span class="op">.</span><span class="nam">close_beads</span><span class="op">(</span><span class="nam">db</span><span class="op">,</span> <span class="nam">row</span><span class="op">,</span> <span class="nam">bd_cwd</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1309" href="#t1309">1309</a></span><span class="t">    <span class="key">await</span> <span class="nam">entry</span><span class="op">.</span><span class="nam">close_beads</span><span class="op">(</span><span class="nam">db</span><span class="op">,</span> <span class="nam">row</span><span class="op">,</span> <span class="nam">bd_cwd</span><span class="op">,</span> <span class="nam">run_dirs</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t1310" href="#t1310">1310</a></span><span class="t">    <span class="key">return</span> <span class="str">&quot;completed&quot;</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t1311" href="#t1311">1311</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t1312" href="#t1312">1312</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
@@ -1449,7 +1449,7 @@
             <a class="nav" href="z_323e79e8bb4dca6e_findings_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.15.4">coverage.py v7.15.4</a>,
-            created at 2026-09-18 23:51 +0000
+            created at 2026-09-19 06:14 +0000
         </p>
     </div>
 </footer>
