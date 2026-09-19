@@ -11,8 +11,8 @@
 | src/kraft/adapters/beads.py              |       62 |        8 |     87% |44, 83, 86-87, 125-126, 180-181 |
 | src/kraft/adapters/forge/\_\_init\_\_.py |        9 |        0 |    100% |           |
 | src/kraft/adapters/forge/ci.py           |       90 |        3 |     97% |74, 299-300 |
-| src/kraft/adapters/forge/gh.py           |       87 |        7 |     92% |141, 160, 222, 230-233, 273 |
-| src/kraft/adapters/forge/git.py          |       85 |       10 |     88% |162-169, 281-286, 296 |
+| src/kraft/adapters/forge/gh.py           |      100 |        9 |     91% |144, 163, 203-204, 253, 261-264, 304 |
+| src/kraft/adapters/forge/git.py          |       90 |        9 |     90% |191-192, 304-309, 319 |
 | src/kraft/adapters/forge/glab.py         |      146 |        7 |     95% |224-225, 308, 340-341, 360, 382 |
 | src/kraft/adapters/forge/models.py       |      100 |        0 |    100% |           |
 | src/kraft/adapters/forge/mr.py           |      108 |        5 |     95% |67, 190, 242, 295-296 |
@@ -33,7 +33,7 @@
 | src/kraft/api/routes/sessions.py         |      106 |        7 |     93% |69, 191-193, 197, 199, 202 |
 | src/kraft/api/routes/settings.py         |      355 |       25 |     93% |41, 137, 240, 242, 244, 338, 343-346, 361-362, 386-387, 389, 421-424, 427-428, 432-437, 494, 496 |
 | src/kraft/api/routes/work\_items.py      |      201 |        7 |     97% |115, 224, 227, 260-263, 358-359 |
-| src/kraft/api/startup.py                 |      117 |        4 |     97% |121-122, 247-248 |
+| src/kraft/api/startup.py                 |      120 |        4 |     97% |122-123, 250-251 |
 | src/kraft/archive.py                     |       29 |        6 |     79% |     52-57 |
 | src/kraft/auth.py                        |       74 |        8 |     89% |44, 48, 50-51, 96-99 |
 | src/kraft/auto\_escalate\_delay.py       |       45 |        6 |     87% |   172-177 |
@@ -81,7 +81,7 @@
 | src/kraft/mcp.py                         |       67 |       20 |     70% |30, 37, 42, 49, 98, 106, 120, 127, 134, 141, 148, 156, 165, 173, 181, 196, 215, 233, 242-243 |
 | src/kraft/notify.py                      |      152 |       13 |     91% |186-187, 271-278, 291-294, 319-322 |
 | src/kraft/paths.py                       |       46 |        0 |    100% |           |
-| src/kraft/policy.py                      |      185 |        8 |     96% |144, 155, 158, 200, 210, 214, 230, 234 |
+| src/kraft/policy.py                      |      189 |        8 |     96% |148, 159, 162, 204, 214, 218, 234, 238 |
 | src/kraft/progress.py                    |       67 |        0 |    100% |           |
 | src/kraft/rate\_limit\_retry.py          |       56 |        9 |     84% |124-126, 134-139 |
 | src/kraft/reattach.py                    |      171 |       21 |     88% |60-61, 69-70, 103-104, 194, 242-252, 332-333, 391, 397-398 |
@@ -97,7 +97,7 @@
 | src/kraft/store/counters.py              |       35 |        0 |    100% |           |
 | src/kraft/store/gates.py                 |       22 |        0 |    100% |           |
 | src/kraft/store/repos.py                 |       17 |        0 |    100% |           |
-| src/kraft/store/sessions.py              |       89 |        0 |    100% |           |
+| src/kraft/store/sessions.py              |       90 |        0 |    100% |           |
 | src/kraft/store/work\_items.py           |      121 |        0 |    100% |           |
 | src/kraft/templates.py                   |      547 |       27 |     95% |106, 115, 185, 481, 534, 664, 682, 688, 698, 707, 726, 734, 749, 768-770, 940, 1013, 1057, 1060, 1093, 1105, 1115, 1125, 1130, 1235-1239 |
 | src/kraft/triggers.py                    |       38 |       10 |     74% |48-49, 66-73 |
@@ -106,7 +106,7 @@
 | src/kraft/worker\_env.py                 |        8 |        0 |    100% |           |
 | src/kraft/worktree\_read.py              |       48 |        8 |     83% |82, 86-88, 91-95, 103-104 |
 | src/kraft/ws.py                          |       61 |        0 |    100% |           |
-| **TOTAL**                                | **11485** |  **812** | **93%** |           |
+| **TOTAL**                                | **11511** |  **813** | **93%** |           |
 
 
 ## Setup coverage badge
