@@ -669,12 +669,36 @@ async def measure_node(
         repair_hooks = registry.hooks.get(t, {}).get("on_failure")
         if not repair_hooks:
             return status
+        failed_session = next(
+            (
+                s
+                for s in reversed(
+                    db.read(lambda c: store.sessions_for_round(c, work_item_id, node["id"], round))
+                )
+                if s["hook_point"] == t
+            ),
+            None,
+        )
+        context = prompts.task_failure_note(t, status, failed_session)
+        # Same shape as `walk.recover_node`: a human's steer leads and keeps
+        # its template; otherwise Kraft's own context is a seeded one.
+        repair_steer = (
+            Steer(f"{steer.take()}\n\n{context}", source=steer.source)
+            if steer is not None and steer
+            else Steer(context, source="seeded")
+        )
         await db.write(
             lambda c, t=t, h=list(repair_hooks): events.append(
                 c,
                 work_item_id,
                 "task_recovery_started",
-                {"node_id": node["id"], "failed_task": t, "tasks": h},
+                {
+                    "node_id": node["id"],
+                    "failed_task": t,
+                    "tasks": h,
+                    "status": status,
+                    "log_path": failed_session["log_path"] if failed_session else None,
+                },
             )
         )
         for r in repair_hooks:
@@ -688,7 +712,7 @@ async def measure_node(
                 worktree,
                 loop_severities=loop_severities,
                 round=_TASK_REPAIR_ROUND,
-                steer=steer,
+                steer=repair_steer,
                 launch=launch,
                 budget=budget,
             )

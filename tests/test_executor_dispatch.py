@@ -2925,3 +2925,48 @@ def test_every_status_declares_the_tier_that_handles_it():
     missing = sorted(statuses - set(context.SCOPE))
     assert not missing, f"statuses with no declared scope: {missing}"
     assert set(context.SCOPE.values()) <= {"advance", "task", "node", "chain", "stop"}
+
+
+def test_a_binding_repair_is_given_the_failure_it_is_repairing(tmp_path, monkeypatch):
+    """on.ci.repair reported the diagnosis was absent from its prompt and from
+    the item's events; a node-level repair gets a seeded context, a binding one
+    got whatever unrelated steer was in flight."""
+
+    async def scenario():
+        database, rd, worktree, wid, row = await _setup_measure_node_scenario(tmp_path)
+        try:
+            steers = {}
+
+            async def fake_dispatch_node(db_, run_dirs_, task_hook, node, row_, reg, wt, **kw):
+                steers[task_hook] = kw.get("steer")
+                return "failed" if task_hook == "on.a" else "done"
+
+            monkeypatch.setattr(dispatch, "dispatch_node", fake_dispatch_node)
+            registry = Registry(
+                hooks={
+                    "on.a": {"kind": "builtin", "handler": "noop", "on_failure": ["on.fix"]},
+                    "on.fix": {"kind": "builtin", "handler": "noop"},
+                },
+                raw={},
+            )
+            node = {"id": "n", "tasks": ["on.a"], "on_failure": None}
+            await dispatch.measure_node(
+                database, rd, wid, node, row, registry, worktree, round=0, steer=None
+            )
+            repair = steers["on.fix"]
+            assert repair.source == "seeded"
+            assert "on.a" in repair.take()
+
+            steers.clear()
+            from kraft.executor.context import Steer
+
+            human = Steer("look at the lockfile")
+            await dispatch.measure_node(
+                database, rd, wid, node, row, registry, worktree, round=0, steer=human
+            )
+            text = steers["on.fix"].take()
+            assert text.startswith("look at the lockfile") and "on.a" in text
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
