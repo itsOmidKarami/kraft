@@ -301,8 +301,33 @@ def test_gh_ci_status_maps_timed_out_to_the_infra_reason(tmp_path, monkeypatch):
 
     status = asyncio.run(forge.GhCli().ci_status(repo=tmp_path, mr=forge.MR(7, "http://x/7")))
 
-    assert status.sha == "abc123"
     assert status.failed_jobs[0].failure_reason == "job_execution_timeout"
+
+
+def test_ci_status_sha_is_the_checks_sha_not_the_pr_head(tmp_path, monkeypatch):
+    """`sha = headRefOid` made render_ci's freshness guard compare the branch
+    head to itself, so it could never fire on GitHub."""
+    stub = tmp_path / "gh"
+    stub.write_text(
+        '#!/bin/sh\nif [ "$1" = run ]; then\n'
+        'cat <<\'E\'\n[{"databaseId":123456,"headSha":"oldsha"}]\nE\n'
+        f"else\ncat <<'E'\n{GH_PR_VIEW_TIMED_OUT}\nE\nfi\n"
+    )
+    stub.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+
+    status = asyncio.run(forge.GhCli().ci_status(repo=tmp_path, mr=forge.MR(7, "http://x/7")))
+
+    assert status.sha == "oldsha"  # not the PR's headRefOid, "abc123"
+
+
+def test_ci_status_sha_is_empty_when_it_cannot_be_told(tmp_path, monkeypatch):
+    """The guard must stay inert rather than guess."""
+    _stub(tmp_path, monkeypatch, "gh", GH_PR_VIEW_TIMED_OUT)  # run list answers a dict
+
+    status = asyncio.run(forge.GhCli().ci_status(repo=tmp_path, mr=forge.MR(7, "http://x/7")))
+
+    assert status.sha == ""
 
 
 GH_RUN_LIST = (
