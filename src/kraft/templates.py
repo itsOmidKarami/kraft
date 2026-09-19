@@ -18,6 +18,7 @@ from pydantic import (
     TypeAdapter,
     ValidationError,
     ValidationInfo,
+    field_validator,
     model_validator,
 )
 from pydantic_core import PydanticCustomError
@@ -362,6 +363,13 @@ class ForgeBinding(_Binding):
         None
     )
 
+    @field_validator("poll_timeout", "poll_interval", mode="before")
+    @classmethod
+    def _reject_explicit_null_poll_values(cls, value, info):
+        if value is None:
+            raise ValueError(f"{info.field_name} must be a number")
+        return value
+
 
 class AgentBinding(_Binding):
     kind: Literal["agent"]
@@ -370,15 +378,15 @@ class AgentBinding(_Binding):
     harness: str | None = None
     model: StrictStr | None = None
     escalate_model: StrictStr | None = None
-    deny_tools: Annotated[list[StrictStr], Field(strict=True)] | None = None
-    steering: Annotated[list[StrictStr], Field(strict=True)] | None = None
+    deny_tools: Annotated[list[StrictStr], Field(strict=True)] = Field(default_factory=list)
+    steering: Annotated[list[StrictStr], Field(strict=True)] = Field(default_factory=list)
     skill: Any = None
     artifact: Annotated[StrictStr, Field(pattern=f"^{_ARTIFACT_KIND.pattern}$")] | None = None
     #: A validator in `load_registry`, not a `Literal`: its legal values come
     #: from the named harness's own `values:` (`minimal` is real for codex and
     #: invalid for claude).
     effort: Any = None
-    allowed_tools: Annotated[list[StrictStr], Field(strict=True)] | None = None
+    allowed_tools: Annotated[list[StrictStr], Field(strict=True)] = Field(default_factory=list)
     permission_mode: Any = None
 
 
@@ -543,6 +551,18 @@ def load_registry(
         kind = binding["kind"]
         if kind not in _VALID_KINDS:
             raise RegistryError(f"{path.name}: hook {hook!r} has unknown kind {kind!r}")
+        if kind == "agent":
+            try:
+                _BINDING.validate_python(binding)
+            except ValidationError as exc:
+                err = exc.errors()[0]
+                key = ".".join(str(x) for x in err["loc"][1:])
+                if key == "command":
+                    raise RegistryError(
+                        f"{path.name}: agent hook {hook!r} 'command' must be a string "
+                        "(it overrides argv[0] only)"
+                    ) from exc
+                raise RegistryError(f"{path.name}: hook {hook!r} {key!r}: {err['msg']}") from exc
         if kind == "forge":
             handler = binding.get("handler")
             for key in ("poll_timeout", "poll_interval"):

@@ -112,6 +112,16 @@ def test_loop_severities_default(tmp_path):
     assert policy.load_policy(p).loop_severities == frozenset({"critical", "important"})
 
 
+@pytest.mark.parametrize("key", ["loops", "findings", "triggers"])
+def test_policy_null_collections_keep_their_legacy_empty_defaults(tmp_path, key):
+    p = tmp_path / "policy.yaml"
+    p.write_text(f"default: {{attempts: 3, wall_clock_s: 60}}\n{key}: null\n")
+    loaded = policy.load_policy(p)
+    assert loaded.loops == {}
+    assert loaded.loop_severities == policy.DEFAULT_LOOP_SEVERITIES
+    assert loaded.triggers == []
+
+
 def test_loop_severities_configured(tmp_path):
     p = tmp_path / "policy.yaml"
     p.write_text(

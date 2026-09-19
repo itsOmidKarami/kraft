@@ -221,6 +221,9 @@ def load_policy(path: str | Path) -> Policy:
     if not isinstance(data, dict):
         raise PolicyError(f"{path.name}: expected a mapping with a 'default' cap")
     raw = dict(data)
+    for key in ("loops", "findings", "triggers"):
+        if raw.get(key) is None:
+            raw.pop(key, None)
     raw_mc = raw.get("max_concurrent")
     if raw_mc is None:
         # Compat: an intake.yaml written before the move still names the

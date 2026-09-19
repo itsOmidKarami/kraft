@@ -947,6 +947,45 @@ def test_load_registry_rejects_deny_tools_not_a_list(tmp_path):
         templates.load_registry(tmp_path / "registry.yaml")
 
 
+@pytest.mark.parametrize("value", ["null", "3", "[3]"])
+def test_load_registry_rejects_bad_steering_before_file_validation(tmp_path, value):
+    (tmp_path / "registry.yaml").write_text(
+        f"hooks:\n  on.x: {{ kind: agent, command: claude, steering: {value} }}\n"
+    )
+    with pytest.raises(templates.RegistryError, match="steering"):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+@pytest.mark.parametrize("key", ["deny_tools", "allowed_tools"])
+def test_load_registry_rejects_explicit_null_agent_tool_lists(tmp_path, key):
+    (tmp_path / "registry.yaml").write_text(
+        f"hooks:\n  on.x: {{ kind: agent, command: claude, {key}: null }}\n"
+    )
+    with pytest.raises(templates.RegistryError, match=key):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+@pytest.mark.parametrize("key", ["poll_timeout", "poll_interval"])
+def test_load_registry_rejects_explicit_null_poll_keys(tmp_path, key):
+    (tmp_path / "registry.yaml").write_text(
+        f"hooks:\n  on.ci.poll: {{ kind: forge, handler: ci_poll, backend: glab, {key}: null }}\n"
+    )
+    with pytest.raises(templates.RegistryError, match=key):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_omitted_agent_and_forge_optional_fields_keep_safe_defaults(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n"
+        "  on.agent: { kind: agent, command: claude }\n"
+        "  on.ci.poll: { kind: forge, handler: ci_poll, backend: glab }\n"
+    )
+    hooks = templates.load_registry(tmp_path / "registry.yaml").hooks
+    assert hooks["on.agent"].get("steering", []) == []
+    assert hooks["on.ci.poll"].get("poll_timeout") is None
+    assert hooks["on.ci.poll"].get("poll_interval") is None
+
+
 def test_load_registry_rejects_unknown_permission_mode(tmp_path):
     """A typo in a permission grant must fail at config load, not at dispatch --
     by dispatch the item has already paid for a worktree and a session."""
