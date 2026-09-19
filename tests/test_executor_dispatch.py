@@ -2910,3 +2910,18 @@ def test_measure_node_stops_at_a_rebase_that_moved_the_base(tmp_path, monkeypatc
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_every_status_declares_the_tier_that_handles_it():
+    """One table says which tier handles each status, so a new status cannot be
+    added without saying where it is handled."""
+    from kraft.executor import context
+
+    statuses = {
+        v
+        for k, v in vars(context).items()
+        if k.isupper() and isinstance(v, str) and not k.startswith("_")
+    }
+    missing = sorted(statuses - set(context.SCOPE))
+    assert not missing, f"statuses with no declared scope: {missing}"
+    assert set(context.SCOPE.values()) <= {"advance", "task", "node", "chain", "stop"}

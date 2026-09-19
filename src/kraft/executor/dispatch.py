@@ -29,6 +29,7 @@ from kraft.executor.context import (
     CONFIG_ERROR,
     INFRA_STOP,
     RATE_LIMITED,
+    SCOPE,
     WAITING,
     LaunchContext,
     Steer,
@@ -87,7 +88,7 @@ def _matched_scopes(scopes: list[dict], changed_paths: list[str]) -> list[dict]:
 #: about, and for `paused`/`CONFIG_ERROR` running more subprocesses after one
 #: would be actively wrong (a human asked everything to stop; the next
 #: scope's binary may be missing too).
-_SCOPE_STOP_STATUSES = frozenset({"paused", CONFIG_ERROR, RATE_LIMITED})
+_SCOPE_STOP_STATUSES = frozenset(s for s, tier in SCOPE.items() if tier == "stop")
 
 
 def _last_own_round_head(
@@ -774,7 +775,7 @@ async def measure_node(
 
 #: A task in one of these states failed outright -- the same set
 #: `measure_node` treats as failed.
-_FAILING_STATUSES = ("failed", "needs_context", "conflict")
+_FAILING_STATUSES = tuple(s for s, tier in SCOPE.items() if tier == "task")
 
 
 def collect_findings(db, work_item_id: str, node: dict, round: int, registry: Registry):

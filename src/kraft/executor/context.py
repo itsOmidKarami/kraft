@@ -51,6 +51,32 @@ BASE_MOVED = "base_moved"
 INFRA_STOP = "infra_stop"
 
 
+#: The tier that handles each status, in one place so a new status cannot be
+#: added without declaring where it is handled.
+#:
+#: * `advance` -- the node moves forward.
+#: * `task`    -- the one task is repairable/retryable (binding `on_failure`,
+#:   then node repair, then `fix_loop`).
+#: * `chain`   -- handled by the chain walk itself, not a retry (a bounce).
+#: * `stop`    -- no retry at any tier: a pause, a budget breach, a config
+#:   error, a rate limit, a wait handed back to the scheduler, an infra-red
+#:   pipeline that goes straight to `needs_human`.
+SCOPE: dict[str, str] = {
+    "done": "advance",
+    "done_with_concerns": "advance",
+    "failed": "task",
+    "needs_context": "task",
+    "conflict": "task",  # RebaseConflict has its own resolver, but a task still fails on it
+    "paused": "stop",  # a human's own SIGTERM
+    BUDGET: "stop",  # nothing ran; a fix cycle would only spend more
+    RATE_LIMITED: "stop",
+    CONFIG_ERROR: "stop",
+    WAITING: "stop",  # handed back to the scheduler; re-entry resumes, it does not retry
+    INFRA_STOP: "stop",  # forge's own fault; a fix loop cannot fix it
+    BASE_MOVED: "chain",  # the bounce, taken by run_once
+}
+
+
 #: What one gate approval must also do, and the chain it leaves behind:
 #: `kraft.api.routes.gates.apply_approval`, partially applied over the app state. `None` means
 #: no door is wired up, and an agent may not approve at all -- see
