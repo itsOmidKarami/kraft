@@ -127,6 +127,36 @@ class TemplateDocument(BaseModel):
     insert_before: dict[str, list[ChainNodeIn]] = Field(default_factory=dict)
     insert_after: dict[str, list[ChainNodeIn]] = Field(default_factory=dict)
 
+    @staticmethod
+    def _without_redundant_tasks(node: Any) -> Any:
+        if not isinstance(node, dict) or "tasks" not in node or "steps" not in node:
+            return node
+        steps = node["steps"]
+        if isinstance(steps, list) and node["tasks"] == [
+            task for group in steps if isinstance(group, list) for task in group
+        ]:
+            return {key: value for key, value in node.items() if key != "tasks"}
+        return node
+
+    @field_validator("nodes", mode="before")
+    @classmethod
+    def _canonicalize_root_nodes(cls, nodes: Any) -> Any:
+        if isinstance(nodes, list):
+            return [cls._without_redundant_tasks(node) for node in nodes]
+        return nodes
+
+    @field_validator("insert_before", "insert_after", mode="before")
+    @classmethod
+    def _canonicalize_inserted_nodes(cls, inserts: Any) -> Any:
+        if isinstance(inserts, dict):
+            return {
+                anchor: [cls._without_redundant_tasks(node) for node in nodes]
+                if isinstance(nodes, list)
+                else nodes
+                for anchor, nodes in inserts.items()
+            }
+        return inserts
+
     def resolve(
         self, documents: dict[str, TemplateDocument], *, visiting: frozenset[str] = frozenset()
     ) -> list[ChainNodeIn]:
@@ -553,7 +583,7 @@ class Template:
     #: `GET /registry` -- a round trip must echo what was on disk rather than
     #: growing keys nobody wrote -- with a type instead of an untyped dict.
     #: `None` for a `Template` built by hand (most tests). Note
-    #: `_resolve_template_dict` applies `extends`/`remove`/`insert_*` *before*
+    #: `TemplateDocument.resolve` applies `extends`/`remove`/`insert_*` *before*
     #: this, so it is the resolved-but-not-normalized form.
     authored: list | None = None
 

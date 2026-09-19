@@ -2066,6 +2066,25 @@ def test_with_steps_derives_a_flat_task_list_from_groups_in_order():
     assert out["tasks"] == ["on.a", "on.b", "on.c"], "flat union, in group order"
 
 
+def test_matching_tasks_and_steps_load_for_root_and_inserted_nodes(tmp_path):
+    (tmp_path / "base.yaml").write_text(
+        "id: base\nnodes:\n- id: work\n  tasks: [on.a, on.b]\n  steps: [[on.a], [on.b]]\n"
+    )
+    (tmp_path / "child.yaml").write_text(
+        "id: child\nextends: base\ninsert_after:\n  work:\n  - id: verify\n"
+        "    tasks: [on.c]\n    steps: [[on.c]]\n"
+    )
+
+    loaded = templates.load_templates(tmp_path, _reg())
+
+    assert [node.model_dump(exclude_unset=True) for node in loaded.valid["base"].authored] == [
+        {"id": "work", "steps": [["on.a"], ["on.b"]]}
+    ]
+    assert loaded.valid["base"].nodes[0]["tasks"] == ["on.a", "on.b"]
+    assert loaded.valid["child"].nodes[1]["steps"] == [["on.c"]]
+    assert loaded.valid["child"].nodes[1]["tasks"] == ["on.c"]
+
+
 def test_a_template_may_not_declare_both_steps_and_tasks(tmp_path):
     (tmp_path / "t.yaml").write_text(
         "id: t\nnodes:\n- id: n\n  tasks: [on.a]\n  steps: [[on.b]]\n  gate_after: null\n"
