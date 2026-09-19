@@ -116,3 +116,21 @@ def test_kraft_mcp_starts_over_real_stdio(tmp_path):
         cwd=Path(__file__).resolve().parents[1],
     )
     assert '"serverInfo"' in proc.stdout, proc.stderr
+
+
+def test_create_work_item_forwards_auto_gate(monkeypatch):
+    """The tool declared `auto_gate` and called the client positionally, one
+    argument short, so an agent asking for `auto_gate=False` silently got
+    `True` and had no way to find out."""
+    seen = {}
+
+    async def fake(*args, **kwargs):
+        seen["args"], seen["kwargs"] = args, kwargs
+        return {"id": "w1", "status": "paused", "title": "t"}
+
+    monkeypatch.setattr(mcp.client, "create_work_item", fake)
+    asyncio.run(
+        mcp.build().call_tool("create_work_item", {"title": "t", "repo": "/r", "auto_gate": False})
+    )
+    assert seen["kwargs"].get("auto_gate") is False
+    assert seen["args"] == ("t",), "every other argument should be passed by keyword"
