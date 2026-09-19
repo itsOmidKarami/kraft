@@ -1306,7 +1306,7 @@ async def run_once(
     # only. Report it the same as every other exit (Kraft-s7c04.50).
     await _report_if_undelivered(db, work_item_id, carried)
     await db.write(lambda c: store.mark_completed(c, work_item_id))
-    await entry.close_beads(db, row, bd_cwd)
+    await entry.close_beads(db, row, bd_cwd, run_dirs)
     return "completed"
 
 

@@ -358,3 +358,15 @@ def test_intake_refuses_an_attachment_it_cannot_copy(tmp_path):
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_a_fixes_trailer_names_a_bead_to_close():
+    assert executor.entry._trailer_beads(
+        ["feat: x\n\nFixes Kraft-abc12.", "chore: y", "fix: z\n\nCloses: Kraft-def34"]
+    ) == ["Kraft-abc12", "Kraft-def34"]
+
+
+def test_a_bare_bead_id_in_a_commit_body_is_not_a_trailer():
+    """Same discipline as the description: mentioning an id promises nothing.
+    Only `Fixes`/`Closes` does."""
+    assert executor.entry._trailer_beads(["fix: touches Kraft-abc12 in passing"]) == []

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import uuid
 from pathlib import Path
 
 from kraft import events, store
 from kraft.adapters import beads
+from kraft.config import git_read
 from kraft.templates import ATTACHMENT_GATES, Template, materialize
 
 logger = logging.getLogger(__name__)
@@ -188,6 +190,24 @@ def attachments_of(work_item_row) -> list[dict]:
     return json.loads(raw) if raw else []
 
 
+#: `Fixes Kraft-abc12` / `Closes: Kraft-abc12` in a commit message. Unlike a
+#: bare id anywhere in prose, this is a promise the author made deliberately,
+#: and it is the convention every forge already reads. It is also the signal
+#: that tracks implementation: a bead fixed by a merged commit stayed open for
+#: a day because nothing here read it.
+_TRAILER_RE = re.compile(r"\b(?:Fixes|Closes)\b:?\s+(Kraft-[a-z0-9]+(?:\.[0-9]+)*)", re.I)
+
+
+def _trailer_beads(messages: list[str]) -> list[str]:
+    """Bead ids promised by `Fixes`/`Closes` trailers, deduped, order preserved."""
+    seen: list[str] = []
+    for message in messages:
+        for match in _TRAILER_RE.findall(message):
+            if match not in seen:
+                seen.append(match)
+    return seen
+
+
 def _implements_beads(work_item_row) -> list[str]:
     """The row's sub-bead ids, tolerating a row that predates the column."""
     if "implements_beads" not in work_item_row.keys():
@@ -196,8 +216,9 @@ def _implements_beads(work_item_row) -> list[str]:
     return json.loads(raw) if raw else []
 
 
-async def close_beads(db, row, bd_cwd: str | None) -> None:
-    """Close `row['bead_id']` plus every id in `row['implements_beads']`.
+async def close_beads(db, row, bd_cwd: str | None, run_dirs) -> None:
+    """Close `row['bead_id']`, every id in `row['implements_beads']`, and every id
+    a `Fixes`/`Closes` trailer on the item's own commits names.
 
     An item filed while bd was down has no `bead_id` (Kraft-7gy); this backfills
     one via a late `beads.intake` before closing, rather than leaving it open
@@ -219,7 +240,18 @@ async def close_beads(db, row, bd_cwd: str | None) -> None:
             await beads.complete(bead_id, cwd=cwd)
         except Exception as exc:  # noqa: BLE001
             logger.warning("bead close failed for %s: %r", bead_id, exc)
-    for sub_id in _implements_beads(row):
+    # `git_read` never raises, so a worktree already cleaned up, or a row with no
+    # `base_ref`, degrades to closing exactly the stated beads: a bead left open
+    # is found, a bead wrongly closed is not.
+    worktree = run_dirs.worktrees / row["id"]
+    log = (
+        git_read(worktree, "log", "--format=%B%x00", f"{row['base_ref']}..HEAD")
+        if row["base_ref"]
+        else None
+    )
+    trailers = _trailer_beads(log.split("\0") if log else [])
+    stated = _implements_beads(row)
+    for sub_id in [*stated, *(x for x in trailers if x != bead_id and x not in stated)]:
         try:
             await beads.complete(sub_id, cwd=cwd)
         except Exception as exc:  # noqa: BLE001
