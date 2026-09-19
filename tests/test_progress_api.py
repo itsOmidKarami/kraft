@@ -64,8 +64,9 @@ def _seed_run(wid: str, head_sha: str | None) -> None:
             },
         )
         conn.execute(
-            "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, log_path, "
-            "result_path, status, created_at, head_sha) VALUES ('s1', ?, 'implementation', "
+            "INSERT OR REPLACE INTO worker_sessions (id, work_item_id, node_id, hook_point, "
+            "log_path, result_path, status, created_at, head_sha) "
+            "VALUES ('s1', ?, 'implementation', "
             "'on.implementation.start', 'x.log', 'x.json', 'running', "
             "'2026-09-11T00:00:00+00:00', ?)",
             (wid, head_sha),
@@ -112,19 +113,56 @@ def test_a_report_moves_progress_on_the_detail_and_the_board(tmp_path, monkeypat
         assert _board_row(client, wid)["progress"] == {"current": 2, "total": 3, "title": "serve"}
 
 
+def _set_base_ref(wid: str, sha: str) -> None:
+    conn = _db()
+    try:
+        conn.execute("UPDATE work_items SET base_ref = ? WHERE id = ?", (sha, wid))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def test_commits_naming_a_task_move_progress_without_a_report(tmp_path, monkeypatch):
-    """Only commits since the implementer's dispatch HEAD count: an earlier
-    run's `Task 3` commit sits below the base and must not."""
+    """Every task commit on the item's branch counts, including ones an earlier
+    run of the same node made.
+
+    This used to scan `<the run's dispatch HEAD>..HEAD`, which is empty by
+    construction on a re-entered node: the second run is dispatched on a HEAD
+    that already contains the first run's commits. On a reject bounce that
+    floored `current` at 1 and painted every finished task `pending` while the
+    diff sat in a green PR.
+    """
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = _paused_item(client, repo)
         wt = _worktree(wid)
-        _git(wt, "commit", "-q", "--allow-empty", "-m", "Task 3: from an earlier run")
+        _set_base_ref(wid, git_read(wt, "rev-parse", "HEAD"))
+        _git(wt, "commit", "-q", "--allow-empty", "-m", "Task 2: from an earlier run")
         _seed_run(wid, head_sha=git_read(wt, "rev-parse", "HEAD"))
         _git(wt, "commit", "-q", "--allow-empty", "-m", "feat: the parser (task 1)")
         _force_node(wid, "implementation", "active")
 
-        assert client.get(f"/api/work-items/{wid}").json()["progress"]["current"] == 2
+        # Task 2 is the highest committed, from either run, so task 3 is current.
+        assert client.get(f"/api/work-items/{wid}").json()["progress"]["current"] == 3
+
+
+def test_a_bounced_run_with_no_reports_keeps_the_committed_progress(tmp_path, monkeypatch):
+    """The reject-bounce shape: a second `node_started` for the same node, no
+    `task_progress` after it, every task already committed."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _paused_item(client, repo)
+        wt = _worktree(wid)
+        _set_base_ref(wid, git_read(wt, "rev-parse", "HEAD"))
+        _seed_run(wid, head_sha=git_read(wt, "rev-parse", "HEAD"))
+        for n in (1, 2, 3):
+            _git(wt, "commit", "-q", "--allow-empty", "-m", f"feat: Task {n}: done")
+        _seed_run(wid, head_sha=git_read(wt, "rev-parse", "HEAD"))  # the bounce
+        _force_node(wid, "implementation", "active")
+
+        detail = client.get(f"/api/work-items/{wid}").json()["progress"]
+        assert (detail["current"], detail["total"]) == (3, 3)
+        assert [t["state"] for t in detail["tasks"]] == ["done", "done", "current"]
 
 
 def test_a_report_from_before_the_latest_node_start_does_not_count(tmp_path, monkeypatch):
