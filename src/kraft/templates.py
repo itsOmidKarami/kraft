@@ -4,7 +4,7 @@ import copy
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal, get_args
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, get_args
 
 import yaml
 from pydantic import (
@@ -48,47 +48,7 @@ CONFIG_FILES = frozenset(
         "theme.yaml",
     }
 )
-# The complete gate set. Public because the API validates approve/reject against it
-# and the chain-review skill documents it — a second copy is how those drift apart.
-GATE_NAMES = {"spec_approval", "plan_approval", "chain_finalized", "human_review_approval"}
-#: Node keys `materialize()` sets from a template but the chain-review skill's
-#: prompt never teaches an agent to reproduce (Kraft-eod0) -- its schema is
-#: `{id, tasks, gate_after, fix_loop}`, four of the eight keys a real node
-#: carries. An agent emitting an "unchanged" node only knows those four, so
-#: the splice that replaces the tail wholesale (`kraft.api.routes.gates._splice_chain_review`)
-#: must carry these forward from the node they replace rather than trust an
-#: agent-authored dict to know they exist.
-NODE_CARRYOVER_FIELDS = (
-    "on_failure",
-    "reject_to",
-    "rebase_bounce_to",
-    "auto_escalate",
-    "auto_escalate_stuck",
-    "auto_escalate_delay_s",
-)
-
-
-#: The `NODE_CARRYOVER_FIELDS` a chain-review node dict is never allowed to
-#: set for itself -- `on_failure`/`reject_to`/`rebase_bounce_to` are the
-#: reviewer's to propose (point 1), but `auto_escalate`/`auto_escalate_stuck`/
-#: `auto_escalate_delay_s` are the human PATCH route's alone (SKILL.md: "still
-#: never yours to set"). `strip_non_proposable_carryover_fields` below drops
-#: these off a reviewer node so they can only ever reach `chain_definition`
-#: through the carry-forward path, never an agent-authored value.
-NON_PROPOSABLE_CARRYOVER_FIELDS = ("auto_escalate", "auto_escalate_stuck", "auto_escalate_delay_s")
-
-
-def strip_non_proposable_carryover_fields(nodes: list) -> list:
-    """Drop `NON_PROPOSABLE_CARRYOVER_FIELDS` off every node in `nodes`, in
-    place, before `carry_forward_node_fields` runs. Without this, a reviewer
-    node that sets `auto_escalate` (etc.) directly splices that value straight
-    into `chain_definition` -- `carry_forward_node_fields` only fills fields
-    the node *omits*, so a value the node explicitly set survives untouched
-    (`kraft.api.routes.gates._splice_chain_review`, Kraft-df4tc)."""
-    for n in nodes:
-        for field in NON_PROPOSABLE_CARRYOVER_FIELDS:
-            n.pop(field, None)
-    return nodes
+CHAIN_REVIEW_GATE = "chain_finalized"
 
 
 class _DictLike(BaseModel):
@@ -174,6 +134,47 @@ class ChainNode(ChainNodeIn):
 
     steps: list[list[str]]
     tasks: list[str]
+    carryover_fields: ClassVar[tuple[str, ...]] = tuple(
+        field
+        for field in ChainNodeIn.model_fields
+        if field not in {"id", "tasks", "steps", "gate_after", "fix_loop"}
+    )
+    non_proposable_carryover_fields: ClassVar[tuple[str, ...]] = tuple(
+        field for field in ChainNodeIn.model_fields if field.startswith("auto_escalate")
+    )
+
+    @classmethod
+    def gate_names(cls, nodes: list[dict]) -> frozenset[str]:
+        return frozenset(node["gate_after"] for node in nodes if node.get("gate_after"))
+
+    @classmethod
+    def strip_non_proposable_carryover_fields(cls, nodes: list[dict]) -> list[dict]:
+        for node in nodes:
+            for field in cls.non_proposable_carryover_fields:
+                node.pop(field, None)
+        return nodes
+
+    @classmethod
+    def carry_forward_fields(cls, old_nodes: list[dict], new_nodes: list[dict]) -> list[dict]:
+        old_by_id = {
+            node["id"]: node
+            for node in old_nodes
+            if isinstance(node, dict) and isinstance(node.get("id"), str)
+        }
+        for node in new_nodes:
+            old = old_by_id.get(node.get("id")) or {}
+            for field in cls.carryover_fields:
+                if field not in node:
+                    node[field] = old.get(field)
+            old_steps = old.get("steps")
+            if (
+                old_steps
+                and "steps" not in node
+                and node.get("tasks") == [task for group in old_steps for task in group]
+            ):
+                node["steps"] = old_steps
+                node.pop("tasks")
+        return new_nodes
 
     @model_validator(mode="before")
     @classmethod
@@ -229,6 +230,20 @@ class ChainNode(ChainNodeIn):
         return self
 
 
+# Compatibility imports for callers that still hold node dicts.
+# Built-in template names retained for compatibility; gates are validated from
+# each materialized chain, not against this set.
+GATE_NAMES = frozenset(
+    {"spec_approval", "plan_approval", "chain_finalized", "human_review_approval"}
+)
+NODE_CARRYOVER_FIELDS = ChainNode.carryover_fields
+NON_PROPOSABLE_CARRYOVER_FIELDS = ChainNode.non_proposable_carryover_fields
+
+
+def strip_non_proposable_carryover_fields(nodes: list[dict]) -> list[dict]:
+    return ChainNode.strip_non_proposable_carryover_fields(nodes)
+
+
 def with_steps(node: dict) -> dict:
     """`node` with both `steps` and `tasks` populated, whichever it was given.
     A thin wrapper over `ChainNode`, kept for the callers that hold dicts."""
@@ -270,34 +285,8 @@ def with_inputs(binding: dict, task_hook: str) -> dict:
     return {}
 
 
-def carry_forward_node_fields(old_nodes: list, new_nodes: list) -> list:
-    """Fill `NODE_CARRYOVER_FIELDS` on `new_nodes` from the old node sharing its
-    `id`, for whichever fields the new node did not itself set. A node id with
-    no old counterpart (one the reviewer added) has nothing to inherit, so it
-    gets `None` for all of these written explicitly -- the same shape
-    `materialize()` gives any node lacking them."""
-    old_by_id = {
-        n["id"]: n for n in old_nodes if isinstance(n, dict) and isinstance(n.get("id"), str)
-    }
-    for n in new_nodes:
-        # `{}` rather than skipping: a node id the reviewer invented still gets
-        # every carryover field written explicitly as `None`, the shape
-        # `materialize` gives any node lacking them (Kraft-fdee6). Skipping
-        # left a reviewer-added node as the only node in `chain_definition`
-        # missing those keys, and the gate preview -- which fills `null` --
-        # promised a shape the splice did not store.
-        old = old_by_id.get(n.get("id")) or {}
-        for field in NODE_CARRYOVER_FIELDS:
-            if field not in n:
-                n[field] = old.get(field)
-        # `steps` is not a NODE_CARRYOVER_FIELD: the reviewer may reshape `tasks`,
-        # and carrying old groups over a changed list would contradict it. But a
-        # node re-emitted with the same flat tasks is unchanged, ordering included.
-        old_steps = old.get("steps")
-        if old_steps and "steps" not in n and n.get("tasks") == [t for g in old_steps for t in g]:
-            n["steps"] = old_steps
-            n.pop("tasks")
-    return new_nodes
+def carry_forward_node_fields(old_nodes: list[dict], new_nodes: list[dict]) -> list[dict]:
+    return ChainNode.carry_forward_fields(old_nodes, new_nodes)
 
 
 #: What an intake attachment stands in for (Kraft-dgh). Keyed on the gate rather
@@ -781,7 +770,7 @@ def validate_nodes(
     nodes: list, registry: Registry, *, preceding_ids: frozenset[str] = frozenset()
 ) -> list[str]:
     """The per-node rules a chain's node list is held to: shape, hook set
-    membership, `GATE_NAMES` membership, and a `fix_loop` node needing at
+    a non-empty `gate_after`, and a `fix_loop` node needing at
     least one task. Takes a bare node list and a registry rather than a whole
     `Template` so the chain-review splice path (Kraft-hm0) can run the same
     checks over an agent's revised tail before it reaches `chain_definition`
@@ -857,14 +846,13 @@ def validate_nodes(
     nodes = [with_steps(n) for n in nodes]
 
     bad_gates = sorted(
-        {
-            n["gate_after"]
-            for n in nodes
-            if n.get("gate_after") is not None and n["gate_after"] not in GATE_NAMES
-        }
+        repr(n.get("gate_after"))
+        for n in nodes
+        if n.get("gate_after") is not None
+        and (not isinstance(n.get("gate_after"), str) or not n["gate_after"])
     )
     if bad_gates:
-        return [f"unknown gate_after value(s) {bad_gates}"]
+        return [f"gate_after must be a non-empty string, got {bad_gates}"]
 
     empty_loop = next((n["id"] for n in nodes if n.get("fix_loop") and not n["tasks"]), None)
     if empty_loop is not None:

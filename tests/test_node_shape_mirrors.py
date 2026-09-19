@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from kraft.templates import NODE_CARRYOVER_FIELDS, ChainNodeIn
+from kraft.templates import NODE_CARRYOVER_FIELDS, ChainNode, ChainNodeIn
 
 ROOT = Path(__file__).resolve().parents[1]
 FIELDS: tuple[str, ...] = tuple(ChainNodeIn.model_fields)
@@ -118,3 +118,7 @@ def test_every_carryover_field_is_a_real_node_field() -> None:
         f"NODE_CARRYOVER_FIELDS names {unknown}, which ChainNodeIn does not "
         "have; those carry nothing forward across a chain-review splice."
     )
+
+
+def test_chain_node_owns_the_derived_carryover_fields() -> None:
+    assert NODE_CARRYOVER_FIELDS == ChainNode.carryover_fields

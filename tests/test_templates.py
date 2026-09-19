@@ -265,10 +265,9 @@ def test_validate_nodes_rejects_an_unregistered_hook(tmp_path):
     assert errs and "on.bogus" in errs[0]
 
 
-def test_validate_nodes_rejects_an_unknown_gate_after(tmp_path):
-    nodes = [{"id": "n1", "tasks": ["on.test.run"], "gate_after": "bogus_gate"}]
-    errs = templates.validate_nodes(nodes, _registry(tmp_path))
-    assert errs and "bogus_gate" in errs[0]
+def test_validate_nodes_accepts_a_custom_gate_after(tmp_path):
+    nodes = [{"id": "n1", "tasks": ["on.test.run"], "gate_after": "release_ready"}]
+    assert templates.validate_nodes(nodes, _registry(tmp_path)) == []
 
 
 def test_validate_nodes_rejects_a_fix_loop_node_with_no_tasks(tmp_path):
@@ -299,17 +298,17 @@ def test_validate_nodes_is_what_load_templates_calls_for_its_own_nodes(tmp_path)
         tmp_path,
         **{
             "registry.yaml": REGISTRY_YAML,
-            "weirdgate.yaml": (
-                "id: weirdgate\n"
-                "nodes:\n"
-                "  - { id: n1, tasks: [on.test.run], gate_after: bogus_gate }\n"
-            ),
+            "weirdgate.yaml": """\\
+id: weirdgate
+nodes:
+  - { id: n1, tasks: [on.test.run], gate_after: '' }
+""",
         },
     )
     reg = templates.load_registry(d / "registry.yaml")
     ts = templates.load_templates(d, reg)
     direct = templates.validate_nodes(
-        [{"id": "n1", "tasks": ["on.test.run"], "gate_after": "bogus_gate"}], reg
+        [{"id": "n1", "tasks": ["on.test.run"], "gate_after": ""}], reg
     )
     assert direct[0] in ts.invalid["weirdgate"]
 
@@ -575,24 +574,24 @@ def test_node_override_schema_preserves_sparse_explicit_nulls():
     assert override.model_dump(exclude_unset=True) == {"model": None, "effort": "high"}
 
 
-def test_unknown_gate_after_quarantines_template(tmp_path):
+def test_empty_gate_after_quarantines_template(tmp_path):
     d = _dir(
         tmp_path,
         **{
             "registry.yaml": REGISTRY_YAML,
             "quick-task.yaml": GOOD_TEMPLATE,
-            "weirdgate.yaml": (
-                "id: weirdgate\n"
-                "nodes:\n"
-                "  - { id: n1, tasks: [on.test.run], gate_after: bogus_gate }\n"
-            ),
+            "weirdgate.yaml": """\\
+id: weirdgate
+nodes:
+  - { id: n1, tasks: [on.test.run], gate_after: '' }
+""",
         },
     )
     reg = templates.load_registry(d / "registry.yaml")
     ts = templates.load_templates(d, reg)
     assert "quick-task" in ts.valid
     assert "weirdgate" in ts.invalid
-    assert "bogus_gate" in ts.invalid["weirdgate"]
+    assert "gate_after" in ts.invalid["weirdgate"]
 
 
 _AUTO_TEMPLATE = (
