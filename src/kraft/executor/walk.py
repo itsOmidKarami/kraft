@@ -267,6 +267,17 @@ async def recover_node(
     )
 
 
+async def _stop_at_moved_base(db, work_item_id: str, node: dict) -> str:
+    """A step moved `base_ref` in a node that declares `rebase_bounce_to`: the
+    node stops there and completes like a clean pass -- the steps it did not run
+    are the ones the bounce skips, and `run_once` reads the moved base_ref right
+    after this returns and bounces, re-running from the target against the new
+    base. The one place that decision is made, for the step boundary and the
+    conflict resolver alike."""
+    await db.write(lambda c: store.complete_node(c, work_item_id, node["id"]))
+    return "ok"
+
+
 async def walk_node(
     db,
     run_dirs,
@@ -279,6 +290,7 @@ async def walk_node(
     policy: _policy.Policy | None = None,
     steer: Steer | None = None,
     launch: LaunchContext | None = None,
+    start_step: int = 0,
 ) -> str:
     key = node.get("fix_loop")
     # Which severities open a fix cycle -- and therefore, by subtraction, which
@@ -316,6 +328,7 @@ async def walk_node(
             launch=launch,
             budget=budget,
             loop_severities=loop_severities,
+            start_step=start_step,
         )
         if verdict == "paused":
             return "paused"
@@ -333,12 +346,7 @@ async def walk_node(
         if verdict == INFRA_STOP:
             return await stops.stop_for_infra(db, work_item_id, node)
         if verdict == BASE_MOVED:
-            # Not a failure: the rebase stopped the node deliberately. Complete
-            # it like a clean pass -- `run_once` reads the moved base_ref right
-            # after this returns and bounces, re-running the node from its
-            # first step against the new base.
-            await db.write(lambda c: store.complete_node(c, work_item_id, node["id"]))
-            return "ok"
+            return await _stop_at_moved_base(db, work_item_id, node)
         if verdict == BUDGET:
             return await stops.stop_for_budget(db, work_item_id, node, budget)
         if verdict == "failed":
@@ -408,10 +416,7 @@ async def walk_node(
                         # would mark it done with the later steps never
                         # dispatched.
                         if node.get("rebase_bounce_to"):
-                            await db.write(
-                                lambda c: store.complete_node(c, work_item_id, node["id"])
-                            )
-                            return "ok"
+                            return await _stop_at_moved_base(db, work_item_id, node)
                         return await walk_node(
                             db,
                             run_dirs,
@@ -474,6 +479,10 @@ async def walk_node(
     # `round` now seeds from the counter the two are different questions, and
     # every site that meant the former needs saying so out loud.
     _first_iteration = True
+    # Where the next measurement resumes: the caller's step on the first pass,
+    # then the group that stopped the last one, so a retry does not re-run
+    # groups that already passed (the rebase step still does).
+    resume_step = start_step
     while True:
         verdict, failed, _excs = await dispatch.measure_node(
             db,
@@ -488,6 +497,14 @@ async def walk_node(
             launch=launch,
             budget=budget,
             loop_severities=loop_severities,
+            start_step=resume_step,
+        )
+        # Read before any repair runs: a repair measures a rewritten node and
+        # moves the cursor itself.
+        resume_step = db.read(
+            lambda c: c.execute(
+                "SELECT current_step FROM work_items WHERE id = ?", (work_item_id,)
+            ).fetchone()[0]
         )
         if verdict == "paused":
             return "paused"
@@ -506,6 +523,10 @@ async def walk_node(
             return await stops.stop_for_waiting(db, work_item_id, node)
         if verdict == INFRA_STOP:
             return await stops.stop_for_infra(db, work_item_id, node)
+        if verdict == BASE_MOVED:
+            # Same decision as the node without a fix loop: not a failure, so
+            # no fix cycle is spent on code the bounce is about to re-measure.
+            return await _stop_at_moved_base(db, work_item_id, node)
         if verdict == BUDGET:
             return await stops.stop_for_budget(db, work_item_id, node, budget)
 
@@ -1120,6 +1141,7 @@ async def run_once(
     registry: Registry,
     bd_cwd: str | None = None,
     start_index: int = 0,
+    start_step: int = 0,
     policy: _policy.Policy | None = None,
     steer: str | None = None,
     steer_source: str = "human",
@@ -1210,6 +1232,7 @@ async def run_once(
         return "needs_human"
 
     i = start_index
+    step = start_step
     while i < len(nodes):
         # Kraft-e7pm: a session verdict of "paused" is not the only way a walk
         # has to stop. Pausing between two nodes' dispatches leaves no live
@@ -1238,7 +1261,9 @@ async def run_once(
             # the next agent to run and no later one
             steer=carried,
             launch=launch,
+            start_step=step,
         )
+        step = 0  # only the entry node resumes mid-way
         if result in ("paused", "needs_human", RATE_LIMITED, WAITING):
             # This call is ending without giving `node` -- or any later node
             # in this same run_once, since none of these statuses continue
@@ -1318,6 +1343,7 @@ async def run(
     registry: Registry,
     bd_cwd: str | None = None,
     start_index: int = 0,
+    start_step: int = 0,
     policy: _policy.Policy | None = None,
     steer: str | None = None,
     steer_source: str = "human",
@@ -1331,6 +1357,7 @@ async def run(
         registry=registry,
         bd_cwd=bd_cwd,
         start_index=start_index,
+        start_step=start_step,
         policy=policy,
         steer=steer,
         steer_source=steer_source,

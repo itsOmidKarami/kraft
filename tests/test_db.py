@@ -214,6 +214,13 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         )
     if version < 29:
         drop_lines = (*drop_lines, "thread         INTEGER NOT NULL DEFAULT 1,")
+    if version < 32:
+        drop_lines = (
+            *drop_lines,
+            "current_step     INTEGER",
+            "-- the step group `current_node_id`",
+            "-- resumed the node past its first",
+        )
     if version < 31:
         drop_lines = (
             *drop_lines,

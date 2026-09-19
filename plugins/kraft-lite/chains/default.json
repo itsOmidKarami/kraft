@@ -77,16 +77,9 @@
       "fix_loop": null
     },
     {
-      "id": "mr_sync",
-      "tasks": [
-        "on.mr.sync"
-      ],
-      "gate_after": null,
-      "fix_loop": null
-    },
-    {
       "id": "merge",
       "tasks": [
+        "on.mr.sync",
         "on.merge"
       ],
       "gate_after": null,

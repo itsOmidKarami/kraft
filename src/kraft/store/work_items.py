@@ -454,6 +454,12 @@ def set_base_ref(conn: sqlite3.Connection, work_item_id: str, sha: str) -> None:
     )
 
 
+def set_current_step(conn: sqlite3.Connection, work_item_id: str, step: int) -> None:
+    """Record the step group the item's current node is about to run, so a
+    wait or a retry can resume there instead of at group 0."""
+    conn.execute("UPDATE work_items SET current_step = ? WHERE id = ?", (step, work_item_id))
+
+
 def set_ci_pipeline_ref(conn: sqlite3.Connection, work_item_id: str, ref: str) -> None:
     """Pin `on.ci.poll` to the pipeline it last saw, stored as
     "<head_sha>:<pipeline_id>" (Kraft-ivh1). GitLab only -- GitHub's

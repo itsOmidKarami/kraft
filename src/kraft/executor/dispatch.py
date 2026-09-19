@@ -29,6 +29,7 @@ from kraft.executor.context import (
     CONFIG_ERROR,
     INFRA_STOP,
     RATE_LIMITED,
+    SCOPE,
     WAITING,
     LaunchContext,
     Steer,
@@ -87,7 +88,7 @@ def _matched_scopes(scopes: list[dict], changed_paths: list[str]) -> list[dict]:
 #: about, and for `paused`/`CONFIG_ERROR` running more subprocesses after one
 #: would be actively wrong (a human asked everything to stop; the next
 #: scope's binary may be missing too).
-_SCOPE_STOP_STATUSES = frozenset({"paused", CONFIG_ERROR, RATE_LIMITED})
+_SCOPE_STOP_STATUSES = frozenset(s for s, tier in SCOPE.items() if tier == "stop")
 
 
 def _last_own_round_head(
@@ -608,6 +609,7 @@ async def measure_node(
     launch: LaunchContext | None = None,
     budget: _policy.Budget = _policy.NO_BUDGET,
     loop_severities: frozenset[str] = _policy.DEFAULT_LOOP_SEVERITIES,
+    start_step: int = 0,
 ) -> tuple[str, list[str], list[BaseException]]:
     await db.write(lambda c, node=node: store.enter_node(c, work_item_id, node["id"]))
 
@@ -668,12 +670,36 @@ async def measure_node(
         repair_hooks = registry.hooks.get(t, {}).get("on_failure")
         if not repair_hooks:
             return status
+        failed_session = next(
+            (
+                s
+                for s in reversed(
+                    db.read(lambda c: store.sessions_for_round(c, work_item_id, node["id"], round))
+                )
+                if s["hook_point"] == t
+            ),
+            None,
+        )
+        context = prompts.task_failure_note(t, status, failed_session)
+        # Same shape as `walk.recover_node`: a human's steer leads and keeps
+        # its template; otherwise Kraft's own context is a seeded one.
+        repair_steer = (
+            Steer(f"{steer.take()}\n\n{context}", source=steer.source)
+            if steer is not None and steer
+            else Steer(context, source="seeded")
+        )
         await db.write(
             lambda c, t=t, h=list(repair_hooks): events.append(
                 c,
                 work_item_id,
                 "task_recovery_started",
-                {"node_id": node["id"], "failed_task": t, "tasks": h},
+                {
+                    "node_id": node["id"],
+                    "failed_task": t,
+                    "tasks": h,
+                    "status": status,
+                    "log_path": failed_session["log_path"] if failed_session else None,
+                },
             )
         )
         for r in repair_hooks:
@@ -687,7 +713,7 @@ async def measure_node(
                 worktree,
                 loop_severities=loop_severities,
                 round=_TASK_REPAIR_ROUND,
-                steer=steer,
+                steer=repair_steer,
                 launch=launch,
                 budget=budget,
             )
@@ -717,7 +743,17 @@ async def measure_node(
     # `tasks[i]` would then name the wrong task in `failed` -- silently, into
     # the fix loop and the on_failure repair.
     outcomes: list[tuple[str, object]] = []
-    for group in groups:
+    for index, group in enumerate(groups):
+        # A resumed node skips the groups before `start_step` -- they already
+        # passed -- EXCEPT its rebase step: detecting drift is that step's whole
+        # job, and skipping it is how a moved base goes unnoticed.
+        if index < start_step:
+            if not any(is_rebase_hook(registry, t) for t in group):
+                continue
+        else:
+            # Recorded before the group runs, not after, so a crash mid-group
+            # resumes at that group rather than past it.
+            await db.write(lambda c, i=index: store.set_current_step(c, work_item_id, i))
         group_results = await asyncio.gather(*(_measure(t) for t in group), return_exceptions=True)
         outcomes.extend(zip(group, group_results, strict=True))
         # Anything but a clean pass stops the node: a later group exists
@@ -772,9 +808,15 @@ async def measure_node(
     return "ok", [], []
 
 
+def is_rebase_hook(registry: Registry, hook: str) -> bool:
+    """Whether `hook` is bound to the rebase builtin. Read from the binding, not
+    the name, so a repo that rebinds `on.mr.rebase` keeps the resume exemption."""
+    return registry.hooks.get(hook, {}).get("handler") == "mr_rebase"
+
+
 #: A task in one of these states failed outright -- the same set
 #: `measure_node` treats as failed.
-_FAILING_STATUSES = ("failed", "needs_context", "conflict")
+_FAILING_STATUSES = tuple(s for s, tier in SCOPE.items() if tier == "task")
 
 
 def collect_findings(db, work_item_id: str, node: dict, round: int, registry: Registry):

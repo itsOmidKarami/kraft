@@ -141,7 +141,7 @@ def test_policy_yaml_is_not_scanned_as_a_template():
     assert "policy" not in ts.valid
 
 
-def test_shipped_default_yaml_is_the_eleven_node_chain():
+def test_shipped_default_yaml_is_the_ten_node_chain():
     reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
     ts = templates.load_templates(TEMPLATES_DIR, reg)
     assert "default" in ts.valid, ts.invalid
@@ -155,7 +155,6 @@ def test_shipped_default_yaml_is_the_eleven_node_chain():
         "open_mr",
         "mr_checks",
         "human_review",
-        "mr_sync",
         "merge",
         "post_merge_watch",
     ]
@@ -164,7 +163,7 @@ def test_shipped_default_yaml_is_the_eleven_node_chain():
     assert gates["plan"] == "plan_approval"
     assert gates["chain_review"] == "chain_finalized"
     assert gates["human_review"] == "human_review_approval"
-    assert gates["open_mr"] is None and gates["merge"] is None and gates["mr_sync"] is None
+    assert gates["open_mr"] is None and gates["merge"] is None
     assert gates["post_merge_watch"] is None
 
     by_id = {n["id"]: n for n in nodes}
@@ -202,13 +201,22 @@ def test_the_default_chain_syncs_the_mr_after_the_review_gate():
     nodes = templates.load_templates(TEMPLATES_DIR, reg).valid["default"].nodes
     at = {n["id"]: i for i, n in enumerate(nodes)}
 
-    sync = next(n for n in nodes if "on.mr.sync" in n["tasks"])
     gate = next(n for n in nodes if n.get("gate_after") == "human_review_approval")
 
-    assert sync["tasks"] == ["on.mr.sync"], "the sync still shares a node with another task"
     assert "on.human_review.requested" in gate["tasks"]
     assert "on.mr.sync" not in gate["tasks"]
-    assert at[gate["id"]] < at[sync["id"]] < at["merge"]
+    assert at[gate["id"]] < at["merge"]
+
+
+def test_merge_syncs_before_it_merges():
+    """One journey, one node: steps stop at the first failing group, so a
+    failed sync never reaches on.merge -- the same boundary the two nodes gave."""
+    reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
+    nodes = templates.load_templates(TEMPLATES_DIR, reg).valid["default"].nodes
+    merge = next(n for n in nodes if n["id"] == "merge")
+    assert merge["steps"] == [["on.mr.sync"], ["on.merge"]]
+    assert merge["tasks"] == ["on.mr.sync", "on.merge"]
+    assert "mr_sync" not in {n["id"] for n in nodes}
 
 
 def test_shipped_default_chain_describes_before_it_opens():
@@ -2063,7 +2071,7 @@ def test_the_default_chain_has_one_mr_node():
     chain = yaml.safe_load(Path("templates/default.yaml").read_text())
     ids = [n["id"] for n in chain["nodes"]]
     assert "pre_mr_rebase" not in ids and "mr_meta" not in ids
-    assert len(ids) == 11, ids
+    assert len(ids) == 10, ids
     open_mr = next(n for n in chain["nodes"] if n["id"] == "open_mr")
     assert open_mr["steps"] == [["on.mr.rebase"], ["on.mr.describe"], ["on.mr.open"]]
     assert open_mr["rebase_bounce_to"] == "verify"

@@ -42,8 +42,7 @@ nodes:
   - { id: open_mr,          steps: [[on.mr.rebase], [on.mr.describe], [on.mr.open]], gate_after: null, rebase_bounce_to: verify }
   - { id: mr_checks,        steps: [[on.ci.poll], [on.review.mr.run]], fix_loop: ci_fix_loop, gate_after: null, rebase_bounce_to: verify }
   - { id: human_review,      tasks: [on.human_review.requested],   gate_after: human_review_approval, reject_to: implementation }
-  - { id: mr_sync,           tasks: [on.mr.sync],                  gate_after: null }
-  - { id: merge,             tasks: [on.merge],                    gate_after: null, rebase_bounce_to: verify }
+  - { id: merge,             steps: [[on.mr.sync], [on.merge]],    gate_after: null, rebase_bounce_to: verify }
   - { id: post_merge_watch,  tasks: [on.merge.watch],              gate_after: null }
 ```
 

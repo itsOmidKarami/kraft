@@ -2910,3 +2910,137 @@ def test_measure_node_stops_at_a_rebase_that_moved_the_base(tmp_path, monkeypatc
             await database.close()
 
     asyncio.run(scenario())
+
+
+def test_every_status_declares_the_tier_that_handles_it():
+    """One table says which tier handles each status, so a new status cannot be
+    added without saying where it is handled."""
+    from kraft.executor import context
+
+    statuses = {
+        v
+        for k, v in vars(context).items()
+        if k.isupper() and isinstance(v, str) and not k.startswith("_")
+    }
+    missing = sorted(statuses - set(context.SCOPE))
+    assert not missing, f"statuses with no declared scope: {missing}"
+    assert set(context.SCOPE.values()) <= {"advance", "task", "node", "chain", "stop"}
+
+
+def test_a_binding_repair_is_given_the_failure_it_is_repairing(tmp_path, monkeypatch):
+    """on.ci.repair reported the diagnosis was absent from its prompt and from
+    the item's events; a node-level repair gets a seeded context, a binding one
+    got whatever unrelated steer was in flight."""
+
+    async def scenario():
+        database, rd, worktree, wid, row = await _setup_measure_node_scenario(tmp_path)
+        try:
+            steers = {}
+
+            async def fake_dispatch_node(db_, run_dirs_, task_hook, node, row_, reg, wt, **kw):
+                steers[task_hook] = kw.get("steer")
+                return "failed" if task_hook == "on.a" else "done"
+
+            monkeypatch.setattr(dispatch, "dispatch_node", fake_dispatch_node)
+            registry = Registry(
+                hooks={
+                    "on.a": {"kind": "builtin", "handler": "noop", "on_failure": ["on.fix"]},
+                    "on.fix": {"kind": "builtin", "handler": "noop"},
+                },
+                raw={},
+            )
+            node = {"id": "n", "tasks": ["on.a"], "on_failure": None}
+            await dispatch.measure_node(
+                database, rd, wid, node, row, registry, worktree, round=0, steer=None
+            )
+            repair = steers["on.fix"]
+            assert repair.source == "seeded"
+            assert "on.a" in repair.take()
+
+            steers.clear()
+            from kraft.executor.context import Steer
+
+            human = Steer("look at the lockfile")
+            await dispatch.measure_node(
+                database, rd, wid, node, row, registry, worktree, round=0, steer=human
+            )
+            text = steers["on.fix"].take()
+            assert text.startswith("look at the lockfile") and "on.a" in text
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_measure_node_records_the_group_it_reached(tmp_path, monkeypatch):
+    """current_node_id alone cannot say 'step 3 of 4', so every re-entry
+    restarted the node."""
+
+    async def scenario():
+        database, rd, worktree, wid, row = await _setup_measure_node_scenario(tmp_path)
+        try:
+            seen = {}
+
+            async def fake_dispatch_node(db_, run_dirs_, task_hook, node, row_, reg, wt, **kw):
+                seen[task_hook] = database.read(
+                    lambda c: c.execute(
+                        "SELECT current_step FROM work_items WHERE id = ?", (wid,)
+                    ).fetchone()[0]
+                )
+                return "failed" if task_hook == "on.c" else "done"
+
+            monkeypatch.setattr(dispatch, "dispatch_node", fake_dispatch_node)
+            node = {
+                "id": "n",
+                "tasks": ["on.a", "on.b", "on.c"],
+                "steps": [["on.a"], ["on.b"], ["on.c"]],
+            }
+            await dispatch.measure_node(
+                database, rd, wid, node, row, Registry(hooks={}, raw={}), worktree, round=0
+            )
+            assert seen == {"on.a": 0, "on.b": 1, "on.c": 2}
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_a_resumed_node_skips_passed_groups_but_still_runs_its_rebase_step(tmp_path, monkeypatch):
+    """Skipping the rebase on a resume is how a moved base goes unnoticed. The
+    rebase is found through its binding, not its name."""
+
+    async def scenario():
+        database, rd, worktree, wid, row = await _setup_measure_node_scenario(tmp_path)
+        try:
+            dispatched = []
+
+            async def fake_dispatch_node(db_, run_dirs_, task_hook, node, row_, reg, wt, **kw):
+                dispatched.append(task_hook)
+                return "done"
+
+            monkeypatch.setattr(dispatch, "dispatch_node", fake_dispatch_node)
+            registry = Registry(
+                hooks={
+                    "on.sync": {"kind": "builtin", "handler": "mr_rebase"},
+                    "on.prep": {"kind": "builtin", "handler": "noop"},
+                    "on.test": {"kind": "builtin", "handler": "noop"},
+                    "on.poll": {"kind": "builtin", "handler": "noop"},
+                },
+                raw={},
+            )
+            steps = [["on.sync"], ["on.prep"], ["on.test"], ["on.poll"]]
+            node = {"id": "n", "tasks": [t for g in steps for t in g], "steps": steps}
+            await dispatch.measure_node(
+                database, rd, wid, node, row, registry, worktree, round=0, start_step=3
+            )
+            assert dispatched == ["on.sync", "on.poll"]
+            cursor = database.read(
+                lambda c: c.execute(
+                    "SELECT current_step FROM work_items WHERE id = ?", (wid,)
+                ).fetchone()[0]
+            )
+            assert cursor == 3
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())

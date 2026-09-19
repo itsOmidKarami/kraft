@@ -94,6 +94,27 @@ def seeded_findings_note(found: list[_findings.Finding]) -> str:
     return _SEEDED_FINDINGS_STEER.format(findings=format_findings(found, repeats=set()))
 
 
+def task_failure_note(task: str, status: str, session=None) -> str:
+    """What a binding-level repair is told about the task it repairs: which
+    task, how it ended, and where its own output is. Without it the repair
+    starts blind -- `on.ci.repair` reported that the `on.ci.poll` diagnosis
+    was absent from its prompt and from the item's events."""
+    note = (
+        f"The task {task} ended {status}. After you finish, {task} will be "
+        "re-measured and that result, not your own report, decides whether this "
+        "repair worked."
+    )
+    if session is not None:
+        note += (
+            f"\nIts session log is at {session['log_path']} "
+            f"and its result at {session['result_path']}"
+        )
+        if session["session_summary_ref"]:
+            note += f", with a session summary at {session['session_summary_ref']}"
+        note += "."
+    return note
+
+
 # A human's note — from the capped card's retry (4b) or a resume after pause (4c) —
 # prepended to the next agent launch. It leads because it is the reason this task is
 # running again.
