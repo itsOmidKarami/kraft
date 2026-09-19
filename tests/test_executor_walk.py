@@ -3065,3 +3065,79 @@ def test_a_resolved_conflict_re_measures_a_node_that_has_more_steps(tmp_path, mo
     monkeypatch.setattr(walk, "resolve_rebase_conflict", fake_resolve)
     assert _walk_single_node(tmp_path, node) == "ok"
     assert len(calls) == 2, "the node must be measured again after the resolve"
+
+
+def test_a_fix_loop_retry_resumes_at_the_failed_group(tmp_path, monkeypatch):
+    """verify is [[rebase], [env.prepare], [test]]: a failing test re-ran the
+    env prepare on every cycle. The rebase still runs -- it is the exemption --
+    but env.prepare does not."""
+    from kraft.executor import dispatch
+
+    tracker = isolated_bd(tmp_path)
+    repo = make_repo(tmp_path)
+    pol = _in_process_policy(tmp_path)
+    dispatched: list[str] = []
+
+    real = dispatch.dispatch_node
+    marker = tmp_path / "first-run-done"
+    # fails once, then passes: the fix cycle is what turns it green
+    fail_once = (
+        f"import pathlib,sys; m=pathlib.Path({str(marker)!r}); "
+        "sys.exit(0 if m.exists() else (m.write_text('x') or 1))"
+    )
+
+    async def fake_dispatch_node(db_, run_dirs_, task_hook, node, row_, reg, wt, **kw):
+        dispatched.append(task_hook)
+        if task_hook in ("on.sync", "on.prep"):
+            return "done"
+        return await real(db_, run_dirs_, task_hook, node, row_, reg, wt, **kw)
+
+    monkeypatch.setattr(dispatch, "dispatch_node", fake_dispatch_node)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            registry = Registry(
+                hooks={
+                    "on.sync": {"kind": "builtin", "handler": "mr_rebase"},
+                    "on.prep": {"kind": "builtin", "handler": "noop"},
+                    "on.test": {"kind": "subprocess", "command": [sys.executable, "-c", fail_once]},
+                    "on.implementation.start": {
+                        "kind": "agent",
+                        "command": f"{sys.executable} {_FAKE_AGENT}",
+                    },
+                }
+            )
+            steps = [["on.sync"], ["on.prep"], ["on.test"]]
+            tmpl = Template(
+                id="verify-only",
+                nodes=[
+                    {
+                        "id": "verify",
+                        "tasks": [t for g in steps for t in g],
+                        "steps": steps,
+                        "gate_after": None,
+                        "fix_loop": "verify_fix_loop",
+                    }
+                ],
+            )
+            wid = await executor.intake(
+                database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
+            )
+            return await executor.run(
+                database,
+                rd,
+                work_item_id=wid,
+                registry=registry,
+                bd_cwd=str(tracker),
+                policy=pol,
+                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    assert dispatched.count("on.test") == 2, dispatched
+    assert dispatched.count("on.prep") == 1, dispatched
+    assert dispatched.count("on.sync") == 2, dispatched
