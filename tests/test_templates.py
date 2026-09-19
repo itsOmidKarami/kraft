@@ -8,10 +8,26 @@ from kraft import harness, skill, templates
 from kraft.templates import (
     ATTACHMENT_GATES,
     GATE_NAMES,
+    AgentDefaults,
+    BindingKind,
+    Capability,
     Template,
     load_registry,
     materialize,
 )
+
+
+def test_registry_models_expose_binding_kinds_capabilities_and_default_merge():
+    assert BindingKind.AGENT.value == "agent"
+    assert Capability.ALLOWED_TOOLS.value == "allowed_tools"
+    defaults = AgentDefaults.model_validate({"model": "default", "allowed_tools": ["read"]})
+    binding = templates.AgentBinding.model_validate(
+        {"kind": "agent", "command": "work", "model": "binding", "allowed_tools": ["write"]}
+    )
+    merged = defaults.merge(binding)
+    assert merged["model"] == "binding"
+    assert merged["allowed_tools"] == ["read", "write"]
+
 
 TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 SKILLS_DIR = Path(__file__).parent.parent / "src" / "kraft" / "skills"

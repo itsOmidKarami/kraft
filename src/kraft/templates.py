@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import re
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, get_args
 
@@ -307,6 +308,21 @@ Effort = Literal["low", "medium", "high", "xhigh", "max"]
 _EFFORT_LEVELS = set(get_args(Effort))
 
 
+class BindingKind(StrEnum):
+    BUILTIN = "builtin"
+    AGENT = "agent"
+    SUBPROCESS = "subprocess"
+    FORGE = "forge"
+
+
+class Capability(StrEnum):
+    MODEL = "model"
+    EFFORT = "effort"
+    DENY_TOOLS = "deny_tools"
+    ALLOWED_TOOLS = "allowed_tools"
+    PERMISSION_MODE = "permission_mode"
+
+
 class _Binding(_DictLike):
     """One `registry.yaml` hook binding. The value checks that need the world
     (a harness's declared capabilities, the steering and skill files, the forge
@@ -378,6 +394,54 @@ class AgentBinding(_Binding):
     allowed_tools: Annotated[list[StrictStr], Field(strict=True)] = Field(default_factory=list)
     permission_mode: Any = None
 
+    # The harness-facing requirements belong to the binding model, while the
+    # loader remains responsible for checking them against the live harness.
+    required_capabilities: ClassVar[dict[str, Capability]] = {
+        "model": Capability.MODEL,
+        "escalate_model": Capability.MODEL,
+        "effort": Capability.EFFORT,
+        "deny_tools": Capability.DENY_TOOLS,
+        "allowed_tools": Capability.ALLOWED_TOOLS,
+        "permission_mode": Capability.PERMISSION_MODE,
+    }
+
+
+class AgentDefaults(BaseModel):
+    """The optional agent fields shared by every agent binding."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    command: StrictStr | None = None
+    profile: str | None = None
+    harness: str | None = None
+    model: StrictStr | None = None
+    escalate_model: StrictStr | None = None
+    deny_tools: Annotated[list[StrictStr], Field(strict=True)] | None = None
+    steering: Annotated[list[StrictStr], Field(strict=True)] | None = None
+    skill: Any = None
+    artifact: Annotated[StrictStr, Field(pattern=f"^{_ARTIFACT_KIND.pattern}$")] | None = None
+    effort: Any = None
+    allowed_tools: Annotated[list[StrictStr], Field(strict=True)] | None = None
+    permission_mode: Any = None
+
+    def merge(self, binding: AgentBinding | dict) -> dict:
+        result = (
+            binding.model_dump(exclude_unset=True)
+            if isinstance(binding, BaseModel)
+            else dict(binding)
+        )
+        list_keys = {"deny_tools", "steering", "allowed_tools"}
+        for key in self.model_fields_set:
+            value = getattr(self, key)
+            if key in list_keys:
+                own = result.get(key, [])
+                result[key] = list(value or []) + [
+                    item for item in own if item not in (value or [])
+                ]
+            elif key not in result:
+                result[key] = value
+        return result
+
 
 HookBinding = Annotated[
     BuiltinBinding | AgentBinding | SubprocessBinding | ForgeBinding,
@@ -396,9 +460,7 @@ _BINDING_MODELS = {
 #: `_PERMISSION_MODES` beside it: the modes a binding may name are the named
 #: harness's own `values:` (leak 9 in the design spec), since `yolo` is real
 #: for gemini and invalid for claude.
-_AGENT_ONLY_KEYS = (
-    frozenset(AgentBinding.model_fields) - frozenset(_Binding.model_fields) - {"kind"}
-)
+_AGENT_ONLY_KEYS = frozenset(AgentDefaults.model_fields)
 #: The `_AGENT_ONLY_KEYS` that merge as a list -- default's items first, then
 #: the binding's own, deduped -- rather than binding-wins-or-not.
 _AGENT_LIST_KEYS = frozenset({"deny_tools", "steering", "allowed_tools"})
@@ -452,12 +514,7 @@ def _harnesses() -> harness.HarnessSet:
 #: harness's own declaration. `escalate_model` is checked as `model`: it is
 #: the same capability used on a different turn.
 _CAPABILITY_KEYS = {
-    "model": "model",
-    "escalate_model": "model",
-    "effort": "effort",
-    "deny_tools": "deny_tools",
-    "allowed_tools": "allowed_tools",
-    "permission_mode": "permission_mode",
+    key: capability.value for key, capability in AgentBinding.required_capabilities.items()
 }
 
 
@@ -475,36 +532,37 @@ def _merge_agent_defaults(data: dict, path: Path) -> None:
     agent_defaults = defaults.get("agent") or {}
     if not isinstance(agent_defaults, dict):
         raise RegistryError(f"{path.name}: 'defaults.agent' must be a mapping")
-    unknown = sorted(set(agent_defaults) - _AGENT_ONLY_KEYS)
-    if unknown:
-        raise RegistryError(f"{path.name}: 'defaults.agent' has unknown key(s) {unknown}")
+    try:
+        defaults_model = AgentDefaults.model_validate(agent_defaults)
+    except ValidationError as exc:
+        extras = [e["loc"][-1] for e in exc.errors() if e["type"] == "extra_forbidden"]
+        if extras:
+            raise RegistryError(
+                f"{path.name}: 'defaults.agent' has unknown key(s) {sorted(extras)}"
+            ) from exc
+        key = str(exc.errors()[0]["loc"][-1])
+        raise RegistryError(f"{path.name}: 'defaults.agent' {key!r} is invalid") from exc
     for key in _AGENT_LIST_KEYS:
-        if key in agent_defaults and not (
-            isinstance(agent_defaults[key], list)
-            and all(isinstance(x, str) for x in agent_defaults[key])
-        ):
+        if key in defaults_model.model_fields_set and getattr(defaults_model, key) is None:
             raise RegistryError(f"{path.name}: 'defaults.agent' {key!r} must be a list of strings")
     if not agent_defaults:
         return
     for hook, binding in data["hooks"].items():
         if not isinstance(binding, dict) or binding.get("kind") != "agent":
             continue
-        for key, dval in agent_defaults.items():
-            if key in _AGENT_LIST_KEYS:
-                if key in binding and not (
+        for key, _dval in defaults_model.model_dump(exclude_unset=True).items():
+            if (
+                key in _AGENT_LIST_KEYS
+                and key in binding
+                and not (
                     isinstance(binding[key], list) and all(isinstance(x, str) for x in binding[key])
-                ):
-                    raise RegistryError(
-                        f"{path.name}: hook {hook!r} {key!r} must be a list of strings"
-                    )
-                own = binding.get(key, [])
-                merged = list(dval)
-                for x in own:
-                    if x not in merged:
-                        merged.append(x)
-                binding[key] = merged
-            elif key not in binding:
-                binding[key] = dval
+                )
+            ):
+                raise RegistryError(f"{path.name}: hook {hook!r} {key!r} must be a list of strings")
+        try:
+            binding.update(defaults_model.merge(binding))
+        except (TypeError, ValueError) as exc:
+            raise RegistryError(f"{path.name}: hook {hook!r} defaults could not be merged") from exc
 
 
 def load_registry(
