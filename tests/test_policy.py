@@ -393,3 +393,14 @@ def test_a_cap_rejects_a_zero_attempt_count():
     bypassed by constructing a Cap directly, which the dataclass allowed."""
     with pytest.raises(Exception):  # noqa: B017 -- pydantic's ValidationError
         policy.Cap(attempts=0, wall_clock_s=60)
+
+
+def test_load_policy_reads_forge_cli_timeout_s_and_defaults_it(tmp_path):
+    d = tmp_path / "policy.yaml"
+    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\n")
+    assert policy.load_policy(d).forge_cli_timeout_s == 120.0
+    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\nforge_cli_timeout_s: 30\n")
+    assert policy.load_policy(d).forge_cli_timeout_s == 30.0
+    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\nforge_cli_timeout_s: 0\n")
+    with pytest.raises(policy.PolicyError):
+        policy.load_policy(d)
