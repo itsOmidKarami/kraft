@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from kraft.templates import ChainNodeIn
+from kraft.templates import NODE_CARRYOVER_FIELDS, ChainNodeIn
 
 ROOT = Path(__file__).resolve().parents[1]
 FIELDS: tuple[str, ...] = tuple(ChainNodeIn.model_fields)
@@ -106,4 +106,15 @@ def test_the_interface_declares_no_field_the_model_dropped(path: str) -> None:
     assert not surplus, (
         f"{path}'s `{name}` ({what}) declares {surplus}, which ChainNodeIn "
         "does not have. Remove them, or add them to the model."
+    )
+
+
+def test_every_carryover_field_is_a_real_node_field() -> None:
+    """`NODE_CARRYOVER_FIELDS` is still a hand-written tuple. A name in it the
+    model does not have carries nothing forward, silently -- the splice reads
+    that key off the old node, finds nothing, and writes nothing."""
+    unknown = sorted(set(NODE_CARRYOVER_FIELDS) - set(FIELDS))
+    assert not unknown, (
+        f"NODE_CARRYOVER_FIELDS names {unknown}, which ChainNodeIn does not "
+        "have; those carry nothing forward across a chain-review splice."
     )
