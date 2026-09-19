@@ -12,7 +12,7 @@
 | src/kraft/adapters/forge/\_\_init\_\_.py |        9 |        0 |    100% |           |
 | src/kraft/adapters/forge/ci.py           |       90 |        3 |     97% |74, 299-300 |
 | src/kraft/adapters/forge/gh.py           |      100 |        9 |     91% |144, 163, 203-204, 253, 261-264, 304 |
-| src/kraft/adapters/forge/git.py          |       90 |        9 |     90% |191-192, 304-309, 319 |
+| src/kraft/adapters/forge/git.py          |       90 |       10 |     89% |185-192, 304-309, 319 |
 | src/kraft/adapters/forge/glab.py         |      146 |        7 |     95% |224-225, 308, 340-341, 360, 382 |
 | src/kraft/adapters/forge/models.py       |      100 |        0 |    100% |           |
 | src/kraft/adapters/forge/mr.py           |      108 |        5 |     95% |67, 190, 242, 295-296 |
@@ -26,7 +26,7 @@
 | src/kraft/api/routes/artifacts.py        |       81 |        1 |     99% |       208 |
 | src/kraft/api/routes/auth.py             |       45 |        6 |     87% |     54-61 |
 | src/kraft/api/routes/board.py            |      105 |        1 |     99% |       126 |
-| src/kraft/api/routes/gates.py            |      136 |       17 |     88% |30, 51-52, 57, 85, 103-104, 242, 296, 298, 321, 337-338, 360-361, 385-386 |
+| src/kraft/api/routes/gates.py            |      136 |       16 |     88% |30, 51-52, 57, 85, 103-104, 296, 298, 321, 337-338, 360-361, 385-386 |
 | src/kraft/api/routes/lifecycle.py        |      475 |       38 |     92% |110, 113-114, 119-120, 199, 228, 243, 376, 447, 449, 451, 505-506, 539, 605-606, 643-644, 697, 720, 727, 758, 767, 865-866, 908-909, 964, 967, 1016, 1048-1049, 1127-1128, 1167, 1176-1177 |
 | src/kraft/api/routes/repos.py            |      125 |        4 |     97% |57-61, 182-183 |
 | src/kraft/api/routes/search.py           |      117 |       14 |     88% |47-48, 74-77, 80, 107-111, 134, 140-141, 171 |
