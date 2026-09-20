@@ -187,8 +187,15 @@ class WorkItemTarget(BaseModel):
     kind: Literal["repository", "workspace"]
     repository: Identifier | None = None
     workspace: Identifier | None = None
-    members: tuple[Identifier, ...] = ()
-    include_root: bool = True
+    #: `strict=False` here only: pydantic's strict mode never coerces a plain
+    #: (decoded-JSON) list into a tuple, so a frozen target rehydrated as a
+    #: dict -- the path `model_validate_json` skips but `json.loads()` then
+    #: `model_validate(dict)` takes -- would otherwise fail on its own
+    #: `model_dump()` output. `members` stays a tuple on the model either way.
+    members: Annotated[tuple[Identifier, ...], Field(strict=False)] = ()
+    #: Meaningless outside a workspace target, so it defaults off; only
+    #: `kind="workspace"` may turn it on (`_kind_owns_its_fields` below).
+    include_root: bool = False
     root_pointer_policy: Annotated[RootPointerPolicy, Field(strict=False)] = (
         RootPointerPolicy.IGNORE
     )
@@ -203,6 +210,8 @@ class WorkItemTarget(BaseModel):
                 raise ValueError("a repository target must name a repository")
             if self.workspace is not None or self.members:
                 raise ValueError("a repository target has no workspace or members")
+            if self.include_root:
+                raise ValueError("a repository target has no root to include")
         else:
             if self.workspace is None:
                 raise ValueError("a workspace target must name a workspace")

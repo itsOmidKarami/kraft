@@ -141,6 +141,30 @@ def test_workspace_target_must_name_a_workspace_and_no_repository():
         te.WorkItemTarget(kind="workspace", workspace="product", repository="api")
 
 
+def test_work_item_target_round_trips_through_a_decoded_json_dict(workspace):
+    """`model_validate_json` relaxes list-to-tuple coercion for `members`, but
+    a target stored as one column inside a larger row is decoded with the row
+    and validated as a dict -- `json.loads()` then `model_validate(dict)`, not
+    `model_validate_json` directly. That path must work too."""
+    import json
+
+    target = te.WorkItemTarget.from_selection(workspace, members=["api"])
+    decoded = json.loads(json.dumps(target.model_dump(mode="json")))
+    rehydrated = te.WorkItemTarget.model_validate(decoded)
+    assert rehydrated == target
+    assert isinstance(rehydrated.members, tuple)
+
+
+def test_repository_target_rejects_a_non_default_include_root():
+    with pytest.raises(ValidationError, match="no root to include"):
+        te.WorkItemTarget(kind="repository", repository="api", include_root=True)
+
+
+def test_repository_target_include_root_defaults_off(api_repository):
+    target = te.WorkItemTarget.for_repository(api_repository)
+    assert target.include_root is False
+
+
 def test_environment_ids_use_the_same_rule_as_the_references_to_them():
     """A repository id a workspace member (or an `AgentTask.harness`) cannot
     name is a definition nothing can reference."""

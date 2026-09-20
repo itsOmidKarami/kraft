@@ -108,6 +108,31 @@ def test_builtin_task_runs_scopes_sequentially_unless_asked():
     assert task.scope is tm.TaskScope.ONCE
 
 
+# ── durations are positive and a polling window is coherent
+# (external-waits-use-a-shared-due-scheduler, external-wait-timeout-needs-human) ──
+
+
+def test_duration_rejects_zero():
+    with pytest.raises(ValidationError, match="positive duration, not zero"):
+        tm.WaitPolicy.model_validate({"timeout": "0s"})
+
+
+def test_duration_accepts_a_positive_amount():
+    assert tm.WaitPolicy.model_validate({"timeout": "30s"}).timeout.total_seconds() == 30
+
+
+def test_polling_policy_rejects_initial_interval_above_max():
+    with pytest.raises(ValidationError, match="must not exceed"):
+        tm.PollingPolicy.model_validate({"initial_interval": "5m", "max_interval": "30s"})
+
+
+def test_polling_policy_allows_initial_interval_at_or_below_max():
+    policy = tm.PollingPolicy.model_validate({"initial_interval": "30s", "max_interval": "5m"})
+    assert policy.initial_interval.total_seconds() == 30
+    equal = tm.PollingPolicy.model_validate({"initial_interval": "5m", "max_interval": "5m"})
+    assert equal.initial_interval == equal.max_interval
+
+
 # ── execution shapes (exec-node-requires-one-execution-shape,
 # exec-node-orders-concurrent-task-groups) ──
 
@@ -409,6 +434,42 @@ def test_a_gate_reject_target_must_name_a_node_in_the_chain():
                 "nodes": [
                     exec_node("spec", tasks=[agent()]),
                     {"id": "gate", "kind": "gate", "reject_to": "nowhere"},
+                ],
+            }
+        )
+
+
+def test_a_gate_reject_target_cannot_name_a_later_node():
+    """`gate-rejection-follows-gate-reject-target` sends execution to
+    `reject_to` on rejection, so it must be work that can change the
+    artifact -- an earlier execution node -- never a later gate
+    (`base-change-restart-target-is-backward` applies the same rule to
+    `restart_from`)."""
+    with pytest.raises(ValidationError, match="reject_to 'chain_review' must name an earlier"):
+        tm.Chain.model_validate(
+            {
+                "id": "default",
+                "nodes": [
+                    exec_node("spec", tasks=[agent()]),
+                    {
+                        "id": "spec_approval",
+                        "kind": "gate",
+                        "reject_to": "chain_review",
+                    },
+                    {"id": "chain_review", "kind": "gate"},
+                ],
+            }
+        )
+
+
+def test_a_gate_reject_target_cannot_name_a_gate():
+    with pytest.raises(ValidationError, match="must name an earlier"):
+        tm.Chain.model_validate(
+            {
+                "id": "default",
+                "nodes": [
+                    {"id": "earlier_gate", "kind": "gate"},
+                    {"id": "gate", "kind": "gate", "reject_to": "earlier_gate"},
                 ],
             }
         )

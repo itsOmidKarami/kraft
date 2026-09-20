@@ -235,8 +235,8 @@ enforced-by: tests/test_template_library.py::test_extends_cannot_change_the_pare
 
 The system SHALL reject a chain with missing references, invalid overrides,
 duplicate identifiers, or invalid cross-node references before it is used.
-enforced-by: tests/test_template_models.py::test_a_gate_reject_target_must_name_a_node_in_the_chain, tests/test_template_library.py::test_extends_rejects_an_unknown_parent, tests/test_template_library.py::test_an_unknown_steering_reference_is_rejected
-origin: docs/templates-v1-design.md "Resolution and execution" -- Phase 1 covers missing references and cross-node reject targets here; duplicate identifiers are pinned under `resolved-chain-identifiers-are-unique`, and invalid per-scope policy overrides join this pin once chain/node/step/task policy layers exist.
+enforced-by: tests/test_template_models.py::test_a_gate_reject_target_must_name_a_node_in_the_chain, tests/test_template_models.py::test_a_gate_reject_target_cannot_name_a_later_node, tests/test_template_models.py::test_a_gate_reject_target_cannot_name_a_gate, tests/test_template_library.py::test_extends_rejects_an_unknown_parent, tests/test_template_library.py::test_an_unknown_steering_reference_is_rejected
+origin: docs/templates-v1-design.md "Resolution and execution" -- Phase 1 covers missing references and cross-node reject targets here, including the `base-change-restart-target-is-backward` backward-reference rule applied to `reject_to`; duplicate identifiers are pinned under `resolved-chain-identifiers-are-unique`, and invalid per-scope policy overrides join this pin once chain/node/step/task policy layers exist.
 
 ## REQ template-resolution-preserves-source-context
 

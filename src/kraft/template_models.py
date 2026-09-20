@@ -78,7 +78,10 @@ def _duration(value: object) -> object:
     match = _DURATION.match(value)
     if match is None:
         raise ValueError(f"{value!r} must be a whole number of s/m/h/d, such as '90m'")
-    return timedelta(seconds=int(match[1]) * _DURATION_UNITS[match[2]])
+    amount = int(match[1])
+    if amount == 0:
+        raise ValueError(f"{value!r} must be a positive duration, not zero")
+    return timedelta(seconds=amount * _DURATION_UNITS[match[2]])
 
 
 #: A duration as templates write it, as the stdlib type the runtime wants.
@@ -175,6 +178,19 @@ class PollingPolicy(BaseModel):
 
     initial_interval: Duration | None = None
     max_interval: Duration | None = None
+
+    @model_validator(mode="after")
+    def _initial_within_max(self) -> Self:
+        if (
+            self.initial_interval is not None
+            and self.max_interval is not None
+            and self.initial_interval > self.max_interval
+        ):
+            raise ValueError(
+                f"initial_interval {self.initial_interval} must not exceed "
+                f"max_interval {self.max_interval}"
+            )
+        return self
 
 
 class WaitPolicy(BaseModel):
@@ -386,12 +402,22 @@ class Chain(BaseModel):
     def _nodes_are_addressable(self) -> Self:
         ids = [n.id for n in self.nodes]
         _unique("node", ids)
-        known = set(ids)
-        for node in self.nodes:
+        index = {n.id: i for i, n in enumerate(self.nodes)}
+        for position, node in enumerate(self.nodes):
             target = node.reject_to if isinstance(node, GateNode) else None
-            if target is not None and target not in known:
-                where = self.id or "this chain"
-                raise ValueError(f"node {node.id!r}: reject_to {target!r} is not a node in {where}")
+            if target is None:
+                continue
+            where = self.id or "this chain"
+            target_position = index.get(target)
+            if (
+                target_position is None
+                or not isinstance(self.nodes[target_position], ExecNode)
+                or target_position >= position
+            ):
+                raise ValueError(
+                    f"node {node.id!r}: reject_to {target!r} must name an earlier "
+                    f"execution node in {where}"
+                )
         return self
 
 
