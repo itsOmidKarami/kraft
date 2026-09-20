@@ -13,10 +13,8 @@ from kraft import executor, store
 from kraft.adapters import beads as beads_mod
 from kraft.api import api_router, deps
 from kraft.api.routes import board
-from kraft.executor import entry
 from kraft.store.repos import RootMergePolicy
 from kraft.templates import (
-    ATTACHMENT_GATES,
     materialize,
     validate_agent_overrides,
     validate_node_override_fields,
@@ -215,8 +213,7 @@ async def create_work_item(body: NewWorkItem, request: Request):
     # `create_work_item`/`executor.run_once` both index `nodes[0]` unguarded
     # (code-review). The bead is already filed and the run spawned by the
     # time either of those would crash, so this has to be checked first.
-    satisfied = frozenset(ATTACHMENT_GATES[a["kind"]] for a in attachments)
-    if not materialize(template, satisfied_gates=satisfied, skip_nodes=body.skip_nodes)["nodes"]:
+    if not materialize(template, skip_nodes=body.skip_nodes)["nodes"]:
         raise HTTPException(422, "skip_nodes would leave no nodes in the chain")
     for node_id, fields in body.node_overrides.items():
         if node_id not in node_ids:
@@ -459,11 +456,11 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
             raise HTTPException(
                 409, "work item has already started; template is fixed for its life"
             )
-        # The exact expression `executor.intake` uses today, against the
-        # item's existing attachments -- switching template must not force a
-        # re-attach to get back a trim the item already earned.
-        satisfied = frozenset(ATTACHMENT_GATES[a["kind"]] for a in entry.attachments_of(row))
-        new_chain_definition = json.dumps(materialize(template, satisfied_gates=satisfied))
+        # The exact expression `executor.intake` uses today. No attachment trim:
+        # V1 applies it inside `ResolvedChain.materialize` from the chain's own
+        # declarations, and wiring this route onto that is Task 5a's along with
+        # the rest of its legacy `Template` load.
+        new_chain_definition = json.dumps(materialize(template))
 
     if body.agent_overrides is not None:
         errs = validate_agent_overrides(body.agent_overrides)

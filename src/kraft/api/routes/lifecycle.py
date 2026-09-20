@@ -23,6 +23,7 @@ from kraft.api.routes.search import OpenDocument
 from kraft.config import git_read
 from kraft.executor import gates, walk
 from kraft.templates import Registry
+from kraft.templates.models import GateNode
 
 logger = logging.getLogger(__name__)
 
@@ -679,9 +680,13 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     """
     st = request.app.state
     row = deps._work_item_row(st, wid)
-    chain = json.loads(row["chain_definition"])
     node_id = row["current_node_id"]
-    node = next((n for n in chain["nodes"] if n["id"] == node_id), None)
+    nodes = store.effective_nodes(walk.chain_of(row), store.node_overrides_of(row))
+    node = next((n for n in nodes if n.id == node_id), None)
+    # Still the legacy shape, and still `st.registry`: `_steer_reachable` asks
+    # which nodes hold an *agent* task, which is a registry-binding question
+    # V1 answers from the task's own kind. Not converted here -- Task 5 owns it.
+    chain = json.loads(row["chain_definition"])
     if node is None:
         raise HTTPException(409, "work item has no current node to retry")
     if row["status"] != "needs_human":
@@ -690,9 +695,12 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         # those meant an item that was never stopped got told its steer text
         # was unreachable instead of that it is not stopped.
         raise HTTPException(409, "work item is not stopped")
-    key = node.get("fix_loop") or None
-    gate = node.get("gate_after")
-    gate_key = f"{gate}_reject_loop" if gate else None
+    # Which counters this retry clears. Both are read off the node's *kind* and
+    # shape now, not off a `fix_loop` string or a `gate_after` name: a V1 gate
+    # is its own node, so "the gate this node has" is "this node is a gate".
+    is_gate = isinstance(node.node, GateNode)
+    key = None if is_gate or node.node.fix_loop is None else walk._loop_key(node)
+    gate_key = f"{node.id}_reject_loop" if is_gate else None
     if row["status"] != "needs_human":
         raise HTTPException(409, "work item is not stopped")
     caller_session_id = request.headers.get("x-kraft-session-id")

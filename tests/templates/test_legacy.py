@@ -6,8 +6,6 @@ import yaml
 
 from kraft import harness, skill, templates
 from kraft.templates import (
-    ATTACHMENT_GATES,
-    GATE_NAMES,
     AgentDefaults,
     BindingKind,
     Capability,
@@ -1494,8 +1492,11 @@ def test_materialize_on_a_template_without_those_gates_is_a_noop():
     assert [n["id"] for n in out["nodes"]] == ["implementation"]
 
 
-def test_attachment_gates_are_real_gate_names():
-    assert set(ATTACHMENT_GATES.values()) <= GATE_NAMES
+# `test_attachment_gates_are_real_gate_names` lived here. `ATTACHMENT_GATES` --
+# the hardcoded attachment-kind-to-gate-*name* table -- is deleted in Template
+# Schema V1 (`attachment-behaviour-is-explicit-gate-configuration`), so there is
+# no name table left for a gate name to be "real" against. The V1 rule is
+# `ResolvedChain.trim_for_attachments`, pinned in tests/templates/test_models.py.
 
 
 def test_a_registry_with_invalid_bytes_is_a_registry_error(tmp_path):

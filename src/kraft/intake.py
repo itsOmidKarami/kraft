@@ -121,7 +121,14 @@ async def _start(app, repo: dict, row: dict) -> str | None:
     # letter of the rule and the opposite of its point: it would run to merge
     # unattended. A human can still start such a chain by hand — they are the
     # judgement the gates exist to invoke.
-    if not any(n.get("gate_after") for n in template.nodes):
+    # A gate is a node whose kind says so (`gate-is-an-ordered-node`), not a
+    # `gate_after` name hung off the node in front of it. `st.templates` above
+    # is still the legacy loader -- Task 5a owns that line -- so until it
+    # returns V1 chains this reads False for every template and auto-intake
+    # refuses to start anything unattended. That is the safe direction of the
+    # two: the rule this guard enforces is "an auto-started item passes no gate
+    # automatically", and refusing is never the violation.
+    if not any(n.get("kind") == "gate" for n in template.nodes):
         logger.warning(
             "auto-intake: %s uses %r, which has no gate — refusing to start it "
             "unattended; a person can start it from the board",

@@ -362,3 +362,58 @@ def test_a_malformed_template_file_is_a_configuration_error(tmp_path):
 def test_a_missing_template_directory_is_a_configuration_error(tmp_path):
     with pytest.raises(TemplateLibraryError, match="library.yaml"):
         TemplateLibrary.from_yaml_dir(tmp_path / "absent")
+
+
+def test_lint_refuses_a_node_mixing_tasks_with_and_without_produces(tmp_path):
+    """Ruling 35's first edge. `trim_for_attachments` is a *node*-level rule and
+    `produces` is task-level, so a node holding one spec-producing task plus
+    another task survives an attached spec and writes the spec again. Closed in
+    validation instead of at runtime: a node either wholly produces a kind or
+    declares none, and the trim is then unambiguous.
+
+    Dropping the single producing task and rebuilding the step is not the
+    alternative -- `Step.tasks` has `min_length=1`, so an emptied step is
+    invalid.
+    """
+    library = {
+        "tasks": {
+            "author": agent_task(produces="spec"),
+            "other": agent_task(),
+        }
+    }
+    chain = {
+        "id": "default",
+        "nodes": [
+            {
+                "id": "spec",
+                "kind": "exec",
+                "tasks": [{"id": "a", "extends": "author"}, {"id": "b", "extends": "other"}],
+            }
+        ],
+    }
+    library_obj = write(tmp_path, library, chain)
+    with pytest.raises(TemplateLibraryError, match="mixes tasks that declare 'produces'"):
+        library_obj.resolve_chain("default")
+    # `lint()` is the reporting door onto the same check, and it names the file
+    # and chain rather than raising at the first one.
+    assert [i.chain for i in library_obj.lint()] == ["default"]
+
+
+def test_lint_allows_a_node_whose_every_task_produces_the_same_kind(tmp_path):
+    library = {"tasks": {"author": agent_task(produces="spec")}}
+    chain = {
+        "id": "default",
+        "nodes": [
+            {
+                "id": "spec",
+                "kind": "exec",
+                "tasks": [{"id": "a", "extends": "author"}, {"id": "b", "extends": "author"}],
+            }
+        ],
+    }
+    assert write(tmp_path, library, chain).lint() == []
+
+
+def test_the_design_chain_has_no_node_mixing_produces(design):
+    """The rule above would be a trap if the shipped chain broke it."""
+    assert design.lint() == []

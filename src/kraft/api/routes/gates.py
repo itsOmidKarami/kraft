@@ -13,13 +13,13 @@ from kraft.api.routes.lifecycle import _stop_live_sessions
 from kraft.executor import gates
 from kraft.templates import (
     CHAIN_REVIEW_GATE,
-    ChainNode,
     carry_forward_node_fields,
     strip_non_proposable_carryover_fields,
     validate_nodes,
     validate_proposed_node_overrides,
     with_steps,
 )
+from kraft.templates.models import GateNode
 
 
 def _strip_front_matter(text: str) -> str:
@@ -36,6 +36,17 @@ def _strip_front_matter(text: str) -> str:
 def _splice_chain_review(st, row) -> tuple[dict | None, dict | None, str | None]:
     """The chain_finalized gate's approval decision (Kraft-hm0, extended
     Kraft-df4tc for escalation targets and the per-node model/effort dial).
+
+    **PARKED since Template Schema V1 (Task 4b): no `src/` caller.** Every line
+    below speaks the legacy `chain_definition` node dict -- the reviewer's
+    envelope schema, `validate_nodes`, `with_steps`,
+    `carry_forward_node_fields`, `store.splice_chain`. Revising a *materialized*
+    chain in place is a different feature from revising a template-shaped one,
+    so `apply_approval` no longer calls this, and a reviewer's
+    `revised_chain_nodes` are currently ignored. Kept rather than deleted
+    because the rules it enforces (one bad field rejects the whole approval, a
+    started node's config is locked, a carried-forward `reject_to` is
+    re-validated against the revised tail) are the feature, not the plumbing.
 
     Returns `(spliced_chain, node_override_patch, None)` when the gate may
     advance -- `node_override_patch` is `{}` when the reviewer proposed no
@@ -145,6 +156,22 @@ def _splice_chain_review(st, row) -> tuple[dict | None, dict | None, str | None]
     return chain, proposals, None
 
 
+def gate_nodes(st, row) -> tuple:
+    """This item's ordered nodes, as the executor sees them: the frozen
+    `MaterializedChain`, node overrides folded on
+    (`store.effective_nodes`). One reader for every gate route, so the
+    approve door, the reject door and the walk cannot disagree about where a
+    gate sits."""
+    return store.effective_nodes(executor.chain_of(row), store.node_overrides_of(row))
+
+
+def _gate_or_404(nodes, gate: str):
+    node = next((n for n in nodes if isinstance(n.node, GateNode) and n.id == gate), None)
+    if node is None:
+        raise HTTPException(404, f"unknown gate {gate!r}")
+    return node
+
+
 class GateReject(BaseModel):
     note: str
     #: Where the chain re-enters. Defaults to the gate node's `reject_to`, and
@@ -152,36 +179,49 @@ class GateReject(BaseModel):
     node: str | None = None
 
 
-async def apply_approval(st, row, gate: str) -> tuple[dict | None, str | None]:
+async def apply_approval(st, row, gate: str) -> tuple[tuple | None, str | None]:
     """Everything an approval does before the chain is allowed to move, and the
-    chain it may move along -- or `(None, reason)` when it must not move at all.
+    ordered nodes it may move along -- or `(None, reason)` when it must not move
+    at all.
 
     One function, two doors: the `POST .../approve` endpoint (a human) and
     `kraft.executor.gates.review_gates` (an agent's `approve` verdict), which reaches it
     through the `on_approve` callback `_launch_approval` hands the executor.
     The same rule `apply_rejection` already enforces for the other verdict:
-    an agent's approval must have exactly the effects a person's would, or
-    `chain_review`'s revised nodes are silently discarded on the path this
-    feature makes the default (Kraft-zr3s).
+    an agent's approval must have exactly the effects a person's would.
 
-    Ingest before any splice: the artifact this approval is about belongs to
-    `row`'s chain as it stood when the gate opened, same as `_gate_artifact`
-    everywhere else it's called.
+    **The final-review gate is selected by `GateNode.chain_finalized`, never by
+    its name** (`chain-finalized-remains-a-dedicated-marker`): a chain may call
+    that gate whatever it likes, and `CHAIN_REVIEW_GATE`'s hardcoded
+    `"chain_finalized"` string was the last name-table read on this path.
+
+    What the marker still buys, and it is the difference an ordinary gate must
+    not have: **a final-review gate cannot be approved without its document.**
+    Every other gate is answerable with nothing to read (`gate_artifact`'s own
+    contract -- an agent that reported done without honouring the artifact
+    contract still leaves a decidable gate), but the whole subject of this one is
+    the review it names, so approving it with no document approves nothing.
+    Kraft-iv4y's posture: a clear 422 telling the human to `kraft item retry` the
+    node that owed the document, not a 200 that changed nothing.
+
+    **What a `chain_finalized` approval does not do yet: splice.**
+    `_splice_chain_review` rewrites the legacy `chain_definition` column from an
+    envelope of legacy node dicts (`validate_nodes`, `with_steps`,
+    `carry_forward_node_fields`), and neither the envelope schema nor
+    `store.splice_chain` has a V1 equivalent -- revising a *materialized* chain
+    in place is a different feature from revising a template-shaped one, and it
+    belongs with the chain-review skill's own V1 conversion. So the approval
+    ingests the artifact and advances, and a reviewer's `revised_chain_nodes`
+    are currently ignored. Reported as a deferral, not silently dropped.
     """
+    nodes = gate_nodes(st, row)
+    node = _gate_or_404(nodes, gate)
     await artifacts._ingest_approved_gate_artifact(st, row, gate)
-    if gate != CHAIN_REVIEW_GATE:
-        return json.loads(row["chain_definition"]), None
-    chain, node_override_patch, reason = _splice_chain_review(st, row)
-    if chain is None:
-        return None, reason
-
-    def write(c):
-        store.splice_chain(c, row["id"], json.dumps(chain))
-        if node_override_patch:
-            store.set_node_overrides(c, row["id"], node_override_patch)
-
-    await st.db.write(write)
-    return chain, None
+    if node.node.chain_finalized and executor.gate_artifact(st.run_dirs, row, gate) is None:
+        return None, (
+            f"{gate}: the final review document is missing; the node that owed it did not write one"
+        )
+    return nodes, None
 
 
 def _decided_by(request: Request) -> str:
@@ -221,9 +261,7 @@ def _decided_by(request: Request) -> str:
 async def approve_gate(wid: str, gate: str, request: Request):
     st = request.app.state
     row = deps._work_item_row(st, wid)
-    chain = json.loads(row["chain_definition"])
-    if gate not in ChainNode.gate_names(chain["nodes"]):
-        raise HTTPException(404, f"unknown gate {gate!r}")
+    _gate_or_404(gate_nodes(st, row), gate)
     if board._pending_gate(st, wid) != gate:
         raise HTTPException(409, f"gate {gate!r} is not pending")
     # A pending gate's status is already needs_human (never active), so the
@@ -243,8 +281,8 @@ async def approve_gate(wid: str, gate: str, request: Request):
     if deps.task_is_live(request.app, wid):
         await deps.cancel(request.app, wid, timeout=deps.CANCEL_TIMEOUT)
 
-    chain, reason = await apply_approval(st, row, gate)
-    if chain is None:
+    nodes, reason = await apply_approval(st, row, gate)
+    if nodes is None:
         # Kraft-iv4y: a human hitting `approve` again after this exact failure
         # used to get a 200 back with nothing changed -- the same reason
         # logged a second time, no error, no hint that approving was never
@@ -256,7 +294,7 @@ async def approve_gate(wid: str, gate: str, request: Request):
         )
 
     await st.db.write(lambda c: store.approve_gate(c, wid, gate, by=_decided_by(request)))
-    start = board._gate_node_index(chain, gate) + 1
+    start = board._gate_node_index(nodes, gate) + 1
     try:
         deps.spawn(
             request.app,
@@ -294,9 +332,8 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
     """
     st = request.app.state
     row = deps._work_item_row(st, wid)
-    chain = json.loads(row["chain_definition"])
-    if gate not in ChainNode.gate_names(chain["nodes"]):
-        raise HTTPException(404, f"unknown gate {gate!r}")
+    nodes = gate_nodes(st, row)
+    _gate_or_404(nodes, gate)
     if board._pending_gate(st, wid) != gate:
         raise HTTPException(409, f"gate {gate!r} is not pending")
     if st.invalid_policy:
@@ -308,7 +345,7 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
             503, f"policy config invalid, refusing work: {'; '.join(st.invalid_policy)}"
         )
     try:
-        executor.reject_target(chain, executor.gate_node_index(chain, gate), body.node)
+        executor.reject_target(nodes, executor.gate_node_index(nodes, gate), body.node)
     except ValueError as exc:
         # Same posture as invalid_policy above: a bad target changes nothing,
         # so it must not be reached having already paused the item and killed
@@ -327,7 +364,7 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
             st.db,
             st.policy,
             work_item_id=wid,
-            chain=chain,
+            nodes=nodes,
             gate=gate,
             note=body.note,
             node=body.node,

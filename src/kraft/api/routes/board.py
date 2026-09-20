@@ -49,12 +49,16 @@ def _needs_context_stop(st, wid: str) -> bool:
     return reason is not None and reason.startswith("needs_context:")
 
 
-def _gate_node_index(chain: dict, gate: str) -> int:
-    return executor.gate_node_index(chain, gate)
+def _gate_node_index(nodes, gate: str) -> int:
+    return executor.gate_node_index(nodes, gate)
 
 
 def _gate_artifact(st, row, gate: str | None) -> str | None:
-    return executor.gate_artifact(st.registry, st.run_dirs, row, gate)
+    """The document the pending gate decides, from the gate's own `artifact`
+    field. `st.registry` is gone from the call: the artifact kind used to be
+    scanned out of the *preceding* node's hook bindings, and a V1 gate declares
+    it itself (`gate-owns-gate-behaviour`)."""
+    return executor.gate_artifact(st.run_dirs, row, gate)
 
 
 @api_router.get("/work-items")

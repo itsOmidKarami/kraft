@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import sqlite3
 
@@ -163,8 +164,74 @@ def node_overrides_of(row) -> dict:
     return json.loads(raw) if raw else {}
 
 
+def effective_nodes(chain, node_overrides: dict) -> tuple:
+    """A `MaterializedChain`'s ordered nodes with `node_overrides` folded on as
+    a **typed** overlay: `tuple[ResolvedNode, ...]`.
+
+    A read-time view that writes nothing, so
+    `materialized-chain-is-immutable-work-item-input` still holds -- that
+    requirement freezes the stored snapshot, and this never touches it. The
+    blind `{**node, **override}` dict merge `effective_chain` does cannot apply
+    to a typed node at all: an unknown key would be accepted silently, and a
+    key of the wrong type would reach the runtime as one.
+
+    **One key is supported: `auto_escalate: bool`** -- the persisted, publicly
+    exposed override name (`db.py`'s `work_items.node_overrides`,
+    `set_node_overrides`, `PATCH /work-items/{id}`), which keeps its spelling
+    even though the chain field it governs is now `GateNode.auto_review`.
+    The split: the **chain declares** the reviewing task, the **override
+    permits or suppresses** it. So `false` clears `auto_review`, and `true`
+    only confirms what the gate already declares -- **a gate declaring no
+    `auto_review` cannot be switched on by an override, because an override
+    names no task.** Broadening the supported set is Task 8's
+    (`retry-overrides-are-policy-bounded`).
+
+    Every other key in a patch is ignored here rather than rejected: the same
+    `node_overrides` blob also carries `model`/`effort`/`attempts`, which
+    `dispatch_node` and `_policy.resolve_cap` read for themselves from the raw
+    dict. This function answers one question -- what the *nodes* look like.
+    """
+    from kraft.templates.models import GateNode
+
+    if not node_overrides:
+        return chain.chain.nodes
+    out = []
+    for resolved in chain.chain.nodes:
+        patch = node_overrides.get(resolved.id) or {}
+        if (
+            isinstance(resolved.node, GateNode)
+            and patch.get("auto_escalate") is False
+            and resolved.node.auto_review is not None
+        ):
+            # `model_copy`, not a re-validated `model_dump` round trip: the one
+            # supported patch sets a field to `None`, which its own annotation
+            # already permits, so there is nothing a revalidation could catch
+            # that the type does not. A second supported key would change that.
+            # Both halves: the model's field and the `ResolvedNode`'s resolved
+            # slot, so neither a reader holding the typed node nor one holding
+            # the resolved task can see a reviewer this item suppressed.
+            out.append(
+                dataclasses.replace(
+                    resolved,
+                    node=resolved.node.model_copy(update={"auto_review": None}),
+                    auto_review=None,
+                )
+            )
+        else:
+            out.append(resolved)
+    return tuple(out)
+
+
 def effective_chain(chain_definition: dict, node_overrides: dict) -> dict:
     """`chain_definition` with `node_overrides` folded over each node.
+
+    The legacy-dict sibling of `effective_nodes`, and retired with the
+    `chain_definition` column itself (Task 5). Its three remaining readers all
+    want a node field V1's schema does not have -- the Config tab's rendered
+    YAML, `effective_auto_escalate_stuck` and `effective_auto_escalate_delay_s`
+    (`auto_escalate_stuck`/`auto_escalate_delay_s` are `policy.yaml` keys in V1,
+    not node keys) -- so there is nothing here for a typed overlay to convert
+    *to*. Anything asking what a V1 node looks like calls `effective_nodes`.
 
     A read-time view, not a write: `chain_definition` stays exactly what
     `templates.materialize` produced at intake (or the last `chain_template`

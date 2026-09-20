@@ -3624,3 +3624,55 @@ def test_a_re_entered_walk_does_not_re_prepare_the_worktree(tmp_path):
     assert runs.read_text().count("run") == 1
     assert [s["hook_point"] for s in sessions] == ["second.main.b"]
     assert not any(e["type"] == "worktree_prepared" for e in evts)
+
+
+def test_an_exec_node_that_completes_advances_to_the_next_exec_node(tmp_path):
+    """`exec-node-runs-then-advances`. Two *consecutive* execution nodes, which
+    no chain in this tree had: every other walk test either has one exec node, or
+    a gate between them, so the advancement the requirement is about was pinned
+    by nothing (4a's review finding L9).
+
+    The second node's task appends to the same file, so order is observable and
+    not just membership.
+    """
+    repo = make_repo(tmp_path)
+    log = tmp_path / "order.txt"
+    chain = _v1(
+        [
+            {
+                "id": "first",
+                "kind": "exec",
+                "tasks": [
+                    {"id": "run", "kind": "subprocess", "command": f"sh -c 'echo a >> {log}'"}
+                ],
+            },
+            {
+                "id": "second",
+                "kind": "exec",
+                "tasks": [
+                    {"id": "run", "kind": "subprocess", "command": f"sh -c 'echo b >> {log}'"}
+                ],
+            },
+        ],
+        repo,
+    )
+
+    status, evts, sessions, _row = asyncio.run(v1_walk(tmp_path, chain, repo=repo))
+
+    assert status == "completed"
+    assert log.read_text().split() == ["a", "b"]
+    assert [s["hook_point"] for s in sessions] == ["first.main.run", "second.main.run"]
+    # And the first node is *completed* before the second is entered -- an
+    # advance that ran the second node without closing the first would leave the
+    # board showing two nodes running at once.
+    node_events = [
+        (e["type"], e["payload"]["node_id"])
+        for e in evts
+        if e["type"] in ("node_started", "node_completed")
+    ]
+    assert node_events == [
+        ("node_started", "first"),
+        ("node_completed", "first"),
+        ("node_started", "second"),
+        ("node_completed", "second"),
+    ]

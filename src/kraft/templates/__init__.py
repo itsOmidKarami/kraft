@@ -409,10 +409,12 @@ def carry_forward_node_fields(old_nodes: list[dict], new_nodes: list[dict]) -> l
     return ChainNode.carry_forward_fields(old_nodes, new_nodes)
 
 
-#: What an intake attachment stands in for (Kraft-dgh). Keyed on the gate rather
-#: than the node id: gate names are a validated closed vocabulary, node ids are
-#: free text a custom template chooses.
-ATTACHMENT_GATES = {"spec": "spec_approval", "plan": "plan_approval"}
+# `ATTACHMENT_GATES = {"spec": "spec_approval", "plan": "plan_approval"}` lived
+# here: a hardcoded attachment-kind-to-gate-*name* table, which is exactly what
+# `attachment-behaviour-is-explicit-gate-configuration` forbids. Deleted in
+# Template Schema V1. What an attachment stands in for is declared by the chain
+# now -- the gate's own `artifact:` and the producing node's tasks' `produces:`
+# -- and applied by `ResolvedChain.trim_for_attachments`.
 #: An `artifact:` value becomes a path segment (`.engineering/<kind>s/<id>.md`),
 #: so it is a bare lowercase identifier — not a path, not a pattern.
 _ARTIFACT_KIND = re.compile(r"[a-z][a-z0-9_-]*")

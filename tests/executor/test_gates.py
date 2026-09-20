@@ -1,66 +1,56 @@
 import asyncio
 import json
+from types import SimpleNamespace
 
 import pytest
+from support.harness import make_repo, v1_chain, v1_item, v1_walk
 
 from kraft import db, events, executor, store
+from kraft.adapters import agent as agent_mod
+from kraft.api.routes import gates as gates_route
 from kraft.executor import gates as gates_module
+from kraft.executor import resuming
+from kraft.executor.context import LaunchContext
+from kraft.paths import RunDirs
+from kraft.templates.models import MaterializedChain
 
 
 def test_apply_rejection_returns_the_reentry_index_then_stops_at_the_cap(tmp_path):
+    """Converted to the typed chain (Task 4b): `apply_rejection` takes the
+    ordered `ResolvedNode`s now, not a chain dict."""
     from kraft import policy as _policy
 
-    chain = {
-        "nodes": [
-            {"id": "implementation", "tasks": [], "gate_after": None},
+    chain = v1_chain(
+        [
             {
-                "id": "human_review",
-                "tasks": [],
-                "gate_after": "human_review_approval",
-                "reject_to": "implementation",
+                "id": "implementation",
+                "kind": "exec",
+                "tasks": [{"id": "run", "kind": "subprocess", "command": "true"}],
             },
-        ]
-    }
+            {"id": "human_review_approval", "kind": "gate", "reject_to": "implementation"},
+        ],
+        repo="/r",
+    )
+    nodes = chain.chain.nodes
     policy = _policy.Policy(loops={}, default=_policy.Cap(attempts=2, wall_clock_s=3600))
 
     async def scenario():
         database = await db.Database.open(tmp_path / "k.db")
         try:
-            await database.write(
-                lambda c: store.create_work_item(
-                    c,
-                    id="w1",
-                    bead_id=None,
-                    title="t",
-                    repo="/r",
-                    chain_template="default",
-                    chain_definition=json.dumps(chain),
+            await v1_item(database, chain, repo="/r")
+            results = []
+            for note in ("not yet", "still not", "no"):
+                results.append(
+                    await executor.apply_rejection(
+                        database,
+                        policy,
+                        work_item_id="w1",
+                        nodes=nodes,
+                        gate="human_review_approval",
+                        note=note,
+                    )
                 )
-            )
-            first = await executor.apply_rejection(
-                database,
-                policy,
-                work_item_id="w1",
-                chain=chain,
-                gate="human_review_approval",
-                note="not yet",
-            )
-            second = await executor.apply_rejection(
-                database,
-                policy,
-                work_item_id="w1",
-                chain=chain,
-                gate="human_review_approval",
-                note="still not",
-            )
-            third = await executor.apply_rejection(
-                database,
-                policy,
-                work_item_id="w1",
-                chain=chain,
-                gate="human_review_approval",
-                note="no",
-            )
+            first, second, third = results
             assert (first, second) == (0, 0)
             # Third breaches attempts=2: no re-entry, and the item is parked.
             assert third is None
@@ -74,105 +64,29 @@ def test_apply_rejection_returns_the_reentry_index_then_stops_at_the_cap(tmp_pat
     asyncio.run(scenario())
 
 
-def test_review_gates_reads_the_items_own_node_override_not_the_templates(tmp_path, monkeypatch):
-    """UI v2 · 04 point 1: the template turns `auto_escalate` on for this gate,
-    but the item's own `node_overrides` turns it back off -- agent gate review
-    must not fire. If `review_gates` read `chain_definition` straight, this
-    node would still show `auto_escalate: true` and `gate_review.review`
-    would be called (and this test's monkeypatch would raise).
-    """
-    chain = {
-        "nodes": [
-            {"id": "a", "tasks": [], "gate_after": "g", "auto_escalate": True},
-        ]
-    }
-
-    def _boom(*a, **kw):
-        raise AssertionError("gate_review.review must not run: the item's override disarmed it")
-
-    monkeypatch.setattr(gates_module.gate_review, "review", _boom)
-
-    async def scenario():
-        database = await db.Database.open(tmp_path / "k.db")
-        try:
-            await database.write(
-                lambda c: store.create_work_item(
-                    c,
-                    id="w1",
-                    bead_id=None,
-                    title="t",
-                    repo="/r",
-                    chain_template="default",
-                    chain_definition=json.dumps(chain),
-                    auto_gate=True,
-                )
-            )
-            await database.write(
-                lambda c: store.set_node_overrides(c, "w1", {"a": {"auto_escalate": False}})
-            )
-            await database.write(lambda c: events.append(c, "w1", "gate_requested", {"gate": "g"}))
-            status = await gates_module.review_gates(
-                "awaiting_gate", database, tmp_path, work_item_id="w1", registry=None
-            )
-            assert status == "awaiting_gate"
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
-
-
-def test_review_gates_skips_before_its_delay_has_elapsed(tmp_path, monkeypatch):
-    from kraft import policy as _policy
-
-    chain = {
-        "nodes": [
-            {"id": "a", "tasks": [], "gate_after": "g", "auto_escalate": True},
-        ]
-    }
-
-    def _boom(*a, **kw):
-        raise AssertionError("gate_review.review must not run before the delay elapses")
-
-    monkeypatch.setattr(gates_module.gate_review, "review", _boom)
-    pol = _policy.Policy(loops={}, default=_policy.Cap(1, 1), auto_escalate_delay_s=600)
-
-    async def scenario():
-        database = await db.Database.open(tmp_path / "k.db")
-        try:
-            await database.write(
-                lambda c: store.create_work_item(
-                    c,
-                    id="w1",
-                    bead_id=None,
-                    title="t",
-                    repo="/r",
-                    chain_template="default",
-                    chain_definition=json.dumps(chain),
-                    auto_gate=True,
-                )
-            )
-            await database.write(lambda c: events.append(c, "w1", "gate_requested", {"gate": "g"}))
-            return await gates_module.review_gates(
-                "awaiting_gate", database, tmp_path, work_item_id="w1", registry=None, policy=pol
-            )
-        finally:
-            await database.close()
-
-    assert asyncio.run(scenario()) == "awaiting_gate"
-
-
-def test_reject_target_rejects_a_forward_node_with_a_value_error():
-    chain = {
-        "nodes": [
-            {"id": "a", "tasks": [], "gate_after": "g"},
-            {"id": "b", "tasks": [], "gate_after": None},
-        ]
-    }
-    with pytest.raises(ValueError):
-        executor.reject_target(chain, 0, "b")
+# `test_review_gates_reads_the_items_own_node_override_not_the_templates` and
+# `test_review_gates_skips_before_its_delay_has_elapsed` lived here, both built
+# on a legacy `gate_after` chain. They are replaced one-for-one, against the
+# typed chain, by
+# `test_a_node_override_permits_or_suppresses_the_declared_auto_review` and
+# `test_auto_review_waits_out_its_effective_delay` at the end of this file.
 
 
 async def _seed_stuck(database, wid, *, reason, chain=None, node_id="implementation"):
+    # Both columns. `auto_escalate_stuck` is Task 7's and still reads node
+    # fields off the legacy `chain_definition`; `resume_after_escalation` walks
+    # the V1 chain to find the node to re-enter at, so the row needs one.
+    v1 = v1_chain(
+        [
+            {
+                "id": n["id"],
+                "kind": "exec",
+                "tasks": [{"id": "run", "kind": "subprocess", "command": "true"}],
+            }
+            for n in (chain or {"nodes": [{"id": node_id}]})["nodes"]
+        ],
+        repo="/r",
+    )
     await database.write(
         lambda c: store.create_work_item(
             c,
@@ -182,6 +96,7 @@ async def _seed_stuck(database, wid, *, reason, chain=None, node_id="implementat
             repo="/r",
             chain_template="default",
             chain_definition=json.dumps(chain or {"nodes": [{"id": node_id, "tasks": []}]}),
+            materialized_chain=v1.to_json(),
         )
     )
     await database.write(lambda c: store.enter_node(c, wid, node_id))
@@ -1051,34 +966,35 @@ def _evt(t, **payload):
     return {"type": t, "payload": payload, "created_at": "2026-09-12T00:00:00+00:00"}
 
 
-def test_gate_already_reviewed_counts_the_started_event():
+def test_gate_review_attempts_counts_the_started_event():
     """`gate_review.review` writes `gate_auto_review_started` before it
     launches anything, so a review that crashed mid-flight -- no verdict, no
-    skip event -- still suppresses the next tick's re-attempt."""
+    skip event -- still spends an attempt and suppresses the next tick at the
+    default bound of one."""
     evts = [_evt("gate_requested", gate="g"), _evt("gate_auto_review_started", gate="g")]
-    assert gates_module._gate_already_reviewed(evts, "g") is True
+    assert gates_module._gate_review_attempts(evts, "g") == 1
 
 
-def test_gate_already_reviewed_resets_at_a_run_boundary():
+def test_gate_review_attempts_resets_at_a_run_boundary():
     """Otherwise a crashed review demotes the gate to human-only for good:
-    a human's resume re-enters review_gates, hits the marker, and returns
+    a human's resume re-enters review_gates, hits the spent bound, and returns
     unchanged with nothing logged (code review finding)."""
     evts = [
         _evt("gate_requested", gate="g"),
         _evt("gate_auto_review_started", gate="g"),
         _evt("work_item_resumed"),
     ]
-    assert gates_module._gate_already_reviewed(evts, "g") is False
+    assert gates_module._gate_review_attempts(evts, "g") == 0
 
 
-def test_gate_already_reviewed_ignores_a_previous_requests_attempt():
+def test_gate_review_attempts_ignores_a_previous_requests_attempt():
     evts = [
         _evt("gate_requested", gate="g"),
         _evt("gate_auto_review_skipped", gate="g", reason="undecided"),
         _evt("gate_rejected", gate="g"),
         _evt("gate_requested", gate="g"),
     ]
-    assert gates_module._gate_already_reviewed(evts, "g") is False
+    assert gates_module._gate_review_attempts(evts, "g") == 0
 
 
 def test_resume_after_escalation_threads_the_seeded_flag_onto_retry_after_cap(
@@ -1183,3 +1099,826 @@ def test_resume_after_escalation_defaults_seeded_to_false_for_an_older_event_sha
     status, seeded = asyncio.run(scenario())
     assert status == "completed"
     assert seeded is False
+
+
+# ── Template Schema V1: gates own their own behaviour (Task 4b) ──
+#
+# Everything below drives the typed `MaterializedChain`. The legacy-chain tests
+# above are Task 5b's to convert; do not read them as the current shape.
+
+
+def _agent_task(id="reviewer", **kw):
+    return {"id": id, "kind": "agent", "harness": "fake", "prompt": "review it", **kw}
+
+
+def _v1(nodes, repo, **kw):
+    return v1_chain(nodes, repo=repo, **kw)
+
+
+def _spec_gate_chain(repo, *, gate_extra=None, after=True):
+    """spec (exec) -> spec_approval (gate) -> implementation (exec)."""
+    nodes = [
+        {
+            "id": "spec",
+            "kind": "exec",
+            "tasks": [{"id": "write", "kind": "subprocess", "command": "true"}],
+        },
+        {"id": "spec_approval", "kind": "gate", "artifact": "spec", **(gate_extra or {})},
+    ]
+    if after:
+        nodes.append(
+            {
+                "id": "implementation",
+                "kind": "exec",
+                "tasks": [{"id": "build", "kind": "subprocess", "command": "true"}],
+            }
+        )
+    return _v1(nodes, repo)
+
+
+async def _open_db(tmp_path, chain, repo, **kwargs):
+    database = await db.Database.open(tmp_path / "k.db")
+    await v1_item(database, chain, repo=repo, **kwargs)
+    return database
+
+
+def _row(database, wid="w1"):
+    return database.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+    )
+
+
+def _fake_state(database, run_dirs):
+    """The slice of `app.state` the gate routes' `apply_approval` reads."""
+
+    class _Indexer:
+        async def ingest_gate_artifact(self, **kw):
+            self.seen = kw
+
+    return SimpleNamespace(db=database, run_dirs=run_dirs, indexer=_Indexer())
+
+
+# -- gate-node-opens-and-halts-execution / gate-approval-advances-to-next-node --
+
+
+def test_gate_node_halts_until_approved(tmp_path):
+    """The walk stops *at* the gate: the node after it does not start, and the
+    gate opens under its own node id with no name table anywhere."""
+    repo = make_repo(tmp_path)
+    chain = _spec_gate_chain(repo)
+
+    status, evts, sessions, row = asyncio.run(v1_walk(tmp_path, chain, repo=repo))
+
+    assert status == "awaiting_gate"
+    assert [s["hook_point"] for s in sessions] == ["spec.main.write"]
+    assert row["current_node_id"] == "spec_approval"
+    requested = next(e for e in evts if e["type"] == "gate_requested")
+    assert requested["payload"] == {"gate": "spec_approval", "node_id": "spec_approval"}
+    # And nothing has completed it yet -- that is what approval is for.
+    assert not [
+        e
+        for e in evts
+        if e["type"] == "node_completed" and e["payload"]["node_id"] == "spec_approval"
+    ]
+
+
+def test_gate_approval_advances_to_the_node_after_the_gate(tmp_path):
+    """`apply_approval` hands back the ordered nodes, the caller advances one
+    past the gate's own index, and the gate node is *completed* rather than left
+    rendering as a node still running (4a's Concern 4)."""
+    repo = make_repo(tmp_path)
+    chain = _spec_gate_chain(repo)
+    rd = RunDirs(tmp_path / "run").ensure()
+
+    async def scenario():
+        database = await _open_db(tmp_path, chain, repo)
+        try:
+            await executor.run_once(
+                database,
+                rd,
+                work_item_id="w1",
+                registry=None,
+                launch=LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None),
+            )
+            row = _row(database)
+            nodes, reason = await gates_route.apply_approval(
+                _fake_state(database, rd), row, "spec_approval"
+            )
+            assert reason is None
+            start = executor.gate_node_index(nodes, "spec_approval") + 1
+            assert nodes[start].id == "implementation"
+            await database.write(lambda c: store.approve_gate(c, "w1", "spec_approval"))
+            status = await executor.run_once(
+                database,
+                rd,
+                work_item_id="w1",
+                registry=None,
+                start_index=start,
+                launch=LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None),
+            )
+            evts = database.read(lambda c: events.read_after(c, 0, "w1"))
+            sessions = database.read(
+                lambda c: c.execute(
+                    "SELECT hook_point FROM worker_sessions WHERE work_item_id = 'w1'"
+                ).fetchall()
+            )
+            return (
+                status,
+                [(e["type"], e["payload"].get("node_id")) for e in evts],
+                [s["hook_point"] for s in sessions],
+            )
+        finally:
+            await database.close()
+
+    status, pairs, hooks = asyncio.run(scenario())
+    assert status == "completed"
+    assert hooks == ["spec.main.write", "implementation.main.build"]
+    # The gate's own node pair closes on approval, and the gate is never
+    # re-requested on the way past.
+    assert ("node_completed", "spec_approval") in pairs
+    assert [t for t, _ in pairs].count("gate_requested") == 1
+
+
+def test_an_ordinary_gate_has_ordinary_pause_and_approval_behaviour(tmp_path):
+    """`chain-finalized-remains-a-dedicated-marker`'s second half: a gate
+    without the marker approves with no document at all, where the final-review
+    gate refuses (see the marker test below)."""
+    repo = make_repo(tmp_path)
+    chain = _v1(
+        [
+            {
+                "id": "build",
+                "kind": "exec",
+                "tasks": [{"id": "run", "kind": "subprocess", "command": "true"}],
+            },
+            {"id": "sign_off", "kind": "gate", "artifact": "review_brief"},
+        ],
+        repo,
+    )
+    rd = RunDirs(tmp_path / "run").ensure()
+
+    async def scenario():
+        database = await _open_db(tmp_path, chain, repo)
+        try:
+            await executor.run_once(
+                database,
+                rd,
+                work_item_id="w1",
+                registry=None,
+                launch=LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None),
+            )
+            return await gates_route.apply_approval(
+                _fake_state(database, rd), _row(database), "sign_off"
+            )
+        finally:
+            await database.close()
+
+    nodes, reason = asyncio.run(scenario())
+    assert reason is None
+    assert nodes is not None
+
+
+def test_the_chain_finalized_marker_not_the_gate_name_selects_chain_review(tmp_path):
+    """Two gates, and the names are deliberately the wrong way round: the one
+    *called* `chain_finalized` carries no marker, and the marked one is called
+    something else. Only the marked gate takes the final-review path, which
+    refuses an approval whose review document was never written."""
+    repo = make_repo(tmp_path)
+    chain = _v1(
+        [
+            {
+                "id": "build",
+                "kind": "exec",
+                "tasks": [{"id": "run", "kind": "subprocess", "command": "true"}],
+            },
+            {"id": "chain_finalized", "kind": "gate", "artifact": "review_brief"},
+            {
+                "id": "summarize",
+                "kind": "exec",
+                "tasks": [{"id": "run", "kind": "subprocess", "command": "true"}],
+            },
+            {"id": "all_done", "kind": "gate", "chain_finalized": True, "artifact": "review_brief"},
+        ],
+        repo,
+    )
+    rd = RunDirs(tmp_path / "run").ensure()
+
+    async def scenario():
+        database = await _open_db(tmp_path, chain, repo)
+        try:
+            await executor.run_once(
+                database,
+                rd,
+                work_item_id="w1",
+                registry=None,
+                launch=LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None),
+            )
+            st = _fake_state(database, rd)
+            row = _row(database)
+            by_name = await gates_route.apply_approval(st, row, "chain_finalized")
+            by_flag = await gates_route.apply_approval(st, row, "all_done")
+            return by_name, by_flag
+        finally:
+            await database.close()
+
+    (named_nodes, named_reason), (flag_nodes, flag_reason) = asyncio.run(scenario())
+    # Named `chain_finalized`, unmarked: an ordinary gate, approvable.
+    assert named_reason is None and named_nodes is not None
+    # Marked, differently named: the final review's own document is the subject,
+    # and nothing wrote one.
+    assert flag_nodes is None
+    assert "final review document is missing" in flag_reason
+
+
+# -- gate-rejection-follows-gate-reject-target --
+
+
+def test_gate_rejection_follows_its_own_reject_to(tmp_path):
+    """`reject_to` wins over the "nearest preceding execution node" fallback, so
+    this chain puts a second execution node between `spec` and the gate --
+    otherwise the two answers coincide and the test pins nothing."""
+    from kraft import policy as _policy
+
+    repo = make_repo(tmp_path)
+    chain = _v1(
+        [
+            {
+                "id": "spec",
+                "kind": "exec",
+                "tasks": [{"id": "write", "kind": "subprocess", "command": "true"}],
+            },
+            {
+                "id": "plan",
+                "kind": "exec",
+                "tasks": [{"id": "write", "kind": "subprocess", "command": "true"}],
+            },
+            {"id": "spec_approval", "kind": "gate", "artifact": "spec", "reject_to": "spec"},
+        ],
+        repo,
+    )
+    nodes = chain.chain.nodes
+    policy = _policy.Policy(loops={}, default=_policy.Cap(attempts=5, wall_clock_s=3600))
+
+    async def scenario():
+        database = await _open_db(tmp_path, chain, repo)
+        try:
+            target = await executor.apply_rejection(
+                database,
+                policy,
+                work_item_id="w1",
+                nodes=nodes,
+                gate="spec_approval",
+                note="redo the spec",
+            )
+            rejected = next(
+                e
+                for e in database.read(lambda c: events.read_after(c, 0, "w1"))
+                if e["type"] == "gate_rejected"
+            )
+            return target, rejected["payload"]["node"]
+        finally:
+            await database.close()
+
+    target, recorded = asyncio.run(scenario())
+    assert nodes[target].id == "spec" and recorded == "spec"
+
+
+def test_a_rejection_with_no_reject_to_re_enters_the_execution_node_before_the_gate(tmp_path):
+    """Ruling 54. A V1 gate has no execution shape, so the old fallback --
+    "re-enter at the gate node itself" -- dispatches nothing and immediately
+    re-requests the same gate, a ping-pong bounded only by the reject cap. The
+    node that produced what the gate is about is what gets re-measured."""
+    repo = make_repo(tmp_path)
+    chain = _spec_gate_chain(repo)  # no reject_to
+    nodes = chain.chain.nodes
+
+    assert nodes[executor.reject_target(nodes, 1, None)].id == "spec"
+
+
+def test_a_gate_with_nothing_before_it_falls_back_to_itself(tmp_path):
+    """The one case where re-entering at the gate is still the answer: there is
+    no earlier execution node to re-measure, so the gate re-opens with the note."""
+    repo = make_repo(tmp_path)
+    chain = _v1([{"id": "sign_off", "kind": "gate"}], repo)
+
+    assert executor.reject_target(chain.chain.nodes, 0, None) == 0
+
+
+def test_a_rejection_cannot_be_aimed_forward_past_the_gate(tmp_path):
+    """`reject_to` is validated by `Chain` itself, but a request body's `node`
+    is validated by nothing -- aimed forward it would skip every node between."""
+    repo = make_repo(tmp_path)
+    chain = _spec_gate_chain(repo)
+
+    with pytest.raises(ValueError, match="not a node of this chain before 'spec_approval'"):
+        executor.reject_target(chain.chain.nodes, 1, "implementation")
+
+
+# -- gate-owns-gate-behaviour / gate-control-does-not-generate-review-work --
+
+
+def test_a_gate_shows_the_artifact_its_own_field_names(tmp_path):
+    """The gate's own `artifact:` names the kind. Nothing scans the preceding
+    node's tasks, so the preceding node here declares a *different* kind and the
+    gate still shows its own."""
+    repo = make_repo(tmp_path)
+    chain = _v1(
+        [
+            {
+                "id": "spec",
+                "kind": "exec",
+                "tasks": [
+                    {
+                        "id": "write",
+                        "kind": "agent",
+                        "harness": "fake",
+                        "prompt": "p",
+                        "produces": "plan",
+                    }
+                ],
+            },
+            {"id": "spec_approval", "kind": "gate", "artifact": "spec"},
+        ],
+        repo,
+    )
+    rd = RunDirs(tmp_path / "run").ensure()
+    rel = agent_mod.artifact_path("spec", "w1")
+    document = rd.worktrees / "w1" / rel
+    document.parent.mkdir(parents=True, exist_ok=True)
+    document.write_text("the spec\n")
+
+    async def scenario():
+        database = await _open_db(tmp_path, chain, repo)
+        try:
+            return executor.gate_artifact(rd, _row(database), "spec_approval")
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario()) == rel
+
+
+def test_a_gate_generates_no_artifact_of_its_own(tmp_path):
+    """A gate declaring no `artifact` has no document, and that is an answerable
+    gate rather than an error -- the gate is a decision control point, it does
+    not produce review work (`gate-control-does-not-generate-review-work`).
+    Neither does a declared kind whose file the worker never wrote."""
+    repo = make_repo(tmp_path)
+    chain = _v1(
+        [
+            {"id": "no_document", "kind": "gate"},
+            {"id": "unwritten", "kind": "gate", "artifact": "spec"},
+        ],
+        repo,
+    )
+    rd = RunDirs(tmp_path / "run").ensure()
+
+    async def scenario():
+        database = await _open_db(tmp_path, chain, repo)
+        try:
+            row = _row(database)
+            return (
+                executor.gate_artifact(rd, row, "no_document"),
+                executor.gate_artifact(rd, row, "unwritten"),
+            )
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario()) == (None, None)
+
+
+def test_a_gate_with_arbitrary_id_works_without_a_name_table(tmp_path):
+    """`GATE_NAMES`' closed vocabulary is gone: a gate id a custom chain invents
+    opens, carries its artifact, and rejects to its own target."""
+    repo = make_repo(tmp_path)
+    chain = _v1(
+        [
+            {
+                "id": "shape_it",
+                "kind": "exec",
+                "tasks": [{"id": "run", "kind": "subprocess", "command": "true"}],
+            },
+            {
+                "id": "does_marketing_like_it",
+                "kind": "gate",
+                "artifact": "spec",
+                "reject_to": "shape_it",
+            },
+        ],
+        repo,
+    )
+    rd = RunDirs(tmp_path / "run").ensure()
+    rel = agent_mod.artifact_path("spec", "w1")
+    (rd.worktrees / "w1" / rel).parent.mkdir(parents=True, exist_ok=True)
+    (rd.worktrees / "w1" / rel).write_text("x\n")
+
+    status, evts, _sessions, _row_ = asyncio.run(v1_walk(tmp_path, chain, repo=repo, run_dirs=rd))
+
+    assert status == "awaiting_gate"
+    assert next(e for e in evts if e["type"] == "gate_requested")["payload"]["gate"] == (
+        "does_marketing_like_it"
+    )
+    nodes = chain.chain.nodes
+    assert nodes[executor.reject_target(nodes, 1, None)].id == "shape_it"
+
+
+# -- gate-auto-review-is-explicit-and-bounded --
+
+
+def _reviewed_chain(repo, *, declare=True):
+    return _v1(
+        [
+            {
+                "id": "spec",
+                "kind": "exec",
+                "tasks": [{"id": "write", "kind": "subprocess", "command": "true"}],
+            },
+            {
+                "id": "spec_approval",
+                "kind": "gate",
+                "artifact": "spec",
+                "reject_to": "spec",
+                **({"auto_review": _agent_task()} if declare else {}),
+            },
+        ],
+        repo,
+    )
+
+
+async def _seed_pending_gate(database, gate="spec_approval"):
+    await database.write(
+        lambda c: events.append(c, "w1", "gate_requested", {"gate": gate, "node_id": gate})
+    )
+
+
+def _no_review(monkeypatch, why):
+    def _boom(*a, **kw):
+        raise AssertionError(why)
+
+    monkeypatch.setattr(gates_module.gate_review, "review", _boom)
+
+
+def test_auto_review_runs_only_with_work_item_opt_in(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    chain = _reviewed_chain(repo)
+    _no_review(monkeypatch, "an item that did not opt in must not be auto-reviewed")
+
+    async def scenario(auto_gate):
+        database = await db.Database.open(tmp_path / f"k-{auto_gate}.db")
+        try:
+            await v1_item(database, chain, repo=repo, auto_gate=auto_gate)
+            await _seed_pending_gate(database)
+            return await gates_module.review_gates(
+                "awaiting_gate", database, tmp_path, work_item_id="w1", registry=None
+            )
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario(False)) == "awaiting_gate"
+    # And with opt-in the arming check passes, so the patched reviewer is reached.
+    with pytest.raises(AssertionError, match="must not be auto-reviewed"):
+        asyncio.run(scenario(True))
+
+
+def test_auto_review_waits_out_its_effective_delay(tmp_path, monkeypatch):
+    from kraft import policy as _policy
+
+    repo = make_repo(tmp_path)
+    chain = _reviewed_chain(repo)
+    _no_review(monkeypatch, "review must not run before the effective delay elapses")
+    pol = _policy.Policy(loops={}, default=_policy.Cap(1, 1), auto_escalate_delay_s=600)
+
+    async def scenario():
+        database = await db.Database.open(tmp_path / "k.db")
+        try:
+            await v1_item(database, chain, repo=repo, auto_gate=True)
+            await _seed_pending_gate(database)
+            return await gates_module.review_gates(
+                "awaiting_gate", database, tmp_path, work_item_id="w1", registry=None, policy=pol
+            )
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario()) == "awaiting_gate"
+
+
+def test_auto_review_stops_at_its_effective_attempt_limit(tmp_path, monkeypatch):
+    """`policy.auto_review_attempts` bounds attempts per `gate_requested`; the
+    limit used to be a hardcoded one. Two attempts are already spent here, so a
+    limit of 2 refuses and a limit of 3 lets the third through."""
+    from kraft import policy as _policy
+
+    repo = make_repo(tmp_path)
+    chain = _reviewed_chain(repo)
+    _no_review(monkeypatch, "third attempt")
+
+    async def scenario(limit):
+        database = await db.Database.open(tmp_path / f"k-{limit}.db")
+        try:
+            await v1_item(database, chain, repo=repo, auto_gate=True)
+            await _seed_pending_gate(database)
+            for _ in range(2):
+                await database.write(
+                    lambda c: events.append(
+                        c, "w1", "gate_auto_review_started", {"gate": "spec_approval"}
+                    )
+                )
+            pol = _policy.Policy(loops={}, default=_policy.Cap(1, 1), auto_review_attempts=limit)
+            return await gates_module.review_gates(
+                "awaiting_gate", database, tmp_path, work_item_id="w1", registry=None, policy=pol
+            )
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario(2)) == "awaiting_gate"
+    with pytest.raises(AssertionError, match="third attempt"):
+        asyncio.run(scenario(3))
+
+
+def test_an_undecided_review_counts_as_one_attempt_not_two(tmp_path):
+    """A review that ran and came back `undecided` writes both a `_started` and
+    a `_skipped {reason: undecided}`. Counting both would halve every bound
+    above 1; a `{reason: budget}` skip never launched and counts for itself."""
+    started = _evt("gate_auto_review_started", gate="g")
+    undecided = _evt("gate_auto_review_skipped", gate="g", reason="undecided")
+    budget = _evt("gate_auto_review_skipped", gate="g", reason="budget")
+    request = _evt("gate_requested", gate="g")
+
+    assert gates_module._gate_review_attempts([request, started, undecided], "g") == 1
+    assert gates_module._gate_review_attempts([request, budget], "g") == 1
+    assert (
+        gates_module._gate_review_attempts([request, started, undecided, started, undecided], "g")
+        == 2
+    )
+
+
+def test_auto_review_reports_a_verdict_and_cannot_clear_its_own_gate(tmp_path, monkeypatch):
+    """The reviewer is dispatched as a *worker* -- `KRAFT_WORK_ITEM_ID` is set,
+    so `client.context._forbid_self_action` refuses to let it approve or reject
+    its own item. It reports a verdict and `review_gates` applies it."""
+    import kraft.adapters.agent as agent_adapter
+
+    repo = make_repo(tmp_path)
+    chain = _reviewed_chain(repo)
+    rd = RunDirs(tmp_path / "run").ensure()
+    seen = {}
+
+    async def _capture(_db, _rd, **kw):
+        seen.update(kw)
+        (rd.results / f"{kw['session_id']}.json").write_text(
+            json.dumps({"status": "done", "verdict": "approve", "concerns": "looks right"})
+        )
+        return "done"
+
+    monkeypatch.setattr(agent_adapter, "run_agent_task", _capture)
+
+    async def scenario():
+        database = await db.Database.open(tmp_path / "k.db")
+        try:
+            await v1_item(database, chain, repo=repo, auto_gate=True)
+            await _seed_pending_gate(database)
+            return await gates_module.gate_review.review(
+                database,
+                rd,
+                work_item_id="w1",
+                gate="spec_approval",
+                node=chain.chain.nodes[1],
+                launch=LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None),
+            )
+        finally:
+            await database.close()
+
+    verdict, note = asyncio.run(scenario())
+    assert (verdict, note) == ("approve", "looks right")
+    # Launched as the gate's own declared task, at its own canonical path --
+    # not a hardcoded `hook_point="gate_review"` and not `command="claude"`.
+    assert seen["hook_point"] == "spec_approval.auto_review"
+    assert seen["harness"] == "fake"
+    # `identify_as_worker` is `run_agent_task`'s default True, which is what
+    # sets KRAFT_WORK_ITEM_ID and therefore what `_forbid_self_action` reads;
+    # nothing here overrides it.
+    assert "identify_as_worker" not in seen
+
+
+def test_a_gate_declaring_no_agent_reviewer_is_left_to_a_human(tmp_path):
+    repo = make_repo(tmp_path)
+    chain = _reviewed_chain(repo, declare=False)
+    rd = RunDirs(tmp_path / "run").ensure()
+
+    async def scenario():
+        database = await db.Database.open(tmp_path / "k.db")
+        try:
+            await v1_item(database, chain, repo=repo, auto_gate=True)
+            return await gates_module.gate_review.review(
+                database,
+                rd,
+                work_item_id="w1",
+                gate="spec_approval",
+                node=chain.chain.nodes[1],
+                launch=LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None),
+            )
+        finally:
+            await database.close()
+
+    verdict, note = asyncio.run(scenario())
+    assert verdict == "undecided"
+    assert "declares no agent task" in note
+
+
+def test_a_node_override_permits_or_suppresses_the_declared_auto_review(tmp_path, monkeypatch):
+    """Ruling 31's split: the chain declares the reviewing task, the per-item
+    override permits or suppresses it. The override key keeps its persisted,
+    publicly exposed name `auto_escalate` even though the chain field is now
+    `auto_review`."""
+    repo = make_repo(tmp_path)
+    chain = _reviewed_chain(repo)
+    _no_review(monkeypatch, "reached the reviewer")
+
+    async def scenario(override):
+        database = await db.Database.open(tmp_path / f"k-{override}.db")
+        try:
+            await v1_item(database, chain, repo=repo, auto_gate=True)
+            await database.write(
+                lambda c: store.set_node_overrides(
+                    c, "w1", {"spec_approval": {"auto_escalate": override}}
+                )
+            )
+            await _seed_pending_gate(database)
+            return await gates_module.review_gates(
+                "awaiting_gate", database, tmp_path, work_item_id="w1", registry=None
+            )
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario(False)) == "awaiting_gate"
+    with pytest.raises(AssertionError, match="reached the reviewer"):
+        asyncio.run(scenario(True))
+
+
+def test_an_override_cannot_switch_on_a_gate_that_declares_no_auto_review(tmp_path, monkeypatch):
+    """The override permits a declared task; it cannot name one. A gate with no
+    `auto_review` stays human-only however the override is set."""
+    repo = make_repo(tmp_path)
+    chain = _reviewed_chain(repo, declare=False)
+    _no_review(monkeypatch, "a gate declaring no reviewer must not be auto-reviewed")
+
+    async def scenario():
+        database = await db.Database.open(tmp_path / "k.db")
+        try:
+            await v1_item(database, chain, repo=repo, auto_gate=True)
+            await database.write(
+                lambda c: store.set_node_overrides(
+                    c, "w1", {"spec_approval": {"auto_escalate": True}}
+                )
+            )
+            await _seed_pending_gate(database)
+            return await gates_module.review_gates(
+                "awaiting_gate", database, tmp_path, work_item_id="w1", registry=None
+            )
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario()) == "awaiting_gate"
+
+
+def test_the_typed_override_is_a_read_time_view_and_does_not_touch_the_snapshot(tmp_path):
+    """`materialized-chain-is-immutable-work-item-input`: the overlay is the
+    first thing in V1 that could have written through to the frozen snapshot.
+    It must not -- the stored column is byte-identical afterwards, and the
+    suppression is only visible in the view."""
+    repo = make_repo(tmp_path)
+    chain = _reviewed_chain(repo)
+    stored_before = chain.to_json()
+
+    async def scenario():
+        database = await db.Database.open(tmp_path / "k.db")
+        try:
+            await v1_item(database, chain, repo=repo, auto_gate=True)
+            await database.write(
+                lambda c: store.set_node_overrides(
+                    c, "w1", {"spec_approval": {"auto_escalate": False}}
+                )
+            )
+            row = _row(database)
+            view = store.effective_nodes(executor.chain_of(row), store.node_overrides_of(row))
+            return row["materialized_chain"], view
+        finally:
+            await database.close()
+
+    stored_after, view = asyncio.run(scenario())
+    assert stored_after == stored_before
+    assert view[1].auto_review is None
+    assert view[1].node.auto_review is None
+    # The chain the row still holds is untouched: re-reading it arms the gate again.
+    assert MaterializedChain.from_json(stored_after).chain.nodes[1].auto_review is not None
+
+
+# -- the two stranding paths (asked for by the controller alongside this task):
+# `maybe_gate`'s cleared-gate guard and `resume_once`'s gate branch. Both fail
+# the same way if they regress -- an approved item never advances and stays
+# stopped forever, which looks like waiting rather than breaking.
+
+
+def test_a_walk_re_entered_at_an_approved_gate_passes_over_it(tmp_path):
+    """`maybe_gate` answers False for a gate this item has already cleared. If
+    it did not, a walk re-entered *at* the gate (a poller, a resume, a
+    re-dispatch) would re-request a gate a human already answered and the item
+    would never move again."""
+    repo = make_repo(tmp_path)
+    chain = _spec_gate_chain(repo)
+    rd = RunDirs(tmp_path / "run").ensure()
+
+    async def scenario():
+        database = await _open_db(tmp_path, chain, repo)
+        try:
+            launch = LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None)
+            await executor.run_once(database, rd, work_item_id="w1", registry=None, launch=launch)
+            await database.write(lambda c: store.approve_gate(c, "w1", "spec_approval"))
+            # start_index is the *gate's* own index, not the node after it.
+            status = await executor.run_once(
+                database,
+                rd,
+                work_item_id="w1",
+                registry=None,
+                start_index=1,
+                launch=launch,
+            )
+            evts = database.read(lambda c: events.read_after(c, 0, "w1"))
+            return status, [e["type"] for e in evts].count("gate_requested")
+        finally:
+            await database.close()
+
+    status, requests = asyncio.run(scenario())
+    assert status == "completed"
+    assert requests == 1
+
+
+def test_a_resume_at_an_approved_gate_continues_past_it(tmp_path):
+    """`resume_once`'s gate branch, which had no V1 test. A crash in the window
+    between `approve_gate` and the next dispatch leaves `current_node_id` on the
+    gate; reattach has to walk *past* it, not sit on it."""
+    repo = make_repo(tmp_path)
+    chain = _spec_gate_chain(repo)
+    rd = RunDirs(tmp_path / "run").ensure()
+
+    async def scenario():
+        database = await _open_db(tmp_path, chain, repo)
+        try:
+            launch = LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None)
+            await executor.run_once(database, rd, work_item_id="w1", registry=None, launch=launch)
+            await database.write(lambda c: store.approve_gate(c, "w1", "spec_approval"))
+            status = await resuming.resume_once(
+                database,
+                rd,
+                work_item_id="w1",
+                registry=None,
+                adopted={},
+                launch=launch,
+            )
+            sessions = database.read(
+                lambda c: c.execute(
+                    "SELECT hook_point FROM worker_sessions WHERE work_item_id = 'w1' "
+                    "ORDER BY created_at"
+                ).fetchall()
+            )
+            return status, [s["hook_point"] for s in sessions]
+        finally:
+            await database.close()
+
+    status, hooks = asyncio.run(scenario())
+    assert status == "completed"
+    assert hooks == ["spec.main.write", "implementation.main.build"]
+
+
+def test_a_resume_at_an_unanswered_gate_re_requests_it(tmp_path):
+    """The other half of the same branch: a gate that was *not* cleared before
+    the crash reopens rather than being walked past."""
+    repo = make_repo(tmp_path)
+    chain = _spec_gate_chain(repo)
+    rd = RunDirs(tmp_path / "run").ensure()
+
+    async def scenario():
+        database = await _open_db(tmp_path, chain, repo)
+        try:
+            launch = LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None)
+            await executor.run_once(database, rd, work_item_id="w1", registry=None, launch=launch)
+            status = await resuming.resume_once(
+                database,
+                rd,
+                work_item_id="w1",
+                registry=None,
+                adopted={},
+                launch=launch,
+            )
+            sessions = database.read(
+                lambda c: c.execute(
+                    "SELECT hook_point FROM worker_sessions WHERE work_item_id = 'w1'"
+                ).fetchall()
+            )
+            return status, [s["hook_point"] for s in sessions]
+        finally:
+            await database.close()
+
+    status, hooks = asyncio.run(scenario())
+    assert status == "awaiting_gate"
+    # The node after the gate still has not run.
+    assert hooks == ["spec.main.write"]

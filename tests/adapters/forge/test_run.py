@@ -2851,3 +2851,35 @@ def test_merge_watch_runs_once_for_a_multi_repo_item(tmp_path, monkeypatch):
 
     assert asyncio.run(scenario()) == "done"
     assert len(reads) == 1, reads
+
+
+def test_a_declared_but_unimplemented_forge_target_stops_for_a_human(tmp_path, monkeypatch):
+    """Ruling 48. `mr.mark_ready`, `mr.automated_review` and
+    `mr.external_approval` are `ForgeAction` members with no handler, and the
+    seeded V1 chain names all three -- so `failed` told an operator their
+    pipeline had broken and burned the node's fix loop finding out. A
+    declared-but-unimplemented action is a configuration limit: `config_error`,
+    which is terminal at every tier, so `walk_node` stops for a person with the
+    target and its owning task named.
+    """
+    fake = forge.FakeForge()
+    returned, recorded = _forge_session(
+        tmp_path, monkeypatch, fake, forge.run.handler_for("mr.mark_ready"), "s-unimpl"
+    )
+    assert returned == "config_error"
+    assert recorded == "config_error"
+    log = (RunDirs(tmp_path / "run").logs / "s-unimpl.log").read_text()
+    assert "mr.mark_ready" in log and "Task 5a" in log
+
+
+def test_every_v1_forge_target_either_maps_or_names_its_owner():
+    """The two tables must not drift: a target with neither a handler nor an
+    owner would reach the stop above with "a later task" and tell the human
+    nothing."""
+    from kraft.templates.models import ForgeAction
+
+    for action in ForgeAction:
+        assert (
+            action.value in forge.run.V1_HANDLERS
+            or action.value in forge.run._UNIMPLEMENTED_TARGETS
+        ), action

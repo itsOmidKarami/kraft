@@ -253,6 +253,21 @@ class TemplateLibrary:
             raise TemplateLibraryError(resolution.explain(exc)) from exc
         resolved = ResolvedChain.from_chain(chain)
         for node in resolved.nodes:
+            # A node whose own tasks *some* of which declare `produces` cannot
+            # be trimmed unambiguously when an attachment of that kind arrives:
+            # the node-level rule
+            # (`MaterializedChain`'s `trim_for_attachments`) would keep it and
+            # re-author the attached document, and dropping the one producing
+            # task instead is not available -- `Step.tasks` has `min_length=1`,
+            # so an emptied step is invalid. Refused here, at load, which is
+            # what makes the trim a clean node-level decision (Ruling 35).
+            produces = node.produces()
+            if len(produces) > 1 and None in produces:
+                raise TemplateLibraryError(
+                    f"{resolution.at(node.id)}: node {node.id!r} mixes tasks that declare "
+                    f"'produces' with tasks that do not ({sorted(k for k in produces if k)}); "
+                    f"a node either wholly produces a kind or declares none"
+                )
             for task in node.tasks():
                 for name in task.task.steering:
                     if name not in self.steering:

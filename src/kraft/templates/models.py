@@ -62,6 +62,11 @@ PATH_SEPARATOR = "."
 #: loop's dedicated judge. Both are members of `RESERVED_SEGMENTS`.
 MAIN_STEP = "main"
 JUDGE_SEGMENT = "judge"
+#: The canonical segment of a gate's own reviewing task
+#: (`GateNode.auto_review`). Not in `RESERVED_SEGMENTS`: a gate declares no
+#: execution shape at all, so there is no authored step id that could collide
+#: with it.
+AUTO_REVIEW_SEGMENT = "auto_review"
 
 #: `resolved-chain-identifiers-are-unique` (no `.`, no whitespace, nothing else
 #: that would make a resolved path ambiguous) is `Identifier`, imported from
@@ -417,7 +422,19 @@ class GateNode(BaseModel):
     artifact: Identifier | None = None
     reject_to: Identifier | None = None
     timeout: Duration | None = None
-    auto_escalate: StrictBool = False
+    #: The task that reviews this gate before a human sees it
+    #: (`gate-auto-review-is-explicit-and-bounded`). One field, not a boolean
+    #: plus a name: a bare `auto_escalate: true` could only mean "Kraft's own
+    #: default reviewer", which is exactly the name indirection V1 deletes.
+    #: None means human-only, and no per-item override can arm it -- the
+    #: override permits or suppresses a declared task, it cannot name one
+    #: (`work_items.node_overrides`, `store.effective_nodes`).
+    #:
+    #: Not a delay or an attempt count: both bounds are policy-owned
+    #: (`policy.auto_escalate_delay_s`, `policy.auto_review_attempts`) and
+    #: folded through `store.effective_auto_escalate_delay_s`. A copy here
+    #: would be a second source of truth for one number.
+    auto_review: AnyTask | None = None
     #: `chain-finalized-remains-a-dedicated-marker`.
     chain_finalized: StrictBool = False
 
@@ -487,14 +504,45 @@ class ResolvedNode:
     fix_loop: tuple[ResolvedStep, ...] = ()
     judge: ResolvedTask | None = None
     escalation: ResolvedTask | None = None
+    #: A gate's own reviewing task (`GateNode.auto_review`), at `<gate>.auto_
+    #: review`. A named slot like a fix loop's judge, so the authored id never
+    #: becomes a path segment; a gate has no steps, so nothing else can occupy
+    #: that path.
+    auto_review: ResolvedTask | None = None
 
     def tasks(self) -> Iterator[ResolvedTask]:
         for group in (self.steps, self.on_failure, self.fix_loop):
             for step in group:
                 yield from step.tasks
-        for dedicated in (self.judge, self.escalation):
+        for dedicated in (self.judge, self.escalation, self.auto_review):
             if dedicated is not None:
                 yield dedicated
+
+    def produces(self) -> frozenset[str | None]:
+        """What this node's *own* steps declare they produce -- `None` as a
+        member for every task declaring nothing, and for a task kind that has
+        no `produces` field at all.
+
+        The node's own steps only: a recovery pass or a fix loop repairs the
+        node's output, it does not decide what the node is *for*. A set rather
+        than a value, because both readers need to tell "all of them produce
+        this one kind" from "some of them do" -- `trim_for_attachments` drops
+        the node only in the first case, and `TemplateLibrary.resolve_chain`
+        refuses the second outright so the distinction cannot arise at runtime.
+        """
+        return frozenset(
+            getattr(t.task, "produces", None) for step in self.steps for t in step.tasks
+        )
+
+
+def _redundant_given(node: ResolvedNode, kinds: frozenset[str]) -> bool:
+    """Whether an attachment of one of `kinds` makes `node` redundant --
+    the whole of `trim_for_attachments`' rule, in one predicate so that both
+    halves (the deciding gate, the producing node) are read side by side."""
+    if isinstance(node.node, GateNode):
+        return not node.node.chain_finalized and node.node.artifact in kinds
+    produces = node.produces()
+    return len(produces) == 1 and next(iter(produces)) in kinds
 
 
 @dataclass(frozen=True)
@@ -518,7 +566,20 @@ class ResolvedChain:
         nodes = []
         for node in chain.nodes:
             if isinstance(node, GateNode):
-                nodes.append(ResolvedNode(id=node.id, node=node))
+                nodes.append(
+                    ResolvedNode(
+                        id=node.id,
+                        node=node,
+                        auto_review=(
+                            ResolvedTask(
+                                path=f"{node.id}{PATH_SEPARATOR}{AUTO_REVIEW_SEGMENT}",
+                                task=node.auto_review,
+                            )
+                            if node.auto_review is not None
+                            else None
+                        ),
+                    )
+                )
                 continue
             loop = node.fix_loop
             nodes.append(
@@ -558,16 +619,75 @@ class ResolvedChain:
         return cls(chain=chain, nodes=tuple(nodes))
 
     def materialize(
-        self, target: WorkItemTarget, effective_policy: InstancePolicy
+        self,
+        target: WorkItemTarget,
+        effective_policy: InstancePolicy,
+        attachment_kinds: frozenset[str] = frozenset(),
     ) -> MaterializedChain:
         """Bind this chain to one work item: its immutable target and the
         policy its tasks run under, with the chain's own override layered on
         (`policy-is-layered-by-execution-scope`,
-        `materialized-chain-is-immutable-work-item-input`)."""
+        `materialized-chain-is-immutable-work-item-input`).
+
+        `attachment_kinds` are the artifact kinds this item arrives with
+        already written (an intake `--spec`/`--plan`), and they trim the chain
+        here rather than at a route handler -- see `trim_for_attachments`.
+        """
         policy = effective_policy
         if self.chain.policy is not None:
             policy = policy.apply_template_override(self.chain.policy)
-        return MaterializedChain(chain=self, target=target, policy=policy)
+        return MaterializedChain(
+            chain=self.trim_for_attachments(attachment_kinds), target=target, policy=policy
+        )
+
+    def trim_for_attachments(self, kinds: frozenset[str]) -> ResolvedChain:
+        """This chain without the nodes an attachment of each kind in `kinds`
+        makes redundant (`attachment-behaviour-is-explicit-gate-configuration`).
+
+        Both ends are declared, so nothing is inferred from position and no
+        kind-to-gate-name table exists anywhere:
+
+        * the gate whose own `artifact` names the kind -- it has nothing left
+          to decide, because the document arrived decided; and
+        * any execution node **all** of whose own tasks declare
+          `produces: <kind>` -- legacy got this for free, because the producing
+          node and its gate were one node; in V1 they are two, so without this
+          an attached spec is handed to a spec author to write again.
+
+        Two edges the plain rule does not cover (Ruling 35):
+
+        * A node mixing tasks with and without `produces` would survive the
+          node-level test and re-author the attachment. Refused at load
+          instead, by `TemplateLibrary.resolve_chain`, so trimming here is
+          unambiguous: a node either wholly produces a kind or does not.
+        * A gate marked `chain_finalized` is **never** dropped, whatever its
+          `artifact` says. It is the chain's sole final-review marker
+          (`chain-finalized-remains-a-dedicated-marker`), and the rule is a
+          string match -- the day an attachment kind is called `review_brief`
+          the chain would otherwise lose its only one.
+
+        A surviving gate whose `reject_to` named a dropped node keeps the gate
+        but loses the target: `gates.reject_target` then falls back the same way
+        it does for a gate that declared none. Left dangling instead, the stored
+        snapshot would no longer re-validate as a `Chain` when it is read back.
+        """
+        if not kinds:
+            return self
+        dropped = {n.id for n in self.nodes if _redundant_given(n, kinds)}
+        if not dropped:
+            return self
+        if len(dropped) == len(self.nodes):
+            raise ValueError(
+                f"attachments {sorted(kinds)} would leave chain {self.id!r} with no nodes"
+            )
+        kept = [
+            node.model_copy(update={"reject_to": None})
+            if isinstance(node, GateNode) and node.reject_to in dropped
+            else node
+            for node in self.chain.nodes
+            if node.id not in dropped
+        ]
+        return ResolvedChain.from_chain(self.chain.model_copy(update={"nodes": kept}))
 
 
 class _StoredMaterialization(BaseModel):

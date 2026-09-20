@@ -113,6 +113,7 @@ class PolicyInput(BaseModel):
     auto_escalate_stuck: StrictBool = True
     auto_escalate_stuck_cap: PositiveInt = DEFAULT_AUTO_ESCALATE_STUCK_CAP
     auto_escalate_delay_s: Annotated[StrictInt, Field(ge=0)] = 0
+    auto_review_attempts: PositiveInt = 1
     forge_cli_timeout_s: Annotated[StrictFloat | StrictInt, Field(gt=0)] = 120
 
     @classmethod
@@ -197,12 +198,34 @@ class Policy:
     #: `Cap.attempts` but counted over `escalation_message` events tagged
     #: `{"auto": true}` rather than a `retry_counters` row.
     auto_escalate_stuck_cap: int = DEFAULT_AUTO_ESCALATE_STUCK_CAP
-    #: Seconds to wait after the triggering event (`gate_requested` for
-    #: `auto_escalate`, `work_item_needs_human` for `auto_escalate_stuck`)
-    #: before either mechanism fires, so a human about to look at the item
-    #: anyway isn't preempted by the agent (Kraft-vyk8). 0, the default, is
-    #: today's immediate-fire behaviour, unchanged.
+    #: Seconds to wait after the triggering event before either delayed
+    #: mechanism fires, so a human about to look at the item anyway isn't
+    #: preempted by the agent (Kraft-vyk8). 0, the default, is today's
+    #: immediate-fire behaviour, unchanged.
+    #:
+    #: **One field, two mechanisms, two owners.** `auto_escalate_delay.py` is a
+    #: single poller and this is the only delay either half reads, so read the
+    #: name as "the delay before an unattended agent acts", not as belonging to
+    #: the `auto_escalate*` family alone:
+    #:
+    #: * **gate auto-review** -- triggered by `gate_requested`, armed by a
+    #:   gate's own `GateNode.auto_review` task and bounded by
+    #:   `auto_review_attempts`. Owned by `gate-auto-review-is-explicit-and-
+    #:   bounded` (Task 4b).
+    #: * **stuck escalation** -- triggered by `work_item_needs_human`, armed by
+    #:   `auto_escalate_stuck` and bounded by `auto_escalate_stuck_cap`. Owned
+    #:   by `stuck-escalation-is-an-exec-node-control` (Task 7), which is the
+    #:   task that may move or rename its half. Nothing in V1's chain schema
+    #:   spells `auto_escalate` any more, so the name no longer says which.
+    #:
+    #: Deliberately not renamed: operators have it set in their `policy.yaml`.
     auto_escalate_delay_s: int = 0
+    #: How many auto-review attempts one `gate_requested` may get before the
+    #: gate is left for a human (`gate-auto-review-is-explicit-and-bounded`).
+    #: Counted over `gate_auto_review_started`/`_skipped` events since the
+    #: request, by `gates._gate_already_reviewed`. 1 -- the default -- is the
+    #: one-attempt-per-request contract this bound replaces a hardcode with.
+    auto_review_attempts: int = 1
     #: Seconds one forge CLI call (`gh`/`glab`/`git`) may run before it is killed
     #: and raised as a `ForgeError`. Bounds a single invocation, not a pipeline
     #: wait -- that is `loops.ci_wait`.
@@ -231,6 +254,7 @@ class Policy:
             auto_escalate_stuck=parsed.auto_escalate_stuck,
             auto_escalate_stuck_cap=parsed.auto_escalate_stuck_cap,
             auto_escalate_delay_s=parsed.auto_escalate_delay_s,
+            auto_review_attempts=parsed.auto_review_attempts,
             forge_cli_timeout_s=float(parsed.forge_cli_timeout_s),
         )
 

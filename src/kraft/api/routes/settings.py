@@ -49,7 +49,11 @@ async def list_templates(request: Request):
         {
             "id": tid,
             "nodes": [dict(n.items()) for n in t.nodes],
-            "gates": sum(1 for n in t.nodes if n.get("gate_after")),
+            # A gate is a node of its own kind now, not a `gate_after` string
+            # on the node in front of it (`gate-is-an-ordered-node`). The wider
+            # V1 load boundary for this route is Task 5a's; only the count is
+            # converted here.
+            "gates": sum(1 for n in t.nodes if n.get("kind") == "gate"),
         }
         for tid, t in sorted(st.templates.valid.items())
     ]

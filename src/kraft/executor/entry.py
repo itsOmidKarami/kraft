@@ -10,7 +10,7 @@ from pathlib import Path
 from kraft import events, store
 from kraft.adapters import beads
 from kraft.config import git_read
-from kraft.templates import ATTACHMENT_GATES, Template, materialize
+from kraft.templates import Template, materialize
 
 logger = logging.getLogger(__name__)
 
@@ -107,10 +107,14 @@ async def intake(
     # Kraft can later make false (Kraft-eqgn). Intake is the last moment the
     # caller can fix the path, so it is where this fails.
     attachments = _store_attachments(run_dirs, work_item_id, attachments, repo=repo)
-    satisfied = frozenset(ATTACHMENT_GATES[a["kind"]] for a in attachments or [])
-    chain_definition = json.dumps(
-        materialize(template, satisfied_gates=satisfied, skip_nodes=skip_nodes)
-    )
+    # No `satisfied_gates=`: an attachment's trim is the V1 chain's own
+    # decision now (`ResolvedChain.trim_for_attachments`, driven by the gate's
+    # `artifact:` and the producing node's `produces:`), not a kind-to-gate-name
+    # table this layer looks up. Wiring `attachment_kinds` through to a
+    # `ResolvedChain.materialize` here is Task 5a's -- it owns this function's
+    # conversion off the legacy `Template` -- so the legacy materialization
+    # below no longer trims at all.
+    chain_definition = json.dumps(materialize(template, skip_nodes=skip_nodes))
     implements_beads = [b for b in (implements_beads or []) if b != bead_id] or None
 
     def _create(c):

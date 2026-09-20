@@ -35,17 +35,26 @@ _EMPTY_META = mr_ops.MRMeta()
 #: reaches is this adapter's, so the mapping lives here rather than in the
 #: executor -- `dispatch` hands over the typed target and nothing else.
 #:
-#: Three actions have no handler yet: `mr.automated_review`, `mr.mark_ready`
-#: and `mr.external_approval` are external waits the shared due scheduler owns
-#: (Task 9). An unmapped target falls through to `_run_one`'s "unknown forge
-#: handler" arm and fails the node loudly, which is the honest answer until
-#: then.
+#: Three actions have no handler yet: `mr.mark_ready` (Task 5a) plus
+#: `mr.automated_review` and `mr.external_approval`, external waits the shared
+#: due scheduler owns (Task 9). An unmapped target falls through to `_run_one`'s
+#: last arm, which **stops the item for a human** rather than failing the node
+#: -- see there for why.
 V1_HANDLERS: dict[str, str] = {
     "mr.open_draft": "open_mr",
     "mr.sync": "sync_mr",
     "mr.ci": "ci_poll",
     "mr.merge": "merge",
     "mr.post_merge_ci": "merge_watch",
+}
+
+
+#: Who implements each target that `V1_HANDLERS` does not map yet, named in the
+#: stop reason so the human reading it knows this is Kraft's gap and not theirs.
+_UNIMPLEMENTED_TARGETS = {
+    "mr.mark_ready": "Task 5a implements it",
+    "mr.automated_review": "Task 9 implements it as an external wait",
+    "mr.external_approval": "Task 9 implements it as an external wait",
 }
 
 
@@ -739,7 +748,23 @@ async def _run_one(
                     log += f"filed {follow_up or '(no bead filed)'}, paused {len(broken)} item(s)\n"
                     status = "done"
         case _:
-            log, status = f"unknown forge handler {handler!r}\n", "failed"
+            # A declared-but-unimplemented action is a *configuration limit*,
+            # not a bug in this run: the seeded V1 chain names all three of the
+            # unmapped targets (see `V1_HANDLERS`), so `failed` told an operator
+            # their pipeline had broken when in fact Kraft had not built that
+            # step yet -- and burned the node's fix loop finding out. Same
+            # posture as `unavailable-selected-harness-needs-human`: name the
+            # target, name the task that implements it, and stop for a person
+            # (Ruling 48). `config_error` is terminal at every tier
+            # (`executor.context.SCOPE`), so `walk_node` turns it straight into
+            # `needs_human` with this reason instead of a retry.
+            owner = _UNIMPLEMENTED_TARGETS.get(handler, "a later task")
+            log = (
+                f"forge target {handler!r} is declared by this chain but Kraft does not "
+                f"implement it yet ({owner}). Nothing is wrong with the merge request; "
+                f"this node cannot run until that lands.\n"
+            )
+            status = "config_error"
     return log, status, findings
 
 

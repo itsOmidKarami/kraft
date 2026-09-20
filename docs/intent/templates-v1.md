@@ -191,14 +191,14 @@ origin: docs/templates-v1-design.md "Resolution and execution" -- a fix loop's j
 
 A human gate SHALL be represented by an ordered node with `kind: gate`; an
 execution node SHALL NOT define `gate_after`.
-enforced-by: tests/templates/test_models.py::test_node_kind_selects_gate_model, tests/templates/test_models.py::test_exec_node_cannot_define_gate_after, tests/templates/test_library.py::test_the_design_chain_keeps_gates_as_ordered_nodes
+enforced-by: tests/templates/test_models.py::test_node_kind_selects_gate_model, tests/templates/test_models.py::test_exec_node_cannot_define_gate_after, tests/templates/test_library.py::test_the_design_chain_keeps_gates_as_ordered_nodes, tests/executor/test_gates.py::test_gate_node_halts_until_approved, tests/executor/test_gates.py::test_a_gate_with_arbitrary_id_works_without_a_name_table
 
 ## REQ gate-owns-gate-behaviour
 
 A gate node SHALL own gate-specific configuration, including its message,
 timeout, reject target, auto-escalation, review artifact reference, and any
 dedicated marker such as `chain_finalized`.
-enforced-by: tests/templates/test_models.py::test_gate_node_owns_gate_configuration, tests/templates/test_models.py::test_exec_node_cannot_define_gate_only_fields
+enforced-by: tests/templates/test_models.py::test_gate_node_owns_gate_configuration, tests/templates/test_models.py::test_exec_node_cannot_define_gate_only_fields, tests/executor/test_gates.py::test_a_gate_shows_the_artifact_its_own_field_names, tests/executor/test_gates.py::test_gate_rejection_follows_its_own_reject_to
 
 ## REQ resolved-chain-identifiers-are-unique
 
@@ -264,7 +264,7 @@ enforced-by: tests/templates/test_materialization.py::test_the_resolved_chain_is
 
 A materialized chain SHALL contain effective policy values and intake-specific
 decisions for one work item and SHALL NOT change as that item executes.
-enforced-by: tests/templates/test_materialization.py::test_materialization_freezes_chain_policy_and_target, tests/templates/test_materialization.py::test_a_materialized_chain_cannot_be_changed_while_the_item_executes, tests/store/test_chain_gates.py::test_a_materialized_chain_round_trips_through_the_work_item_row
+enforced-by: tests/templates/test_materialization.py::test_materialization_freezes_chain_policy_and_target, tests/templates/test_materialization.py::test_a_materialized_chain_cannot_be_changed_while_the_item_executes, tests/store/test_chain_gates.py::test_a_materialized_chain_round_trips_through_the_work_item_row, tests/executor/test_gates.py::test_the_typed_override_is_a_read_time_view_and_does_not_touch_the_snapshot
 
 ## REQ steer-can-address-paused-agent-tasks-individually
 
@@ -369,34 +369,41 @@ of resuming its prior one.
 
 The executor SHALL run an execution node's task group or ordered steps and,
 when they complete successfully, advance to the following ordered node.
-enforced-by: tests/executor/test_walk.py::test_steps_are_ordered_while_tasks_inside_a_step_are_concurrent, tests/executor/test_walk.py::test_the_worktree_and_setup_command_are_prepared_without_an_env_node
+enforced-by: tests/executor/test_walk.py::test_steps_are_ordered_while_tasks_inside_a_step_are_concurrent, tests/executor/test_walk.py::test_the_worktree_and_setup_command_are_prepared_without_an_env_node, tests/executor/test_walk.py::test_an_exec_node_that_completes_advances_to_the_next_exec_node
 
 ## REQ gate-node-opens-and-halts-execution
 
 When the executor reaches a gate node, it SHALL open that gate and SHALL NOT
 start the following node until the gate is approved.
+enforced-by: tests/executor/test_gates.py::test_gate_node_halts_until_approved
 
 ## REQ gate-approval-advances-to-next-node
 
 When a gate is approved, the executor SHALL advance to the node after that
 gate in the materialized chain.
+enforced-by: tests/executor/test_gates.py::test_gate_approval_advances_to_the_node_after_the_gate, tests/executor/test_gates.py::test_a_walk_re_entered_at_an_approved_gate_passes_over_it, tests/executor/test_gates.py::test_a_resume_at_an_approved_gate_continues_past_it
 
 ## REQ gate-rejection-follows-gate-reject-target
 
 When a gate is rejected, the executor SHALL apply that gate node's own
 `reject_to` behaviour.
+enforced-by: tests/executor/test_gates.py::test_gate_rejection_follows_its_own_reject_to, tests/executor/test_gates.py::test_a_rejection_with_no_reject_to_re_enters_the_execution_node_before_the_gate, tests/executor/test_gates.py::test_a_rejection_cannot_be_aimed_forward_past_the_gate
+origin: src/kraft/executor/gates.py §reject_target -- a gate with no `reject_to` re-enters at the nearest preceding *execution* node, not at the gate itself. A V1 gate has no execution shape, so the old fallback dispatched nothing and re-requested the same gate, a ping-pong bounded only by the reject loop's cap; re-running the node that produced what the gate is about is what makes the Kraft-rv6i "measure the repair rather than trust it" rule hold at a gate. A gate with nothing before it falls back to itself, which is the one case where there is no work to re-measure.
 
 ## REQ gate-control-does-not-generate-review-work
 
 A gate node SHALL be a decision control point and SHALL NOT generate its own
 review artifact. A preceding execution node SHALL generate any artifact a gate
 uses.
+enforced-by: tests/executor/test_gates.py::test_a_gate_generates_no_artifact_of_its_own, tests/executor/test_gates.py::test_a_gate_shows_the_artifact_its_own_field_names
 
 ## REQ chain-finalized-remains-a-dedicated-marker
 
 A gate with the dedicated `chain_finalized` marker SHALL retain Kraft's
 chain-review behaviour; other gate nodes SHALL have ordinary pause and
 approval behaviour.
+enforced-by: tests/executor/test_gates.py::test_the_chain_finalized_marker_not_the_gate_name_selects_chain_review, tests/executor/test_gates.py::test_an_ordinary_gate_has_ordinary_pause_and_approval_behaviour, tests/templates/test_models.py::test_an_attachment_never_trims_the_chain_finalized_gate
+origin: src/kraft/api/routes/gates.py §apply_approval -- the marker selects the final-review path, and what that path still does in V1 is refuse an approval whose review document was never written (every other gate is answerable with nothing to read). Splicing a reviewer's revised nodes back in is **not** restored: `_splice_chain_review` rewrites the legacy `chain_definition` from an envelope of legacy node dicts, and revising a *materialized* chain in place is a different feature that lands with the chain-review skill's own V1 conversion. That half of the marker's behaviour is unpinned and parked at the function.
 
 ## REQ gate-auto-review-is-explicit-and-bounded
 
@@ -411,11 +418,15 @@ artifact* it shows, which a verdict-reporting reviewer does not do — it reads 
 artifact an earlier execution node produced.
 `automated-review-is-an-explicit-optional-task` is a chain-level task that waits
 on the *forge's* merge-request review, which is a different subject entirely.
+enforced-by: tests/executor/test_gates.py::test_auto_review_runs_only_with_work_item_opt_in, tests/executor/test_gates.py::test_auto_review_waits_out_its_effective_delay, tests/executor/test_gates.py::test_auto_review_stops_at_its_effective_attempt_limit, tests/executor/test_gates.py::test_auto_review_reports_a_verdict_and_cannot_clear_its_own_gate, tests/executor/test_gates.py::test_a_node_override_permits_or_suppresses_the_declared_auto_review, tests/executor/test_gates.py::test_an_override_cannot_switch_on_a_gate_that_declares_no_auto_review
+origin: src/kraft/templates/models.py §GateNode -- "declare" is one field, `auto_review: AnyTask | None`, not a boolean plus a name: a bare `auto_escalate: true` could only mean "Kraft's own default reviewer", which is the name indirection V1 deletes. "Effective" is policy vocabulary and stays policy-owned -- the delay is `policy.auto_escalate_delay_s` folded through `store.effective_auto_escalate_delay_s`, the attempt bound is `policy.auto_review_attempts` -- so neither is duplicated onto the node. The per-item override keeps its persisted, publicly exposed key name `auto_escalate` (`db.py`'s `work_items.node_overrides`, `set_node_overrides`) and can only *suppress*: it names no task, so it cannot arm a gate that declares none. "SHALL NOT itself approve or reject" is enforced by dispatching the reviewer as a worker (`run_agent_task`'s `identify_as_worker` default, which sets `KRAFT_WORK_ITEM_ID` and therefore `client.context._forbid_self_action`); the pinned test asserts nothing overrides that default rather than re-testing the client guard.
 
 ## REQ attachment-behaviour-is-explicit-gate-configuration
 
 Spec and plan attachment behaviour SHALL be configured explicitly on their
 gate nodes and SHALL NOT be inferred from a preceding execution node.
+enforced-by: tests/templates/test_models.py::test_an_attachment_drops_the_gate_that_decides_it_and_its_producing_node, tests/templates/test_models.py::test_an_attachment_does_not_drop_a_gate_no_attachment_kind_names, tests/templates/test_library.py::test_lint_refuses_a_node_mixing_tasks_with_and_without_produces
+origin: src/kraft/templates/models.py §trim_for_attachments -- both ends are declared: the gate's own `artifact:` and the producing node's tasks' `produces:`. The kind-to-gate-*name* table this replaces (`templates.ATTACHMENT_GATES`) is deleted. The producing node is dropped as well as the gate, which legacy got for free by having them be one node. **The trim is not yet reached from intake**: `executor.intake` still materializes a legacy `Template`, and wiring `attachment_kinds` through to `ResolvedChain.materialize` is Task 5a's, so no attachment trims anything at runtime today.
 
 ## REQ task-recovery-retries-only-the-task
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
@@ -13,7 +12,7 @@ from kraft.executor import stops
 from kraft.executor.context import LaunchContext, OnApprove
 from kraft.store import _now as _now
 from kraft.templates import Registry
-from kraft.templates.models import GateNode, ResolvedNode
+from kraft.templates.models import ExecNode, GateNode, ResolvedNode
 
 
 def pending_gate(db, work_item_id: str, evts: list | None = None) -> str | None:
@@ -51,57 +50,76 @@ def gate_node_index(nodes: Sequence[ResolvedNode], gate: str) -> int:
     return next(i for i, n in enumerate(nodes) if isinstance(n.node, GateNode) and n.id == gate)
 
 
-def gate_artifact(registry, run_dirs, row, gate: str | None) -> str | None:
+def gate_artifact(run_dirs, row, gate: str | None) -> str | None:
     """The document the pending gate is a decision *about*, or None.
 
-    Derived from the binding, not stored: the gate's node names its hooks, a
-    hook with `artifact:` names a kind, and the kind plus the work item id is
-    the path (`agent.artifact_path`). Nothing here to migrate and nothing to go
-    stale when a rerun revises the same file.
+    The gate's own `artifact` field names the kind
+    (`gate-owns-gate-behaviour`), and the kind plus the work item id is the path
+    (`agent.artifact_path`). It is not stored and nothing goes stale when a
+    re-run revises the same file.
 
-    None when there is no pending gate, when none of the node's hooks produce
-    an artifact, or when the file is not on disk — the last case is an agent
-    that reported done without honouring the contract, and the gate is still
-    answerable, just without a document to read.
+    Replaces a scan of the *preceding* node's hook bindings for an `artifact:`
+    key -- a gate that had to be told what it was about by the node in front of
+    it, which is exactly the positional inference V1 deletes.
+
+    None when there is no pending gate, when the gate declares no `artifact`, or
+    when the file is not on disk -- the last case is an agent that reported done
+    without honouring the contract, and the gate is still answerable, just
+    without a document to read.
     """
     if not gate:
         return None
-    chain = json.loads(row["chain_definition"])
-    try:
-        node = chain["nodes"][gate_node_index(chain, gate)]
-    except StopIteration:
+    chain = store.materialized_chain_of(row)
+    if chain is None:
         return None
-    worktree = run_dirs.worktrees / row["id"]
-    for task in node["tasks"]:
-        kind = registry.hooks.get(task, {}).get("artifact")
-        if not kind:
-            continue
-        rel = _agent.artifact_path(kind, row["id"])
-        if (worktree / rel).is_file():
-            return rel
-    return None
+    node = next(
+        (n for n in chain.chain.nodes if isinstance(n.node, GateNode) and n.id == gate), None
+    )
+    if node is None or node.node.artifact is None:
+        return None
+    rel = _agent.artifact_path(node.node.artifact, row["id"])
+    return rel if (run_dirs.worktrees / row["id"] / rel).is_file() else None
 
 
-def reject_target(chain: dict, gate_index: int, requested: str | None) -> int:
+def preceding_exec_node(nodes: Sequence[ResolvedNode], gate_index: int) -> int | None:
+    """The index of the last execution node before `gate_index`, or None.
+
+    What a rejection re-enters at when nothing named a target: the node that
+    produced what the gate is about, so the smallest amount of work is redone
+    and the repair is *measured* rather than trusted (Kraft-rv6i). The gate node
+    itself is no longer a usable answer -- a V1 gate has no execution shape at
+    all, so re-entering there dispatches nothing and immediately re-requests the
+    same gate, a ping-pong bounded only by the reject loop's cap (Ruling 54).
+    """
+    return next(
+        (i for i in range(gate_index - 1, -1, -1) if isinstance(nodes[i].node, ExecNode)), None
+    )
+
+
+def reject_target(nodes: Sequence[ResolvedNode], gate_index: int, requested: str | None) -> int:
     """The index a rejection re-enters the chain at (Kraft-ko7j).
 
-    `requested`, else the gate node's `reject_to`, else the gate node itself.
-    A `reject_to` that `materialize` dropped — an intake attachment satisfied
-    that node's gate — falls back to the gate node rather than raising; a bad
-    `node` in the request body is the caller's error and raises `ValueError`.
+    `requested`, else the gate node's `reject_to`, else `preceding_exec_node`,
+    else the gate node itself (a gate with nothing before it: there is no work
+    to redo, so the gate simply re-opens carrying the note).
+
+    `Chain`'s validator already guarantees an authored `reject_to` names an
+    *earlier execution node*, so the only `reject_to` that can miss is one whose
+    target `trim_for_attachments` dropped -- and that one is nulled at trim
+    time, so it arrives here as no target at all rather than as a dangling name.
+
+    `requested` is the `node` field of an HTTP request body and is validated by
+    nothing, so it keeps its own bounds check and its own `ValueError`: a human
+    rejecting *forward* past the gate would otherwise skip every node in between.
     """
-    nodes = chain["nodes"]
-    name = requested or nodes[gate_index].get("reject_to")
+    gate = nodes[gate_index]
+    name = requested or (gate.node.reject_to if isinstance(gate.node, GateNode) else None)
     if not name:
-        return gate_index
-    index = next((i for i, n in enumerate(nodes) if n["id"] == name), None)
-    if index is None or index > gate_index:
-        if requested:
-            raise ValueError(
-                f"cannot reject to {name!r}: not a node of this chain at or before "
-                f"{nodes[gate_index]['id']!r}"
-            )
-        return gate_index
+        fallback = preceding_exec_node(nodes, gate_index)
+        return gate_index if fallback is None else fallback
+    index = next((i for i, n in enumerate(nodes) if n.id == name), None)
+    if index is None or index >= gate_index:
+        raise ValueError(f"cannot reject to {name!r}: not a node of this chain before {gate.id!r}")
     return index
 
 
@@ -110,7 +128,7 @@ async def apply_rejection(
     policy,
     *,
     work_item_id: str,
-    chain: dict,
+    nodes: Sequence[ResolvedNode],
     gate: str,
     note: str,
     node: str | None = None,
@@ -129,15 +147,15 @@ async def apply_rejection(
     pending and the events table untouched -- the property `kraft.api` held when
     this logic lived there.
     """
-    gate_index = gate_node_index(chain, gate)
-    target = reject_target(chain, gate_index, node)
+    gate_index = gate_node_index(nodes, gate)
+    target = reject_target(nodes, gate_index, node)
     key = f"{gate}_reject_loop"
     cap = _policy.resolve_cap(policy, key)
     count, started_at, cap = await db.write(
         lambda c, cap=cap: store.bump_counter(c, work_item_id, key, cap)
     )
     replan = _policy.check(count=count, started_at=started_at, cap=cap, now=_now()) == "ok"
-    target_id = chain["nodes"][target]["id"]
+    target_id = nodes[target].id
     await db.write(
         lambda c: store.reject_gate(
             c, work_item_id, gate, note, reopen=replan, node=target_id, by=by, verdict=verdict
@@ -149,7 +167,7 @@ async def apply_rejection(
         lambda c: store.mark_needs_human(
             c,
             work_item_id,
-            chain["nodes"][gate_index]["id"],
+            nodes[gate_index].id,
             f"{key} exhausted after {count - 1} rejection(s)",
             {"cycles": count - 1, "attempts": cap.attempts},
         )
@@ -221,13 +239,11 @@ async def review_gates(
         if gate is None or not row["auto_gate"]:
             return status
         # The item's own chain, node overrides folded in (UI v2 · 04 point 1):
-        # an `auto_escalate` override must arm/disarm review here the same way
-        # it does the Config tab's read, not just the template's own binding.
-        chain = store.effective_chain(
-            json.loads(row["chain_definition"]), store.node_overrides_of(row)
-        )
-        gate_index = gate_node_index(chain, gate)
-        node = chain["nodes"][gate_index]
+        # an `auto_escalate` override must suppress review here the same way it
+        # does the Config tab's read, not just the gate's own declaration.
+        nodes = store.effective_nodes(walk.chain_of(row), store.node_overrides_of(row))
+        gate_index = gate_node_index(nodes, gate)
+        node = nodes[gate_index]
         # Armed, past its delay-before-fire, and not already reviewed this
         # round (Kraft-vyk8) -- see `auto_check_due`. At the default delay of
         # 0 the elapsed half is always true, so this stays a no-op for
@@ -257,7 +273,6 @@ async def review_gates(
             work_item_id=work_item_id,
             gate=gate,
             node=node,
-            registry=registry,
             launch=launch,
         )
 
@@ -297,8 +312,8 @@ async def review_gates(
             # cleared with half of them (Kraft-zr3s).
             if on_approve is None:
                 return status
-            chain, reason = await on_approve(row, gate)
-            if chain is None:
+            approved, reason = await on_approve(row, gate)
+            if approved is None:
                 await db.write(
                     lambda c, reason=reason, node=row["current_node_id"]: store.mark_needs_human(
                         c, work_item_id, node, reason
@@ -308,20 +323,26 @@ async def review_gates(
             await db.write(
                 lambda c, gate=gate: store.approve_gate(c, work_item_id, gate, by="agent")
             )
-            start, steer = gate_node_index(chain, gate) + 1, None
+            start, steer = gate_node_index(approved, gate) + 1, None
         else:
-            # `fixed` is a rejection that repaired something on its way out: it
-            # re-enters at the gate node so the repair is measured rather than
-            # trusted -- the Kraft-rv6i rule, applied at a gate. `reject` takes
-            # the chain's own `reject_to`. Both count against the same cap.
+            # `fixed` is a rejection that repaired something on its way out, so
+            # the repair is measured rather than trusted -- the Kraft-rv6i rule,
+            # applied at a gate. It re-enters at the **execution node before the
+            # gate**, not at the gate itself: a V1 gate has no execution shape,
+            # so "re-enter at the gate" would dispatch nothing and re-request
+            # the same gate (Ruling 54). `None` when the gate is first in the
+            # chain -- there is nothing to re-measure, and `reject_target`'s own
+            # fallback lands back on the gate. `reject` takes the chain's own
+            # `reject_to`. Both count against the same cap.
+            repaired = preceding_exec_node(nodes, gate_index)
             target = await apply_rejection(
                 db,
                 policy,
                 work_item_id=work_item_id,
-                chain=chain,
+                nodes=nodes,
                 gate=gate,
                 note=note,
-                node=node["id"] if verdict == "fixed" else None,
+                node=nodes[repaired].id if verdict == "fixed" and repaired is not None else None,
                 by="agent",
                 verdict=verdict,
             )
@@ -385,13 +406,17 @@ def auto_check_due(row, gate: str | None, evts: list, policy) -> bool:
     if gate is not None:
         if not row["auto_gate"]:
             return False
-        chain = store.effective_chain(
-            json.loads(row["chain_definition"]), store.node_overrides_of(row)
-        )
-        node = chain["nodes"][gate_node_index(chain, gate)]
-        if not node.get("auto_escalate"):
+        from kraft.executor import walk
+
+        nodes = store.effective_nodes(walk.chain_of(row), store.node_overrides_of(row))
+        node = nodes[gate_node_index(nodes, gate)]
+        # The gate's own declared reviewing task is the whole arming condition
+        # (`gate-auto-review-is-explicit-and-bounded`): no task, no review, and
+        # no `auto_escalate: true` override can supply one.
+        if node.auto_review is None:
             return False
-        if _gate_already_reviewed(evts, gate):
+        attempts = policy.auto_review_attempts if policy else 1
+        if _gate_review_attempts(evts, gate) >= attempts:
             return False
         elapsed = _seconds_since(
             evts,
@@ -411,12 +436,15 @@ def auto_check_due(row, gate: str | None, evts: list, policy) -> bool:
     return elapsed is not None and elapsed >= delay
 
 
-def _gate_already_reviewed(evts: list, gate: str) -> bool:
-    """True iff the current `gate_requested <gate>` already had a review
-    *attempt* -- a `gate_auto_review_started`, or any
-    `gate_auto_review_skipped` for this gate regardless of `reason`
-    (`"undecided"`, `"budget"`) -- since it was requested. One review
-    attempt per `gate_requested` is the contract: every non-terminating
+def _gate_review_attempts(evts: list, gate: str) -> int:
+    """How many review *attempts* the current `gate_requested <gate>` has had --
+    a `gate_auto_review_started`, or any `gate_auto_review_skipped` for this
+    gate regardless of `reason` (`"undecided"`, `"budget"`) -- since it was
+    requested.
+
+    `policy.auto_review_attempts` is the bound the caller compares this
+    against; 1, its default, is the one-attempt-per-`gate_requested` contract
+    this used to hardcode as a boolean. Every non-terminating
     outcome (an undecided verdict, a budget-breach skip, or a crash
     mid-review that `deps.guard` turns into `mark_needs_human`) must
     suppress the next tick's re-attempt the same
@@ -436,18 +464,28 @@ def _gate_already_reviewed(evts: list, gate: str) -> bool:
     `gate_auto_review_started` counts as the attempt (`gate_review.review`
     writes it before it launches anything), so nothing has to stamp a
     separate marker for the crash case.
+
+    One attempt, not two, when a review ran and came back `undecided`: that
+    writes a `gate_auto_review_started` *and* a `gate_auto_review_skipped
+    {reason: undecided}`, and counting both would halve every bound above 1. A
+    `{reason: budget}` skip is the other way round -- it is refused before
+    anything launches, so it has no `_started` of its own and has to count for
+    itself. Hence: every `_started`, plus every `_skipped` that is not the tail
+    of one.
     """
+    attempts = 0
     for e in reversed(evts):
         if e["type"] == "gate_requested" and e["payload"].get("gate") == gate:
-            return False
+            break
         if e["type"] in _RUN_BOUNDARY:
-            return False
-        if (
-            e["type"] in ("gate_auto_review_skipped", "gate_auto_review_started")
-            and e["payload"].get("gate") == gate
+            break
+        if e["payload"].get("gate") != gate:
+            continue
+        if e["type"] == "gate_auto_review_started" or (
+            e["type"] == "gate_auto_review_skipped" and e["payload"].get("reason") != "undecided"
         ):
-            return True
-    return False
+            attempts += 1
+    return attempts
 
 
 def _seconds_since(evts: list, predicate) -> float | None:
@@ -847,8 +885,7 @@ async def resume_after_escalation(
             seeded=seeded,
         )
     )
-    chain = json.loads(row["chain_definition"])
-    start = next(i for i, n in enumerate(chain["nodes"]) if n["id"] == node_id)
+    start = next(i for i, n in enumerate(walk.chain_of(row).chain.nodes) if n.id == node_id)
     return await walk.run(
         db,
         run_dirs,
