@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from kraft import harness
+from kraft import harness, template_environment
 
 
 def test_bundled_harnesses_all_load():
@@ -275,3 +275,52 @@ def test_an_option_a_harness_does_not_support_is_never_emitted():
     argv = _argv("codex", options={"deny_tools": ("Write",)})
     assert "Write" not in argv
     assert "--disallowed-tools" not in argv
+
+
+# ── HarnessProfile: a configured instance, validated against its provider's
+# own declared capability surface (provider-declares-harness-capabilities,
+# harness-profile-has-safe-instance-configuration,
+# agent-task-selects-capability-compatible-runtime-options) ──
+
+
+def test_harness_profile_selects_only_provider_declared_options():
+    claude = harness.load(None).valid["claude"]
+    parsed = template_environment.HarnessProfileInput(
+        provider="claude_code", executable="claude", defaults={"effort": "low"}
+    )
+    profile = template_environment.HarnessProfile.from_input(
+        "claude_review", parsed, harness=claude
+    )
+    assert profile.defaults == {"effort": "low"}
+    assert profile.provider == "claude_code"
+
+
+def test_harness_profile_rejects_an_option_the_provider_does_not_declare():
+    """A profile selects only from what `provider-declares-harness-
+    capabilities` -- it does not invent its own runtime option."""
+    claude = harness.load(None).valid["claude"]
+    parsed = template_environment.HarnessProfileInput(
+        provider="claude_code", defaults={"network": "on"}
+    )
+    with pytest.raises(template_environment.TemplateEnvironmentError, match="network"):
+        template_environment.HarnessProfile.from_input("bad", parsed, harness=claude)
+
+
+def test_harness_profile_rejects_a_value_the_provider_rejects():
+    claude = harness.load(None).valid["claude"]
+    parsed = template_environment.HarnessProfileInput(
+        provider="claude_code", defaults={"effort": "minimal"}
+    )
+    with pytest.raises(template_environment.TemplateEnvironmentError, match="effort"):
+        template_environment.HarnessProfile.from_input("bad", parsed, harness=claude)
+
+
+def test_harness_profile_reports_unavailable_when_disabled():
+    """`unavailable-selected-harness-needs-human` needs to know this fact;
+    it does not itself decide what happens next -- that is Phase 6's."""
+    claude = harness.load(None).valid["claude"]
+    parsed = template_environment.HarnessProfileInput(provider="claude_code", enabled=False)
+    profile = template_environment.HarnessProfile.from_input(
+        "claude_review", parsed, harness=claude
+    )
+    assert profile.is_available() is False

@@ -70,29 +70,34 @@ method.
 
 The system SHALL distinguish a code-owned agent-runtime provider, a configured
 harness profile for that provider, and an agent task that selects a profile.
+enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider_declared_options, tests/test_template_environment.py::test_harness_profile_selects_only_declared_options
 
 ## REQ provider-owns-runtime-mechanics
 
 An agent-runtime provider SHALL own invocation, context delivery, supported
 runtime options, session resumption, skill loading, and normalized task
 results for its runtime.
+enforced-by: tests/test_harnesses.py::test_claude_argv_matches_todays_invocation
 
 ## REQ provider-declares-harness-capabilities
 
 An agent-runtime provider SHALL declare the capabilities and runtime-option
 schema it supports. Harness profiles and templates SHALL only select from that
 provider-declared surface.
+enforced-by: tests/test_harnesses.py::test_harness_profile_rejects_an_option_the_provider_does_not_declare, tests/test_harnesses.py::test_harness_profile_rejects_a_value_the_provider_rejects
 
 ## REQ harness-profile-has-safe-instance-configuration
 
 A harness profile MAY configure an enabled runtime instance, executable or
 connection choice, and default runtime options. It SHALL NOT require template
 authors to configure provider command syntax or result parsing.
+enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider_declared_options, tests/test_harnesses.py::test_harness_profile_reports_unavailable_when_disabled
 
 ## REQ agent-task-selects-capability-compatible-runtime-options
 
 An agent task MAY select a harness profile and override its runtime defaults
 only with options supported by the selected provider and allowed by policy.
+enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider_declared_options, tests/test_harnesses.py::test_harness_profile_rejects_a_value_the_provider_rejects
 
 ## REQ unavailable-selected-harness-needs-human
 
@@ -508,32 +513,39 @@ base, the system SHALL apply that node's `on_base_changed` restart behaviour.
 The effective task policy SHALL resolve from instance policy through repository,
 work-item, chain, node, step, and task policy overrides, from broadest scope
 to narrowest scope.
+enforced-by: tests/test_policy.py::test_policy_is_layered_from_instance_through_repository_to_work_item
+origin: docs/templates-v1-design.md "Policy" -- chain/node/step/task layers land once those types exist (Phase 2+); this pins the mechanism through the scopes typed so far.
 
 ## REQ policy-has-defaults-and-administrator-maxima
 
 The instance policy SHALL distinguish inheritable operational defaults from
 non-overridable administrator safety maxima.
+enforced-by: tests/test_policy.py::test_template_policy_cannot_widen_allowed_tools, tests/test_policy.py::test_work_item_policy_may_exceed_default_within_admin_maximum
 
 ## REQ template-policy-cannot-relax-safety-ceilings
 
 Template policy overrides SHALL only tighten inherited safety ceilings,
 including budgets, allowed tools, permissions, and repository access.
+enforced-by: tests/test_policy.py::test_template_policy_cannot_widen_allowed_tools, tests/test_policy.py::test_template_policy_can_narrow_allowed_tools, tests/test_policy.py::test_template_policy_cannot_exceed_token_budget_ceiling
 
 ## REQ repository-policy-cannot-relax-instance-safety
 
 Repository policy overrides SHALL only tighten inherited safety ceilings and
 SHALL remain effective for every chain and task that runs in that repository.
+enforced-by: tests/test_policy.py::test_policy_is_layered_from_instance_through_repository_to_work_item
 
 ## REQ repositories-workspaces-and-areas-are-distinct
 
 The system SHALL distinguish an independent repository, a workspace that
 combines repositories, and a path-scoped area within one repository. An area
 SHALL NOT be treated as an independent repository or forge target.
+enforced-by: tests/test_template_environment.py::test_area_has_no_forge_field_to_declare, tests/test_template_environment.py::test_repository_with_areas_keeps_them_path_scoped_not_independent
 
 ## REQ workspace-declares-root-and-members
 
 A workspace SHALL declare its root repository and each member repository with
 the path where it is mounted in that root.
+enforced-by: tests/test_template_environment.py::test_workspace_declares_root_and_members
 
 ## REQ work-item-target-selection-is-immutable
 
@@ -721,16 +733,19 @@ SHALL leave its workspace root pointer unchanged and require human action.
 
 Template policy overrides MAY replace operational defaults, including timeouts
 and retry or wait timing, in either direction.
+enforced-by: tests/test_policy.py::test_template_policy_may_replace_operational_defaults_either_direction
 
 ## REQ work-item-policy-may-exceed-default-ceilings-within-admin-maximum
 
 An operator editing a work item MAY raise a normal policy ceiling for that work
 item, but SHALL NOT exceed an explicitly configured administrator maximum.
+enforced-by: tests/test_policy.py::test_work_item_policy_may_exceed_default_within_admin_maximum
 
 ## REQ policy-override-rules-are-field-specific
 
 The system SHALL apply field-specific restriction rules to policy overrides and
 SHALL NOT treat policy overrides as an unrestricted generic merge.
+enforced-by: tests/test_policy.py::test_policy_override_rejects_unknown_fields_field_specifically, tests/test_policy.py::test_template_policy_cannot_widen_allowed_tools, tests/test_policy.py::test_template_policy_may_replace_operational_defaults_either_direction
 
 ## REQ template-lint-reports-library-validity
 
