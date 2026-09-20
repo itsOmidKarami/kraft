@@ -672,3 +672,91 @@ def test_agent_task_selects_a_harness_profile_by_id():
     task = tm.AgentTask.model_validate(agent("review", harness=profile.id))
     assert task.harness == profile.id == "claude_review"
     assert "provider" not in tm.AgentTask.model_fields
+
+
+def _resolved(nodes: list[dict]) -> tm.ResolvedChain:
+    return tm.ResolvedChain.from_chain(tm.Chain.model_validate({"id": "c", "nodes": nodes}))
+
+
+def test_a_skip_and_an_attachment_trim_are_one_drop_not_two():
+    """Two sequential trims can each leave a chain non-empty while their union
+    empties it, and `run_once`/`create_work_item` both index `nodes[0]`
+    unguarded -- by which point the bead is filed and the run spawned. One
+    drop, one refusal."""
+    resolved = _resolved(
+        [
+            {
+                "id": "plan",
+                "kind": "exec",
+                "tasks": [
+                    {
+                        "id": "author",
+                        "kind": "agent",
+                        "harness": "h",
+                        "prompt": "p",
+                        "produces": "plan",
+                    }
+                ],
+            },
+            {
+                "id": "implementation",
+                "kind": "exec",
+                "tasks": [{"id": "build", "kind": "subprocess", "command": "true"}],
+            },
+        ]
+    )
+    target = WorkItemTarget.for_repository(Repository(id="target", path="/r"))
+    policy = InstancePolicy.from_input(InstancePolicyInput())
+
+    # Either alone leaves one node standing.
+    assert [
+        n.id
+        for n in resolved.materialize(
+            target, policy, attachment_kinds=frozenset({"plan"})
+        ).chain.nodes
+    ] == ["implementation"]
+    assert [
+        n.id
+        for n in resolved.materialize(
+            target, policy, skip_nodes=frozenset({"implementation"})
+        ).chain.nodes
+    ] == ["plan"]
+
+    with pytest.raises(ValueError, match="no nodes"):
+        resolved.materialize(
+            target,
+            policy,
+            attachment_kinds=frozenset({"plan"}),
+            skip_nodes=frozenset({"implementation"}),
+        )
+
+
+def test_a_skip_that_orphans_a_reject_target_clears_it_rather_than_dangling():
+    """Same rule the attachment trim gets, because both go through
+    `without_nodes`: a dangling `reject_to` stops the stored snapshot
+    re-validating as a `Chain` when it is read back."""
+    resolved = _resolved(
+        [
+            {
+                "id": "spec",
+                "kind": "exec",
+                "tasks": [{"id": "write", "kind": "subprocess", "command": "true"}],
+            },
+            {"id": "spec_approval", "kind": "gate", "reject_to": "spec"},
+            {
+                "id": "implementation",
+                "kind": "exec",
+                "tasks": [{"id": "build", "kind": "subprocess", "command": "true"}],
+            },
+        ]
+    )
+    kept = resolved.without_nodes({"spec"})
+    gate = next(n for n in kept.chain.nodes if n.id == "spec_approval")
+    assert gate.reject_to is None
+    # And it still round-trips: that is the failure a dangling target causes.
+    tm.MaterializedChain.from_json(
+        kept.materialize(
+            WorkItemTarget.for_repository(Repository(id="target", path="/r")),
+            InstancePolicy.from_input(InstancePolicyInput()),
+        ).to_json()
+    )

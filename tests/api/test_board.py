@@ -640,3 +640,65 @@ def test_judge_stop_note_stops_at_the_last_resolved_gate(tmp_path, monkeypatch):
         _seed_events(client, wid, [later], event_type="judge_verdict")
         notes = client.get(f"/api/work-items/{wid}").json()["judge_stop_note"]
         assert [n["reasoning"] for n in notes] == ["new, after the gate"]
+
+
+def test_steerable_is_answered_off_the_v1_snapshot(tmp_path, monkeypatch):
+    """Kraft-bz9b on a V1 row. `chain_definition` is `"{}"` now, so a reader
+    that still looked there would either 500 on a missing `nodes` key or fail
+    open for every item -- offering a steer box on a node whose remaining chain
+    runs no agent at all, and then 409ing the text.
+
+    Both ends of the answer are pinned: a node with an agent task after it is
+    steerable, one whose tail is forge-only is not.
+    """
+    import asyncio
+
+    from support.harness import v1_chain, v1_item, v1_walk  # noqa: F401
+
+    from kraft import db as _db
+    from kraft.api.routes import lifecycle
+    from kraft.paths import RunDirs
+
+    repo = make_repo(tmp_path)
+    chain = v1_chain(
+        [
+            {
+                "id": "implementation",
+                "kind": "exec",
+                "tasks": [{"id": "build", "kind": "subprocess", "command": "true"}],
+            },
+            {
+                "id": "review",
+                "kind": "exec",
+                "tasks": [{"id": "look", "kind": "agent", "harness": "fake", "prompt": "review"}],
+            },
+            {
+                "id": "merge",
+                "kind": "exec",
+                "tasks": [{"id": "go", "kind": "forge", "target": "mr.merge"}],
+            },
+        ],
+        repo=repo,
+    )
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await _db.Database.open(rd.db)
+        try:
+            await v1_item(database, chain, repo=repo, wid="w1")
+            answers = {}
+            for node_id in ("implementation", "merge"):
+                await database.write(
+                    lambda c, n=node_id: c.execute(
+                        "UPDATE work_items SET current_node_id = ? WHERE id = 'w1'", (n,)
+                    )
+                )
+                row = database.read(
+                    lambda c: c.execute("SELECT * FROM work_items WHERE id = 'w1'").fetchone()
+                )
+                answers[node_id] = lifecycle.steer_reachable(row, None)
+            return answers
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario()) == {"implementation": True, "merge": False}

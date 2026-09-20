@@ -2201,3 +2201,67 @@ def test_an_override_that_cannot_do_anything_is_refused_at_the_door(tmp_path):
     # Suppressing a gate that declares nothing is a harmless no-op, not an error:
     # it says the same thing the chain already says.
     assert asyncio.run(scenario(undeclared, False)) is None
+
+
+def test_a_chain_whose_plan_node_was_trimmed_still_reaches_chain_finalized(tmp_path):
+    """Ruling 66, and the question attachment trimming actually raises.
+
+    Legacy `gates.md:110` says a chain with no `plan` node SHALL NOT open its
+    `chain_finalized` gate -- written when the only way to have no plan node
+    was to have no plan. Under Rulings 28/30/35 an item filed with `--plan`
+    has that node *trimmed*, so read literally the rule forbids the final gate
+    ever opening and the chain could never finish.
+
+    The answer is yes: a chain may finalize when the node that produced its
+    plan was trimmed, because the plan exists as an attachment. Pinned here so
+    nobody re-derives the legacy rule from the trimmed chain's shape.
+    """
+    from support.harness import v1_resolved
+
+    from kraft.policy import InstancePolicy, InstancePolicyInput
+    from kraft.templates.environment import Repository, WorkItemTarget
+
+    repo = make_repo(tmp_path)
+    resolved = v1_resolved(
+        [
+            {
+                "id": "plan",
+                "kind": "exec",
+                "tasks": [
+                    {
+                        "id": "author",
+                        "kind": "agent",
+                        "harness": "fake",
+                        "prompt": "write the plan",
+                        "produces": "plan",
+                    }
+                ],
+            },
+            {"id": "plan_approval", "kind": "gate", "artifact": "plan"},
+            {
+                "id": "implementation",
+                "kind": "exec",
+                "tasks": [{"id": "build", "kind": "subprocess", "command": "true"}],
+            },
+            {
+                "id": "chain_review",
+                "kind": "gate",
+                "chain_finalized": True,
+                "artifact": "review_brief",
+            },
+        ]
+    )
+    chain = resolved.materialize(
+        target=WorkItemTarget.for_repository(Repository(id="target", path=str(repo))),
+        effective_policy=InstancePolicy.from_input(InstancePolicyInput()),
+        attachment_kinds=frozenset({"plan"}),
+    )
+    # The trim took the producing node and its gate, and left the final marker.
+    assert [n.id for n in chain.chain.nodes] == ["implementation", "chain_review"]
+
+    status, evts, _sessions, row = asyncio.run(v1_walk(tmp_path, chain, repo=repo))
+
+    assert status == "awaiting_gate"
+    assert row["current_node_id"] == "chain_review"
+    requested = [e["payload"]["gate"] for e in evts if e["type"] == "gate_requested"]
+    assert requested == ["chain_review"]
