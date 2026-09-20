@@ -2,7 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from kraft import harness, template_environment
+from kraft import harness
+from kraft.templates import environment as template_environment
 
 
 def test_bundled_harnesses_all_load():
