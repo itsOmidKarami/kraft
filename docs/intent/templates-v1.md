@@ -43,7 +43,6 @@ enforced-by: tests/templates/test_library.py::test_from_yaml_dir_loads_component
 The system SHALL NOT use `registry.yaml` as a source of agent, subprocess,
 forge, or built-in task configuration; those definitions SHALL live in typed
 templates.
-enforced-by: tests/templates/test_materialization.py::test_task_configuration_resolves_from_the_library_alone
 
 ## REQ task-kinds-are-discriminated
 

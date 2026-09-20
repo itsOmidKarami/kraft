@@ -114,11 +114,15 @@ def test_the_seeded_library_has_no_lint_errors():
 
 
 def test_task_configuration_resolves_from_the_library_alone(tmp_path):
-    """`registry-is-not-a-task-configuration-source`: the seeded chain's tasks
-    carry their own typed configuration, so a directory holding only
-    `library.yaml` and `chains/` resolves every one of them. Copying just those
-    two into an otherwise empty directory is the check -- there is no
-    `registry.yaml` for a hook name to be looked up in."""
+    """The seeded chain's tasks carry their own typed configuration, so a
+    directory holding only `library.yaml` and `chains/` resolves every one of
+    them -- there is no `registry.yaml` for a hook name to be looked up in.
+
+    Deliberately not pinned to `registry-is-not-a-task-configuration-source`.
+    That requirement says the *system* shall not use `registry.yaml` as a task
+    configuration source, and it still does: the legacy loader is live and the
+    file is still seeded. This proves only that a V1 library needs no registry.
+    Task 5 pins the requirement, once `registry.yaml` leaves the seed."""
     (tmp_path / CHAINS_DIR).mkdir()
     (tmp_path / LIBRARY_FILE).write_text((SEEDED / LIBRARY_FILE).read_text())
     (tmp_path / CHAINS_DIR / "default.yaml").write_text(
@@ -261,7 +265,8 @@ def test_lint_writes_nothing_and_reloads_nothing(tmp_path):
     # A library already in memory must not go back to disk: an edit landing
     # mid-lint would otherwise be reported against a file the caller never
     # loaded.
-    (tmp_path / CHAINS_DIR / "broken.yaml").write_text(
+    edited = tmp_path / CHAINS_DIR / "broken.yaml"
+    edited.write_text(
         yaml.safe_dump({"nodes": [{"id": "n", "kind": "exec", "tasks": [{"extends": "base"}]}]})
     )
 
@@ -269,7 +274,13 @@ def test_lint_writes_nothing_and_reloads_nothing(tmp_path):
 
     assert [i.chain for i in issues] == ["broken"]
     assert "typo" in issues[0].message
-    assert snapshot(tmp_path).keys() == before.keys()
+    # Content, not just the file list: a lint that rewrote a file in place --
+    # normalising YAML, say -- would leave the names untouched and pass.
+    after = snapshot(tmp_path)
+    assert after.keys() == before.keys()
+    assert {p: c for p, c in after.items() if p != edited} == {
+        p: c for p, c in before.items() if p != edited
+    }
 
 
 # ── materialization (authored-resolved-and-materialized-chains-are-distinct) ──
@@ -361,8 +372,12 @@ def test_a_materialized_chain_round_trips_through_its_own_json():
 
 
 def test_serialization_is_deterministic():
-    """`resolved-template-is-deterministic`: the stored form is expansion only,
-    so re-serializing a restored snapshot reproduces the same bytes."""
+    """Re-serializing a restored snapshot reproduces the same bytes, so a caller
+    can compare two stored snapshots without normalising them first.
+
+    Deliberately does not claim `resolved-template-is-deterministic` -- that
+    requirement is about a resolved-template *response* being expansion only, and
+    is pinned to `test_resolution_is_expansion_only_and_repeatable` instead."""
     stored = (
         TemplateLibrary.from_yaml_dir(SEEDED)
         .resolve_chain("default")
@@ -411,18 +426,18 @@ def test_the_target_selection_survives_serialization():
     assert restored == target
 
 
-def test_the_run_parent_is_carried_but_empty_until_a_retry_forks():
-    """Phase 5 fills this; materialization reserves it so a fork's lineage does
-    not need a second migration."""
-    resolved = TemplateLibrary.from_yaml_dir(SEEDED).resolve_chain("default")
-
-    original = resolved.materialize(target=repository_target(), effective_policy=policy())
-    fork = resolved.materialize(
-        target=repository_target(), effective_policy=policy(), run_parent="run-1"
+def test_the_snapshot_does_not_carry_fork_lineage():
+    """`work_items.run_fork_parent` is the only record of a fork's parent. A
+    field on the snapshot as well would be a second source of truth nothing keeps
+    equal to the column -- and the column is the one a query can reach."""
+    materialized = (
+        TemplateLibrary.from_yaml_dir(SEEDED)
+        .resolve_chain("default")
+        .materialize(target=repository_target(), effective_policy=policy())
     )
 
-    assert original.run_parent is None
-    assert MaterializedChain.from_json(fork.to_json()).run_parent == "run-1"
+    assert not hasattr(materialized, "run_parent")
+    assert "run_parent" not in materialized.to_json()
 
 
 def test_a_stored_snapshot_that_is_not_a_materialized_chain_is_an_error():

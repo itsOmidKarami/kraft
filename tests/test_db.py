@@ -214,15 +214,6 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         )
     if version < 29:
         drop_lines = (*drop_lines, "thread         INTEGER NOT NULL DEFAULT 1,")
-    if version < 33:
-        drop_lines = (
-            *drop_lines,
-            "materialized_chain TEXT,",
-            "run_fork_parent  TEXT,",
-            "-- template schema V1's immutable work-item input",
-            "-- Beside `chain_definition`, not replacing it",
-            "-- the run this one forked from (Phase 5 retry forks)",
-        )
     if version < 32:
         drop_lines = (
             *drop_lines,
@@ -241,6 +232,15 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         # `command` is the last worker_sessions column -- dropping it leaves
         # head_sha's own trailing comma dangling before the closing `);`.
         replace = (*replace, ("head_sha       TEXT,", "head_sha       TEXT"))
+    if version < 33:
+        drop_lines = (
+            *drop_lines,
+            "materialized_chain TEXT,",
+            "run_fork_parent  TEXT,",
+            "-- template schema V1's immutable work-item input",
+            "-- Beside `chain_definition`, not replacing it",
+            "-- the run this one forked from (Phase 5 retry forks)",
+        )
     schema = "\n".join(
         rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
     )

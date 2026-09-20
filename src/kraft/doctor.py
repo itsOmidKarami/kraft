@@ -291,6 +291,13 @@ def _chain_template_files(directory: Path) -> dict[str, set[str]]:
     `policy.yaml`, `repos.yaml`) by structure, not by filename, so a
     template added in a later version is picked up without a code change
     here.
+
+    Narrow margin worth knowing: the V1 `library.yaml` *does* have a top-level
+    `nodes:`. It is excluded only because that `nodes:` is a mapping of reusable
+    nodes by name and the guard below is `isinstance(..., list)`. A V1 file that
+    ever grew a top-level `nodes` list would be read as a chain template here.
+    The V1 chains themselves are under `chains/`, which this glob does not
+    descend into.
     """
     found: dict[str, set[str]] = {}
     if not directory.is_dir():

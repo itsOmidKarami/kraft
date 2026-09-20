@@ -92,6 +92,12 @@ def _duration_text(value: timedelta) -> str:
     Symmetry with `_duration`, and the whole reason it is here: pydantic's own
     JSON form for a `timedelta` is ISO-8601 (`PT1H30M`), which `_duration` then
     refuses. A stored chain has to re-read, so the grammar has to round-trip.
+
+    Not total symmetry: a zero duration serializes to `"0d"`, which `_duration`
+    rejects. That asymmetry is the rule working, not a gap -- `Duration` refuses
+    zero on purpose, because a zero polling interval is a hot loop and a zero
+    timeout stops an item before any pipeline could settle. No validated model
+    can hold one, so nothing round-trippable reaches this branch.
     """
     total = int(value.total_seconds())
     unit = next(u for u in ("d", "h", "m", "s") if total % _DURATION_UNITS[u] == 0)
@@ -106,6 +112,18 @@ Duration = Annotated[
     BeforeValidator(_duration),
     PlainSerializer(_duration_text, return_type=str, when_used="json"),
 ]
+
+
+def first_error(exc: ValidationError) -> str:
+    """A pydantic failure as one line naming the field that failed.
+
+    Here rather than in `kraft.templates.library` because `PATH_SEPARATOR` is
+    this module's, and both this module's `MaterializedChain.from_json` and that
+    module's steering-profile load need the same shape.
+    """
+    error = exc.errors()[0]
+    location = PATH_SEPARATOR.join(str(part) for part in error["loc"])
+    return f"{location}: {error['msg']}" if location else error["msg"]
 
 
 def _not_reserved(id: str) -> str:
@@ -540,11 +558,7 @@ class ResolvedChain:
         return cls(chain=chain, nodes=tuple(nodes))
 
     def materialize(
-        self,
-        target: WorkItemTarget,
-        effective_policy: InstancePolicy,
-        *,
-        run_parent: str | None = None,
+        self, target: WorkItemTarget, effective_policy: InstancePolicy
     ) -> MaterializedChain:
         """Bind this chain to one work item: its immutable target and the
         policy its tasks run under, with the chain's own override layered on
@@ -553,7 +567,7 @@ class ResolvedChain:
         policy = effective_policy
         if self.chain.policy is not None:
             policy = policy.apply_template_override(self.chain.policy)
-        return MaterializedChain(chain=self, target=target, policy=policy, run_parent=run_parent)
+        return MaterializedChain(chain=self, target=target, policy=policy)
 
 
 class _StoredMaterialization(BaseModel):
@@ -570,7 +584,6 @@ class _StoredMaterialization(BaseModel):
     chain: Chain
     target: WorkItemTarget
     policy: InstancePolicy
-    run_parent: StrictStr | None = None
 
 
 @dataclass(frozen=True)
@@ -581,27 +594,38 @@ class MaterializedChain:
     chain: ResolvedChain
     target: WorkItemTarget
     policy: InstancePolicy
-    #: The run this one forked from, filled by Phase 5's retry forks. Reserved
-    #: here so a fork's lineage needs no second storage migration.
-    run_parent: str | None = None
+
+    # Fork lineage is deliberately NOT a field here. `work_items.run_fork_parent`
+    # is the one place a fork's parent is recorded: a field as well would be a
+    # second source of truth that nothing keeps equal to the column, and the
+    # column is the one a query can reach.
 
     @property
     def task_paths(self) -> tuple[str, ...]:
         return self.chain.task_paths
 
     def to_json(self) -> str:
-        """The immutable work-item input, as one JSON document: the resolved
-        chain, the effective policy, the typed target, and the run parent.
+        """The immutable work-item input, as one JSON document: the authored
+        chain, the effective policy, and the typed target.
 
         The *authored* chain is what is stored, never the resolved paths -- they
-        are derived from it deterministically (`resolved-template-is-
-        deterministic`), so storing both would let the two disagree.
+        are derived from it deterministically, so storing both would let the two
+        disagree.
+
+        What is NOT frozen here, and a consumer has to know it: steering profile
+        bodies and harness profile configuration. Both are referenced by name --
+        a task carries `steering: [project-standards]` and `harness: codex_default`,
+        and resolution only checks that the names exist. So editing a steering
+        profile's `instructions` in `library.yaml`, or a harness profile's
+        defaults, changes what an already-materialized item's later tasks do.
+        That is intended: `materialized-chain-is-immutable-work-item-input` names
+        effective policy values and intake-specific decisions, and installation-
+        wide guidance prose is neither.
         """
         return _StoredMaterialization(
             chain=self.chain.chain,
             target=self.target,
             policy=self.policy,
-            run_parent=self.run_parent,
         ).model_dump_json()
 
     @classmethod
@@ -611,12 +635,9 @@ class MaterializedChain:
         try:
             stored = _StoredMaterialization.model_validate_json(raw)
         except ValidationError as exc:
-            raise TemplateLibraryError(
-                f"not a materialized chain: {exc.errors()[0]['msg']}"
-            ) from exc
+            raise TemplateLibraryError(f"not a materialized chain: {first_error(exc)}") from exc
         return cls(
             chain=ResolvedChain.from_chain(stored.chain),
             target=stored.target,
             policy=stored.policy,
-            run_parent=stored.run_parent,
         )

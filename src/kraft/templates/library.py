@@ -34,6 +34,7 @@ from kraft.templates.models import (
     ResolvedChain,
     SteeringProfile,
     TaskKind,
+    first_error,
 )
 
 LIBRARY_FILE = "library.yaml"
@@ -183,7 +184,7 @@ class TemplateLibrary:
             try:
                 steering[name] = SteeringProfile.model_validate(body)
             except ValidationError as exc:
-                raise TemplateLibraryError(f"{source}: {_first(exc)}") from exc
+                raise TemplateLibraryError(f"{source}: {first_error(exc)}") from exc
 
         chains: dict[str, RawComponent] = {}
         for chain_path in sorted((root / CHAINS_DIR).glob("*.yaml")):
@@ -259,12 +260,6 @@ class TemplateLibrary:
                             f"{resolution.at(task.path)}: selects no steering profile {name!r}"
                         )
         return resolved
-
-
-def _first(exc: ValidationError) -> str:
-    error = exc.errors()[0]
-    location = PATH_SEPARATOR.join(str(part) for part in error["loc"])
-    return f"{location}: {error['msg']}" if location else error["msg"]
 
 
 @dataclass(frozen=True)
