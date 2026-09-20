@@ -16,7 +16,6 @@ from kraft import config as _config
 from kraft import events, store
 from kraft import findings as _findings
 from kraft import policy as _policy
-from kraft import sandbox as _sandbox
 from kraft import templates as _templates
 from kraft.adapters import agent as _agent
 from kraft.adapters import forge as _forge
@@ -36,6 +35,7 @@ from kraft.executor.context import (
 )
 from kraft.store import _now as _now
 from kraft.templates import Registry
+from kraft.worker import sandbox as _sandbox
 
 logger = logging.getLogger(__name__)
 

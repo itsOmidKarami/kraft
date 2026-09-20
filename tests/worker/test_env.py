@@ -1,4 +1,4 @@
-from kraft.worker_env import BASELINE, worker_env
+from kraft.worker.env import BASELINE, worker_env
 
 
 def test_repo_scoped_leaks_never_reach_a_worker(monkeypatch):

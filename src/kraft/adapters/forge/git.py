@@ -8,9 +8,9 @@ import asyncio
 import subprocess
 from pathlib import Path
 
-from kraft import sandbox
 from kraft.adapters.forge.models import ForgeError
 from kraft.config import git_read, main_ignore_args
+from kraft.worker import sandbox
 
 #: Per-call cap, set from `policy.forge_cli_timeout_s` at startup. `subprocess.run`
 #: with no timeout blocks its thread forever on a stalled `gh`, and no deadline

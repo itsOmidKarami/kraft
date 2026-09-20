@@ -8,7 +8,7 @@ from kraft import events, review
 from kraft.api import api_router, deps
 from kraft.api.routes import board
 from kraft.index import ingest as ingest_mod
-from kraft.worktree_read import read_worktree_file
+from kraft.worker.worktree_read import read_worktree_file
 
 logger = logging.getLogger(__name__)
 

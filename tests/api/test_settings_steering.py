@@ -15,7 +15,7 @@ from support.harness import fake_templates_dir, make_repo
 
 from kraft import config
 from kraft import intake as intake_mod
-from kraft import steering as steering_mod
+from kraft.worker import steering as steering_mod
 
 _FAKE_AGENT = Path(__file__).resolve().parents[1] / "support" / "fake_agent.py"
 

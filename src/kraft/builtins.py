@@ -12,7 +12,7 @@ from pathlib import Path
 from kraft import logs, store
 from kraft.adapters.forge import git
 from kraft.config import git_read, main_ignore_args
-from kraft.worker_env import worker_env
+from kraft.worker.env import worker_env
 
 logger = logging.getLogger(__name__)
 

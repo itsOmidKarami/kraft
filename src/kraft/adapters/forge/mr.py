@@ -11,7 +11,7 @@ from typing import Literal
 
 from kraft.adapters.forge.models import ForgeError, MRRef
 from kraft.index.ingest import split_front_matter
-from kraft.worktree_read import read_worktree_file
+from kraft.worker.worktree_read import read_worktree_file
 
 #: GitHub rejects a PR/MR body over 65 536 characters; GitLab's own limit is
 #: far higher. The same body is built for both backends, so the cap is picked

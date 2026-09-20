@@ -14,8 +14,6 @@ from kraft import (
     ci_wait,
     executor,
     rate_limit_retry,
-    reattach,
-    sandbox,
 )
 from kraft import auth as auth_mod
 from kraft import config as config_mod
@@ -30,6 +28,7 @@ from kraft.index import db as index_db
 from kraft.index.service import Indexer
 from kraft.paths import BUNDLED, RunDirs, default_run_dir, default_skills_dir, default_templates_dir
 from kraft.templates import load_registry, load_templates
+from kraft.worker import reattach, sandbox
 from kraft.ws import Broadcaster
 
 logger = logging.getLogger(__name__)

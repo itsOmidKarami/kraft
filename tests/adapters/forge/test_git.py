@@ -20,8 +20,8 @@ import pytest
 from support.harness import make_repo
 
 from kraft import builtins as kraft_builtins
-from kraft import sandbox
 from kraft.adapters import forge
+from kraft.worker import sandbox
 
 BRANCH = "kraft/abc"
 
@@ -185,7 +185,7 @@ def test_push_still_runs_pre_push_under_harden_host_git_env(tmp_path, monkeypatc
     (git-lfs's) uploading the objects a push's pointers reference must still
     run. A pinned `core.hooksPath` that survives into `forge.push` would
     silently drop those uploads."""
-    from kraft import sandbox
+    from kraft.worker import sandbox
 
     repo = _repo_with_origin(tmp_path)
     hooks_dir = _git(repo, "rev-parse", "--git-path", "hooks").strip()

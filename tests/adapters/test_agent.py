@@ -7,10 +7,11 @@ from pathlib import Path
 import pytest
 from support.harness import make_repo
 
-from kraft import db, skill, steering, store
+from kraft import db, skill, store
 from kraft.adapters import agent
 from kraft.adapters.subprocess import read_concerns, read_question
 from kraft.paths import RunDirs
+from kraft.worker import steering
 
 _FAKE = Path(__file__).resolve().parents[1] / "support" / "fake_agent.py"
 _REPO_ROOT = Path(__file__).resolve().parents[2]

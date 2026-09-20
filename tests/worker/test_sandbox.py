@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from kraft import sandbox
+from kraft.worker import sandbox
 
 
 def test_resolve_falls_through_to_the_binding_when_repo_sets_nothing():

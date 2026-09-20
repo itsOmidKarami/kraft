@@ -9,9 +9,10 @@ import sys
 
 from support.harness import fake_docker_bin
 
-from kraft import db, events, reattach, store
+from kraft import db, events, store
 from kraft.paths import RunDirs
 from kraft.templates import Registry
+from kraft.worker import reattach
 
 _CHAIN = json.dumps(
     {

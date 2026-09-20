@@ -11,7 +11,6 @@ import psutil
 
 from kraft import events, store
 from kraft import policy as _policy
-from kraft import sandbox as _sandbox
 from kraft import usage as _usage
 from kraft.adapters.subprocess import (
     _progress_usage,
@@ -24,6 +23,7 @@ from kraft.executor.context import LaunchContext, OnApprove
 from kraft.executor.dispatch import ESCALATION_HOOK
 from kraft.store._common import _now, _span_ms
 from kraft.templates import Registry
+from kraft.worker import sandbox as _sandbox
 
 logger = logging.getLogger(__name__)
 

@@ -33,9 +33,9 @@ from pydantic import (
     model_validator,
 )
 
-from kraft import sandbox as _sandbox
-from kraft import steering as _steering
 from kraft.store.repos import RootMergePolicy
+from kraft.worker import sandbox as _sandbox
+from kraft.worker import steering as _steering
 
 logger = logging.getLogger(__name__)
 
