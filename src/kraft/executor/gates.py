@@ -456,15 +456,25 @@ def _gate_review_attempts(evts: list, gate: str) -> int:
     """How many review *attempts* the current `gate_requested <gate>` has had
     since it was requested.
 
-    An attempt is one `gate_auto_review_started`, **plus** one for every
-    `gate_auto_review_skipped` whose reason is **not** `"undecided"`. The reason
-    matters, and the excluded set is exactly that one value -- see the
-    `undecided` paragraph below, which is the whole rule. This summary used to
-    read "any skip regardless of reason", which contradicted both the paragraph
-    and the code, and a reviewer cleared a real re-dispatch loop as safe on the
-    strength of it. Anything that returns without launching therefore has to
-    write a skip with its *own* reason (`"budget"`, `"unreviewable"`), never
-    `"undecided"`, or it spends no attempt and the poller re-arms forever.
+    An attempt is one `gate_auto_review_started`, **plus** one
+    `gate_auto_review_skipped` that does not immediately follow a `_started`.
+    The pairing is **structural and reads no `reason` at all**: a `_started`
+    opens an attempt, the next skip closes the one it belongs to without adding
+    to the tally, and an unpaired skip counts for itself whatever its reason
+    says. So a caller that returns without launching spends an attempt no matter
+    which reason string it writes, and `reason` is documentation for a human
+    reading the timeline rather than an input to this count.
+
+    Two superseded descriptions of this function have each sent a careful reader
+    to the wrong conclusion, so the rule above is the only one to trust and the
+    history is kept only to stop a third: it once read "any skip regardless of
+    reason", which contradicted its own body and led a reviewer to clear a real
+    re-dispatch loop as safe; it was then corrected to "any skip whose reason is
+    not `undecided`", which described the body accurately *in the same commit
+    that replaced that body* with the pairing pass, so it was false on arrival.
+    Neither claim is true now. If you change the tally rule, change **this
+    paragraph and the one above it first** -- both previous failures were a
+    leading summary left behind by a correct body.
 
     `policy.auto_review_attempts` is the bound the caller compares this
     against; 1, its default, is the one-attempt-per-`gate_requested` contract
