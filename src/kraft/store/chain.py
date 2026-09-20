@@ -177,6 +177,18 @@ def chain_node_ids(row) -> tuple[str, ...]:
 
     `()` for a row with neither column populated -- a caller distinguishes "no
     nodes" from "node not found" through `node_index`'s `default`.
+
+    **What it guarantees, precisely: no `KeyError` for any shape Kraft writes.**
+    Not "cannot raise", which earlier drafts of this docstring said and the code
+    never did. A stored `materialized_chain` that a *later* build's
+    `MaterializedChain` no longer validates raises `TemplateLibraryError` from
+    `materialized_chain_of`, and a hand-edited `chain_definition` that is not a
+    mapping of node dicts with `id` keys raises `JSONDecodeError`/`AttributeError`
+    /`KeyError`. Neither is swallowed on purpose: turning a schema mismatch into
+    `()` would make a chain silently look empty, and the callers that read this
+    after a status write are wrapped in `stops.claimed_or_stopped`, which turns a
+    propagating exception into a `needs_human` stop naming the item. Loud and
+    stopped beats quiet and empty.
     """
     v1 = materialized_chain_of(row)
     if v1 is not None:
@@ -190,9 +202,11 @@ def node_index(row, node_id, *, default=None):
     """The position of `node_id` in this item's chain, or `default`.
 
     Over `chain_node_ids`, so both chain shapes answer the same way and neither
-    raises. `default=None` for a caller that must refuse ("no current node to
-    skip"); `default=0` for one whose honest fallback is the start of the chain
-    (a `resume` of an item that never reached a node).
+    raises a `KeyError` for a row Kraft wrote -- see there for the two inputs
+    that do raise, and why that is deliberate. `default=None` for a caller that
+    must refuse ("no current node to skip"); `default=0` for one whose honest
+    fallback is the start of the chain (a `resume` of an item that never reached
+    a node).
     """
     ids = chain_node_ids(row)
     return ids.index(node_id) if node_id in ids else default

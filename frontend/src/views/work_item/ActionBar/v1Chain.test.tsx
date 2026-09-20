@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ChainNode, WorkItem } from "../../../types";
+import { yamlOf } from "../RightPane/ConfigPane";
+import { gateNote } from "../NotStarted";
 import { rejectTarget } from "./ItemCard";
 
 /** A Template Schema V1 chain as `store.chain_view` projects it: a gate is a
@@ -73,5 +75,35 @@ describe("a V1 chain answers the gate questions the same way a legacy one does",
     // control that arms agent gate review.
     const gate = V1_NODES.find((n) => n.id === "spec_approval")!;
     expect(!gate.gate_after).toBe(false);
+  });
+});
+
+/** A V1 gate node reporting itself under `gate_after` is what makes the eleven
+ *  gate-question consumers correct -- and it is also a shape no authored
+ *  template can have, so the two places that *render* the field have to say
+ *  something else. Confusing-but-correct is still confusing. */
+describe("a V1 gate node does not render as pointing at itself", () => {
+  it("the not-started chain list says `gate`, not `then gate <its own id>`", () => {
+    const gate = V1_NODES.find((n) => n.id === "spec_approval")!;
+    const exec = V1_NODES.find((n) => n.id === "spec")!;
+    expect(gateNote(gate)).toBe(" · gate");
+    expect(gateNote(gate)).not.toContain("spec_approval");
+    // And a legacy exec node still names the gate it leads to.
+    expect(gateNote({ ...exec, gate_after: "spec_approval" })).toBe(
+      " · then gate spec_approval",
+    );
+  });
+
+  it("the config YAML prints the field a V1 gate actually declares", () => {
+    const item = {
+      ...v1Item(),
+      chain_definition: { template_id: "default", nodes: V1_NODES },
+    } as WorkItem;
+    const text = yamlOf(item, null).map((l) => l.text);
+    expect(text).toContain("    kind: gate, reject_to: spec");
+    // The gate's own entry does not claim to lead to itself.
+    expect(text).not.toContain("    gate_after: spec_approval");
+    // An exec node keeps the field it really has.
+    expect(text).toContain("    gate_after: null");
   });
 });
