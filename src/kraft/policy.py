@@ -115,6 +115,30 @@ class PolicyInput(BaseModel):
     auto_escalate_delay_s: Annotated[StrictInt, Field(ge=0)] = 0
     auto_review_attempts: PositiveInt = 1
     forge_cli_timeout_s: Annotated[StrictFloat | StrictInt, Field(gt=0)] = 120
+    #: V1's `defaults:`/`maxima:` sections, read by the *same* loader rather
+    #: than a second one. `policy.yaml` is one file, and one filename with two
+    #: live loaders is how two readers of it start disagreeing (Ruling 18/37):
+    #: `InstancePolicyInput.from_yaml` deliberately does not exist. Forward
+    #: references, because the V1 models are defined further down this module
+    #: beside the override engine they belong to -- `model_rebuild()` at the
+    #: bottom of the file resolves them.
+    defaults: PolicyDefaultsInput = Field(default_factory=lambda: PolicyDefaultsInput())
+    maxima: PolicyMaximaInput = Field(default_factory=lambda: PolicyMaximaInput())
+
+    @model_validator(mode="after")
+    def _v1_defaults_are_within_v1_maxima(self) -> PolicyInput:
+        """The same coherence rule `InstancePolicyInput` enforces, applied
+        where the file is actually read -- so a `defaults:` entry past a
+        `maxima:` ceiling is refused at load rather than at first use."""
+        InstancePolicyInput(defaults=self.defaults, maxima=self.maxima)
+        return self
+
+    def instance_policy(self) -> InstancePolicy:
+        """This file's V1 instance policy: the resolved starting point every
+        later `apply_template_override` layers onto."""
+        return InstancePolicy.from_input(
+            InstancePolicyInput(defaults=self.defaults, maxima=self.maxima)
+        )
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> PolicyInput:
@@ -589,3 +613,10 @@ class InstancePolicy:
             updates[field_name] = tuple(value)
 
         return dataclasses.replace(self, **updates)
+
+
+# `PolicyInput.defaults`/`.maxima` are forward references to the V1 models
+# above, which are defined after it: one loader for `policy.yaml` (Ruling 37)
+# means the legacy schema has to carry the V1 sections, and the V1 models sit
+# with the override engine that reads them.
+PolicyInput.model_rebuild()
