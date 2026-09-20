@@ -76,28 +76,15 @@ async def _re_enter_one(app, row) -> bool:
     node_id = row["current_node_id"]
     cap = policy_mod.resolve_cap(st.policy, "ci_wait") if st.policy is not None else _DEFAULT_CAP
 
-    def _bump_and_reenter(c):
-        # One transaction: the counter bump and the status flip back to
-        # 'active' must land together, or a tick between them could re-select
-        # this same row (Kraft-ppk9).
-        result = store.bump_counter(c, wid, _key(node_id), cap)
-        store.mark_reentered(c, wid)
-        return result
-
-    count, started_at, cap = await st.db.write(_bump_and_reenter)
-    if policy_mod.check(count=count, started_at=started_at, cap=cap, now=_now()) == "breached":
-        await st.db.write(
-            lambda c: store.mark_needs_human(
-                c, wid, node_id, f"CI wait exceeded its cap after {count - 1} re-entry(ies)"
-            )
-        )
-        return False
-    # Bracketed for the claim-then-return class: the claim above has made
-    # this item read `active`, and this poller's own `tick` SELECT filters on
-    # the status it just left behind -- so an exit from here that neither
-    # spawns a walk nor moves the status again leaves the item claimed and
-    # unowned, and *no later tick will ever select it again*. One stop, at
-    # the bracket, rather than one per early return.
+    # Bracketed from *before* the claim -- which happens inside the transaction
+    # body below -- to the hand-off. A claim makes this item read `active`, and
+    # this poller's own `tick` SELECT filters `status = 'waiting'`, so an exit
+    # from here that neither spawns a walk nor moves the status again leaves the
+    # item claimed and unowned, and *no later tick will ever select it again*.
+    # The nested `def` is inside the bracket deliberately: its `return result`
+    # is a value handed back to `db.write`, so `dev/check_claim_handoff.py`
+    # would otherwise report it as an unprotected exit a human must adjudicate
+    # every time it runs.
     async with stops.claimed_or_stopped(
         st.db,
         wid,
@@ -105,6 +92,23 @@ async def _re_enter_one(app, row) -> bool:
         reason="the CI wait poller re-entered this item but could not start a walk",
         handed_off=lambda: deps.task_is_live(app, wid),
     ):
+
+        def _bump_and_reenter(c):
+            # One transaction: the counter bump and the status flip back to
+            # 'active' must land together, or a tick between them could re-select
+            # this same row (Kraft-ppk9).
+            result = store.bump_counter(c, wid, _key(node_id), cap)
+            store.mark_reentered(c, wid)
+            return result
+
+        count, started_at, cap = await st.db.write(_bump_and_reenter)
+        if policy_mod.check(count=count, started_at=started_at, cap=cap, now=_now()) == "breached":
+            await st.db.write(
+                lambda c: store.mark_needs_human(
+                    c, wid, node_id, f"CI wait exceeded its cap after {count - 1} re-entry(ies)"
+                )
+            )
+            return False
         # `store.node_index`, not `chain["nodes"]`: a V1 row's `chain_definition` is
         # `"{}"`, and this poller re-enters a node it already claimed -- a raise here
         # would leave the item waiting forever with nothing behind it. `None` means

@@ -321,72 +321,90 @@ async def review_gates(
                 )
             )
             return status
-        if verdict == "approve":
-            # An approval is not just a status change: `chain_finalized` splices
-            # the reviewed nodes in, and every artifact-carrying gate indexes its
-            # document, which nothing else durably keeps. `kraft.api.routes.gates.apply_approval` is
-            # that work, reached through `on_approve` because it needs the
-            # indexer this layer has no handle on. Without the callback the
-            # effects cannot run, so the gate is left for a person rather than
-            # cleared with half of them (Kraft-zr3s).
-            if on_approve is None:
-                return status
-            approved, reason = await on_approve(row, gate)
-            if approved is None:
-                await db.write(
-                    lambda c, reason=reason, node=row["current_node_id"]: store.mark_needs_human(
-                        c, work_item_id, node, reason
-                    )
-                )
-                return "needs_human"
-            await db.write(
-                lambda c, gate=gate: store.approve_gate(c, work_item_id, gate, by="agent")
-            )
-            start, steer = gate_node_index(approved, gate) + 1, None
-        else:
-            # `fixed` is a rejection that repaired something on its way out, so
-            # the repair is measured rather than trusted -- the Kraft-rv6i rule,
-            # applied at a gate. It re-enters at the **execution node before the
-            # gate**, not at the gate itself: a V1 gate has no execution shape,
-            # so "re-enter at the gate" would dispatch nothing and re-request
-            # the same gate (Ruling 54). `None` when the gate is first in the
-            # chain -- there is nothing to re-measure, and `reject_target`'s own
-            # fallback lands back on the gate. `reject` takes the chain's own
-            # `reject_to`. Both count against the same cap.
-            repaired = preceding_exec_node(nodes, gate_index)
-            target = await apply_rejection(
-                db,
-                policy,
-                work_item_id=work_item_id,
-                nodes=nodes,
-                gate=gate,
-                note=note,
-                node=nodes[repaired].id if verdict == "fixed" and repaired is not None else None,
-                by="agent",
-                verdict=verdict,
-            )
-            if target is None:
-                return "needs_human"
-            start, steer = target, note
-
-        status = await walk.run_once(
+        # Bracketed from *before* the claim to the hand-off, for the same reason
+        # `apply_approval`'s route door is: `store.approve_gate` below is an
+        # unconditional `UPDATE work_items SET status = 'active'`, and
+        # `gate_node_index(approved, gate) + 1` is a defaultless `next(...)` that
+        # raises `StopIteration` for a gate this chain does not have -- after the
+        # claim. `dev/check_claim_handoff.py` cannot see that exit (it is a
+        # propagating exception, not a `return`/`raise` statement), which is
+        # exactly why the fix is a bracket over the region rather than a stop per
+        # exit the checker happens to list.
+        async with stops.claimed_or_stopped(
             db,
-            run_dirs,
-            work_item_id=work_item_id,
-            registry=registry,
-            policy=policy,
-            launch=launch,
-            bd_cwd=bd_cwd,
-            start_index=start,
-            steer=steer,
-            # An agent's verdict is not a human's steer (Kraft-s7c04.6). Without
-            # this the re-run's prompt led with "A human has steered this run"
-            # over a note an agent wrote -- and on a `fixed` verdict, over
-            # commits the agent had just made -- which is how a review brief
-            # came to tell the human they had fixed it themselves. `steer` is
-            # None on the approve path, where `source` is never read.
-            steer_source="gate_review",
-        )
+            work_item_id,
+            row["current_node_id"],
+            reason="gate review cleared or rejected the gate but could not start a walk",
+        ):
+            if verdict == "approve":
+                # An approval is not just a status change: `chain_finalized` splices
+                # the reviewed nodes in, and every artifact-carrying gate indexes its
+                # document, which nothing else durably keeps.
+                # `kraft.api.routes.gates.apply_approval` is that work, reached
+                # through `on_approve` because it needs the
+                # indexer this layer has no handle on. Without the callback the
+                # effects cannot run, so the gate is left for a person rather than
+                # cleared with half of them (Kraft-zr3s).
+                if on_approve is None:
+                    return status
+                approved, reason = await on_approve(row, gate)
+                if approved is None:
+                    await db.write(
+                        lambda c, reason=reason, node=row["current_node_id"]: (
+                            store.mark_needs_human(c, work_item_id, node, reason)
+                        )
+                    )
+                    return "needs_human"
+                await db.write(
+                    lambda c, gate=gate: store.approve_gate(c, work_item_id, gate, by="agent")
+                )
+                start, steer = gate_node_index(approved, gate) + 1, None
+            else:
+                # `fixed` is a rejection that repaired something on its way out, so
+                # the repair is measured rather than trusted -- the Kraft-rv6i rule,
+                # applied at a gate. It re-enters at the **execution node before the
+                # gate**, not at the gate itself: a V1 gate has no execution shape,
+                # so "re-enter at the gate" would dispatch nothing and re-request
+                # the same gate (Ruling 54). `None` when the gate is first in the
+                # chain -- there is nothing to re-measure, and `reject_target`'s own
+                # fallback lands back on the gate. `reject` takes the chain's own
+                # `reject_to`. Both count against the same cap.
+                repaired = preceding_exec_node(nodes, gate_index)
+                target = await apply_rejection(
+                    db,
+                    policy,
+                    work_item_id=work_item_id,
+                    nodes=nodes,
+                    gate=gate,
+                    note=note,
+                    node=nodes[repaired].id
+                    if verdict == "fixed" and repaired is not None
+                    else None,
+                    by="agent",
+                    verdict=verdict,
+                )
+                if target is None:
+                    return "needs_human"
+                start, steer = target, note
+
+            status = await walk.run_once(
+                db,
+                run_dirs,
+                work_item_id=work_item_id,
+                registry=registry,
+                policy=policy,
+                launch=launch,
+                bd_cwd=bd_cwd,
+                start_index=start,
+                steer=steer,
+                # An agent's verdict is not a human's steer (Kraft-s7c04.6). Without
+                # this the re-run's prompt led with "A human has steered this run"
+                # over a note an agent wrote -- and on a `fixed` verdict, over
+                # commits the agent had just made -- which is how a review brief
+                # came to tell the human they had fixed it themselves. `steer` is
+                # None on the approve path, where `source` is never read.
+                steer_source="gate_review",
+            )
     return status
 
 
@@ -906,33 +924,35 @@ async def resume_after_escalation(
     # A failed claim means a human abandoned, paused or otherwise moved the
     # item during the minutes the escalation turn ran: the deferred request
     # is dropped rather than resurrecting a stop it is no longer on.
-    claimed = await db.write(
-        lambda c: store.claim_for_run(c, work_item_id, from_statuses=["needs_human"])
-    )
-    if not claimed:
-        status = status_of(db, work_item_id)
-        await db.write(
-            lambda c: events.append(
-                c,
-                work_item_id,
-                "work_item_self_retry_dropped",
-                {"node_id": node_id, "status": status},
-            )
-        )
-        return status
-    # Bracketed for the claim-then-return class: `claim_for_run` above has made
-    # this item read `active`. No `handed_off` callback -- this site awaits its
-    # walk inline rather than registering a task, so by the time the bracket's
-    # `finally` runs a successful walk has already set its own terminal status
-    # and the bracket's `active` test is false. `walk.chain_of` raises
-    # `LookupError` on a legacy row and `store.node_index` answers `None` for a
-    # node this chain does not have; both used to leave the item claimed.
+    # Bracketed from *before* the claim to the hand-off. No `handed_off`
+    # callback -- this site awaits its walk inline rather than registering a
+    # task, so by the time the bracket's `finally` runs a successful walk has
+    # already set its own terminal status and the bracket's `active` test is
+    # false. `walk.chain_of` raises `LookupError` on a legacy row and
+    # `store.node_index` answers `None` for a node this chain does not have;
+    # both used to leave the item claimed. The dropped-self-retry return is
+    # inside it deliberately: the claim failed there, so the status is not
+    # `active` and the bracket does nothing.
     async with stops.claimed_or_stopped(
         db,
         work_item_id,
         node_id,
         reason="the escalation retry claimed this item but could not start a walk",
     ):
+        claimed = await db.write(
+            lambda c: store.claim_for_run(c, work_item_id, from_statuses=["needs_human"])
+        )
+        if not claimed:
+            status = status_of(db, work_item_id)
+            await db.write(
+                lambda c: events.append(
+                    c,
+                    work_item_id,
+                    "work_item_self_retry_dropped",
+                    {"node_id": node_id, "status": status},
+                )
+            )
+            return status
         worktree = run_dirs.worktrees / work_item_id
         try:
             new_base = await _builtins.refresh_worktree_base(

@@ -584,21 +584,16 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         # and catching spawn's own refusal only after those writes would
         # strand the item claimed 'active' with no walk behind it.
         raise HTTPException(409, "a walk is already running for this work item")
-    claimed = await st.db.write(
-        lambda c: store.claim_for_run(c, wid, from_statuses=from_statuses, limit=limit)
-    )
-    if not claimed:
-        if st.db.read(store.active_count) >= limit:
-            raise HTTPException(
-                409, f"all {limit} slots are busy; pause something or raise max_concurrent"
-            )
-        raise HTTPException(409, "work item is not paused")
-    # Everything from here to the hand-off is bracketed (Ruling: the
-    # claim-then-return class). The claim above has made this item read
-    # `active`, which means "a walk is behind this"; any exit from here that
-    # neither spawns one nor leaves a status a selector re-picks would leave it
-    # claimed and unowned. `stops.claimed_or_stopped` performs that stop once,
-    # for every exit including the ones no static sweep can enumerate.
+    # Bracketed from *before* the claim to the hand-off (the claim-then-return
+    # class). A claim makes this item read `active`, which means "a walk is
+    # behind this"; any exit from here that neither spawns one nor leaves a
+    # status a selector re-picks would leave it claimed and unowned.
+    # `stops.claimed_or_stopped` performs that stop once, for every exit --
+    # including the ones no static sweep can enumerate, and including the
+    # failed-claim 409s below, which are harmless inside it (the status is not
+    # `active`, so the bracket does nothing) and which
+    # `dev/check_claim_handoff.py` would otherwise have had to adjudicate by
+    # hand.
     async with stops.claimed_or_stopped(
         st.db,
         wid,
@@ -606,6 +601,15 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         reason="resume claimed this item but could not start a walk",
         handed_off=lambda: deps.task_is_live(request.app, wid),
     ):
+        claimed = await st.db.write(
+            lambda c: store.claim_for_run(c, wid, from_statuses=from_statuses, limit=limit)
+        )
+        if not claimed:
+            if st.db.read(store.active_count) >= limit:
+                raise HTTPException(
+                    409, f"all {limit} slots are busy; pause something or raise max_concurrent"
+                )
+            raise HTTPException(409, "work item is not paused")
         # The claim moves before this awaited rebase deliberately (Kraft-11e0):
         # the up-to-60s network call now happens on an item already marked
         # `active`, and no second caller can pass the claim while it runs.
@@ -874,21 +878,16 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         # writes would strand the item claimed 'active' with the cap already
         # cleared and no walk behind it.
         raise HTTPException(409, "a walk is already running for this work item")
-    claimed = await st.db.write(
-        lambda c: store.claim_for_run(c, wid, from_statuses=["needs_human"], limit=limit)
-    )
-    if not claimed:
-        if st.db.read(store.active_count) >= limit:
-            raise HTTPException(
-                409, f"all {limit} slots are busy; pause something or raise max_concurrent"
-            )
-        raise HTTPException(409, "work item is not stopped")
-    # Everything from here to the hand-off is bracketed (Ruling: the
-    # claim-then-return class). The claim above has made this item read
-    # `active`, which means "a walk is behind this"; any exit from here that
-    # neither spawns one nor leaves a status a selector re-picks would leave it
-    # claimed and unowned. `stops.claimed_or_stopped` performs that stop once,
-    # for every exit including the ones no static sweep can enumerate.
+    # Bracketed from *before* the claim to the hand-off (the claim-then-return
+    # class). A claim makes this item read `active`, which means "a walk is
+    # behind this"; any exit from here that neither spawns one nor leaves a
+    # status a selector re-picks would leave it claimed and unowned.
+    # `stops.claimed_or_stopped` performs that stop once, for every exit --
+    # including the ones no static sweep can enumerate, and including the
+    # failed-claim 409s below, which are harmless inside it (the status is not
+    # `active`, so the bracket does nothing) and which
+    # `dev/check_claim_handoff.py` would otherwise have had to adjudicate by
+    # hand.
     async with stops.claimed_or_stopped(
         st.db,
         wid,
@@ -896,6 +895,15 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         reason="retry claimed this item but could not start a walk",
         handed_off=lambda: deps.task_is_live(request.app, wid),
     ):
+        claimed = await st.db.write(
+            lambda c: store.claim_for_run(c, wid, from_statuses=["needs_human"], limit=limit)
+        )
+        if not claimed:
+            if st.db.read(store.active_count) >= limit:
+                raise HTTPException(
+                    409, f"all {limit} slots are busy; pause something or raise max_concurrent"
+                )
+            raise HTTPException(409, "work item is not stopped")
         worktree = st.run_dirs.worktrees / wid
         try:
             new_base = await builtins_mod.refresh_worktree_base(
@@ -1080,19 +1088,16 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
 
         sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
 
-        claimed = await st.db.write(
-            lambda c: store.claim_for_run(
-                c, wid, from_statuses=["active", "waiting", "paused", "needs_human"]
-            )
-        )
-        if not claimed:
-            raise HTTPException(409, "work item status changed; try again")
-        # Everything from here to the hand-off is bracketed (Ruling: the
-        # claim-then-return class). The claim above has made this item read
-        # `active`, which means "a walk is behind this"; any exit from here that
-        # neither spawns one nor leaves a status a selector re-picks would leave it
-        # claimed and unowned. `stops.claimed_or_stopped` performs that stop once,
-        # for every exit including the ones no static sweep can enumerate.
+        # Bracketed from *before* the claim to the hand-off (the claim-then-return
+        # class). A claim makes this item read `active`, which means "a walk is
+        # behind this"; any exit from here that neither spawns one nor leaves a
+        # status a selector re-picks would leave it claimed and unowned.
+        # `stops.claimed_or_stopped` performs that stop once, for every exit --
+        # including the ones no static sweep can enumerate, and including the
+        # failed-claim 409s below, which are harmless inside it (the status is not
+        # `active`, so the bracket does nothing) and which
+        # `dev/check_claim_handoff.py` would otherwise have had to adjudicate by
+        # hand.
         async with stops.claimed_or_stopped(
             st.db,
             wid,
@@ -1100,6 +1105,13 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
             reason="skip could not start a walk for the node after the skipped one",
             handed_off=lambda: deps.task_is_live(request.app, wid),
         ):
+            claimed = await st.db.write(
+                lambda c: store.claim_for_run(
+                    c, wid, from_statuses=["active", "waiting", "paused", "needs_human"]
+                )
+            )
+            if not claimed:
+                raise HTTPException(409, "work item status changed; try again")
             note = (body.note or "").strip() or None
             session_ids = [s["id"] for s in sessions]
             # mark first, then signal: same race pause_work_item guards against —

@@ -86,24 +86,14 @@ async def _retry_one(app, row) -> bool:
         )
         return False
 
-    claimed = await st.db.write(
-        lambda c: store.claim_for_run(c, wid, from_statuses=["rate_limited"])
-    )
-    if not claimed:
-        # Something else (a human abandoning it, most plausibly) already moved
-        # this item off `rate_limited` between the `due` SELECT and here.
-        # `retry_after_cap` no longer flips status itself -- without this
-        # check the poller would blindly claw an abandoned item back to
-        # 'active' and spawn a walk into a worktree that may already be gone.
-        logger.info("rate-limit retry: %s is no longer rate_limited, skipping", wid)
-        return False
-
-    # Bracketed for the claim-then-return class: `claim_for_run` above has made
-    # this item read `active`, and this poller's own `tick` SELECT filters
-    # `status = 'rate_limited'` -- so an exit from here that neither spawns a walk
-    # nor moves the status again leaves the item claimed and unowned, and *no
-    # later tick will ever select it again*. One stop, at the bracket, rather
-    # than one per early return.
+    # Bracketed from *before* the claim to the hand-off. A claim makes this item
+    # read `active`, and this poller's own `tick` SELECT filters
+    # `status = 'rate_limited'`, so an exit from here that neither spawns a walk nor
+    # moves the status again leaves the item claimed and unowned, and *no later tick
+    # will ever select it again*. The failed-claim `return False` is inside it
+    # deliberately: harmless (the status is not `active`, so the bracket does
+    # nothing) and one less row for `dev/check_claim_handoff.py` to make a human
+    # adjudicate.
     async with stops.claimed_or_stopped(
         st.db,
         wid,
@@ -111,6 +101,18 @@ async def _retry_one(app, row) -> bool:
         reason="the rate-limit poller claimed this item but could not start a walk",
         handed_off=lambda: deps.task_is_live(app, wid),
     ):
+        claimed = await st.db.write(
+            lambda c: store.claim_for_run(c, wid, from_statuses=["rate_limited"])
+        )
+        if not claimed:
+            # Something else (a human abandoning it, most plausibly) already moved
+            # this item off `rate_limited` between the `due` SELECT and here.
+            # `retry_after_cap` no longer flips status itself -- without this
+            # check the poller would blindly claw an abandoned item back to
+            # 'active' and spawn a walk into a worktree that may already be gone.
+            logger.info("rate-limit retry: %s is no longer rate_limited, skipping", wid)
+            return False
+
         await st.db.write(lambda c: store.retry_after_cap(c, wid, node_id, None, RESUME_PROMPT))
         # Same as `ci_wait`'s: over `store.node_index` so a V1 row's `"{}"`
         # `chain_definition` cannot raise, and a node that is not in this item's

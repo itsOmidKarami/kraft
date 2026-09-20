@@ -128,3 +128,36 @@ def test_a_walk_that_reached_a_terminal_status_needs_no_callback(tmp_path):
         return _status(database)
 
     assert _drive(tmp_path, body) == "completed"
+
+
+def test_a_gate_approval_that_cannot_start_a_walk_stops_the_item(tmp_path):
+    """The live instance `dev/check_claim_handoff.py` could not see until its
+    `CLAIMS` set stopped being hand-written.
+
+    `store.approve_gate` is an unconditional `UPDATE work_items SET status =
+    'active'` -- a claim like any other, and `api/deps.py`'s own `task_is_live`
+    docstring already named the hazard: "calling `store.approve_gate`/
+    `apply_rejection` and only then discovering `spawn` refuses would leave the
+    gate cleared and the item `active` with no walk behind it". Both approval
+    doors then computed their start index with a **defaultless** `next(...)`
+    (`gate_node_index`, which its own docstring says "Raises `StopIteration` for
+    a gate this chain does not have"), after the claim.
+
+    Asserted here against the bracket rather than over HTTP, because the failure
+    is the *stored status*, not the response: the gate is cleared either way.
+    """
+
+    async def body(database):
+        await database.write(lambda c: store.approve_gate(c, "w1", "spec_approval"))
+        assert _status(database) == "active", "approve_gate is a claim"
+        # `next(...)` inside a coroutine raises `StopIteration`, which Python
+        # re-wraps as `RuntimeError` on the way out -- so the assertion is on the
+        # *stored status*, which is the thing that was wrong.
+        with pytest.raises((StopIteration, RuntimeError)):
+            async with stops.claimed_or_stopped(
+                database, "w1", "implementation", reason="could not start a walk"
+            ):
+                raise StopIteration("gate_node_index on a gate this chain does not have")
+        return _status(database)
+
+    assert _drive(tmp_path, body) == "needs_human"

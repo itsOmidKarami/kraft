@@ -2317,3 +2317,58 @@ def test_resume_after_escalation_stops_an_item_whose_node_left_the_chain(tmp_pat
     status, stored = asyncio.run(scenario())
     assert stored == "needs_human", "left claimed 'active' with no walk behind it"
     assert status == "needs_human"
+
+
+def test_gate_review_that_cannot_locate_its_gate_stops_rather_than_leaving_it_claimed(
+    tmp_path, monkeypatch
+):
+    """`review_gates`' approve branch claims the item with `store.approve_gate`
+    and then locates its start index with `gate_node_index(approved, gate) + 1`
+    -- a defaultless `next(...)` whose own docstring says it "Raises
+    `StopIteration` for a gate this chain does not have", *after* the claim.
+
+    `dev/check_claim_handoff.py` cannot see that exit: it is a propagating
+    exception, not a `return`/`raise` statement. So this is the test that has to,
+    and it is the reason the fix is a bracket over the region rather than a stop
+    at each exit the checker happens to list.
+    """
+    repo = make_repo(tmp_path)
+    chain = _reviewed_chain(repo)
+    monkeypatch.setattr(
+        gates_module.gate_review,
+        "review",
+        lambda *a, **kw: _approve_verdict(),
+    )
+
+    async def _on_approve(row, gate):
+        # A node list the gate is absent from -- what a template switch or a
+        # spliced chain leaves behind.
+        return [n for n in chain.chain.nodes if n.id != gate], None
+
+    async def scenario():
+        database = await db.Database.open(tmp_path / "k.db")
+        try:
+            await v1_item(database, chain, repo=repo, auto_gate=True)
+            await _seed_pending_gate(database)
+            with pytest.raises((StopIteration, RuntimeError)):
+                await gates_module.review_gates(
+                    "awaiting_gate",
+                    database,
+                    tmp_path,
+                    work_item_id="w1",
+                    registry=None,
+                    on_approve=_on_approve,
+                )
+            return database.read(
+                lambda c: c.execute("SELECT status FROM work_items WHERE id='w1'").fetchone()
+            )["status"]
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario()) == "needs_human", (
+        "the gate was cleared and the item left claimed 'active' with no walk behind it"
+    )
+
+
+async def _approve_verdict():
+    return "approve", None

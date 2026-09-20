@@ -10,7 +10,7 @@ from kraft.adapters import agent as agent_mod
 from kraft.api import api_router, deps
 from kraft.api.routes import artifacts, board
 from kraft.api.routes.lifecycle import _stop_live_sessions
-from kraft.executor import gates
+from kraft.executor import gates, stops
 from kraft.templates import (
     CHAIN_REVIEW_GATE,
     carry_forward_node_fields,
@@ -293,31 +293,48 @@ async def approve_gate(wid: str, gate: str, request: Request):
             422, f"{reason} -- gate {gate!r} cannot be approved; run `kraft item retry` instead"
         )
 
-    await st.db.write(lambda c: store.approve_gate(c, wid, gate, by=_decided_by(request)))
-    start = board._gate_node_index(nodes, gate) + 1
-    try:
-        deps.spawn(
-            request.app,
-            wid,
-            deps.guard(
-                st.db,
+    # Bracketed from *before* the claim to the hand-off. `store.approve_gate` is
+    # an unconditional `UPDATE work_items SET status = 'active'` -- a claim like
+    # any other, which `api/deps.py`'s `task_is_live` docstring already names:
+    # "calling `store.approve_gate`/`apply_rejection` and only then discovering
+    # `spawn` refuses would leave the gate cleared and the item `active` with no
+    # walk behind it". The `_gate_node_index` below is a defaultless `next(...)`
+    # that raises `StopIteration` for a gate this chain does not have, after the
+    # claim -- verbatim the shape `stops.claimed_or_stopped` exists for, and the
+    # one `dev/check_claim_handoff.py` could not see until `CLAIMS` stopped
+    # being hand-written.
+    async with stops.claimed_or_stopped(
+        st.db,
+        wid,
+        row["current_node_id"],
+        reason="gate approval cleared the gate but could not start a walk",
+        handed_off=lambda: deps.task_is_live(request.app, wid),
+    ):
+        await st.db.write(lambda c: store.approve_gate(c, wid, gate, by=_decided_by(request)))
+        start = board._gate_node_index(nodes, gate) + 1
+        try:
+            deps.spawn(
+                request.app,
                 wid,
-                executor.run(
+                deps.guard(
                     st.db,
-                    st.run_dirs,
-                    work_item_id=wid,
-                    registry=st.registry,
-                    bd_cwd=deps.bd_cwd(),
-                    start_index=start,
-                    policy=st.policy,
-                    launch=deps.launch(st, row["repo"]),
-                    on_approve=deps._on_approve(st),
+                    wid,
+                    executor.run(
+                        st.db,
+                        st.run_dirs,
+                        work_item_id=wid,
+                        registry=st.registry,
+                        bd_cwd=deps.bd_cwd(),
+                        start_index=start,
+                        policy=st.policy,
+                        launch=deps.launch(st, row["repo"]),
+                        on_approve=deps._on_approve(st),
+                    ),
                 ),
-            ),
-        )
-    except deps.AlreadyRunning:
-        raise HTTPException(409, "a walk is already running for this work item") from None
-    return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+            )
+        except deps.AlreadyRunning:
+            raise HTTPException(409, "a walk is already running for this work item") from None
+        return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
 
 
 @api_router.post("/work-items/{wid}/gates/{gate:path}/reject")
