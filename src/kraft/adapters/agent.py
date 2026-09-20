@@ -7,6 +7,7 @@ from typing import NamedTuple
 from kraft import harness as _harness
 from kraft import skill as _skill
 from kraft.adapters import subprocess as _subprocess
+from kraft.templates.models import AgentTask
 from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
 
@@ -225,6 +226,46 @@ def resolve_invocation(
         allowed_tools=tuple(binding.get("allowed_tools", ())),
         permission_mode=binding.get("permission_mode"),
         sandbox=_sandbox.resolve(binding, repo),
+    )
+
+
+def resolve_agent_task(
+    task: AgentTask,
+    repo_entry: dict | None,
+    steering_dir: Path | None,
+    *,
+    skills_dir: Path | None = None,
+    escalate: bool = False,
+    item_override: dict | None = None,
+) -> Invocation:
+    """One V1 `AgentTask`'s launch.
+
+    The typed entry point to `resolve_invocation`'s precedence rules, so the
+    executor hands over a model and never a hook dictionary. The dict is built
+    here, inside the adapter, and only from fields the task actually sets: an
+    absent `model`/`effort`/`skill` must stay absent so the repo's own default
+    and the item's override still win where `resolve_invocation` says they do.
+
+    `command`, `deny_tools`, `allowed_tools`, `permission_mode` and
+    `escalate_model` are deliberately not task fields in V1 -- they belong to
+    the harness profile (`harness-profile-has-safe-instance-configuration`),
+    which Task 5 loads. Until then a task's harness supplies its own command
+    through `kraft.harness`, and the repo entry supplies deny_tools.
+    """
+    return resolve_invocation(
+        {
+            "kind": "agent",
+            "harness": task.harness,
+            "steering": list(task.steering),
+            **({"skill": task.skill} if task.skill is not None else {}),
+            **({"model": task.model} if task.model is not None else {}),
+            **({"effort": task.effort} if task.effort is not None else {}),
+        },
+        repo_entry,
+        steering_dir,
+        skills_dir=skills_dir,
+        escalate=escalate,
+        item_override=item_override,
     )
 
 

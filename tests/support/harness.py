@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import atexit
+import json
 import os
 import shutil
 import subprocess
@@ -310,3 +311,137 @@ def fake_templates_dir(
 
 def e2e_templates_dir(tmp_path: Path) -> Path:
     return fake_templates_dir(tmp_path, "claude --model claude-haiku-4-5-20251001")
+
+
+# --- Template Schema V1 -------------------------------------------------------
+#
+# A V1 work item's whole input is its `materialized_chain` column, so a test
+# that drives the executor builds one directly: `intake.py` does not write the
+# column yet (Task 5), and there is deliberately no legacy fallback to walk.
+
+
+def v1_chain(nodes: list[dict], *, repo: Path | str, chain_id: str = "t"):
+    """A `MaterializedChain` over `nodes` (authored V1 node mappings), bound to
+    a single-repository target on `repo`."""
+    from kraft.policy import InstancePolicy, InstancePolicyInput
+    from kraft.templates.environment import Repository, WorkItemTarget
+    from kraft.templates.models import Chain, ResolvedChain
+
+    chain = Chain.model_validate({"id": chain_id, "nodes": nodes})
+    return ResolvedChain.from_chain(chain).materialize(
+        target=WorkItemTarget.for_repository(Repository(id="target", path=str(repo))),
+        effective_policy=InstancePolicy.from_input(InstancePolicyInput.model_validate({})),
+    )
+
+
+def v1_item(database, chain, *, repo: Path | str, wid: str = "w1", title: str = "t", **kwargs):
+    """Insert a work item whose only chain is `chain`. Returns the awaitable
+    `database.write` gives back, so callers `await` it like `mk_item`."""
+    from kraft import store
+
+    return database.write(
+        lambda c: store.create_work_item(
+            c,
+            id=wid,
+            bead_id=None,
+            title=title,
+            repo=str(repo),
+            chain_template=chain.chain.id,
+            # Not `""`: the column is NOT NULL and Task 5 removes it. Nothing
+            # in a V1 walk reads it.
+            chain_definition="{}",
+            materialized_chain=chain.to_json(),
+            **kwargs,
+        )
+    )
+
+
+#: A harness definition for the fake agent: the same shape `src/kraft/harnesses/
+#: claude.yaml` declares (so `fixtures/fake_agent.py` sees the flags it already
+#: parses), with `command` pointed at the fake and `usage` read from the result
+#: file so no envelope has to be faked.
+_FAKE_HARNESS = """
+id: fake
+kind: cli
+command: {command}
+capabilities:
+  prompt:          {{ cli: ["-p", "{{value}}"] }}
+  context:         {{ channel: system_prompt, cli: ["--append-system-prompt", "{{value}}"] }}
+  model:           {{ cli: ["--model", "{{value}}"] }}
+  effort:          {{ cli: ["--effort", "{{value}}"] }}
+  resume:          {{ cli: ["--resume", "{{value}}"] }}
+  usage:           {{ source: result_file }}
+"""
+
+
+def fake_harness_home(tmp_path: Path, command: list[str], *, harness_id: str = "fake") -> Path:
+    """A `$KRAFT_HOME` whose `templates/harnesses/` overlays one harness that
+    launches `command`. Set `KRAFT_HOME` to the returned path and an agent task
+    selecting `harness_id` runs the fake instead of a real CLI."""
+    home = tmp_path / "kraft-home"
+    directory = home / "templates" / "harnesses"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{harness_id}.yaml").write_text(
+        _FAKE_HARNESS.format(command=json.dumps([str(c) for c in command])).replace(
+            "id: fake", f"id: {harness_id}"
+        )
+    )
+    return home
+
+
+async def v1_walk(
+    tmp_path: Path,
+    chain,
+    *,
+    repo: Path | str,
+    repo_entry: dict | None = None,
+    policy=None,
+    wid: str = "w1",
+    title: str = "t",
+    steer: str | None = None,
+    run_dirs=None,
+    **item_kwargs,
+):
+    """File `chain` as one work item and walk it once.
+
+    Returns `(status, events, sessions)` -- the two readbacks nearly every
+    assertion about a walk needs, as plain dicts, with the database already
+    closed. A caller that needs more reads the run directory itself.
+    """
+    from kraft import db as _db
+    from kraft import events as _events
+    from kraft import executor
+    from kraft.executor.context import LaunchContext
+    from kraft.paths import RunDirs
+
+    rd = run_dirs or RunDirs(tmp_path / "run").ensure()
+    database = await _db.Database.open(rd.db)
+    try:
+        await v1_item(database, chain, repo=repo, wid=wid, title=title, **item_kwargs)
+        status = await executor.run_once(
+            database,
+            rd,
+            work_item_id=wid,
+            registry=None,
+            policy=policy,
+            steer=steer,
+            # `setup_command: ""` is the repo declaring it needs no preparation;
+            # a repo entry without one refuses to cut a worktree at all.
+            launch=LaunchContext(
+                repo_entry={"setup_command": ""} if repo_entry is None else repo_entry,
+                steering_dir=None,
+            ),
+        )
+        evts = [dict(e) for e in database.read(lambda c: _events.read_after(c, 0, wid))]
+        sessions = [
+            dict(r)
+            for r in database.read(
+                lambda c: c.execute(
+                    "SELECT * FROM worker_sessions WHERE work_item_id = ? ORDER BY created_at",
+                    (wid,),
+                ).fetchall()
+            )
+        ]
+        return status, evts, sessions
+    finally:
+        await database.close()

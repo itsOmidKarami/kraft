@@ -161,12 +161,12 @@ diff at that gate.
 ## REQ env-setup-pins-the-diff-base
 WHEN the `env_setup` node creates a work item's worktree, the system SHALL record
 the source repo's current HEAD as that work item's `base_ref`.
-enforced-by: tests/test_builtins.py::test_env_setup_stamps_base_ref
+enforced-by: tests/test_builtins.py::test_worktree_preparation_stamps_base_ref
 
 ## REQ env-setup-re-entry-does-not-repin-the-base
 IF the `env_setup` node re-enters against an existing worktree, THEN the system
 SHALL NOT overwrite the work item's `base_ref`.
-enforced-by: tests/test_builtins.py::test_env_setup_does_not_restamp_on_reentry, tests/test_builtins.py::test_ensure_worktree_is_idempotent_and_pins_base_ref_once
+enforced-by: tests/test_builtins.py::test_worktree_preparation_does_not_restamp_on_reentry, tests/test_builtins.py::test_ensure_worktree_is_idempotent_and_pins_base_ref_once
 
 ## REQ diff-includes-uncommitted-work
 The system SHALL include uncommitted worktree changes in the diff it serves for a

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json
+from pathlib import Path
 
 from kraft import builtins as _builtins
 from kraft import config as _config
@@ -9,22 +9,22 @@ from kraft import store
 from kraft.executor import entry, gates, walk
 from kraft.executor.context import _ADVANCING, RATE_LIMITED, WAITING, LaunchContext, OnApprove
 from kraft.templates import Registry
+from kraft.templates.models import ExecNode, GateNode, ResolvedNode
 
 
 async def reconcile_current_node(
     db,
     run_dirs,
     work_item_id,
-    node,
+    node: ResolvedNode,
     row,
-    registry,
     worktree,
     adopted,
     *,
     policy: _policy.Policy | None = None,
     launch: LaunchContext | None = None,
 ) -> str:
-    node_id = node["id"]
+    node_id = node.id
     sessions = db.read(
         lambda c: c.execute(
             "SELECT id, status FROM worker_sessions WHERE work_item_id = ? AND node_id = ?",
@@ -34,7 +34,12 @@ async def reconcile_current_node(
 
     # A multi-step node creates step 2's session row only after step 1 finishes,
     # so a crash mid-step-1 leaves fewer rows than tasks; walk_node re-measures it.
-    if node.get("fix_loop") or node.get("on_failure") or len(node.get("steps") or []) > 1:
+    exec_node = node.node if isinstance(node.node, ExecNode) else None
+    if (
+        (exec_node is not None and exec_node.fix_loop is not None)
+        or node.on_failure
+        or len(node.steps) > 1
+    ):
         # A node that can remediate itself is its own reconciliation: re-entering
         # `walk_node` re-measures it, and a failure then reaches the repair the
         # template declared. The session-count check below would instead read
@@ -60,7 +65,6 @@ async def reconcile_current_node(
                 work_item_id,
                 node,
                 row,
-                registry,
                 worktree,
                 policy=policy,
                 launch=launch,
@@ -80,7 +84,6 @@ async def reconcile_current_node(
                 work_item_id,
                 node,
                 row,
-                registry,
                 worktree,
                 policy=policy,
                 launch=launch,
@@ -99,16 +102,15 @@ async def reconcile_current_node(
     # accumulated across every escalation and every earlier failed attempt.
     # See `store.latest_session_per_task`'s own docstring for the observed
     # history this fixes.
-    final = db.read(
-        lambda c: store.latest_session_per_task(c, work_item_id, node_id, node["tasks"])
-    )
+    measured = [t.path for step in node.steps for t in step.tasks]
+    final = db.read(lambda c: store.latest_session_per_task(c, work_item_id, node_id, measured))
     # ponytail: single-task-node resume only. A crash mid-fan-out of a multi-task
     # node (fewer sessions than tasks, none failed) -> needs_human, no partial
     # re-dispatch. Upgrade with per-task session reconciliation if multi-task
     # nodes ship.
     # Nodes declaring `on_failure` never reach here; they took the re-measuring
     # branch above.
-    if len(final) == len(node["tasks"]) and all(r["status"] in _ADVANCING for r in final):
+    if len(final) == len(measured) and all(r["status"] in _ADVANCING for r in final):
         await db.write(lambda c: store.complete_node(c, work_item_id, node_id))
         return "ok"
     await db.write(
@@ -135,8 +137,7 @@ async def resume_once(
     )
     if row is None:
         raise LookupError(f"unknown work_item {work_item_id!r}")
-    chain = json.loads(row["chain_definition"])
-    nodes = chain["nodes"]
+    nodes = walk.chain_of(row).chain.nodes
     cur = row["current_node_id"]
 
     if cur is None:
@@ -144,8 +145,8 @@ async def resume_once(
         # Recorded before ensure_worktree below for the same reason `run` records
         # it first: a worktree that can never be created must not leave the item
         # looking like it crashed before load_chain ever happened.
-        await db.write(lambda c: store.load_chain(c, work_item_id, nodes[0]["id"]))
-        cur = nodes[0]["id"]
+        await db.write(lambda c: store.load_chain(c, work_item_id, nodes[0].id))
+        cur = nodes[0].id
 
     # Before the first dispatch, not inside the `env_setup` node: `default.yaml`
     # runs `spec` and `plan` first, and both need a checkout — and, for `plan`'s
@@ -164,18 +165,27 @@ async def resume_once(
             attachments=entry.attachments_of(row),
             repo_entry=launch.repo_entry if launch else None,
         )
+        # The same implicit runtime preparation `walk.run_once` does, for the
+        # same reason: the resumed node can commit, and a rebase may have landed
+        # a new lockfile while the item was stopped.
+        await _builtins.prepare_runtime(
+            worktree, Path(row["repo"]), launch.repo_entry if launch else None
+        )
     except (RuntimeError, _config.ConfigError) as exc:
         reason = str(exc)
         await db.write(lambda c: store.enter_node(c, work_item_id, cur))
         await db.write(lambda c: store.mark_needs_human(c, work_item_id, cur, reason))
         return "needs_human"
 
-    start = next(i for i, n in enumerate(nodes) if n["id"] == cur)
+    start = next(i for i, n in enumerate(nodes) if n.id == cur)
 
-    node0 = nodes[start]
-    gate0 = node0.get("gate_after")
-    if gate0 and gates.gate_cleared(db, work_item_id, gate0):
-        # the gate was approved before the crash; do not reconcile or re-request it.
+    # A gate node ran nothing, so there is nothing to reconcile: either it is
+    # still unanswered (re-request it and stop) or it was cleared before the
+    # crash and the walk continues at the node after it. `maybe_gate` answers
+    # both questions.
+    if isinstance(nodes[start].node, GateNode):
+        if await gates.maybe_gate(db, work_item_id, nodes[start]):
+            return "awaiting_gate"
         start += 1
         if start >= len(nodes):
             await db.write(lambda c: store.mark_completed(c, work_item_id))
@@ -190,7 +200,6 @@ async def resume_once(
             work_item_id,
             nodes[start],
             row,
-            registry,
             worktree,
             adopted,
             policy=policy,
@@ -200,17 +209,15 @@ async def resume_once(
     ):
         return "needs_human"
 
-    if await gates.maybe_gate(db, work_item_id, nodes[start]):
-        return "awaiting_gate"
-
     for node in nodes[start + 1 :]:
+        if await gates.maybe_gate(db, work_item_id, node):
+            return "awaiting_gate"
         tail_result = await walk.walk_node(
             db,
             run_dirs,
             work_item_id,
             node,
             row,
-            registry,
             worktree,
             policy=policy,
             launch=launch,
@@ -221,8 +228,6 @@ async def resume_once(
             return RATE_LIMITED
         if tail_result == WAITING:
             return WAITING
-        if await gates.maybe_gate(db, work_item_id, node):
-            return "awaiting_gate"
 
     await db.write(lambda c: store.mark_completed(c, work_item_id))
     await entry.close_beads(db, row, bd_cwd, run_dirs)

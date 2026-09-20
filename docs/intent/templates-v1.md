@@ -55,18 +55,22 @@ enforced-by: tests/templates/test_models.py::test_task_kind_selects_the_concrete
 An agent task MAY select one skill as its primary method. A task SHALL NOT
 select more than one skill; composable additional guidance SHALL be expressed
 through steering profiles.
+enforced-by: tests/executor/test_dispatch.py::test_an_agent_task_contract_precedes_its_skill_and_steering
+origin: src/kraft/templates/models.py §AgentTask -- the single-skill half is the type (`skill: StrictStr | None`, so a list is a validation error and no runtime check exists to test); the pinned test covers the other half, that composable additional guidance arrives through steering profiles rather than a second skill.
 
 ## REQ agent-task-contract-precedes-skill-and-steering
 
 The system SHALL provide an agent task's Kraft-owned output and lifecycle
 contract before its selected skill and steering profiles. A selected skill or
 steering profile SHALL NOT remove that contract.
+enforced-by: tests/executor/test_dispatch.py::test_an_agent_task_contract_precedes_its_skill_and_steering
 
 ## REQ selected-skill-must-be-available
 
 When an agent task selects a skill that its execution environment cannot load,
 the task SHALL stop for human action and SHALL NOT substitute a different
 method.
+enforced-by: tests/executor/test_dispatch.py::test_an_unloadable_selected_skill_stops_for_a_human
 
 ## REQ provider-profile-and-agent-task-are-distinct
 
@@ -79,7 +83,7 @@ enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider
 An agent-runtime provider SHALL own invocation, context delivery, supported
 runtime options, session resumption, skill loading, and normalized task
 results for its runtime.
-origin: docs/templates-v1-design.md "Harness profiles" -- deliberately unpinned until Task 4, which owns all six mechanics; delete this note in the same edit that adds the pin. Phase 1 implemented none of these six mechanics -- it only consumes the pre-existing `kraft.harness` declaration from a harness profile. tests/test_harnesses.py covers invocation and resume for today's V0 dispatcher, which is not this requirement's sentence; context delivery, skill loading and normalized results have no V1 test at all. The pin lands with the executor phase that owns them.
+enforced-by: tests/executor/test_dispatch.py::test_each_task_kind_reaches_its_own_adapter, tests/executor/test_dispatch.py::test_an_agent_task_contract_precedes_its_skill_and_steering, tests/adapters/test_agent.py::test_a_typed_agent_task_resolves_through_provider_declared_options, tests/adapters/test_agent.py::test_the_provider_spells_session_resumption_for_an_agent_task
 
 ## REQ provider-declares-harness-capabilities
 
@@ -105,6 +109,7 @@ enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider
 
 When a selected harness profile is unavailable at runtime, the task SHALL stop
 for human action and SHALL NOT silently select a different harness.
+enforced-by: tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human
 
 ## REQ agent-roles-use-ordinary-agent-task-runtime-configuration
 
@@ -134,23 +139,27 @@ enforced-by: tests/templates/test_models.py::test_builtin_task_accepts_a_code_ow
 Verification of repository test scopes SHALL be an explicitly configured
 typed built-in task and SHALL NOT depend on a node name or another implicit
 template convention.
+enforced-by: tests/executor/test_dispatch.py::test_each_task_kind_reaches_its_own_adapter, tests/executor/test_dispatch.py::test_changed_test_scopes_run_all_scopes_when_nothing_matches
 
 ## REQ changed-test-scope-verification-selects-safely
 
 The changed-test-scope task SHALL run every scope selected by changed paths.
 When the changed paths are empty or do not match a configured scope, it SHALL
 run every configured scope.
+enforced-by: tests/executor/test_dispatch.py::test_changed_test_scopes_run_all_scopes_when_nothing_matches
 
 ## REQ changed-test-scope-verification-is-sequential-by-default
 
 The changed-test-scope task SHALL run selected scopes sequentially by default.
 It MAY run scopes in bounded parallelism only when its configuration explicitly
 requests it.
+enforced-by: tests/executor/test_dispatch.py::test_changed_test_scopes_run_sequentially_unless_configured_parallel
 
 ## REQ changed-test-scope-verification-aggregates-results
 
 The changed-test-scope task SHALL await all selected scope results and report
 one aggregate task result.
+enforced-by: tests/executor/test_dispatch.py::test_changed_test_scopes_report_one_aggregate_result
 
 ## REQ exec-node-orders-concurrent-task-groups
 
@@ -359,6 +368,7 @@ of resuming its prior one.
 
 The executor SHALL run an execution node's task group or ordered steps and,
 when they complete successfully, advance to the following ordered node.
+enforced-by: tests/executor/test_walk.py::test_steps_are_ordered_while_tasks_inside_a_step_are_concurrent, tests/executor/test_walk.py::test_the_worktree_and_setup_command_are_prepared_without_an_env_node
 
 ## REQ gate-node-opens-and-halts-execution
 

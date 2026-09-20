@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from kraft.executor import stops
 from kraft.executor.context import LaunchContext, OnApprove
 from kraft.store import _now as _now
 from kraft.templates import Registry
+from kraft.templates.models import GateNode, ResolvedNode
 
 
 def pending_gate(db, work_item_id: str, evts: list | None = None) -> str | None:
@@ -38,8 +40,15 @@ def pending_gate(db, work_item_id: str, evts: list | None = None) -> str | None:
     return None
 
 
-def gate_node_index(chain: dict, gate: str) -> int:
-    return next(i for i, n in enumerate(chain["nodes"]) if n.get("gate_after") == gate)
+def gate_node_index(nodes: Sequence[ResolvedNode], gate: str) -> int:
+    """Where `gate` sits in the chain's ordered nodes.
+
+    A V1 gate *is* a node (`gate-is-an-ordered-node`), so its identity is that
+    node's id and there is nothing to search a task list for. Raises
+    `StopIteration` for a gate this chain does not have, exactly as the
+    `gate_after` scan it replaces did.
+    """
+    return next(i for i, n in enumerate(nodes) if isinstance(n.node, GateNode) and n.id == gate)
 
 
 def gate_artifact(registry, run_dirs, row, gate: str | None) -> str | None:
@@ -157,12 +166,25 @@ def gate_cleared(db, work_item_id: str, gate: str) -> bool:
     return False
 
 
-async def maybe_gate(db, work_item_id: str, node: dict) -> bool:
-    """If the node ends in a gate, request it and return True (caller stops the walk)."""
-    gate = node.get("gate_after")
-    if not gate:
+async def maybe_gate(db, work_item_id: str, node: ResolvedNode) -> bool:
+    """Whether the walk stops here because `node` is an unanswered gate
+    (`gate-node-opens-and-halts-execution`).
+
+    True opens the gate and stops the caller. False means walk on, which covers
+    both an execution node and a gate this item has *already* cleared -- a
+    resumed or re-entered walk passes over an approved gate rather than
+    re-requesting one a human has answered.
+
+    `enter_node` before the request: a gate node is where the item now is, so
+    `current_node_id` has to say so for resume and for the approve door to find
+    it.
+    """
+    if not isinstance(node.node, GateNode):
         return False
-    await db.write(lambda c: store.request_gate(c, work_item_id, node["id"], gate))
+    if gate_cleared(db, work_item_id, node.id):
+        return False
+    await db.write(lambda c: store.enter_node(c, work_item_id, node.id))
+    await db.write(lambda c: store.request_gate(c, work_item_id, node.id, node.id))
     return True
 
 

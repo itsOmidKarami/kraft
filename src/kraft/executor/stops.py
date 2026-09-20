@@ -7,6 +7,7 @@ from kraft import policy as _policy
 from kraft.adapters import forge as _forge
 from kraft.executor.context import RATE_LIMITED, WAITING
 from kraft.store import _now as _now
+from kraft.templates.models import ResolvedNode
 
 
 def budget_breach(db, work_item_id: str, budget: _policy.Budget) -> dict | None:
@@ -36,7 +37,7 @@ def budget_reason(breach: dict) -> str:
     )
 
 
-async def stop_for_budget(db, work_item_id: str, node: dict, budget: _policy.Budget) -> str:
+async def stop_for_budget(db, work_item_id: str, node: ResolvedNode, budget: _policy.Budget) -> str:
     # The fallback cannot fire in practice — sums only grow between the dispatch
     # that returned BUDGET and here — but a None would crash the escalation path
     # rather than stop the item, which is the wrong failure.
@@ -46,9 +47,7 @@ async def stop_for_budget(db, work_item_id: str, node: dict, budget: _policy.Bud
         "cap_usd": 0.0,
     }
     reason = budget_reason(breach)
-    await db.write(
-        lambda c: store.mark_needs_human(c, work_item_id, node["id"], reason, None, breach)
-    )
+    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, None, breach))
     return "needs_human"
 
 
@@ -67,29 +66,29 @@ def latest_rate_limit(db, work_item_id: str) -> dict | None:
     return None
 
 
-async def stop_for_rate_limit(db, work_item_id: str, node: dict) -> str:
+async def stop_for_rate_limit(db, work_item_id: str, node: ResolvedNode) -> str:
     info = latest_rate_limit(db, work_item_id) or {}
     retry_at = info.get("resets_at_iso") or _now()
-    await db.write(lambda c: store.mark_rate_limited(c, work_item_id, node["id"], retry_at))
+    await db.write(lambda c: store.mark_rate_limited(c, work_item_id, node.id, retry_at))
     return RATE_LIMITED
 
 
-async def stop_for_waiting(db, work_item_id: str, node: dict) -> str:
+async def stop_for_waiting(db, work_item_id: str, node: ResolvedNode) -> str:
     # Counter-driven backoff, growing the same way `poll_ci`'s in-loop sleep
     # grows today (`adapters/forge/ci.py`'s `DEFAULT_POLL_INTERVAL`/
     # `_MAX_POLL_INTERVAL`): doubling from the first wait, capped. The counter
     # is `ci_wait.py`'s (`ci_wait:<node_id>`) -- read, not bumped, here; the
     # poller bumps it on each re-entry, so a node waiting for the first time
     # (no row yet) starts at the base interval.
-    row = db.read(lambda c: store.read_counter(c, work_item_id, f"ci_wait:{node['id']}"))
+    row = db.read(lambda c: store.read_counter(c, work_item_id, f"ci_wait:{node.id}"))
     count = (row["count"] if row else 0) + 1
     interval = min(_forge.DEFAULT_POLL_INTERVAL * (2 ** (count - 1)), _forge._MAX_POLL_INTERVAL)
     retry_at = (datetime.fromisoformat(_now()) + timedelta(seconds=interval)).isoformat()
-    await db.write(lambda c: store.mark_waiting(c, work_item_id, node["id"], retry_at))
+    await db.write(lambda c: store.mark_waiting(c, work_item_id, node.id, retry_at))
     return WAITING
 
 
-async def stop_for_infra(db, work_item_id: str, node: dict) -> str:
+async def stop_for_infra(db, work_item_id: str, node: ResolvedNode) -> str:
     """The persisted `ci_infra:<node_id>` retry cap is spent and the pipeline
     is still red for a reason that is the forge's fault, not the branch's
     code (Kraft-h81i, Kraft-s8ul) -- straight to needs_human, no fix cycle, no
@@ -100,5 +99,5 @@ async def stop_for_infra(db, work_item_id: str, node: dict) -> str:
         (e["payload"]["reason"] for e in reversed(info) if e["type"] == "ci_infra_exhausted"),
         "CI infrastructure failed and retrying it did not recover",
     )
-    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node["id"], reason))
+    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason))
     return "needs_human"

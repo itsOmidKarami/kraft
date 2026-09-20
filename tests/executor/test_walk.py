@@ -6,7 +6,14 @@ import sys
 from pathlib import Path
 
 import pytest
-from support.harness import _git, fake_registry, isolated_bd, make_repo
+from support.harness import (
+    _git,
+    fake_registry,
+    isolated_bd,
+    make_repo,
+    v1_chain,
+    v1_walk,
+)
 
 from kraft import db, events, executor, store
 from kraft.adapters import beads
@@ -3284,3 +3291,167 @@ def test_a_fix_loop_node_stops_at_a_moved_base_without_spending_a_cycle(tmp_path
     assert result == "completed"
     assert dispatched == ["on.sync"]
     assert counter is None
+
+
+# --- Template Schema V1: one execution shape ---------------------------------
+
+
+def _v1(nodes, repo):
+    return v1_chain(nodes, repo=repo)
+
+
+def test_steps_are_ordered_while_tasks_inside_a_step_are_concurrent(tmp_path):
+    """`exec-node-orders-concurrent-task-groups`, end to end: the two tasks in
+    one step overlap in time, and the next step does not start until both of
+    them have finished."""
+    repo = make_repo(tmp_path)
+    log = tmp_path / "order.txt"
+
+    def marker(name: str) -> str:
+        return f"sh -c 'echo {name}-start >> {log}; sleep 0.4; echo {name}-end >> {log}'"
+
+    chain = _v1(
+        [
+            {
+                "id": "build",
+                "kind": "exec",
+                "steps": [
+                    {
+                        "id": "wide",
+                        "tasks": [
+                            {"id": "a", "kind": "subprocess", "command": marker("a")},
+                            {"id": "b", "kind": "subprocess", "command": marker("b")},
+                        ],
+                    },
+                    {
+                        "id": "after",
+                        "tasks": [{"id": "c", "kind": "subprocess", "command": marker("c")}],
+                    },
+                ],
+            }
+        ],
+        repo,
+    )
+
+    status, _evts, sessions = asyncio.run(v1_walk(tmp_path, chain, repo=repo))
+
+    assert status == "completed"
+    lines = log.read_text().split()
+    # Concurrent within the step: both started before either finished.
+    assert set(lines[:2]) == {"a-start", "b-start"}
+    # Ordered between steps: the later step's task started after both ended.
+    assert lines.index("c-start") > max(lines.index("a-end"), lines.index("b-end"))
+    assert [s["hook_point"] for s in sessions] == [
+        "build.wide.a",
+        "build.wide.b",
+        "build.after.c",
+    ] or [s["hook_point"] for s in sessions] == [
+        "build.wide.b",
+        "build.wide.a",
+        "build.after.c",
+    ]
+
+
+def test_a_task_is_identified_by_its_canonical_path_in_sessions_and_events(tmp_path):
+    """Ruling 1: the canonical path replaces the hook name in
+    `sessions.hook_point` and in every event payload that names a task. A hook
+    name reused by two nodes could not tell them apart; a path always can."""
+    repo = make_repo(tmp_path)
+    chain = _v1(
+        [
+            {
+                "id": "verify",
+                "kind": "exec",
+                "steps": [
+                    {
+                        "id": "checks",
+                        "tasks": [{"id": "suite", "kind": "subprocess", "command": "false"}],
+                    }
+                ],
+                "on_failure": {
+                    "tasks": [{"id": "repair", "kind": "subprocess", "command": "true"}]
+                },
+            }
+        ],
+        repo,
+    )
+
+    status, evts, sessions = asyncio.run(v1_walk(tmp_path, chain, repo=repo))
+
+    assert status == "needs_human"
+    assert "verify.checks.suite" in [s["hook_point"] for s in sessions]
+    assert "verify.on_failure.main.repair" in [s["hook_point"] for s in sessions]
+    recovery = next(e for e in evts if e["type"] == "node_recovery_started")
+    assert recovery["payload"]["failed_tasks"] == ["verify.checks.suite"]
+    assert recovery["payload"]["tasks"] == ["verify.on_failure.main.repair"]
+    # Operator-facing text names the task, not its address (Ruling 1's second
+    # half): the reason already says which node it is in.
+    stop = next(e for e in evts if e["type"] == "work_item_needs_human")
+    assert "suite [subprocess]" in stop["payload"]["reason"]
+
+
+def test_the_worktree_and_setup_command_are_prepared_without_an_env_node(tmp_path):
+    """Ruling 4: `env_setup` is not a V1 builtin, so worktree creation, the
+    repo's setup command and the uncarried-local-files report are implicit
+    runtime preparation done before the first node dispatches."""
+    repo = make_repo(tmp_path)
+    chain = _v1(
+        [
+            {
+                "id": "build",
+                "kind": "exec",
+                "tasks": [{"id": "run", "kind": "subprocess", "command": "true"}],
+            }
+        ],
+        repo,
+    )
+
+    status, evts, sessions = asyncio.run(
+        v1_walk(
+            tmp_path,
+            chain,
+            repo=repo,
+            repo_entry={"setup_command": "touch prepared.marker"},
+        )
+    )
+
+    assert status == "completed"
+    assert (tmp_path / "run" / "worktrees" / "w1" / "prepared.marker").is_file()
+    # No session stands in for the deleted node, and nothing names its hook.
+    assert [s["hook_point"] for s in sessions] == ["build.main.run"]
+    prepared = next(e for e in evts if e["type"] == "worktree_prepared")
+    assert "touch prepared.marker" in prepared["payload"]["report"]
+
+
+def test_a_gate_node_halts_the_walk_before_the_node_after_it(tmp_path):
+    """`gate-node-opens-and-halts-execution` / `gate-is-an-ordered-node`: the
+    gate is its own ordered node, identified by its node id, and the node after
+    it does not start."""
+    repo = make_repo(tmp_path)
+    after = tmp_path / "after.txt"
+    chain = _v1(
+        [
+            {
+                "id": "spec",
+                "kind": "exec",
+                "tasks": [{"id": "write", "kind": "subprocess", "command": "true"}],
+            },
+            {"id": "spec_approval", "kind": "gate", "message": "Approve the spec."},
+            {
+                "id": "implementation",
+                "kind": "exec",
+                "tasks": [
+                    {"id": "build", "kind": "subprocess", "command": f"touch {after}"},
+                ],
+            },
+        ],
+        repo,
+    )
+
+    status, evts, sessions = asyncio.run(v1_walk(tmp_path, chain, repo=repo))
+
+    assert status == "awaiting_gate"
+    requested = next(e for e in evts if e["type"] == "gate_requested")
+    assert requested["payload"] == {"gate": "spec_approval", "node_id": "spec_approval"}
+    assert [s["hook_point"] for s in sessions] == ["spec.main.write"]
+    assert not after.exists()

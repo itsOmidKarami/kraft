@@ -142,7 +142,14 @@ def test_session_exit_with_ref_ingests_summary(tmp_path):
     asyncio.run(scenario())
 
 
-def test_env_prepare_session_start_triggers_repo_rescan(tmp_path):
+def test_a_repository_artifact_rescan_still_fires_for_a_v1_chain(tmp_path):
+    """The 04 §2 piggyback used to ride on the `on.env.prepare` session an
+    `env_setup` node started. V1 has no such node (Ruling 4), so the trigger is
+    `chain_loaded` -- which `store.load_chain` emits at the top of every walk,
+    V1 or not, and which carries the same "a work item is starting on this repo"
+    meaning. Without the move the rescan would simply never fire again, with
+    nothing failing to say so.
+    """
     from kraft import store
     from kraft.paths import RunDirs
 
@@ -164,18 +171,7 @@ def test_env_prepare_session_start_triggers_repo_rescan(tmp_path):
                 subprocess.run(
                     ["git", "-C", str(repo), "commit", "-m", "b"], check=True, capture_output=True
                 )
-                await state.write(
-                    lambda c: store.create_session(
-                        c,
-                        id="s-env",
-                        work_item_id="w1",
-                        node_id="env_setup",
-                        hook_point="on.env.prepare",
-                        log_path="/dev/null",
-                        result_path="/dev/null",
-                    )
-                )
-                await state.write(lambda c: store.session_running(c, "s-env", 1234, 1.0))
+                await state.write(lambda c: store.load_chain(c, "w1", "build"))
                 for _ in range(50):
                     if ix.search("piggyback"):
                         break

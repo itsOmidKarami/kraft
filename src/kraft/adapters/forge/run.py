@@ -30,6 +30,31 @@ logger = logging.getLogger(__name__)
 #: stays a lint-clean default rather than a fresh call per signature.
 _EMPTY_META = mr_ops.MRMeta()
 
+#: Which internal handler each V1 `ForgeAction` runs. The vocabulary a chain
+#: author writes (`target: mr.open_draft`) is the schema's; which code path it
+#: reaches is this adapter's, so the mapping lives here rather than in the
+#: executor -- `dispatch` hands over the typed target and nothing else.
+#:
+#: Three actions have no handler yet: `mr.automated_review`, `mr.mark_ready`
+#: and `mr.external_approval` are external waits the shared due scheduler owns
+#: (Task 9). An unmapped target falls through to `_run_one`'s "unknown forge
+#: handler" arm and fails the node loudly, which is the honest answer until
+#: then.
+V1_HANDLERS: dict[str, str] = {
+    "mr.open_draft": "open_mr",
+    "mr.sync": "sync_mr",
+    "mr.ci": "ci_poll",
+    "mr.merge": "merge",
+    "mr.post_merge_ci": "merge_watch",
+}
+
+
+def handler_for(target: str) -> str:
+    """The handler name for a V1 `ForgeAction` value, or the target itself when
+    nothing maps it -- `_run_one` then reports it as unknown by the name the
+    chain actually wrote."""
+    return V1_HANDLERS.get(target, target)
+
 
 def resolve(name: str) -> Forge:
     """Named, never probed.

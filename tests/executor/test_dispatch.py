@@ -6,7 +6,17 @@ import subprocess
 import sys
 from pathlib import Path
 
-from support.harness import _git, fake_docker_bin, fake_registry, isolated_bd, make_repo
+from support.harness import (
+    _git,
+    fake_docker_bin,
+    fake_harness_home,
+    fake_registry,
+    isolated_bd,
+    make_repo,
+    v1_chain,
+    v1_item,
+    v1_walk,
+)
 from support.store_fixtures import mk_item, open_db
 
 from kraft import db, events, executor, store
@@ -1678,12 +1688,7 @@ def test_a_steered_rerun_over_an_existing_artifact_is_framed_as_a_revision(tmp_p
     (tmp_path / ".engineering" / "plans").mkdir(parents=True)
     (tmp_path / ".engineering" / "plans" / "w1.md").write_text("# the plan\n")
 
-    prefix = executor.steer_prefix(
-        {"kind": "agent", "command": "claude", "skill": "plan", "artifact": "plan"},
-        {"id": "w1"},
-        tmp_path,
-        "task 4 has no test",
-    )
+    prefix = executor.steer_prefix("plan", {"id": "w1"}, tmp_path, "task 4 has no test")
 
     assert ".engineering/plans/w1.md" in prefix
     assert "evise" in prefix  # "Revise that document in place"
@@ -1694,17 +1699,10 @@ def test_a_steered_rerun_over_an_existing_artifact_is_framed_as_a_revision(tmp_p
 def test_a_steered_node_with_no_artifact_yet_keeps_the_plain_steer_prompt(tmp_path):
     """The branch fires on the document's existence, not on any gate name: a
     node whose artifact was never written has nothing to revise."""
-    with_binding = executor.steer_prefix(
-        {"kind": "agent", "command": "claude", "skill": "plan", "artifact": "plan"},
-        {"id": "w1"},
-        tmp_path,
-        "go left",
-    )
-    no_binding = executor.steer_prefix(
-        {"kind": "agent", "command": "claude"}, {"id": "w1"}, tmp_path, "go left"
-    )
+    with_artifact = executor.steer_prefix("plan", {"id": "w1"}, tmp_path, "go left")
+    without = executor.steer_prefix(None, {"id": "w1"}, tmp_path, "go left")
 
-    assert with_binding == no_binding == "A human has steered this run: go left\n\n"
+    assert with_artifact == without == "A human has steered this run: go left\n\n"
 
 
 def test_agent_node_commits_what_the_worker_left_behind(tmp_path, monkeypatch):
@@ -2391,7 +2389,7 @@ def test_a_seeded_note_is_not_attributed_to_a_human(tmp_path):
     human read ... and sent it back with this note"."""
     (tmp_path / ".engineering" / "plans").mkdir(parents=True)
     (tmp_path / ".engineering" / "plans" / "w1.md").write_text("# the plan\n")
-    binding = {"kind": "agent", "command": "claude", "skill": "plan", "artifact": "plan"}
+    binding = "plan"
     note = "Findings the last review of this node left unresolved:\n- [important] a.py:1 — x (cr)"
 
     seeded = executor.steer_prefix(binding, {"id": "w1"}, tmp_path, note, source="seeded")
@@ -2736,7 +2734,7 @@ def test_a_gate_reviewers_verdict_names_an_automated_review_as_its_author(tmp_pa
     commits the agent had just made in that worktree. The node re-running could
     not tell those commits from a human's, so the brief it produced told the
     human they had fixed it themselves."""
-    binding = {"kind": "agent", "command": "claude", "skill": "plan", "artifact": "plan"}
+    binding = "plan"
     (tmp_path / ".engineering" / "plans").mkdir(parents=True)
     (tmp_path / ".engineering" / "plans" / "w1.md").write_text("# the plan\n")
     note = "tidied the swallowed OSError and committed it"
@@ -3044,3 +3042,397 @@ def test_a_resumed_node_skips_passed_groups_but_still_runs_its_rebase_step(tmp_p
             await database.close()
 
     asyncio.run(scenario())
+
+
+# --- Template Schema V1: typed dispatch --------------------------------------
+
+
+def _v1_task(node_id: str, step_id: str, raw: dict):
+    """One authored task, resolved to `(ResolvedNode, ResolvedTask)` -- what
+    `dispatch_node` takes, without a whole chain to drive."""
+    from kraft.templates.models import Chain, ExecNode, ResolvedChain
+
+    chain = Chain.model_validate(
+        {
+            "id": "t",
+            "nodes": [{"id": node_id, "kind": "exec", "steps": [{"id": step_id, "tasks": [raw]}]}],
+        }
+    )
+    assert isinstance(chain.nodes[0], ExecNode)
+    node = ResolvedChain.from_chain(chain).nodes[0]
+    return node, node.steps[0].tasks[0]
+
+
+async def _dispatch_one(tmp_path, repo, raw: dict, *, repo_entry=None, wid="w1"):
+    """Dispatch one typed task against a real work item row and return
+    `(status, database, run_dirs, node, task)` with the database still open."""
+    from kraft.executor.context import LaunchContext
+
+    node, task = _v1_task("verify", "checks", raw)
+    chain = v1_chain(
+        [{"id": "verify", "kind": "exec", "steps": [{"id": "checks", "tasks": [raw]}]}], repo=repo
+    )
+    rd = RunDirs(tmp_path / "run").ensure()
+    database = await db.Database.open(rd.db)
+    await v1_item(database, chain, repo=repo, wid=wid)
+    row = database.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+    )
+    status = await dispatch.dispatch_node(
+        database,
+        rd,
+        task,
+        node,
+        row,
+        repo,
+        launch=LaunchContext(repo_entry=repo_entry or {"setup_command": ""}, steering_dir=None),
+    )
+    return status, database, rd, node, task
+
+
+def test_each_task_kind_reaches_its_own_adapter(tmp_path, monkeypatch):
+    """Ruling 3: the task's *type* chooses the adapter, and the model's own
+    fields -- not a looked-up binding -- are what the adapter is handed. The
+    adapters are recorded rather than run: this is about which one is picked and
+    with what, and each one's own behaviour has its own tests."""
+    repo = make_repo(tmp_path)
+    seen: dict[str, dict] = {}
+
+    async def fake_subprocess(_db, _rd, **kw):
+        seen.setdefault("subprocess", kw)
+        return "done"
+
+    async def fake_agent(_db, _rd, **kw):
+        seen["agent"] = kw
+        return "done"
+
+    async def fake_forge(_db, _rd, **kw):
+        seen["forge"] = kw
+        return "done"
+
+    monkeypatch.setattr(dispatch._subprocess, "run_task", fake_subprocess)
+    monkeypatch.setattr(dispatch._agent, "run_agent_task", fake_agent)
+    monkeypatch.setattr(dispatch._forge, "run_task", fake_forge)
+    monkeypatch.setattr(dispatch._builtins, "restore_branch", lambda *a, **k: None)
+
+    async def commit_stragglers(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(dispatch._forge, "commit_stragglers", commit_stragglers)
+    monkeypatch.setenv("KRAFT_HOME", str(fake_harness_home(tmp_path, [sys.executable, "-c", ""])))
+
+    async def scenario():
+        for raw, entry in (
+            ({"id": "t", "kind": "subprocess", "command": "just ci-test"}, None),
+            (
+                {"id": "t", "kind": "builtin", "ref": "kraft.verify_changed_test_scopes"},
+                {"setup_command": "", "test_command": "just test"},
+            ),
+            (
+                {"id": "t", "kind": "agent", "harness": "fake", "prompt": "do the work"},
+                None,
+            ),
+            ({"id": "t", "kind": "forge", "target": "mr.open_draft"}, None),
+        ):
+            status, database, *_ = await _dispatch_one(
+                tmp_path / raw["kind"], repo, raw, repo_entry=entry
+            )
+            assert status == "done", raw
+            await database.close()
+
+    asyncio.run(scenario())
+
+    assert set(seen) == {"subprocess", "agent", "forge"}
+    # The subprocess task's own command, split by the adapter's boundary, not a
+    # registry list. (The builtin ran through the same adapter with the repo's
+    # command -- `test_changed_test_scopes_*` covers that side.)
+    assert seen["subprocess"]["cmd"] == ["just", "ci-test"]
+    assert seen["agent"]["harness"] == "fake"
+    assert "do the work" in seen["agent"]["task_instruction"]
+    # The chain writes the lifecycle point; the adapter owns which handler runs.
+    assert seen["forge"]["handler"] == "open_mr"
+    assert seen["forge"]["hook_point"] == "verify.checks.t"
+
+
+def test_changed_test_scopes_run_all_scopes_when_nothing_matches(tmp_path):
+    """`changed-test-scope-verification-selects-safely`: a changed path matching
+    no configured scope, and an empty diff, both run every scope. Under-testing
+    is the bug this exists to close."""
+    repo = make_repo(tmp_path)
+    scopes = [
+        {"paths": ["src/**"], "command": "echo src"},
+        {"paths": ["tests/**"], "command": "echo tests"},
+    ]
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            chain = v1_chain(
+                [
+                    {
+                        "id": "verify",
+                        "kind": "exec",
+                        "tasks": [
+                            {
+                                "id": "t",
+                                "kind": "builtin",
+                                "ref": "kraft.verify_changed_test_scopes",
+                            }
+                        ],
+                    }
+                ],
+                repo=repo,
+            )
+            await v1_item(database, chain, repo=repo)
+            base = git_read(repo, "rev-parse", "HEAD")
+            await database.write(lambda c: store.set_base_ref(c, "w1", base))
+            empty_diff, _sandbox = dispatch._select_scopes(
+                database, "w1", repo, "verify", "verify.main.t", 0, {"test_scopes": scopes}
+            )
+            # A changed path no scope claims.
+            (repo / "docs").mkdir(exist_ok=True)
+            (repo / "docs" / "note.md").write_text("x\n")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "docs only")
+            unmatched, _ = dispatch._select_scopes(
+                database, "w1", repo, "verify", "verify.main.t", 0, {"test_scopes": scopes}
+            )
+            return empty_diff, unmatched
+        finally:
+            await database.close()
+
+    empty_diff, unmatched = asyncio.run(scenario())
+
+    assert [s["cmd"] for s in empty_diff] == [["echo", "src"], ["echo", "tests"]]
+    assert [s["cmd"] for s in unmatched] == [["echo", "src"], ["echo", "tests"]]
+
+
+def _scope_marker(log: Path, name: str) -> dict:
+    return {
+        "paths": ["**"],
+        "command": f"sh -c 'echo {name}-start >> {log}; sleep 0.4; echo {name}-end >> {log}'",
+    }
+
+
+def test_changed_test_scopes_run_sequentially_unless_configured_parallel(tmp_path):
+    """`changed-test-scope-verification-is-sequential-by-default`: the scopes
+    share one worktree, so one finishes before the next starts unless the task
+    asks for parallel."""
+    repo = make_repo(tmp_path)
+
+    async def scenario(execution: str, log: Path):
+        entry = {
+            "setup_command": "",
+            "test_scopes": [_scope_marker(log, "one"), _scope_marker(log, "two")],
+        }
+        status, database, *_ = await _dispatch_one(
+            tmp_path / execution,
+            repo,
+            {
+                "id": "t",
+                "kind": "builtin",
+                "ref": "kraft.verify_changed_test_scopes",
+                "execution": execution,
+            },
+            repo_entry=entry,
+        )
+        await database.close()
+        return status, log.read_text().split()
+
+    sequential_log = tmp_path / "sequential.txt"
+    parallel_log = tmp_path / "parallel.txt"
+    seq_status, sequential = asyncio.run(scenario("sequential", sequential_log))
+    par_status, parallel = asyncio.run(scenario("parallel", parallel_log))
+
+    assert seq_status == "done" and par_status == "done"
+    assert sequential == ["one-start", "one-end", "two-start", "two-end"]
+    assert set(parallel[:2]) == {"one-start", "two-start"}
+
+
+def test_changed_test_scopes_report_one_aggregate_result(tmp_path):
+    """`changed-test-scope-verification-aggregates-results`: every selected
+    scope runs and the task reports one status -- a later scope's pass never
+    hides an earlier scope's failure (C2, Kraft-s7c04.9)."""
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        entry = {
+            "setup_command": "",
+            "test_scopes": [
+                {"paths": ["**"], "command": "false"},
+                {"paths": ["**"], "command": "true"},
+            ],
+        }
+        status, database, _rd, _node, task = await _dispatch_one(
+            tmp_path,
+            repo,
+            {"id": "t", "kind": "builtin", "ref": "kraft.verify_changed_test_scopes"},
+            repo_entry=entry,
+        )
+        rows = database.read(
+            lambda c: c.execute(
+                "SELECT hook_point, status FROM worker_sessions ORDER BY created_at"
+            ).fetchall()
+        )
+        await database.close()
+        return status, [tuple(r) for r in rows], task.path
+
+    status, rows, path = asyncio.run(scenario())
+
+    assert status == "failed"
+    # Both scopes ran, both under the task's own canonical path, and the task
+    # reported once.
+    assert rows == [(path, "failed"), (path, "done")]
+
+
+def test_an_agent_task_contract_precedes_its_skill_and_steering(tmp_path, monkeypatch):
+    """`agent-task-contract-precedes-skill-and-steering`: Kraft's own output and
+    lifecycle contract is delivered first, then the selected method, then
+    steering -- and a selected skill cannot displace the contract."""
+    from kraft.executor.context import LaunchContext
+
+    repo = make_repo(tmp_path)
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    argv_log = tmp_path / "argv.txt"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_ARGV_LOG", str(argv_log))
+    monkeypatch.setenv(
+        "KRAFT_HOME", str(fake_harness_home(tmp_path, [sys.executable, str(_FAKE_AGENT)]))
+    )
+    skills = tmp_path / "skills"
+    (skills / "house-method").mkdir(parents=True)
+    (skills / "house-method" / "SKILL.md").write_text("THE-METHOD\n")
+    steering = tmp_path / "steering"
+    steering.mkdir()
+    (steering / "project-standards.md").write_text("THE-STEERING\n")
+
+    async def scenario():
+        node, task = _v1_task(
+            "spec",
+            "author",
+            {
+                "id": "write",
+                "kind": "agent",
+                "harness": "fake",
+                "prompt": "Produce the specification.",
+                "skill": "house-method",
+                "steering": ["project-standards"],
+            },
+        )
+        chain = v1_chain(
+            [
+                {
+                    "id": "spec",
+                    "kind": "exec",
+                    "steps": [
+                        {
+                            "id": "author",
+                            "tasks": [
+                                dict(
+                                    id="write",
+                                    kind="agent",
+                                    harness="fake",
+                                    prompt="Produce the specification.",
+                                    skill="house-method",
+                                    steering=["project-standards"],
+                                )
+                            ],
+                        }
+                    ],
+                }
+            ],
+            repo=repo,
+        )
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await v1_item(database, chain, repo=repo)
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = 'w1'").fetchone()
+            )
+            return await dispatch.dispatch_node(
+                database,
+                rd,
+                task,
+                node,
+                row,
+                repo,
+                launch=LaunchContext(
+                    repo_entry={"setup_command": ""},
+                    steering_dir=steering,
+                    skills_dir=skills,
+                ),
+            )
+        finally:
+            await database.close()
+
+    status = asyncio.run(scenario())
+
+    assert status == "done"
+    argv = json.loads(argv_log.read_text().splitlines()[0])
+    context = argv[argv.index("--append-system-prompt") + 1]
+    assert context.index("write a short session summary") < context.index("THE-METHOD")
+    assert context.index("THE-METHOD") < context.index("THE-STEERING")
+
+
+def test_an_unloadable_selected_skill_stops_for_a_human(tmp_path, monkeypatch):
+    """`selected-skill-must-be-available`: no substitute method, no launch."""
+    repo = make_repo(tmp_path)
+    monkeypatch.setenv("KRAFT_HOME", str(fake_harness_home(tmp_path, [sys.executable, "-c", ""])))
+    chain = v1_chain(
+        [
+            {
+                "id": "spec",
+                "kind": "exec",
+                "tasks": [
+                    {
+                        "id": "write",
+                        "kind": "agent",
+                        "harness": "fake",
+                        "prompt": "Produce the specification.",
+                        "skill": "no-such-method",
+                    }
+                ],
+            }
+        ],
+        repo=repo,
+    )
+
+    status, evts, sessions = asyncio.run(v1_walk(tmp_path, chain, repo=repo))
+
+    assert status == "needs_human"
+    assert [s["status"] for s in sessions] == ["config_error"]
+    reason = next(e for e in evts if e["type"] == "work_item_needs_human")["payload"]["reason"]
+    assert "could not start write in node spec" in reason
+    assert "no-such-method" in Path(sessions[0]["log_path"]).read_text()
+
+
+def test_an_unavailable_selected_harness_stops_for_a_human(tmp_path, monkeypatch):
+    """`unavailable-selected-harness-needs-human`: never silently another
+    harness."""
+    repo = make_repo(tmp_path)
+    monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "empty-home"))
+    chain = v1_chain(
+        [
+            {
+                "id": "spec",
+                "kind": "exec",
+                "tasks": [
+                    {
+                        "id": "write",
+                        "kind": "agent",
+                        "harness": "ghost",
+                        "prompt": "Produce the specification.",
+                    }
+                ],
+            }
+        ],
+        repo=repo,
+    )
+
+    status, _evts, sessions = asyncio.run(v1_walk(tmp_path, chain, repo=repo))
+
+    assert status == "needs_human"
+    assert [s["status"] for s in sessions] == ["config_error"]
+    log = Path(sessions[0]["log_path"]).read_text()
+    assert "selects harness 'ghost', which is not available" in log
