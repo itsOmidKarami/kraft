@@ -64,11 +64,7 @@ dynamically.
 
 ```yaml
 loops:
-  verify_fix_loop:   { attempts: 3, wall_clock_s: 3600 }
-  ci_fix_loop:       { attempts: 3, wall_clock_s: 3600 }
   ci_wait:           { attempts: 60, wall_clock_s: 1800 }
-  rebase_bounce:     { attempts: 2, wall_clock_s: 3600 }
-  rebase_conflict:   { attempts: 3, wall_clock_s: 3600 }
 default:             { attempts: 3, wall_clock_s: 3600 }
 
 max_concurrent: 3
@@ -95,11 +91,22 @@ triggers:
     repo: /path/to/repo
     chain: default
     title: "Nightly dependency check"
+
+# Template Schema V1: operational defaults and administrator maxima.
+defaults:
+  timeout_minutes: 60
+  max_attempts: 3
+  allowed_harnesses: [codex_default, claude_review]
+maxima:
+  timeout_minutes: 180
+  token_budget: 2000000
+  allowed_tools: [git, shell, editor]
+  allowed_harnesses: [codex_default, claude_review]
 ```
 
 | Key | Means |
 |---|---|
-| `loops.<name>` | `attempts` and `wall_clock_s` ceiling for a named fix loop, referenced by a node's `fix_loop`. `default` covers anything not named explicitly. `rebase_conflict` bounds the conflict-resolving agent `/resume`, `/retry`, or any node's rebase can dispatch. |
+| `loops.<name>` | `attempts` and `wall_clock_s` ceiling for one named loop. `default` covers anything not named explicitly, which today is every fix loop: a chain node's fix loop is keyed by the node's own canonical path (`implementation.fix_loop`), not by a flat name. A key naming no live loop is **silently unused** — `loops.get(key, default)` neither errors nor warns — so the shipped file names only `ci_wait`, which is real. |
 | `max_concurrent` | How many work items may be `active` at once, across every repo, however they were started (`resume`, `retry`, or auto-intake). Moved here from `intake.yaml` — that file's copy is now a legacy fallback `load_policy` reads only when this key is absent. |
 | `auto_escalate_stuck` | Whether a `needs_human` stop for a reason *other than* a pending gate (e.g. a stuck fix loop) auto-dispatches an escalation turn. Independent of a node's own `auto_escalate` (gate review) — different mechanism, different trigger. Defaults on. |
 | `auto_escalate_stuck_cap` | Attempts one `needs_human` run may be auto-escalated by `auto_escalate_stuck` before leaving it for a human — the stuck-escalation equivalent of a fix loop's `attempts`. |
@@ -111,6 +118,42 @@ triggers:
 | `rate_limit_retries` | How many times Kraft auto-relaunches a work item after a rejected API rate limit before stopping for a human. Counts attempts, not wall-clock time — a rate-limit wait can run for hours. |
 | `archive.after_days` | Completed/abandoned items older than this auto-archive. The board's Done group header states this number — keep them in sync if you change it. Defaults to `30` in the shipped template, but disables auto-archiving entirely (`None`/absent) if you remove the key rather than edit it. |
 | `triggers` | Optional list of cron-fired chain starts. See [Inbound triggers](triggers.md). |
+| `defaults` | Template Schema V1's inheritable operational starting points — `timeout_minutes`, `max_attempts`, `allowed_harnesses`. No safety meaning of their own: a repository, work item, chain, node, step or task may move any of them in either direction, bounded only by `maxima`. All optional; unset means unbounded. |
+| `maxima` | The administrator ceiling nothing downstream may exceed — `timeout_minutes`, `max_attempts`, `allowed_harnesses`, `token_budget`, `allowed_tools`. A safety field listed only here (`token_budget`, `allowed_tools`) starts *at* its maximum and can only ever be narrowed by an override. An unset maximum is no bound at all, which is what a fresh install ships with. A `defaults` entry past a `maxima` ceiling is refused when the file is read. |
+
+## `harnesses.yaml` — harness profiles
+
+A harness *profile* is a configured instance of an agent-runtime provider: which
+executable to run, and what runtime options to start from. It is never provider
+command syntax or result parsing — the provider package
+(`src/kraft/harnesses/<provider>.yaml`) declares the capability surface, and a
+profile selects only from it. A `defaults` key the provider does not declare, or
+a value it does not accept, is refused when the file is read.
+
+```yaml
+harnesses:
+  codex_default:
+    provider: codex
+    enabled: true
+    executable: codex
+    defaults:
+      effort: medium
+
+  claude_review:
+    provider: claude
+    enabled: true
+    executable: claude
+    defaults:
+      model: sonnet
+```
+
+| Key | Means |
+|---|---|
+| `<profile id>` | The name a V1 task's `harness:` selects. Lowercase, digits, `_` and `-`. |
+| `provider` | The harness this profile configures. Must be an installed harness id (`claude`, `codex`, `gemini`) — the provider id *is* the harness id. |
+| `enabled` | `false` takes the profile out of service. A task selecting a disabled profile stops for a human; Kraft never substitutes another. Defaults `true`. |
+| `executable` | The command to launch, when it differs from the provider's own default. |
+| `defaults` | Runtime options every task using this profile starts from (`model`, `effort`, ...). Checked against what the provider declares it accepts. |
 
 ## `repos.yaml` — connected repos
 
