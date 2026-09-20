@@ -36,7 +36,8 @@ but the availability of such a helper SHALL NOT be required for the update.
 The template directory SHALL contain one `library.yaml` for reusable tasks,
 steps, nodes, and named steering profiles, and one selectable chain per file
 under `chains/`.
-enforced-by: tests/templates/test_library.py::test_from_yaml_dir_loads_components_and_one_chain_per_file, tests/templates/test_library.py::test_each_chain_file_is_one_selectable_chain, tests/templates/test_library.py::test_two_chain_files_claiming_one_id_is_an_error_naming_both, tests/templates/test_materialization.py::test_the_seed_is_a_library_file_and_one_chain_per_file
+enforced-by: tests/templates/test_library.py::test_from_yaml_dir_loads_components_and_one_chain_per_file, tests/templates/test_library.py::test_each_chain_file_is_one_selectable_chain, tests/templates/test_library.py::test_two_chain_files_claiming_one_id_is_an_error_naming_both, tests/templates/test_materialization.py::test_the_seed_is_a_library_file_and_one_chain_per_file, tests/templates/test_environment.py::test_the_seeded_harnesses_yaml_loads_and_covers_the_seeded_library
+origin: templates/harnesses.yaml -- added beside Task 3's pins rather than replacing them: the directory's fifth file now loads too, and a `harness:` the seeded library names but no seeded profile provides would make the shipped chain undispatchable.
 
 ## REQ registry-is-not-a-task-configuration-source
 
@@ -91,14 +92,16 @@ origin: src/kraft/harness.py §build_argv -- five of the six mechanics are pinne
 An agent-runtime provider SHALL declare the capabilities and runtime-option
 schema it supports. Harness profiles and templates SHALL only select from that
 provider-declared surface.
-enforced-by: tests/test_harnesses.py::test_harness_profile_rejects_an_option_the_provider_does_not_declare, tests/test_harnesses.py::test_harness_profile_rejects_a_value_the_provider_rejects
+enforced-by: tests/test_harnesses.py::test_harness_profile_rejects_an_option_the_provider_does_not_declare, tests/test_harnesses.py::test_harness_profile_rejects_a_value_the_provider_rejects, tests/templates/test_environment.py::test_a_profile_default_the_provider_does_not_declare_is_refused
+origin: src/kraft/templates/environment.py -- `HarnessProfileTable.from_yaml` is the file boundary, so the check now fires when `harnesses.yaml` is read rather than only when a profile is constructed in code.
 
 ## REQ harness-profile-has-safe-instance-configuration
 
 A harness profile MAY configure an enabled runtime instance, executable or
 connection choice, and default runtime options. It SHALL NOT require template
 authors to configure provider command syntax or result parsing.
-enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider_declared_options, tests/test_harnesses.py::test_harness_profile_reports_unavailable_when_disabled
+enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider_declared_options, tests/test_harnesses.py::test_harness_profile_reports_unavailable_when_disabled, tests/templates/test_environment.py::test_harness_profiles_load_against_their_provider_declarations, tests/templates/test_environment.py::test_a_profile_whose_provider_is_not_its_harness_id_is_refused
+origin: src/kraft/templates/environment.py -- a profile names a provider and its defaults; it carries no command syntax or result parsing, and an unknown provider is refused at load rather than becoming an arbitrary command fragment.
 
 ## REQ agent-task-selects-capability-compatible-runtime-options
 
@@ -600,13 +603,15 @@ enforced-by: tests/test_policy.py::test_policy_is_layered_from_instance_through_
 The system SHALL distinguish an independent repository, a workspace that
 combines repositories, and a path-scoped area within one repository. An area
 SHALL NOT be treated as an independent repository or forge target.
-enforced-by: tests/templates/test_environment.py::test_area_has_no_forge_field_to_declare, tests/templates/test_environment.py::test_repository_with_areas_keeps_them_path_scoped_not_independent
+enforced-by: tests/templates/test_environment.py::test_area_has_no_forge_field_to_declare, tests/templates/test_environment.py::test_repository_with_areas_keeps_them_path_scoped_not_independent, tests/templates/test_environment.py::test_repository_table_loads_repositories_and_workspaces
+origin: src/kraft/templates/environment.py -- `repos.yaml` keeps the three in separate sections (`repositories:` keyed by id, `workspaces:` beside it, `areas:` only inside a repository), so the distinction holds at the file boundary and not only in the types.
 
 ## REQ workspace-declares-root-and-members
 
 A workspace SHALL declare its root repository and each member repository with
 the path where it is mounted in that root.
-enforced-by: tests/templates/test_environment.py::test_workspace_declares_root_and_members
+enforced-by: tests/templates/test_environment.py::test_workspace_declares_root_and_members, tests/templates/test_environment.py::test_a_workspace_mounting_an_unknown_repository_is_refused_at_load, tests/templates/test_environment.py::test_a_workspace_rooted_on_an_unknown_repository_is_refused_at_load
+origin: src/kraft/templates/environment.py -- both ends of every declaration are resolved when the file is read; a root or member naming no declared repository assembles an empty checkout at run time, hours after the typo.
 
 ## REQ work-item-target-selection-is-immutable
 
