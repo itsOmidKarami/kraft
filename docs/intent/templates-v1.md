@@ -79,7 +79,7 @@ enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider
 An agent-runtime provider SHALL own invocation, context delivery, supported
 runtime options, session resumption, skill loading, and normalized task
 results for its runtime.
-origin: docs/intent/templates-v1.md -- deliberately unpinned. Phase 1 implemented none of these six mechanics -- it only consumes the pre-existing `kraft.harness` declaration from a harness profile. tests/test_harnesses.py covers invocation and resume for today's V0 dispatcher, which is not this requirement's sentence; context delivery, skill loading and normalized results have no V1 test at all. The pin lands with the executor phase that owns them.
+origin: docs/templates-v1-design.md "Harness profiles" -- deliberately unpinned until Task 4, which owns all six mechanics; delete this note in the same edit that adds the pin. Phase 1 implemented none of these six mechanics -- it only consumes the pre-existing `kraft.harness` declaration from a harness profile. tests/test_harnesses.py covers invocation and resume for today's V0 dispatcher, which is not this requirement's sentence; context delivery, skill loading and normalized results have no V1 test at all. The pin lands with the executor phase that owns them.
 
 ## REQ provider-declares-harness-capabilities
 
@@ -259,7 +259,7 @@ enforced-by: tests/templates/test_materialization.py::test_materialization_freez
 ## REQ steer-can-address-paused-agent-tasks-individually
 
 An operator MAY provide distinct steering instructions to selected paused agent
-tasks. A steer SHALL not target a non-agent task.
+tasks. A steer SHALL NOT target a non-agent task.
 
 ## REQ steer-defaults-to-all-paused-agent-tasks
 
@@ -389,8 +389,17 @@ approval behaviour.
 
 ## REQ gate-auto-review-is-explicit-and-bounded
 
-A gate node MAY declare an automated review task. The system SHALL run it only
-with work-item opt-in and within its effective delay and attempt limits.
+A gate node MAY declare an automated review task that reports a verdict on the
+gate's decision. The system SHALL run it only with work-item opt-in and within
+its effective delay and attempt limits. Such a task SHALL report a verdict for
+the system to apply and SHALL NOT itself approve or reject the gate.
+
+This is distinct from two neighbouring behaviours it is easy to conflate.
+`gate-control-does-not-generate-review-work` forbids a gate *producing the
+artifact* it shows, which a verdict-reporting reviewer does not do — it reads an
+artifact an earlier execution node produced.
+`automated-review-is-an-explicit-optional-task` is a chain-level task that waits
+on the *forge's* merge-request review, which is a different subject entirely.
 
 ## REQ attachment-behaviour-is-explicit-gate-configuration
 
@@ -534,7 +543,7 @@ The effective task policy SHALL resolve from instance policy through repository,
 work-item, chain, node, step, and task policy overrides, from broadest scope
 to narrowest scope.
 enforced-by: tests/test_policy.py::test_policy_is_layered_from_instance_through_repository_to_work_item
-origin: docs/templates-v1-design.md "Policy" -- chain/node/step/task layers land once those types exist (Phase 2+); this pins the mechanism through the scopes typed so far.
+origin: docs/templates-v1-design.md "Policy" -- the chain/node/step/task layers are Task 8's, deliberately not added earlier because nothing consumes them until `retry-overrides-are-policy-bounded`; this pins the mechanism through the scopes typed so far.
 
 ## REQ policy-has-defaults-and-administrator-maxima
 
@@ -549,6 +558,13 @@ enforced-by: tests/test_policy.py::test_template_policy_cannot_widen_allowed_too
 
 Template policy overrides SHALL only tighten inherited safety ceilings,
 including budgets, allowed tools, permissions, and repository access.
+
+The split between a safety ceiling and an operational value is a rule, not the
+membership of these examples. A **safety ceiling** may only tighten, against the
+inherited value: `allowed_tools` and `token_budget`. An **operational value** may
+move in either direction, bounded by an explicitly configured administrator
+maximum rather than by the inherited value: timeouts, retry and wait timing, and
+`allowed_harnesses`. A field absent from `maxima:` is unbounded.
 enforced-by: tests/test_policy.py::test_template_policy_cannot_widen_allowed_tools, tests/test_policy.py::test_template_policy_can_narrow_allowed_tools, tests/test_policy.py::test_template_policy_cannot_exceed_token_budget_ceiling
 
 ## REQ repository-policy-cannot-relax-instance-safety
@@ -571,6 +587,9 @@ the path where it is mounted in that root.
 enforced-by: tests/templates/test_environment.py::test_workspace_declares_root_and_members
 
 ## REQ work-item-target-selection-is-immutable
+
+This requirement governs **selection at intake**; the run-time immutability of
+what was selected is `work-item-target-is-typed-and-immutable`.
 
 A work item MAY target one repository, selected members of a workspace, or a
 workspace root and its members. The selected targets and root-pointer policy
@@ -696,7 +715,7 @@ review settlement, external approval, merge completion, and post-merge CI.
 ## REQ automated-review-is-an-explicit-optional-task
 
 A chain MAY declare a task that waits for automated merge-request review. When
-no such task is declared, the system SHALL not expect automated review for that
+no such task is declared, the system SHALL NOT expect automated review for that
 chain.
 
 ## REQ automated-review-task-uses-ordinary-task-results
@@ -746,7 +765,7 @@ merge so root CI can run.
 ## REQ root-source-merge-request-readiness-waits-for-child-merges
 
 When a workspace work item changes root source and child repositories, the
-system SHALL not mark the root merge request ready until the child merge
+system SHALL NOT mark the root merge request ready until the child merge
 requests have merged and the root contains their final pointer revisions.
 
 ## REQ blocked-child-merge-leaves-parent-unchanged
