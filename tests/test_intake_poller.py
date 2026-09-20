@@ -556,11 +556,6 @@ def test_an_auto_started_item_stops_at_its_first_gate(tmp_path, monkeypatch):
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     monkeypatch.setenv("KRAFT_BD_CWD", str(repo))
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates_dir))
-    # `default_harnesses_dir()` is `kraft_home()/templates/harnesses`, which is
-    # where `fake_templates_dir` put the overlaid `fake` harness every V1 agent
-    # task in the fixture library selects. Without this the first node would
-    # try to launch a real agent CLI.
-    monkeypatch.setenv("KRAFT_HOME", str(tmp_path))
     monkeypatch.setenv(
         "KRAFT_FRONTEND_DIST", os.environ.get("KRAFT_FRONTEND_DIST") or str(tmp_path / "no-dist")
     )
