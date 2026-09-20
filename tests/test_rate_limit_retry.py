@@ -214,3 +214,42 @@ def test_a_v1_item_is_relaunched_rather_than_stranded_rate_limited(tmp_path, mon
 
     _run(lambda: _stub(tmp_path), body)
     assert spawned, "the poller found no node index and left the item rate_limited"
+
+
+def _status_of(app, wid="w1"):
+    return app.state.db.read(
+        lambda c: c.execute("SELECT status FROM work_items WHERE id=?", (wid,)).fetchone()
+    )["status"]
+
+
+def test_a_node_the_chain_does_not_have_stops_the_item_rather_than_wedging_it(tmp_path):
+    """N1's other half, and worse ordered: `claim_for_run` *then*
+    `retry_after_cap` *then* the index read, with `tick` filtering
+    `status = 'rate_limited'`. A return leaving it `active` is a permanent wedge
+    that looks live. The stop is `stops.claimed_or_stopped`'s."""
+    from support.harness import v1_chain, v1_item
+
+    repo = make_repo(tmp_path)
+    chain = v1_chain(
+        [
+            {
+                "id": "implementation",
+                "kind": "exec",
+                "tasks": [{"id": "build", "kind": "subprocess", "command": "true"}],
+            }
+        ],
+        repo=repo,
+    )
+
+    async def body(app):
+        await v1_item(app.state.db, chain, repo=str(repo), wid="w1")
+        await app.state.db.write(lambda c: store.enter_node(c, "w1", "gone_from_the_chain"))
+        await app.state.db.write(
+            lambda c: store.mark_rate_limited(
+                c, "w1", "gone_from_the_chain", "2000-01-01T00:00:00+00:00"
+            )
+        )
+        assert await rate_limit_retry.tick(app) == []
+        return _status_of(app)
+
+    assert _run(lambda: _stub(tmp_path), body) == "needs_human"

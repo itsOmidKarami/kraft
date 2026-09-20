@@ -68,6 +68,7 @@ async def tick(app) -> list[str]:
 
 async def _retry_one(app, row) -> bool:
     from kraft.api import deps
+    from kraft.executor import stops  # deferred, same cycle as `executor` below
 
     st = app.state
     wid = row["id"]
@@ -97,42 +98,57 @@ async def _retry_one(app, row) -> bool:
         logger.info("rate-limit retry: %s is no longer rate_limited, skipping", wid)
         return False
 
-    await st.db.write(lambda c: store.retry_after_cap(c, wid, node_id, None, RESUME_PROMPT))
-    # Same as `ci_wait`'s: over `store.node_index` so a V1 row's `"{}"`
-    # `chain_definition` cannot raise, and a node that is not in this item's
-    # chain stops rather than silently relaunching it at node zero.
-    start = store.node_index(row, node_id)
-    if start is None:
-        logger.warning(
-            "rate_limit_retry: %s has no node %r in its chain, not relaunching", wid, node_id
-        )
-        return
-    from kraft import executor  # deferred: avoids a kraft.api <-> kraft.executor import cycle
+    # Bracketed for the claim-then-return class: `claim_for_run` above has made
+    # this item read `active`, and this poller's own `tick` SELECT filters
+    # `status = 'rate_limited'` -- so an exit from here that neither spawns a walk
+    # nor moves the status again leaves the item claimed and unowned, and *no
+    # later tick will ever select it again*. One stop, at the bracket, rather
+    # than one per early return.
+    async with stops.claimed_or_stopped(
+        st.db,
+        wid,
+        node_id,
+        reason="the rate-limit poller claimed this item but could not start a walk",
+        handed_off=lambda: deps.task_is_live(app, wid),
+    ):
+        await st.db.write(lambda c: store.retry_after_cap(c, wid, node_id, None, RESUME_PROMPT))
+        # Same as `ci_wait`'s: over `store.node_index` so a V1 row's `"{}"`
+        # `chain_definition` cannot raise, and a node that is not in this item's
+        # chain stops rather than silently relaunching it at node zero.
+        start = store.node_index(row, node_id)
+        if start is None:
+            # `return False`, not a bare `return`: this function's contract is
+            # "did I relaunch it". The bracket above turns the claim into a stop.
+            logger.warning(
+                "rate_limit_retry: %s has no node %r in its chain, not relaunching", wid, node_id
+            )
+            return False
+        from kraft import executor  # deferred: avoids a kraft.api <-> kraft.executor import cycle
 
-    try:
-        deps.spawn(
-            app,
-            wid,
-            deps.guard(
-                st.db,
+        try:
+            deps.spawn(
+                app,
                 wid,
-                executor.run(
+                deps.guard(
                     st.db,
-                    st.run_dirs,
-                    work_item_id=wid,
-                    registry=st.registry,
-                    bd_cwd=deps.bd_cwd(),
-                    start_index=start,
-                    policy=st.policy,
-                    steer=RESUME_PROMPT,
-                    launch=deps.launch(st, row["repo"]),
+                    wid,
+                    executor.run(
+                        st.db,
+                        st.run_dirs,
+                        work_item_id=wid,
+                        registry=st.registry,
+                        bd_cwd=deps.bd_cwd(),
+                        start_index=start,
+                        policy=st.policy,
+                        steer=RESUME_PROMPT,
+                        launch=deps.launch(st, row["repo"]),
+                    ),
                 ),
-            ),
-        )
-    except deps.AlreadyRunning:
-        logger.warning("rate-limit retry: %s already has a live walk, skipping", wid)
-        return False
-    return True
+            )
+        except deps.AlreadyRunning:
+            logger.warning("rate-limit retry: %s already has a live walk, skipping", wid)
+            return False
+        return True
 
 
 async def poller(app) -> None:

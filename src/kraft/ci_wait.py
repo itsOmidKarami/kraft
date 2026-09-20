@@ -69,6 +69,7 @@ async def tick(app) -> list[str]:
 
 async def _re_enter_one(app, row) -> bool:
     from kraft.api import deps
+    from kraft.executor import stops  # deferred, same cycle as `executor` below
 
     st = app.state
     wid = row["id"]
@@ -91,45 +92,59 @@ async def _re_enter_one(app, row) -> bool:
             )
         )
         return False
+    # Bracketed for the claim-then-return class: the claim above has made
+    # this item read `active`, and this poller's own `tick` SELECT filters on
+    # the status it just left behind -- so an exit from here that neither
+    # spawns a walk nor moves the status again leaves the item claimed and
+    # unowned, and *no later tick will ever select it again*. One stop, at
+    # the bracket, rather than one per early return.
+    async with stops.claimed_or_stopped(
+        st.db,
+        wid,
+        node_id,
+        reason="the CI wait poller re-entered this item but could not start a walk",
+        handed_off=lambda: deps.task_is_live(app, wid),
+    ):
+        # `store.node_index`, not `chain["nodes"]`: a V1 row's `chain_definition` is
+        # `"{}"`, and this poller re-enters a node it already claimed -- a raise here
+        # would leave the item waiting forever with nothing behind it. `None` means
+        # this node is not in this item's chain at all, which is a stop, not a
+        # restart at zero.
+        start = store.node_index(row, node_id)
+        if start is None:
+            # `return False`, not a bare `return`: this function's contract is
+            # "did I re-enter it". The bracket above turns the claim into a stop.
+            logger.warning("ci_wait: %s has no node %r in its chain, not re-entering", wid, node_id)
+            return False
+        from kraft import executor  # deferred: avoids a kraft.api <-> kraft.executor import cycle
 
-    # `store.node_index`, not `chain["nodes"]`: a V1 row's `chain_definition` is
-    # `"{}"`, and this poller re-enters a node it already claimed -- a raise here
-    # would leave the item waiting forever with nothing behind it. `None` means
-    # this node is not in this item's chain at all, which is a stop, not a
-    # restart at zero.
-    start = store.node_index(row, node_id)
-    if start is None:
-        logger.warning("ci_wait: %s has no node %r in its chain, not re-entering", wid, node_id)
-        return
-    from kraft import executor  # deferred: avoids a kraft.api <-> kraft.executor import cycle
-
-    # No steer: there is no agent to address here, and a note handed to a
-    # forge node would sit unconsumed until the next agent launch -- a
-    # different node's business.
-    try:
-        deps.spawn(
-            app,
-            wid,
-            deps.guard(
-                st.db,
+        # No steer: there is no agent to address here, and a note handed to a
+        # forge node would sit unconsumed until the next agent launch -- a
+        # different node's business.
+        try:
+            deps.spawn(
+                app,
                 wid,
-                executor.run(
+                deps.guard(
                     st.db,
-                    st.run_dirs,
-                    work_item_id=wid,
-                    registry=st.registry,
-                    bd_cwd=deps.bd_cwd(),
-                    start_index=start,
-                    start_step=row["current_step"],
-                    policy=st.policy,
-                    launch=deps.launch(st, row["repo"]),
+                    wid,
+                    executor.run(
+                        st.db,
+                        st.run_dirs,
+                        work_item_id=wid,
+                        registry=st.registry,
+                        bd_cwd=deps.bd_cwd(),
+                        start_index=start,
+                        start_step=row["current_step"],
+                        policy=st.policy,
+                        launch=deps.launch(st, row["repo"]),
+                    ),
                 ),
-            ),
-        )
-    except deps.AlreadyRunning:
-        logger.warning("ci-wait: %s already has a live walk, skipping this tick", wid)
-        return False
-    return True
+            )
+        except deps.AlreadyRunning:
+            logger.warning("ci-wait: %s already has a live walk, skipping this tick", wid)
+            return False
+        return True
 
 
 async def poller(app) -> None:

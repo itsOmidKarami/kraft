@@ -2265,3 +2265,55 @@ def test_a_chain_whose_plan_node_was_trimmed_still_reaches_chain_finalized(tmp_p
     assert row["current_node_id"] == "chain_review"
     requested = [e["payload"]["gate"] for e in evts if e["type"] == "gate_requested"]
     assert requested == ["chain_review"]
+
+
+def test_resume_after_escalation_stops_an_item_whose_node_left_the_chain(tmp_path):
+    """The claim-then-return class in its fourth instance, and the one no review
+    named. `resume_after_escalation` claims the item, writes `retry_after_cap`,
+    and *then* located its start index with
+    `next(i for i, n in enumerate(walk.chain_of(row).chain.nodes) if n.id == node_id)`
+    -- which raises `StopIteration` for a node the chain does not have and
+    `LookupError` for a legacy row, both after the write. The item was left
+    claimed `active` with the cap already cleared and no walk behind it.
+
+    A static sweep of `return`/`raise` statements cannot see either raise, which
+    is the argument for `stops.claimed_or_stopped` bracketing the whole region
+    rather than a stop per early return.
+    """
+    from kraft.paths import RunDirs
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = "w1"
+            await _seed_stuck(database, wid, reason="git rebase failed")
+            cursor = database.read(lambda c: events.read_after(c, 0, wid))[-1]["seq"]
+            # The self-retry names a node this item's chain does not contain --
+            # what a `set_chain_template` switch leaves behind.
+            await database.write(
+                lambda c: events.append(
+                    c,
+                    wid,
+                    "work_item_self_retry_requested",
+                    {
+                        "node_id": "gone_from_the_chain",
+                        "key": None,
+                        "gate_key": None,
+                        "steer": None,
+                    },
+                )
+            )
+            status = await gates_module.resume_after_escalation(
+                database, rd, work_item_id=wid, cursor=cursor, registry=None
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT status FROM work_items WHERE id=?", (wid,)).fetchone()
+            )
+            return status, row["status"]
+        finally:
+            await database.close()
+
+    status, stored = asyncio.run(scenario())
+    assert stored == "needs_human", "left claimed 'active' with no walk behind it"
+    assert status == "needs_human"

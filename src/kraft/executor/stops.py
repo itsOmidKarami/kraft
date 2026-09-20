@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 
 from kraft import events, store
@@ -8,6 +10,68 @@ from kraft.adapters import forge as _forge
 from kraft.executor.context import RATE_LIMITED, WAITING
 from kraft.store import _now as _now
 from kraft.templates.models import ResolvedNode
+
+
+@asynccontextmanager
+async def claimed_or_stopped(
+    db,
+    work_item_id: str,
+    node_id: str | None,
+    *,
+    reason: str,
+    handed_off: Callable[[], bool] | None = None,
+) -> AsyncIterator[None]:
+    """Bracket a claim-then-hand-off region so no exit can leave a work item
+    claimed and unowned.
+
+    **The invariant.** A path that writes a *runnable* status
+    (`store.claim_for_run`, `mark_reentered`) has taken ownership of the item: it
+    now reads `active`, which means "a walk is behind this". Every such path must
+    end by either handing the item to a walk, or leaving it in a status some
+    selector will pick up again. A path that does neither leaves the item
+    claimed with nothing behind it -- it *looks* running and is not, and nothing
+    will ever select it: `ci_wait.tick` filters `status = 'waiting'`,
+    `rate_limit_retry.tick` filters `status = 'rate_limited'`, the board shows it
+    as live, and the only trace is whatever was logged on the way out.
+
+    **Enforced here rather than at each `return`**, for three reasons that a
+    per-return `mark_needs_human` does not cover:
+
+    * The exits are not all lexical. `walk.chain_of` raises `LookupError` on a
+      legacy row and `next(...)` raises `StopIteration`; a static sweep of
+      `return`/`raise` statements cannot see either, and both leave through this
+      `finally` anyway.
+    * This class has now recurred three times on one branch -- a crash in
+      `resume`/`retry`/`skip`, then the same crash in the two pollers, then the
+      pollers again with the crash swapped for a `logger.warning` and a bare
+      `return`. Each round fixed the reported site. A bracket is the only form
+      of the fix that the *next* early return inherits for free.
+    * The stop it performs is the same stop at every site, so writing it once
+      removes the chance of two doors disagreeing about what a stranded item
+      should become.
+
+    `handed_off` says "something else owns this item now" -- for a route or a
+    poller that is `deps.task_is_live(app, wid)`, which is true both when this
+    call spawned the walk and when `spawn` refused because another walk already
+    holds it. A site that awaits its walk inline needs no callback: by the time
+    this `finally` runs the walk has set its own terminal status, so the
+    `active` test is already false.
+
+    Deliberately not a `return` inside `finally` -- that would swallow an
+    in-flight exception, and the 409 a refused hand-off raises has to reach the
+    caller.
+    """
+    try:
+        yield
+    finally:
+        if not (handed_off is not None and handed_off()):
+            row = db.read(
+                lambda c: c.execute(
+                    "SELECT status FROM work_items WHERE id = ?", (work_item_id,)
+                ).fetchone()
+            )
+            if row is not None and row["status"] == "active":
+                await db.write(lambda c: store.mark_needs_human(c, work_item_id, node_id, reason))
 
 
 def budget_breach(db, work_item_id: str, budget: _policy.Budget) -> dict | None:

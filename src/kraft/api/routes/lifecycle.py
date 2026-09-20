@@ -21,7 +21,7 @@ from kraft.api import api_router, deps
 from kraft.api.routes import board, search
 from kraft.api.routes.search import OpenDocument
 from kraft.config import git_read
-from kraft.executor import gates, walk
+from kraft.executor import gates, stops, walk
 from kraft.templates import Registry
 from kraft.templates.models import AgentTask, GateNode
 
@@ -593,30 +593,85 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
                 409, f"all {limit} slots are busy; pause something or raise max_concurrent"
             )
         raise HTTPException(409, "work item is not paused")
+    # Everything from here to the hand-off is bracketed (Ruling: the
+    # claim-then-return class). The claim above has made this item read
+    # `active`, which means "a walk is behind this"; any exit from here that
+    # neither spawns one nor leaves a status a selector re-picks would leave it
+    # claimed and unowned. `stops.claimed_or_stopped` performs that stop once,
+    # for every exit including the ones no static sweep can enumerate.
+    async with stops.claimed_or_stopped(
+        st.db,
+        wid,
+        row["current_node_id"],
+        reason="resume claimed this item but could not start a walk",
+        handed_off=lambda: deps.task_is_live(request.app, wid),
+    ):
+        # The claim moves before this awaited rebase deliberately (Kraft-11e0):
+        # the up-to-60s network call now happens on an item already marked
+        # `active`, and no second caller can pass the claim while it runs.
+        if steer_text is not None:
+            await st.db.write(lambda c: store.set_steer(c, wid, steer_text))
+        steer = await st.db.write(lambda c: store.take_steer(c, wid))
+        worktree = st.run_dirs.worktrees / wid
+        try:
+            new_base = await builtins_mod.refresh_worktree_base(
+                worktree, Path(row["repo"]), store.branch_for(row)
+            )
+        except builtins_mod.RebaseConflict as exc:
+            # `steer` here is already the taken local (line 414, above the
+            # rebase) -- the helper must not re-read `pending_steer_context`,
+            # which this call already emptied.
+            return _spawn_conflict_resolution(
+                st, request, wid, row, row["current_node_id"], store.chain_view(row), steer, exc
+            )
+        except RuntimeError as exc:
+            # The claim already flipped this item to 'active'; a failed rebase
+            # must not leave it stranded there with no walk behind it.
+            reason = str(exc)
+            await st.db.write(
+                lambda c: store.mark_needs_human(c, wid, row["current_node_id"], reason)
+            )
+            try:
+                deps.spawn(
+                    request.app,
+                    wid,
+                    deps.guard(
+                        st.db,
+                        wid,
+                        gates.auto_escalate_stuck(
+                            "needs_human",
+                            st.db,
+                            st.run_dirs,
+                            work_item_id=wid,
+                            registry=st.registry,
+                            policy=st.policy,
+                            launch=deps.launch(st, row["repo"]),
+                            bd_cwd=deps.bd_cwd(),
+                            on_approve=deps._on_approve(st),
+                        ),
+                    ),
+                )
+            except deps.AlreadyRunning:
+                raise HTTPException(409, "a walk is already running for this work item") from None
+            return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+        if new_base:
+            worktree_head = git_read(worktree, "rev-parse", "HEAD", expected_failure=True)
+            await st.db.write(
+                lambda c: events.append(
+                    c,
+                    wid,
+                    "worktree_rebase_verified",
+                    {"reported_head": new_base, "worktree_head": worktree_head},
+                )
+            )
+            await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
+        await st.db.write(lambda c: store.resume_work_item(c, wid, steer))
 
-    # The claim moves before this awaited rebase deliberately (Kraft-11e0):
-    # the up-to-60s network call now happens on an item already marked
-    # `active`, and no second caller can pass the claim while it runs.
-    if steer_text is not None:
-        await st.db.write(lambda c: store.set_steer(c, wid, steer_text))
-    steer = await st.db.write(lambda c: store.take_steer(c, wid))
-    worktree = st.run_dirs.worktrees / wid
-    try:
-        new_base = await builtins_mod.refresh_worktree_base(
-            worktree, Path(row["repo"]), store.branch_for(row)
-        )
-    except builtins_mod.RebaseConflict as exc:
-        # `steer` here is already the taken local (line 414, above the
-        # rebase) -- the helper must not re-read `pending_steer_context`,
-        # which this call already emptied.
-        return _spawn_conflict_resolution(
-            st, request, wid, row, row["current_node_id"], store.chain_view(row), steer, exc
-        )
-    except RuntimeError as exc:
-        # The claim already flipped this item to 'active'; a failed rebase
-        # must not leave it stranded there with no walk behind it.
-        reason = str(exc)
-        await st.db.write(lambda c: store.mark_needs_human(c, wid, row["current_node_id"], reason))
+        # `store.node_index`, never `chain["nodes"]`: this runs *after*
+        # `resume_work_item` has already claimed the row, so a raise here leaves the
+        # item `active` with no walk behind it. `default=0` because an item that
+        # never reached a node resumes at the start of its chain.
+        start = store.node_index(row, row["current_node_id"], default=0)
         try:
             deps.spawn(
                 request.app,
@@ -624,64 +679,23 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
                 deps.guard(
                     st.db,
                     wid,
-                    gates.auto_escalate_stuck(
-                        "needs_human",
+                    executor.run(
                         st.db,
                         st.run_dirs,
                         work_item_id=wid,
                         registry=st.registry,
-                        policy=st.policy,
-                        launch=deps.launch(st, row["repo"]),
                         bd_cwd=deps.bd_cwd(),
+                        start_index=start,
+                        policy=st.policy,
+                        steer=steer,
+                        launch=deps.launch(st, row["repo"]),
                         on_approve=deps._on_approve(st),
                     ),
                 ),
             )
         except deps.AlreadyRunning:
             raise HTTPException(409, "a walk is already running for this work item") from None
-        return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
-    if new_base:
-        worktree_head = git_read(worktree, "rev-parse", "HEAD", expected_failure=True)
-        await st.db.write(
-            lambda c: events.append(
-                c,
-                wid,
-                "worktree_rebase_verified",
-                {"reported_head": new_base, "worktree_head": worktree_head},
-            )
-        )
-        await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
-    await st.db.write(lambda c: store.resume_work_item(c, wid, steer))
-
-    # `store.node_index`, never `chain["nodes"]`: this runs *after*
-    # `resume_work_item` has already claimed the row, so a raise here leaves the
-    # item `active` with no walk behind it. `default=0` because an item that
-    # never reached a node resumes at the start of its chain.
-    start = store.node_index(row, row["current_node_id"], default=0)
-    try:
-        deps.spawn(
-            request.app,
-            wid,
-            deps.guard(
-                st.db,
-                wid,
-                executor.run(
-                    st.db,
-                    st.run_dirs,
-                    work_item_id=wid,
-                    registry=st.registry,
-                    bd_cwd=deps.bd_cwd(),
-                    start_index=start,
-                    policy=st.policy,
-                    steer=steer,
-                    launch=deps.launch(st, row["repo"]),
-                    on_approve=deps._on_approve(st),
-                ),
-            ),
-        )
-    except deps.AlreadyRunning:
-        raise HTTPException(409, "a walk is already running for this work item") from None
-    return {"id": wid, "node_id": row["current_node_id"], "steer": steer}
+        return {"id": wid, "node_id": row["current_node_id"], "steer": steer}
 
 
 @api_router.post("/work-items/{wid}/open-worktree")
@@ -869,21 +883,78 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                 409, f"all {limit} slots are busy; pause something or raise max_concurrent"
             )
         raise HTTPException(409, "work item is not stopped")
+    # Everything from here to the hand-off is bracketed (Ruling: the
+    # claim-then-return class). The claim above has made this item read
+    # `active`, which means "a walk is behind this"; any exit from here that
+    # neither spawns one nor leaves a status a selector re-picks would leave it
+    # claimed and unowned. `stops.claimed_or_stopped` performs that stop once,
+    # for every exit including the ones no static sweep can enumerate.
+    async with stops.claimed_or_stopped(
+        st.db,
+        wid,
+        node_id,
+        reason="retry claimed this item but could not start a walk",
+        handed_off=lambda: deps.task_is_live(request.app, wid),
+    ):
+        worktree = st.run_dirs.worktrees / wid
+        try:
+            new_base = await builtins_mod.refresh_worktree_base(
+                worktree, Path(row["repo"]), store.branch_for(row)
+            )
+        except builtins_mod.RebaseConflict as exc:
+            # `/retry` never persists `steer` ahead of the rebase the way
+            # `/resume` does -- the helper is the first thing to write it.
+            return _spawn_conflict_resolution(
+                st, request, wid, row, node_id, store.chain_view(row), steer, exc
+            )
+        except RuntimeError as exc:
+            reason = str(exc)
+            await st.db.write(lambda c: store.mark_needs_human(c, wid, node_id, reason))
+            try:
+                deps.spawn(
+                    request.app,
+                    wid,
+                    deps.guard(
+                        st.db,
+                        wid,
+                        gates.auto_escalate_stuck(
+                            "needs_human",
+                            st.db,
+                            st.run_dirs,
+                            work_item_id=wid,
+                            registry=st.registry,
+                            policy=st.policy,
+                            launch=deps.launch(st, row["repo"]),
+                            bd_cwd=deps.bd_cwd(),
+                            on_approve=deps._on_approve(st),
+                        ),
+                    ),
+                )
+            except deps.AlreadyRunning:
+                raise HTTPException(409, "a walk is already running for this work item") from None
+            return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+        if new_base:
+            worktree_head = git_read(worktree, "rev-parse", "HEAD", expected_failure=True)
+            await st.db.write(
+                lambda c: events.append(
+                    c,
+                    wid,
+                    "worktree_rebase_verified",
+                    {"reported_head": new_base, "worktree_head": worktree_head},
+                )
+            )
+            await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
 
-    worktree = st.run_dirs.worktrees / wid
-    try:
-        new_base = await builtins_mod.refresh_worktree_base(
-            worktree, Path(row["repo"]), store.branch_for(row)
+        await st.db.write(
+            lambda c: store.retry_after_cap(
+                c, wid, node_id, key, steer, gate_key=gate_key, seeded=seeded
+            )
         )
-    except builtins_mod.RebaseConflict as exc:
-        # `/retry` never persists `steer` ahead of the rebase the way
-        # `/resume` does -- the helper is the first thing to write it.
-        return _spawn_conflict_resolution(
-            st, request, wid, row, node_id, store.chain_view(row), steer, exc
-        )
-    except RuntimeError as exc:
-        reason = str(exc)
-        await st.db.write(lambda c: store.mark_needs_human(c, wid, node_id, reason))
+        # Same reason as `resume`'s: `retry_after_cap` above has already written the
+        # row, so this must not raise. `node` was resolved off the V1 nodes at the
+        # top of this handler, so a missing index here means the two disagree --
+        # 0 restarts the chain rather than stranding it claimed.
+        start = store.node_index(row, node_id, default=0)
         try:
             deps.spawn(
                 request.app,
@@ -891,69 +962,24 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                 deps.guard(
                     st.db,
                     wid,
-                    gates.auto_escalate_stuck(
-                        "needs_human",
+                    executor.run(
                         st.db,
                         st.run_dirs,
                         work_item_id=wid,
                         registry=st.registry,
-                        policy=st.policy,
-                        launch=deps.launch(st, row["repo"]),
                         bd_cwd=deps.bd_cwd(),
+                        start_index=start,
+                        policy=st.policy,
+                        steer=steer,
+                        steer_source="seeded" if seeded else "human",
+                        launch=deps.launch(st, row["repo"]),
                         on_approve=deps._on_approve(st),
                     ),
                 ),
             )
         except deps.AlreadyRunning:
             raise HTTPException(409, "a walk is already running for this work item") from None
-        return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
-    if new_base:
-        worktree_head = git_read(worktree, "rev-parse", "HEAD", expected_failure=True)
-        await st.db.write(
-            lambda c: events.append(
-                c,
-                wid,
-                "worktree_rebase_verified",
-                {"reported_head": new_base, "worktree_head": worktree_head},
-            )
-        )
-        await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
-
-    await st.db.write(
-        lambda c: store.retry_after_cap(
-            c, wid, node_id, key, steer, gate_key=gate_key, seeded=seeded
-        )
-    )
-    # Same reason as `resume`'s: `retry_after_cap` above has already written the
-    # row, so this must not raise. `node` was resolved off the V1 nodes at the
-    # top of this handler, so a missing index here means the two disagree --
-    # 0 restarts the chain rather than stranding it claimed.
-    start = store.node_index(row, node_id, default=0)
-    try:
-        deps.spawn(
-            request.app,
-            wid,
-            deps.guard(
-                st.db,
-                wid,
-                executor.run(
-                    st.db,
-                    st.run_dirs,
-                    work_item_id=wid,
-                    registry=st.registry,
-                    bd_cwd=deps.bd_cwd(),
-                    start_index=start,
-                    policy=st.policy,
-                    steer=steer,
-                    steer_source="seeded" if seeded else "human",
-                    launch=deps.launch(st, row["repo"]),
-                    on_approve=deps._on_approve(st),
-                ),
-            ),
-        )
-    except deps.AlreadyRunning:
-        raise HTTPException(409, "a walk is already running for this work item") from None
-    return {"id": wid, "node_id": node_id, "loop": key, "steer": steer}
+        return {"id": wid, "node_id": node_id, "loop": key, "steer": steer}
 
 
 class RaiseBudget(BaseModel):
@@ -1061,40 +1087,52 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
         )
         if not claimed:
             raise HTTPException(409, "work item status changed; try again")
-
-        note = (body.note or "").strip() or None
-        session_ids = [s["id"] for s in sessions]
-        # mark first, then signal: same race pause_work_item guards against —
-        # a SIGTERM landing before the row says 'paused' resolves as 'failed'.
-        await st.db.write(
-            lambda c: store.skip_node(c, wid, node_id, gate, note, session_ids=session_ids)
-        )
-        for s in sessions:
-            _terminate(s["pid"])
-
-        try:
-            deps.spawn(
-                request.app,
-                wid,
-                deps.guard(
-                    st.db,
-                    wid,
-                    executor.run(
-                        st.db,
-                        st.run_dirs,
-                        work_item_id=wid,
-                        registry=st.registry,
-                        bd_cwd=deps.bd_cwd(),
-                        start_index=node_index + 1,
-                        policy=st.policy,
-                        launch=deps.launch(st, row["repo"]),
-                        on_approve=deps._on_approve(st),
-                    ),
-                ),
+        # Everything from here to the hand-off is bracketed (Ruling: the
+        # claim-then-return class). The claim above has made this item read
+        # `active`, which means "a walk is behind this"; any exit from here that
+        # neither spawns one nor leaves a status a selector re-picks would leave it
+        # claimed and unowned. `stops.claimed_or_stopped` performs that stop once,
+        # for every exit including the ones no static sweep can enumerate.
+        async with stops.claimed_or_stopped(
+            st.db,
+            wid,
+            node_id,
+            reason="skip could not start a walk for the node after the skipped one",
+            handed_off=lambda: deps.task_is_live(request.app, wid),
+        ):
+            note = (body.note or "").strip() or None
+            session_ids = [s["id"] for s in sessions]
+            # mark first, then signal: same race pause_work_item guards against —
+            # a SIGTERM landing before the row says 'paused' resolves as 'failed'.
+            await st.db.write(
+                lambda c: store.skip_node(c, wid, node_id, gate, note, session_ids=session_ids)
             )
-        except deps.AlreadyRunning:
-            raise HTTPException(409, "a walk is already running for this work item") from None
-        return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+            for s in sessions:
+                _terminate(s["pid"])
+
+            try:
+                deps.spawn(
+                    request.app,
+                    wid,
+                    deps.guard(
+                        st.db,
+                        wid,
+                        executor.run(
+                            st.db,
+                            st.run_dirs,
+                            work_item_id=wid,
+                            registry=st.registry,
+                            bd_cwd=deps.bd_cwd(),
+                            start_index=node_index + 1,
+                            policy=st.policy,
+                            launch=deps.launch(st, row["repo"]),
+                            on_approve=deps._on_approve(st),
+                        ),
+                    ),
+                )
+            except deps.AlreadyRunning:
+                raise HTTPException(409, "a walk is already running for this work item") from None
+            return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
 
 
 @api_router.post("/work-items/{wid}/escalate")

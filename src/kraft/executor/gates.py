@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +14,8 @@ from kraft.executor.context import LaunchContext, OnApprove
 from kraft.store import _now as _now
 from kraft.templates import Registry
 from kraft.templates.models import ExecNode, GateNode, ResolvedNode
+
+logger = logging.getLogger(__name__)
 
 
 def pending_gate(db, work_item_id: str, evts: list | None = None) -> str | None:
@@ -917,40 +920,68 @@ async def resume_after_escalation(
             )
         )
         return status
-    worktree = run_dirs.worktrees / work_item_id
-    try:
-        new_base = await _builtins.refresh_worktree_base(
-            worktree, Path(row["repo"]), store.branch_for(row)
-        )
-    except RuntimeError as exc:
-        reason = str(exc)
-        await db.write(lambda c: store.mark_needs_human(c, work_item_id, node_id, reason))
-        return status_of(db, work_item_id)
-    if new_base:
-        await db.write(lambda c: store.set_base_ref(c, work_item_id, new_base))
-    await db.write(
-        lambda c: store.retry_after_cap(
-            c,
-            work_item_id,
-            node_id,
-            key,
-            steer,
-            gate_key=gate_key,
-            escalated=True,
-            seeded=seeded,
-        )
-    )
-    start = next(i for i, n in enumerate(walk.chain_of(row).chain.nodes) if n.id == node_id)
-    return await walk.run(
+    # Bracketed for the claim-then-return class: `claim_for_run` above has made
+    # this item read `active`. No `handed_off` callback -- this site awaits its
+    # walk inline rather than registering a task, so by the time the bracket's
+    # `finally` runs a successful walk has already set its own terminal status
+    # and the bracket's `active` test is false. `walk.chain_of` raises
+    # `LookupError` on a legacy row and `store.node_index` answers `None` for a
+    # node this chain does not have; both used to leave the item claimed.
+    async with stops.claimed_or_stopped(
         db,
-        run_dirs,
-        work_item_id=work_item_id,
-        registry=registry,
-        bd_cwd=bd_cwd,
-        start_index=start,
-        policy=policy,
-        steer=steer,
-        steer_source="seeded" if seeded else "human",
-        launch=launch,
-        on_approve=on_approve,
-    )
+        work_item_id,
+        node_id,
+        reason="the escalation retry claimed this item but could not start a walk",
+    ):
+        worktree = run_dirs.worktrees / work_item_id
+        try:
+            new_base = await _builtins.refresh_worktree_base(
+                worktree, Path(row["repo"]), store.branch_for(row)
+            )
+        except RuntimeError as exc:
+            reason = str(exc)
+            await db.write(lambda c: store.mark_needs_human(c, work_item_id, node_id, reason))
+            return status_of(db, work_item_id)
+        if new_base:
+            await db.write(lambda c: store.set_base_ref(c, work_item_id, new_base))
+        await db.write(
+            lambda c: store.retry_after_cap(
+                c,
+                work_item_id,
+                node_id,
+                key,
+                steer,
+                gate_key=gate_key,
+                escalated=True,
+                seeded=seeded,
+            )
+        )
+        # `store.node_index`, not `next(i for i, n in enumerate(walk.chain_of(
+        # row).chain.nodes) ...)`: that raised `LookupError` for a legacy row and
+        # `StopIteration` for an unknown node, both *after* `retry_after_cap`.
+        start = store.node_index(row, node_id)
+        if start is None:
+            # No `return` here: the status this function reports has to be read
+            # *after* the bracket has performed its stop, or the caller is told
+            # `active` about an item that is about to be `needs_human`. Falls
+            # through to the read below the `async with`.
+            logger.warning(
+                "escalation retry: %s has no node %r in its chain, not relaunching",
+                work_item_id,
+                node_id,
+            )
+        else:
+            return await walk.run(
+                db,
+                run_dirs,
+                work_item_id=work_item_id,
+                registry=registry,
+                bd_cwd=bd_cwd,
+                start_index=start,
+                policy=policy,
+                steer=steer,
+                steer_source="seeded" if seeded else "human",
+                launch=launch,
+                on_approve=on_approve,
+            )
+    return status_of(db, work_item_id)

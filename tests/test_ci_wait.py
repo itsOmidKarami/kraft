@@ -236,3 +236,44 @@ def test_a_v1_item_is_re_entered_rather_than_stranded_waiting(tmp_path, monkeypa
 
     _run(lambda: _stub(tmp_path), body)
     assert spawned, "the poller found no node index and left the item waiting"
+
+
+def test_a_node_the_chain_does_not_have_stops_the_item_rather_than_wedging_it(tmp_path):
+    """N1. `mark_reentered` has already flipped the row to `active` by the time
+    the start index is read, and `tick`'s own SELECT filters
+    `status = 'waiting'` -- so a return that leaves it `active` means no later
+    tick will ever select this row again. Permanently wedged, looking live, with
+    one log line to show for it.
+
+    The stop is the bracket's (`stops.claimed_or_stopped`), not this branch's, so
+    the same guarantee covers the exits no static sweep can enumerate.
+    """
+    from support.harness import v1_chain, v1_item
+
+    repo = make_repo(tmp_path)
+    chain = v1_chain(
+        [
+            {
+                "id": "mr_checks",
+                "kind": "exec",
+                "tasks": [{"id": "poll", "kind": "subprocess", "command": "true"}],
+            }
+        ],
+        repo=repo,
+    )
+
+    async def body(app):
+        await v1_item(app.state.db, chain, repo=str(repo), wid="w1")
+        # A current node this chain does not have -- the state a template switch
+        # or a legacy row leaves behind, and the case the `start is None` branch
+        # was written for.
+        await app.state.db.write(lambda c: store.enter_node(c, "w1", "gone_from_the_chain"))
+        await app.state.db.write(
+            lambda c: store.mark_waiting(
+                c, "w1", "gone_from_the_chain", "2000-01-01T00:00:00+00:00"
+            )
+        )
+        assert await ci_wait.tick(app) == []
+        return _status(app)
+
+    assert _run(lambda: _stub(tmp_path), body) == "needs_human"
