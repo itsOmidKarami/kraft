@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sqlite3
 from pathlib import Path
@@ -302,7 +303,9 @@ def test_one_unparseable_chain_file_degrades_the_instance_instead_of_lying(tmp_p
     with _client(tmp_path, monkeypatch, templates_dir) as client:
         health = client.get("/api/health").json()
         assert health["status"] == "degraded"
-        assert "broken.yaml" in health["invalid_templates"].get("library", "")
+        # Keyed `library.yaml`, not `library`: `st.templates.invalid` is keyed by
+        # template name, and a chain template called `library` would collide.
+        assert "broken.yaml" in health["invalid_templates"].get("library.yaml", "")
 
         r = client.post(
             "/api/work-items",
@@ -312,3 +315,74 @@ def test_one_unparseable_chain_file_degrades_the_instance_instead_of_lying(tmp_p
         assert "broken.yaml" in r.json()["detail"]
         # And not the misleading answer: the chain id it named is a real one.
         assert "unknown or invalid template" not in r.json()["detail"]
+
+
+def test_every_door_names_the_broken_file_rather_than_the_chain_id(tmp_path, monkeypatch, caplog):
+    """N4. Two of four doors named the file; the other two said "unknown chain
+    template", which sends the operator to look at a chain id that is fine.
+
+    `PATCH` 404'd *before* reaching the 503, because its `chain_ids` membership
+    check ran first -- and with no library there is nothing to be a member of,
+    so every id was "unknown". The two background doors (auto-intake, cron
+    triggers) logged the same misleading line.
+    """
+    from types import SimpleNamespace
+
+    from kraft import intake as intake_mod
+    from kraft import triggers as triggers_mod
+
+    templates_dir = fake_templates_dir(tmp_path, "claude")
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch, templates_dir) as client:
+        # An item filed while the library was still readable -- the state a
+        # PATCH arrives in after an operator hand-edits a chain file badly.
+        wid = client.post(
+            "/api/work-items",
+            json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
+        ).json()["id"]
+
+        # Now the library does not parse.
+        client.app.state.library = None
+        client.app.state.invalid_library = ["chains/broken.yaml: cannot read/parse"]
+
+        # The create door.
+        created = client.post(
+            "/api/work-items",
+            json={"title": "t", "repo": str(repo), "chain_template": "default"},
+        )
+        assert created.status_code == 503 and "broken.yaml" in created.json()["detail"]
+
+        # The PATCH door: it used to 404 "unknown chain template 'default'",
+        # because the `chain_ids` membership check ran before the 503 and with no
+        # library there is nothing to be a member of.
+        r = client.patch(f"/api/work-items/{wid}", json={"chain_template": "default"})
+        assert r.status_code == 503, r.text
+        assert "broken.yaml" in r.json()["detail"]
+
+        # An unknown *work item* is still a 404, ahead of everything.
+        assert (
+            client.patch("/api/work-items/nope", json={"chain_template": "default"}).status_code
+            == 404
+        )
+
+    # The two background doors: a bare state is enough, because both guards run
+    # before either touches the database.
+    state = SimpleNamespace(
+        library=None,
+        invalid_library=["chains/broken.yaml: cannot read/parse: while parsing a flow sequence"],
+        policy=SimpleNamespace(triggers=[SimpleNamespace(cron="* * * * *", chain="default")]),
+        trigger_last_fired={},
+    )
+    app = SimpleNamespace(state=state)
+    with caplog.at_level("WARNING"):
+        assert asyncio.run(intake_mod._start(app, {"path": "/r"}, {"id": "B"})) is None
+        assert asyncio.run(triggers_mod.tick(app)) == []
+    # Scoped to the two background loggers: `deps.load_library` also names the
+    # file when it first fails to read it, which is a third, correct mention.
+    named = {
+        r.name
+        for r in caplog.records
+        if "broken.yaml" in r.getMessage() and r.name in ("kraft.intake", "kraft.triggers")
+    }
+    assert named == {"kraft.intake", "kraft.triggers"}, caplog.text
+    assert not any("unknown chain template" in r.getMessage() for r in caplog.records), caplog.text

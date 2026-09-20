@@ -86,7 +86,10 @@ async def health(request: Request):
     # admin health` and `admin doctor` all show it without changing.
     library_errors = getattr(st, "invalid_library", None) or []
     if library_errors:
-        invalid = {**invalid, "library": "; ".join(library_errors)}
+        # `"library.yaml"`, not `"library"`: `st.templates.invalid` is keyed by
+        # template name, and a chain template literally called `library` would
+        # otherwise be overwritten by this entry.
+        invalid = {**invalid, "library.yaml": "; ".join(library_errors)}
     return {
         "status": "degraded" if (invalid or invalid_policy) else "ok",
         "invalid_templates": invalid,

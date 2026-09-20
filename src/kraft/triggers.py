@@ -44,6 +44,16 @@ async def tick(app, *, now: datetime | None = None) -> list[str]:
         if st.trigger_last_fired.get(index) == stamp:
             continue
         st.trigger_last_fired[index] = stamp
+        if getattr(st, "library", None) is None:
+            # Not "unknown chain template": see `intake._start`. One bad file
+            # makes every chain unresolvable, and naming the chain id sends the
+            # operator to the wrong file.
+            logger.warning(
+                "trigger %d: the template library is invalid (%s), skipped",
+                index,
+                "; ".join(getattr(st, "invalid_library", None) or ["templates/library.yaml"]),
+            )
+            continue
         chain = api_deps.resolve_chain(st, trig.chain)
         if chain is None:
             logger.warning("trigger %d: unknown chain template %r, skipped", index, trig.chain)

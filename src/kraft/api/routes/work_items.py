@@ -297,7 +297,11 @@ async def create_work_item(body: NewWorkItem, request: Request):
             "id": wid,
             "bead_id": row["bead_id"],
             "status": row["status"],
-            "chain_definition": json.loads(row["chain_definition"] or "{}"),
+            # `store.chain_view`, like both GET doors: this returned `{}` for a
+            # V1 item, so `kraft item create --json` printed a chain with no
+            # nodes and this door contradicted the "one shape at every door"
+            # rationale of the fix that changed the other two.
+            "chain_definition": store.chain_view(row),
             "materialized_chain": row["materialized_chain"],
             # the run task advances this asynchronously; before its first write the
             # chain still starts at node 0 by definition.
@@ -464,7 +468,13 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
 
     new_materialized = None
     if body.chain_template is not None:
-        if st.library is None or body.chain_template not in st.library.chain_ids:
+        # `st.library is None` first, through the shared door: a 404 "unknown
+        # chain template 'default'" for a library that did not parse tells the
+        # operator their chain id is wrong, which is the one misleading answer
+        # the 503 was written to replace. The membership check answers 404 only
+        # once there *is* a library to be absent from.
+        deps.library_or_503(st)
+        if body.chain_template not in st.library.chain_ids:
             raise HTTPException(404, f"unknown chain template {body.chain_template!r}")
         if row["current_node_id"] is not None:
             raise HTTPException(

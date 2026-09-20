@@ -215,6 +215,22 @@ def load_library(templates_dir: Path) -> tuple[TemplateLibrary | None, list[str]
         return None, [str(exc)]
 
 
+def library_or_503(st):
+    """The V1 template library, or the 503 that names the file that broke it.
+
+    One function so every door answers the same way. `TemplateLibrary.
+    from_yaml_dir` raises on any single bad file, so one malformed
+    `chains/*.yaml` leaves *every* chain unresolvable -- and each door that
+    reports that as "unknown chain template" tells the operator their chain id
+    is wrong. Same posture as `invalid_policy`'s 503: name the file, refuse the
+    work, leave the Settings screens reachable.
+    """
+    if st.library is None:
+        detail = "; ".join(getattr(st, "invalid_library", None) or ["templates/library.yaml"])
+        raise HTTPException(503, f"template library invalid, refusing work: {detail}")
+    return st.library
+
+
 def resolve_chain(st, chain_template: str | None):
     """The resolved V1 chain `chain_template` names, or `None`.
 
@@ -246,9 +262,7 @@ def resolve_chain_or_422(st, chain_template: str | None):
     does not parse. Same posture and same shape as `invalid_policy`'s 503: name
     the file, refuse the work, and leave the Settings screens reachable.
     """
-    if st.library is None:
-        detail = "; ".join(getattr(st, "invalid_library", None) or ["templates/library.yaml"])
-        raise HTTPException(503, f"template library invalid, refusing work: {detail}")
+    library_or_503(st)
     chain = resolve_chain(st, chain_template)
     if chain is None:
         raise HTTPException(422, "unknown or invalid template")

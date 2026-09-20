@@ -712,16 +712,21 @@ def test_a_v1_item_lists_and_renders_its_chain_nodes(tmp_path, monkeypatch):
     detail route project the frozen snapshot into the same envelope instead, so
     the board is *correct* for a V1 item and not merely non-crashing.
 
-    A V1 gate carries `kind: "gate"` rather than a faked `gate_after`: the gate
-    is a node of its own (`gate-is-an-ordered-node`), and the stage bar has to
-    be able to tell one apart without that field lying.
+    A V1 gate node reports **itself** under `gate_after`, and carries
+    `kind: "gate"` beside it. Eleven SPA consumers ask one of three questions of
+    `gate_after` -- is this a gate, what is it called, which node owns gate X --
+    and for a gate node the answer to all three is its own id: a V1 gate is
+    where its own document lives. Leaving the field null answered all three with
+    "this chain has no gates", which is why `ItemCard.gateNodeId` returned null
+    for every V1 item and the gate's document door disappeared.
     """
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
+        created = client.post(
             "/api/work-items",
             json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
-        ).json()["id"]
+        ).json()
+        wid = created["id"]
 
         listed = next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
         detail = client.get(f"/api/work-items/{wid}").json()
@@ -733,5 +738,35 @@ def test_a_v1_item_lists_and_renders_its_chain_nodes(tmp_path, monkeypatch):
             # A gate declares no execution shape; an exec node's tasks are
             # canonical paths, which is what V1 has instead of hook names.
             assert nodes[0]["tasks"] == ["spec.main.author"] and nodes[1]["tasks"] == []
-            assert nodes[1]["gate_after"] is None
+            assert nodes[0]["gate_after"] is None, "an exec node is not a gate"
+            assert nodes[1]["gate_after"] == "spec_approval"
+            assert nodes[1]["reject_to"] == "spec"
+            # `gateNodeId`'s question -- "which node owns gate `spec_approval`"
+            # -- resolves, which is the door to the gate's document.
+            assert [n["id"] for n in nodes if n["gate_after"] == "spec_approval"] == [
+                "spec_approval"
+            ]
+            # The fields the Config tab renders, where a blank reads as
+            # "not configured": the fix-loop *cap key*, and whether the gate
+            # declares a reviewing task.
+            impl = next(n for n in nodes if n["id"] == "implementation")
+            assert impl["fix_loop"] == "implementation.fix_loop"
+            assert impl["steps"] == [
+                ["implementation.implementation.implement"],
+                ["implementation.verification.test_changed_scopes"],
+            ]
+            assert nodes[1]["auto_escalate"] is False
             assert payload["chain_definition"]["template_id"] == "default"
+
+        # And the third door: `POST /work-items`' own 201 body, which only
+        # carries a chain on the autostart branch. It shipped the raw column, so
+        # `kraft item create --json` printed a chain with no nodes.
+        started = client.post(
+            "/api/work-items",
+            json={"title": "t2", "repo": str(repo), "chain_template": "default"},
+        ).json()
+        assert [n["id"] for n in started["chain_definition"]["nodes"][:2]] == [
+            "spec",
+            "spec_approval",
+        ]
+        assert started["current_node_id"] == "spec"

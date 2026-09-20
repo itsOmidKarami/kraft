@@ -113,6 +113,15 @@ async def _start(app, repo: dict, row: dict) -> str | None:
     from kraft.api import deps
 
     st = app.state
+    if st.library is None:
+        # Distinguished from "no such chain": a library that did not parse makes
+        # every chain unresolvable, and logging the chain id here is the same
+        # misleading answer the API's 503 replaced.
+        logger.warning(
+            "auto-intake: the template library is invalid (%s), skipping",
+            "; ".join(getattr(st, "invalid_library", None) or ["templates/library.yaml"]),
+        )
+        return None
     chain = deps.resolve_chain(st, repo.get("default_chain_template") or "default")
     if chain is None:
         logger.warning("auto-intake: %s has no valid chain template, skipping", repo["path"])

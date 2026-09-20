@@ -226,33 +226,65 @@ def chain_view(row) -> dict:
     instead, so the board is *correct* for a V1 item rather than merely not
     crashing.
 
-    `kind` is carried through for a V1 node: a V1 gate is a node of its own,
-    not a `gate_after` string on the node in front of it, and the stage bar has
-    to be able to tell them apart without that field being faked
-    (`gate-is-an-ordered-node`).
+    **A V1 gate node reports itself under `gate_after`, and that is deliberate.**
+    Eleven SPA consumers ask one of three questions of that field -- "is this
+    node a gate" (`StageGraph`, `Phone`, `MiniChain`, the gate counts), "what is
+    this gate called" (`NotStarted`'s first-gate line, `Inspector/Config`), and
+    "which node owns gate X" (`ItemCard.gateNodeId`, `ChainReviewDiff`'s
+    `tailStart`, `PolicyPage`'s reject-loop detection). Leaving it null answered
+    all three with "this chain has no gates", which is worse than the blank
+    board it replaced: `gateNodeId` returned `None` for every V1 item, so the
+    gate's document door disappeared.
+
+    Teaching eleven consumers a second rule is the mistake this whole class is
+    about, and it is not needed: for a gate node the answer to all three
+    questions *is* its own id. A V1 gate is where its own document lives
+    (`gates.gate_artifact` reads the gate's own `artifact`), so "which node owns
+    gate `spec_approval`" is `spec_approval`. `kind` carries the structural fact
+    beside it for a reader that needs to know a gate is a node rather than a
+    flag on one (`gate-is-an-ordered-node`), and `MiniChain` uses it.
+
+    The rest of the projection exists because the Config tab renders these
+    fields and blanks read as "not configured": `fix_loop` is the *cap key*
+    (`walk._loop_key`, `<node>.fix_loop`) rather than an authored loop name,
+    which is what `PolicyPage` matches against `policy.yaml`'s `loops:`, and
+    `auto_escalate` is whether the gate declares an `auto_review` task, which is
+    what `Inspector/Config`'s toggle enables itself on.
     """
     v1 = materialized_chain_of(row)
     if v1 is None:
         raw = row["chain_definition"] if "chain_definition" in row.keys() else None
         legacy = json.loads(raw) if raw else {}
         return {**legacy, "nodes": legacy.get("nodes") or []}
+    return {"template_id": v1.chain.id, "nodes": [_node_view(n) for n in v1.chain.nodes]}
+
+
+def _node_view(node) -> dict:
+    """One resolved V1 node in the shape the SPA's `ChainNode` speaks. See
+    `chain_view` for why a gate reports itself under `gate_after`."""
+    from kraft.templates.models import GateNode
+
+    gate = node.node if isinstance(node.node, GateNode) else None
+    # The node's *own* steps, not `node.tasks()`: the legacy `tasks`/`steps`
+    # pair is what the node runs, and `tasks()` also yields the recovery pass,
+    # the fix loop, the judge and a gate's reviewer -- which the Config tab
+    # would then render as though they were ordinary work.
+    steps = [[task.path for task in step.tasks] for step in node.steps]
     return {
-        "template_id": v1.chain.id,
-        "nodes": [
-            {
-                "id": node.id,
-                "kind": node.node.kind.value,
-                # Canonical task paths, which is what a V1 node has instead of
-                # a list of hook-point names. Empty on a gate, which declares
-                # no execution shape at all.
-                "tasks": [task.path for task in node.tasks()],
-                # A V1 gate has no `gate_after`; `kind` above is how it is
-                # recognised. Present and null so the field's own type still
-                # holds for every node in the list.
-                "gate_after": None,
-            }
-            for node in v1.chain.nodes
-        ],
+        "id": node.id,
+        "kind": node.node.kind.value,
+        # Canonical task paths, which is what a V1 node has instead of a list of
+        # hook-point names. Empty on a gate, which declares no execution shape.
+        "tasks": [path for group in steps for path in group],
+        "steps": steps or None,
+        "gate_after": node.id if gate is not None else None,
+        "reject_to": gate.reject_to if gate is not None else None,
+        # The cap key `policy.yaml`'s `loops:` would name, not an authored loop
+        # name -- V1 has none. Mirrors `walk._loop_key`; duplicated rather than
+        # imported because `kraft.store` must not import the executor.
+        "fix_loop": f"{node.id}.fix_loop" if node.fix_loop else None,
+        "auto_escalate": node.auto_review is not None if gate is not None else None,
+        "on_failure": [task.path for step in node.on_failure for task in step.tasks] or None,
     }
 
 
