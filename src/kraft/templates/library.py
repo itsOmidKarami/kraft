@@ -253,8 +253,13 @@ class TemplateLibrary:
             raise TemplateLibraryError(resolution.explain(exc)) from exc
         resolved = ResolvedChain.from_chain(chain)
         for node in resolved.nodes:
-            # A node whose own tasks *some* of which declare `produces` cannot
-            # be trimmed unambiguously when an attachment of that kind arrives:
+            # A node whose own tasks do not agree on what the node produces
+            # cannot be trimmed unambiguously when an attachment arrives. Two
+            # shapes, one rule: some tasks declaring `produces` and some not, and
+            # two tasks declaring *different* kinds. `> 1` covers both; the
+            # earlier `> 1 and None in produces` missed `{spec, plan}`, where an
+            # attached spec leaves the node -- and so the plan half of it -- in
+            # place, which is the same ambiguity from the other side:
             # the node-level rule
             # (`MaterializedChain`'s `trim_for_attachments`) would keep it and
             # re-author the attached document, and dropping the one producing
@@ -262,11 +267,11 @@ class TemplateLibrary:
             # so an emptied step is invalid. Refused here, at load, which is
             # what makes the trim a clean node-level decision (Ruling 35).
             produces = node.produces()
-            if len(produces) > 1 and None in produces:
+            if len(produces) > 1:
                 raise TemplateLibraryError(
-                    f"{resolution.at(node.id)}: node {node.id!r} mixes tasks that declare "
-                    f"'produces' with tasks that do not ({sorted(k for k in produces if k)}); "
-                    f"a node either wholly produces a kind or declares none"
+                    f"{resolution.at(node.id)}: node {node.id!r} does not agree on what it "
+                    f"produces ({sorted(k or '(none)' for k in produces)}); a node either "
+                    f"wholly produces one kind or declares none"
                 )
             for task in node.tasks():
                 for name in task.task.steering:

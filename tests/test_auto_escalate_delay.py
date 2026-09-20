@@ -378,3 +378,85 @@ def test_tick_skips_a_row_that_is_not_armed_for_auto_escalation(tmp_path, monkey
         assert await auto_escalate_delay.tick(app) == []
 
     _run(build, body)
+
+
+def test_a_legacy_row_does_not_abort_the_tick_for_every_other_row(tmp_path, monkeypatch):
+    """A legacy row with a pending gate and a delay > 0 makes `auto_check_due`
+    walk the V1 chain, and `walk.chain_of` raises `LookupError` for a row the
+    legacy intake path wrote. Uncaught, that aborted the whole scan -- every
+    `_INTERVAL_S`, forever -- and starved every other due row behind it.
+
+    Two rows: the legacy one and a V1 one that is genuinely due. The V1 row must
+    be dispatched whichever order `ORDER BY RANDOM()` hands them over, so the
+    legacy row is deliberately the first one seeded.
+    """
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    repo = make_repo(tmp_path)
+    pol = policy.Policy(loops={}, default=policy.Cap(3, 3600), auto_escalate_delay_s=0)
+    # Off the clock, the same seam the sibling delay tests use.
+    monkeypatch.setattr("kraft.executor.gates._seconds_since", lambda evts, pred: 10_000.0)
+    calls = []
+
+    async def fake_dispatch(database, run_dirs, *, work_item_id, message, launch, auto, evts=None):
+        calls.append(work_item_id)
+        return "done"
+
+    monkeypatch.setattr("kraft.executor.gates.escalate.dispatch", fake_dispatch)
+
+    def build():
+        return _stub(tmp_path, policy_obj=pol)
+
+    async def body(app):
+        # A legacy row: `chain_definition` only, and a per-node delay so it gets
+        # past `tick`'s own zero-delay filter and reaches `auto_check_due`.
+        await _seed_awaiting_gate(app, str(repo), wid="legacy")
+        await app.state.db.write(
+            lambda c: store.set_node_overrides(c, "legacy", {"a": {"auto_escalate_delay_s": 1}})
+        )
+        # A V1 row that is due: stopped, armed, past a delay of 1s.
+        await app.state.db.write(
+            lambda c: store.create_work_item(
+                c,
+                id="v1",
+                bead_id=None,
+                title="t",
+                repo=str(repo),
+                chain_template="t",
+                chain_definition="{}",
+                materialized_chain=_v1_stuck_chain(repo).to_json(),
+            )
+        )
+        await app.state.db.write(lambda c: store.enter_node(c, "v1", "implementation"))
+        await app.state.db.write(
+            lambda c: store.set_node_overrides(
+                c, "v1", {"implementation": {"auto_escalate_delay_s": 1}}
+            )
+        )
+        await app.state.db.write(
+            lambda c: store.mark_needs_human(c, "v1", "implementation", "verify failed")
+        )
+        attempted = await auto_escalate_delay.tick(app)
+
+        await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)
+        # The legacy row is skipped, not raised on, and the V1 row still gets its
+        # turn. Without the per-row guard `tick` raises out of the loop and
+        # `attempted` is never returned at all.
+        assert attempted == ["v1"]
+        assert calls == ["v1"]
+
+    _run(build, body)
+
+
+def _v1_stuck_chain(repo):
+    from support.harness import v1_chain
+
+    return v1_chain(
+        [
+            {
+                "id": "implementation",
+                "kind": "exec",
+                "tasks": [{"id": "run", "kind": "subprocess", "command": "true"}],
+            }
+        ],
+        repo=repo,
+    )

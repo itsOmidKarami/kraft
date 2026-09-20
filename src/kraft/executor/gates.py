@@ -39,6 +39,22 @@ def pending_gate(db, work_item_id: str, evts: list | None = None) -> str | None:
     return None
 
 
+def reject_loop_key(gate: str) -> str:
+    """The `retry_counters` key a gate's reject loop counts under.
+
+    One spelling, two writers. `apply_rejection` bumps it and
+    `api/routes/lifecycle.py`'s retry clears it, and they had the f-string each
+    -- `f"{gate}_reject_loop"` here and `f"{node.id}_reject_loop"` there. Those
+    agree only because a V1 gate's node id *is* its gate name, which is true today
+    and is exactly the kind of coincidence that stops being true quietly: a retry
+    that cleared a key nothing bumped leaves the gate re-opening onto a spent
+    counter, and every rejection after that is refused forever (Kraft-ko7j §A4).
+    `store.retry_after_cap`'s docstring names this function rather than a third
+    spelling of the same format string.
+    """
+    return f"{gate}_reject_loop"
+
+
 def gate_node_index(nodes: Sequence[ResolvedNode], gate: str) -> int:
     """Where `gate` sits in the chain's ordered nodes.
 
@@ -149,7 +165,7 @@ async def apply_rejection(
     """
     gate_index = gate_node_index(nodes, gate)
     target = reject_target(nodes, gate_index, node)
-    key = f"{gate}_reject_loop"
+    key = reject_loop_key(gate)
     cap = _policy.resolve_cap(policy, key)
     count, started_at, cap = await db.write(
         lambda c, cap=cap: store.bump_counter(c, work_item_id, key, cap)
@@ -437,10 +453,18 @@ def auto_check_due(row, gate: str | None, evts: list, policy) -> bool:
 
 
 def _gate_review_attempts(evts: list, gate: str) -> int:
-    """How many review *attempts* the current `gate_requested <gate>` has had --
-    a `gate_auto_review_started`, or any `gate_auto_review_skipped` for this
-    gate regardless of `reason` (`"undecided"`, `"budget"`) -- since it was
-    requested.
+    """How many review *attempts* the current `gate_requested <gate>` has had
+    since it was requested.
+
+    An attempt is one `gate_auto_review_started`, **plus** one for every
+    `gate_auto_review_skipped` whose reason is **not** `"undecided"`. The reason
+    matters, and the excluded set is exactly that one value -- see the
+    `undecided` paragraph below, which is the whole rule. This summary used to
+    read "any skip regardless of reason", which contradicted both the paragraph
+    and the code, and a reviewer cleared a real re-dispatch loop as safe on the
+    strength of it. Anything that returns without launching therefore has to
+    write a skip with its *own* reason (`"budget"`, `"unreviewable"`), never
+    `"undecided"`, or it spends no attempt and the poller re-arms forever.
 
     `policy.auto_review_attempts` is the bound the caller compares this
     against; 1, its default, is the one-attempt-per-`gate_requested` contract
@@ -470,20 +494,41 @@ def _gate_review_attempts(evts: list, gate: str) -> int:
     {reason: undecided}`, and counting both would halve every bound above 1. A
     `{reason: budget}` skip is the other way round -- it is refused before
     anything launches, so it has no `_started` of its own and has to count for
-    itself. Hence: every `_started`, plus every `_skipped` that is not the tail
-    of one.
+    itself.
+
+    So the rule is **"every `_started`, plus every `_skipped` that is not the tail
+    of one"**, and it is implemented as exactly that: a chronological pass that
+    pairs an `undecided` skip with the `_started` it closes, and counts an
+    unpaired skip for itself. Approximating "not the tail of one" as "reason is
+    not `undecided`" is what it used to do, and that made correctness depend on
+    every early return picking a distinct reason string -- one that did not (the
+    non-agent `auto_review` guard in `gate_review.review`) left the tally at zero
+    and the delay poller re-arming the same dead gate every tick forever. The
+    structural pairing cannot be got wrong by a caller, so the reason is now
+    documentation rather than load-bearing.
     """
-    attempts = 0
+    # Chronological, not the reverse scan the boundary search wants, because
+    # pairing a skip with the `_started` before it needs the events in order.
+    since: list[dict] = []
     for e in reversed(evts):
         if e["type"] == "gate_requested" and e["payload"].get("gate") == gate:
             break
         if e["type"] in _RUN_BOUNDARY:
             break
-        if e["payload"].get("gate") != gate:
-            continue
-        if e["type"] == "gate_auto_review_started" or (
-            e["type"] == "gate_auto_review_skipped" and e["payload"].get("reason") != "undecided"
+        if e["payload"].get("gate") == gate and e["type"] in (
+            "gate_auto_review_started",
+            "gate_auto_review_skipped",
         ):
+            since.append(e)
+    attempts = 0
+    open_started = False
+    for e in reversed(since):
+        if e["type"] == "gate_auto_review_started":
+            attempts += 1
+            open_started = True
+        elif open_started:
+            open_started = False  # the tail of the attempt already counted
+        else:
             attempts += 1
     return attempts
 

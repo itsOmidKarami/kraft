@@ -250,6 +250,30 @@ def effective_chain(chain_definition: dict, node_overrides: dict) -> dict:
     return {**chain_definition, "nodes": nodes}
 
 
+def _v1_node_override(row, key: str):
+    """The per-node override value for `key` on the node the item is *currently*
+    stopped on, for a **V1** row -- or None when nothing sets it.
+
+    `auto_escalate_stuck` and `auto_escalate_delay_s` are the two keys this
+    answers, and in V1 neither is a *node* field at all: `ExecNode`/`GateNode`
+    declare neither, both live in `policy.yaml`, and the only per-node layer left
+    is the override dict itself. So this reads the override and stops -- there is
+    no node value beneath it to fall through to.
+
+    That is a deliberate narrowing of the controller's "read `effective_nodes`":
+    the overlay is typed over `ResolvedNode`, and a typed node has no field named
+    `auto_escalate_stuck` for an overlay to produce. Reading the override layer
+    directly is the whole of what "the per-node value" can mean here.
+
+    Without this, both `effective_*` helpers below returned `default` for every V1
+    row -- `chain_definition` is `"{}"`, so their `"nodes" not in` guard fired
+    first -- while `PATCH /work-items/{id}` validated the override, persisted it
+    and returned 200. The policy-level value still worked; only the per-node
+    override was silently dead.
+    """
+    return node_overrides_of(row).get(row["current_node_id"], {}).get(key)
+
+
 def effective_auto_escalate_stuck(row, default: bool) -> bool:
     """Per-item node override -> chain node value -> `default` (mirrors
     `store/budget.py:effective_budget`'s "override beats node beats
@@ -277,6 +301,9 @@ def effective_auto_escalate_stuck(row, default: bool) -> bool:
     fallback, just placed where it actually has to sit -- skips the call
     that would crash instead of trying to catch its result afterwards.
     """
+    if row["materialized_chain"] if "materialized_chain" in row.keys() else None:
+        value = _v1_node_override(row, "auto_escalate_stuck")
+        return default if value is None else value
     chain_definition = json.loads(row["chain_definition"])
     if "nodes" not in chain_definition:
         return default
@@ -304,6 +331,9 @@ def effective_auto_escalate_delay_s(row, default: int) -> int:
     `effective_auto_escalate_stuck`: while an item sits `awaiting_gate` or
     `needs_human`, that is still the node the gate/stop belongs to.
     """
+    if row["materialized_chain"] if "materialized_chain" in row.keys() else None:
+        value = _v1_node_override(row, "auto_escalate_delay_s")
+        return default if value is None else value
     chain_definition = json.loads(row["chain_definition"])
     if "nodes" not in chain_definition:
         return default

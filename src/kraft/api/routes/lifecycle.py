@@ -700,7 +700,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     # is its own node, so "the gate this node has" is "this node is a gate".
     is_gate = isinstance(node.node, GateNode)
     key = None if is_gate or node.node.fix_loop is None else walk._loop_key(node)
-    gate_key = f"{node.id}_reject_loop" if is_gate else None
+    gate_key = gates.reject_loop_key(node.id) if is_gate else None
     if row["status"] != "needs_human":
         raise HTTPException(409, "work item is not stopped")
     caller_session_id = request.headers.get("x-kraft-session-id")

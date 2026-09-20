@@ -314,8 +314,15 @@ def _stub_walk(monkeypatch, calls, status="completed"):
         ("approve", 2),
         # reject -> the chain's own reject_to
         ("reject", 0),
-        # fixed -> the gate node itself, so the repair is measured, not trusted
-        ("fixed", 1),
+        # fixed -> the execution node *before* the gate, so the repair is
+        # measured and not trusted. NOT the gate node itself any more (Task 4b,
+        # Ruling 54): a V1 gate has no execution shape, so re-entering there
+        # dispatched nothing and re-requested the same gate. In this chain the
+        # preceding execution node is also what `reject_to` names, so the two
+        # verdicts coincide at 0 -- the discriminating case, where they differ,
+        # is pinned in tests/executor/test_gates.py by
+        # test_a_fixed_verdict_re_enters_the_execution_node_before_the_gate.
+        ("fixed", 0),
     ],
 )
 def test_verdict_reenters_the_walk_at_the_right_node(

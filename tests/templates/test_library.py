@@ -392,7 +392,7 @@ def test_lint_refuses_a_node_mixing_tasks_with_and_without_produces(tmp_path):
         ],
     }
     library_obj = write(tmp_path, library, chain)
-    with pytest.raises(TemplateLibraryError, match="mixes tasks that declare 'produces'"):
+    with pytest.raises(TemplateLibraryError, match="does not agree on what it produces"):
         library_obj.resolve_chain("default")
     # `lint()` is the reporting door onto the same check, and it names the file
     # and chain rather than raising at the first one.
@@ -417,3 +417,25 @@ def test_lint_allows_a_node_whose_every_task_produces_the_same_kind(tmp_path):
 def test_the_design_chain_has_no_node_mixing_produces(design):
     """The rule above would be a trap if the shipped chain broke it."""
     assert design.lint() == []
+
+
+def test_lint_refuses_a_node_whose_tasks_produce_two_different_kinds(tmp_path):
+    """The other half of the same ambiguity. A node producing both a spec and a
+    plan is not trimmed by an attached spec (the rule is "all of its tasks produce
+    this kind"), so the spec is written again -- and trimming it *would* throw the
+    plan away. `produces` has to agree across a node either way, so the rule is
+    `len(produces) > 1`, not `> 1 and None in produces`.
+    """
+    library = {"tasks": {"spec": agent_task(produces="spec"), "plan": agent_task(produces="plan")}}
+    chain = {
+        "id": "default",
+        "nodes": [
+            {
+                "id": "design",
+                "kind": "exec",
+                "tasks": [{"id": "a", "extends": "spec"}, {"id": "b", "extends": "plan"}],
+            }
+        ],
+    }
+    with pytest.raises(TemplateLibraryError, match="does not agree on what it produces"):
+        write(tmp_path, library, chain).resolve_chain("default")

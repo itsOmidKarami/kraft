@@ -5,9 +5,9 @@ description: Use when the verify node asks for a security review of a change tha
 
 # Reviewing this work item's diff for security
 
-`chain_review` added this task because the plan touches something that decides
+This task is in the chain because the work touches something that decides
 *who may do what* — authentication, session handling, tokens, secrets, or a
-permission check. You are not repeating `on.review.local.run`'s general review;
+permission check. You are not repeating the general code review beside you;
 you are reading the same diff with one question in mind, and you are allowed to
 find nothing.
 

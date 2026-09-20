@@ -403,8 +403,15 @@ def _validate_node_overrides(st, row, patch: dict[str, dict]) -> None:
     (UI v2 · 04 point 1). `patch == {}` (reset to template) 409s if the item
     has started at all -- point 2, "only allowed on unstarted nodes".
     """
-    chain = json.loads(row["chain_definition"])
-    node_ids = {n["id"] for n in chain["nodes"]}
+    # V1 reads the frozen snapshot; a legacy row still reads the column, which is
+    # Task 5's to retire along with every other `chain_definition` reader here.
+    reviewers: dict[str, object] | None = None
+    v1 = store.materialized_chain_of(row)
+    if v1 is not None:
+        node_ids = {n.id for n in v1.chain.nodes}
+        reviewers = {n.id: n.auto_review for n in v1.chain.nodes}
+    else:
+        node_ids = {n["id"] for n in json.loads(row["chain_definition"])["nodes"]}
     if not patch:
         if row["current_node_id"] is not None:
             raise HTTPException(409, "work item has already started; overrides cannot be reset")
@@ -417,6 +424,23 @@ def _validate_node_overrides(st, row, patch: dict[str, dict]) -> None:
             field_errs = validate_node_override_fields(fields)
             if field_errs:
                 raise HTTPException(422, f"node {node_id!r}: {field_errs[0]}")
+            # Said in the error, because that is what this caller reads. The
+            # override *permits or suppresses* a reviewing task the chain
+            # declares; it does not name one (`store.effective_nodes`). Accepting
+            # `auto_escalate: true` on a gate with no `auto_review` would persist
+            # a switch, return 200, and change nothing -- the shape a human reads
+            # as "I turned it on".
+            if (
+                reviewers is not None
+                and fields.get("auto_escalate") is True
+                and reviewers.get(node_id) is None
+            ):
+                raise HTTPException(
+                    422,
+                    f"node {node_id!r} declares no 'auto_review' task, so agent gate review "
+                    f"cannot be switched on for it: an override permits or suppresses the "
+                    f"reviewer its chain declares, it cannot supply one",
+                )
             if store.node_started(c, row["id"], node_id):
                 raise HTTPException(409, f"node {node_id!r} has started; its config is locked")
 

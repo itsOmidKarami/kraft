@@ -3,6 +3,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 from support.harness import make_repo, v1_chain, v1_item, v1_walk
 
 from kraft import db, events, executor, store
@@ -1880,13 +1881,25 @@ def test_a_resume_at_an_approved_gate_continues_past_it(tmp_path):
                     "ORDER BY created_at"
                 ).fetchall()
             )
-            return status, [s["hook_point"] for s in sessions]
+            evts = database.read(lambda c: events.read_after(c, 0, "w1"))
+            gate_starts = sum(
+                1
+                for e in evts
+                if e["type"] == "node_started" and e["payload"]["node_id"] == "spec_approval"
+            )
+            return status, [s["hook_point"] for s in sessions], gate_starts
         finally:
             await database.close()
 
-    status, hooks = asyncio.run(scenario())
+    status, hooks, gate_starts = asyncio.run(scenario())
     assert status == "completed"
     assert hooks == ["spec.main.write", "implementation.main.build"]
+    # `resume_once` advances *past* the cleared gate before it reconciles, so the
+    # gate is not handed to `reconcile_current_node` -- which, for a node with no
+    # steps and no sessions, re-enters `walk_node` and stamps a second
+    # `node_started` on a gate the item already answered. Cosmetic in effect and
+    # a lie in the timeline: the board would show the approved gate entered twice.
+    assert gate_starts == 1
 
 
 def test_a_resume_at_an_unanswered_gate_re_requests_it(tmp_path):
@@ -1922,3 +1935,269 @@ def test_a_resume_at_an_unanswered_gate_re_requests_it(tmp_path):
     assert status == "awaiting_gate"
     # The node after the gate still has not run.
     assert hooks == ["spec.main.write"]
+
+
+# ── Fix round 1 ──
+
+
+def test_an_unpaired_skip_counts_as_its_own_attempt(tmp_path):
+    """**Defence in depth against a state the type now forbids.** Do not delete
+    this as testing the impossible.
+
+    `_gate_review_attempts` pairs a `gate_auto_review_skipped {reason:
+    undecided}` with the `gate_auto_review_started` it closes, so a review that
+    ran and came back undecided is one attempt and not two. An *unpaired* skip --
+    one with no `_started` before it -- is something that returned before
+    launching, and it has to count for itself: counted as zero, `auto_check_due`
+    stays True and the delay poller re-arms the same dead gate every tick
+    forever, burning a `max_concurrent` slot and 409-ing a human's retry.
+
+    Today's only producer of an unpaired skip was `gate_review.review`'s
+    non-agent-reviewer guard, and `GateNode.auto_review: AgentTask | None` now
+    makes that unrepresentable in a validated chain -- so the state is
+    constructed here deliberately rather than reached through the product. The
+    earlier implementation approximated "not the tail of a `_started`" as "reason
+    is not `undecided`", which made correctness depend on every early return
+    choosing a distinct reason string.
+    """
+    request = _evt("gate_requested", gate="g")
+    started = _evt("gate_auto_review_started", gate="g")
+    undecided = _evt("gate_auto_review_skipped", gate="g", reason="undecided")
+
+    # Paired: one attempt.
+    assert gates_module._gate_review_attempts([request, started, undecided], "g") == 1
+    # Unpaired, same reason string: still one attempt.
+    assert gates_module._gate_review_attempts([request, undecided], "g") == 1
+    # And a second unpaired one is a second attempt, so any bound is reachable.
+    assert gates_module._gate_review_attempts([request, undecided, undecided], "g") == 2
+
+
+def test_a_gate_cannot_declare_a_reviewer_that_cannot_report_a_verdict(tmp_path):
+    """The root fix for the re-dispatch loop above (item 9). The contract is
+    "write a `verdict` into your result file", which a subprocess or a forge wait
+    has no way to do -- so a chain declaring one declares something the runtime
+    cannot honour. Closed by the type, the same call `AgentTask.produces` makes,
+    rather than discovered by running it."""
+    from kraft.templates.models import GateNode
+
+    for bad in (
+        {"id": "r", "kind": "subprocess", "command": "true"},
+        {"id": "r", "kind": "forge", "target": "mr.ci"},
+        {"id": "r", "kind": "builtin", "ref": "kraft.verify_changed_test_scopes"},
+    ):
+        with pytest.raises(ValidationError, match="auto_review"):
+            GateNode.model_validate({"id": "g", "kind": "gate", "auto_review": bad})
+
+
+def test_a_reviewer_that_slipped_past_the_type_spends_an_attempt(tmp_path):
+    """The defensive half. `gate_review.review`'s kind guard is unreachable from a
+    validated chain, but a `MaterializedChain` round-tripped out of a row written
+    by an older build is not something the new type can retroactively police. When
+    it does fire it must spend an attempt, which means writing a skip whose reason
+    is not `"undecided"` -- `auto_check_due`'s own docstring is about exactly the
+    re-arm-forever loop an uncounted return causes.
+
+    Built with `model_construct`, which bypasses validation on purpose: that is the
+    only way to reach the guard now.
+    """
+    from kraft.templates.models import GateNode, ResolvedNode, ResolvedTask, SubprocessTask
+
+    repo = make_repo(tmp_path)
+    chain = _reviewed_chain(repo)
+    rd = RunDirs(tmp_path / "run").ensure()
+    task = SubprocessTask.model_validate({"id": "r", "kind": "subprocess", "command": "true"})
+    node = ResolvedNode(
+        id="spec_approval",
+        node=GateNode.model_construct(id="spec_approval", kind="gate", auto_review=task),
+        auto_review=ResolvedTask(path="spec_approval.auto_review", task=task),
+    )
+
+    async def scenario():
+        database = await db.Database.open(tmp_path / "k.db")
+        try:
+            await v1_item(database, chain, repo=repo, auto_gate=True)
+            await _seed_pending_gate(database)
+            verdict, note = await gates_module.gate_review.review(
+                database,
+                rd,
+                work_item_id="w1",
+                gate="spec_approval",
+                node=node,
+                launch=LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None),
+            )
+            evts = database.read(lambda c: events.read_after(c, 0, "w1"))
+            return verdict, note, evts
+        finally:
+            await database.close()
+
+    verdict, note, evts = asyncio.run(scenario())
+    assert verdict == "undecided"
+    assert "declares no agent task" in note
+    # The attempt is countable, so the next poller tick refuses instead of
+    # re-arming: one unpaired skip is one attempt, and the default bound is 1.
+    assert gates_module._gate_review_attempts(evts, "spec_approval") == 1
+
+
+def test_a_fixed_verdict_re_enters_the_execution_node_before_the_gate(tmp_path):
+    """Ruling 54 applied to the `fixed` verdict, on a chain where the answer is
+    *not* the same as `reject_to`'s: `reject_to` names `spec` and the node before
+    the gate is `plan`. A `fixed` verdict repaired something in this worktree, so
+    the smallest thing whose re-run measures the repair is the node that produced
+    what the gate is about -- not the whole way back to `reject_to`, and not the
+    gate itself, which runs nothing."""
+    from kraft import policy as _policy
+
+    repo = make_repo(tmp_path)
+    chain = _v1(
+        [
+            {
+                "id": "spec",
+                "kind": "exec",
+                "tasks": [{"id": "w", "kind": "subprocess", "command": "true"}],
+            },
+            {
+                "id": "plan",
+                "kind": "exec",
+                "tasks": [{"id": "w", "kind": "subprocess", "command": "true"}],
+            },
+            {
+                "id": "plan_approval",
+                "kind": "gate",
+                "artifact": "plan",
+                "reject_to": "spec",
+                "auto_review": _agent_task(),
+            },
+            {
+                "id": "build",
+                "kind": "exec",
+                "tasks": [{"id": "w", "kind": "subprocess", "command": "true"}],
+            },
+        ],
+        repo,
+    )
+    rd = RunDirs(tmp_path / "run").ensure()
+    starts = []
+
+    async def fake_run_once(database, run_dirs, **kw):
+        starts.append(kw.get("start_index"))
+        return "completed"
+
+    async def scenario(monkeypatch, verdict):
+        starts.clear()
+        monkeypatch.setattr(
+            gates_module.gate_review,
+            "review",
+            lambda *a, **kw: _resolved((verdict, "I fixed the migration")),
+        )
+        monkeypatch.setattr("kraft.executor.walk.run_once", fake_run_once)
+        database = await db.Database.open(tmp_path / f"k-{verdict}.db")
+        try:
+            await v1_item(database, chain, repo=repo, wid="w1", auto_gate=True)
+            await _seed_pending_gate(database, "plan_approval")
+            await gates_module.review_gates(
+                "awaiting_gate",
+                database,
+                rd,
+                work_item_id="w1",
+                registry=None,
+                policy=_policy.Policy(loops={}, default=_policy.Cap(attempts=5, wall_clock_s=3600)),
+                launch=LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None),
+            )
+            return list(starts)
+        finally:
+            await database.close()
+
+    with pytest.MonkeyPatch.context() as mp:
+        fixed = asyncio.run(scenario(mp, "fixed"))
+    with pytest.MonkeyPatch.context() as mp:
+        rejected = asyncio.run(scenario(mp, "reject"))
+
+    # index 1 == `plan`, the execution node immediately before the gate.
+    assert fixed == [1]
+    # index 0 == `spec`, which is what the gate's own `reject_to` names. The two
+    # verdicts must not coincide, or this pins nothing.
+    assert rejected == [0]
+
+
+async def _resolved(value):
+    return value
+
+
+def test_the_reject_loop_counter_a_retry_clears_is_the_one_a_rejection_bumps(tmp_path):
+    """One spelling, two writers. `apply_rejection` bumps the key and the retry
+    route clears it, and each had its own f-string (`f"{gate}_reject_loop"` here,
+    `f"{node.id}_reject_loop"` there, and a third spelling in
+    `store.retry_after_cap`'s docstring). They agreed only because a V1 gate's node
+    id *is* its gate name -- and a retry that cleared a key nothing bumped leaves
+    the gate re-opening onto a spent counter, every rejection after it refused
+    forever (Kraft-ko7j §A4). Asserted against the row `bump_counter` actually
+    wrote, not against a second copy of the format string.
+    """
+    from kraft import policy as _policy
+
+    repo = make_repo(tmp_path)
+    chain = _spec_gate_chain(repo, gate_extra={"reject_to": "spec"})
+
+    async def scenario():
+        database = await _open_db(tmp_path, chain, repo)
+        try:
+            await executor.apply_rejection(
+                database,
+                _policy.Policy(loops={}, default=_policy.Cap(attempts=5, wall_clock_s=3600)),
+                work_item_id="w1",
+                nodes=chain.chain.nodes,
+                gate="spec_approval",
+                note="again",
+            )
+            return database.read(
+                lambda c: [
+                    r["key"]
+                    for r in c.execute(
+                        "SELECT key FROM retry_counters WHERE work_item_id = 'w1'"
+                    ).fetchall()
+                ]
+            )
+        finally:
+            await database.close()
+
+    keys = asyncio.run(scenario())
+    assert keys == [gates_module.reject_loop_key("spec_approval")]
+
+
+def test_an_override_that_cannot_do_anything_is_refused_at_the_door(tmp_path):
+    """§4 says to say it "in the error or the docstring, whichever the caller will
+    read". The caller here is `PATCH /work-items/{id}`, and a 200 that persists a
+    switch which changes nothing is the shape a human reads as "I turned it on".
+    `_validate_node_overrides` is the route's own validator, called with the same
+    arguments the route calls it with."""
+    from fastapi import HTTPException
+
+    from kraft.api.routes import work_items as work_items_route
+
+    repo = make_repo(tmp_path)
+    declared = _reviewed_chain(repo)
+    undeclared = _reviewed_chain(repo, declare=False)
+
+    async def scenario(chain, patch):
+        database = await db.Database.open(tmp_path / f"k-{id(chain)}-{patch}.db")
+        try:
+            await v1_item(database, chain, repo=repo)
+            st = SimpleNamespace(db=database)
+            row = _row(database)
+            return work_items_route._validate_node_overrides(
+                st, row, {"spec_approval": {"auto_escalate": patch}}
+            )
+        finally:
+            await database.close()
+
+    # Declared: arming it is meaningful, so it is accepted.
+    assert asyncio.run(scenario(declared, True)) is None
+    # Undeclared: refused, and the message says why rather than leaving the
+    # caller to infer it from an unchanged board.
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(scenario(undeclared, True))
+    assert exc.value.status_code == 422
+    assert "declares no 'auto_review' task" in exc.value.detail
+    # Suppressing a gate that declares nothing is a harmless no-op, not an error:
+    # it says the same thing the chain already says.
+    assert asyncio.run(scenario(undeclared, False)) is None

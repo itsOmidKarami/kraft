@@ -5,10 +5,14 @@ description: Read why a merge request's pipeline just failed, and repair what is
 
 # Repairing a red mr_checks pipeline
 
-`on.ci.poll` just failed. Its diagnosis — the failed job's name and the tail
-of its trace — is already in the prompt above. You get one pass: `on.ci.poll`
-re-runs after you exit and decides whether it worked, so there is no point
-guessing twice.
+The merge request's CI wait just failed. Its diagnosis — the failed job's name
+and the tail of its trace — is already in the prompt above.
+
+**How many passes you get is the chain's decision, not this skill's**, and the
+prompt tells you which attempt this is. Fix what you can see and exit; the CI
+wait runs again and decides whether it worked. Do not guess twice inside one
+pass on the strength of having only one — the seeded chain's repair loop allows
+three.
 
 ## When the trace names a missing or wrong label
 
@@ -30,19 +34,19 @@ seen at all, and this is what makes that happen.
 
 This task exists for MR-metadata problems, not code problems — a missing
 label, not a failing test. If the pipeline is red for a reason no label can
-fix, do nothing: `on.ci.poll` runs again right after you, fails the same way,
-and the item stops for a human with the same diagnosis you would only be
-repeating.
+fix, do nothing: the CI wait runs again after you, fails the same way, and once
+the chain's repair attempts are spent the item stops for a human with the same
+diagnosis you would only be repeating.
 
 ## Diagnosing a merge conflict
 
-`on.ci.poll` already asks the forge itself whether this branch can merge and
+The CI wait already asks the forge itself whether this branch can merge and
 puts the answer in its own log line (`merge request is not mergeable:
 conflict`, or similar) — you do not need to re-derive that by hand. Do not
 check out another branch or attempt a local `git merge` to look for
 conflicts yourself: this worktree is the item's own, the next task after you
 resolves the merge request from whatever branch is checked out, and a merge
-left mid-conflict when your one pass ends strands it there (Kraft-v5qd). If
+left mid-conflict when your pass ends strands it there (Kraft-v5qd). If
 you need more than the log line gives you, use a read-only command that does
 not change what is checked out (`git merge-tree`, `git log`, `glab mr
 diff`) — and in any case there is nothing this task can do about a real

@@ -91,10 +91,30 @@ async def review(
     """
     auto_review = node.auto_review
     if auto_review is None or not isinstance(auto_review.task, AgentTask):
-        # `auto_check_due` already refused an undeclared reviewer, so this is
-        # only reachable for a declared task of a kind that cannot report a
-        # verdict at all (a subprocess, a forge wait). Undecided rather than a
-        # raise: a misconfigured gate still has to reach a human.
+        # Defence in depth, and unreachable from a validated chain:
+        # `GateNode.auto_review` is typed `AgentTask | None`, so a non-agent
+        # reviewer cannot be represented, and `auto_check_due` refuses an
+        # *undeclared* one before this is called. Note what `auto_check_due` does
+        # **not** do -- it tests `node.auto_review is None` and never the task's
+        # kind, which is why this arm existed at all. It stays for a
+        # `MaterializedChain` round-tripped out of a row an older build wrote,
+        # which the new type cannot retroactively police.
+        #
+        # **The event is not optional.** `_gate_review_attempts` counts an
+        # `gate_auto_review_skipped` that is not the tail of a
+        # `gate_auto_review_started`, and this was the one early return that
+        # wrote neither -- so the attempt tally stayed at zero, `auto_check_due`
+        # stayed True, and the delay poller re-armed the same dead gate every
+        # tick forever: a `max_concurrent` slot burned and a human's `retry`
+        # 409'd, which is the exact failure `auto_check_due` exists to prevent.
+        await db.write(
+            lambda c: events.append(
+                c,
+                work_item_id,
+                "gate_auto_review_skipped",
+                {"gate": gate, "reason": "unreviewable"},
+            )
+        )
         return "undecided", (f"gate {gate!r} declares no agent task to review it; a person decides")
     row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()

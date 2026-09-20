@@ -434,7 +434,15 @@ class GateNode(BaseModel):
     #: (`policy.auto_escalate_delay_s`, `policy.auto_review_attempts`) and
     #: folded through `store.effective_auto_escalate_delay_s`. A copy here
     #: would be a second source of truth for one number.
-    auto_review: AnyTask | None = None
+    #:
+    #: `AgentTask`, not `AnyTask`. The contract is "report a `verdict` in your
+    #: result file" -- a subprocess or a forge wait has no way to report one, so
+    #: a chain declaring either here declares something the runtime cannot
+    #: honour. Same call as `AgentTask.produces`: closed in validation rather
+    #: than discovered by running it. `gate_review.review` keeps a defensive
+    #: kind check for a snapshot that reached the row without passing through
+    #: here, and that check is now genuinely defence rather than the only door.
+    auto_review: AgentTask | None = None
     #: `chain-finalized-remains-a-dedicated-marker`.
     chain_finalized: StrictBool = False
 

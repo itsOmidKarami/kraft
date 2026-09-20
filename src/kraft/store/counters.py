@@ -87,8 +87,12 @@ def retry_after_cap(
     the item still has to be put back to work. A plain task failure strands an
     item exactly as hard as a breached cap does (Kraft-bzwi).
 
-    `gate_key` is the `<gate>_reject_loop` of the node's own gate, when it has
-    one. Retry is the human's override of the reject cap too (Kraft-ko7j §A4);
+    `gate_key` is `executor.gates.reject_loop_key(<gate>)` -- the key
+    `apply_rejection` bumps -- for the node when the node *is* a gate. Named as
+    that function rather than spelled out again here: a third copy of the format
+    string is a third thing to keep equal to the other two.
+
+    Retry is the human's override of the reject cap too (Kraft-ko7j §A4):
     without clearing it, the retried node re-opens its gate onto a spent
     counter and every rejection after that is refused forever.
 
