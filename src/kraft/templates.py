@@ -1,20 +1,25 @@
 from __future__ import annotations
 
 import copy
-import math
 import re
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, get_args
 
 import yaml
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
     TypeAdapter,
     ValidationError,
     ValidationInfo,
+    field_validator,
     model_validator,
 )
 from pydantic_core import PydanticCustomError
@@ -24,18 +29,11 @@ from kraft import skill as _skill
 from kraft import steering as _steering
 from kraft.config import first_error
 from kraft.paths import default_skills_dir
-from kraft.store import OVERRIDABLE_NODE_FIELDS
 
 if TYPE_CHECKING:
     from kraft import harness
 
 _VALID_KINDS = {"builtin", "agent", "subprocess", "forge"}
-_FORGE_HANDLERS = {"open_mr", "sync_mr", "ci_poll", "merge", "merge_watch"}
-#: Duplicated in `adapters.forge.resolve`, deliberately: config validation must
-#: not import the adapter layer. Edit both together. `auto` is the exception —
-#: `adapters.forge.backend_for` translates it to one of the others at dispatch,
-#: so `resolve` never sees it.
-_FORGE_BACKENDS = {"auto", "glab", "gh", "fake"}
 # Config files that share the templates directory but are not chain templates.
 # One definition: `load_templates` skips them, and the registry save copies the
 # templates around them. Without this, every settings file the UI writes would be
@@ -51,47 +49,7 @@ CONFIG_FILES = frozenset(
         "theme.yaml",
     }
 )
-# The complete gate set. Public because the API validates approve/reject against it
-# and the chain-review skill documents it — a second copy is how those drift apart.
-GATE_NAMES = {"spec_approval", "plan_approval", "chain_finalized", "human_review_approval"}
-#: Node keys `materialize()` sets from a template but the chain-review skill's
-#: prompt never teaches an agent to reproduce (Kraft-eod0) -- its schema is
-#: `{id, tasks, gate_after, fix_loop}`, four of the eight keys a real node
-#: carries. An agent emitting an "unchanged" node only knows those four, so
-#: the splice that replaces the tail wholesale (`kraft.api.routes.gates._splice_chain_review`)
-#: must carry these forward from the node they replace rather than trust an
-#: agent-authored dict to know they exist.
-NODE_CARRYOVER_FIELDS = (
-    "on_failure",
-    "reject_to",
-    "rebase_bounce_to",
-    "auto_escalate",
-    "auto_escalate_stuck",
-    "auto_escalate_delay_s",
-)
-
-
-#: The `NODE_CARRYOVER_FIELDS` a chain-review node dict is never allowed to
-#: set for itself -- `on_failure`/`reject_to`/`rebase_bounce_to` are the
-#: reviewer's to propose (point 1), but `auto_escalate`/`auto_escalate_stuck`/
-#: `auto_escalate_delay_s` are the human PATCH route's alone (SKILL.md: "still
-#: never yours to set"). `strip_non_proposable_carryover_fields` below drops
-#: these off a reviewer node so they can only ever reach `chain_definition`
-#: through the carry-forward path, never an agent-authored value.
-NON_PROPOSABLE_CARRYOVER_FIELDS = ("auto_escalate", "auto_escalate_stuck", "auto_escalate_delay_s")
-
-
-def strip_non_proposable_carryover_fields(nodes: list) -> list:
-    """Drop `NON_PROPOSABLE_CARRYOVER_FIELDS` off every node in `nodes`, in
-    place, before `carry_forward_node_fields` runs. Without this, a reviewer
-    node that sets `auto_escalate` (etc.) directly splices that value straight
-    into `chain_definition` -- `carry_forward_node_fields` only fills fields
-    the node *omits*, so a value the node explicitly set survives untouched
-    (`kraft.api.routes.gates._splice_chain_review`, Kraft-df4tc)."""
-    for n in nodes:
-        for field in NON_PROPOSABLE_CARRYOVER_FIELDS:
-            n.pop(field, None)
-    return nodes
+CHAIN_REVIEW_GATE = "chain_finalized"
 
 
 class _DictLike(BaseModel):
@@ -157,6 +115,97 @@ class ChainNodeIn(_DictLike):
         return self
 
 
+class TemplateDocument(BaseModel):
+    """The authored YAML document and its composition rules."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    nodes: list[ChainNodeIn] | None = None
+    extends: str | None = None
+    remove: list[str] = Field(default_factory=list)
+    insert_before: dict[str, list[ChainNodeIn]] = Field(default_factory=dict)
+    insert_after: dict[str, list[ChainNodeIn]] = Field(default_factory=dict)
+
+    @staticmethod
+    def _without_redundant_tasks(node: Any) -> Any:
+        if not isinstance(node, dict) or "tasks" not in node or "steps" not in node:
+            return node
+        steps = node["steps"]
+        if not isinstance(steps, list):
+            return node
+        flattened = [task for group in steps if isinstance(group, list) for task in group]
+        if node["tasks"] == [] or node["tasks"] == flattened:
+            return {key: value for key, value in node.items() if key != "tasks"}
+        return node
+
+    @field_validator("nodes", mode="before")
+    @classmethod
+    def _canonicalize_root_nodes(cls, nodes: Any) -> Any:
+        if isinstance(nodes, list):
+            return [cls._without_redundant_tasks(node) for node in nodes]
+        return nodes
+
+    @field_validator("insert_before", "insert_after", mode="before")
+    @classmethod
+    def _canonicalize_inserted_nodes(cls, inserts: Any) -> Any:
+        if isinstance(inserts, dict):
+            return {
+                anchor: [cls._without_redundant_tasks(node) for node in nodes]
+                if isinstance(nodes, list)
+                else nodes
+                for anchor, nodes in inserts.items()
+            }
+        return inserts
+
+    def resolve(
+        self, documents: dict[str, TemplateDocument], *, visiting: frozenset[str] = frozenset()
+    ) -> list[ChainNodeIn]:
+        """Resolve inheritance into fresh node models for one template."""
+        if self.extends is None:
+            if not self.nodes:
+                raise RegistryError(f"template {self.id!r}: 'nodes' must be a non-empty list")
+            used = sorted(key for key in _COMPOSITION_KEYS if key in self.model_fields_set)
+            if used:
+                raise RegistryError(f"template {self.id!r}: {used} require 'extends'")
+            return [node.model_copy(deep=True) for node in self.nodes]
+
+        if "nodes" in self.model_fields_set:
+            raise RegistryError(f"template {self.id!r}: cannot set both 'extends' and 'nodes'")
+        if self.extends not in documents:
+            raise RegistryError(f"template {self.id!r}: extends unknown template {self.extends!r}")
+        if self.extends in visiting:
+            raise RegistryError(f"template {self.id!r}: 'extends' cycle at {self.extends!r}")
+
+        nodes = documents[self.extends].resolve(documents, visiting=visiting | {self.id})
+        base_ids = {node.id for node in nodes}
+        unknown_remove = sorted(set(self.remove) - base_ids)
+        if unknown_remove:
+            raise RegistryError(
+                f"template {self.id!r}: 'remove' names unknown node id(s) {unknown_remove}"
+            )
+        nodes = [node for node in nodes if node.id not in self.remove]
+
+        for name, inserts in (
+            ("insert_before", self.insert_before),
+            ("insert_after", self.insert_after),
+        ):
+            for anchor, extra in inserts.items():
+                ids = [node.id for node in nodes]
+                if anchor not in ids:
+                    raise RegistryError(
+                        f"template {self.id!r}: {name!r} names unknown anchor node id {anchor!r}"
+                    )
+                offset = ids.index(anchor) + (name == "insert_after")
+                nodes[offset:offset] = [node.model_copy(deep=True) for node in extra]
+
+        ids = [node.id for node in nodes]
+        dupes = sorted({node_id for node_id in ids if ids.count(node_id) > 1})
+        if dupes:
+            raise RegistryError(f"template {self.id!r}: duplicate node id(s) {dupes}")
+        return nodes
+
+
 class ChainNode(ChainNodeIn):
     """A chain node as everything downstream reads it: `steps` and `tasks` both
     always set, in agreement.
@@ -177,6 +226,47 @@ class ChainNode(ChainNodeIn):
 
     steps: list[list[str]]
     tasks: list[str]
+    carryover_fields: ClassVar[tuple[str, ...]] = tuple(
+        field
+        for field in ChainNodeIn.model_fields
+        if field not in {"id", "tasks", "steps", "gate_after", "fix_loop"}
+    )
+    non_proposable_carryover_fields: ClassVar[tuple[str, ...]] = tuple(
+        field for field in ChainNodeIn.model_fields if field.startswith("auto_escalate")
+    )
+
+    @classmethod
+    def gate_names(cls, nodes: list[dict]) -> frozenset[str]:
+        return frozenset(node["gate_after"] for node in nodes if node.get("gate_after"))
+
+    @classmethod
+    def strip_non_proposable_carryover_fields(cls, nodes: list[dict]) -> list[dict]:
+        for node in nodes:
+            for field in cls.non_proposable_carryover_fields:
+                node.pop(field, None)
+        return nodes
+
+    @classmethod
+    def carry_forward_fields(cls, old_nodes: list[dict], new_nodes: list[dict]) -> list[dict]:
+        old_by_id = {
+            node["id"]: node
+            for node in old_nodes
+            if isinstance(node, dict) and isinstance(node.get("id"), str)
+        }
+        for node in new_nodes:
+            old = old_by_id.get(node.get("id")) or {}
+            for field in cls.carryover_fields:
+                if field not in node:
+                    node[field] = old.get(field)
+            old_steps = old.get("steps")
+            if (
+                old_steps
+                and "steps" not in node
+                and node.get("tasks") == [task for group in old_steps for task in group]
+            ):
+                node["steps"] = old_steps
+                node.pop("tasks")
+        return new_nodes
 
     @model_validator(mode="before")
     @classmethod
@@ -231,6 +321,38 @@ class ChainNode(ChainNodeIn):
                     )
         return self
 
+    def materialized_dict(self) -> dict:
+        """Return the stable chain-definition shape with fresh mutable values."""
+        return with_steps(
+            {
+                "id": self.id,
+                "tasks": list(self.tasks),
+                "steps": [list(group) for group in self.steps],
+                "gate_after": self.gate_after,
+                "fix_loop": self.fix_loop,
+                "on_failure": list(self.on_failure) if self.on_failure else None,
+                "reject_to": self.reject_to,
+                "rebase_bounce_to": self.rebase_bounce_to,
+                "auto_escalate": self.auto_escalate,
+                "auto_escalate_stuck": self.auto_escalate_stuck,
+                "auto_escalate_delay_s": self.auto_escalate_delay_s,
+            }
+        )
+
+
+# Compatibility imports for callers that still hold node dicts.
+# Built-in template names retained for compatibility; gates are validated from
+# each materialized chain, not against this set.
+GATE_NAMES = frozenset(
+    {"spec_approval", "plan_approval", "chain_finalized", "human_review_approval"}
+)
+NODE_CARRYOVER_FIELDS = ChainNode.carryover_fields
+NON_PROPOSABLE_CARRYOVER_FIELDS = ChainNode.non_proposable_carryover_fields
+
+
+def strip_non_proposable_carryover_fields(nodes: list[dict]) -> list[dict]:
+    return ChainNode.strip_non_proposable_carryover_fields(nodes)
+
 
 def with_steps(node: dict) -> dict:
     """`node` with both `steps` and `tasks` populated, whichever it was given.
@@ -273,34 +395,8 @@ def with_inputs(binding: dict, task_hook: str) -> dict:
     return {}
 
 
-def carry_forward_node_fields(old_nodes: list, new_nodes: list) -> list:
-    """Fill `NODE_CARRYOVER_FIELDS` on `new_nodes` from the old node sharing its
-    `id`, for whichever fields the new node did not itself set. A node id with
-    no old counterpart (one the reviewer added) has nothing to inherit, so it
-    gets `None` for all of these written explicitly -- the same shape
-    `materialize()` gives any node lacking them."""
-    old_by_id = {
-        n["id"]: n for n in old_nodes if isinstance(n, dict) and isinstance(n.get("id"), str)
-    }
-    for n in new_nodes:
-        # `{}` rather than skipping: a node id the reviewer invented still gets
-        # every carryover field written explicitly as `None`, the shape
-        # `materialize` gives any node lacking them (Kraft-fdee6). Skipping
-        # left a reviewer-added node as the only node in `chain_definition`
-        # missing those keys, and the gate preview -- which fills `null` --
-        # promised a shape the splice did not store.
-        old = old_by_id.get(n.get("id")) or {}
-        for field in NODE_CARRYOVER_FIELDS:
-            if field not in n:
-                n[field] = old.get(field)
-        # `steps` is not a NODE_CARRYOVER_FIELD: the reviewer may reshape `tasks`,
-        # and carrying old groups over a changed list would contradict it. But a
-        # node re-emitted with the same flat tasks is unchanged, ordering included.
-        old_steps = old.get("steps")
-        if old_steps and "steps" not in n and n.get("tasks") == [t for g in old_steps for t in g]:
-            n["steps"] = old_steps
-            n.pop("tasks")
-    return new_nodes
+def carry_forward_node_fields(old_nodes: list[dict], new_nodes: list[dict]) -> list[dict]:
+    return ChainNode.carry_forward_fields(old_nodes, new_nodes)
 
 
 #: What an intake attachment stands in for (Kraft-dgh). Keyed on the gate rather
@@ -317,7 +413,23 @@ _ARTIFACT_KIND = re.compile(r"[a-z][a-z0-9_-]*")
 #: `minimal` is real for codex and invalid for claude. Checked at config load
 #: rather than at dispatch: a typo reaching the CLI fails the node *after* the
 #: work item has already paid for a worktree and a session (Kraft-tff).
-_EFFORT_LEVELS = {"low", "medium", "high", "xhigh", "max"}
+Effort = Literal["low", "medium", "high", "xhigh", "max"]
+_EFFORT_LEVELS = set(get_args(Effort))
+
+
+class BindingKind(StrEnum):
+    BUILTIN = "builtin"
+    AGENT = "agent"
+    SUBPROCESS = "subprocess"
+    FORGE = "forge"
+
+
+class Capability(StrEnum):
+    MODEL = "model"
+    EFFORT = "effort"
+    DENY_TOOLS = "deny_tools"
+    ALLOWED_TOOLS = "allowed_tools"
+    PERMISSION_MODE = "permission_mode"
 
 
 class _Binding(_DictLike):
@@ -334,53 +446,135 @@ class _Binding(_DictLike):
     # `interactive`/`timeout`/`repos` are UI-facing rather than dispatch-facing
     # (02 §13): the registry round-trips them through Settings ahead of the
     # screen/executor that will read them.
-    interactive: bool | None = None
-    timeout: Any = None
+    interactive: StrictBool | None = None
+    timeout: Annotated[StrictInt | StrictFloat, Field(gt=0, allow_inf_nan=False)] | None = None
     repos: dict[str, dict] | None = None
     sandbox: Any = None
     #: Kind-agnostic on purpose (spec §4): the motivating repair hangs off
     #: `on.ci.poll`, which is `kind: forge`. Not an agent-only key, so not
     #: settable through `defaults.agent` either -- a repair silently inherited
     #: by every agent binding is the opposite of what a per-task repair is for.
-    on_failure: Any = None
+    on_failure: Annotated[list[StrictStr], Field(min_length=1, strict=True)] | None = None
+
+    @field_validator("interactive", "timeout", mode="before")
+    @classmethod
+    def _reject_explicit_null_values(cls, value, info):
+        if value is None:
+            raise ValueError(f"{info.field_name} may not be null")
+        return value
 
 
 class BuiltinBinding(_Binding):
     kind: Literal["builtin"]
-    handler: str
+    handler: StrictStr
 
 
 class SubprocessBinding(_Binding):
     kind: Literal["subprocess"]
-    command: list[str]
+    command: Annotated[list[StrictStr], Field(strict=True)]
     inputs: dict[str, dict] | None = None
 
 
 class ForgeBinding(_Binding):
     kind: Literal["forge"]
-    handler: str
-    backend: str
-    poll_timeout: Any = None
-    poll_interval: Any = None
+    handler: Literal["open_mr", "sync_mr", "ci_poll", "merge", "merge_watch"]
+    backend: Literal["auto", "glab", "gh", "fake"]
+    poll_timeout: Annotated[StrictInt | StrictFloat, Field(ge=0, allow_inf_nan=False)] | None = None
+    poll_interval: Annotated[StrictInt | StrictFloat, Field(gt=0, allow_inf_nan=False)] | None = (
+        None
+    )
+
+    @field_validator("poll_timeout", "poll_interval", mode="before")
+    @classmethod
+    def _reject_explicit_null_poll_values(cls, value, info):
+        if value is None:
+            raise ValueError(f"{info.field_name} must be a number")
+        return value
 
 
 class AgentBinding(_Binding):
     kind: Literal["agent"]
-    command: str | None = None
+    command: StrictStr | None = None
     profile: str | None = None
     harness: str | None = None
-    model: Any = None
-    escalate_model: Any = None
-    deny_tools: list[str] | None = None
-    steering: list[str] | None = None
+    model: StrictStr | None = None
+    escalate_model: StrictStr | None = None
+    deny_tools: Annotated[list[StrictStr], Field(strict=True)] = Field(default_factory=list)
+    steering: Annotated[list[StrictStr], Field(strict=True)] = Field(default_factory=list)
     skill: Any = None
-    artifact: Any = None
+    artifact: Annotated[StrictStr, Field(pattern=f"^{_ARTIFACT_KIND.pattern}$")] | None = None
     #: A validator in `load_registry`, not a `Literal`: its legal values come
     #: from the named harness's own `values:` (`minimal` is real for codex and
     #: invalid for claude).
     effort: Any = None
-    allowed_tools: list[str] | None = None
+    allowed_tools: Annotated[list[StrictStr], Field(strict=True)] = Field(default_factory=list)
     permission_mode: Any = None
+
+    @field_validator("command", "artifact", mode="before")
+    @classmethod
+    def _reject_explicit_null_agent_values(cls, value, info):
+        if value is None:
+            raise ValueError(f"{info.field_name} may not be null")
+        return value
+
+    # The harness-facing requirements belong to the binding model, while the
+    # loader remains responsible for checking them against the live harness.
+    required_capabilities: ClassVar[dict[str, Capability]] = {
+        "model": Capability.MODEL,
+        "escalate_model": Capability.MODEL,
+        "effort": Capability.EFFORT,
+        "deny_tools": Capability.DENY_TOOLS,
+        "allowed_tools": Capability.ALLOWED_TOOLS,
+        "permission_mode": Capability.PERMISSION_MODE,
+    }
+
+
+class AgentDefaults(BaseModel):
+    """The optional agent fields shared by every agent binding."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    interactive: StrictBool | None = None
+    timeout: Annotated[StrictInt | StrictFloat, Field(gt=0, allow_inf_nan=False)] | None = None
+    command: StrictStr | None = None
+    profile: str | None = None
+    harness: str | None = None
+    model: StrictStr | None = None
+    escalate_model: StrictStr | None = None
+    deny_tools: Annotated[list[StrictStr], Field(strict=True)] | None = None
+    steering: Annotated[list[StrictStr], Field(strict=True)] | None = None
+    skill: Any = None
+    artifact: Annotated[StrictStr, Field(pattern=f"^{_ARTIFACT_KIND.pattern}$")] | None = None
+    effort: Any = None
+    allowed_tools: Annotated[list[StrictStr], Field(strict=True)] | None = None
+    permission_mode: Any = None
+
+    @field_validator("interactive", "timeout", "command", "artifact", mode="before")
+    @classmethod
+    def _reject_explicit_null_values(cls, value, info):
+        if value is None:
+            raise ValueError(f"{info.field_name} may not be null")
+        return value
+
+    def merge(self, binding: AgentBinding | dict) -> dict:
+        result = (
+            binding.model_dump(exclude_unset=True)
+            if isinstance(binding, BaseModel)
+            else dict(binding)
+        )
+        list_keys = {"deny_tools", "steering", "allowed_tools"}
+        for key in self.model_fields_set:
+            value = getattr(self, key)
+            if key in list_keys:
+                own = result.get(key, [])
+                merged = []
+                for item in [*(value or []), *own]:
+                    if item not in merged:
+                        merged.append(item)
+                result[key] = merged
+            elif key not in result:
+                result[key] = value
+        return result
 
 
 HookBinding = Annotated[
@@ -400,9 +594,7 @@ _BINDING_MODELS = {
 #: `_PERMISSION_MODES` beside it: the modes a binding may name are the named
 #: harness's own `values:` (leak 9 in the design spec), since `yolo` is real
 #: for gemini and invalid for claude.
-_AGENT_ONLY_KEYS = (
-    frozenset(AgentBinding.model_fields) - frozenset(_Binding.model_fields) - {"kind"}
-)
+_AGENT_ONLY_KEYS = frozenset(AgentDefaults.model_fields)
 #: The `_AGENT_ONLY_KEYS` that merge as a list -- default's items first, then
 #: the binding's own, deduped -- rather than binding-wins-or-not.
 _AGENT_LIST_KEYS = frozenset({"deny_tools", "steering", "allowed_tools"})
@@ -433,9 +625,24 @@ class Template:
     #: `GET /registry` -- a round trip must echo what was on disk rather than
     #: growing keys nobody wrote -- with a type instead of an untyped dict.
     #: `None` for a `Template` built by hand (most tests). Note
-    #: `_resolve_template_dict` applies `extends`/`remove`/`insert_*` *before*
+    #: `TemplateDocument.resolve` applies `extends`/`remove`/`insert_*` *before*
     #: this, so it is the resolved-but-not-normalized form.
     authored: list | None = None
+
+    def materialize(
+        self,
+        *,
+        satisfied_gates: frozenset[str] = frozenset(),
+        skip_nodes: frozenset[str] = frozenset(),
+    ) -> dict:
+        return {
+            "template_id": self.id,
+            "nodes": [
+                ChainNode.model_validate(node).materialized_dict()
+                for node in self.nodes
+                if node.get("gate_after") not in satisfied_gates and node["id"] not in skip_nodes
+            ],
+        }
 
 
 @dataclass(frozen=True)
@@ -456,12 +663,7 @@ def _harnesses() -> harness.HarnessSet:
 #: harness's own declaration. `escalate_model` is checked as `model`: it is
 #: the same capability used on a different turn.
 _CAPABILITY_KEYS = {
-    "model": "model",
-    "escalate_model": "model",
-    "effort": "effort",
-    "deny_tools": "deny_tools",
-    "allowed_tools": "allowed_tools",
-    "permission_mode": "permission_mode",
+    key: capability.value for key, capability in AgentBinding.required_capabilities.items()
 }
 
 
@@ -479,36 +681,37 @@ def _merge_agent_defaults(data: dict, path: Path) -> None:
     agent_defaults = defaults.get("agent") or {}
     if not isinstance(agent_defaults, dict):
         raise RegistryError(f"{path.name}: 'defaults.agent' must be a mapping")
-    unknown = sorted(set(agent_defaults) - _AGENT_ONLY_KEYS)
-    if unknown:
-        raise RegistryError(f"{path.name}: 'defaults.agent' has unknown key(s) {unknown}")
+    try:
+        defaults_model = AgentDefaults.model_validate(agent_defaults)
+    except ValidationError as exc:
+        extras = [e["loc"][-1] for e in exc.errors() if e["type"] == "extra_forbidden"]
+        if extras:
+            raise RegistryError(
+                f"{path.name}: 'defaults.agent' has unknown key(s) {sorted(extras)}"
+            ) from exc
+        key = str(exc.errors()[0]["loc"][-1])
+        raise RegistryError(f"{path.name}: 'defaults.agent' {key!r} is invalid") from exc
     for key in _AGENT_LIST_KEYS:
-        if key in agent_defaults and not (
-            isinstance(agent_defaults[key], list)
-            and all(isinstance(x, str) for x in agent_defaults[key])
-        ):
+        if key in defaults_model.model_fields_set and getattr(defaults_model, key) is None:
             raise RegistryError(f"{path.name}: 'defaults.agent' {key!r} must be a list of strings")
     if not agent_defaults:
         return
     for hook, binding in data["hooks"].items():
         if not isinstance(binding, dict) or binding.get("kind") != "agent":
             continue
-        for key, dval in agent_defaults.items():
-            if key in _AGENT_LIST_KEYS:
-                if key in binding and not (
+        for key, _dval in defaults_model.model_dump(exclude_unset=True).items():
+            if (
+                key in _AGENT_LIST_KEYS
+                and key in binding
+                and not (
                     isinstance(binding[key], list) and all(isinstance(x, str) for x in binding[key])
-                ):
-                    raise RegistryError(
-                        f"{path.name}: hook {hook!r} {key!r} must be a list of strings"
-                    )
-                own = binding.get(key, [])
-                merged = list(dval)
-                for x in own:
-                    if x not in merged:
-                        merged.append(x)
-                binding[key] = merged
-            elif key not in binding:
-                binding[key] = dval
+                )
+            ):
+                raise RegistryError(f"{path.name}: hook {hook!r} {key!r} must be a list of strings")
+        try:
+            binding.update(defaults_model.merge(binding))
+        except (TypeError, ValueError) as exc:
+            raise RegistryError(f"{path.name}: hook {hook!r} defaults could not be merged") from exc
 
 
 def load_registry(
@@ -544,26 +747,20 @@ def load_registry(
         kind = binding["kind"]
         if kind not in _VALID_KINDS:
             raise RegistryError(f"{path.name}: hook {hook!r} has unknown kind {kind!r}")
-        if kind == "builtin" and not isinstance(binding.get("handler"), str):
-            raise RegistryError(f"{path.name}: builtin hook {hook!r} needs a string 'handler'")
-        if kind == "agent" and "command" in binding and not isinstance(binding["command"], str):
-            raise RegistryError(
-                f"{path.name}: agent hook {hook!r} 'command' must be a string "
-                "(it overrides argv[0] only)"
-            )
+        if kind == "agent":
+            try:
+                _BINDING.validate_python(binding)
+            except ValidationError as exc:
+                err = exc.errors()[0]
+                key = ".".join(str(x) for x in err["loc"][1:])
+                if key == "command":
+                    raise RegistryError(
+                        f"{path.name}: agent hook {hook!r} 'command' must be a string "
+                        "(it overrides argv[0] only)"
+                    ) from exc
+                raise RegistryError(f"{path.name}: hook {hook!r} {key!r}: {err['msg']}") from exc
         if kind == "forge":
             handler = binding.get("handler")
-            if handler not in _FORGE_HANDLERS:
-                raise RegistryError(
-                    f"{path.name}: forge hook {hook!r} has unknown handler {handler!r}; "
-                    f"known: {sorted(_FORGE_HANDLERS)}"
-                )
-            backend = binding.get("backend")
-            if backend not in _FORGE_BACKENDS:
-                raise RegistryError(
-                    f"{path.name}: forge hook {hook!r} has unknown backend {backend!r}; "
-                    f"known: {sorted(_FORGE_BACKENDS)}"
-                )
             for key in ("poll_timeout", "poll_interval"):
                 if key not in binding:
                     continue
@@ -572,35 +769,6 @@ def load_registry(
                         f"{path.name}: forge hook {hook!r} has {key!r}, which applies "
                         "only to a ci_poll handler"
                     )
-                value = binding[key]
-                # bool is an int in Python, and `poll_timeout: true` is a typo,
-                # not a one-second deadline.
-                bad = isinstance(value, bool) or not isinstance(value, int | float)
-                # .inf is a node that never returns and never frees its intake
-                # slot; .nan goes straight into asyncio.sleep.
-                bad = bad or not math.isfinite(value)
-                # A zero timeout is a meaningful single-shot check. A zero
-                # *interval* is a hot loop: it would re-run the forge CLI as
-                # fast as a thread can return for the whole timeout. Tests that
-                # want no wait pass it to `run_task` directly, not through here.
-                if key == "poll_timeout":
-                    bad = bad or value < 0
-                    wanted = "non-negative number"
-                else:
-                    bad = bad or value <= 0
-                    wanted = "positive number"
-                if bad:
-                    raise RegistryError(
-                        f"{path.name}: forge hook {hook!r} {key!r} must be a "
-                        f"{wanted}, not {value!r}"
-                    )
-        if kind == "subprocess" and not (
-            isinstance(binding.get("command"), list)
-            and all(isinstance(x, str) for x in binding["command"])
-        ):
-            raise RegistryError(
-                f"{path.name}: subprocess hook {hook!r} needs a list-of-strings 'command'"
-            )
 
         if kind == "agent":
             hs = harnesses if harnesses is not None else _harnesses()
@@ -621,15 +789,6 @@ def load_registry(
             h = hs.valid[hid]
             # Normalised here so no consumer re-derives the default.
             binding["harness"] = hid
-            for key in ("model", "escalate_model"):
-                if binding.get(key) is not None and not isinstance(binding[key], str):
-                    raise RegistryError(f"{path.name}: hook {hook!r} {key!r} must be a string")
-            for key in ("deny_tools", "steering", "allowed_tools"):
-                v = binding.get(key, [])
-                if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
-                    raise RegistryError(
-                        f"{path.name}: hook {hook!r} {key!r} must be a list of strings"
-                    )
             try:
                 _steering.validate(steering_dir, binding.get("steering", []), where=path.name)
             except _steering.SteeringError as exc:
@@ -639,13 +798,6 @@ def load_registry(
                     _skill.validate(skills_dir, binding["skill"], where=path.name)
                 except _skill.SkillError as exc:
                     raise RegistryError(str(exc)) from exc
-            if "artifact" in binding:
-                art = binding["artifact"]
-                if not isinstance(art, str) or not _ARTIFACT_KIND.fullmatch(art):
-                    raise RegistryError(
-                        f"{path.name}: hook {hook!r} 'artifact' must be a bare lowercase "
-                        f"kind like 'spec' or 'plan'; got {art!r}"
-                    )
             # Fail at load, no emulation: a binding naming a capability its
             # harness does not declare, or a value outside that capability's
             # own `values:`, is rejected here rather than at 3am.
@@ -676,11 +828,6 @@ def load_registry(
                 raise RegistryError(
                     f"{path.name}: hook {hook!r} is kind 'builtin'; 'timeout' applies only to "
                     "a subprocess, agent, or forge hook"
-                )
-            t = binding["timeout"]
-            if isinstance(t, bool) or not isinstance(t, int | float) or t <= 0:
-                raise RegistryError(
-                    f"{path.name}: hook {hook!r} 'timeout' must be a positive number of minutes"
                 )
         if "repos" in binding:
             repos_raw = binding["repos"]
@@ -745,8 +892,6 @@ def load_registry(
                         f"{path.name}: hook {hook!r} input {name!r} on the env channel "
                         "needs a string 'name'"
                     )
-        if "interactive" in binding and not isinstance(binding["interactive"], bool):
-            raise RegistryError(f"{path.name}: hook {hook!r} 'interactive' must be a boolean")
         try:
             data["hooks"][hook] = _BINDING.validate_python(binding)
         except ValidationError as exc:
@@ -767,6 +912,38 @@ def load_registry(
                 ) from exc
             err = exc.errors()[0]
             key = ".".join(str(x) for x in err["loc"][1:])
+            field = key.split(".")[0]
+            if field == "handler" and kind == "forge":
+                raise RegistryError(
+                    f"{path.name}: forge hook {hook!r} has unknown handler "
+                    f"{binding.get('handler')!r}"
+                ) from exc
+            if field == "backend" and kind == "forge":
+                raise RegistryError(
+                    f"{path.name}: forge hook {hook!r} has unknown backend "
+                    f"{binding.get('backend')!r}"
+                ) from exc
+            if field == "poll_timeout":
+                raise RegistryError(
+                    f"{path.name}: forge hook {hook!r} poll_timeout must be a non-negative number"
+                ) from exc
+            if field == "poll_interval":
+                raise RegistryError(
+                    f"{path.name}: forge hook {hook!r} poll_interval must be a positive number"
+                ) from exc
+            if field == "timeout":
+                raise RegistryError(
+                    f"{path.name}: hook {hook!r} 'timeout' must be a positive number of minutes"
+                ) from exc
+            if field == "command" and kind == "agent":
+                raise RegistryError(
+                    f"{path.name}: agent hook {hook!r} 'command' must be a string "
+                    "(it overrides argv[0] only)"
+                ) from exc
+            if field == "on_failure":
+                raise RegistryError(
+                    f"{path.name}: hook {hook!r} 'on_failure' must be a non-empty list of strings"
+                ) from exc
             raise RegistryError(f"{path.name}: hook {hook!r} {key!r}: {err['msg']}") from exc
     # Binding-level `on_failure` (spec §4): a repair that travels with the task
     # rather than with whichever node happens to run it. Validated here, after
@@ -777,14 +954,6 @@ def load_registry(
         repair = binding.get("on_failure")
         if repair is None:
             continue
-        if (
-            not isinstance(repair, list)
-            or not repair
-            or not all(isinstance(t, str) for t in repair)
-        ):
-            raise RegistryError(
-                f"{path.name}: hook {hook!r} 'on_failure' must be a non-empty list of strings"
-            )
         # A hook naming itself would dispatch its own repair, fail again, and
         # do it forever. The general cycle (a -> b -> a) is not checked: a
         # repair's own `on_failure` is never dispatched (`dispatch.measure_node`
@@ -808,7 +977,7 @@ def validate_nodes(
     nodes: list, registry: Registry, *, preceding_ids: frozenset[str] = frozenset()
 ) -> list[str]:
     """The per-node rules a chain's node list is held to: shape, hook set
-    membership, `GATE_NAMES` membership, and a `fix_loop` node needing at
+    a non-empty `gate_after`, and a `fix_loop` node needing at
     least one task. Takes a bare node list and a registry rather than a whole
     `Template` so the chain-review splice path (Kraft-hm0) can run the same
     checks over an agent's revised tail before it reaches `chain_definition`
@@ -884,14 +1053,13 @@ def validate_nodes(
     nodes = [with_steps(n) for n in nodes]
 
     bad_gates = sorted(
-        {
-            n["gate_after"]
-            for n in nodes
-            if n.get("gate_after") is not None and n["gate_after"] not in GATE_NAMES
-        }
+        repr(n.get("gate_after"))
+        for n in nodes
+        if n.get("gate_after") is not None
+        and (not isinstance(n.get("gate_after"), str) or not n["gate_after"])
     )
     if bad_gates:
-        return [f"unknown gate_after value(s) {bad_gates}"]
+        return [f"gate_after must be a non-empty string, got {bad_gates}"]
 
     empty_loop = next((n["id"] for n in nodes if n.get("fix_loop") and not n["tasks"]), None)
     if empty_loop is not None:
@@ -946,28 +1114,65 @@ def validate_nodes(
     return []
 
 
-def validate_model_effort_fields(overrides: dict) -> list[str]:
-    """The type/membership rules `model`, `escalate_model`, and `effort` are
-    held to wherever one appears as an override -- a work item's own
-    `agent_overrides` (`validate_agent_overrides` below) and a per-node
-    override (`kraft.api.routes.work_items._validate_node_overrides`,
-    Kraft-df4tc) and a chain-review-proposed `proposed_node_overrides`
-    (`kraft.api.routes.gates._splice_chain_review`, same bead). One field-
-    level check, three callers, so none of them can drift into a different
-    idea of a valid `effort` (Kraft-unk's reasoning, at the field level
-    rather than the whole-object level `validate_agent_overrides` already
-    applies it at).
+class ModelEffortOverride(BaseModel):
+    """The reusable model/effort override shape. Defaults are deliberately
+    omitted by callers with `exclude_unset=True`, so `None` means an explicit
+    reset for the model fields rather than an override that was not supplied."""
 
-    Returns error strings with no `agent_overrides`/node-id prefix -- each
-    caller's own message already carries the context a bare "'effort' must
-    be one of..." needs.
-    """
-    for key in ("model", "escalate_model"):
-        if key in overrides and overrides[key] is not None and not isinstance(overrides[key], str):
-            return [f"{key!r} must be a string or null"]
-    if "effort" in overrides and overrides["effort"] not in _EFFORT_LEVELS:
-        return [f"'effort' must be one of {sorted(_EFFORT_LEVELS)}; got {overrides['effort']!r}"]
+    model_config = ConfigDict(extra="forbid")
+
+    model: StrictStr | None = None
+    escalate_model: StrictStr | None = None
+    effort: Effort = Field(default=None)
+
+
+class AgentOverride(ModelEffortOverride):
+    pass
+
+
+class ProposedNodeOverride(ModelEffortOverride):
+    pass
+
+
+class NodeOverride(ModelEffortOverride):
+    auto_escalate: StrictBool = Field(default=None)
+    auto_escalate_stuck: StrictBool = Field(default=None)
+    auto_escalate_delay_s: Annotated[StrictInt, Field(ge=0)] = Field(default=None)
+    attempts: Annotated[StrictInt, Field(ge=1)] = Field(default=None)
+    wall_clock_s: Annotated[StrictInt, Field(ge=1)] = Field(default=None)
+
+
+def _override_errors(
+    schema: type[BaseModel], values: object, *, unknown: str, object_name: str | None = None
+) -> list[str]:
+    """Translate typed-schema errors into the terse, caller-owned API errors."""
+    try:
+        schema.model_validate(values)
+    except ValidationError as exc:
+        errors = exc.errors()
+        extras = sorted(
+            str(error["loc"][0]) for error in errors if error["type"] == "extra_forbidden"
+        )
+        if extras:
+            return [unknown.format(extras=extras)]
+        if not isinstance(values, dict):
+            return [f"{object_name} must be an object" if object_name else "must be an object"]
+        error = errors[0]
+        field = str(error["loc"][0])
+        if field in {"model", "escalate_model"}:
+            return [f"{field!r} must be a string or null"]
+        if field == "effort":
+            return [f"'effort' must be one of {sorted(_EFFORT_LEVELS)}; got {values[field]!r}"]
+        if field in {"auto_escalate", "auto_escalate_stuck"}:
+            return [f"{field} must be a boolean"]
+        if field == "auto_escalate_delay_s":
+            return ["auto_escalate_delay_s must be a non-negative int"]
+        return [f"{field} must be a positive int"]
     return []
+
+
+def validate_model_effort_fields(overrides: dict) -> list[str]:
+    return _override_errors(ModelEffortOverride, overrides, unknown="cannot override {extras}")
 
 
 #: The only fields a chain-review artifact's `proposed_node_overrides` may
@@ -985,10 +1190,7 @@ def validate_proposed_node_overrides(proposed: dict) -> list[str]:
     type checks. Anything else -- `auto_escalate` included -- is never the
     reviewer's to set (Kraft-df4tc).
     """
-    extra = set(proposed) - PROPOSABLE_NODE_OVERRIDE_FIELDS
-    if extra:
-        return [f"cannot propose {sorted(extra)}"]
-    return validate_model_effort_fields(proposed)
+    return _override_errors(ProposedNodeOverride, proposed, unknown="cannot propose {extras}")
 
 
 def validate_node_override_fields(fields: dict) -> list[str]:
@@ -1006,37 +1208,7 @@ def validate_node_override_fields(fields: dict) -> list[str]:
     Returns error strings with no node-id prefix -- each caller's own message
     already carries that context.
     """
-    extra = set(fields) - OVERRIDABLE_NODE_FIELDS
-    if extra:
-        return [f"cannot override {sorted(extra)}"]
-    if "auto_escalate" in fields and not isinstance(fields["auto_escalate"], bool):
-        return ["auto_escalate must be a boolean"]
-    if "auto_escalate_stuck" in fields and not isinstance(fields["auto_escalate_stuck"], bool):
-        return ["auto_escalate_stuck must be a boolean"]
-    if "auto_escalate_delay_s" in fields and (
-        not isinstance(fields["auto_escalate_delay_s"], int)
-        or isinstance(fields["auto_escalate_delay_s"], bool)
-        or fields["auto_escalate_delay_s"] < 0
-    ):
-        return ["auto_escalate_delay_s must be a non-negative int"]
-    if "attempts" in fields and (
-        not isinstance(fields["attempts"], int)
-        or isinstance(fields["attempts"], bool)
-        or fields["attempts"] < 1
-    ):
-        return ["attempts must be a positive int"]
-    if "wall_clock_s" in fields and (
-        not isinstance(fields["wall_clock_s"], int)
-        or isinstance(fields["wall_clock_s"], bool)
-        or fields["wall_clock_s"] < 1
-    ):
-        return ["wall_clock_s must be a positive int"]
-    model_effort = {k: v for k, v in fields.items() if k in ("model", "escalate_model", "effort")}
-    if model_effort:
-        errs = validate_model_effort_fields(model_effort)
-        if errs:
-            return errs
-    return []
+    return _override_errors(NodeOverride, fields, unknown="cannot override {extras}")
 
 
 def validate_agent_overrides(overrides: dict) -> list[str]:
@@ -1053,104 +1225,32 @@ def validate_agent_overrides(overrides: dict) -> list[str]:
 
     Returns error strings, empty if valid.
     """
-    if not isinstance(overrides, dict):
-        return ["agent_overrides must be an object"]
-    unknown = sorted(set(overrides) - {"model", "escalate_model", "effort"})
-    if unknown:
-        return [
-            f"agent_overrides has unknown key(s) {unknown}; only model, "
+    errors = _override_errors(
+        AgentOverride,
+        overrides,
+        unknown=(
+            "agent_overrides has unknown key(s) {extras}; only model, "
             "escalate_model, effort are allowed"
-        ]
-    return [f"agent_overrides {e}" for e in validate_model_effort_fields(overrides)]
+        ),
+        object_name="agent_overrides",
+    )
+    return [
+        f"agent_overrides {error}" if not error.startswith("agent_overrides") else error
+        for error in errors
+    ]
 
 
-#: The keys `_resolve_template_dict` treats as composition -- meaningless,
+#: The keys `TemplateDocument.resolve` treats as composition -- meaningless,
 #: and rejected, on a template that does not `extends` (spec §2's "Hard load
 #: errors" posture: a key that silently does nothing is worse than a
 #: rejected one).
 _COMPOSITION_KEYS = ("remove", "insert_before", "insert_after")
 
 
-def _resolve_template_dict(
-    tid: str, raw_by_id: dict[str, dict], *, visiting: frozenset[str] = frozenset()
-) -> list:
-    """Resolve one raw template dict into a flat node list, recursively
-    resolving `extends` first. Raises `RegistryError` -- caught by
-    `load_templates`'s own per-template try/except below, the same as every
-    other load-time defect -- since this runs before any node-level
-    validation has produced a node to attach an error to.
-
-    Every node returned is a fresh `dict` copy: two templates extending the
-    same base, or one template's own `insert_before`/`insert_after`, must
-    never share a node dict a sibling resolution could then mutate.
-    """
-    data = raw_by_id[tid]
-    extends = data.get("extends")
-
-    if extends is None:
-        nodes = data.get("nodes")
-        if not isinstance(nodes, list) or not nodes:
-            raise RegistryError(f"template {tid!r}: 'nodes' must be a non-empty list")
-        used = sorted(k for k in _COMPOSITION_KEYS if k in data)
-        if used:
-            raise RegistryError(f"template {tid!r}: {used} require 'extends'")
-        bad = next((n for n in nodes if not isinstance(n, dict)), None)
-        if bad is not None:
-            raise RegistryError(f"template {tid!r}: node entries must be mappings, got {bad!r}")
-        return [dict(n) for n in nodes]
-
-    if "nodes" in data:
-        raise RegistryError(f"template {tid!r}: cannot set both 'extends' and 'nodes'")
-    if not isinstance(extends, str):
-        raise RegistryError(f"template {tid!r}: 'extends' must be a string template id")
-    if extends not in raw_by_id:
-        raise RegistryError(f"template {tid!r}: extends unknown template {extends!r}")
-    if extends in visiting:
-        raise RegistryError(f"template {tid!r}: 'extends' cycle at {extends!r}")
-
-    nodes = _resolve_template_dict(extends, raw_by_id, visiting=visiting | {tid})
-
-    remove = data.get("remove", [])
-    if not isinstance(remove, list) or not all(isinstance(x, str) for x in remove):
-        raise RegistryError(f"template {tid!r}: 'remove' must be a list of node ids")
-    base_ids = {n["id"] for n in nodes if isinstance(n.get("id"), str)}
-    unknown_remove = sorted(set(remove) - base_ids)
-    if unknown_remove:
-        raise RegistryError(f"template {tid!r}: 'remove' names unknown node id(s) {unknown_remove}")
-    nodes = [n for n in nodes if n.get("id") not in remove]
-
-    for key in ("insert_before", "insert_after"):
-        spec = data.get(key, {})
-        if not isinstance(spec, dict):
-            raise RegistryError(
-                f"template {tid!r}: {key!r} must be a mapping of anchor to node list"
-            )
-        for anchor, extra in spec.items():
-            if not isinstance(extra, list) or not all(isinstance(n, dict) for n in extra):
-                raise RegistryError(
-                    f"template {tid!r}: {key!r}[{anchor!r}] must be a list of node dicts"
-                )
-            ids_now = [n.get("id") for n in nodes]
-            if anchor not in ids_now:
-                raise RegistryError(
-                    f"template {tid!r}: {key!r} names unknown anchor node id {anchor!r}"
-                )
-            idx = ids_now.index(anchor)
-            offset = idx if key == "insert_before" else idx + 1
-            nodes[offset:offset] = [dict(n) for n in extra]
-
-    ids = [n.get("id") for n in nodes]
-    dupes = sorted({i for i in ids if ids.count(i) > 1})
-    if dupes:
-        raise RegistryError(f"template {tid!r}: duplicate node id(s) {dupes}")
-
-    return nodes
-
-
 def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
     valid: dict[str, Template] = {}
     invalid: dict[str, str] = {}
-    raw_by_id: dict[str, dict] = {}
+    documents: dict[str, TemplateDocument] = {}
 
     for path in sorted(Path(dir).glob("*.yaml")):
         if path.name in CONFIG_FILES:
@@ -1166,17 +1266,22 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
             invalid[stem] = f"{path.name}: missing a string 'id'"
             continue
         tid = data["id"]
-        if tid in raw_by_id or tid in invalid:
+        if tid in documents or tid in invalid:
             invalid[stem] = f"{path.name}: duplicate template id {tid!r}"
             continue
-        raw_by_id[tid] = data
-
-    for tid in raw_by_id:
         try:
-            nodes = _resolve_template_dict(tid, raw_by_id)
+            documents[tid] = TemplateDocument.model_validate(data)
+        except ValidationError as exc:
+            invalid[tid] = first_error(exc, f"template {tid!r}")
+
+    for tid, document in documents.items():
+        try:
+            authored = document.resolve(documents)
         except RegistryError as exc:
             invalid[tid] = str(exc)
             continue
+
+        nodes = [node.model_dump(exclude_unset=True) for node in authored]
 
         node_errors = validate_nodes(nodes, registry)
         if node_errors:
@@ -1186,9 +1291,9 @@ def load_templates(dir: str | Path, registry: Registry) -> TemplateSet:
         # authored form is the `steps` one.
         authored = [
             ChainNodeIn.model_validate(
-                {k: v for k, v in n.items() if not (k == "tasks" and n.get("steps"))}
+                {k: v for k, v in node.items() if not (k == "tasks" and node.get("steps"))}
             )
-            for n in nodes
+            for node in nodes
         ]
         # `validate_nodes` normalizes its own local copy to check a `steps`
         # node's shape; `Template.nodes` needs that same normalization; a
@@ -1317,25 +1422,4 @@ def materialize(
     though it gates) -- a human choosing this at intake is the same trust an
     attachment trim already gets, so a gate skipped this way is not a gate
     bypassed at runtime, it never existed for this item."""
-    return {
-        "template_id": template.id,
-        "nodes": [
-            with_steps(
-                {
-                    "id": n["id"],
-                    "tasks": list(n.get("tasks") or []),
-                    "steps": [list(g) for g in n["steps"]] if n.get("steps") else None,
-                    "gate_after": n.get("gate_after"),
-                    "fix_loop": n.get("fix_loop"),
-                    "on_failure": list(n["on_failure"]) if n.get("on_failure") else None,
-                    "reject_to": n.get("reject_to"),
-                    "rebase_bounce_to": n.get("rebase_bounce_to"),
-                    "auto_escalate": n.get("auto_escalate"),
-                    "auto_escalate_stuck": n.get("auto_escalate_stuck"),
-                    "auto_escalate_delay_s": n.get("auto_escalate_delay_s"),
-                }
-            )
-            for n in template.nodes
-            if n.get("gate_after") not in satisfied_gates and n["id"] not in skip_nodes
-        ],
-    }
+    return template.materialize(satisfied_gates=satisfied_gates, skip_nodes=skip_nodes)

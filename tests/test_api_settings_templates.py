@@ -77,10 +77,10 @@ def test_reload_with_a_broken_registry_keeps_the_last_good_config(client, templa
     assert {"quick-task", "default"} <= valid_ids
 
 
-def test_an_unknown_gate_is_refused(client):
+def test_a_custom_gate_is_accepted(client):
     nodes = [{"id": "a", "tasks": ["on.test.run"], "gate_after": "made_up_gate"}]
     r = client.post("/api/templates/scratch/validate", json={"nodes": nodes})
-    assert r.json()["valid"] is False and "gate_after" in r.json()["error"]
+    assert r.json()["valid"] is True
 
 
 def test_validate_names_the_node_and_task_that_do_not_resolve(client):

@@ -10,10 +10,18 @@ import sqlite3
 import subprocess
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
 from support.api import _FAKE_CLAUDE, _await_gate, _client, _poll_events, _post_default, _set_status
 from support.harness import fake_templates_dir, make_repo, make_repo_with_engineering
 
 from kraft.adapters import beads
+from kraft.api.routes.work_items import NewWorkItem
+
+
+def test_new_work_item_schema_rejects_an_unknown_root_merge_policy():
+    with pytest.raises(ValidationError):
+        NewWorkItem.model_validate({"title": "x", "repo": "/r", "root_merge_policy": "nope"})
 
 
 def test_post_invalid_template_422(tmp_path, monkeypatch):

@@ -58,6 +58,16 @@ describe("api", () => {
     );
   });
 
+  it("encodes custom gate names in gate action URLs", async () => {
+    const f = mockFetch(200, {});
+    vi.stubGlobal("fetch", f);
+    await api.approveGate("id1", "release/ready#1");
+    expect(f).toHaveBeenCalledWith(
+      "/api/work-items/id1/gates/release%2Fready%231/approve",
+      expect.anything(),
+    );
+  });
+
   it("logUrl builds the log path", () => {
     expect(api.logUrl("s9")).toBe("/worker-sessions/s9/log");
   });

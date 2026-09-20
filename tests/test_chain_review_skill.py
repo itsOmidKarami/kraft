@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from kraft.templates import GATE_NAMES, load_registry
+from kraft.templates import load_registry
 
 SKILL = Path(__file__).parent.parent / "src" / "kraft" / "skills" / "chain-review" / "SKILL.md"
 REGISTRY = Path(__file__).parent.parent / "templates" / "registry.yaml"
@@ -29,16 +29,8 @@ def test_the_skill_exists_and_has_frontmatter(text):
     assert "description:" in head
 
 
-def test_every_gate_it_names_is_a_real_gate(text):
-    named = set(re.findall(r"`(\w*(?:approval|finalized))`", text))
-    assert named, "skill names no gates at all"
-    assert named <= GATE_NAMES, f"skill names gates the validator rejects: {named - GATE_NAMES}"
-
-
-def test_it_names_the_whole_gate_set(text):
-    """It claims 'these four are the entire set' — so it must list all four."""
-    missing = {g for g in GATE_NAMES if f"`{g}`" not in text}
-    assert not missing, f"gate set grew; skill does not mention {missing}"
+def test_it_limits_gate_names_to_the_supplied_chain(text):
+    assert "already present in the supplied chain" in text
 
 
 def test_every_hook_point_it_cites_is_registered(text):

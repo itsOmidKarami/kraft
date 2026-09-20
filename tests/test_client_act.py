@@ -207,6 +207,23 @@ def test_a_worker_reports_progress_on_its_own_item(monkeypatch):
     assert seen == {"path": "/work-items/w1/progress", "payload": {"task": 2}}
 
 
+def test_gate_actions_encode_custom_gate_names(monkeypatch):
+    seen = []
+
+    async def fake_act(path, payload=None):
+        seen.append((path, payload))
+        return {"id": "w1"}
+
+    monkeypatch.setattr(client.transport, "_act", fake_act)
+    asyncio.run(client.approve_gate("release/ready#1", work_item_id="w1"))
+    asyncio.run(client.reject_gate("redo", "release/ready#1", work_item_id="w1"))
+
+    assert seen == [
+        ("/work-items/w1/gates/release%2Fready%231/approve", None),
+        ("/work-items/w1/gates/release%2Fready%231/reject", {"note": "redo"}),
+    ]
+
+
 def test_the_board_and_the_item_keep_progress(monkeypatch):
     p = {"current": 2, "total": 3, "title": "serve"}
     row = {

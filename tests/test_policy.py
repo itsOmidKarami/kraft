@@ -2,10 +2,29 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from kraft import policy
 
 _SHIPPED = Path(__file__).parent.parent / "templates" / "policy.yaml"
+
+
+def test_policy_input_rejects_wrong_scalar_bounds_and_shapes():
+    """The YAML boundary validates static policy shape before runtime conversion."""
+    base = {"default": {"attempts": 3, "wall_clock_s": 60}}
+    with pytest.raises(ValidationError):
+        policy.PolicyInput.model_validate({**base, "rate_limit_retries": True})
+    with pytest.raises(ValidationError):
+        policy.PolicyInput.model_validate({**base, "findings": {"loop_severities": ["urgent"]}})
+    with pytest.raises(ValidationError):
+        policy.PolicyInput.model_validate(
+            {
+                **base,
+                "triggers": [
+                    {"cron": "* * * * *", "repo": 1, "chain": "default", "title": "Sweep"}
+                ],
+            }
+        )
 
 
 def test_load_shipped_policy():
@@ -91,6 +110,16 @@ def test_loop_severities_default(tmp_path):
     p = tmp_path / "policy.yaml"
     p.write_text("default: {attempts: 3, wall_clock_s: 60}\n")
     assert policy.load_policy(p).loop_severities == frozenset({"critical", "important"})
+
+
+@pytest.mark.parametrize("key", ["loops", "findings", "triggers"])
+def test_policy_null_collections_keep_their_legacy_empty_defaults(tmp_path, key):
+    p = tmp_path / "policy.yaml"
+    p.write_text(f"default: {{attempts: 3, wall_clock_s: 60}}\n{key}: null\n")
+    loaded = policy.load_policy(p)
+    assert loaded.loops == {}
+    assert loaded.loop_severities == policy.DEFAULT_LOOP_SEVERITIES
+    assert loaded.triggers == []
 
 
 def test_loop_severities_configured(tmp_path):

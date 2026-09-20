@@ -4,10 +4,18 @@ import dataclasses
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 import yaml
-from pydantic import Field, StrictFloat, StrictInt, ValidationError
+from pydantic import (
+    BaseModel,
+    Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+    ValidationError,
+)
 from pydantic.dataclasses import dataclass as model
 
 from kraft.findings import SEVERITIES
@@ -73,6 +81,39 @@ class Budget:
 NO_BUDGET = Budget()
 
 
+class TriggerInput(BaseModel):
+    cron: StrictStr
+    repo: StrictStr
+    chain: StrictStr
+    title: StrictStr
+    description: StrictStr = ""
+
+
+class FindingsInput(BaseModel):
+    loop_severities: list[Literal["critical", "important", "minor"]] | None = None
+
+
+class ArchiveInput(BaseModel):
+    after_days: Annotated[StrictInt, Field(ge=0)] | None = None
+
+
+class PolicyInput(BaseModel):
+    """Static policy.yaml schema; runtime conversion remains in ``load_policy``."""
+
+    loops: dict[str, Cap] = Field(default_factory=dict)
+    default: Cap
+    findings: FindingsInput = Field(default_factory=FindingsInput)
+    budget: Budget | None = None
+    rate_limit_retries: PositiveInt = 5
+    triggers: list[TriggerInput] = Field(default_factory=list)
+    max_concurrent: PositiveInt = 3
+    archive: ArchiveInput | None = None
+    auto_escalate_stuck: StrictBool = True
+    auto_escalate_stuck_cap: PositiveInt = DEFAULT_AUTO_ESCALATE_STUCK_CAP
+    auto_escalate_delay_s: Annotated[StrictInt, Field(ge=0)] = 0
+    forge_cli_timeout_s: Annotated[StrictFloat | StrictInt, Field(gt=0)] = 120
+
+
 @dataclass(frozen=True)
 class Policy:
     loops: dict[str, Cap]
@@ -122,47 +163,12 @@ class Policy:
 def _field_error(name: str, exc: ValidationError) -> PolicyError:
     """The message names the offending key, as the hand-rolled checks did."""
     err = exc.errors()[0]
+    if err["type"] == "literal_error" and err["loc"][:2] == ("findings", "loop_severities"):
+        return PolicyError(
+            f"{name}: unknown severity {err['input']!r}; expected one of {SEVERITIES}"
+        )
     key = ".".join(str(p) for p in err["loc"] if p != "args")
     return PolicyError(f"{name}: '{key}': {err['msg']}")
-
-
-def _cap(name: str, raw: object) -> Cap:
-    if not isinstance(raw, dict):
-        raise PolicyError(f"{name}: expected a mapping with 'attempts' and 'wall_clock_s'")
-    if "attempts" not in raw or "wall_clock_s" not in raw:
-        raise PolicyError(f"{name}: missing 'attempts' or 'wall_clock_s'")
-    try:
-        return Cap(
-            attempts=raw["attempts"],
-            wall_clock_s=raw["wall_clock_s"],
-            escalate_after=raw.get("escalate_after"),
-        )
-    except ValidationError as exc:
-        raise _field_error(name, exc) from exc
-
-
-def _budget(name: str, raw: object) -> Budget:
-    if raw is None:
-        return NO_BUDGET
-    if not isinstance(raw, dict):
-        raise PolicyError(f"{name}: expected a mapping")
-    try:
-        return Budget(work_item_usd=raw.get("work_item_usd"), daily_usd=raw.get("daily_usd"))
-    except ValidationError as exc:
-        raise _field_error(name, exc) from exc
-
-
-def _archive_after_days(name: str, raw: object) -> int | None:
-    if raw is None:
-        return None
-    if not isinstance(raw, dict):
-        raise PolicyError(f"{name}: expected a mapping")
-    after_days = raw.get("after_days")
-    if after_days is None:
-        return None
-    if not isinstance(after_days, int) or isinstance(after_days, bool) or after_days < 0:
-        raise PolicyError(f"{name}: 'after_days' must be a non-negative int, or absent")
-    return after_days
 
 
 def _cron_fields(name: str, expr: str) -> tuple[str, str, str, str, str]:
@@ -199,24 +205,9 @@ def cron_due(expr: str, dt: datetime) -> bool:
     )
 
 
-def _trigger(name: str, raw: object) -> Trigger:
-    if not isinstance(raw, dict):
-        raise PolicyError(f"{name}: expected a mapping")
-    try:
-        cron = raw["cron"]
-        repo = raw["repo"]
-        chain = raw["chain"]
-        title = raw["title"]
-    except KeyError as exc:
-        raise PolicyError(f"{name}: missing 'cron', 'repo', 'chain', or 'title'") from exc
-    for field_name, value in (("cron", cron), ("repo", repo), ("chain", chain), ("title", title)):
-        if not isinstance(value, str):
-            raise PolicyError(f"{name}: '{field_name}' must be a string")
-    _cron_fields(f"{name}.cron", cron)
-    description = raw.get("description", "")
-    if not isinstance(description, str):
-        raise PolicyError(f"{name}: 'description' must be a string")
-    return Trigger(cron=cron, repo=repo, chain=chain, title=title, description=description)
+def _trigger(name: str, raw: TriggerInput) -> Trigger:
+    _cron_fields(f"{name}.cron", raw.cron)
+    return Trigger(**raw.model_dump())
 
 
 def load_policy(path: str | Path) -> Policy:
@@ -227,36 +218,13 @@ def load_policy(path: str | Path) -> Policy:
         data = yaml.safe_load(path.read_text())
     except (OSError, ValueError, yaml.YAMLError) as exc:
         raise PolicyError(f"{path.name}: cannot read/parse: {exc}") from exc
-    if not isinstance(data, dict) or "default" not in data:
+    if not isinstance(data, dict):
         raise PolicyError(f"{path.name}: expected a mapping with a 'default' cap")
-    loops_raw = data.get("loops") or {}
-    if not isinstance(loops_raw, dict):
-        raise PolicyError(f"{path.name}: 'loops' must be a mapping")
-    loops = {k: _cap(f"loops.{k}", v) for k, v in loops_raw.items()}
-    findings_raw = data.get("findings") or {}
-    if not isinstance(findings_raw, dict):
-        raise PolicyError(f"{path.name}: 'findings' must be a mapping")
-    sev_raw = findings_raw.get("loop_severities")
-    if sev_raw is None:
-        severities = DEFAULT_LOOP_SEVERITIES
-    else:
-        if not isinstance(sev_raw, list):
-            raise PolicyError(f"{path.name}: 'findings.loop_severities' must be a list")
-        unknown = [s for s in sev_raw if s not in SEVERITIES]
-        if unknown:
-            raise PolicyError(
-                f"{path.name}: unknown severity {unknown[0]!r}; expected one of {SEVERITIES}"
-            )
-        severities = frozenset(sev_raw)
-    budget = _budget(f"{path.name}: 'budget'", data.get("budget"))
-    raw_retries = data.get("rate_limit_retries", 5)
-    if not isinstance(raw_retries, int) or isinstance(raw_retries, bool) or raw_retries < 1:
-        raise PolicyError(f"{path.name}: 'rate_limit_retries' must be a positive int")
-    triggers_raw = data.get("triggers") or []
-    if not isinstance(triggers_raw, list):
-        raise PolicyError(f"{path.name}: 'triggers' must be a list")
-    triggers = [_trigger(f"{path.name}: triggers[{i}]", t) for i, t in enumerate(triggers_raw)]
-    raw_mc = data.get("max_concurrent")
+    raw = dict(data)
+    for key in ("loops", "findings", "triggers"):
+        if raw.get(key) is None:
+            raw.pop(key, None)
+    raw_mc = raw.get("max_concurrent")
     if raw_mc is None:
         # Compat: an intake.yaml written before the move still names the
         # operator's real limit under the old key. Honour it once rather than
@@ -271,34 +239,31 @@ def load_policy(path: str | Path) -> Policy:
                 raw_mc = legacy["max_concurrent"]
     if raw_mc is None:
         raw_mc = 3
-    if not isinstance(raw_mc, int) or isinstance(raw_mc, bool) or raw_mc < 1:
-        raise PolicyError(f"{path.name}: 'max_concurrent' must be a positive int")
-    archive_after_days = _archive_after_days(f"{path.name}: 'archive'", data.get("archive"))
-    raw_aes = data.get("auto_escalate_stuck", True)
-    if not isinstance(raw_aes, bool):
-        raise PolicyError(f"{path.name}: 'auto_escalate_stuck' must be a bool")
-    raw_aes_cap = data.get("auto_escalate_stuck_cap", DEFAULT_AUTO_ESCALATE_STUCK_CAP)
-    if not isinstance(raw_aes_cap, int) or isinstance(raw_aes_cap, bool) or raw_aes_cap < 1:
-        raise PolicyError(f"{path.name}: 'auto_escalate_stuck_cap' must be a positive int")
-    raw_delay = data.get("auto_escalate_delay_s", 0)
-    if not isinstance(raw_delay, int) or isinstance(raw_delay, bool) or raw_delay < 0:
-        raise PolicyError(f"{path.name}: 'auto_escalate_delay_s' must be a non-negative int")
-    raw_fct = data.get("forge_cli_timeout_s", 120)
-    if not isinstance(raw_fct, int | float) or isinstance(raw_fct, bool) or raw_fct <= 0:
-        raise PolicyError(f"{path.name}: 'forge_cli_timeout_s' must be a positive number")
+    raw["max_concurrent"] = raw_mc
+    try:
+        parsed = PolicyInput.model_validate(raw)
+    except ValidationError as exc:
+        raise _field_error(path.name, exc) from exc
+    severities = (
+        frozenset(parsed.findings.loop_severities)
+        if parsed.findings.loop_severities is not None
+        else DEFAULT_LOOP_SEVERITIES
+    )
     return Policy(
-        loops=loops,
-        default=_cap("default", data["default"]),
+        loops=parsed.loops,
+        default=parsed.default,
         loop_severities=severities,
-        budget=budget,
-        archive_after_days=archive_after_days,
-        rate_limit_retries=raw_retries,
-        triggers=triggers,
-        max_concurrent=raw_mc,
-        auto_escalate_stuck=raw_aes,
-        auto_escalate_stuck_cap=raw_aes_cap,
-        auto_escalate_delay_s=raw_delay,
-        forge_cli_timeout_s=float(raw_fct),
+        budget=parsed.budget or NO_BUDGET,
+        archive_after_days=parsed.archive.after_days if parsed.archive else None,
+        rate_limit_retries=parsed.rate_limit_retries,
+        triggers=[
+            _trigger(f"{path.name}: triggers[{i}]", t) for i, t in enumerate(parsed.triggers)
+        ],
+        max_concurrent=parsed.max_concurrent,
+        auto_escalate_stuck=parsed.auto_escalate_stuck,
+        auto_escalate_stuck_cap=parsed.auto_escalate_stuck_cap,
+        auto_escalate_delay_s=parsed.auto_escalate_delay_s,
+        forge_cli_timeout_s=float(parsed.forge_cli_timeout_s),
     )
 
 

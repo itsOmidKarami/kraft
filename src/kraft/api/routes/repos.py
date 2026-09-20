@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from kraft import config as config_mod
 from kraft.api import api_router, deps
+from kraft.store.repos import RootMergePolicy
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ class RepoBody(BaseModel):
     default_model: str | None = None
     deny_tools: list[str] | None = None
     steering: list[str] | None = None
-    default_root_merge_policy: str | None = None
+    default_root_merge_policy: RootMergePolicy | None = None
 
 
 class ProbeBody(BaseModel):
@@ -197,7 +198,7 @@ class RepoPatch(BaseModel):
     deny_tools: list[str] | None = None
     steering: list[str] | None = None
     local_files: list[str] | None = None
-    default_root_merge_policy: str | None = None
+    default_root_merge_policy: RootMergePolicy | None = None
 
 
 def _refuse_enable_without_test_command(st, entry: dict) -> None:

@@ -20,7 +20,7 @@ from configparser import ConfigParser
 from configparser import Error as ConfigParserError
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import yaml
 from pydantic import (
@@ -35,7 +35,7 @@ from pydantic import (
 
 from kraft import sandbox as _sandbox
 from kraft import steering as _steering
-from kraft.store.repos import ROOT_MERGE_POLICIES
+from kraft.store.repos import RootMergePolicy
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +164,7 @@ class RepoEntry(BaseModel):
     # (Kraft-gxcmy). Relative file paths only: a directory here is how a list
     # like this starts dragging `.venv` and `node_modules` into every worktree,
     # and a glob is the same trap with extra steps.
-    local_files: list[str] = []
+    local_files: list[Annotated[str, Field(min_length=1)]] = []
     # How this repo's worktree is prepared. No default and no fallback: an
     # absent key is "nobody has decided yet" and stops the chain when the
     # worktree is built, while `""` is a deliberate "nothing to do"
@@ -174,10 +174,10 @@ class RepoEntry(BaseModel):
     # Layered onto the worker baseline, which is an allowlist rather than the
     # daemon's inherited environment (Kraft-69atv).
     env: dict[str, str] = {}
-    env_passthrough: list[str] = []
+    env_passthrough: list[Annotated[str, Field(min_length=1)]] = []
     deny_tools: list[str] = []
     steering: list[str] = []
-    default_root_merge_policy: str = "bump"
+    default_root_merge_policy: RootMergePolicy = "bump"
     sandbox: Any = None
 
     @model_validator(mode="before")
@@ -198,26 +198,16 @@ class RepoEntry(BaseModel):
             data["project"] = legacy
         return data
 
-    @field_validator("env_passthrough", "local_files")
+    @field_validator("local_files")
     @classmethod
-    def _non_empty_strings(cls, v: list[str], info) -> list[str]:
-        if not all(v):
-            raise ValueError("must be a list of non-empty strings")
-        if info.field_name == "local_files":
-            for rel in v:
-                if rel.endswith("/"):
-                    raise ValueError(f"entry {rel!r} must name a file")
-                if Path(rel).is_absolute() or ".." in Path(rel).parts:
-                    raise ValueError(f"entry {rel!r} must be a relative path inside the repo")
-                if any(c in rel for c in "*?["):
-                    raise ValueError(f"entry {rel!r} must be a literal path, not a glob")
-        return v
-
-    @field_validator("default_root_merge_policy")
-    @classmethod
-    def _known_merge_policy(cls, v: str) -> str:
-        if v not in ROOT_MERGE_POLICIES:
-            raise ValueError(f"must be one of {sorted(ROOT_MERGE_POLICIES)}")
+    def _safe_local_files(cls, v: list[str]) -> list[str]:
+        for rel in v:
+            if rel.endswith("/"):
+                raise ValueError(f"entry {rel!r} must name a file")
+            if Path(rel).is_absolute() or ".." in Path(rel).parts:
+                raise ValueError(f"entry {rel!r} must be a relative path inside the repo")
+            if any(c in rel for c in "*?["):
+                raise ValueError(f"entry {rel!r} must be a literal path, not a glob")
         return v
 
     @field_validator("sandbox")

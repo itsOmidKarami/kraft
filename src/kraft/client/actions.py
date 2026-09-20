@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from urllib.parse import quote
 
 from kraft import config
 from kraft.client import context, reads, transport
@@ -155,7 +156,7 @@ async def approve_gate(gate: str | None = None, work_item_id: str | None = None)
     """Approve the gate a work item is waiting on."""
     target = context._forbid_self_action(work_item_id)
     gate = gate or await _pending_gate_of(target)
-    return await transport._act(f"/work-items/{target}/gates/{gate}/approve")
+    return await transport._act(f"/work-items/{target}/gates/{quote(gate, safe='')}/approve")
 
 
 async def reject_gate(
@@ -177,7 +178,9 @@ async def reject_gate(
     payload: dict = {"note": note.strip()}
     if node:
         payload["node"] = node
-    return await transport._act(f"/work-items/{target}/gates/{gate}/reject", payload)
+    return await transport._act(
+        f"/work-items/{target}/gates/{quote(gate, safe='')}/reject", payload
+    )
 
 
 async def pause(work_item_id: str | None = None) -> dict:

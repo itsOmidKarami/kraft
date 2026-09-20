@@ -174,9 +174,8 @@ a reason.
   matters. Adding a task to a node that has `steps` means choosing which group
   it joins, or giving it one of its own: a security review added to `verify`
   belongs after the suite, not beside it.
-- `gate_after` — one of `spec_approval`, `plan_approval`, `chain_finalized`,
-  `human_review_approval`, or `null`. These four are the entire set. You cannot
-  create a new gate.
+- `gate_after` — a non-empty gate name already present in the supplied chain,
+  or `null`. Do not invent a new gate.
 - `fix_loop` — a loop-counter name, or `null`. A node with a `fix_loop` must have
   at least one task; a loop with nothing to measure never terminates.
 

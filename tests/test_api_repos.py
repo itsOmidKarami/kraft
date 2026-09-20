@@ -13,11 +13,13 @@ from pathlib import Path
 import pytest
 import yaml
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from support.api_settings import _client
 from support.harness import fake_templates_dir, isolated_bd, make_repo, make_repo_with_submodule
 
 from kraft import config, events, store, templates
 from kraft import db as kdb
+from kraft.api.routes.repos import RepoBody, RepoPatch
 from kraft.paths import RunDirs
 
 _FAKE_AGENT = Path(__file__).resolve().parents[0] / "support" / "fake_agent.py"
@@ -176,6 +178,24 @@ def test_patch_repo_round_trips_local_files(tmp_path, client, templates_dir):
 
     (entry,) = client.get("/api/repos").json()["repos"]
     assert entry["local_files"] == [".python-version"]
+
+
+def test_patch_repo_round_trips_root_merge_policy_as_a_yaml_string(tmp_path, client, templates_dir):
+    repo = make_repo(tmp_path)
+    client.post("/api/repos", json={"path": str(repo), "enabled": False})
+
+    r = client.patch(f"/api/repos?path={repo}", json={"default_root_merge_policy": "skip"})
+    assert r.status_code == 200, r.text
+
+    on_disk = yaml.safe_load((templates_dir / "repos.yaml").read_text())
+    assert on_disk["repos"][0]["default_root_merge_policy"] == "skip"
+
+
+@pytest.mark.parametrize("model, payload", [(RepoBody, {"path": "/r"}), (RepoPatch, {})])
+def test_repo_request_models_reject_an_unknown_root_merge_policy(model, payload):
+    """An API schema must reject an invalid policy before a route touches disk."""
+    with pytest.raises(ValidationError):
+        model.model_validate({**payload, "default_root_merge_policy": "nope"})
 
 
 def test_patch_repo_with_a_glob_in_local_files_is_refused(tmp_path, client, templates_dir):
@@ -907,6 +927,13 @@ def test_load_repos_rejects_a_non_string_env_passthrough_entry(tmp_path):
     path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "env_passthrough": ["", "OK"]}]}))
     with pytest.raises(config.ConfigError, match="env_passthrough"):
         config.load_repos(path)
+
+
+@pytest.mark.parametrize("field", ["env_passthrough", "local_files"])
+def test_repo_entry_empty_string_items_use_pydantic_inner_constraints(field):
+    with pytest.raises(ValidationError) as exc:
+        config.RepoEntry.model_validate({"path": "/a", field: [""]})
+    assert exc.value.errors()[0]["type"] == "string_too_short"
 
 
 def test_load_repos_defaults_setup_command_env_and_env_passthrough(tmp_path):

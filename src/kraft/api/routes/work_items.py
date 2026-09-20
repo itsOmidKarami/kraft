@@ -14,6 +14,7 @@ from kraft.adapters import beads as beads_mod
 from kraft.api import api_router, deps
 from kraft.api.routes import board
 from kraft.executor import entry
+from kraft.store.repos import RootMergePolicy
 from kraft.templates import (
     ATTACHMENT_GATES,
     materialize,
@@ -42,7 +43,7 @@ class NewWorkItem(BaseModel):
     #: cross-repo (design 1g "Advanced · cross-repo"): submodule paths from the
     #: repo's .gitmodules, and what happens to the root pointer when they land
     submodules: list[str] = []
-    root_merge_policy: str = "bump"
+    root_merge_policy: RootMergePolicy = "bump"
     #: spec/plan documents that already exist — they trim the gates they satisfy
     attachments: list[Attachment] = []
     #: the caller's working directory, sent only when there are attachment paths
@@ -177,8 +178,6 @@ async def create_work_item(body: NewWorkItem, request: Request):
     )
     if template is None:
         raise HTTPException(422, "unknown or invalid template")
-    if body.root_merge_policy not in store.ROOT_MERGE_POLICIES:
-        raise HTTPException(422, f"unknown root_merge_policy {body.root_merge_policy!r}")
     # Before `executor.intake`, which no longer 502s on a bd failure (Kraft-7gy)
     # and would file the item with no bead and a warning nobody reads. An
     # explicit check rather than `Field(max_length=...)`: pydantic's 422 body is

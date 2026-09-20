@@ -12,7 +12,8 @@ from kraft.api.routes import artifacts, board
 from kraft.api.routes.lifecycle import _stop_live_sessions
 from kraft.executor import gates
 from kraft.templates import (
-    GATE_NAMES,
+    CHAIN_REVIEW_GATE,
+    ChainNode,
     carry_forward_node_fields,
     strip_non_proposable_carryover_fields,
     validate_nodes,
@@ -60,7 +61,7 @@ def _splice_chain_review(st, row) -> tuple[dict | None, dict | None, str | None]
 
     nodes = envelope.get("revised_chain_nodes")
     chain = json.loads(row["chain_definition"])
-    tail_start = board._gate_node_index(chain, "chain_finalized") + 1
+    tail_start = board._gate_node_index(chain, CHAIN_REVIEW_GATE) + 1
     preceding_ids = frozenset(n["id"] for n in chain["nodes"][:tail_start])
     errs = (
         validate_nodes(nodes, st.registry, preceding_ids=preceding_ids)
@@ -168,7 +169,7 @@ async def apply_approval(st, row, gate: str) -> tuple[dict | None, str | None]:
     everywhere else it's called.
     """
     await artifacts._ingest_approved_gate_artifact(st, row, gate)
-    if gate != "chain_finalized":
+    if gate != CHAIN_REVIEW_GATE:
         return json.loads(row["chain_definition"]), None
     chain, node_override_patch, reason = _splice_chain_review(st, row)
     if chain is None:
@@ -216,11 +217,12 @@ def _decided_by(request: Request) -> str:
     return "human"
 
 
-@api_router.post("/work-items/{wid}/gates/{gate}/approve")
+@api_router.post("/work-items/{wid}/gates/{gate:path}/approve")
 async def approve_gate(wid: str, gate: str, request: Request):
     st = request.app.state
     row = deps._work_item_row(st, wid)
-    if gate not in GATE_NAMES:
+    chain = json.loads(row["chain_definition"])
+    if gate not in ChainNode.gate_names(chain["nodes"]):
         raise HTTPException(404, f"unknown gate {gate!r}")
     if board._pending_gate(st, wid) != gate:
         raise HTTPException(409, f"gate {gate!r} is not pending")
@@ -280,7 +282,7 @@ async def approve_gate(wid: str, gate: str, request: Request):
     return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
 
 
-@api_router.post("/work-items/{wid}/gates/{gate}/reject")
+@api_router.post("/work-items/{wid}/gates/{gate:path}/reject")
 async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
     """Reject a gate and put the chain back to work (02 §7.2, backward motion).
 
@@ -292,7 +294,8 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
     """
     st = request.app.state
     row = deps._work_item_row(st, wid)
-    if gate not in GATE_NAMES:
+    chain = json.loads(row["chain_definition"])
+    if gate not in ChainNode.gate_names(chain["nodes"]):
         raise HTTPException(404, f"unknown gate {gate!r}")
     if board._pending_gate(st, wid) != gate:
         raise HTTPException(409, f"gate {gate!r} is not pending")
@@ -304,7 +307,6 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
         raise HTTPException(
             503, f"policy config invalid, refusing work: {'; '.join(st.invalid_policy)}"
         )
-    chain = json.loads(row["chain_definition"])
     try:
         executor.reject_target(chain, executor.gate_node_index(chain, gate), body.node)
     except ValueError as exc:

@@ -148,10 +148,10 @@ export const raiseBudget = (id: string, budgetUsd: number | null) =>
   );
 
 export const approveGate = (id: string, gate: string) =>
-  req<void>(`/work-items/${id}/gates/${gate}/approve`, { method: "POST" });
+  req<void>(`/work-items/${id}/gates/${encodeURIComponent(gate)}/approve`, { method: "POST" });
 
 export const rejectGate = (id: string, gate: string, note: string) =>
-  req<void>(`/work-items/${id}/gates/${gate}/reject`, json("POST", { note }));
+  req<void>(`/work-items/${id}/gates/${encodeURIComponent(gate)}/reject`, json("POST", { note }));
 
 export const pauseWorkItem = (id: string) =>
   req<{ id: string; paused_sessions: string[] }>(`/work-items/${id}/pause`, json("POST", {}));

@@ -144,6 +144,49 @@ def test_gate_approve_advances_chain(tmp_path, monkeypatch):
         assert any(e["type"] == "node_started" and e["payload"]["node_id"] == "plan" for e in evts)
 
 
+def test_approve_accepts_a_custom_gate_in_this_items_chain(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    templates_dir = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
+    path = templates_dir / "default.yaml"
+    chain = yaml.safe_load(path.read_text())
+    chain["nodes"][0]["gate_after"] = "release/ready#1"
+    path.write_text(yaml.safe_dump(chain, sort_keys=False))
+
+    with _client(tmp_path, monkeypatch, templates_dir=templates_dir) as client:
+        wid = _post_default(client, repo)
+        _await_gate(client, wid, "release/ready#1")
+        response = client.post(f"/api/work-items/{wid}/gates/release%2Fready%231/approve")
+        assert response.status_code == 200, response.text
+        assert _poll_node_started(client, wid, "plan")
+
+
+def test_reject_accepts_an_encoded_slash_containing_custom_gate(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    templates_dir = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
+    path = templates_dir / "default.yaml"
+    chain = yaml.safe_load(path.read_text())
+    chain["nodes"][0]["gate_after"] = "release/ready#1"
+    path.write_text(yaml.safe_dump(chain, sort_keys=False))
+
+    with _client(tmp_path, monkeypatch, templates_dir=templates_dir) as client:
+        wid = _post_default(client, repo)
+        _await_gate(client, wid, "release/ready#1")
+        response = client.post(
+            f"/api/work-items/{wid}/gates/release%2Fready%231/reject", json={"note": "redo"}
+        )
+
+    assert response.status_code == 200, response.text
+
+
+def test_approve_rejects_gate_absent_from_this_items_chain(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        response = client.post(f"/api/work-items/{wid}/gates/release_ready/approve")
+
+    assert response.status_code == 404
+
+
 def test_chain_review_splice_runs_the_revised_tail(tmp_path, monkeypatch):
     """Kraft-hm0: a genuinely revised tail is spliced into `chain_definition`
     on `chain_finalized` approval, and the next node runs the added task, not

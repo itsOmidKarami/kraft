@@ -8,10 +8,27 @@ from kraft import harness, skill, templates
 from kraft.templates import (
     ATTACHMENT_GATES,
     GATE_NAMES,
+    AgentDefaults,
+    BindingKind,
+    Capability,
     Template,
     load_registry,
+    load_templates,
     materialize,
 )
+
+
+def test_registry_models_expose_binding_kinds_capabilities_and_default_merge():
+    assert BindingKind.AGENT.value == "agent"
+    assert Capability.ALLOWED_TOOLS.value == "allowed_tools"
+    defaults = AgentDefaults.model_validate({"model": "default", "allowed_tools": ["read"]})
+    binding = templates.AgentBinding.model_validate(
+        {"kind": "agent", "command": "work", "model": "binding", "allowed_tools": ["write"]}
+    )
+    merged = defaults.merge(binding)
+    assert merged["model"] == "binding"
+    assert merged["allowed_tools"] == ["read", "write"]
+
 
 TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 SKILLS_DIR = Path(__file__).parent.parent / "src" / "kraft" / "skills"
@@ -108,6 +125,7 @@ hooks:
   on.env.prepare:          { kind: builtin,    handler: env_setup }
   on.implementation.start: { kind: agent,      command: claude }
   on.test.run:             { kind: subprocess, command: [pytest, -q] }
+  on.work:                 { kind: builtin,    handler: work }
 """
 
 GOOD_TEMPLATE = """\
@@ -265,10 +283,9 @@ def test_validate_nodes_rejects_an_unregistered_hook(tmp_path):
     assert errs and "on.bogus" in errs[0]
 
 
-def test_validate_nodes_rejects_an_unknown_gate_after(tmp_path):
-    nodes = [{"id": "n1", "tasks": ["on.test.run"], "gate_after": "bogus_gate"}]
-    errs = templates.validate_nodes(nodes, _registry(tmp_path))
-    assert errs and "bogus_gate" in errs[0]
+def test_validate_nodes_accepts_a_custom_gate_after(tmp_path):
+    nodes = [{"id": "n1", "tasks": ["on.test.run"], "gate_after": "release_ready"}]
+    assert templates.validate_nodes(nodes, _registry(tmp_path)) == []
 
 
 def test_validate_nodes_rejects_a_fix_loop_node_with_no_tasks(tmp_path):
@@ -299,17 +316,17 @@ def test_validate_nodes_is_what_load_templates_calls_for_its_own_nodes(tmp_path)
         tmp_path,
         **{
             "registry.yaml": REGISTRY_YAML,
-            "weirdgate.yaml": (
-                "id: weirdgate\n"
-                "nodes:\n"
-                "  - { id: n1, tasks: [on.test.run], gate_after: bogus_gate }\n"
-            ),
+            "weirdgate.yaml": """\
+id: weirdgate
+nodes:
+  - { id: n1, tasks: [on.test.run], gate_after: '' }
+""",
         },
     )
     reg = templates.load_registry(d / "registry.yaml")
     ts = templates.load_templates(d, reg)
     direct = templates.validate_nodes(
-        [{"id": "n1", "tasks": ["on.test.run"], "gate_after": "bogus_gate"}], reg
+        [{"id": "n1", "tasks": ["on.test.run"], "gate_after": ""}], reg
     )
     assert direct[0] in ts.invalid["weirdgate"]
 
@@ -323,6 +340,43 @@ _BASE_TEMPLATE = (
     "  - { id: implementation, tasks: [on.implementation.start], gate_after: null }\n"
     "  - { id: verify,         tasks: [on.test.run],            gate_after: null }\n"
 )
+
+
+def test_resolved_sibling_templates_do_not_share_mutable_nodes(tmp_path):
+    _write(tmp_path, "base.yaml", "id: base\nnodes: [{id: work, tasks: [on.work]}]\n")
+    _write(tmp_path, "left.yaml", "id: left\nextends: base\n")
+    _write(tmp_path, "right.yaml", "id: right\nextends: base\n")
+    templates = load_templates(tmp_path, _registry(tmp_path))
+    templates.valid["left"].nodes[0]["tasks"].append("on.extra")
+    assert "on.extra" not in templates.valid["right"].nodes[0]["tasks"]
+
+
+def test_custom_gate_name_is_valid_template_data(tmp_path):
+    _write(
+        tmp_path,
+        "release.yaml",
+        "id: release\nnodes: [{id: work, tasks: [on.work], gate_after: release_ready}]\n",
+    )
+    templates = load_templates(tmp_path, _registry(tmp_path))
+    assert templates.valid["release"].nodes[-1]["gate_after"] == "release_ready"
+
+
+def test_template_document_resolves_its_composition(tmp_path):
+    base = templates.TemplateDocument.model_validate(
+        {"id": "base", "nodes": [{"id": "work", "tasks": ["on.work"]}]}
+    )
+    child = templates.TemplateDocument.model_validate(
+        {
+            "id": "child",
+            "extends": "base",
+            "insert_after": {"work": [{"id": "verify", "tasks": ["on.test.run"]}]},
+        }
+    )
+
+    assert [node.id for node in child.resolve({"base": base, "child": child})] == [
+        "work",
+        "verify",
+    ]
 
 
 def test_extends_inherits_the_base_templates_nodes(tmp_path):
@@ -555,24 +609,44 @@ def test_validate_agent_overrides_still_rejects_non_string_model():
     assert errs == ["agent_overrides 'model' must be a string or null"]
 
 
-def test_unknown_gate_after_quarantines_template(tmp_path):
+def test_node_override_schema_rejects_unknown_fields():
+    errs = templates.validate_node_override_fields({"not_a_setting": True})
+    assert errs == ["cannot override ['not_a_setting']"]
+
+
+def test_node_override_schema_rejects_explicit_invalid_bounds():
+    assert templates.validate_node_override_fields({"attempts": 0}) == [
+        "attempts must be a positive int"
+    ]
+    assert templates.validate_node_override_fields({"auto_escalate_delay_s": -1}) == [
+        "auto_escalate_delay_s must be a non-negative int"
+    ]
+
+
+def test_node_override_schema_preserves_sparse_explicit_nulls():
+    override = templates.NodeOverride.model_validate({"model": None, "effort": "high"})
+    assert override.model_fields_set == {"model", "effort"}
+    assert override.model_dump(exclude_unset=True) == {"model": None, "effort": "high"}
+
+
+def test_empty_gate_after_quarantines_template(tmp_path):
     d = _dir(
         tmp_path,
         **{
             "registry.yaml": REGISTRY_YAML,
             "quick-task.yaml": GOOD_TEMPLATE,
-            "weirdgate.yaml": (
-                "id: weirdgate\n"
-                "nodes:\n"
-                "  - { id: n1, tasks: [on.test.run], gate_after: bogus_gate }\n"
-            ),
+            "weirdgate.yaml": """\
+id: weirdgate
+nodes:
+  - { id: n1, tasks: [on.test.run], gate_after: '' }
+""",
         },
     )
     reg = templates.load_registry(d / "registry.yaml")
     ts = templates.load_templates(d, reg)
     assert "quick-task" in ts.valid
     assert "weirdgate" in ts.invalid
-    assert "bogus_gate" in ts.invalid["weirdgate"]
+    assert "gate_after" in ts.invalid["weirdgate"]
 
 
 _AUTO_TEMPLATE = (
@@ -690,10 +764,14 @@ def _dir(tmp_path, **files):
     return tmp_path
 
 
+def _write(tmp_path, name, body):
+    (tmp_path / name).write_text(body)
+
+
 def test_load_registry_ok(tmp_path):
     d = _dir(tmp_path, **{"registry.yaml": REGISTRY_YAML})
     reg = templates.load_registry(d / "registry.yaml")
-    assert set(reg.hooks) == {"on.env.prepare", "on.implementation.start", "on.test.run"}
+    assert set(reg.hooks) == {"on.env.prepare", "on.implementation.start", "on.test.run", "on.work"}
 
 
 def test_load_registry_rejects_an_unknown_key(tmp_path):
@@ -727,6 +805,30 @@ def test_load_registry_rejects_bad_bindings(tmp_path, body):
     (tmp_path / "registry.yaml").write_text(body)
     with pytest.raises(templates.RegistryError):
         templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_forge_binding_rejects_an_unknown_handler_at_the_model_boundary():
+    with pytest.raises(templates.ValidationError, match="Input should be"):
+        templates.ForgeBinding.model_validate(
+            {"kind": "forge", "handler": "teleport", "backend": "glab"}
+        )
+
+
+def test_subprocess_binding_rejects_non_string_command_items_at_the_model_boundary():
+    with pytest.raises(templates.ValidationError):
+        templates.SubprocessBinding.model_validate({"kind": "subprocess", "command": ["pytest", 1]})
+
+
+def test_forge_binding_rejects_a_negative_poll_timeout_at_the_model_boundary():
+    with pytest.raises(templates.ValidationError):
+        templates.ForgeBinding.model_validate(
+            {
+                "kind": "forge",
+                "handler": "ci_poll",
+                "backend": "glab",
+                "poll_timeout": -1,
+            }
+        )
 
 
 # ── registry `defaults:` (Kraft-6m2x6 phase 1) ─────────────────────────────
@@ -768,6 +870,15 @@ def test_defaults_agent_steering_dedupes_a_repeated_entry(tmp_path):
     assert reg.hooks["on.a"]["steering"] == ["shared"]
 
 
+def test_defaults_agent_allowed_tools_dedupes_defaults_and_binding_entries(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "defaults:\n  agent: { allowed_tools: [read, read] }\n"
+        "hooks:\n  on.a: { kind: agent, command: claude, allowed_tools: [write, write] }\n"
+    )
+    reg = templates.load_registry(tmp_path / "registry.yaml")
+    assert reg.hooks["on.a"]["allowed_tools"] == ["read", "write"]
+
+
 def test_defaults_agent_scalar_does_not_override_the_bindings_own_value(tmp_path):
     (tmp_path / "registry.yaml").write_text(
         "defaults:\n  agent: { model: opus }\n"
@@ -795,6 +906,37 @@ def test_defaults_rejects_an_unknown_top_level_key(tmp_path):
     )
     with pytest.raises(templates.RegistryError, match="defaults"):
         templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_defaults_agent_accepts_exactly_these_keys():
+    """Pinned, not derived, on purpose.
+
+    `_AGENT_ONLY_KEYS` comes off `AgentDefaults.model_fields`, so adding a
+    field to that model silently widens what `defaults.agent` accepts -- which
+    is how `interactive` and `timeout` arrived without a decision. Only
+    `dev/check_docs_coverage.py` noticed, and only for `interactive`: its
+    substring test already found the word "timeout" elsewhere on the page.
+    This list is the decision. Changing it means documenting the new key in
+    `docsite/configuration.md` under `defaults.agent.*` in the same commit.
+    """
+    assert templates._AGENT_ONLY_KEYS == frozenset(
+        {
+            "allowed_tools",
+            "artifact",
+            "command",
+            "deny_tools",
+            "effort",
+            "escalate_model",
+            "harness",
+            "interactive",
+            "model",
+            "permission_mode",
+            "profile",
+            "skill",
+            "steering",
+            "timeout",
+        }
+    )
 
 
 def test_defaults_agent_rejects_an_unknown_key(tmp_path):
@@ -828,6 +970,25 @@ def test_defaults_missing_entirely_is_fine(tmp_path):
     (tmp_path / "registry.yaml").write_text("hooks:\n  on.a: { kind: agent, command: claude }\n")
     reg = templates.load_registry(tmp_path / "registry.yaml")
     assert reg.hooks["on.a"] == {"kind": "agent", "command": "claude", "harness": "claude"}
+
+
+@pytest.mark.parametrize("key", ["interactive", "timeout", "command", "artifact"])
+def test_load_registry_rejects_explicit_null_agent_values(tmp_path, key):
+    (tmp_path / "registry.yaml").write_text(
+        f"hooks:\n  on.a: {{ kind: agent, command: claude, {key}: null }}\n"
+    )
+    with pytest.raises(templates.RegistryError, match=key):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+@pytest.mark.parametrize("key", ["interactive", "timeout", "command", "artifact"])
+def test_defaults_agent_rejects_explicit_null_values(tmp_path, key):
+    (tmp_path / "registry.yaml").write_text(
+        f"defaults:\n  agent: {{ {key}: null }}\nhooks:\n"
+        "  on.a: { kind: agent, command: claude }\n"
+    )
+    with pytest.raises(templates.RegistryError, match=key):
+        templates.load_registry(tmp_path / "registry.yaml")
 
 
 # ── new agent-hook keys: profile, model, deny_tools, steering ──────────────────
@@ -901,6 +1062,45 @@ def test_load_registry_rejects_deny_tools_not_a_list(tmp_path):
     )
     with pytest.raises(templates.RegistryError):
         templates.load_registry(tmp_path / "registry.yaml")
+
+
+@pytest.mark.parametrize("value", ["null", "3", "[3]"])
+def test_load_registry_rejects_bad_steering_before_file_validation(tmp_path, value):
+    (tmp_path / "registry.yaml").write_text(
+        f"hooks:\n  on.x: {{ kind: agent, command: claude, steering: {value} }}\n"
+    )
+    with pytest.raises(templates.RegistryError, match="steering"):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+@pytest.mark.parametrize("key", ["deny_tools", "allowed_tools"])
+def test_load_registry_rejects_explicit_null_agent_tool_lists(tmp_path, key):
+    (tmp_path / "registry.yaml").write_text(
+        f"hooks:\n  on.x: {{ kind: agent, command: claude, {key}: null }}\n"
+    )
+    with pytest.raises(templates.RegistryError, match=key):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+@pytest.mark.parametrize("key", ["poll_timeout", "poll_interval"])
+def test_load_registry_rejects_explicit_null_poll_keys(tmp_path, key):
+    (tmp_path / "registry.yaml").write_text(
+        f"hooks:\n  on.ci.poll: {{ kind: forge, handler: ci_poll, backend: glab, {key}: null }}\n"
+    )
+    with pytest.raises(templates.RegistryError, match=key):
+        templates.load_registry(tmp_path / "registry.yaml")
+
+
+def test_omitted_agent_and_forge_optional_fields_keep_safe_defaults(tmp_path):
+    (tmp_path / "registry.yaml").write_text(
+        "hooks:\n"
+        "  on.agent: { kind: agent, command: claude }\n"
+        "  on.ci.poll: { kind: forge, handler: ci_poll, backend: glab }\n"
+    )
+    hooks = templates.load_registry(tmp_path / "registry.yaml").hooks
+    assert hooks["on.agent"].get("steering", []) == []
+    assert hooks["on.ci.poll"].get("poll_timeout") is None
+    assert hooks["on.ci.poll"].get("poll_interval") is None
 
 
 def test_load_registry_rejects_unknown_permission_mode(tmp_path):
@@ -1065,6 +1265,18 @@ def test_materialize_quick_task_from_shipped_templates():
     }
     assert "current_node_id" not in chain
     assert json.loads(json.dumps(chain)) == chain  # round-trips
+
+
+def test_template_materialize_returns_the_existing_chain_definition_shape():
+    template = Template(
+        id="t",
+        nodes=[{"id": "implementation", "tasks": ["on.implementation.start"]}],
+    )
+
+    chain = template.materialize(satisfied_gates=frozenset(), skip_nodes=frozenset())
+
+    assert chain == materialize(template)
+    assert set(chain) == {"template_id", "nodes"}
 
 
 def test_default_yaml_verify_node_has_fix_loop():
@@ -1914,6 +2126,44 @@ def test_with_steps_derives_a_flat_task_list_from_groups_in_order():
     out = templates.with_steps({"id": "n", "steps": [["on.a"], ["on.b", "on.c"]]})
     assert out["steps"] == [["on.a"], ["on.b", "on.c"]]
     assert out["tasks"] == ["on.a", "on.b", "on.c"], "flat union, in group order"
+
+
+def test_matching_tasks_and_steps_load_for_root_and_inserted_nodes(tmp_path):
+    (tmp_path / "base.yaml").write_text(
+        "id: base\nnodes:\n- id: work\n  tasks: [on.a, on.b]\n  steps: [[on.a], [on.b]]\n"
+    )
+    (tmp_path / "child.yaml").write_text(
+        "id: child\nextends: base\ninsert_after:\n  work:\n  - id: verify\n"
+        "    tasks: [on.c]\n    steps: [[on.c]]\n"
+    )
+
+    loaded = templates.load_templates(tmp_path, _reg())
+
+    assert [node.model_dump(exclude_unset=True) for node in loaded.valid["base"].authored] == [
+        {"id": "work", "steps": [["on.a"], ["on.b"]]}
+    ]
+    assert loaded.valid["base"].nodes[0]["tasks"] == ["on.a", "on.b"]
+    assert loaded.valid["child"].nodes[1]["steps"] == [["on.c"]]
+    assert loaded.valid["child"].nodes[1]["tasks"] == ["on.c"]
+
+
+def test_empty_flat_tasks_and_steps_load_for_root_and_inserted_nodes(tmp_path):
+    (tmp_path / "base.yaml").write_text(
+        "id: base\nnodes:\n- id: work\n  tasks: []\n  steps: [[on.a]]\n"
+    )
+    (tmp_path / "child.yaml").write_text(
+        "id: child\nextends: base\ninsert_after:\n  work:\n  - id: verify\n"
+        "    tasks: []\n    steps: [[on.b]]\n"
+    )
+
+    loaded = templates.load_templates(tmp_path, _reg())
+
+    assert [node.model_dump(exclude_unset=True) for node in loaded.valid["base"].authored] == [
+        {"id": "work", "steps": [["on.a"]]}
+    ]
+    assert loaded.valid["base"].nodes[0]["tasks"] == ["on.a"]
+    assert loaded.valid["child"].nodes[1]["steps"] == [["on.b"]]
+    assert loaded.valid["child"].nodes[1]["tasks"] == ["on.b"]
 
 
 def test_a_template_may_not_declare_both_steps_and_tasks(tmp_path):
