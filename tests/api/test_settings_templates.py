@@ -207,7 +207,10 @@ def test_hook_runs_lists_recent_sessions_for_the_hook(tmp_path, client, template
     client.post("/api/repos", json={"path": str(repo), "test_command": "pytest"})
     wid = client.post(
         "/api/work-items",
-        json={"title": "x", "repo": str(repo), "chain_template": "quick-task", "autostart": False},
+        # `default`: the V1 seed ships one chain, and this test only needs an
+        # item to hang worker sessions off. Whether a V1 `quick-task` should
+        # exist at all is 5b's call (see the 5a report).
+        json={"title": "x", "repo": str(repo), "chain_template": "default", "autostart": False},
     ).json()["id"]
 
     conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")

@@ -46,6 +46,11 @@ CONFIG_FILES = frozenset(
         # shipped library as a malformed chain template. Its chains live in
         # `chains/`, which this glob does not descend into.
         "library.yaml",
+        # The V1 harness-profile table (`environment.HarnessProfileTable`).
+        # Same reason as `library.yaml`: no top-level `id`, so a loader that
+        # scanned it would report the shipped file as a malformed chain
+        # template and put a fresh install into degraded health.
+        "harnesses.yaml",
         "policy.yaml",
         "repos.yaml",
         "access.yaml",
