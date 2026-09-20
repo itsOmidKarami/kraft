@@ -159,6 +159,17 @@ def test_policy_yaml_is_not_scanned_as_a_template():
     assert "policy" not in ts.valid
 
 
+def test_library_yaml_is_not_scanned_as_a_template():
+    """The V1 `library.yaml` now sits in the same directory. It has no top-level
+    `id`, so without being named in `CONFIG_FILES` the legacy loader reads it as
+    a malformed chain template and /health degrades -- the same hazard
+    policy.yaml is in that list for."""
+    reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
+    ts = templates.load_templates(TEMPLATES_DIR, reg)
+    assert "library" not in ts.invalid
+    assert "library" not in ts.valid
+
+
 def test_shipped_default_yaml_is_the_ten_node_chain():
     reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
     ts = templates.load_templates(TEMPLATES_DIR, reg)

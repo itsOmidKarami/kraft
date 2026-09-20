@@ -1,0 +1,81 @@
+# chains/default.yaml
+id: default
+
+nodes:
+  - id: spec
+    kind: exec
+    tasks:
+      - id: author
+        extends: spec_author
+
+  - id: spec_approval
+    kind: gate
+    message: Review and approve the specification.
+    artifact: spec
+    reject_to: spec
+
+  - id: plan
+    kind: exec
+    tasks:
+      - id: author
+        extends: plan_author
+
+  - id: plan_approval
+    kind: gate
+    message: Review and approve the implementation plan.
+    artifact: plan
+    reject_to: plan
+
+  - id: implementation
+    extends: implementation
+
+  - id: local_review
+    kind: gate
+    message: Approve creating a draft merge request.
+    reject_to: implementation
+
+  - id: draft_merge_request
+    kind: exec
+    tasks:
+      - id: open
+        extends: open_draft_mr
+
+  - id: merge_request_feedback
+    extends: post_draft_feedback
+
+  - id: work_item_summary
+    kind: exec
+    tasks:
+      - id: author
+        extends: write_summary
+
+  - id: chain_review
+    kind: gate
+    chain_finalized: true
+    message: Review the complete work item and merge-request summary.
+    artifact: review_brief
+    reject_to: implementation
+
+  - id: mark_ready
+    kind: exec
+    tasks:
+      - id: ready
+        extends: mark_mr_ready
+
+  - id: external_approval
+    kind: exec
+    tasks:
+      - id: await
+        extends: await_external_approval
+
+  - id: merge
+    kind: exec
+    tasks:
+      - id: merge
+        extends: merge_mr
+
+  - id: post_merge_ci
+    kind: exec
+    tasks:
+      - id: await
+        extends: await_post_merge_ci

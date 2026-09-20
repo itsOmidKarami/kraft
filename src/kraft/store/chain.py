@@ -139,6 +139,24 @@ def skip_node(
         events.append(conn, work_item_id, "worker_session_paused", {"session_id": sid})
 
 
+def materialized_chain_of(row):
+    """`row["materialized_chain"]` as the model that wrote it, or None.
+
+    None for every row the legacy intake path wrote — and for every row written
+    before the column existed. A caller that needs V1 has to handle that, which
+    is why this returns None rather than raising: the legacy path is still live
+    until Task 5 retires it.
+
+    Imported inside the function: `kraft.templates.models` pulls in `kraft.policy`
+    and `kraft.harness`, and `kraft.store` is imported by both the API and the
+    worker, neither of which should pay for the template schema to read a row.
+    """
+    from kraft.templates.models import MaterializedChain
+
+    raw = row["materialized_chain"] if "materialized_chain" in row.keys() else None
+    return MaterializedChain.from_json(raw) if raw else None
+
+
 def node_overrides_of(row) -> dict:
     """`row["node_overrides"]` decoded, `{}` when there are none."""
     raw = row["node_overrides"] if "node_overrides" in row.keys() else None

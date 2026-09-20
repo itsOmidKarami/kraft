@@ -36,13 +36,14 @@ but the availability of such a helper SHALL NOT be required for the update.
 The template directory SHALL contain one `library.yaml` for reusable tasks,
 steps, nodes, and named steering profiles, and one selectable chain per file
 under `chains/`.
-enforced-by: tests/templates/test_library.py::test_from_yaml_dir_loads_components_and_one_chain_per_file, tests/templates/test_library.py::test_each_chain_file_is_one_selectable_chain, tests/templates/test_library.py::test_two_chain_files_claiming_one_id_is_an_error_naming_both
+enforced-by: tests/templates/test_library.py::test_from_yaml_dir_loads_components_and_one_chain_per_file, tests/templates/test_library.py::test_each_chain_file_is_one_selectable_chain, tests/templates/test_library.py::test_two_chain_files_claiming_one_id_is_an_error_naming_both, tests/templates/test_materialization.py::test_the_seed_is_a_library_file_and_one_chain_per_file
 
 ## REQ registry-is-not-a-task-configuration-source
 
 The system SHALL NOT use `registry.yaml` as a source of agent, subprocess,
 forge, or built-in task configuration; those definitions SHALL live in typed
 templates.
+enforced-by: tests/templates/test_materialization.py::test_task_configuration_resolves_from_the_library_alone
 
 ## REQ task-kinds-are-discriminated
 
@@ -248,11 +249,13 @@ enforced-by: tests/templates/test_library.py::test_an_inheritance_error_names_th
 
 The system SHALL distinguish the authored template library, a reusable fully
 resolved chain, and a per-work-item materialized chain snapshot.
+enforced-by: tests/templates/test_materialization.py::test_the_resolved_chain_is_reusable_across_work_items, tests/templates/test_materialization.py::test_materialization_freezes_chain_policy_and_target
 
 ## REQ materialized-chain-is-immutable-work-item-input
 
 A materialized chain SHALL contain effective policy values and intake-specific
 decisions for one work item and SHALL NOT change as that item executes.
+enforced-by: tests/templates/test_materialization.py::test_materialization_freezes_chain_policy_and_target, tests/templates/test_materialization.py::test_a_materialized_chain_cannot_be_changed_while_the_item_executes, tests/store/test_chain_gates.py::test_a_materialized_chain_round_trips_through_the_work_item_row
 
 ## REQ steer-can-address-paused-agent-tasks-individually
 
@@ -573,6 +576,7 @@ enforced-by: tests/templates/test_environment.py::test_workspace_declares_root_a
 A work item MAY target one repository, selected members of a workspace, or a
 workspace root and its members. The selected targets and root-pointer policy
 SHALL be captured when the work item is materialized.
+enforced-by: tests/templates/test_materialization.py::test_the_target_selection_survives_serialization, tests/templates/test_materialization.py::test_materialization_freezes_chain_policy_and_target
 
 ## REQ workspace-root-pointer-update-is-explicit
 
@@ -634,6 +638,7 @@ A work item SHALL select either one repository or a workspace target. A
 workspace target MAY select member repositories and its root repository. The
 selected targets, mount paths, base revisions, effective repository and area
 policy, and root-pointer policy SHALL remain unchanged for that work item.
+enforced-by: tests/templates/test_materialization.py::test_the_target_selection_survives_serialization, tests/templates/test_materialization.py::test_a_materialized_chain_cannot_be_changed_while_the_item_executes
 
 ## REQ selected-repositories-get-corresponding-branches
 
@@ -790,6 +795,7 @@ template library in isolation, without writing either input to disk.
 A resolved-template response SHALL represent inheritance and component
 expansion only; attachment-driven gate satisfaction and other per-work-item
 materialization SHALL remain separate.
+enforced-by: tests/templates/test_materialization.py::test_resolution_is_expansion_only_and_repeatable
 
 ## REQ template-cli-exposes-lint-and-resolved-output
 

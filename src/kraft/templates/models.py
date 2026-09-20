@@ -36,8 +36,10 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
+    PlainSerializer,
     StrictBool,
     StrictStr,
+    ValidationError,
     model_validator,
 )
 
@@ -84,8 +86,26 @@ def _duration(value: object) -> object:
     return timedelta(seconds=amount * _DURATION_UNITS[match[2]])
 
 
+def _duration_text(value: timedelta) -> str:
+    """Back to the authored form, largest exact unit first.
+
+    Symmetry with `_duration`, and the whole reason it is here: pydantic's own
+    JSON form for a `timedelta` is ISO-8601 (`PT1H30M`), which `_duration` then
+    refuses. A stored chain has to re-read, so the grammar has to round-trip.
+    """
+    total = int(value.total_seconds())
+    unit = next(u for u in ("d", "h", "m", "s") if total % _DURATION_UNITS[u] == 0)
+    return f"{total // _DURATION_UNITS[unit]}{unit}"
+
+
 #: A duration as templates write it, as the stdlib type the runtime wants.
-Duration = Annotated[timedelta, BeforeValidator(_duration)]
+#: `when_used="json"` so only the stored form changes: a reader holding the
+#: model still sees a `timedelta`.
+Duration = Annotated[
+    timedelta,
+    BeforeValidator(_duration),
+    PlainSerializer(_duration_text, return_type=str, when_used="json"),
+]
 
 
 def _not_reserved(id: str) -> str:
@@ -520,7 +540,11 @@ class ResolvedChain:
         return cls(chain=chain, nodes=tuple(nodes))
 
     def materialize(
-        self, target: WorkItemTarget, effective_policy: InstancePolicy
+        self,
+        target: WorkItemTarget,
+        effective_policy: InstancePolicy,
+        *,
+        run_parent: str | None = None,
     ) -> MaterializedChain:
         """Bind this chain to one work item: its immutable target and the
         policy its tasks run under, with the chain's own override layered on
@@ -529,7 +553,24 @@ class ResolvedChain:
         policy = effective_policy
         if self.chain.policy is not None:
             policy = policy.apply_template_override(self.chain.policy)
-        return MaterializedChain(chain=self, target=target, policy=policy)
+        return MaterializedChain(chain=self, target=target, policy=policy, run_parent=run_parent)
+
+
+class _StoredMaterialization(BaseModel):
+    """`MaterializedChain`'s stored form, so the mapping between the snapshot
+    and its column lives on the model rather than in whatever writes the row.
+
+    Not `_CONFIG`: this validates Kraft's own output, where a `policy` tuple
+    arrives from JSON as a list and has to coerce back. The strict, extra-
+    forbidding models are for *authored* input.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    chain: Chain
+    target: WorkItemTarget
+    policy: InstancePolicy
+    run_parent: StrictStr | None = None
 
 
 @dataclass(frozen=True)
@@ -540,7 +581,42 @@ class MaterializedChain:
     chain: ResolvedChain
     target: WorkItemTarget
     policy: InstancePolicy
+    #: The run this one forked from, filled by Phase 5's retry forks. Reserved
+    #: here so a fork's lineage needs no second storage migration.
+    run_parent: str | None = None
 
     @property
     def task_paths(self) -> tuple[str, ...]:
         return self.chain.task_paths
+
+    def to_json(self) -> str:
+        """The immutable work-item input, as one JSON document: the resolved
+        chain, the effective policy, the typed target, and the run parent.
+
+        The *authored* chain is what is stored, never the resolved paths -- they
+        are derived from it deterministically (`resolved-template-is-
+        deterministic`), so storing both would let the two disagree.
+        """
+        return _StoredMaterialization(
+            chain=self.chain.chain,
+            target=self.target,
+            policy=self.policy,
+            run_parent=self.run_parent,
+        ).model_dump_json()
+
+    @classmethod
+    def from_json(cls, raw: str) -> MaterializedChain:
+        from kraft.templates.library import TemplateLibraryError
+
+        try:
+            stored = _StoredMaterialization.model_validate_json(raw)
+        except ValidationError as exc:
+            raise TemplateLibraryError(
+                f"not a materialized chain: {exc.errors()[0]['msg']}"
+            ) from exc
+        return cls(
+            chain=ResolvedChain.from_chain(stored.chain),
+            target=stored.target,
+            policy=stored.policy,
+            run_parent=stored.run_parent,
+        )

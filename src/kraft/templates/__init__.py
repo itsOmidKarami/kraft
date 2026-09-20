@@ -41,6 +41,11 @@ _VALID_KINDS = {"builtin", "agent", "subprocess", "forge"}
 CONFIG_FILES = frozenset(
     {
         "registry.yaml",
+        # The V1 reusable-component library (`kraft.templates.library`). It has
+        # no top-level `id`, so a loader that scanned it would report the
+        # shipped library as a malformed chain template. Its chains live in
+        # `chains/`, which this glob does not descend into.
+        "library.yaml",
         "policy.yaml",
         "repos.yaml",
         "access.yaml",

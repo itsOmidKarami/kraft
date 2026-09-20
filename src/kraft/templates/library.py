@@ -49,6 +49,19 @@ class TemplateLibraryError(Exception):
     pass
 
 
+@dataclass(frozen=True)
+class TemplateIssue:
+    """One thing wrong with an authored library, named where an author can find
+    it (`template-resolution-preserves-source-context`)."""
+
+    file: Path
+    chain: str
+    message: str
+
+    def __str__(self) -> str:
+        return f"{self.chain}: {self.message}"
+
+
 class Namespace(StrEnum):
     """The `library.yaml` sections, which are also the `extends` namespaces: a
     component extends one parent of its own kind and no other
@@ -203,6 +216,24 @@ class TemplateLibrary:
         """Which namespace declares `name`, for the cross-namespace `extends`
         error that says what the author actually referenced."""
         return next((ns for ns in _EXTENDABLE if name in self._components[ns]), None)
+
+    def lint(self) -> list[TemplateIssue]:
+        """Every chain in this library that does not resolve, rather than the
+        first (`template-lint-reports-library-validity`).
+
+        Over the library already in memory: no file is read and none is written,
+        so an edit landing mid-lint cannot be reported against configuration the
+        caller never loaded. Parse errors are `from_yaml_dir`'s -- a library that
+        cannot be parsed has no instance to lint, and the caller turns that one
+        raise into its own issue.
+        """
+        issues = []
+        for id, raw in self._chains.items():
+            try:
+                self.resolve_chain(id)
+            except TemplateLibraryError as exc:
+                issues.append(TemplateIssue(file=raw.source.file, chain=id, message=str(exc)))
+        return issues
 
     def resolve_chain(self, id: str) -> ResolvedChain:
         """Expand one chain's `extends` references, validate the result into a

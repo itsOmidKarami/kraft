@@ -407,3 +407,104 @@ def test_effective_auto_escalate_delay_s_survives_a_bare_chain_definition_with_a
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", ("w1",)).fetchone()
     )
     assert store.effective_auto_escalate_delay_s(row, 30) == 30
+
+
+# ── the V1 materialized snapshot, stored alongside the legacy chain_definition ──
+
+
+def _materialized():
+    from pathlib import Path
+
+    from kraft.policy import InstancePolicy, InstancePolicyInput
+    from kraft.templates.environment import Repository, WorkItemTarget
+    from kraft.templates.library import TemplateLibrary
+
+    root = Path(__file__).resolve().parents[2] / "templates"
+    return (
+        TemplateLibrary.from_yaml_dir(root)
+        .resolve_chain("default")
+        .materialize(
+            target=WorkItemTarget.for_repository(Repository(id="api", path="/work/api")),
+            effective_policy=InstancePolicy.from_input(
+                InstancePolicyInput.model_validate({"defaults": {"timeout_minutes": 60}})
+            ),
+        )
+    )
+
+
+def test_a_materialized_chain_round_trips_through_the_work_item_row(tmp_path):
+    """The column is the work item's immutable V1 input: what intake wrote is
+    what the executor reads back, target and effective policy included."""
+    from kraft.templates.models import MaterializedChain
+
+    materialized = _materialized()
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="w1",
+                    bead_id=None,
+                    title="t",
+                    repo="/r",
+                    chain_template="default",
+                    chain_definition="{}",
+                    materialized_chain=materialized.to_json(),
+                )
+            )
+            return database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
+            )
+        finally:
+            await database.close()
+
+    row = asyncio.run(scenario())
+    restored = store.materialized_chain_of(row)
+
+    assert isinstance(restored, MaterializedChain)
+    assert restored.task_paths == materialized.task_paths
+    assert restored.target == materialized.target
+    assert restored.policy == materialized.policy
+    # Decision 1: additive. The legacy column is untouched and still readable.
+    assert row["chain_definition"] == "{}"
+
+
+def test_a_row_with_no_materialized_chain_reads_as_none(tmp_path):
+    """Every row written before this migration, and every legacy-path item
+    Task 5 has not converted yet."""
+    database = _seeded(tmp_path, "w1", {"nodes": []}, "n")
+    row = database.read(lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone())
+    assert store.materialized_chain_of(row) is None
+    assert row["run_fork_parent"] is None
+
+
+def test_the_run_fork_parent_column_is_written_at_intake(tmp_path):
+    """Reserved for Phase 5's retry forks: a fork records the run it came from
+    without a second migration."""
+
+    async def scenario():
+        database = await open_db(tmp_path)
+        try:
+            await database.write(
+                lambda c: store.create_work_item(
+                    c,
+                    id="w2",
+                    bead_id=None,
+                    title="t",
+                    repo="/r",
+                    chain_template="default",
+                    chain_definition="{}",
+                    run_fork_parent="w1",
+                )
+            )
+            return database.read(
+                lambda c: c.execute(
+                    "SELECT run_fork_parent FROM work_items WHERE id='w2'"
+                ).fetchone()
+            )
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario())["run_fork_parent"] == "w1"

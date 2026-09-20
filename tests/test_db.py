@@ -214,6 +214,15 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         )
     if version < 29:
         drop_lines = (*drop_lines, "thread         INTEGER NOT NULL DEFAULT 1,")
+    if version < 33:
+        drop_lines = (
+            *drop_lines,
+            "materialized_chain TEXT,",
+            "run_fork_parent  TEXT,",
+            "-- template schema V1's immutable work-item input",
+            "-- Beside `chain_definition`, not replacing it",
+            "-- the run this one forked from (Phase 5 retry forks)",
+        )
     if version < 32:
         drop_lines = (
             *drop_lines,
@@ -518,6 +527,31 @@ def test_migrate_v25_to_v26_adds_archive_columns(tmp_path):
 
     cols = {r[1] for r in conn.execute("PRAGMA table_info(work_items)").fetchall()}
     assert {"archived_at", "archived_by"} <= cols
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+
+
+def test_migrate_v32_to_v33_adds_the_v1_columns_and_keeps_the_legacy_chain(tmp_path):
+    """Template schema V1 is additive: an existing item keeps the
+    `chain_definition` it materialized under the legacy loader and simply gains
+    two NULL columns, because a legacy chain cannot be faithfully translated
+    into a V1 one (`_MIGRATIONS[32]`)."""
+    conn = db._connect(tmp_path / "orchestrator.db")
+    _build_old_db(conn, 32)
+    conn.execute(
+        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+        "status, created_at, updated_at) VALUES ('w1','t','/r','default','{\"nodes\": []}',"
+        "'active','now','now')"
+    )
+    conn.commit()
+
+    db.migrate(conn)
+
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(work_items)").fetchall()}
+    assert {"materialized_chain", "run_fork_parent"} <= cols
+    row = conn.execute("SELECT * FROM work_items WHERE id = 'w1'").fetchone()
+    assert row["chain_definition"] == '{"nodes": []}'
+    assert row["materialized_chain"] is None
+    assert row["run_fork_parent"] is None
     assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
 
 
