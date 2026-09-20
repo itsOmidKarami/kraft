@@ -318,18 +318,11 @@ class FixLoop(ExecutionShape):
 
     #: Optional (`fix-loop-judge-is-optional`), and its runtime configuration
     #: is an ordinary task's (`judge-runtime-is-independent-from-fixer-
-    #: runtime`). Its canonical segment is the container's own name, `judge`.
+    #: runtime`). A named slot, not a step: its canonical segment is the slot's
+    #: own name, `judge`, so the authored id never becomes a path segment and
+    #: cannot collide with anything. No reserved check belongs here.
     judge: AnyTask | None = None
     max_attempts: Annotated[int, Field(gt=0)] | None = None
-
-    @model_validator(mode="after")
-    def _judge_identifier(self) -> Self:
-        # The judge occupies step position, so it obeys the step rule -- except
-        # for `judge`, the segment it already is (docs/templates-v1-design.md's
-        # own library.yaml names it that).
-        if self.judge is not None and self.judge.id != JUDGE_SEGMENT:
-            _not_reserved(self.judge.id)
-        return self
 
 
 class ExecNode(ExecutionShape):
@@ -344,8 +337,17 @@ class ExecNode(ExecutionShape):
     on_failure: RecoveryPlan | None = None
     fix_loop: FixLoop | None = None
     #: A bounded escalation task (`stuck-escalation-is-an-exec-node-control`).
-    #: Its canonical container segment is `escalation`.
+    #: `escalation` is the container segment and the task's own id follows it,
+    #: so -- unlike a fix loop's judge -- this id *is* a path segment.
     escalation: AnyTask | None = None
+
+    @model_validator(mode="after")
+    def _escalation_identifier(self) -> Self:
+        # The one dedicated task whose authored id becomes a segment of its own
+        # (`node.escalation.<id>`), so it obeys the reserved-segment rule.
+        if self.escalation is not None:
+            _not_reserved(self.escalation.id)
+        return self
 
 
 class GateNode(BaseModel):

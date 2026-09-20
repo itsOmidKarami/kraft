@@ -42,6 +42,45 @@ def test_from_yaml_dir_loads_components_and_one_chain_per_file(design):
     assert design.steering["project-standards"].instructions.startswith("Keep changes focused")
 
 
+def test_each_chain_file_is_one_selectable_chain(tmp_path):
+    library = {"tasks": {"base": agent_task()}}
+    chain = {
+        "id": "default",
+        "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "base"}]}],
+    }
+    loaded = write(tmp_path, library, chain)
+    (tmp_path / "chains" / "quick-change.yaml").write_text(
+        yaml.safe_dump({**chain, "id": "quick-change"})
+    )
+    assert TemplateLibrary.from_yaml_dir(tmp_path).chain_ids == ("default", "quick-change")
+    assert loaded.chain_ids == ("default",)
+
+
+def test_two_chain_files_claiming_one_id_is_an_error_naming_both(tmp_path):
+    library = {"tasks": {"base": agent_task()}}
+    chain = {
+        "id": "default",
+        "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "base"}]}],
+    }
+    write(tmp_path, library, chain)
+    (tmp_path / "chains" / "also-default.yaml").write_text(yaml.safe_dump(chain))
+    with pytest.raises(TemplateLibraryError) as exc:
+        TemplateLibrary.from_yaml_dir(tmp_path)
+    assert "also-default.yaml" in str(exc.value)
+    assert "chains/default.yaml" in str(exc.value)
+
+
+def test_chain_level_extends_is_rejected_explicitly(tmp_path):
+    library = {"tasks": {"base": agent_task()}}
+    chain = {
+        "id": "variant",
+        "extends": "default",
+        "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "base"}]}],
+    }
+    with pytest.raises(TemplateLibraryError, match="chain-level 'extends' is not supported"):
+        write(tmp_path, library, chain, chain_id="variant").resolve_chain("variant")
+
+
 def test_an_unknown_chain_is_rejected(design):
     with pytest.raises(TemplateLibraryError, match="no chain 'nope'"):
         design.resolve_chain("nope")

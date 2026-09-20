@@ -213,18 +213,42 @@ def test_a_reserved_segment_is_rejected_as_a_step_identifier():
             tm.Step.model_validate({"id": reserved, "tasks": [agent()]})
 
 
-def test_a_reserved_segment_is_rejected_for_the_dedicated_fix_loop_judge():
-    # The judge is a dedicated task in step position, so its identifier obeys
-    # the step rule -- except for `judge` itself, which is the segment it
-    # already occupies (the design's own library.yaml names it that).
-    for reserved in sorted(tm.RESERVED_SEGMENTS - {"judge"}):
+def test_a_reserved_segment_is_rejected_for_the_dedicated_escalation_task():
+    # `node.escalation.<id>`: the escalation task's authored id becomes a path
+    # segment of its own, so it obeys the reserved-segment rule.
+    for reserved in sorted(tm.RESERVED_SEGMENTS):
         with pytest.raises(ValidationError, match="reserved"):
-            tm.FixLoop.model_validate({"tasks": [agent("repair")], "judge": agent(reserved)})
+            tm.ExecNode.model_validate(
+                exec_node("build", tasks=[agent()], escalation=agent(reserved))
+            )
 
 
-def test_the_dedicated_judge_may_be_named_after_its_own_segment():
-    loop = tm.FixLoop.model_validate({"tasks": [agent("repair")], "judge": agent("judge")})
-    assert loop.judge.id == "judge"
+def test_the_dedicated_judge_is_a_slot_so_any_id_is_addressable():
+    # A judge occupies the named `judge` slot, whose own name is its canonical
+    # segment, so its authored id is never a path segment and cannot collide --
+    # not even with a reserved word.
+    for id in ("judge", "main", "strict"):
+        loop = tm.FixLoop.model_validate({"tasks": [agent("repair")], "judge": agent(id)})
+        assert loop.judge.id == id
+    resolved_judge = (
+        tm.ResolvedChain.from_chain(
+            tm.Chain.model_validate(
+                {
+                    "id": "c",
+                    "nodes": [
+                        exec_node(
+                            "build",
+                            tasks=[agent()],
+                            fix_loop={"tasks": [agent("r")], "judge": agent("main")},
+                        )
+                    ],
+                }
+            )
+        )
+        .nodes[0]
+        .judge
+    )
+    assert resolved_judge.path == "build.fix_loop.judge"
 
 
 def test_an_ordinary_task_may_reuse_a_reserved_word_as_its_own_identifier():

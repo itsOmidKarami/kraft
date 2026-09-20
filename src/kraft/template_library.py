@@ -178,6 +178,12 @@ class TemplateLibrary:
             id = body.get("id") or chain_path.stem
             if not isinstance(id, str):
                 raise TemplateLibraryError(f"{chain_path}: 'id' must be a string")
+            if id in chains:
+                # One selectable chain per file: two files claiming one id would
+                # otherwise make the loser's chain vanish from `chain_ids`.
+                raise TemplateLibraryError(
+                    f"{chain_path}: chain id {id!r} is already declared by {chains[id].source.file}"
+                )
             chains[id] = RawComponent(
                 {**body, "id": id}, ComponentSource(chain_path, Namespace.NODES, id)
             )
@@ -263,6 +269,15 @@ class _Resolution:
     # ── expansion ──
 
     def expand_chain(self, data: Mapping[str, object]) -> Mapping[str, object]:
+        if "extends" in data:
+            # `component-extends-has-one-parent` allows a chain to extend one
+            # chain, but V1 has no consumer for it and no chain namespace to
+            # resolve it against. Say so, rather than letting the author read
+            # pydantic's "Extra inputs are not permitted".
+            raise TemplateLibraryError(
+                f"{self._chain.file}: chain-level 'extends' is not supported in V1; "
+                "share structure through a reusable node instead"
+            )
         nodes = data.get("nodes")
         if not isinstance(nodes, list):
             raise TemplateLibraryError(f"{self._chain.file}: 'nodes' must be a list")

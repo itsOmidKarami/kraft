@@ -36,7 +36,7 @@ but the availability of such a helper SHALL NOT be required for the update.
 The template directory SHALL contain one `library.yaml` for reusable tasks,
 steps, nodes, and named steering profiles, and one selectable chain per file
 under `chains/`.
-enforced-by: tests/test_template_library.py::test_from_yaml_dir_loads_components_and_one_chain_per_file
+enforced-by: tests/test_template_library.py::test_from_yaml_dir_loads_components_and_one_chain_per_file, tests/test_template_library.py::test_each_chain_file_is_one_selectable_chain, tests/test_template_library.py::test_two_chain_files_claiming_one_id_is_an_error_naming_both
 
 ## REQ registry-is-not-a-task-configuration-source
 
@@ -174,8 +174,8 @@ escalation task SHALL take its container as its path segment, such as
 `main`, `on_failure`, `fix_loop`, `judge`, `escalation`, `on_base_changed`, and
 `on_conflict` SHALL NOT be used as authored step identifiers, nor as the
 identifier of a dedicated task that occupies a step position.
-enforced-by: tests/test_template_models.py::test_a_tasks_group_resolves_to_one_step_named_main, tests/test_template_models.py::test_a_fix_loop_tasks_group_resolves_to_a_main_step_under_its_container, tests/test_template_models.py::test_a_reserved_segment_is_rejected_as_a_step_identifier, tests/test_template_models.py::test_a_reserved_segment_is_rejected_for_the_dedicated_fix_loop_judge
-origin: docs/templates-v1-design.md "Resolution and execution" -- a dedicated judge takes its container as its segment, and its own id may be `judge` because that is the segment it occupies (the design's library.yaml names it so).
+enforced-by: tests/test_template_models.py::test_a_tasks_group_resolves_to_one_step_named_main, tests/test_template_models.py::test_a_fix_loop_tasks_group_resolves_to_a_main_step_under_its_container, tests/test_template_models.py::test_a_reserved_segment_is_rejected_as_a_step_identifier, tests/test_template_models.py::test_a_reserved_segment_is_rejected_for_the_dedicated_escalation_task
+origin: docs/templates-v1-design.md "Resolution and execution" -- a fix loop's judge is a named slot whose own name is its canonical segment, so its authored id is never a path segment and the reserved rule does not apply to it; the escalation task's id does become a segment (`node.escalation.<id>`) and is checked.
 
 ## REQ gate-is-an-ordered-node
 
@@ -217,6 +217,7 @@ enforced-by: tests/test_template_models.py::test_steps_keep_their_authored_ident
 A reusable task, step, node, or chain MAY extend one same-namespace parent and
 the system SHALL reject multiple parents, cross-namespace parents, and cycles.
 enforced-by: tests/test_template_library.py::test_extends_rejects_more_than_one_parent, tests/test_template_library.py::test_extends_rejects_a_cycle, tests/test_template_library.py::test_extends_rejects_a_cross_namespace_parent, tests/test_template_library.py::test_extends_rejects_an_unknown_parent
+origin: Implemented for the task, step and node namespaces. Chain-level `extends` is deliberately not implemented in V1 -- no shipped chain uses it -- and a chain file carrying `extends` is rejected with an explicit resolver error (tests/test_template_library.py::test_chain_level_extends_is_rejected_explicitly).
 
 ## REQ extends-merges-objects-and-replaces-arrays
 
@@ -235,7 +236,7 @@ enforced-by: tests/test_template_library.py::test_extends_cannot_change_the_pare
 The system SHALL reject a chain with missing references, invalid overrides,
 duplicate identifiers, or invalid cross-node references before it is used.
 enforced-by: tests/test_template_models.py::test_a_gate_reject_target_must_name_a_node_in_the_chain, tests/test_template_library.py::test_extends_rejects_an_unknown_parent, tests/test_template_library.py::test_an_unknown_steering_reference_is_rejected
-origin: Phase 1 covers missing references, duplicate identifiers and cross-node reject targets; invalid per-scope policy overrides join this pin once chain/node/step/task policy layers exist.
+origin: Phase 1 covers missing references and cross-node reject targets here; duplicate identifiers are pinned under `resolved-chain-identifiers-are-unique`, and invalid per-scope policy overrides join this pin once chain/node/step/task policy layers exist.
 
 ## REQ template-resolution-preserves-source-context
 
