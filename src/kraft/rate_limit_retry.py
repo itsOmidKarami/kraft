@@ -11,7 +11,6 @@ retried one are put back to work the same way.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 
 from kraft import policy as policy_mod
@@ -53,7 +52,9 @@ async def tick(app) -> list[str]:
     st = app.state
     due = st.db.read(
         lambda c: c.execute(
-            "SELECT id, repo, current_node_id, chain_definition FROM work_items "
+            # `materialized_chain` too, for `store.node_index` -- see ci_wait.py.
+            "SELECT id, repo, current_node_id, chain_definition, materialized_chain "
+            "FROM work_items "
             "WHERE status = 'rate_limited' AND retry_at <= ?",
             (_now(),),
         ).fetchall()
@@ -97,8 +98,15 @@ async def _retry_one(app, row) -> bool:
         return False
 
     await st.db.write(lambda c: store.retry_after_cap(c, wid, node_id, None, RESUME_PROMPT))
-    chain = json.loads(row["chain_definition"])
-    start = next(i for i, n in enumerate(chain["nodes"]) if n["id"] == node_id)
+    # Same as `ci_wait`'s: over `store.node_index` so a V1 row's `"{}"`
+    # `chain_definition` cannot raise, and a node that is not in this item's
+    # chain stops rather than silently relaunching it at node zero.
+    start = store.node_index(row, node_id)
+    if start is None:
+        logger.warning(
+            "rate_limit_retry: %s has no node %r in its chain, not relaunching", wid, node_id
+        )
+        return
     from kraft import executor  # deferred: avoids a kraft.api <-> kraft.executor import cycle
 
     try:

@@ -175,8 +175,8 @@ export function MiniChain({
             data-state={state}
           >
             <span className="chain-fill" title={size === "sm" ? n.id : undefined}>
-              {n.gate_after && (
-                <span className="chain-gate" title={n.gate_after}>
+              {(n.gate_after || n.kind === "gate") && (
+                <span className="chain-gate" title={n.gate_after ?? n.id}>
                   <Flag weight="fill" size={9} />
                 </span>
               )}

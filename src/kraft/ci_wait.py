@@ -16,7 +16,6 @@ coroutine that used to sit in the wait.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 
 from kraft import policy as policy_mod
@@ -52,7 +51,11 @@ async def tick(app) -> list[str]:
     st = app.state
     due = st.db.read(
         lambda c: c.execute(
-            "SELECT id, repo, current_node_id, current_step, chain_definition FROM work_items "
+            # `materialized_chain` as well as `chain_definition`: the row is
+            # handed to `store.node_index`, which reads the V1 snapshot first
+            # and cannot find it in a column the SELECT never fetched.
+            "SELECT id, repo, current_node_id, current_step, chain_definition, "
+            "materialized_chain FROM work_items "
             "WHERE status = 'waiting' AND retry_at <= ?",
             (_now(),),
         ).fetchall()
@@ -89,8 +92,15 @@ async def _re_enter_one(app, row) -> bool:
         )
         return False
 
-    chain = json.loads(row["chain_definition"])
-    start = next(i for i, n in enumerate(chain["nodes"]) if n["id"] == node_id)
+    # `store.node_index`, not `chain["nodes"]`: a V1 row's `chain_definition` is
+    # `"{}"`, and this poller re-enters a node it already claimed -- a raise here
+    # would leave the item waiting forever with nothing behind it. `None` means
+    # this node is not in this item's chain at all, which is a stop, not a
+    # restart at zero.
+    start = store.node_index(row, node_id)
+    if start is None:
+        logger.warning("ci_wait: %s has no node %r in its chain, not re-entering", wid, node_id)
+        return
     from kraft import executor  # deferred: avoids a kraft.api <-> kraft.executor import cycle
 
     # No steer: there is no agent to address here, and a note handed to a

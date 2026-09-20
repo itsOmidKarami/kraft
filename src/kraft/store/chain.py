@@ -159,6 +159,103 @@ def materialized_chain_of(row):
     return MaterializedChain.from_json(raw) if raw else None
 
 
+def chain_node_ids(row) -> tuple[str, ...]:
+    """Every node id of this item's chain, in order, whichever column holds it.
+
+    **The one reader for an ordering question**, and the reason it exists rather
+    than a guard per caller. `chain_definition` is `"{}"` on a V1 row, so
+    `json.loads(row["chain_definition"])["nodes"]` raises `KeyError` there --
+    and every caller that asks this question (`resume`, `retry`, `skip`,
+    `ci_wait`, `rate_limit_retry`) asks it *after* it has already written the
+    row's new status. The raise therefore leaves the item claimed `active` with
+    no walk behind it: it looks running and is not, which is the worst shape a
+    failure can take here.
+
+    A guard in each caller would be a larger diff than this and would leave the
+    sixth caller, written next month, broken in exactly the same way. So the
+    shape decision lives here, once.
+
+    `()` for a row with neither column populated -- a caller distinguishes "no
+    nodes" from "node not found" through `node_index`'s `default`.
+    """
+    v1 = materialized_chain_of(row)
+    if v1 is not None:
+        return tuple(node.id for node in v1.chain.nodes)
+    raw = row["chain_definition"] if "chain_definition" in row.keys() else None
+    legacy = json.loads(raw) if raw else {}
+    return tuple(n["id"] for n in (legacy.get("nodes") or []))
+
+
+def node_index(row, node_id, *, default=None):
+    """The position of `node_id` in this item's chain, or `default`.
+
+    Over `chain_node_ids`, so both chain shapes answer the same way and neither
+    raises. `default=None` for a caller that must refuse ("no current node to
+    skip"); `default=0` for one whose honest fallback is the start of the chain
+    (a `resume` of an item that never reached a node).
+    """
+    ids = chain_node_ids(row)
+    return ids.index(node_id) if node_id in ids else default
+
+
+def gate_node_index(row, gate: str, *, default=None):
+    """Where `gate` sits in this item's ordered nodes, or `default`.
+
+    Beside `node_index` because the answer differs by shape and the difference
+    is exactly one line: a V1 gate **is** a node, so its id is a node id
+    (`gate-is-an-ordered-node`); a legacy gate is a `gate_after` string on the
+    node in front of it. Callers ask "which node does this gate sit at" and
+    should not have to know which.
+    """
+    v1 = materialized_chain_of(row)
+    if v1 is not None:
+        return node_index(row, gate, default=default)
+    raw = row["chain_definition"] if "chain_definition" in row.keys() else None
+    nodes = (json.loads(raw) if raw else {}).get("nodes") or []
+    return next((i for i, n in enumerate(nodes) if n.get("gate_after") == gate), default)
+
+
+def chain_view(row) -> dict:
+    """The item's chain in the shape the API's `chain_definition` field and the
+    SPA's `ChainDefinition` type speak, over either column.
+
+    A V1 row's `chain_definition` is `"{}"`, and the board reads
+    `chain_definition.nodes` to draw its stage bar and to name the current node
+    -- so returning the raw column left the board blank. This projects the
+    frozen V1 snapshot into the same `{template_id, nodes: [...]}` envelope
+    instead, so the board is *correct* for a V1 item rather than merely not
+    crashing.
+
+    `kind` is carried through for a V1 node: a V1 gate is a node of its own,
+    not a `gate_after` string on the node in front of it, and the stage bar has
+    to be able to tell them apart without that field being faked
+    (`gate-is-an-ordered-node`).
+    """
+    v1 = materialized_chain_of(row)
+    if v1 is None:
+        raw = row["chain_definition"] if "chain_definition" in row.keys() else None
+        legacy = json.loads(raw) if raw else {}
+        return {**legacy, "nodes": legacy.get("nodes") or []}
+    return {
+        "template_id": v1.chain.id,
+        "nodes": [
+            {
+                "id": node.id,
+                "kind": node.node.kind.value,
+                # Canonical task paths, which is what a V1 node has instead of
+                # a list of hook-point names. Empty on a gate, which declares
+                # no execution shape at all.
+                "tasks": [task.path for task in node.tasks()],
+                # A V1 gate has no `gate_after`; `kind` above is how it is
+                # recognised. Present and null so the field's own type still
+                # holds for every node in the list.
+                "gate_after": None,
+            }
+            for node in v1.chain.nodes
+        ],
+    }
+
+
 def node_overrides_of(row) -> dict:
     """`row["node_overrides"]` decoded, `{}` when there are none."""
     raw = row["node_overrides"] if "node_overrides" in row.keys() else None

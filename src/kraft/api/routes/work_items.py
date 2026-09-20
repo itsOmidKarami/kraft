@@ -397,15 +397,12 @@ def _validate_node_overrides(st, row, patch: dict[str, dict]) -> None:
     (UI v2 · 04 point 1). `patch == {}` (reset to template) 409s if the item
     has started at all -- point 2, "only allowed on unstarted nodes".
     """
-    # V1 reads the frozen snapshot; a legacy row still reads the column, which is
-    # Task 5's to retire along with every other `chain_definition` reader here.
-    reviewers: dict[str, object] | None = None
+    # Node ids come from the shared reader, which answers for either chain shape
+    # and never raises; only `reviewers` needs the typed snapshot, because
+    # `auto_review` has no legacy equivalent.
+    node_ids = set(store.chain_node_ids(row))
     v1 = store.materialized_chain_of(row)
-    if v1 is not None:
-        node_ids = {n.id for n in v1.chain.nodes}
-        reviewers = {n.id: n.auto_review for n in v1.chain.nodes}
-    else:
-        node_ids = {n["id"] for n in json.loads(row["chain_definition"])["nodes"]}
+    reviewers = {n.id: n.auto_review for n in v1.chain.nodes} if v1 is not None else None
     if not patch:
         if row["current_node_id"] is not None:
             raise HTTPException(409, "work item has already started; overrides cannot be reset")

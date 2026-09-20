@@ -36,8 +36,8 @@ but the availability of such a helper SHALL NOT be required for the update.
 The template directory SHALL contain one `library.yaml` for reusable tasks,
 steps, nodes, and named steering profiles, and one selectable chain per file
 under `chains/`.
-enforced-by: tests/templates/test_library.py::test_from_yaml_dir_loads_components_and_one_chain_per_file, tests/templates/test_library.py::test_each_chain_file_is_one_selectable_chain, tests/templates/test_library.py::test_two_chain_files_claiming_one_id_is_an_error_naming_both, tests/templates/test_materialization.py::test_the_seed_is_a_library_file_and_one_chain_per_file, tests/templates/test_environment.py::test_the_seeded_harnesses_yaml_loads_and_covers_the_seeded_library
-origin: templates/harnesses.yaml -- added beside Task 3's pins rather than replacing them: the directory's fifth file now loads too, and a `harness:` the seeded library names but no seeded profile provides would make the shipped chain undispatchable.
+enforced-by: tests/templates/test_library.py::test_from_yaml_dir_loads_components_and_one_chain_per_file, tests/templates/test_library.py::test_each_chain_file_is_one_selectable_chain, tests/templates/test_library.py::test_two_chain_files_claiming_one_id_is_an_error_naming_both, tests/templates/test_materialization.py::test_the_seed_is_a_library_file_and_one_chain_per_file
+origin: templates/library.yaml -- Task 3's four pins are the whole sentence ("one `library.yaml`" plus "one selectable chain per file"), and they are left exactly as they were. Task 5a added a fifth entry here for `test_the_seeded_harnesses_yaml_loads_and_covers_the_seeded_library` and it is **removed again**: that test verifies harness-profile coverage, which is a different sentence, and a pin claiming more than its test proves is worse than an honest gap. It is pinned where it belongs, under `harness-profile-has-safe-instance-configuration`. This requirement says nothing about `harnesses.yaml`, and should not.
 
 ## REQ registry-is-not-a-task-configuration-source
 
@@ -100,8 +100,8 @@ origin: src/kraft/templates/environment.py -- `HarnessProfileTable.from_yaml` is
 A harness profile MAY configure an enabled runtime instance, executable or
 connection choice, and default runtime options. It SHALL NOT require template
 authors to configure provider command syntax or result parsing.
-enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider_declared_options, tests/test_harnesses.py::test_harness_profile_reports_unavailable_when_disabled, tests/templates/test_environment.py::test_harness_profiles_load_against_their_provider_declarations, tests/templates/test_environment.py::test_a_profile_whose_provider_is_not_its_harness_id_is_refused
-origin: src/kraft/templates/environment.py -- a profile names a provider and its defaults; it carries no command syntax or result parsing, and an unknown provider is refused at load rather than becoming an arbitrary command fragment.
+enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider_declared_options, tests/test_harnesses.py::test_harness_profile_reports_unavailable_when_disabled, tests/templates/test_environment.py::test_harness_profiles_load_against_their_provider_declarations, tests/templates/test_environment.py::test_a_profile_whose_provider_is_not_its_harness_id_is_refused, tests/templates/test_environment.py::test_the_seeded_harnesses_yaml_loads_and_covers_the_seeded_library
+origin: src/kraft/templates/environment.py -- a profile names a provider and its defaults; it carries no command syntax or result parsing, and an unknown provider is refused at load rather than becoming an arbitrary command fragment. NOT YET REACHED AT RUNTIME: `executor/dispatch.py` resolves a task's `harness:` against `kraft.harness.load(...)` -- a harness *id* -- so `HarnessProfileTable` is loaded and validated but no dispatch selects through it. Until that is wired, `templates/harnesses.yaml` is configuration an operator can get wrong without being told, and the docsite section says so.
 
 ## REQ agent-task-selects-capability-compatible-runtime-options
 

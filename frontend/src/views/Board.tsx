@@ -534,7 +534,7 @@ function rowReason(
   state: DerivedState["state"],
   turn: WorkerSession | undefined,
 ): { text: ReactNode; plain: string; tone: "accent" | "neutral" } | null {
-  const node = item.chain_definition.nodes.find((n) => n.id === item.current_node_id);
+  const node = (item.chain_definition.nodes ?? []).find((n) => n.id === item.current_node_id);
   const accent = (plain: string) => ({ text: plain, plain, tone: "accent" as const });
   switch (state) {
     case "escalating": {
@@ -776,7 +776,7 @@ function BoardRow({
         </div>
       </div>
       <MiniChain
-        nodes={item.chain_definition.nodes}
+        nodes={item.chain_definition.nodes ?? []}
         currentNodeId={item.current_node_id}
         done={item.completedNodes}
         size="sm"

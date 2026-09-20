@@ -234,9 +234,21 @@ def resolve_chain(st, chain_template: str | None):
 
 
 def resolve_chain_or_422(st, chain_template: str | None):
-    """`resolve_chain`, as the 422 every intake door owes its caller. One
+    """`resolve_chain`, as the error every intake door owes its caller. One
     function so the three doors (`POST /work-items`, `POST /triggers`, and the
-    auto-intake poller's own check) cannot answer differently."""
+    auto-intake poller's own check) cannot answer differently.
+
+    **503 when the library itself did not load, 422 only when the chain is
+    genuinely unknown.** `TemplateLibrary.from_yaml_dir` raises on any one bad
+    file, so a single malformed `chains/*.yaml` leaves `st.library is None` and
+    *every* chain id unresolvable -- and "unknown or invalid template" then
+    tells the operator their chain id is wrong when the truth is that one file
+    does not parse. Same posture and same shape as `invalid_policy`'s 503: name
+    the file, refuse the work, and leave the Settings screens reachable.
+    """
+    if st.library is None:
+        detail = "; ".join(getattr(st, "invalid_library", None) or ["templates/library.yaml"])
+        raise HTTPException(503, f"template library invalid, refusing work: {detail}")
     chain = resolve_chain(st, chain_template)
     if chain is None:
         raise HTTPException(422, "unknown or invalid template")

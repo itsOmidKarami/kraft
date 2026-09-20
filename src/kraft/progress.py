@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 
 from kraft import events
+from kraft import store as _store
 from kraft.adapters.agent import artifact_path
 from kraft.config import git_read
 
@@ -109,7 +110,11 @@ def implementation_node(chain: dict) -> str | None:
 
 def active_implementation_node(row) -> str | None:
     """The implementation node's id while `row` is running it, else None."""
-    node_id = implementation_node(json.loads(row["chain_definition"]))
+    # `store.chain_view`, not the raw column: a V1 row's `chain_definition` is
+    # `"{}"`. (A V1 chain has no `on.implementation.start` hook name, so this
+    # answers None for one -- correct until progress reads a task path instead,
+    # and never a KeyError.)
+    node_id = implementation_node(_store.chain_view(row))
     if node_id and row["status"] == "active" and row["current_node_id"] == node_id:
         return node_id
     return None

@@ -702,3 +702,36 @@ def test_steerable_is_answered_off_the_v1_snapshot(tmp_path, monkeypatch):
             await database.close()
 
     assert asyncio.run(scenario()) == {"implementation": True, "merge": False}
+
+
+def test_a_v1_item_lists_and_renders_its_chain_nodes(tmp_path, monkeypatch):
+    """H1's other half. `chain_definition` is `"{}"` on a V1 row, and the board
+    draws its stage bar and names the current node from
+    `chain_definition.nodes` -- so the raw column made every board row blank
+    and `PeekPane`/`Board`'s unguarded `.nodes` a crash. Both the list and the
+    detail route project the frozen snapshot into the same envelope instead, so
+    the board is *correct* for a V1 item and not merely non-crashing.
+
+    A V1 gate carries `kind: "gate"` rather than a faked `gate_after`: the gate
+    is a node of its own (`gate-is-an-ordered-node`), and the stage bar has to
+    be able to tell one apart without that field lying.
+    """
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
+        ).json()["id"]
+
+        listed = next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
+        detail = client.get(f"/api/work-items/{wid}").json()
+
+        for payload in (listed, detail):
+            nodes = payload["chain_definition"]["nodes"]
+            assert [n["id"] for n in nodes[:2]] == ["spec", "spec_approval"]
+            assert nodes[0]["kind"] == "exec" and nodes[1]["kind"] == "gate"
+            # A gate declares no execution shape; an exec node's tasks are
+            # canonical paths, which is what V1 has instead of hook names.
+            assert nodes[0]["tasks"] == ["spec.main.author"] and nodes[1]["tasks"] == []
+            assert nodes[1]["gate_after"] is None
+            assert payload["chain_definition"]["template_id"] == "default"

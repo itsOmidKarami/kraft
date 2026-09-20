@@ -283,3 +283,32 @@ def test_a_template_survives_a_get_then_put_round_trip(client, templates_dir, sh
     assert client.put("/api/templates/shapes", json={"nodes": nodes}).status_code == 200
     after = yaml.safe_load((templates_dir / "shapes.yaml").read_text())
     assert after["nodes"] == shapes
+
+
+def test_one_unparseable_chain_file_degrades_the_instance_instead_of_lying(tmp_path, monkeypatch):
+    """`TemplateLibrary.from_yaml_dir` raises on any one bad file, so a single
+    malformed `chains/*.yaml` leaves no library at all and every chain id
+    unresolvable. Answering 422 "unknown or invalid template" then tells the
+    operator their chain id is wrong when the truth is that one file does not
+    parse -- and that is the one thing a person reading it will act on.
+
+    503 naming the file instead, the same posture `invalid_policy` already has,
+    and `/health` says `degraded` so a monitor sees it without anyone filing a
+    work item first.
+    """
+    templates_dir = fake_templates_dir(tmp_path, "claude")
+    (templates_dir / "chains" / "broken.yaml").write_text("id: broken\nnodes: [ unclosed\n")
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch, templates_dir) as client:
+        health = client.get("/api/health").json()
+        assert health["status"] == "degraded"
+        assert "broken.yaml" in health["invalid_templates"].get("library", "")
+
+        r = client.post(
+            "/api/work-items",
+            json={"title": "t", "repo": str(repo), "chain_template": "default"},
+        )
+        assert r.status_code == 503, r.text
+        assert "broken.yaml" in r.json()["detail"]
+        # And not the misleading answer: the chain id it named is a real one.
+        assert "unknown or invalid template" not in r.json()["detail"]

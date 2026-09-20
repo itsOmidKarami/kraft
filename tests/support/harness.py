@@ -352,8 +352,16 @@ def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) ->
                 task.clear()
                 task.update({"kind": "subprocess", "command": "true"})
         library = yaml.safe_dump(parsed, sort_keys=False)
-        harnesses = templates_dir / "harnesses"
-        harnesses.mkdir(exist_ok=True)
+        # `$KRAFT_HOME/templates/harnesses`, which is what
+        # `paths.default_harnesses_dir()` reads -- *not* `templates_dir`, which
+        # is `KRAFT_TEMPLATES_DIR` and a different directory under pytest
+        # (`conftest._isolated_kraft_home` pins `KRAFT_HOME` to its own path).
+        # Writing it beside the library instead meant every V1 walk driven
+        # through `support.api._client` stopped at "harness 'fake' is not
+        # available", which reads as a chain defect and is a fixture one.
+        home = os.environ.get("KRAFT_HOME")
+        harnesses = (Path(home) / "templates" if home else templates_dir) / "harnesses"
+        harnesses.mkdir(parents=True, exist_ok=True)
         (harnesses / "fake.yaml").write_text(
             _FAKE_HARNESS.format(command=json.dumps(shlex.split(agent_command)))
         )

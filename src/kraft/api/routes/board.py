@@ -103,7 +103,10 @@ async def list_work_items(request: Request):
             "repo": r["repo"],
             "status": r["status"],
             "chain_template": r["chain_template"],
-            "chain_definition": json.loads(r["chain_definition"]),
+            # `store.chain_view`, not the raw column: a V1 row's
+            # `chain_definition` is `"{}"`, and the board draws its stage bar
+            # and names the current node from `chain_definition.nodes`.
+            "chain_definition": store.chain_view(r),
             "current_node_id": r["current_node_id"],
             "bead_id": r["bead_id"],
             "created_at": r["created_at"],
@@ -289,10 +292,9 @@ async def get_work_item(wid: str, request: Request):
         ).fetchall()
     )
     pending = _pending_gate(st, wid)
-    # `"{}"` on a V1 row -- the column is NOT NULL and Task 11 removes it.
-    # Everything this route still reads off it degrades to empty rather than
-    # raising; `steerable` reads the frozen snapshot instead.
-    chain = json.loads(row["chain_definition"] or "{}")
+    # Over both chain shapes, so a V1 item's stage bar is *correct* rather than
+    # merely not crashing. `steerable` below reads the frozen snapshot directly.
+    chain = store.chain_view(row)
     node_overrides = store.node_overrides_of(row)
     budget = st.policy.budget if st.policy else policy_mod.NO_BUDGET
     cap_usd, cap_source = store.effective_work_item_cap(row, budget)

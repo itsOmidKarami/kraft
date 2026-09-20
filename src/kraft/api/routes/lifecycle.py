@@ -326,9 +326,9 @@ def _node_has_agent_task(node: dict, registry: Registry) -> bool:
     return any(registry.hooks.get(h, {}).get("kind") == "agent" for h in hooks)
 
 
-def steer_reachable(row, registry: Registry) -> bool:
-    """Whether a Steer note given at this item's current node could reach any
-    agent task from there to the end of its chain.
+def steer_reachable(row, registry: Registry, node_id: str | None = None) -> bool:
+    """Whether a Steer note given at `node_id` -- this item's current node by
+    default -- could reach any agent task from there to the end of its chain.
 
     One entry point over both chain shapes, so the `GET /work-items/{id}`
     field the UI hides a control on and the 409 the steer route raises cannot
@@ -338,7 +338,7 @@ def steer_reachable(row, registry: Registry) -> bool:
     current node at all -- an unmapped edge is not a reason to hide a control
     that may still work.
     """
-    start_id = row["current_node_id"]
+    start_id = node_id if node_id is not None else row["current_node_id"]
     if start_id is None:
         return True
     v1 = store.materialized_chain_of(row)
@@ -445,7 +445,7 @@ async def _resolve_conflict_task(
     """
     if steer_text:
         await st.db.write(lambda c: store.set_steer(c, wid, steer_text))
-    node = next((n for n in chain["nodes"] if n["id"] == node_id), None)
+    node = next((n for n in (chain.get("nodes") or []) if n["id"] == node_id), None)
     if node is not None and (st.policy is None or st.policy.auto_escalate_stuck):
         worktree = st.run_dirs.worktrees / wid
         r_status, r_steer, _new_base = await walk.resolve_rebase_conflict(
@@ -522,6 +522,9 @@ async def _resolve_conflict_task(
 def _spawn_conflict_resolution(
     st, request: Request, wid: str, row, node_id: str, chain: dict, steer_text: str | None, exc
 ) -> dict:
+    # `chain` is `store.chain_view(row)` at both call sites, never the raw
+    # column: a V1 row's `chain_definition` is `"{}"`, and this path reaches
+    # `chain["nodes"]` two frames down.
     """Registers `_resolve_conflict_task` as `wid`'s task and returns the
     item's current row immediately -- the route itself does not wait on it
     (design §4.8: "the route returns immediately either way")."""
@@ -563,11 +566,10 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
     # non-empty) — fall back to the same "1" resume already used rather than
     # crash a path that used to degrade gracefully.
     limit = st.policy.max_concurrent if st.policy else 1
-    chain = json.loads(row["chain_definition"])
     steer_text = None
     if body.steer and body.steer.strip():
         steer_text = body.steer.strip()
-        found = any(n["id"] == row["current_node_id"] for n in chain["nodes"])
+        found = row["current_node_id"] in store.chain_node_ids(row)
         if found and not steer_reachable(row, st.registry):
             raise HTTPException(
                 409,
@@ -608,7 +610,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         # rebase) -- the helper must not re-read `pending_steer_context`,
         # which this call already emptied.
         return _spawn_conflict_resolution(
-            st, request, wid, row, row["current_node_id"], chain, steer, exc
+            st, request, wid, row, row["current_node_id"], store.chain_view(row), steer, exc
         )
     except RuntimeError as exc:
         # The claim already flipped this item to 'active'; a failed rebase
@@ -651,7 +653,11 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
     await st.db.write(lambda c: store.resume_work_item(c, wid, steer))
 
-    start = next((i for i, n in enumerate(chain["nodes"]) if n["id"] == row["current_node_id"]), 0)
+    # `store.node_index`, never `chain["nodes"]`: this runs *after*
+    # `resume_work_item` has already claimed the row, so a raise here leaves the
+    # item `active` with no walk behind it. `default=0` because an item that
+    # never reached a node resumes at the start of its chain.
+    start = store.node_index(row, row["current_node_id"], default=0)
     try:
         deps.spawn(
             request.app,
@@ -715,10 +721,6 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     node_id = row["current_node_id"]
     nodes = store.effective_nodes(walk.chain_of(row), store.node_overrides_of(row))
     node = next((n for n in nodes if n.id == node_id), None)
-    # Still the legacy shape, and still `st.registry`: `_steer_reachable` asks
-    # which nodes hold an *agent* task, which is a registry-binding question
-    # V1 answers from the task's own kind. Not converted here -- Task 5 owns it.
-    chain = json.loads(row["chain_definition"])
     if node is None:
         raise HTTPException(409, "work item has no current node to retry")
     if row["status"] != "needs_human":
@@ -761,9 +763,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                 409, f"all {limit} slots are busy; pause something or raise max_concurrent"
             )
         precheck_steer = (body.steer or "").strip() or None
-        if precheck_steer is not None and not _steer_reachable(
-            chain["nodes"], node_id, st.registry
-        ):
+        if precheck_steer is not None and not steer_reachable(row, st.registry, node_id):
             raise HTTPException(
                 409,
                 f"node {node_id!r} has no agent task downstream to steer; "
@@ -794,7 +794,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         # `gates.auto_escalate_stuck` perform it once its `await` on this
         # session's run actually returns (Kraft code-review finding).
         steer = (body.steer or "").strip() or None
-        if steer is not None and not _steer_reachable(chain["nodes"], node_id, st.registry):
+        if steer is not None and not steer_reachable(row, st.registry, node_id):
             raise HTTPException(
                 409,
                 f"node {node_id!r} has no agent task downstream to steer; "
@@ -828,7 +828,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     limit = st.policy.max_concurrent if st.policy else 1
 
     steer = (body.steer or "").strip() or None
-    if steer is not None and not _steer_reachable(chain["nodes"], node_id, st.registry):
+    if steer is not None and not steer_reachable(row, st.registry, node_id):
         # Explicit only: the seeded-findings and last-rejection fallbacks
         # below are Kraft's own carry-forward, not something the caller just
         # typed and needs told.
@@ -878,7 +878,9 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     except builtins_mod.RebaseConflict as exc:
         # `/retry` never persists `steer` ahead of the rebase the way
         # `/resume` does -- the helper is the first thing to write it.
-        return _spawn_conflict_resolution(st, request, wid, row, node_id, chain, steer, exc)
+        return _spawn_conflict_resolution(
+            st, request, wid, row, node_id, store.chain_view(row), steer, exc
+        )
     except RuntimeError as exc:
         reason = str(exc)
         await st.db.write(lambda c: store.mark_needs_human(c, wid, node_id, reason))
@@ -922,7 +924,11 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
             c, wid, node_id, key, steer, gate_key=gate_key, seeded=seeded
         )
     )
-    start = next(i for i, n in enumerate(chain["nodes"]) if n["id"] == node_id)
+    # Same reason as `resume`'s: `retry_after_cap` above has already written the
+    # row, so this must not raise. `node` was resolved off the V1 nodes at the
+    # top of this handler, so a missing index here means the two disagree --
+    # 0 restarts the chain rather than stranding it claimed.
+    start = store.node_index(row, node_id, default=0)
     try:
         deps.spawn(
             request.app,
@@ -1032,18 +1038,19 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
             # the pre-cancel read said.
             row = deps._work_item_row(st, wid)
 
-        chain = json.loads(row["chain_definition"])
+        node_ids = store.chain_node_ids(row)
         gate = board._pending_gate(st, wid)
-        if gate is not None:
-            node_index = board._gate_node_index(chain, gate)
-        else:
-            node_index = next(
-                (i for i, n in enumerate(chain["nodes"]) if n["id"] == row["current_node_id"]),
-                None,
-            )
-            if node_index is None:
-                raise HTTPException(409, "work item has no current node to skip")
-        node_id = chain["nodes"][node_index]["id"]
+        # Both branches over the shared reader, which answers for either chain
+        # shape and never raises. This runs after `cancel` above, so a raise
+        # here would strand an item whose walk is already gone.
+        node_index = (
+            store.gate_node_index(row, gate)
+            if gate is not None
+            else store.node_index(row, row["current_node_id"])
+        )
+        if node_index is None or node_index >= len(node_ids):
+            raise HTTPException(409, "work item has no current node to skip")
+        node_id = node_ids[node_index]
 
         sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
 

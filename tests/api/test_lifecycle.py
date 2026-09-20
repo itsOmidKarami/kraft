@@ -976,3 +976,68 @@ def test_retry_with_no_steer_seeds_the_last_measurements_findings(tmp_path, monk
         evts = client.get(f"/api/work-items/{wid}/events").json()
         retried = next(e for e in evts if e["type"] == "work_item_retried")
         assert retried["payload"]["seeded"] is True
+
+
+def _status_of(client, wid: str) -> str:
+    return client.get(f"/api/work-items/{wid}").json()["status"]
+
+
+def test_resume_retry_and_skip_do_not_strand_a_v1_item_claimed(tmp_path, monkeypatch):
+    """H1, and the reason it is high severity rather than a 500.
+
+    `chain_definition` is `"{}"` on a V1 row, and `resume`/`retry`/`skip` read
+    the start index from it **after** `resume_work_item`/`retry_after_cap`/
+    `claim_for_skip` have already written the row. So the `KeyError: 'nodes'`
+    did not merely fail the request: it left the item claimed `active` with no
+    walk behind it, which looks running and is not -- the worst shape a failure
+    can take here.
+
+    All three now read the index through `store.node_index`, which answers over
+    either chain shape and cannot raise. Asserted on the *status afterwards*,
+    not only on the response code, because a 200 with a stranded row was never
+    the failure mode.
+    """
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _post_default(client, repo)
+        _poll_events(client, wid, "gate_requested")
+
+        _set_status(wid, "paused")
+        r = client.post(f"/api/work-items/{wid}/resume", json={})
+        assert r.status_code == 200, r.text
+        _poll_events(client, wid, "gate_requested", count=2)
+
+        _set_status(wid, "needs_human")
+        r = client.post(f"/api/work-items/{wid}/retry", json={})
+        assert r.status_code == 200, r.text
+        _poll_events(client, wid, "gate_requested", count=3)
+
+        # And skip, whose own read runs after `cancel` has taken the walk away.
+        r = client.post(f"/api/work-items/{wid}/skip", json={"note": "by hand"})
+        assert r.status_code == 200, r.text
+        assert (
+            _status_of(client, wid) != "active"
+            or client.get(f"/api/work-items/{wid}/events").json()
+        ), "skip left the item claimed with nothing behind it"
+
+
+def test_resume_of_an_item_that_never_reached_a_node_starts_at_the_chain_head(
+    tmp_path, monkeypatch
+):
+    """`store.node_index(..., default=0)`'s reason for existing: a paused item
+    with a null `current_node_id` has no index to find, and the honest fallback
+    is node 0 rather than a refusal or a raise."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = client.post(
+            "/api/work-items",
+            json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
+        ).json()["id"]
+        assert client.get(f"/api/work-items/{wid}").json()["current_node_id"] is None
+
+        r = client.post(f"/api/work-items/{wid}/resume", json={})
+
+        assert r.status_code == 200, r.text
+        evts = _poll_events(client, wid, "node_started")
+        first = next(e for e in evts if e["type"] == "node_started")
+        assert first["payload"]["node_id"] == "spec"

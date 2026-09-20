@@ -123,6 +123,17 @@ maxima:
 
 ## `harnesses.yaml` — harness profiles
 
+!!! warning "Not read yet"
+
+    This file is validated when it loads — a bad provider or an option the
+    provider does not declare is refused, and a broken file shows up on
+    `kraft admin doctor` — but **nothing dispatches through it yet.** A chain
+    task's `harness:` is currently resolved against the installed harness ids
+    (`claude`, `codex`, `gemini`), not against a profile name, so editing a
+    profile here changes nothing about how an agent is launched. The seeded
+    file exists so the shipped chain's `harness:` names resolve; treat the
+    section below as the shape to write, not as a live dial.
+
 A harness *profile* is a configured instance of an agent-runtime provider: which
 executable to run, and what runtime options to start from. It is never provider
 command syntax or result parsing — the provider package

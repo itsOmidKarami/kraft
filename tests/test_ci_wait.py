@@ -194,3 +194,45 @@ def test_a_ci_wait_reentry_resumes_at_the_waiting_group(tmp_path, monkeypatch):
         assert seen["start_step"] == 3
 
     _run(lambda: _stub(tmp_path), body)
+
+
+def test_a_v1_item_is_re_entered_rather_than_stranded_waiting(tmp_path, monkeypatch):
+    """H1's poller half. `chain_definition` is `"{}"` on a V1 row, so the old
+    `next(i for i, n in enumerate(chain["nodes"]) ...)` raised -- inside a
+    poller tick, after `mark_reentered` had already bumped the counter. The item
+    sat `waiting` forever with nothing coming for it, and the only trace was a
+    log line. The index comes from `store.node_index` now, over either shape.
+    """
+    from support.harness import v1_chain, v1_item
+
+    repo = make_repo(tmp_path)
+    chain = v1_chain(
+        [
+            {
+                "id": "implementation",
+                "kind": "exec",
+                "tasks": [{"id": "build", "kind": "subprocess", "command": "true"}],
+            },
+            {
+                "id": "mr_checks",
+                "kind": "exec",
+                "tasks": [{"id": "poll", "kind": "subprocess", "command": "true"}],
+            },
+        ],
+        repo=repo,
+    )
+    spawned: list[int] = []
+
+    async def body(app):
+        await v1_item(app.state.db, chain, repo=str(repo), wid="w1")
+        await app.state.db.write(lambda c: store.enter_node(c, "w1", "mr_checks"))
+        await app.state.db.write(
+            lambda c: store.mark_waiting(c, "w1", "mr_checks", "2000-01-01T00:00:00+00:00")
+        )
+        from kraft.api import deps as api_deps
+
+        monkeypatch.setattr(api_deps, "spawn", lambda *a, **k: spawned.append(1))
+        await ci_wait.tick(app)
+
+    _run(lambda: _stub(tmp_path), body)
+    assert spawned, "the poller found no node index and left the item waiting"

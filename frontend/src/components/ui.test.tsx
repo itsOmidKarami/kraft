@@ -55,6 +55,21 @@ describe("TaskBar", () => {
 });
 
 describe("MiniChain", () => {
+  it("flags a Template Schema V1 gate node, which carries no gate_after", () => {
+    // A V1 gate *is* a node of its own rather than a `gate_after` string on the
+    // node in front of it, so the bar has to recognise it by `kind`. Faking
+    // `gate_after` onto the gate node would render the same and lie about the
+    // shape, which is why this is a separate field and a separate test.
+    const v1 = [
+      { id: "spec", kind: "exec" as const, tasks: ["spec.main.author"], gate_after: null },
+      { id: "spec_approval", kind: "gate" as const, tasks: [], gate_after: null },
+    ];
+    render(<MiniChain nodes={v1} currentNodeId="spec_approval" size="lg" />);
+    expect(screen.getByTestId("node-spec_approval")).toHaveAttribute("data-state", "current");
+    expect(screen.getByTitle("spec_approval")).toBeInTheDocument();
+    expect(screen.queryByTitle("spec")).toBeNull();
+  });
+
   it("marks done, current and todo segments and ticks gated nodes", () => {
     render(<MiniChain nodes={NODES} currentNodeId="verify" done={["env_setup"]} size="lg" />);
     expect(screen.getByTestId("node-env_setup")).toHaveAttribute("data-state", "done");

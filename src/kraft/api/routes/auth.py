@@ -79,6 +79,14 @@ async def health(request: Request):
     st = request.app.state
     invalid = st.templates.invalid
     invalid_policy = st.invalid_policy
+    # A library that did not parse makes every chain unselectable, so it is a
+    # degraded instance for the same reason a bad `policy.yaml` is -- reported
+    # under `invalid_templates` (keyed by the file, beside the legacy per-chain
+    # entries) rather than as a new field, so the SPA's health badge, `kraft
+    # admin health` and `admin doctor` all show it without changing.
+    library_errors = getattr(st, "invalid_library", None) or []
+    if library_errors:
+        invalid = {**invalid, "library": "; ".join(library_errors)}
     return {
         "status": "degraded" if (invalid or invalid_policy) else "ok",
         "invalid_templates": invalid,
