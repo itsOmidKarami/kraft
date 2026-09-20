@@ -79,7 +79,7 @@ enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider
 An agent-runtime provider SHALL own invocation, context delivery, supported
 runtime options, session resumption, skill loading, and normalized task
 results for its runtime.
-origin: Deliberately unpinned. Phase 1 implemented none of these six mechanics -- it only consumes the pre-existing `kraft.harness` declaration from a harness profile. tests/test_harnesses.py covers invocation and resume for today's V0 dispatcher, which is not this requirement's sentence; context delivery, skill loading and normalized results have no V1 test at all. The pin lands with the executor phase that owns them.
+origin: docs/intent/templates-v1.md -- deliberately unpinned. Phase 1 implemented none of these six mechanics -- it only consumes the pre-existing `kraft.harness` declaration from a harness profile. tests/test_harnesses.py covers invocation and resume for today's V0 dispatcher, which is not this requirement's sentence; context delivery, skill loading and normalized results have no V1 test at all. The pin lands with the executor phase that owns them.
 
 ## REQ provider-declares-harness-capabilities
 
@@ -217,7 +217,7 @@ enforced-by: tests/test_template_models.py::test_steps_keep_their_authored_ident
 A reusable task, step, node, or chain MAY extend one same-namespace parent and
 the system SHALL reject multiple parents, cross-namespace parents, and cycles.
 enforced-by: tests/test_template_library.py::test_extends_rejects_more_than_one_parent, tests/test_template_library.py::test_extends_rejects_a_cycle, tests/test_template_library.py::test_extends_rejects_a_cross_namespace_parent, tests/test_template_library.py::test_extends_rejects_an_unknown_parent
-origin: Implemented for the task, step and node namespaces. Chain-level `extends` is deliberately not implemented in V1 -- no shipped chain uses it -- and a chain file carrying `extends` is rejected with an explicit resolver error (tests/test_template_library.py::test_chain_level_extends_is_rejected_explicitly).
+origin: docs/templates-v1-design.md "Library components" -- implemented for the task, step and node namespaces. Chain-level `extends` is deliberately not implemented in V1 -- no shipped chain uses it -- and a chain file carrying `extends` is rejected with an explicit resolver error (tests/test_template_library.py::test_chain_level_extends_is_rejected_explicitly).
 
 ## REQ extends-merges-objects-and-replaces-arrays
 
@@ -236,7 +236,7 @@ enforced-by: tests/test_template_library.py::test_extends_cannot_change_the_pare
 The system SHALL reject a chain with missing references, invalid overrides,
 duplicate identifiers, or invalid cross-node references before it is used.
 enforced-by: tests/test_template_models.py::test_a_gate_reject_target_must_name_a_node_in_the_chain, tests/test_template_library.py::test_extends_rejects_an_unknown_parent, tests/test_template_library.py::test_an_unknown_steering_reference_is_rejected
-origin: Phase 1 covers missing references and cross-node reject targets here; duplicate identifiers are pinned under `resolved-chain-identifiers-are-unique`, and invalid per-scope policy overrides join this pin once chain/node/step/task policy layers exist.
+origin: docs/templates-v1-design.md "Resolution and execution" -- Phase 1 covers missing references and cross-node reject targets here; duplicate identifiers are pinned under `resolved-chain-identifiers-are-unique`, and invalid per-scope policy overrides join this pin once chain/node/step/task policy layers exist.
 
 ## REQ template-resolution-preserves-source-context
 
