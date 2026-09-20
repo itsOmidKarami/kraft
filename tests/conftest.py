@@ -34,21 +34,25 @@ def _default_setup_command_for_tests_without_a_launch_context(monkeypatch):
     raises) is untouched: this fixture never sees that call, because `{}` is
     not `None`.
 
-    **Three paths, not one.** `ensure_worktree` was the only one when this
-    fixture was written; Task 4a moved `run_setup_command` into
-    `walk.run_once`'s own preparation block as `prepare_runtime`, and V1 added
-    the `kraft.verify_changed_test_scopes` builtin, which runs the connected
-    repo's *own* `test_command`. All three shell out with no timeout, so a unit
-    test that reaches one with a real command runs it to completion -- and
-    several tests here connect a repo declaring `pytest` or `just test`, which
-    means running this suite inside itself. Cover all three from one place.
+    **Two paths, not one.** `ensure_worktree` was the only one when this fixture
+    was written; Task 4a moved `run_setup_command` into `walk.run_once`'s own
+    preparation block as `prepare_runtime`. Both shell out with no timeout, so
+    keep them saying the same thing from one place.
+
+    The third path -- V1's `kraft.verify_changed_test_scopes` builtin, which
+    runs the connected repo's *own* `test_command` -- is deliberately **not**
+    defaulted here. There is nothing to key it on: its `repo_entry` is
+    `launch.repo_entry or {}`, never `None`, and a test calling
+    `dispatch._select_scopes` directly passes a bare `{"test_scopes": [...]}`
+    that this fixture cannot tell from a real one without breaking it. It is
+    handled where the command comes from instead:
+    `tests/support/harness.seed_v1_library` rewrites that builtin out of the
+    fixture library, so a V1 chain in a unit test never carries it.
     """
     import kraft.builtins as builtins_mod
-    from kraft.executor import dispatch as dispatch_mod
 
     real_ensure_worktree = builtins_mod.ensure_worktree
     real_prepare_runtime = builtins_mod.prepare_runtime
-    real_select_scopes = dispatch_mod._select_scopes
 
     async def _ensure_worktree_with_default(*args, repo_entry=None, **kwargs):
         if repo_entry is None:
@@ -62,24 +66,8 @@ def _default_setup_command_for_tests_without_a_launch_context(monkeypatch):
             repo_entry = dict(_INERT_REPO_ENTRY)
         return await real_prepare_runtime(worktree, repo, repo_entry, **kwargs)
 
-    def _select_scopes_without_a_declared_entry(*args, **kwargs):
-        # The one that actually bites, because it runs the *repo's own*
-        # `test_command`. `repo_entry` here is `launch.repo_entry or {}`, so it
-        # is never `None`; what marks "this test declared nothing" is the
-        # absence of a `setup_command` key, which every fixture that does
-        # declare an entry sets (`config.RepoEntry` always dumps it, and
-        # `tests/support/api.py` defaults it). Select no scopes in that case:
-        # `_run_changed_test_scopes` then reports a config error, which is the
-        # honest answer for a repo that declares no command. Called positionally
-        # by `_run_changed_test_scopes`, so read it out of either place.
-        entry = kwargs.get("repo_entry", args[6] if len(args) > 6 else None)
-        if isinstance(entry, dict) and "setup_command" not in entry:
-            return [], None
-        return real_select_scopes(*args, **kwargs)
-
     monkeypatch.setattr(builtins_mod, "ensure_worktree", _ensure_worktree_with_default)
     monkeypatch.setattr(builtins_mod, "prepare_runtime", _prepare_runtime_with_default)
-    monkeypatch.setattr(dispatch_mod, "_select_scopes", _select_scopes_without_a_declared_entry)
 
 
 @pytest.fixture(autouse=True)
