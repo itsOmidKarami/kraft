@@ -14,7 +14,6 @@ from kraft import auth as auth_mod
 from kraft import config as config_mod
 from kraft import intake as intake_mod
 from kraft import policy as policy_mod
-from kraft import steering as steering_mod
 from kraft import store
 from kraft.adapters import beads
 from kraft.api import api_router, deps, perimeter
@@ -24,6 +23,7 @@ from kraft.templates import (
     load_registry,
     load_templates,
 )
+from kraft.worker import steering as steering_mod
 
 # ══ settings (design 5a–5e) ═════════════════════════════════════════════════
 #

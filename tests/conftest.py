@@ -51,7 +51,7 @@ def _forward_fake_agent_env_vars_into_worker_env(monkeypatch):
     owes nothing to.
     """
     import kraft.adapters.subprocess as sp_mod
-    from kraft.worker_env import worker_env as real_worker_env
+    from kraft.worker.env import worker_env as real_worker_env
 
     def patched(repo_entry, extra=None):
         names = [k for k in os.environ if k.startswith("KRAFT_FAKE_")]

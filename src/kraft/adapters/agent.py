@@ -5,10 +5,10 @@ from pathlib import Path
 from typing import NamedTuple
 
 from kraft import harness as _harness
-from kraft import sandbox as _sandbox
 from kraft import skill as _skill
-from kraft import steering as _steering
 from kraft.adapters import subprocess as _subprocess
+from kraft.worker import sandbox as _sandbox
+from kraft.worker import steering as _steering
 
 _CTX = (
     "You are working on a Kraft work item.\n"

@@ -11,7 +11,7 @@ maintain.
 
 import os
 
-from kraft.sandbox import FORWARDED_ENV
+from kraft.worker.sandbox import FORWARDED_ENV
 
 #: What a host process needs to run at all, plus network reachability. Forge
 #: credentials are deliberately absent: Kraft's own forge calls go through

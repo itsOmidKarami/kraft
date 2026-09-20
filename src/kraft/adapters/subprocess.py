@@ -18,9 +18,9 @@ from pathlib import Path
 import psutil
 
 from kraft import events, logs, store
-from kraft import sandbox as _sandbox
 from kraft import usage as _usage
-from kraft.worker_env import worker_env
+from kraft.worker import sandbox as _sandbox
+from kraft.worker.env import worker_env
 
 logger = logging.getLogger(__name__)
 

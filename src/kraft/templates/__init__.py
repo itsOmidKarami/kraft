@@ -24,11 +24,11 @@ from pydantic import (
 )
 from pydantic_core import PydanticCustomError
 
-from kraft import sandbox as _sandbox
 from kraft import skill as _skill
-from kraft import steering as _steering
 from kraft.config import first_error
 from kraft.paths import default_skills_dir
+from kraft.worker import sandbox as _sandbox
+from kraft.worker import steering as _steering
 
 if TYPE_CHECKING:
     from kraft import harness

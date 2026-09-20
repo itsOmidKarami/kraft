@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from kraft import steering
+from kraft.worker import steering
 
 
 def _dir(tmp_path, files):
