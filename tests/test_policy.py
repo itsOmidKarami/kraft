@@ -540,6 +540,48 @@ def test_template_policy_cannot_exceed_token_budget_ceiling(instance_policy):
         instance_policy.apply_template_override({"token_budget": 3_000_000})
 
 
+# ── allowed_harnesses: operational-with-an-administrator-maximum, not a
+# ratchet-only safety field (docs/templates-v1-design.md lists it under both
+# `defaults:` and `maxima:`, unlike `allowed_tools`/`token_budget`) ──
+
+
+def test_template_policy_can_narrow_allowed_harnesses(instance_policy):
+    narrowed = instance_policy.apply_template_override({"allowed_harnesses": ["codex_default"]})
+    assert narrowed.allowed_harnesses == ("codex_default",)
+
+
+def test_template_policy_can_widen_allowed_harnesses_within_maximum(instance_policy):
+    """Unlike `allowed_tools`, `allowed_harnesses` may widen -- as long as it
+    stays within `maxima.allowed_harnesses`."""
+    widened = instance_policy.apply_template_override(
+        {"allowed_harnesses": ["codex_default", "claude_review"]}
+    )
+    assert set(widened.allowed_harnesses) == {"codex_default", "claude_review"}
+
+
+def test_template_policy_cannot_widen_allowed_harnesses_past_maximum(instance_policy):
+    with pytest.raises(policy.PolicyError, match="allowed_harnesses"):
+        instance_policy.apply_template_override({"allowed_harnesses": ["codex_default", "gemini"]})
+
+
+def test_defaults_narrower_than_maxima_can_still_widen_back_to_maxima():
+    """Regression: `InstancePolicy.from_input` seeds the `allowed_harnesses`
+    ceiling from `defaults`, which may be narrower than `maxima`. Treating
+    `allowed_harnesses` as ratchet-only against that seeded value would
+    permanently lower the real ceiling below what the administrator actually
+    allowed -- an operator could never widen back toward `maxima`."""
+    parsed = policy.InstancePolicyInput.model_validate(
+        {
+            "defaults": {"allowed_harnesses": ["codex_default"]},
+            "maxima": {"allowed_harnesses": ["codex_default", "claude_review"]},
+        }
+    )
+    pol = policy.InstancePolicy.from_input(parsed)
+    assert pol.allowed_harnesses == ("codex_default",)
+    widened = pol.apply_template_override({"allowed_harnesses": ["codex_default", "claude_review"]})
+    assert set(widened.allowed_harnesses) == {"codex_default", "claude_review"}
+
+
 def test_template_policy_may_replace_operational_defaults_either_direction(instance_policy):
     """`timeout_minutes` has no configured administrator maximum here, so it
     may move up or down freely (`template-policy-may-replace-operational-

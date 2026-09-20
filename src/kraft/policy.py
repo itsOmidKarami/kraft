@@ -144,6 +144,11 @@ class PolicyInput(BaseModel):
             if legacy_path.is_file():
                 try:
                     legacy = yaml.safe_load(legacy_path.read_text())
+                # PEP 758 (Python 3.14+): a parenthesized tuple here has no
+                # `as` clause, so `ruff format` rewrites it straight back to
+                # this bare form -- `just lint` fails on the parenthesized
+                # version. The `except (...) as exc:` four lines up keeps its
+                # parens only because `as` still requires them.
                 except OSError, ValueError, yaml.YAMLError:
                     legacy = None
                 if isinstance(legacy, dict) and isinstance(legacy.get("max_concurrent"), int):
@@ -360,15 +365,25 @@ def check(*, count: int, started_at: str, cap: Cap, now: str) -> str:
 # later chain/node/step/task) layers through, from broadest to narrowest
 # (`policy-is-layered-by-execution-scope`).
 
-#: Fields where an override may only narrow the inherited value, never widen
-#: it (`template-policy-cannot-relax-safety-ceilings`).
-_SAFETY_LIST_FIELDS = ("allowed_tools", "allowed_harnesses")
+#: Fields where an override may only narrow the *inherited* value, never
+#: widen it (`template-policy-cannot-relax-safety-ceilings`: "budgets,
+#: allowed tools, permissions, and repository access" -- not harnesses).
+_SAFETY_LIST_FIELDS = ("allowed_tools",)
 _SAFETY_NUMERIC_FIELDS = ("token_budget",)
 #: Fields that may move freely in either direction, bounded only by an
 #: administrator maximum when one is explicitly configured
 #: (`template-policy-may-replace-operational-defaults`,
 #: `work-item-policy-may-exceed-default-ceilings-within-admin-maximum`).
 _OPERATIONAL_NUMERIC_FIELDS = ("timeout_minutes", "max_attempts")
+#: Same rule as `_OPERATIONAL_NUMERIC_FIELDS`, for a list-valued field: bounded
+#: by `maxima`, not by the current inherited value, so a `defaults:` entry
+#: narrower than `maxima:` doesn't permanently lower the real ceiling. The
+#: design's `policy.yaml` lists `allowed_harnesses` under *both* `defaults:`
+#: and `maxima:` -- an operational default plus an administrator maximum,
+#: exactly what `work-item-policy-may-exceed-default-ceilings-within-admin-
+#: maximum` describes -- unlike `allowed_tools`/`token_budget`, which appear
+#: under `maxima:` only.
+_OPERATIONAL_LIST_FIELDS = ("allowed_harnesses",)
 
 
 class PolicyDefaultsInput(BaseModel):
@@ -426,9 +441,12 @@ class TemplatePolicyOverride(BaseModel):
 class InstancePolicy:
     """One resolved policy state: the effective value of every field, plus
     the untouched administrator maxima every later `apply_template_override`
-    call must still respect. A safety field with no `defaults:` entry
-    (`allowed_tools`, `token_budget`) starts *at* its maximum -- there is
-    nothing to narrow it from until the first override does."""
+    call must still respect. A ratchet-only safety field with no `defaults:`
+    entry (`allowed_tools`, `token_budget`) starts *at* its maximum -- there
+    is nothing to narrow it from until the first override does.
+    `allowed_harnesses` is different: it is operational-with-a-maximum, not
+    ratchet-only, so its bound for widening is always `maxima`, never the
+    current inherited value (see `_OPERATIONAL_LIST_FIELDS`)."""
 
     timeout_minutes: int | None
     max_attempts: int | None
@@ -457,14 +475,16 @@ class InstancePolicy:
 
     def apply_template_override(self, raw: TemplatePolicyOverride | dict) -> InstancePolicy:
         """Layer `raw` onto this policy, field by field
-        (`policy-override-rules-are-field-specific`): a safety field
-        (`allowed_tools`, `allowed_harnesses`, `token_budget`) may only
-        narrow the inherited value; an operational field (`timeout_minutes`,
-        `max_attempts`) may move either way but not past an explicitly
+        (`policy-override-rules-are-field-specific`): a ratchet-only safety
+        field (`allowed_tools`, `token_budget`) may only narrow the inherited
+        value; an operational field (`timeout_minutes`, `max_attempts`,
+        `allowed_harnesses`) may move either way but not past an explicitly
         configured administrator maximum
-        (`work-item-policy-may-exceed-default-ceilings-within-admin-maximum`).
-        The same method resolves a repository override over the instance
-        policy, a work-item override over that, and so on
+        (`work-item-policy-may-exceed-default-ceilings-within-admin-maximum`)
+        -- for `allowed_harnesses` that bound is always `maxima`, so a
+        `defaults:` value narrower than `maxima:` can still be widened back
+        up to it. The same method resolves a repository override over the
+        instance policy, a work-item override over that, and so on
         (`policy-is-layered-by-execution-scope`)."""
         override = (
             raw
@@ -507,5 +527,19 @@ class InstancePolicy:
                     f"'{field_name}' cannot exceed the administrator maximum {admin_max}"
                 )
             updates[field_name] = value
+
+        for field_name in _OPERATIONAL_LIST_FIELDS:
+            value = getattr(override, field_name)
+            if value is None:
+                continue
+            admin_max = getattr(self.maxima, field_name)
+            if admin_max is not None and not set(value) <= set(admin_max):
+                extra = sorted(set(value) - set(admin_max))
+                verb = "is" if len(extra) == 1 else "are"
+                raise PolicyError(
+                    f"'{field_name}' cannot exceed the administrator maximum "
+                    f"{sorted(admin_max)!r}; {extra} {verb} not allowed"
+                )
+            updates[field_name] = tuple(value)
 
         return dataclasses.replace(self, **updates)
