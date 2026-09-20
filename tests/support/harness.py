@@ -336,6 +336,22 @@ def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) ->
         # point `KRAFT_HOME` at `templates_dir.parent`, which is where
         # `default_harnesses_dir()` looks.
         library = re.sub(r"(?m)^(\s*harness:\s*)\S+$", r"\g<1>fake", library)
+        # And the `kraft.verify_changed_test_scopes` builtin becomes an inert
+        # `true`. This is the same protection `noop_verify` gives the legacy
+        # `on.test.run` binding, and it is not optional here: that builtin runs
+        # **the connected repo's own `test_command`**, and several tests in this
+        # suite connect a repo declaring `pytest` or `just test`. A V1 chain
+        # reaching it in a unit test runs this suite inside itself --
+        # `builtins.run_setup_command`/`_subprocess.run_task` have no timeout,
+        # so the nested run finishes the whole suite before the outer one
+        # continues. A test that means to exercise the real builtin builds its
+        # own chain (tests/executor/test_dispatch.py) and is untouched by this.
+        parsed = yaml.safe_load(library)
+        for task in parsed.get("tasks", {}).values():
+            if task.get("kind") == "builtin":
+                task.clear()
+                task.update({"kind": "subprocess", "command": "true"})
+        library = yaml.safe_dump(parsed, sort_keys=False)
         harnesses = templates_dir / "harnesses"
         harnesses.mkdir(exist_ok=True)
         (harnesses / "fake.yaml").write_text(
