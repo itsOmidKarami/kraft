@@ -353,17 +353,33 @@ def test_skips_a_repo_that_is_not_enabled(tmp_path, monkeypatch):
 
 
 def test_refuses_a_template_with_no_gate(tmp_path, monkeypatch):
-    """Spec §5 reached by configuration: `quick-task` gates nowhere, so running
-    it unattended would take a bead to merge with no human anywhere."""
+    """Spec §5 reached by configuration: a chain that gates nowhere would take a
+    bead to merge unattended with no human anywhere."""
     monkeypatch.setattr(
         intake_mod.beads, "ready", _ready([{"id": "B-1", "title": "t", "priority": 3}])
     )
 
+    # A real, resolvable, gateless chain -- written before `_stub` builds the
+    # library out of this directory. Pointing the repo at a chain id that does
+    # not exist would make this pass on the *unknown template* branch instead,
+    # which is a different refusal and would leave the gate rule unpinned.
+    chains = tmp_path / "templates" / "chains"
+    chains.mkdir(parents=True, exist_ok=True)
+    (chains / "gateless.yaml").write_text(
+        "id: gateless\n"
+        "nodes:\n"
+        "  - id: implementation\n"
+        "    kind: exec\n"
+        "    tasks:\n"
+        "      - { id: build, kind: subprocess, command: 'true' }\n"
+    )
+
     async def body(app):
+        assert app.state.library.resolve_chain("gateless"), "the fixture chain must resolve"
         assert await intake_mod.tick(app) == []
         assert _work_items(app) == []
 
-    _run(lambda: _stub(tmp_path, repo_entry={"default_chain_template": "quick-task"}), body)
+    _run(lambda: _stub(tmp_path, repo_entry={"default_chain_template": "gateless"}), body)
 
 
 def test_skips_an_epic(tmp_path, monkeypatch):
