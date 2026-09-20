@@ -55,10 +55,6 @@ async def intake(
     #: empty policy -- an unset maximum is no bound at all -- so an internal
     #: caller with no policy object still files a valid item.
     effective_policy: InstancePolicy | None = None,
-    #: Artifact kinds this item arrives with already written (`--spec`,
-    #: `--plan`). They trim the chain at materialization: the gate whose
-    #: `artifact` names the kind, and the node that would have produced it.
-    attachment_kinds: frozenset[str] = frozenset(),
     description: str | None = None,
     bd_cwd: str | None = None,
     submodules: list[str] | None = None,
@@ -147,7 +143,11 @@ async def intake(
             if effective_policy is not None
             else InstancePolicy.from_input(InstancePolicyInput())
         ),
-        attachment_kinds=attachment_kinds,
+        # Derived from the attachments themselves, never passed in beside
+        # them: the kinds that trim the chain and the documents that justify
+        # the trim have to be the same list, and a caller holding both is a
+        # caller that can make them disagree.
+        attachment_kinds=frozenset(a["kind"] for a in attachments),
         skip_nodes=skip_nodes,
     )
     implements_beads = [b for b in (implements_beads or []) if b != bead_id] or None

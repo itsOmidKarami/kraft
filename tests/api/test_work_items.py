@@ -5,6 +5,7 @@ worktree-head fields on GET."""
 from __future__ import annotations
 
 import dataclasses
+import json
 import os
 import sqlite3
 import subprocess
@@ -354,11 +355,18 @@ def test_patch_switching_chain_template_preserves_attachment_gate_trim(tmp_path,
     spec_approval out of its chain (Kraft-dgh); switching template must not
     force it to reattach to get that trim back."""
     templates_dir = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
-    (templates_dir / "custom.yaml").write_text(
+    (templates_dir / "chains" / "custom.yaml").write_text(
         "id: custom\n"
         "nodes:\n"
-        "  - { id: spec, tasks: [on.spec.requested], gate_after: spec_approval }\n"
-        "  - { id: verify, tasks: [on.test.run], gate_after: null }\n"
+        "  - id: spec\n"
+        "    kind: exec\n"
+        "    tasks:\n"
+        "      - { id: author, kind: agent, harness: fake, prompt: spec, produces: spec }\n"
+        "  - { id: spec_approval, kind: gate, message: approve, artifact: spec }\n"
+        "  - id: verify\n"
+        "    kind: exec\n"
+        "    tasks:\n"
+        "      - { id: run, kind: agent, harness: fake, prompt: verify }\n"
     )
     client = _client(tmp_path, monkeypatch, templates_dir=templates_dir)
     with client:
@@ -378,13 +386,16 @@ def test_patch_switching_chain_template_preserves_attachment_gate_trim(tmp_path,
             },
         ).json()["id"]
         before = client.get(f"/api/work-items/{wid}").json()
-        assert "spec" not in [n["id"] for n in before["chain_definition"]["nodes"]]
+        filed = [n["id"] for n in json.loads(before["materialized_chain"])["chain"]["nodes"]]
+        assert "spec" not in filed and "spec_approval" not in filed
 
         r = client.patch(f"/api/work-items/{wid}", json={"chain_template": "custom"})
         assert r.status_code == 200, r.text
 
         after = client.get(f"/api/work-items/{wid}").json()
-        assert [n["id"] for n in after["chain_definition"]["nodes"]] == ["verify"]
+        assert [n["id"] for n in json.loads(after["materialized_chain"])["chain"]["nodes"]] == [
+            "verify"
+        ]
 
 
 def test_patch_sets_agent_overrides_and_records_an_event(tmp_path, monkeypatch):
@@ -625,7 +636,12 @@ def test_intake_with_a_plan_attachment_trims_the_chain_and_reports_it(tmp_path, 
             {k: v for k, v in a.items() if k != "source"} for a in item["attachments"]
         ] == expected
         assert Path(item["attachments"][0]["source"]).is_relative_to(stored_dir)
-        assert "plan_approval" not in [n["gate_after"] for n in item["chain_definition"]["nodes"]]
+        # The gate whose `artifact` is the plan, and the node that would have
+        # written it, are both gone from the frozen snapshot -- V1 declares the
+        # trim on both ends instead of looking a kind up in a gate-name table.
+        nodes = json.loads(item["materialized_chain"])["chain"]["nodes"]
+        assert "plan_approval" not in [n["id"] for n in nodes]
+        assert "plan" not in [n["id"] for n in nodes]
         listed = next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
         assert [
             {k: v for k, v in a.items() if k != "source"} for a in listed["attachments"]

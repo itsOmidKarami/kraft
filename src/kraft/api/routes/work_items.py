@@ -222,7 +222,6 @@ async def create_work_item(body: NewWorkItem, request: Request):
             repo=body.repo,
             chain=chain,
             effective_policy=st.instance_policy,
-            attachment_kinds=attachment_kinds,
             # The raw request value, not the resolved template's id (Kraft-cd47):
             # None here means no explicit template was chosen, and must stay
             # None in the row -- `intake`'s own default would otherwise store
@@ -289,17 +288,21 @@ async def create_work_item(body: NewWorkItem, request: Request):
             ),
         ),
     )
-    chain = json.loads(row["chain_definition"])
+    # The chain as filed: the trim the attachments earned is already applied,
+    # so this is what will actually run and not what the template declares.
+    filed = store.materialized_chain_of(row)
     return JSONResponse(
         status_code=201,
         content={
             "id": wid,
             "bead_id": row["bead_id"],
             "status": row["status"],
-            "chain_definition": chain,
+            "chain_definition": json.loads(row["chain_definition"] or "{}"),
+            "materialized_chain": row["materialized_chain"],
             # the run task advances this asynchronously; before its first write the
             # chain still starts at node 0 by definition.
-            "current_node_id": row["current_node_id"] or chain["nodes"][0]["id"],
+            "current_node_id": row["current_node_id"]
+            or (filed.chain.nodes[0].id if filed is not None else None),
             **extra,
         },
     )

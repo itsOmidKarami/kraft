@@ -386,15 +386,21 @@ def e2e_templates_dir(tmp_path: Path) -> Path:
 # column yet (Task 5), and there is deliberately no legacy fallback to walk.
 
 
+def v1_resolved(nodes: list[dict], *, chain_id: str = "t"):
+    """A `ResolvedChain` over `nodes` (authored V1 node mappings) -- what
+    `executor.intake` takes, and what `v1_chain` materializes."""
+    from kraft.templates.models import Chain, ResolvedChain
+
+    return ResolvedChain.from_chain(Chain.model_validate({"id": chain_id, "nodes": nodes}))
+
+
 def v1_chain(nodes: list[dict], *, repo: Path | str, chain_id: str = "t"):
     """A `MaterializedChain` over `nodes` (authored V1 node mappings), bound to
     a single-repository target on `repo`."""
     from kraft.policy import InstancePolicy, InstancePolicyInput
     from kraft.templates.environment import Repository, WorkItemTarget
-    from kraft.templates.models import Chain, ResolvedChain
 
-    chain = Chain.model_validate({"id": chain_id, "nodes": nodes})
-    return ResolvedChain.from_chain(chain).materialize(
+    return v1_resolved(nodes, chain_id=chain_id).materialize(
         target=WorkItemTarget.for_repository(Repository(id="target", path=str(repo))),
         effective_policy=InstancePolicy.from_input(InstancePolicyInput.model_validate({})),
     )
