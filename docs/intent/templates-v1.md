@@ -36,7 +36,7 @@ but the availability of such a helper SHALL NOT be required for the update.
 The template directory SHALL contain one `library.yaml` for reusable tasks,
 steps, nodes, and named steering profiles, and one selectable chain per file
 under `chains/`.
-enforced-by: tests/test_template_library.py::test_from_yaml_dir_loads_components_and_one_chain_per_file, tests/test_template_library.py::test_each_chain_file_is_one_selectable_chain, tests/test_template_library.py::test_two_chain_files_claiming_one_id_is_an_error_naming_both
+enforced-by: tests/templates/test_library.py::test_from_yaml_dir_loads_components_and_one_chain_per_file, tests/templates/test_library.py::test_each_chain_file_is_one_selectable_chain, tests/templates/test_library.py::test_two_chain_files_claiming_one_id_is_an_error_naming_both
 
 ## REQ registry-is-not-a-task-configuration-source
 
@@ -48,7 +48,7 @@ templates.
 
 Every task SHALL declare exactly one discriminated kind: `builtin`, `agent`,
 `subprocess`, or `forge`.
-enforced-by: tests/test_template_models.py::test_task_kind_selects_the_concrete_task_model, tests/test_template_models.py::test_task_without_a_kind_is_rejected, tests/test_template_models.py::test_unknown_task_kind_is_rejected
+enforced-by: tests/templates/test_models.py::test_task_kind_selects_the_concrete_task_model, tests/templates/test_models.py::test_task_without_a_kind_is_rejected, tests/templates/test_models.py::test_unknown_task_kind_is_rejected
 
 ## REQ agent-task-may-select-one-skill
 
@@ -72,7 +72,7 @@ method.
 
 The system SHALL distinguish a code-owned agent-runtime provider, a configured
 harness profile for that provider, and an agent task that selects a profile.
-enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider_declared_options, tests/test_harnesses.py::test_harness_profile_provider_must_be_the_harness_it_configures, tests/test_template_models.py::test_agent_task_selects_a_harness_profile_by_id
+enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider_declared_options, tests/test_harnesses.py::test_harness_profile_provider_must_be_the_harness_it_configures, tests/templates/test_models.py::test_agent_task_selects_a_harness_profile_by_id
 
 ## REQ provider-owns-runtime-mechanics
 
@@ -127,7 +127,7 @@ require a new escalation session.
 
 A built-in task SHALL name its action through `ref`, and the system SHALL
 reject a reference to an action Kraft does not support.
-enforced-by: tests/test_template_models.py::test_builtin_task_accepts_a_code_owned_ref, tests/test_template_models.py::test_builtin_task_rejects_an_action_kraft_does_not_support, tests/test_template_models.py::test_builtin_task_requires_a_ref
+enforced-by: tests/templates/test_models.py::test_builtin_task_accepts_a_code_owned_ref, tests/templates/test_models.py::test_builtin_task_rejects_an_action_kraft_does_not_support, tests/templates/test_models.py::test_builtin_task_requires_a_ref
 
 ## REQ changed-test-scope-verification-is-a-typed-built-in-task
 
@@ -156,12 +156,12 @@ one aggregate task result.
 
 An execution node's `tasks` SHALL be one concurrent task group; its `steps`
 SHALL be ordered groups whose tasks run concurrently within each group.
-enforced-by: tests/test_template_models.py::test_exec_node_tasks_are_one_concurrent_group_and_steps_are_ordered
+enforced-by: tests/templates/test_models.py::test_exec_node_tasks_are_one_concurrent_group_and_steps_are_ordered
 
 ## REQ exec-node-requires-one-execution-shape
 
 An execution node SHALL define exactly one of `tasks` or `steps`.
-enforced-by: tests/test_template_models.py::test_exec_node_requires_one_execution_shape, tests/test_template_models.py::test_exec_node_rejects_neither_execution_shape, tests/test_template_models.py::test_exec_node_rejects_an_empty_task_group
+enforced-by: tests/templates/test_models.py::test_exec_node_requires_one_execution_shape, tests/templates/test_models.py::test_exec_node_rejects_neither_execution_shape, tests/templates/test_models.py::test_exec_node_rejects_an_empty_task_group
 
 ## REQ task-group-shorthand-resolves-to-one-step
 
@@ -174,21 +174,21 @@ escalation task SHALL take its container as its path segment, such as
 `main`, `on_failure`, `fix_loop`, `judge`, `escalation`, `on_base_changed`, and
 `on_conflict` SHALL NOT be used as authored step identifiers, nor as the
 identifier of a dedicated task that occupies a step position.
-enforced-by: tests/test_template_models.py::test_a_tasks_group_resolves_to_one_step_named_main, tests/test_template_models.py::test_a_fix_loop_tasks_group_resolves_to_a_main_step_under_its_container, tests/test_template_models.py::test_a_reserved_segment_is_rejected_as_a_step_identifier, tests/test_template_models.py::test_a_reserved_segment_is_rejected_for_the_dedicated_escalation_task
+enforced-by: tests/templates/test_models.py::test_a_tasks_group_resolves_to_one_step_named_main, tests/templates/test_models.py::test_a_fix_loop_tasks_group_resolves_to_a_main_step_under_its_container, tests/templates/test_models.py::test_a_reserved_segment_is_rejected_as_a_step_identifier, tests/templates/test_models.py::test_a_reserved_segment_is_rejected_for_the_dedicated_escalation_task
 origin: docs/templates-v1-design.md "Resolution and execution" -- a fix loop's judge is a named slot whose own name is its canonical segment, so its authored id is never a path segment and the reserved rule does not apply to it; the escalation task's id does become a segment (`node.escalation.<id>`) and is checked.
 
 ## REQ gate-is-an-ordered-node
 
 A human gate SHALL be represented by an ordered node with `kind: gate`; an
 execution node SHALL NOT define `gate_after`.
-enforced-by: tests/test_template_models.py::test_node_kind_selects_gate_model, tests/test_template_models.py::test_exec_node_cannot_define_gate_after, tests/test_template_library.py::test_the_design_chain_keeps_gates_as_ordered_nodes
+enforced-by: tests/templates/test_models.py::test_node_kind_selects_gate_model, tests/templates/test_models.py::test_exec_node_cannot_define_gate_after, tests/templates/test_library.py::test_the_design_chain_keeps_gates_as_ordered_nodes
 
 ## REQ gate-owns-gate-behaviour
 
 A gate node SHALL own gate-specific configuration, including its message,
 timeout, reject target, auto-escalation, review artifact reference, and any
 dedicated marker such as `chain_finalized`.
-enforced-by: tests/test_template_models.py::test_gate_node_owns_gate_configuration, tests/test_template_models.py::test_exec_node_cannot_define_gate_only_fields
+enforced-by: tests/templates/test_models.py::test_gate_node_owns_gate_configuration, tests/templates/test_models.py::test_exec_node_cannot_define_gate_only_fields
 
 ## REQ resolved-chain-identifiers-are-unique
 
@@ -198,7 +198,7 @@ fix-loop plans. An authored node, step, or task identifier SHALL match
 `[a-z][a-z0-9_-]*`, so that no identifier can contain the canonical path
 separator, whitespace, or any other character that would make a resolved path
 ambiguous.
-enforced-by: tests/test_template_models.py::test_an_identifier_that_would_make_a_path_ambiguous_is_rejected, tests/test_template_models.py::test_duplicate_task_ids_in_one_step_are_rejected, tests/test_template_models.py::test_duplicate_step_ids_in_one_node_are_rejected, tests/test_template_models.py::test_duplicate_node_ids_in_a_chain_are_rejected, tests/test_template_library.py::test_the_design_chain_resolves_to_its_documented_canonical_paths
+enforced-by: tests/templates/test_models.py::test_an_identifier_that_would_make_a_path_ambiguous_is_rejected, tests/templates/test_models.py::test_duplicate_task_ids_in_one_step_are_rejected, tests/templates/test_models.py::test_duplicate_step_ids_in_one_node_are_rejected, tests/templates/test_models.py::test_duplicate_node_ids_in_a_chain_are_rejected, tests/templates/test_library.py::test_the_design_chain_resolves_to_its_documented_canonical_paths
 
 ## REQ component-identifiers-are-qualified-by-node-instance
 
@@ -210,39 +210,39 @@ such as `node.on_failure.step.task` or `node.fix_loop.step.task`. A dedicated
 fix-loop judge or escalation task uses its container, such as
 `node.fix_loop.judge` or `node.escalation.task`. This shall preserve global
 uniqueness when a component is used more than once.
-enforced-by: tests/test_template_models.py::test_steps_keep_their_authored_identifiers_in_the_path, tests/test_template_models.py::test_the_same_local_task_id_in_two_steps_gets_two_distinct_paths, tests/test_template_models.py::test_recovery_and_fix_loop_reuse_of_a_local_id_stays_distinct, tests/test_template_models.py::test_one_reusable_node_used_twice_keeps_its_paths_distinct, tests/test_template_library.py::test_the_design_chain_resolves_to_its_documented_canonical_paths
+enforced-by: tests/templates/test_models.py::test_steps_keep_their_authored_identifiers_in_the_path, tests/templates/test_models.py::test_the_same_local_task_id_in_two_steps_gets_two_distinct_paths, tests/templates/test_models.py::test_recovery_and_fix_loop_reuse_of_a_local_id_stays_distinct, tests/templates/test_models.py::test_one_reusable_node_used_twice_keeps_its_paths_distinct, tests/templates/test_library.py::test_the_design_chain_resolves_to_its_documented_canonical_paths
 
 ## REQ component-extends-has-one-parent
 
 A reusable task, step, node, or chain MAY extend one same-namespace parent and
 the system SHALL reject multiple parents, cross-namespace parents, and cycles.
-enforced-by: tests/test_template_library.py::test_extends_rejects_more_than_one_parent, tests/test_template_library.py::test_extends_rejects_a_cycle, tests/test_template_library.py::test_extends_rejects_a_cross_namespace_parent, tests/test_template_library.py::test_extends_rejects_an_unknown_parent
-origin: docs/templates-v1-design.md "Library components" -- implemented for the task, step and node namespaces. Chain-level `extends` is deliberately not implemented in V1 -- no shipped chain uses it -- and a chain file carrying `extends` is rejected with an explicit resolver error (tests/test_template_library.py::test_chain_level_extends_is_rejected_explicitly).
+enforced-by: tests/templates/test_library.py::test_extends_rejects_more_than_one_parent, tests/templates/test_library.py::test_extends_rejects_a_cycle, tests/templates/test_library.py::test_extends_rejects_a_cross_namespace_parent, tests/templates/test_library.py::test_extends_rejects_an_unknown_parent
+origin: docs/templates-v1-design.md "Library components" -- implemented for the task, step and node namespaces. Chain-level `extends` is deliberately not implemented in V1 -- no shipped chain uses it -- and a chain file carrying `extends` is rejected with an explicit resolver error (tests/templates/test_library.py::test_chain_level_extends_is_rejected_explicitly).
 
 ## REQ extends-merges-objects-and-replaces-arrays
 
 During `extends` resolution, mappings SHALL merge recursively, scalar values
 including `null` SHALL replace inherited values, and arrays SHALL replace their
 inherited arrays as a whole.
-enforced-by: tests/test_template_library.py::test_extends_replaces_arrays_wholesale_and_scalars_including_null, tests/test_template_library.py::test_extends_merges_maps_recursively
+enforced-by: tests/templates/test_library.py::test_extends_replaces_arrays_wholesale_and_scalars_including_null, tests/templates/test_library.py::test_extends_merges_maps_recursively
 
 ## REQ extends-cannot-change-kind
 
 A derived component SHALL NOT change the discriminated `kind` of its parent.
-enforced-by: tests/test_template_library.py::test_extends_cannot_change_the_parent_kind, tests/test_template_library.py::test_extends_cannot_change_a_kind_inherited_further_up_the_chain
+enforced-by: tests/templates/test_library.py::test_extends_cannot_change_the_parent_kind, tests/templates/test_library.py::test_extends_cannot_change_a_kind_inherited_further_up_the_chain
 
 ## REQ resolved-chain-is-validated-before-use
 
 The system SHALL reject a chain with missing references, invalid overrides,
 duplicate identifiers, or invalid cross-node references before it is used.
-enforced-by: tests/test_template_models.py::test_a_gate_reject_target_must_name_a_node_in_the_chain, tests/test_template_models.py::test_a_gate_reject_target_cannot_name_a_later_node, tests/test_template_models.py::test_a_gate_reject_target_cannot_name_a_gate, tests/test_template_library.py::test_extends_rejects_an_unknown_parent, tests/test_template_library.py::test_an_unknown_steering_reference_is_rejected
+enforced-by: tests/templates/test_models.py::test_a_gate_reject_target_must_name_a_node_in_the_chain, tests/templates/test_models.py::test_a_gate_reject_target_cannot_name_a_later_node, tests/templates/test_models.py::test_a_gate_reject_target_cannot_name_a_gate, tests/templates/test_library.py::test_extends_rejects_an_unknown_parent, tests/templates/test_library.py::test_an_unknown_steering_reference_is_rejected
 origin: docs/templates-v1-design.md "Resolution and execution" -- Phase 1 covers missing references and cross-node reject targets here, including the `base-change-restart-target-is-backward` backward-reference rule applied to `reject_to`; duplicate identifiers are pinned under `resolved-chain-identifiers-are-unique`, and invalid per-scope policy overrides join this pin once chain/node/step/task policy layers exist.
 
 ## REQ template-resolution-preserves-source-context
 
 The template resolver SHALL retain source paths for inheritance and validation
 errors so an author can identify the input that needs correction.
-enforced-by: tests/test_template_library.py::test_an_inheritance_error_names_the_file_and_the_component, tests/test_template_library.py::test_a_schema_error_names_the_library_file_the_component_came_from, tests/test_template_library.py::test_a_duplicate_identifier_error_names_the_container_and_the_id
+enforced-by: tests/templates/test_library.py::test_an_inheritance_error_names_the_file_and_the_component, tests/templates/test_library.py::test_a_schema_error_names_the_library_file_the_component_came_from, tests/templates/test_library.py::test_a_duplicate_identifier_error_names_the_container_and_the_id
 
 ## REQ authored-resolved-and-materialized-chains-are-distinct
 
@@ -560,13 +560,13 @@ enforced-by: tests/test_policy.py::test_policy_is_layered_from_instance_through_
 The system SHALL distinguish an independent repository, a workspace that
 combines repositories, and a path-scoped area within one repository. An area
 SHALL NOT be treated as an independent repository or forge target.
-enforced-by: tests/test_template_environment.py::test_area_has_no_forge_field_to_declare, tests/test_template_environment.py::test_repository_with_areas_keeps_them_path_scoped_not_independent
+enforced-by: tests/templates/test_environment.py::test_area_has_no_forge_field_to_declare, tests/templates/test_environment.py::test_repository_with_areas_keeps_them_path_scoped_not_independent
 
 ## REQ workspace-declares-root-and-members
 
 A workspace SHALL declare its root repository and each member repository with
 the path where it is mounted in that root.
-enforced-by: tests/test_template_environment.py::test_workspace_declares_root_and_members
+enforced-by: tests/templates/test_environment.py::test_workspace_declares_root_and_members
 
 ## REQ work-item-target-selection-is-immutable
 

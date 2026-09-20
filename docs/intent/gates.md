@@ -44,7 +44,7 @@ enforced-by: tests/test_planning_chain.py::test_spec_gate_offers_the_document_th
 
 ## REQ reject-without-a-note-is-rejected
 IF a gate rejection carries no note, THEN the system SHALL reject the request.
-enforced-by: tests/test_api_gates.py::test_gate_reject_requires_note_and_re_runs_the_producer
+enforced-by: tests/api/test_gates.py::test_gate_reject_requires_note_and_re_runs_the_producer
 
 ## REQ reject-without-a-note-leaves-the-gate-open
 IF a gate rejection carries no note, THEN the system SHALL leave the gate open.
@@ -57,7 +57,7 @@ enforced-by: tests/test_gates.py::test_reject_records_the_note_and_reopen_flips_
 ## REQ producer-gate-reject-reinvokes-the-producing-hook
 WHEN a `spec_approval` or `plan_approval` gate is rejected, the system SHALL
 re-invoke that node's own producing hook.
-enforced-by: tests/test_planning_chain.py::test_spec_gate_offers_the_document_then_reject_and_approve, tests/test_planning_chain.py::test_a_rejected_plan_rerun_is_framed_as_a_revision, tests/test_api_gates.py::test_gate_reject_requires_note_and_re_runs_the_producer
+enforced-by: tests/test_planning_chain.py::test_spec_gate_offers_the_document_then_reject_and_approve, tests/test_planning_chain.py::test_a_rejected_plan_rerun_is_framed_as_a_revision, tests/api/test_gates.py::test_gate_reject_requires_note_and_re_runs_the_producer
 
 ## REQ chain-finalized-reject-reinvokes-chain-review
 WHEN a `chain_finalized` gate is rejected, the system SHALL re-invoke
@@ -71,7 +71,7 @@ enforced-by: tests/test_planning_chain.py::test_spec_gate_offers_the_document_th
 ## REQ producer-gate-reject-increments-its-reject-loop-counter
 WHEN a `spec_approval` gate is rejected, the system SHALL increment the
 `spec_approval_reject_loop` counter for that work item.
-enforced-by: tests/test_api_gates.py::test_gate_reject_is_bounded_by_its_reject_loop
+enforced-by: tests/api/test_gates.py::test_gate_reject_is_bounded_by_its_reject_loop
 
 ## REQ plan-approval-reject-increments-its-reject-loop-counter
 WHEN a `plan_approval` gate is rejected, the system SHALL increment the
@@ -88,7 +88,7 @@ re-invoke the node's producing hook.
 ## REQ reject-loop-breach-sets-needs-human
 IF a `<gate>_reject_loop` counter is at its cap, THEN the system SHALL leave the
 work item in `needs_human`.
-enforced-by: tests/test_gate_review.py::test_repeated_fixed_verdicts_breach_the_reject_loop, tests/test_api_gates.py::test_gate_reject_is_bounded_by_its_reject_loop
+enforced-by: tests/skills/test_gate_review.py::test_repeated_fixed_verdicts_breach_the_reject_loop, tests/api/test_gates.py::test_gate_reject_is_bounded_by_its_reject_loop
 
 ## REQ reinvoked-node-reopens-its-own-gate
 WHEN a producing hook re-invoked after a rejection completes, the system SHALL
@@ -98,13 +98,13 @@ enforced-by: tests/test_planning_chain.py::test_spec_gate_offers_the_document_th
 ## REQ reject-to-re-enters-the-named-node
 WHERE a gate's node declares a `reject_to` node, the system SHALL move the work
 item to that node when the gate is rejected.
-enforced-by: tests/test_gate_review.py::test_verdict_reenters_the_walk_at_the_right_node[reject-0], tests/test_api_gates.py::test_rejecting_the_final_gate_re_enters_at_implementation
+enforced-by: tests/skills/test_gate_review.py::test_verdict_reenters_the_walk_at_the_right_node[reject-0], tests/api/test_gates.py::test_rejecting_the_final_gate_re_enters_at_implementation
 origin: templates/default.yaml
 
 ## REQ reject-to-carries-the-note-as-steer
 WHERE a gate's node declares a `reject_to` node, the system SHALL carry the
 reviewer's note into the re-entered node as steer context.
-enforced-by: tests/test_gate_review.py::test_verdict_reenters_the_walk_at_the_right_node[reject-0], tests/test_api_gates.py::test_rejecting_the_final_gate_re_enters_at_implementation
+enforced-by: tests/skills/test_gate_review.py::test_verdict_reenters_the_walk_at_the_right_node[reject-0], tests/api/test_gates.py::test_rejecting_the_final_gate_re_enters_at_implementation
 origin: templates/default.yaml
 
 ## REQ chain-review-gate-requires-a-plan-node
@@ -114,7 +114,7 @@ IF the loaded chain contains no `plan` node, THEN the system SHALL NOT open the
 ## REQ chain-finalized-approval-splices-the-revised-chain
 WHEN the `chain_finalized` gate is approved, the system SHALL splice the revised
 chain nodes into the work item's `chain_definition`.
-enforced-by: tests/test_api_gates.py::test_chain_review_splice_runs_the_revised_tail
+enforced-by: tests/api/test_gates.py::test_chain_review_splice_runs_the_revised_tail
 
 ## REQ chain-revision-leaves-executed-nodes-alone
 WHEN the system splices a revised chain into `chain_definition`, the system SHALL
@@ -134,16 +134,16 @@ enforced-by: tests/test_gates.py::test_a_spec_worker_that_wrote_no_artifact_open
 ## REQ gate-without-its-artifact-stays-answerable
 IF a pending gate's artifact is not on disk, THEN the system SHALL still accept a
 decision on that gate.
-enforced-by: tests/test_artifact_api.py::test_approving_a_gate_with_no_artifact_ingests_nothing
+enforced-by: tests/api/test_artifact.py::test_approving_a_gate_with_no_artifact_ingests_nothing
 
 ## REQ intake-copies-a-gate-trimming-attachment
 WHEN intake trims a gate for an attachment, the system SHALL copy that attachment
 into Kraft's own storage.
-enforced-by: tests/test_executor_entry.py::test_intake_copies_an_attachment_into_kraft_storage, tests/test_executor_entry.py::test_the_copy_survives_the_original_being_deleted
+enforced-by: tests/executor/test_entry.py::test_intake_copies_an_attachment_into_kraft_storage, tests/executor/test_entry.py::test_the_copy_survives_the_original_being_deleted
 
 ## REQ intake-refuses-an-uncopyable-attachment
 IF intake cannot copy an attachment, THEN the system SHALL refuse the intake.
-enforced-by: tests/test_executor_entry.py::test_intake_refuses_an_attachment_it_cannot_copy
+enforced-by: tests/executor/test_entry.py::test_intake_refuses_an_attachment_it_cannot_copy
 
 ## REQ missing-stored-attachment-fails-loudly
 IF a trimmed gate's stored attachment is missing when the worktree is prepared,
@@ -171,41 +171,41 @@ enforced-by: tests/test_builtins.py::test_env_setup_does_not_restamp_on_reentry,
 ## REQ diff-includes-uncommitted-work
 The system SHALL include uncommitted worktree changes in the diff it serves for a
 work item.
-enforced-by: tests/test_diff_api.py::test_diff_splits_landed_commits_from_in_flight_work, tests/test_diff_api.py::test_diff_landed_is_empty_when_nothing_is_committed
+enforced-by: tests/api/test_diff.py::test_diff_splits_landed_commits_from_in_flight_work, tests/api/test_diff.py::test_diff_landed_is_empty_when_nothing_is_committed
 
 ## REQ diff-lists-untracked-files-separately
 WHEN a work item's worktree contains untracked files, the system SHALL report
 their paths in a list separate from the diff body.
-enforced-by: tests/test_diff_api.py::test_diff_lists_untracked_without_adding_them, tests/test_diff_api.py::test_diff_lists_untracked_files_inside_a_new_directory
+enforced-by: tests/api/test_diff.py::test_diff_lists_untracked_without_adding_them, tests/api/test_diff.py::test_diff_lists_untracked_files_inside_a_new_directory
 
 ## REQ null-base-ref-yields-an-empty-diff
 IF a work item's `base_ref` is null, THEN the system SHALL return a success
 response with an empty diff.
-enforced-by: tests/test_diff_api.py::test_diff_with_null_base_ref_is_empty_not_an_error
+enforced-by: tests/api/test_diff.py::test_diff_with_null_base_ref_is_empty_not_an_error
 
 ## REQ missing-worktree-is-not-found
 IF a work item's `base_ref` is set and its worktree directory does not exist, THEN
 the system SHALL respond 404 to a diff request.
-enforced-by: tests/test_diff_api.py::test_diff_404s_when_the_worktree_is_gone
+enforced-by: tests/api/test_diff.py::test_diff_404s_when_the_worktree_is_gone
 
 ## REQ failed-git-diff-is-an-error-not-an-empty-diff
 IF `git diff` exits non-zero, THEN the system SHALL respond 500.
-enforced-by: tests/test_diff_api.py::test_diff_500s_when_git_fails_rather_than_returning_empty
+enforced-by: tests/api/test_diff.py::test_diff_500s_when_git_fails_rather_than_returning_empty
 
 ## REQ oversized-diff-is-flagged-truncated
 IF the diff body exceeds the size cap, THEN the system SHALL set `truncated` on
 the response.
-enforced-by: tests/test_diff_api.py::test_diff_truncates_at_a_file_boundary
+enforced-by: tests/api/test_diff.py::test_diff_truncates_at_a_file_boundary
 
 ## REQ truncated-diff-keeps-the-full-file-list
 IF the diff body exceeds the size cap, THEN the system SHALL still return the
 complete file list.
-enforced-by: tests/test_diff_api.py::test_diff_truncates_at_a_file_boundary
+enforced-by: tests/api/test_diff.py::test_diff_truncates_at_a_file_boundary
 
 ## REQ truncated-diff-cuts-at-a-file-boundary
 IF the diff body exceeds the size cap, THEN the system SHALL cut the returned body
 at a file boundary.
-enforced-by: tests/test_diff_api.py::test_diff_truncates_at_a_file_boundary, tests/test_diff_api.py::test_truncate_bounds_a_single_file_bigger_than_the_cap
+enforced-by: tests/api/test_diff.py::test_diff_truncates_at_a_file_boundary, tests/api/test_diff.py::test_truncate_bounds_a_single_file_bigger_than_the_cap
 
 ## REQ pause-is-available-between-gates
 WHILE a work item is running an unattended stretch, the system SHALL accept a

@@ -232,7 +232,7 @@ async def retry_infra_once(
     failing the terminal node -- the same MR-vs-branch split the caller's
     first read already makes with `branch_ci_status`. Both real backends
     raise there; `FakeForge` does not, so the double that holds this down
-    (`tests/test_forge_run.py`) raises on the MR path on purpose.
+    (`tests/adapters/forge/test_run.py`) raises on the MR path on purpose.
     """
     await forge.retry_jobs(repo=repo, ci=first)
     ci_status = (

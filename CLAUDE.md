@@ -114,6 +114,34 @@ Two consequences worth remembering:
   attach it — not because the file might vanish, but because changing it
   afterwards is a no-op that looks like it worked.
 
+### The test tree mirrors the source tree
+
+A test for `src/kraft/<pkg>/<mod>.py` lives at `tests/<pkg>/test_<mod>.py` — not
+`tests/test_<pkg>_<mod>.py`. Flat names under a hierarchical source is how the
+layout drifted the first time. A module with no package mirrors nothing and
+stays at `tests/test_<mod>.py`.
+
+**Every `tests/` subdirectory needs an empty `__init__.py`.** This is
+load-bearing, not tidiness. The mirrored tree has eleven duplicate basenames
+(`test_gates.py` exists under `api/`, `executor/` and the root, and so on for
+`test_db`, `test_auth`, `test_budget`, `test_escalate`, `test_progress`,
+`test_reattach`, `test_repos`, `test_service`, `test_triggers`,
+`test_work_items`), which pytest's default prepend import mode rejects as a
+hard collection error. Packages fix it with no config change, and they keep
+`tests/` on `sys.path` — which the 87 files doing `from support.harness import
+...` depend on. Do not "simplify" this by switching to
+`--import-mode=importlib`; that drops `tests/` off `sys.path` and breaks every
+one of them.
+
+Two things bite when you move or add a nested test:
+
+- `Path(__file__)` paths are written relative to `tests/`, so a file one level
+  down needs `parents[1]` where the root wanted `parents[0]`. Resolve them
+  against the filesystem rather than trusting the arithmetic.
+- Moving a test file breaks its `enforced-by:` pins in `docs/intent/`. CI runs
+  `python -m kraft.intent`, which exits 1 on a broken pin, so repoint them in
+  the same change and confirm with `just intent`.
+
 ### Marking a task already done in a reused plan
 
 A plan attached to one work item is sometimes reused for a later item that

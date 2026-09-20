@@ -1,0 +1,66 @@
+"""The chain-review skill tells a headless agent which gate names and hook
+points are legal. Those two sets live in code (`templates.GATE_NAMES`) and in
+config (`templates/registry.yaml`). If they drift apart, the skill teaches the
+agent to emit a chain the validator rejects — and nothing else would catch it.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import pytest
+
+from kraft.templates import load_registry
+
+SKILL = (
+    Path(__file__).resolve().parents[2] / "src" / "kraft" / "skills" / "chain-review" / "SKILL.md"
+)
+REGISTRY = Path(__file__).resolve().parents[2] / "templates" / "registry.yaml"
+
+
+@pytest.fixture(scope="module")
+def text() -> str:
+    return SKILL.read_text()
+
+
+def test_the_skill_exists_and_has_frontmatter(text):
+    assert text.startswith("---\n")
+    head = text.split("---", 2)[1]
+    assert "name: chain-review" in head
+    assert "description:" in head
+
+
+def test_it_limits_gate_names_to_the_supplied_chain(text):
+    assert "already present in the supplied chain" in text
+
+
+def test_every_hook_point_it_cites_is_registered(text):
+    cited = set(re.findall(r"`(on\.[\w.]+)`", text))
+    assert cited, "skill cites no hook points"
+    known = set(load_registry(REGISTRY).hooks)
+    assert cited <= known, f"skill cites unregistered hooks: {sorted(cited - known)}"
+
+
+def test_it_documents_carried_over_fields(text):
+    """Kraft-eod0: the skill's schema is only 4 of a node's 8 real keys. It
+    must say the other 4 (on_failure among them) are preserved for it, or a
+    reviewer following the schema to the letter looks like it strips them."""
+    for field in ("on_failure", "reject_to", "rebase_bounce_to", "auto_escalate"):
+        assert field in text, f"carried-over field {field!r} undocumented"
+
+
+def test_skill_documents_the_escalation_fields_as_settable(text):
+    assert "reject_to" in text.split("Every node you write is exactly")[1][:600]
+    assert "proposed_node_overrides" in text
+    assert "flags" in text
+
+
+def test_skill_documents_the_model_effort_dial_table(text):
+    assert "proposed_node_overrides" in text
+    assert "model" in text and "escalate_model" in text and "effort" in text
+
+
+def test_skill_documents_permission_surface_as_flag_only(text):
+    assert "flags" in text
+    assert "never propose" in text.lower() or "read-only" in text.lower()
