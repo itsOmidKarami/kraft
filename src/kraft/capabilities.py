@@ -82,10 +82,12 @@ MANIFEST: tuple[Capability, ...] = (
     Capability(
         version="0.72.0",
         name="inputs",
-        what="a hook binding declares what it is fed and on which channel, so a "
-        "review hook bound to a CLI gets the same diff and findings an agent one does",
-        how="add `inputs:` to a subprocess binding in registry.yaml, e.g. "
-        "`inputs:\\n  review_package: { channel: env, name: KRAFT_REVIEW_PACKAGE }`",
+        what="a hook binding declared what it was fed and on which channel. "
+        "INERT since Template Schema V1: no task declares inputs, and nothing "
+        "fills KRAFT_REVIEW_PACKAGE or the carried-findings file any more",
+        how="nothing to adopt, and nothing to configure -- an explicit per-task "
+        "input declaration lands with the V1 fix-loop work; configuring the old "
+        "key buys a hook an env var Kraft never sets",
     ),
     Capability(
         version="0.74.0",

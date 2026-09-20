@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from kraft import builtins as _builtins
 from kraft import config as _config
 from kraft import policy as _policy
@@ -165,12 +163,10 @@ async def resume_once(
             attachments=entry.attachments_of(row),
             repo_entry=launch.repo_entry if launch else None,
         )
-        # The same implicit runtime preparation `walk.run_once` does, for the
-        # same reason: the resumed node can commit, and a rebase may have landed
-        # a new lockfile while the item was stopped.
-        await _builtins.prepare_runtime(
-            worktree, Path(row["repo"]), launch.repo_entry if launch else None
-        )
+        # No `prepare_runtime` here, deliberately. A resume is a re-entry, and
+        # `walk.run_once` only prepares when a walk starts (`start_index == 0`)
+        # for the reason its own comment gives; a resumed worktree was prepared
+        # when it was cut, or by the walk that is being resumed.
     except (RuntimeError, _config.ConfigError) as exc:
         reason = str(exc)
         await db.write(lambda c: store.enter_node(c, work_item_id, cur))

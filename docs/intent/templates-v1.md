@@ -83,7 +83,8 @@ enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider
 An agent-runtime provider SHALL own invocation, context delivery, supported
 runtime options, session resumption, skill loading, and normalized task
 results for its runtime.
-enforced-by: tests/executor/test_dispatch.py::test_each_task_kind_reaches_its_own_adapter, tests/executor/test_dispatch.py::test_an_agent_task_contract_precedes_its_skill_and_steering, tests/adapters/test_agent.py::test_a_typed_agent_task_resolves_through_provider_declared_options, tests/adapters/test_agent.py::test_the_provider_spells_session_resumption_for_an_agent_task
+enforced-by: tests/executor/test_dispatch.py::test_each_task_kind_reaches_its_own_adapter, tests/executor/test_dispatch.py::test_an_agent_task_contract_precedes_its_skill_and_steering, tests/executor/test_dispatch.py::test_a_typed_agent_task_reports_the_providers_own_normalized_result, tests/adapters/test_agent.py::test_a_typed_agent_task_resolves_through_provider_declared_options
+origin: src/kraft/harness.py §build_argv -- five of the six mechanics are pinned above (invocation, context delivery, runtime options, skill loading, normalized results), each through a typed dispatch. **Session resumption is not**, and cannot be yet: a V1 `AgentTask` has no field that asks for a resumed provider session, so no chain dispatch reaches `build_argv`'s `resume` path. Its only caller is `kraft.escalate.dispatch`, whose own typed task arrives with the escalation controls (Task 7/8 of the template-schema-v1 plan); the provider-side spelling meanwhile is covered by tests/adapters/test_agent.py::test_the_provider_spells_session_resumption_for_an_agent_task, which is harness-level and deliberately not claimed as this requirement's evidence.
 
 ## REQ provider-declares-harness-capabilities
 

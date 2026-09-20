@@ -331,6 +331,12 @@ def build_context(
     hook_point: str,
     session_id: str,
     artifact: str | None = None,
+    #: PARKED under Template Schema V1: nothing passes this. A V1 chain has no
+    #: way to say "this task reviews the change" (the `inputs:` channel went
+    #: with the hook registry), so `executor.prompts.review_package` has no
+    #: caller -- see its own `REVIEW_HOOKS` note. Task 7 of the
+    #: template-schema-v1 plan rewires it through an `AgentTask` input
+    #: declaration; the parameter and the paragraph below stay for that.
     review_package: str | None = None,
     method_text: str | None = None,
     steering_texts: tuple[str, ...] = (),
@@ -428,6 +434,7 @@ async def run_agent_task(
     permission_mode: str | None = None,
     sandbox: dict | None = None,
     steering_texts: tuple[str, ...] = (),
+    #: PARKED: see `build_context`'s own note on this parameter.
     review_package: str | None = None,
     artifact: str | None = None,
     method_text: str | None = None,

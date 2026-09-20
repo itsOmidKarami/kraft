@@ -400,11 +400,13 @@ async def v1_walk(
     title: str = "t",
     steer: str | None = None,
     run_dirs=None,
+    start_index: int = 0,
+    start_step: int = 0,
     **item_kwargs,
 ):
     """File `chain` as one work item and walk it once.
 
-    Returns `(status, events, sessions)` -- the two readbacks nearly every
+    Returns `(status, events, sessions, row)` -- the readbacks nearly every
     assertion about a walk needs, as plain dicts, with the database already
     closed. A caller that needs more reads the run directory itself.
     """
@@ -425,6 +427,8 @@ async def v1_walk(
             registry=None,
             policy=policy,
             steer=steer,
+            start_index=start_index,
+            start_step=start_step,
             # `setup_command: ""` is the repo declaring it needs no preparation;
             # a repo entry without one refuses to cut a worktree at all.
             launch=LaunchContext(
@@ -442,6 +446,11 @@ async def v1_walk(
                 ).fetchall()
             )
         ]
-        return status, evts, sessions
+        row = dict(
+            database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+        )
+        return status, evts, sessions, row
     finally:
         await database.close()

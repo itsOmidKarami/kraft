@@ -981,9 +981,11 @@ def last_measurement(
     guessing.
 
     The whole findings, not their fingerprints: the caller derives the tags it
-    used to get, and the messages and severities are what `prompts.
-    carried_findings_note` hands the next reviewer (Kraft-s7c04.1) and what
-    `walk._carry_severity` floors a repeat's rating against (Kraft-s7c04.3).
+    used to get, and the messages and severities are what `walk._carry_severity`
+    floors a repeat's rating against (Kraft-s7c04.3) -- and what
+    `prompts.carried_findings_note` handed the next reviewer (Kraft-s7c04.1)
+    until V1 left that function with no caller (see
+    `findings.resolve_identity`).
     Returning both would make this the second reader of `findings_measured` in
     this module, which `unresolved_findings_steer`'s docstring forbids for good
     reason -- three readers of one event is three things to keep in step.

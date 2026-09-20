@@ -642,9 +642,12 @@ async def walk_node(
         # the stuck detector.
         found, reported_hooks = dispatch.collect_findings(db, work_item_id, node, round)
         # A `same_as` is only believable for a tag this round's reviewer was
-        # actually shown, and `carried_findings_note` is what showed it. An
-        # invented or stale tag would collapse two distinct defects onto one
-        # identity and fire the stuck detector on a fiction (Kraft-s7c04.2).
+        # actually shown. An invented or stale tag would collapse two distinct
+        # defects onto one identity and fire the stuck detector on a fiction
+        # (Kraft-s7c04.2). Under V1 nothing shows a reviewer its previous
+        # findings at all -- see `findings.resolve_identity`, which says what
+        # that costs and why the call stays: as it stands this strips nothing
+        # because no `same_as` can arrive.
         found = _findings.resolve_identity(
             found, known={f.fingerprint for f in previous_found or []}
         )
@@ -1059,9 +1062,23 @@ async def run_once(
         # preparation: V1 has no builtin action for it, and every node from the
         # first one on can commit, so the environment the repo declares has to
         # be there before anything dispatches. Recorded as an event rather than
-        # a session -- there is no task here to own one.
-        report = await _builtins.prepare_runtime(
-            worktree, Path(row["repo"]), launch.repo_entry if launch else None
+        # a session -- there is no task here to own one; `kraft view events` is
+        # where a human reads the report back.
+        #
+        # Only when the walk is actually starting, unlike `ensure_worktree`
+        # above it. `env_setup` was an ordinary node, so a re-entry at
+        # `start_index > 0` skipped it -- and `run_once` is re-entered that way
+        # by the `ci_wait` poller (up to `loops.ci_wait` times for one pipeline),
+        # `rate_limit_retry`, gate approval and every `/retry`. Running the
+        # repo's `setup_command` per dispatch attempt rather than per item would
+        # re-`uv sync` a worktree sixty times over one CI wait and append its
+        # whole stdout to the events table each time.
+        report = (
+            await _builtins.prepare_runtime(
+                worktree, Path(row["repo"]), launch.repo_entry if launch else None
+            )
+            if start_index == 0
+            else None
         )
     except (RuntimeError, _config.ConfigError) as exc:
         failing_node = nodes[start_index].id
@@ -1069,9 +1086,10 @@ async def run_once(
         await db.write(lambda c: store.enter_node(c, work_item_id, failing_node))
         await db.write(lambda c: store.mark_needs_human(c, work_item_id, failing_node, reason))
         return "needs_human"
-    await db.write(
-        lambda c: events.append(c, work_item_id, "worktree_prepared", {"report": report})
-    )
+    if report is not None:
+        await db.write(
+            lambda c: events.append(c, work_item_id, "worktree_prepared", {"report": report})
+        )
 
     i = start_index
     step = start_step

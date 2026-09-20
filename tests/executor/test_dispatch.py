@@ -3398,7 +3398,7 @@ def test_an_unloadable_selected_skill_stops_for_a_human(tmp_path, monkeypatch):
         repo=repo,
     )
 
-    status, evts, sessions = asyncio.run(v1_walk(tmp_path, chain, repo=repo))
+    status, evts, sessions, _row = asyncio.run(v1_walk(tmp_path, chain, repo=repo))
 
     assert status == "needs_human"
     assert [s["status"] for s in sessions] == ["config_error"]
@@ -3430,9 +3430,63 @@ def test_an_unavailable_selected_harness_stops_for_a_human(tmp_path, monkeypatch
         repo=repo,
     )
 
-    status, _evts, sessions = asyncio.run(v1_walk(tmp_path, chain, repo=repo))
+    status, _evts, sessions, _row = asyncio.run(v1_walk(tmp_path, chain, repo=repo))
 
     assert status == "needs_human"
     assert [s["status"] for s in sessions] == ["config_error"]
     log = Path(sessions[0]["log_path"]).read_text()
     assert "selects harness 'ghost', which is not available" in log
+
+
+def test_a_typed_agent_task_reports_the_providers_own_normalized_result(tmp_path, monkeypatch):
+    """`provider-owns-runtime-mechanics` (normalized task results): the status a
+    typed agent task reports is the provider's own result, normalized by the
+    adapter into Kraft's vocabulary and written onto the session row -- Kraft
+    does not infer it from an exit code."""
+    from kraft.executor.context import LaunchContext
+
+    repo = make_repo(tmp_path)
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_STATUS", "done_with_concerns")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_CONCERNS", "the totals are still Decimal")
+    monkeypatch.setenv(
+        "KRAFT_HOME", str(fake_harness_home(tmp_path, [sys.executable, str(_FAKE_AGENT)]))
+    )
+
+    async def scenario():
+        raw = {"id": "write", "kind": "agent", "harness": "fake", "prompt": "do the work"}
+        node, task = _v1_task("spec", "author", raw)
+        chain = v1_chain(
+            [{"id": "spec", "kind": "exec", "steps": [{"id": "author", "tasks": [raw]}]}],
+            repo=repo,
+        )
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await v1_item(database, chain, repo=repo)
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = 'w1'").fetchone()
+            )
+            status = await dispatch.dispatch_node(
+                database,
+                rd,
+                task,
+                node,
+                row,
+                repo,
+                launch=LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None),
+            )
+            session = database.read(
+                lambda c: c.execute(
+                    "SELECT hook_point, status, result_path FROM worker_sessions"
+                ).fetchone()
+            )
+            return status, dict(session)
+        finally:
+            await database.close()
+
+    status, session = asyncio.run(scenario())
+
+    assert status == "done_with_concerns"
+    assert (session["hook_point"], session["status"]) == ("spec.author.write", status)
+    assert "the totals are still Decimal" in Path(session["result_path"]).read_text()

@@ -3333,7 +3333,7 @@ def test_steps_are_ordered_while_tasks_inside_a_step_are_concurrent(tmp_path):
         repo,
     )
 
-    status, _evts, sessions = asyncio.run(v1_walk(tmp_path, chain, repo=repo))
+    status, _evts, sessions, _row = asyncio.run(v1_walk(tmp_path, chain, repo=repo))
 
     assert status == "completed"
     lines = log.read_text().split()
@@ -3376,7 +3376,7 @@ def test_a_task_is_identified_by_its_canonical_path_in_sessions_and_events(tmp_p
         repo,
     )
 
-    status, evts, sessions = asyncio.run(v1_walk(tmp_path, chain, repo=repo))
+    status, evts, sessions, _row = asyncio.run(v1_walk(tmp_path, chain, repo=repo))
 
     assert status == "needs_human"
     assert "verify.checks.suite" in [s["hook_point"] for s in sessions]
@@ -3406,7 +3406,7 @@ def test_the_worktree_and_setup_command_are_prepared_without_an_env_node(tmp_pat
         repo,
     )
 
-    status, evts, sessions = asyncio.run(
+    status, evts, sessions, _row = asyncio.run(
         v1_walk(
             tmp_path,
             chain,
@@ -3448,10 +3448,179 @@ def test_a_gate_node_halts_the_walk_before_the_node_after_it(tmp_path):
         repo,
     )
 
-    status, evts, sessions = asyncio.run(v1_walk(tmp_path, chain, repo=repo))
+    status, evts, sessions, _row = asyncio.run(v1_walk(tmp_path, chain, repo=repo))
 
     assert status == "awaiting_gate"
     requested = next(e for e in evts if e["type"] == "gate_requested")
     assert requested["payload"] == {"gate": "spec_approval", "node_id": "spec_approval"}
     assert [s["hook_point"] for s in sessions] == ["spec.main.write"]
     assert not after.exists()
+
+
+# Ruling 2 named four semantics that survive the conversion unchanged. Three of
+# them had no test of their own -- only the legacy-red ones Task 5 converts,
+# which is the worst place for an invariant to live while an implementation is
+# being rewritten under it.
+
+
+def _two_step_node(marker_a: Path, marker_b: Path, *, first_fails: bool):
+    tail = "exit 1" if first_fails else "true"
+    return {
+        "id": "verify",
+        "kind": "exec",
+        "steps": [
+            {
+                "id": "first",
+                "tasks": [
+                    {
+                        "id": "a",
+                        "kind": "subprocess",
+                        "command": f"sh -c 'touch {marker_a}; {tail}'",
+                    }
+                ],
+            },
+            {
+                "id": "second",
+                "tasks": [{"id": "b", "kind": "subprocess", "command": f"touch {marker_b}"}],
+            },
+        ],
+    }
+
+
+def test_a_step_that_does_not_pass_stops_the_node_before_the_next_step(tmp_path):
+    """Ruling 2's break-on-anything-but-`_ADVANCING` rule: a later step exists
+    precisely because it must not run against an unsettled earlier one."""
+    repo = make_repo(tmp_path)
+    first, second = tmp_path / "a.marker", tmp_path / "b.marker"
+    chain = v1_chain([_two_step_node(first, second, first_fails=True)], repo=repo)
+
+    status, _evts, sessions, _row = asyncio.run(v1_walk(tmp_path, chain, repo=repo))
+
+    assert status == "needs_human"
+    assert first.exists()
+    assert not second.exists()
+    assert [s["hook_point"] for s in sessions] == ["verify.first.a"]
+
+
+def test_a_resumed_node_skips_the_steps_that_already_passed(tmp_path):
+    """Ruling 2's `start_step` semantics: a resumed node re-enters at the step
+    that stopped it and does not re-buy the ones before it."""
+    repo = make_repo(tmp_path)
+    first, second = tmp_path / "a.marker", tmp_path / "b.marker"
+    chain = v1_chain([_two_step_node(first, second, first_fails=False)], repo=repo)
+
+    status, _evts, sessions, _row = asyncio.run(v1_walk(tmp_path, chain, repo=repo, start_step=1))
+
+    assert status == "completed"
+    assert not first.exists()
+    assert second.exists()
+    assert [s["hook_point"] for s in sessions] == ["verify.second.b"]
+
+
+def test_the_resume_cursor_records_the_step_that_stopped_the_node(tmp_path):
+    """Ruling 2's `store.set_current_step` write before each group: recorded
+    before the step runs, not after, so a crash mid-step resumes at that step
+    rather than past it."""
+    repo = make_repo(tmp_path)
+    first, second = tmp_path / "a.marker", tmp_path / "b.marker"
+    node = _two_step_node(first, second, first_fails=False)
+    node["steps"][1]["tasks"][0]["command"] = "false"
+    chain = v1_chain([node], repo=repo)
+
+    status, _evts, _sessions, row = asyncio.run(v1_walk(tmp_path, chain, repo=repo))
+
+    assert status == "needs_human"
+    assert row["current_step"] == 1
+
+
+def test_a_recovery_pass_does_not_move_the_resume_cursor(tmp_path):
+    """The one semantics this task changed on purpose: only the node's *own*
+    steps are the node's progress, so a recovery plan's steps neither re-enter
+    the node nor overwrite the cursor a later measuring pass reads back. The
+    node stopped at its second step; the repair runs two steps of its own and
+    the cursor still says 1."""
+    repo = make_repo(tmp_path)
+    chain = v1_chain(
+        [
+            {
+                "id": "verify",
+                "kind": "exec",
+                "steps": [
+                    {
+                        "id": "first",
+                        "tasks": [{"id": "a", "kind": "subprocess", "command": "true"}],
+                    },
+                    {
+                        "id": "second",
+                        "tasks": [{"id": "b", "kind": "subprocess", "command": "false"}],
+                    },
+                ],
+                # The repair's own first step fails, so `recover_node` returns
+                # before its re-measure and nothing else can touch the cursor.
+                "on_failure": {
+                    "steps": [
+                        {
+                            "id": "repair",
+                            "tasks": [{"id": "r", "kind": "subprocess", "command": "false"}],
+                        },
+                        {
+                            "id": "sync",
+                            "tasks": [{"id": "s", "kind": "subprocess", "command": "true"}],
+                        },
+                    ]
+                },
+            }
+        ],
+        repo=repo,
+    )
+
+    status, evts, sessions, row = asyncio.run(v1_walk(tmp_path, chain, repo=repo))
+
+    assert status == "needs_human"
+    assert any(e["type"] == "node_recovery_started" for e in evts)
+    assert "verify.on_failure.repair.r" in [s["hook_point"] for s in sessions]
+    assert row["current_step"] == 1
+
+
+def test_a_re_entered_walk_does_not_re_prepare_the_worktree(tmp_path):
+    """`env_setup` was a node, so a re-entry at `start_index > 0` skipped it.
+    The `ci_wait` poller, `rate_limit_retry`, gate approval and every `/retry`
+    re-enter `run_once` that way -- running the repo's `setup_command` per
+    dispatch attempt instead of per item would re-`uv sync` a worktree for every
+    poll of one pipeline. `ensure_worktree` stays unconditional: a resumed walk
+    still needs the worktree to be there."""
+    repo = make_repo(tmp_path)
+    runs = tmp_path / "setup-runs"
+    chain = v1_chain(
+        [
+            {
+                "id": "first",
+                "kind": "exec",
+                "tasks": [{"id": "a", "kind": "subprocess", "command": "true"}],
+            },
+            {
+                "id": "second",
+                "kind": "exec",
+                "tasks": [{"id": "b", "kind": "subprocess", "command": "true"}],
+            },
+        ],
+        repo=repo,
+    )
+
+    status, evts, sessions, _row = asyncio.run(
+        v1_walk(
+            tmp_path,
+            chain,
+            repo=repo,
+            repo_entry={"setup_command": f"sh -c 'echo run >> {runs}'"},
+            start_index=1,
+        )
+    )
+
+    assert status == "completed"
+    # Cut the worktree (which prepares it once, inside `ensure_worktree`) and
+    # walked only the node it was asked to.
+    assert (tmp_path / "run" / "worktrees" / "w1" / "calc.py").is_file()
+    assert runs.read_text().count("run") == 1
+    assert [s["hook_point"] for s in sessions] == ["second.main.b"]
+    assert not any(e["type"] == "worktree_prepared" for e in evts)

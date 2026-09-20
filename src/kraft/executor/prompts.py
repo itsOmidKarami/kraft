@@ -95,7 +95,13 @@ def seeded_findings_note(found: list[_findings.Finding]) -> str:
 
 
 def task_failure_note(task: str, status: str, session=None) -> str:
-    """What a binding-level repair is told about the task it repairs: which
+    """**Parked, not live.** The task-level repair layer it fed was a per-task
+    `on_failure` in `registry.yaml`; V1 declares `on_failure` on the node only,
+    so `dispatch.measure_node` no longer has a per-task repair to narrate. Task 7
+    of the template-schema-v1 plan owns the recovery controls and decides whether
+    a task-scoped layer comes back (`task-recovery-retries-only-the-task`).
+
+    What a binding-level repair is told about the task it repairs: which
     task, how it ended, and where its own output is. Without it the repair
     starts blind -- `on.ci.repair` reported that the `on.ci.poll` diagnosis
     was absent from its prompt and from the item's events."""
@@ -403,7 +409,17 @@ def scope_note(task: AgentTask, repo_entry: dict | None) -> str:
     return _SCOPE_NOTE.format(rows=rows)
 
 
-#: The hooks whose job is to judge a change rather than make one. They are the
+#: PARKED under Template Schema V1, with everything keyed on it: `review_package`,
+#: `_last_review_session`, `carried_findings_note`, `previous_review_note` and
+#: `fix_attempt_note` have no `src/` caller any more. A V1 task is identified by
+#: its canonical path, not by a hook name, and no task field says "this one
+#: reviews the change" -- so there is nothing left to key the delivery on. Task 7
+#: of the template-schema-v1 plan adds an explicit `AgentTask` input declaration
+#: and rewires them; they are kept intact for that, and `findings.
+#: resolve_identity` records what their absence costs meanwhile. Nothing below
+#: this line describes behaviour that currently happens.
+#:
+#: The hooks whose job is to judge a change rather than make one. They were the
 #: only ones handed a review package and the previous round's findings:
 #: everything else is working *in* the diff.
 #:
@@ -441,6 +457,12 @@ def carried_findings_note(previous: list[_findings.Finding]) -> str:
 
     "" when there is no previous round, so a work item's first and most
     important review is byte-identical to what it is today.
+
+    **Parked, not live.** No `src/` caller under Template Schema V1: delivering the change
+    under review, and the previous round's findings, was keyed on three hook *names*
+    (`REVIEW_HOOKS`) and V1 has no name to key on. Task 7 of the template-schema-v1 plan
+    rebuilds this on an explicit `AgentTask` input declaration, which is why these are kept
+    rather than deleted. Do not read them as describing what runs today.
     """
     if not previous:
         return ""
@@ -495,10 +517,12 @@ def _session_note(row, template: str, summary_template: str) -> str:
 
 
 def previous_review_note(row) -> str:
+    """**Parked: see `REVIEW_HOOKS`.**"""
     return _session_note(row, _PREVIOUS_REVIEW, _PREVIOUS_REVIEW_SUMMARY)
 
 
 def fix_attempt_note(row) -> str:
+    """**Parked: see `REVIEW_HOOKS`.**"""
     return _session_note(row, _FIX_ATTEMPT, _FIX_ATTEMPT_SUMMARY)
 
 
@@ -510,6 +534,7 @@ _REVIEWED_STATUS = ("done", "done_with_concerns")
 
 def _last_review_session(db, work_item_id: str, task_hook: str) -> sqlite3.Row | None:
     """The previous *completed* session on this hook, or None (Kraft-s7c04.1).
+    **Parked: see `REVIEW_HOOKS`.**
 
     Its `head_sha` is the head that session was dispatched at.
 
@@ -549,7 +574,8 @@ def _last_review_session(db, work_item_id: str, task_hook: str) -> sqlite3.Row |
 def review_package(
     db, run_dirs, work_item_id: str, worktree, task_hook: str, session_id: str
 ) -> str | None:
-    """The change under review, written out for a reviewer, or None.
+    """The change under review, written out for a reviewer, or None. **Parked:
+    see `REVIEW_HOOKS`.**
 
     None on every non-review hook, on an item with no `base_ref` (pre-migration
     items and any template with no env_setup node), and on a git failure -- a
