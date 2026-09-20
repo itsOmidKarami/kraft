@@ -23,7 +23,7 @@ from kraft.api.routes.search import OpenDocument
 from kraft.config import git_read
 from kraft.executor import gates, walk
 from kraft.templates import Registry
-from kraft.templates.models import GateNode
+from kraft.templates.models import AgentTask, GateNode
 
 logger = logging.getLogger(__name__)
 
@@ -326,6 +326,38 @@ def _node_has_agent_task(node: dict, registry: Registry) -> bool:
     return any(registry.hooks.get(h, {}).get("kind") == "agent" for h in hooks)
 
 
+def steer_reachable(row, registry: Registry) -> bool:
+    """Whether a Steer note given at this item's current node could reach any
+    agent task from there to the end of its chain.
+
+    One entry point over both chain shapes, so the `GET /work-items/{id}`
+    field the UI hides a control on and the 409 the steer route raises cannot
+    disagree. A V1 row answers off its frozen snapshot; a legacy row answers
+    off `chain_definition` through `_steer_reachable` below. Fails open
+    (`True`) when the current node is not in its own chain, or when there is no
+    current node at all -- an unmapped edge is not a reason to hide a control
+    that may still work.
+    """
+    start_id = row["current_node_id"]
+    if start_id is None:
+        return True
+    v1 = store.materialized_chain_of(row)
+    if v1 is not None:
+        reached = False
+        for node in v1.chain.nodes:
+            reached = reached or node.id == start_id
+            if reached and any(isinstance(t.task, AgentTask) for t in node.tasks()):
+                return True
+        # Only "not reachable" when the node was actually found: an id that is
+        # in no node of this chain takes the fail-open path.
+        return not reached
+    chain = json.loads(row["chain_definition"] or "{}")
+    nodes = chain.get("nodes")
+    if not nodes or not any(n["id"] == start_id for n in nodes):
+        return True
+    return _steer_reachable(nodes, start_id, registry)
+
+
 def _steer_reachable(nodes: list[dict], start_id: str, registry: Registry) -> bool:
     """Whether a Steer note given at `start_id` could reach *any* agent task
     from there to the end of the chain.
@@ -536,7 +568,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
     if body.steer and body.steer.strip():
         steer_text = body.steer.strip()
         found = any(n["id"] == row["current_node_id"] for n in chain["nodes"])
-        if found and not _steer_reachable(chain["nodes"], row["current_node_id"], st.registry):
+        if found and not steer_reachable(row, st.registry):
             raise HTTPException(
                 409,
                 f"node {row['current_node_id']!r} has no agent task downstream to steer; "

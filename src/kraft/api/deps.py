@@ -22,6 +22,7 @@ from fastapi import FastAPI, HTTPException
 from kraft import config as config_mod
 from kraft import executor, harness, store
 from kraft.templates import load_registry, load_templates
+from kraft.templates.library import TemplateLibrary, TemplateLibraryError
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +197,50 @@ def _reload_templates(st) -> None:
         harnesses=st.harnesses,
     )
     st.templates = load_templates(st.templates_dir, st.registry)
+    st.library, st.invalid_library = load_library(st.templates_dir)
+
+
+def load_library(templates_dir: Path) -> tuple[TemplateLibrary | None, list[str]]:
+    """The V1 template library for `templates_dir`, and why it is missing.
+
+    Degrades rather than raising, the same way `policy.yaml` does at startup: a
+    library that cannot be parsed must still leave the Settings screens
+    reachable, because they are how an operator fixes it. Every caller checks
+    for `None`; nothing falls back to the legacy loader.
+    """
+    try:
+        return TemplateLibrary.from_yaml_dir(templates_dir), []
+    except TemplateLibraryError as exc:
+        logger.warning("template library unreadable: %s", exc)
+        return None, [str(exc)]
+
+
+def resolve_chain(st, chain_template: str | None):
+    """The resolved V1 chain `chain_template` names, or `None`.
+
+    `None` for `chain_template` means "no explicit template was chosen"
+    (Kraft-cd47) and resolves `default`, the same way the legacy lookup did --
+    the *stored* value stays `None`, which is the distinction that matters.
+    Resolution failures are `None` too: a chain that does not resolve is not
+    selectable, and `lint()` is where an author reads why.
+    """
+    if st.library is None:
+        return None
+    try:
+        return st.library.resolve_chain(chain_template if chain_template is not None else "default")
+    except TemplateLibraryError:
+        logger.warning("chain template %r does not resolve", chain_template, exc_info=True)
+        return None
+
+
+def resolve_chain_or_422(st, chain_template: str | None):
+    """`resolve_chain`, as the 422 every intake door owes its caller. One
+    function so the three doors (`POST /work-items`, `POST /triggers`, and the
+    auto-intake poller's own check) cannot answer differently."""
+    chain = resolve_chain(st, chain_template)
+    if chain is None:
+        raise HTTPException(422, "unknown or invalid template")
+    return chain
 
 
 def repos_path(st) -> Path:

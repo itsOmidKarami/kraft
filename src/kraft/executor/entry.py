@@ -10,7 +10,9 @@ from pathlib import Path
 from kraft import events, store
 from kraft.adapters import beads
 from kraft.config import git_read
-from kraft.templates import Template, materialize
+from kraft.policy import InstancePolicy, InstancePolicyInput
+from kraft.templates.environment import Repository, WorkItemTarget
+from kraft.templates.models import ResolvedChain
 
 logger = logging.getLogger(__name__)
 
@@ -23,13 +25,40 @@ logger = logging.getLogger(__name__)
 _UNSET = object()
 
 
+def single_repo_target(repo: str) -> WorkItemTarget:
+    """The immutable target of an item filed against one repository.
+
+    The id is the constant `"target"`, not the repository's own configured id:
+    a single-repository item has exactly one target, nothing reads the name,
+    and a `repos.yaml` id is not available at every intake door. A *workspace*
+    target carries real member ids and is Phase 6's.
+
+    Shared with the `/work-items` route, which dry-runs the same
+    materialization before it files a bead -- two copies of this would let the
+    dry run and the real one disagree about what gets trimmed.
+    """
+    return WorkItemTarget.for_repository(Repository(id="target", path=repo))
+
+
 async def intake(
     db,
     run_dirs,
     *,
     title: str,
     repo: str,
-    template: Template,
+    #: The resolved V1 chain this item runs. Materialized here, into the
+    #: `materialized_chain` column, which is the executor's only input
+    #: (`materialized-chain-is-immutable-work-item-input`).
+    chain: ResolvedChain,
+    #: The V1 instance policy this item's tasks start from; the chain's own
+    #: `policy:` override is layered onto it by `materialize`. Defaults to the
+    #: empty policy -- an unset maximum is no bound at all -- so an internal
+    #: caller with no policy object still files a valid item.
+    effective_policy: InstancePolicy | None = None,
+    #: Artifact kinds this item arrives with already written (`--spec`,
+    #: `--plan`). They trim the chain at materialization: the gate whose
+    #: `artifact` names the kind, and the node that would have produced it.
+    attachment_kinds: frozenset[str] = frozenset(),
     description: str | None = None,
     bd_cwd: str | None = None,
     submodules: list[str] | None = None,
@@ -53,7 +82,7 @@ async def intake(
     implements_beads: list[str] | None = None,
     bead_cwd: str | None = None,
     #: The value to store in the row's `chain_template` column. `_UNSET`
-    #: (default) stores `template.id`; `None` stores `None` -- the caller
+    #: (default) stores `chain.id`; `None` stores `None` -- the caller
     #: that wants that distinction (Kraft-cd47) has to say so explicitly.
     chain_template: str | None | object = _UNSET,
     #: Arms agent gate review for this item's `auto_escalate` gates
@@ -63,8 +92,8 @@ async def intake(
     #: passes the value.
     auto_gate: bool = False,
     #: Node ids to remove from the materialized chain at intake (UI v2 · 04
-    #: point 6, `templates.materialize`'s `skip_nodes`). Already validated
-    #: against the template by the caller.
+    #: point 6, `ResolvedChain.materialize`'s `skip_nodes`). Already validated
+    #: against the chain by the caller.
     skip_nodes: frozenset[str] = frozenset(),
     #: Intake-time spend cap and per-node overrides, forwarded verbatim to
     #: `store.create_work_item` (point 6). `budget_set=False` (default)
@@ -107,14 +136,20 @@ async def intake(
     # Kraft can later make false (Kraft-eqgn). Intake is the last moment the
     # caller can fix the path, so it is where this fails.
     attachments = _store_attachments(run_dirs, work_item_id, attachments, repo=repo)
-    # No `satisfied_gates=`: an attachment's trim is the V1 chain's own
-    # decision now (`ResolvedChain.trim_for_attachments`, driven by the gate's
-    # `artifact:` and the producing node's `produces:`), not a kind-to-gate-name
-    # table this layer looks up. Wiring `attachment_kinds` through to a
-    # `ResolvedChain.materialize` here is Task 5a's -- it owns this function's
-    # conversion off the legacy `Template` -- so the legacy materialization
-    # below no longer trims at all.
-    chain_definition = json.dumps(materialize(template, skip_nodes=skip_nodes))
+    # An attachment's trim is the V1 chain's own decision -- the gate's
+    # `artifact:` and the producing node's `produces:`, never a kind-to-gate-
+    # name table this layer looks up -- and it happens in the same drop as
+    # `skip_nodes`, so a chain the two together would empty is refused once.
+    materialized = chain.materialize(
+        target=single_repo_target(repo),
+        effective_policy=(
+            effective_policy
+            if effective_policy is not None
+            else InstancePolicy.from_input(InstancePolicyInput())
+        ),
+        attachment_kinds=attachment_kinds,
+        skip_nodes=skip_nodes,
+    )
     implements_beads = [b for b in (implements_beads or []) if b != bead_id] or None
 
     def _create(c):
@@ -128,8 +163,12 @@ async def intake(
             title=title,
             description=description,
             repo=repo,
-            chain_template=template.id if chain_template is _UNSET else chain_template,
-            chain_definition=chain_definition,
+            chain_template=chain.id if chain_template is _UNSET else chain_template,
+            # `"{}"`, not the legacy envelope: the column is NOT NULL and Task
+            # 11 removes it. Nothing in a V1 walk reads it -- `walk.chain_of`
+            # reads `materialized_chain` and has no fallback.
+            chain_definition="{}",
+            materialized_chain=materialized.to_json(),
             # Recorded on every new row, so a bead is closed where it was filed
             # whatever KRAFT_BD_CWD says months later.
             bead_cwd=bead_cwd or cwd,

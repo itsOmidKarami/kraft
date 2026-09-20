@@ -73,6 +73,7 @@ async def lifespan(app: FastAPI):
     app.state.skills_dir = Path(os.environ.get("KRAFT_SKILLS_DIR") or default_skills_dir())
     registry = load_registry(templates_dir / "registry.yaml", skills_dir=app.state.skills_dir)
     templates = load_templates(templates_dir, registry)
+    library, invalid_library = deps.load_library(templates_dir)
 
     # Config the Settings screens edit. Read once here and re-read on every save,
     # so a hand edit and a UI edit are the same operation to the rest of the app.
@@ -87,8 +88,20 @@ async def lifespan(app: FastAPI):
 
     policy_obj = None
     invalid_policy: list[str] = []
+    # One read of one file (Ruling 37): the legacy loop-cap `Policy` the
+    # executor reads and V1's `defaults:`/`maxima:` instance policy come out of
+    # the same parse, so the two can never disagree about what policy.yaml
+    # says. An unreadable file leaves the *empty* instance policy rather than
+    # None -- an unset maximum is no bound at all, which is what a materialized
+    # chain needs when the process is already refusing work over
+    # `invalid_policy`.
+    instance_policy = policy_mod.InstancePolicy.from_input(policy_mod.InstancePolicyInput())
     try:
-        policy_obj = policy_mod.load_policy(templates_dir / "policy.yaml")
+        parsed_policy = policy_mod.PolicyInput.from_yaml(templates_dir / "policy.yaml")
+        policy_obj = policy_mod.Policy.from_input(
+            parsed_policy, source=templates_dir / "policy.yaml"
+        )
+        instance_policy = parsed_policy.instance_policy()
     except policy_mod.PolicyError as exc:
         invalid_policy = [str(exc)]
 
@@ -150,7 +163,10 @@ async def lifespan(app: FastAPI):
     app.state.run_dirs = run_dirs
     app.state.registry = registry
     app.state.templates = templates
+    app.state.library = library
+    app.state.invalid_library = invalid_library
     app.state.policy = policy_obj
+    app.state.instance_policy = instance_policy
     if policy_obj:
         forge_git.CLI_TIMEOUT_S = policy_obj.forge_cli_timeout_s
     app.state.access = access

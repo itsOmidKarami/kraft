@@ -25,7 +25,7 @@ still reads the legacy `kraft.templates` shapes.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
+from collections.abc import Container, Iterator
 from dataclasses import dataclass
 from datetime import timedelta
 from enum import StrEnum
@@ -631,11 +631,18 @@ class ResolvedChain:
         target: WorkItemTarget,
         effective_policy: InstancePolicy,
         attachment_kinds: frozenset[str] = frozenset(),
+        skip_nodes: frozenset[str] = frozenset(),
     ) -> MaterializedChain:
         """Bind this chain to one work item: its immutable target and the
         policy its tasks run under, with the chain's own override layered on
         (`policy-is-layered-by-execution-scope`,
         `materialized-chain-is-immutable-work-item-input`).
+
+        `skip_nodes` are node ids the person filing the item chose to leave out
+        (UI v2 · 04 point 6). Applied *with* the attachment trim in one drop,
+        not one after the other: two sequential trims can each leave a chain
+        non-empty while their union empties it, and only the combined check
+        catches that.
 
         `attachment_kinds` are the artifact kinds this item arrives with
         already written (an intake `--spec`/`--plan`), and they trim the chain
@@ -644,9 +651,10 @@ class ResolvedChain:
         policy = effective_policy
         if self.chain.policy is not None:
             policy = policy.apply_template_override(self.chain.policy)
-        return MaterializedChain(
-            chain=self.trim_for_attachments(attachment_kinds), target=target, policy=policy
+        dropped = {n.id for n in self.nodes if _redundant_given(n, attachment_kinds)} | (
+            skip_nodes & {n.id for n in self.nodes}
         )
+        return MaterializedChain(chain=self.without_nodes(dropped), target=target, policy=policy)
 
     def trim_for_attachments(self, kinds: frozenset[str]) -> ResolvedChain:
         """This chain without the nodes an attachment of each kind in `kinds`
@@ -681,12 +689,25 @@ class ResolvedChain:
         """
         if not kinds:
             return self
-        dropped = {n.id for n in self.nodes if _redundant_given(n, kinds)}
+        return self.without_nodes({n.id for n in self.nodes if _redundant_given(n, kinds)})
+
+    def without_nodes(self, dropped: Container[str] | set[str]) -> ResolvedChain:
+        """This chain minus `dropped`, re-resolved.
+
+        One function for both reasons a node leaves a chain at intake -- an
+        attachment made it redundant, or the person filing the item skipped it
+        -- because the two have the same two consequences and had better not
+        disagree about either: a chain emptied by the drop is refused, and a
+        surviving gate whose `reject_to` named a dropped node has that target
+        nulled rather than left dangling (a dangling target stops the stored
+        snapshot re-validating as a `Chain` on read-back).
+        """
+        dropped = {n.id for n in self.nodes if n.id in dropped}
         if not dropped:
             return self
         if len(dropped) == len(self.nodes):
             raise ValueError(
-                f"attachments {sorted(kinds)} would leave chain {self.id!r} with no nodes"
+                f"dropping {sorted(dropped)} would leave chain {self.id!r} with no nodes"
             )
         kept = [
             node.model_copy(update={"reject_to": None})

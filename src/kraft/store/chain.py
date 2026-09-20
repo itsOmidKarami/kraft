@@ -76,24 +76,25 @@ def splice_chain(conn: sqlite3.Connection, work_item_id, chain_definition: str) 
 
 
 def set_chain_template(
-    conn: sqlite3.Connection, work_item_id, template_id: str, chain_definition: str
+    conn: sqlite3.Connection, work_item_id, template_id: str, materialized_chain: str
 ) -> None:
     """Switch a not-yet-started item onto a different chain template
     (Kraft-gwn6): the caller has already 404'd an unknown template and 409'd a
-    started item, and already recomputed `chain_definition` by calling
-    `templates.materialize` the same way `executor.intake` would have, so this
-    is just the write. Its own event type, not folded into `chain_spliced`:
-    that event means the chain-review splice path touched the row; this means
-    intake's own materialization ran again against a different template,
-    which is a different question to answer from the timeline.
+    started item, and already re-run `ResolvedChain.materialize` the same way
+    `executor.intake` would have -- attachments included, so a switch cannot
+    undo the trim the item was filed with -- so this is just the write. Its own
+    event type, not folded into `chain_spliced`: that event means the
+    chain-review splice path touched the row; this means intake's own
+    materialization ran again against a different template, which is a
+    different question to answer from the timeline.
     """
     old_template_id = conn.execute(
         "SELECT chain_template FROM work_items WHERE id = ?", (work_item_id,)
     ).fetchone()[0]
     conn.execute(
-        "UPDATE work_items SET chain_template = ?, chain_definition = ?, updated_at = ? "
+        "UPDATE work_items SET chain_template = ?, materialized_chain = ?, updated_at = ? "
         "WHERE id = ?",
-        (template_id, chain_definition, _now(), work_item_id),
+        (template_id, materialized_chain, _now(), work_item_id),
     )
     events.append(
         conn, work_item_id, "chain_template_changed", {"from": old_template_id, "to": template_id}

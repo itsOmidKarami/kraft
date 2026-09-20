@@ -13,6 +13,7 @@ import logging
 from datetime import UTC, datetime
 
 from kraft import executor
+from kraft.api import deps as api_deps
 from kraft.policy import cron_due
 
 logger = logging.getLogger(__name__)
@@ -43,8 +44,8 @@ async def tick(app, *, now: datetime | None = None) -> list[str]:
         if st.trigger_last_fired.get(index) == stamp:
             continue
         st.trigger_last_fired[index] = stamp
-        template = st.templates.valid.get(trig.chain)
-        if template is None:
+        chain = api_deps.resolve_chain(st, trig.chain)
+        if chain is None:
             logger.warning("trigger %d: unknown chain template %r, skipped", index, trig.chain)
             continue
         wid = await executor.intake(
@@ -53,7 +54,8 @@ async def tick(app, *, now: datetime | None = None) -> list[str]:
             title=trig.title,
             description=trig.description,
             repo=trig.repo,
-            template=template,
+            chain=chain,
+            effective_policy=getattr(st, "instance_policy", None),
             chain_template=trig.chain,
             status="paused",
         )

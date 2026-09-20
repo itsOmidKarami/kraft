@@ -289,7 +289,10 @@ async def get_work_item(wid: str, request: Request):
         ).fetchall()
     )
     pending = _pending_gate(st, wid)
-    chain = json.loads(row["chain_definition"])
+    # `"{}"` on a V1 row -- the column is NOT NULL and Task 11 removes it.
+    # Everything this route still reads off it degrades to empty rather than
+    # raising; `steerable` reads the frozen snapshot instead.
+    chain = json.loads(row["chain_definition"] or "{}")
     node_overrides = store.node_overrides_of(row)
     budget = st.policy.budget if st.policy else policy_mod.NO_BUDGET
     cap_usd, cap_source = store.effective_work_item_cap(row, budget)
@@ -358,11 +361,7 @@ async def get_work_item(wid: str, request: Request):
         # 409 on. Fails open (True) when the node isn't in its own chain --
         # an unmapped edge case is not a reason to hide a control that may
         # still work.
-        "steerable": (
-            lifecycle._steer_reachable(chain["nodes"], row["current_node_id"], st.registry)
-            if any(n["id"] == row["current_node_id"] for n in chain["nodes"])
-            else True
-        ),
+        "steerable": lifecycle.steer_reachable(row, st.registry),
     }
 
 

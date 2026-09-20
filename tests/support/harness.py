@@ -3,6 +3,8 @@ from __future__ import annotations
 import atexit
 import json
 import os
+import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -306,7 +308,71 @@ def fake_templates_dir(
         )
     )
     shutil.copy(_REPO_ROOT / "templates" / "policy.yaml", d / "policy.yaml")
+    seed_v1_library(d, agent_command=agent_command)
     return d
+
+
+def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) -> Path:
+    """Put the shipped V1 layout -- `library.yaml` plus `chains/*.yaml` -- into
+    `templates_dir`, beside whatever legacy files are already there.
+
+    Beside, not instead: 5b owns converting the 60 callers that still read
+    `registry.yaml` and the legacy chain files, so both layouts have to load
+    out of one directory until then. They do not collide -- the V1 loader reads
+    only `library.yaml` and `chains/`, and `load_templates` reads neither.
+
+    The *shipped* seed, copied rather than hand-written, so a fixture cannot
+    drift from the chain an operator actually gets.
+    """
+    templates_dir.mkdir(parents=True, exist_ok=True)
+    library = (_REPO_ROOT / "templates" / "library.yaml").read_text()
+    if agent_command is not None:
+        # Every agent task points at one overlaid `fake` harness that launches
+        # `agent_command`, and `harnesses/fake.yaml` beside it declares that
+        # harness. `executor.dispatch` resolves a task's `harness:` against
+        # `kraft.harness.load(None)` -- the harness-*profile* indirection is a
+        # later phase -- so a fixture that left the shipped `codex_default`
+        # there would try to launch a real `codex`. A test using this must
+        # point `KRAFT_HOME` at `templates_dir.parent`, which is where
+        # `default_harnesses_dir()` looks.
+        library = re.sub(r"(?m)^(\s*harness:\s*)\S+$", r"\g<1>fake", library)
+        harnesses = templates_dir / "harnesses"
+        harnesses.mkdir(exist_ok=True)
+        (harnesses / "fake.yaml").write_text(
+            _FAKE_HARNESS.format(command=json.dumps(shlex.split(agent_command)))
+        )
+        (templates_dir / "harnesses.yaml").write_text(
+            yaml.safe_dump({"harnesses": {"fake": {"provider": "fake"}}})
+        )
+    (templates_dir / "library.yaml").write_text(library)
+    # KNOWN GAP, bridged here so a V1 fixture can actually run: a V1 steering
+    # profile is *inline* in `library.yaml`, but `adapters/agent.py` still
+    # resolves a task's `steering:` names to `templates/steering/<name>.md`
+    # files -- nothing has wired the library's own `steering` mapping into
+    # dispatch. Until that lands, write each profile out as the file the
+    # dispatcher looks for, so the fixture exercises the chain rather than the
+    # gap. Delete this the day dispatch reads `library.steering`.
+    profiles = yaml.safe_load(library).get("steering") or {}
+    if profiles:
+        steering_dir = templates_dir / "steering"
+        steering_dir.mkdir(exist_ok=True)
+        for name, body in profiles.items():
+            (steering_dir / f"{name}.md").write_text((body or {}).get("instructions", ""))
+    chains = templates_dir / "chains"
+    chains.mkdir(exist_ok=True)
+    for chain in sorted((_REPO_ROOT / "templates" / "chains").glob("*.yaml")):
+        shutil.copy(chain, chains / chain.name)
+    return templates_dir
+
+
+def v1_library(templates_dir: Path):
+    """The `TemplateLibrary` for `templates_dir`, seeding the V1 layout first
+    if it is not already there."""
+    from kraft.templates.library import TemplateLibrary
+
+    if not (Path(templates_dir) / "library.yaml").is_file():
+        seed_v1_library(Path(templates_dir))
+    return TemplateLibrary.from_yaml_dir(templates_dir)
 
 
 def e2e_templates_dir(tmp_path: Path) -> Path:

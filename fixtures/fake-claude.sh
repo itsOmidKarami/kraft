@@ -111,6 +111,17 @@ case "$hook" in
   on.plan.requested) kind="plan" ;;
   *) kind="" ;;
 esac
+# V1 has no fixed hook names: a task's hook point is its canonical path
+# (`spec.main.author`), and what it must write is declared by `produces:` and
+# spelled out in the instruction the adapter built. So when the hook name says
+# nothing, read the instruction -- which is the same thing a real agent does,
+# and the only signal that survives a chain author renaming the node.
+if [ -z "$kind" ]; then
+  case "$ctx" in
+    *".engineering/specs/"*) kind="spec" ;;
+    *".engineering/plans/"*) kind="plan" ;;
+  esac
+fi
 # Only on a status that advances the chain (executor._ADVANCING), mirroring
 # tests/support/fake_agent.py. A real worker that reports needs_context or a
 # failure has written nothing, and `agent._resolve_status` holds only a claim of
