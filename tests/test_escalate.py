@@ -716,3 +716,47 @@ def test_another_nodes_judge_verdict_is_not_carried(tmp_path, monkeypatch):
 def test_no_judge_verdict_means_no_judge_line(tmp_path, monkeypatch):
     prompt = _dispatch_with(monkeypatch, tmp_path, [])
     assert "fix-loop judge" not in prompt
+
+
+def test_dispatch_resolves_its_agent_through_the_harness_not_a_hardcoded_command(
+    tmp_path, monkeypatch
+):
+    """Kraft-jxu39. `escalate` built its launch from `{"command": "claude"}`,
+    which bypasses the harness declaration entirely: an operator overlaying
+    `~/.kraft/templates/harnesses/claude.yaml` was ignored, and no fixture could
+    substitute a fake -- so any test reaching this path spawned a real `claude`.
+    Cheap only by accident, because `conftest._isolated_kraft_home` empties
+    `HOME` and CI has no API key; with one set it is a real agent turn.
+
+    Task 4b removed the identical hardcode from `gate_review.py`
+    (`{"command": "claude", "skill": "gate-review"}`); this is its sibling.
+    `run_agent_task` falls through to the harness's own declared command when
+    `command` is empty, which is what every other V1 agent launch does.
+    """
+    seen = {}
+
+    async def fake_run_agent_task(db, run_dirs, *, session_id, command, harness, **kw):
+        seen["command"] = command
+        seen["harness"] = harness
+        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("")
+        return "done"
+
+    monkeypatch.setattr("kraft.escalate._agent.run_agent_task", fake_run_agent_task)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await Database.open(rd.db)
+        try:
+            await _seed_needs_human(database, rd, "w1")
+            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+            await escalate.dispatch(database, rd, work_item_id="w1", message="m", launch=launch)
+        finally:
+            await database.close()
+
+    import asyncio
+
+    asyncio.run(scenario())
+    assert seen["command"] == "", "a hardcoded command bypasses the harness declaration"
+    assert seen["harness"] == "claude"

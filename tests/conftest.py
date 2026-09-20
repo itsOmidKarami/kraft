@@ -70,6 +70,52 @@ def _default_setup_command_for_tests_without_a_launch_context(monkeypatch):
     monkeypatch.setattr(builtins_mod, "prepare_runtime", _prepare_runtime_with_default)
 
 
+#: Agent CLIs this suite must never actually launch. Kraft-jxu39: the only reason
+#: a stray real launch has been cheap so far is that `_isolated_kraft_home`
+#: redirects `HOME` to an empty temp dir and this machine has no
+#: `ANTHROPIC_API_KEY`/`CLAUDE_CODE_OAUTH_TOKEN`, so the binary resolves and
+#: exits in milliseconds. On a developer machine with a key set the same call is
+#: a real agent turn: network, tokens, tens of seconds.
+_REAL_AGENT_BINARIES = frozenset({"claude", "codex", "gemini", "amp", "cursor-agent"})
+
+
+@pytest.fixture(autouse=True)
+def _no_real_agent_binary(request, monkeypatch):
+    """Fail loudly rather than spend tokens: a test that reaches a real agent CLI
+    gets an `AssertionError` naming itself and the command.
+
+    At `adapters.subprocess.run_task`, where the argv is final -- not at
+    `resolve_invocation`, because the whole class of defect here is a *resolved*
+    launch whose command nobody expected. The check is on the command's basename
+    only, so every fixture agent (`fixtures/fake-claude.sh`,
+    `tests/support/fake_agent.py`, `sys.executable`) passes untouched, and so
+    does every non-agent subprocess a node runs (`pytest`, `just`, `git`).
+
+    `real_executor` is the opt-out, the same marker `_no_agent_launch` already
+    uses in `tests/test_intake_poller.py` -- and even then this only lets the
+    launch through; `KRAFT_E2E` still gates the tests that mean to reach a real
+    agent.
+    """
+    if "real_executor" in request.keywords or "e2e" in request.keywords:
+        return
+
+    import kraft.adapters.subprocess as sp_mod
+
+    real_run_task = sp_mod.run_task
+
+    async def guarded(*args, cmd=None, **kwargs):
+        first = (cmd[0] if isinstance(cmd, list | tuple) and cmd else cmd) or ""
+        if Path(str(first)).name in _REAL_AGENT_BINARIES:
+            raise AssertionError(
+                f"{request.node.nodeid} tried to launch the real agent binary {first!r} "
+                f"(argv {list(cmd)!r}). Point it at a fixture agent, or mark the test "
+                f"`real_executor` if it genuinely means to."
+            )
+        return await real_run_task(*args, cmd=cmd, **kwargs)
+
+    monkeypatch.setattr(sp_mod, "run_task", guarded)
+
+
 @pytest.fixture(autouse=True)
 def _forward_fake_agent_env_vars_into_worker_env(monkeypatch):
     """A worker's env is now built by `worker_env`'s allowlist rather than

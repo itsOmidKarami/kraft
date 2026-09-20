@@ -335,8 +335,24 @@ async def dispatch(
     # there is no hook. Its own `escalate:` kwarg (left at the `False` default)
     # is the fix loop's unrelated "buy a stronger model" bump -- same word,
     # different feature; not to be confused with this module.
+    #
+    # `harness:`, **not** `command: "claude"`. Same shape Task 4b removed from
+    # `gate_review.py`, and removed here for the same reason: a hardcoded
+    # `command` bypasses the harness declaration entirely, so an operator who
+    # overlays `~/.kraft/templates/harnesses/claude.yaml` is ignored and a test
+    # fixture cannot substitute a fake. `run_agent_task` falls through to the
+    # harness's own declared command when `command` is empty
+    # (`adapters/agent.py`'s `command=command or None`), which is what every
+    # other V1 agent launch already does.
+    #
+    # `"claude"` as the harness id is still a hardcode, and a deliberate one:
+    # **where escalation's agent should be declared in V1 is an open design
+    # question** -- it is not a chain node, so it has no `AgentTask` and no
+    # `harness:` of its own to read. See the Task 5a report's fix-round-2
+    # section; naming a default here is the smallest honest change until that is
+    # decided.
     inv = _agent.resolve_invocation(
-        {"command": "claude"}, launch.repo_entry, launch.steering_dir, skills_dir=launch.skills_dir
+        {"harness": "claude"}, launch.repo_entry, launch.steering_dir, skills_dir=launch.skills_dir
     )
     status = await _agent.run_agent_task(
         db,
