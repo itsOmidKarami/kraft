@@ -908,6 +908,37 @@ def test_defaults_rejects_an_unknown_top_level_key(tmp_path):
         templates.load_registry(tmp_path / "registry.yaml")
 
 
+def test_defaults_agent_accepts_exactly_these_keys():
+    """Pinned, not derived, on purpose.
+
+    `_AGENT_ONLY_KEYS` comes off `AgentDefaults.model_fields`, so adding a
+    field to that model silently widens what `defaults.agent` accepts -- which
+    is how `interactive` and `timeout` arrived without a decision. Only
+    `dev/check_docs_coverage.py` noticed, and only for `interactive`: its
+    substring test already found the word "timeout" elsewhere on the page.
+    This list is the decision. Changing it means documenting the new key in
+    `docsite/configuration.md` under `defaults.agent.*` in the same commit.
+    """
+    assert templates._AGENT_ONLY_KEYS == frozenset(
+        {
+            "allowed_tools",
+            "artifact",
+            "command",
+            "deny_tools",
+            "effort",
+            "escalate_model",
+            "harness",
+            "interactive",
+            "model",
+            "permission_mode",
+            "profile",
+            "skill",
+            "steering",
+            "timeout",
+        }
+    )
+
+
 def test_defaults_agent_rejects_an_unknown_key(tmp_path):
     (tmp_path / "registry.yaml").write_text(
         "defaults:\n  agent: { handler: nope }\n"
