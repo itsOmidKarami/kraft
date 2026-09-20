@@ -35,15 +35,16 @@ _EMPTY_META = mr_ops.MRMeta()
 #: reaches is this adapter's, so the mapping lives here rather than in the
 #: executor -- `dispatch` hands over the typed target and nothing else.
 #:
-#: Three actions have no handler yet: `mr.mark_ready` (Task 5a) plus
-#: `mr.automated_review` and `mr.external_approval`, external waits the shared
-#: due scheduler owns (Task 9). An unmapped target falls through to `_run_one`'s
-#: last arm, which **stops the item for a human** rather than failing the node
-#: -- see there for why.
+#: Two actions have no handler yet: `mr.automated_review` and
+#: `mr.external_approval`, external waits the shared due scheduler owns
+#: (Task 9). An unmapped target falls through to `_run_one`'s last arm, which
+#: **stops the item for a human** rather than failing the node -- see there for
+#: why.
 V1_HANDLERS: dict[str, str] = {
     "mr.open_draft": "open_mr",
     "mr.sync": "sync_mr",
     "mr.ci": "ci_poll",
+    "mr.mark_ready": "mark_ready",
     "mr.merge": "merge",
     "mr.post_merge_ci": "merge_watch",
 }
@@ -52,7 +53,6 @@ V1_HANDLERS: dict[str, str] = {
 #: Who implements each target that `V1_HANDLERS` does not map yet, named in the
 #: stop reason so the human reading it knows this is Kraft's gap and not theirs.
 _UNIMPLEMENTED_TARGETS = {
-    "mr.mark_ready": "Task 5a implements it",
     "mr.automated_review": "Task 9 implements it as an external wait",
     "mr.external_approval": "Task 9 implements it as an external wait",
 }
@@ -389,6 +389,31 @@ async def _run_one(
             # before a human is asked to read it (Kraft-c09h).
             await forge.update_mr(repo=repo, branch=branch, body=body)
             log, status = "pushed and synced the merge request description\n", "done"
+        case "mark_ready":
+            # `mr.mark_ready` in V1: publication, split out of `sync_mr`'s
+            # push-and-describe so a chain can put its final human gate between
+            # the two. Not an external wait -- both `gh` and `glab` undraft in
+            # one call -- so it needs no scheduler and no persisted condition.
+            #
+            # Idempotent on both CLIs (their own docs: marking a ready MR ready
+            # is a no-op), which is what makes a re-entered walk safe here. An
+            # MR already merged has nothing left to publish: same shortcut
+            # `sync_mr` and `merge` take, for the same reason -- its source
+            # branch is usually deleted with the merge, and the node's stated
+            # end state is already true.
+            existing = await forge.find_mr(repo=repo, branch=branch)
+            if existing is not None and existing.state == "merged":
+                return (
+                    f"already merged (!{existing.number}); nothing to mark ready\n",
+                    "done",
+                    findings,
+                )
+            await forge.mark_ready(
+                repo=repo,
+                branch=branch,
+                mr=MR(number=existing.number if existing else 0, url=""),
+            )
+            log, status = "marked the merge request ready for review\n", "done"
         case "merge":
             # "Someone merged it first" and "the merge was refused" were
             # indistinguishable while this only ever shelled out: both

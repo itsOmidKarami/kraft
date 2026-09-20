@@ -240,6 +240,45 @@ def test_sync_mr_marks_the_mr_ready_before_it_pushes(tmp_path, monkeypatch):
     assert fake.opened_draft[mr.number] is False
 
 
+def test_mark_ready_undrafts_the_merge_request(tmp_path, monkeypatch):
+    """`mr.mark_ready` is V1's publication step, split out of `sync_mr` so a
+    chain can put its final gate between describing the MR and publishing it.
+    Without a handler the seeded chain stopped here for a human every time
+    (Ruling 48's `config_error` arm), so the chain could never reach merge."""
+    fake = forge.FakeForge()
+    mr = asyncio.run(fake.open_mr(repo=tmp_path, branch="kraft/w1", title="t", body="b"))
+    assert fake.opened_draft[mr.number] is True
+
+    returned, recorded = _forge_session(
+        tmp_path, monkeypatch, fake, forge.run.handler_for("mr.mark_ready"), "s-ready"
+    )
+
+    assert (returned, recorded) == ("done", "done")
+    assert fake.opened_draft[mr.number] is False
+
+
+def test_mark_ready_treats_an_already_merged_mr_as_done(tmp_path, monkeypatch):
+    """Same shortcut `sync_mr` and `merge` take (Kraft-7itv): a merged MR's
+    source branch is usually deleted with it, so undrafting it is at best a
+    no-op and at worst a CLI error that stops the item one node from the end
+    with the work already on main."""
+
+    class Refusing(forge.FakeForge):
+        async def mark_ready(self, *, repo, branch, mr):  # pragma: no cover - must not run
+            raise AssertionError("it undrafted a merge request the forge has already merged")
+
+    fake = Refusing()
+    mr = asyncio.run(fake.open_mr(repo=tmp_path, branch="kraft/w1", title="t", body="b"))
+    asyncio.run(fake.merge(repo=tmp_path, branch="kraft/w1", mr=mr))
+
+    returned, recorded = _forge_session(
+        tmp_path, monkeypatch, fake, forge.run.handler_for("mr.mark_ready"), "s-ready-merged"
+    )
+
+    assert (returned, recorded) == ("done", "done")
+    assert "nothing to mark ready" in _session_log(tmp_path, "s-ready-merged")
+
+
 def test_sync_mr_treats_an_already_merged_mr_as_done(tmp_path, monkeypatch):
     """Kraft-7itv, from work item 45b06993: the MR was merged by hand, its
     source branch deleted with it, and `human_review` skipped. mr_sync's
@@ -2854,22 +2893,25 @@ def test_merge_watch_runs_once_for_a_multi_repo_item(tmp_path, monkeypatch):
 
 
 def test_a_declared_but_unimplemented_forge_target_stops_for_a_human(tmp_path, monkeypatch):
-    """Ruling 48. `mr.mark_ready`, `mr.automated_review` and
-    `mr.external_approval` are `ForgeAction` members with no handler, and the
-    seeded V1 chain names all three -- so `failed` told an operator their
-    pipeline had broken and burned the node's fix loop finding out. A
-    declared-but-unimplemented action is a configuration limit: `config_error`,
-    which is terminal at every tier, so `walk_node` stops for a person with the
-    target and its owning task named.
+    """Ruling 48. `mr.automated_review` and `mr.external_approval` are
+    `ForgeAction` members with no handler, and the seeded V1 chain names both --
+    so `failed` told an operator their pipeline had broken and burned the node's
+    fix loop finding out. A declared-but-unimplemented action is a configuration
+    limit: `config_error`, which is terminal at every tier, so `walk_node` stops
+    for a person with the target and its owning task named.
+
+    (Retargeted from `mr.mark_ready` when Task 5a implemented that one -- the
+    assertion is about the *unimplemented* arm, so it has to name a target that
+    is still unimplemented or it stops testing anything.)
     """
     fake = forge.FakeForge()
     returned, recorded = _forge_session(
-        tmp_path, monkeypatch, fake, forge.run.handler_for("mr.mark_ready"), "s-unimpl"
+        tmp_path, monkeypatch, fake, forge.run.handler_for("mr.automated_review"), "s-unimpl"
     )
     assert returned == "config_error"
     assert recorded == "config_error"
     log = (RunDirs(tmp_path / "run").logs / "s-unimpl.log").read_text()
-    assert "mr.mark_ready" in log and "Task 5a" in log
+    assert "mr.automated_review" in log and "Task 9" in log
 
 
 def test_every_v1_forge_target_either_maps_or_names_its_owner():
