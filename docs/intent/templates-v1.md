@@ -72,14 +72,14 @@ method.
 
 The system SHALL distinguish a code-owned agent-runtime provider, a configured
 harness profile for that provider, and an agent task that selects a profile.
-enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider_declared_options, tests/test_template_environment.py::test_harness_profile_selects_only_declared_options
+enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider_declared_options, tests/test_harnesses.py::test_harness_profile_provider_must_be_the_harness_it_configures, tests/test_template_models.py::test_agent_task_selects_a_harness_profile_by_id
 
 ## REQ provider-owns-runtime-mechanics
 
 An agent-runtime provider SHALL own invocation, context delivery, supported
 runtime options, session resumption, skill loading, and normalized task
 results for its runtime.
-enforced-by: tests/test_harnesses.py::test_claude_argv_matches_todays_invocation
+origin: Deliberately unpinned. Phase 1 implemented none of these six mechanics -- it only consumes the pre-existing `kraft.harness` declaration from a harness profile. tests/test_harnesses.py covers invocation and resume for today's V0 dispatcher, which is not this requirement's sentence; context delivery, skill loading and normalized results have no V1 test at all. The pin lands with the executor phase that owns them.
 
 ## REQ provider-declares-harness-capabilities
 
@@ -537,8 +537,11 @@ origin: docs/templates-v1-design.md "Policy" -- chain/node/step/task layers land
 ## REQ policy-has-defaults-and-administrator-maxima
 
 The instance policy SHALL distinguish inheritable operational defaults from
-non-overridable administrator safety maxima.
-enforced-by: tests/test_policy.py::test_template_policy_cannot_widen_allowed_tools, tests/test_policy.py::test_work_item_policy_may_exceed_default_within_admin_maximum
+non-overridable administrator safety maxima. A `defaults:` value SHALL NOT
+exceed its `maxima:` counterpart. A `maxima:` field left unset SHALL bound
+nothing: `allowed_harnesses` with no administrator maximum permits an override
+naming any harness.
+enforced-by: tests/test_policy.py::test_template_policy_cannot_widen_allowed_tools, tests/test_policy.py::test_work_item_policy_may_exceed_default_within_admin_maximum, tests/test_policy.py::test_default_timeout_above_its_maximum_is_rejected, tests/test_policy.py::test_default_max_attempts_above_its_maximum_is_rejected, tests/test_policy.py::test_default_harnesses_outside_its_maximum_are_rejected, tests/test_policy.py::test_unset_harness_maximum_bounds_nothing
 
 ## REQ template-policy-cannot-relax-safety-ceilings
 

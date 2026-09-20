@@ -4,9 +4,15 @@ and the canonical execution paths a resolved chain assigns."""
 import pytest
 from pydantic import ValidationError
 
+from kraft import harness as harness_mod
 from kraft import template_models as tm
 from kraft.policy import InstancePolicy, InstancePolicyInput, PolicyError
-from kraft.template_environment import Repository, WorkItemTarget
+from kraft.template_environment import (
+    HarnessProfile,
+    HarnessProfileInput,
+    Repository,
+    WorkItemTarget,
+)
 
 
 def agent(id: str = "author", **kw) -> dict:
@@ -464,3 +470,21 @@ def test_materialize_cannot_exceed_an_administrator_maximum():
             WorkItemTarget.for_repository(Repository(id="api", path="/work/api")),
             policy(timeout_minutes=120),
         )
+
+
+def test_agent_task_selects_a_harness_profile_by_id():
+    """Three distinct things (`provider-profile-and-agent-task-are-distinct`):
+    the code-owned provider (`kraft.harness.Harness`), one configured profile
+    of that provider, and an agent task that selects the profile by id. The
+    task names the profile only -- it has no field for the provider, and none
+    for the runtime mechanics the provider owns."""
+    claude = harness_mod.load(None).valid["claude"]
+    profile = HarnessProfile.from_input(
+        "claude_review",
+        HarnessProfileInput(provider="claude", defaults={"effort": "low"}),
+        harness=claude,
+    )
+    assert profile.provider == claude.id
+    task = tm.AgentTask.model_validate(agent("review", harness=profile.id))
+    assert task.harness == profile.id == "claude_review"
+    assert "provider" not in tm.AgentTask.model_fields

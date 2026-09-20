@@ -286,22 +286,20 @@ def test_an_option_a_harness_does_not_support_is_never_emitted():
 def test_harness_profile_selects_only_provider_declared_options():
     claude = harness.load(None).valid["claude"]
     parsed = template_environment.HarnessProfileInput(
-        provider="claude_code", executable="claude", defaults={"effort": "low"}
+        provider="claude", executable="claude", defaults={"effort": "low"}
     )
     profile = template_environment.HarnessProfile.from_input(
         "claude_review", parsed, harness=claude
     )
     assert profile.defaults == {"effort": "low"}
-    assert profile.provider == "claude_code"
+    assert profile.provider == "claude"
 
 
 def test_harness_profile_rejects_an_option_the_provider_does_not_declare():
     """A profile selects only from what `provider-declares-harness-
     capabilities` -- it does not invent its own runtime option."""
     claude = harness.load(None).valid["claude"]
-    parsed = template_environment.HarnessProfileInput(
-        provider="claude_code", defaults={"network": "on"}
-    )
+    parsed = template_environment.HarnessProfileInput(provider="claude", defaults={"network": "on"})
     with pytest.raises(template_environment.TemplateEnvironmentError, match="network"):
         template_environment.HarnessProfile.from_input("bad", parsed, harness=claude)
 
@@ -309,7 +307,7 @@ def test_harness_profile_rejects_an_option_the_provider_does_not_declare():
 def test_harness_profile_rejects_a_value_the_provider_rejects():
     claude = harness.load(None).valid["claude"]
     parsed = template_environment.HarnessProfileInput(
-        provider="claude_code", defaults={"effort": "minimal"}
+        provider="claude", defaults={"effort": "minimal"}
     )
     with pytest.raises(template_environment.TemplateEnvironmentError, match="effort"):
         template_environment.HarnessProfile.from_input("bad", parsed, harness=claude)
@@ -319,8 +317,27 @@ def test_harness_profile_reports_unavailable_when_disabled():
     """`unavailable-selected-harness-needs-human` needs to know this fact;
     it does not itself decide what happens next -- that is Phase 6's."""
     claude = harness.load(None).valid["claude"]
-    parsed = template_environment.HarnessProfileInput(provider="claude_code", enabled=False)
+    parsed = template_environment.HarnessProfileInput(provider="claude", enabled=False)
     profile = template_environment.HarnessProfile.from_input(
         "claude_review", parsed, harness=claude
     )
     assert profile.is_available() is False
+
+
+def test_harness_profile_provider_must_be_the_harness_it_configures():
+    """A profile is one configured instance of a provider, and the provider id
+    IS the `Harness.id` -- there is no second registry a mapping could point
+    at (`provider-profile-and-agent-task-are-distinct`)."""
+    claude = harness.load(None).valid["claude"]
+    parsed = template_environment.HarnessProfileInput(provider="codex")
+    with pytest.raises(template_environment.TemplateEnvironmentError, match="codex"):
+        template_environment.HarnessProfile.from_input("mismatched", parsed, harness=claude)
+
+
+def test_harness_profile_id_must_be_nameable_by_a_task():
+    """`AgentTask.harness` is an `Identifier`; a profile id that pattern rejects
+    could be defined and never referenced."""
+    claude = harness.load(None).valid["claude"]
+    parsed = template_environment.HarnessProfileInput(provider="claude")
+    with pytest.raises(template_environment.TemplateEnvironmentError, match="Claude-Review"):
+        template_environment.HarnessProfile.from_input("Claude-Review", parsed, harness=claude)

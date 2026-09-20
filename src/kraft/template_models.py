@@ -42,7 +42,7 @@ from pydantic import (
 )
 
 from kraft.policy import InstancePolicy, TemplatePolicyOverride
-from kraft.template_environment import WorkItemTarget
+from kraft.template_environment import Identifier, WorkItemTarget
 
 #: Step identifiers Kraft generates itself, so an author cannot occupy one and
 #: make a resolved path ambiguous (docs/templates-v1-design.md "Resolution and
@@ -61,12 +61,11 @@ PATH_SEPARATOR = "."
 MAIN_STEP = "main"
 JUDGE_SEGMENT = "judge"
 
-#: `resolved-chain-identifiers-are-unique`: no `.`, no whitespace, nothing else
-#: that would make a resolved path ambiguous. Defined here rather than imported
-#: from `kraft.templates`, whose equivalent is private to a module V1 replaces.
-_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_-]*$")
-
-Identifier = Annotated[StrictStr, Field(pattern=_IDENTIFIER.pattern)]
+#: `resolved-chain-identifiers-are-unique` (no `.`, no whitespace, nothing else
+#: that would make a resolved path ambiguous) is `Identifier`, imported from
+#: `kraft.template_environment` so that both sides of every reference share one
+#: rule -- a task's `harness:` and the profile id it names. Not imported from
+#: `kraft.templates`, whose equivalent is private to a module V1 replaces.
 
 _DURATION = re.compile(r"^(\d+)(s|m|h|d)$")
 _DURATION_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
@@ -162,7 +161,7 @@ _LOOSE = Field(strict=False)
 
 
 class SteeringProfile(BaseModel):
-    """One `library.yaml` `steering:` entry: composable guidance a task or node
+    """One `library.yaml` `steering:` entry: composable guidance a task
     selects by name (`agent-task-may-select-one-skill` keeps the *skill* single;
     steering is where additional guidance goes)."""
 

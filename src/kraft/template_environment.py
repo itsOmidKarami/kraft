@@ -15,15 +15,34 @@ has a typed target to build into and freeze.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictStr,
+    field_validator,
+    model_validator,
+)
 
 from kraft.harness import Harness
+
+#: One identifier rule for both sides of every reference: the harness-profile
+#: id an `AgentTask.harness` names, the repository id a workspace member
+#: mounts, the chain id a repository defaults to. `kraft.template_models`
+#: imports `Identifier` from here rather than defining its own, because it
+#: already imports this module and the reverse would be a cycle -- so nothing
+#: definable here is unreferenceable there.
+_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_-]*$")
+
+Identifier = Annotated[StrictStr, Field(pattern=_IDENTIFIER.pattern)]
 
 
 class TemplateEnvironmentError(Exception):
@@ -124,15 +143,15 @@ class Repository(BaseModel):
 
     model_config = ConfigDict(strict=True, extra="forbid")
 
-    id: StrictStr = Field(min_length=1)
+    id: Identifier
     path: StrictStr = Field(min_length=1)
     enabled: StrictBool = True
-    default_chain: StrictStr | None = None
+    default_chain: Identifier | None = None
     forge: ForgeTarget | None = None
     worktree: Worktree = Field(default_factory=Worktree)
     verification: Verification = Field(default_factory=Verification)
-    steering: list[StrictStr] = Field(default_factory=list)
-    areas: dict[StrictStr, Area] = Field(default_factory=dict)
+    steering: list[Identifier] = Field(default_factory=list)
+    areas: dict[Identifier, Area] = Field(default_factory=dict)
 
 
 class WorkspaceMember(BaseModel):
@@ -141,7 +160,7 @@ class WorkspaceMember(BaseModel):
 
     model_config = ConfigDict(strict=True, extra="forbid")
 
-    repository: StrictStr = Field(min_length=1)
+    repository: Identifier
     path: StrictStr = Field(min_length=1)
 
 
@@ -150,12 +169,12 @@ class Workspace(BaseModel):
 
     model_config = ConfigDict(strict=True, extra="forbid")
 
-    id: StrictStr = Field(min_length=1)
-    root: StrictStr = Field(min_length=1)
+    id: Identifier
+    root: Identifier
     root_pointer_default: Annotated[RootPointerPolicy, Field(strict=False)] = (
         RootPointerPolicy.IGNORE
     )
-    members: dict[StrictStr, WorkspaceMember] = Field(default_factory=dict)
+    members: dict[Identifier, WorkspaceMember] = Field(default_factory=dict)
 
 
 class WorkItemTarget(BaseModel):
@@ -166,13 +185,30 @@ class WorkItemTarget(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
 
     kind: Literal["repository", "workspace"]
-    repository: StrictStr | None = None
-    workspace: StrictStr | None = None
-    members: tuple[StrictStr, ...] = ()
+    repository: Identifier | None = None
+    workspace: Identifier | None = None
+    members: tuple[Identifier, ...] = ()
     include_root: bool = True
     root_pointer_policy: Annotated[RootPointerPolicy, Field(strict=False)] = (
         RootPointerPolicy.IGNORE
     )
+
+    @model_validator(mode="after")
+    def _kind_owns_its_fields(self) -> WorkItemTarget:
+        """Each `kind` carries exactly its own fields. The classmethods below
+        build this correctly, but they are not in the path when Phase 2
+        rehydrates a frozen target from stored JSON."""
+        if self.kind == "repository":
+            if self.repository is None:
+                raise ValueError("a repository target must name a repository")
+            if self.workspace is not None or self.members:
+                raise ValueError("a repository target has no workspace or members")
+        else:
+            if self.workspace is None:
+                raise ValueError("a workspace target must name a workspace")
+            if self.repository is not None:
+                raise ValueError("a workspace target has no repository")
+        return self
 
     @classmethod
     def for_repository(cls, repository: Repository) -> WorkItemTarget:
@@ -211,7 +247,7 @@ class HarnessProfileInput(BaseModel):
 
     model_config = ConfigDict(strict=True, extra="forbid")
 
-    provider: StrictStr = Field(min_length=1)
+    provider: Identifier
     enabled: StrictBool = True
     executable: StrictStr | None = None
     defaults: dict[StrictStr, StrictStr] = Field(default_factory=dict)
@@ -236,6 +272,17 @@ class HarnessProfile:
     def from_input(
         cls, id: str, parsed: HarnessProfileInput, *, harness: Harness
     ) -> HarnessProfile:
+        if not _IDENTIFIER.match(id):
+            raise TemplateEnvironmentError(
+                f"harness profile id {id!r} must match {_IDENTIFIER.pattern} "
+                f"to be nameable by a task's 'harness:'"
+            )
+        if parsed.provider != harness.id:
+            raise TemplateEnvironmentError(
+                f"harness profile {id!r}: provider {parsed.provider!r} is not the "
+                f"harness it configures ({harness.id!r}) -- the provider id IS "
+                f"the harness id"
+            )
         for option, value in parsed.defaults.items():
             if not harness.supports(option):
                 raise TemplateEnvironmentError(

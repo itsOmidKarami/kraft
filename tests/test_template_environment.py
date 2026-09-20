@@ -119,44 +119,32 @@ def test_work_item_target_is_immutable(workspace):
         target.members = ("other",)
 
 
-# ── harness profiles: provider-defined runtime option validation ──
+def test_repository_target_cannot_carry_workspace_fields():
+    """Phase 2 freezes this model into a work item and rehydrates it from
+    stored JSON, where `for_repository`/`from_selection` are not in the path --
+    so the invalid state has to be out of the type, not just unbuilt."""
+    with pytest.raises(ValidationError, match="no workspace or members"):
+        te.WorkItemTarget(
+            kind="repository", repository="api", workspace="product", members=("api",)
+        )
 
 
-class _FakeHarness:
-    """A stand-in for `kraft.harness.Harness` -- only `supports`/`value_ok`
-    matter to `HarnessProfile.from_input`."""
-
-    id = "fake"
-
-    def supports(self, name: str) -> bool:
-        return name in ("model", "effort")
-
-    def value_ok(self, name: str, value: str) -> bool:
-        return name != "effort" or value in ("low", "medium", "high")
+def test_repository_target_must_name_a_repository():
+    with pytest.raises(ValidationError, match="must name a repository"):
+        te.WorkItemTarget(kind="repository")
 
 
-def test_harness_profile_selects_only_declared_options():
-    parsed = te.HarnessProfileInput(
-        provider="codex", executable="codex", defaults={"effort": "medium"}
-    )
-    profile = te.HarnessProfile.from_input("codex_default", parsed, harness=_FakeHarness())
-    assert profile.is_available() is True
-    assert profile.executable == "codex"
+def test_workspace_target_must_name_a_workspace_and_no_repository():
+    with pytest.raises(ValidationError, match="must name a workspace"):
+        te.WorkItemTarget(kind="workspace", members=("api",))
+    with pytest.raises(ValidationError, match="no repository"):
+        te.WorkItemTarget(kind="workspace", workspace="product", repository="api")
 
 
-def test_harness_profile_rejects_an_undeclared_option():
-    parsed = te.HarnessProfileInput(provider="codex", defaults={"network": "on"})
-    with pytest.raises(te.TemplateEnvironmentError, match="network"):
-        te.HarnessProfile.from_input("codex_default", parsed, harness=_FakeHarness())
-
-
-def test_harness_profile_rejects_a_value_the_provider_does_not_accept():
-    parsed = te.HarnessProfileInput(provider="codex", defaults={"effort": "extreme"})
-    with pytest.raises(te.TemplateEnvironmentError, match="extreme"):
-        te.HarnessProfile.from_input("codex_default", parsed, harness=_FakeHarness())
-
-
-def test_harness_profile_is_unavailable_when_disabled():
-    parsed = te.HarnessProfileInput(provider="codex", enabled=False)
-    profile = te.HarnessProfile.from_input("codex_default", parsed, harness=_FakeHarness())
-    assert profile.is_available() is False
+def test_environment_ids_use_the_same_rule_as_the_references_to_them():
+    """A repository id a workspace member (or an `AgentTask.harness`) cannot
+    name is a definition nothing can reference."""
+    with pytest.raises(ValidationError, match="string_pattern_mismatch"):
+        te.Repository(id="Api-Service", path="/work/api")
+    with pytest.raises(ValidationError, match="string_pattern_mismatch"):
+        te.Workspace(id="Product", root="product_root")

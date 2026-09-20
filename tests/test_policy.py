@@ -564,6 +564,46 @@ def test_template_policy_cannot_widen_allowed_harnesses_past_maximum(instance_po
         instance_policy.apply_template_override({"allowed_harnesses": ["codex_default", "gemini"]})
 
 
+# ── maxima means maxima: `defaults:` is bounded by `maxima:` too
+# (policy-has-defaults-and-administrator-maxima) ──
+
+
+def test_default_timeout_above_its_maximum_is_rejected():
+    with pytest.raises(ValidationError, match="defaults.timeout_minutes 500"):
+        policy.InstancePolicyInput.model_validate(
+            {"defaults": {"timeout_minutes": 500}, "maxima": {"timeout_minutes": 60}}
+        )
+
+
+def test_default_max_attempts_above_its_maximum_is_rejected():
+    with pytest.raises(ValidationError, match="defaults.max_attempts 9"):
+        policy.InstancePolicyInput.model_validate(
+            {"defaults": {"max_attempts": 9}, "maxima": {"max_attempts": 5}}
+        )
+
+
+def test_default_harnesses_outside_its_maximum_are_rejected():
+    with pytest.raises(ValidationError, match="defaults.allowed_harnesses"):
+        policy.InstancePolicyInput.model_validate(
+            {
+                "defaults": {"allowed_harnesses": ["codex_default", "gemini"]},
+                "maxima": {"allowed_harnesses": ["codex_default"]},
+            }
+        )
+
+
+def test_unset_harness_maximum_bounds_nothing():
+    """An unset maximum is no bound at all -- a decision, not an omission: any
+    `defaults:` list is accepted and any override may name any harness."""
+    pol = policy.InstancePolicy.from_input(
+        policy.InstancePolicyInput.model_validate(
+            {"defaults": {"allowed_harnesses": ["codex_default"], "timeout_minutes": 500}}
+        )
+    )
+    widened = pol.apply_template_override({"allowed_harnesses": ["anything_at_all"]})
+    assert widened.allowed_harnesses == ("anything_at_all",)
+
+
 def test_defaults_narrower_than_maxima_can_still_widen_back_to_maxima():
     """Regression: `InstancePolicy.from_input` seeds the `allowed_harnesses`
     ceiling from `defaults`, which may be narrower than `maxima`. Treating

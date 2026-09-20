@@ -16,6 +16,7 @@ from pydantic import (
     StrictInt,
     StrictStr,
     ValidationError,
+    model_validator,
 )
 from pydantic.dataclasses import dataclass as model
 
@@ -420,6 +421,27 @@ class InstancePolicyInput(BaseModel):
 
     defaults: PolicyDefaultsInput = Field(default_factory=PolicyDefaultsInput)
     maxima: PolicyMaximaInput = Field(default_factory=PolicyMaximaInput)
+
+    @model_validator(mode="after")
+    def _defaults_within_maxima(self) -> InstancePolicyInput:
+        """maxima means maxima: the instance cannot start above a ceiling it
+        enforces on every override below it. Both sections are administrator-
+        authored in one file, so this is coherence rather than privilege
+        escalation -- but `policy-has-defaults-and-administrator-maxima` calls
+        maxima non-overridable, and a `defaults:` entry past one is an
+        override in all but name. An unset maximum is no bound at all."""
+        for name in _OPERATIONAL_NUMERIC_FIELDS:
+            value, ceiling = getattr(self.defaults, name), getattr(self.maxima, name)
+            if value is not None and ceiling is not None and value > ceiling:
+                raise ValueError(f"defaults.{name} {value} exceeds maxima.{name} {ceiling}")
+        for name in _OPERATIONAL_LIST_FIELDS:
+            value, ceiling = getattr(self.defaults, name), getattr(self.maxima, name)
+            if value is not None and ceiling is not None and not set(value) <= set(ceiling):
+                extra = sorted(set(value) - set(ceiling))
+                raise ValueError(
+                    f"defaults.{name} {extra} is not permitted by maxima.{name} {sorted(ceiling)}"
+                )
+        return self
 
 
 class TemplatePolicyOverride(BaseModel):

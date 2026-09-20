@@ -465,6 +465,9 @@ class _Resolution:
         canonical path of the offending component, and the file its definition
         came from when it was inherited."""
         error = exc.errors()[0]
+        # Positional assumption: pydantic puts a discriminated-union tag in its
+        # own `loc` part, so dropping parts equal to a tag drops the tag, not a
+        # field or an id that happens to share the name.
         loc = tuple(part for part in error["loc"] if part not in _UNION_TAGS)
         key = next((k for k in _prefixes(loc) if k in self._located), None)
         if key is None:
