@@ -433,3 +433,233 @@ def test_load_policy_reads_forge_cli_timeout_s_and_defaults_it(tmp_path):
     d.write_text("default: { attempts: 1, wall_clock_s: 1 }\nforge_cli_timeout_s: 0\n")
     with pytest.raises(policy.PolicyError):
         policy.load_policy(d)
+
+
+# ── model-led boundary: PolicyInput.from_yaml / Policy.from_input / cap_for ──
+
+
+def test_the_target_shape_round_trips(tmp_path):
+    """`PolicyInput.from_yaml` reads and validates, `Policy.from_input`
+    converts, `Policy.cap_for` looks up -- the exact shape the plan pins."""
+    d = tmp_path / "policy.yaml"
+    d.write_text(
+        "loops:\n  ci_wait: { attempts: 5, wall_clock_s: 10 }\n"
+        "default: { attempts: 2, wall_clock_s: 20 }\n"
+    )
+    parsed = policy.PolicyInput.from_yaml(d)
+    assert isinstance(parsed, policy.PolicyInput)
+    pol = policy.Policy.from_input(parsed, source=d)
+    assert isinstance(pol, policy.Policy)
+    cap = pol.cap_for("ci_wait", None)
+    assert cap == policy.Cap(5, 10)
+
+
+def test_load_policy_and_resolve_cap_still_work_as_two_line_delegators(tmp_path):
+    """The 15/11 existing callers (`executor/`, `ci_wait.py`, ...) are not
+    migrated in this phase; `load_policy`/`resolve_cap` must keep behaving
+    exactly as before."""
+    d = tmp_path / "policy.yaml"
+    d.write_text(
+        "loops:\n  ci_wait: { attempts: 5, wall_clock_s: 10 }\n"
+        "default: { attempts: 2, wall_clock_s: 20 }\n"
+    )
+    pol = policy.load_policy(d)
+    assert policy.resolve_cap(pol, "ci_wait", {"attempts": 9}) == policy.Cap(9, 10)
+    assert policy.resolve_cap(pol, "nonexistent") == policy.Cap(2, 20)
+
+
+def test_from_yaml_rejects_malformed_policy_the_same_way(tmp_path):
+    d = tmp_path / "policy.yaml"
+    d.write_text("default: { attempts: 0, wall_clock_s: 5 }\n")
+    with pytest.raises(policy.PolicyError):
+        policy.PolicyInput.from_yaml(d)
+
+
+def test_cap_for_accepts_a_raw_dict_override_at_the_boundary():
+    """A stored node override arrives as an untyped dict
+    (`store.node_overrides_of`); `cap_for` validates it internally into a
+    `CapOverride` rather than requiring every caller to construct one."""
+    pol = policy.Policy(loops={}, default=policy.Cap(attempts=3, wall_clock_s=60))
+    assert pol.cap_for("default", {"attempts": 9}) == policy.Cap(9, 60)
+    assert pol.cap_for("default", policy.CapOverride(attempts=9)) == policy.Cap(9, 60)
+
+
+def test_cap_for_ignores_unrelated_keys_on_a_stored_node_override():
+    """A `node_overrides` row also carries `model`/`effort`/`auto_escalate`,
+    validated elsewhere -- `cap_for` must not choke on them."""
+    pol = policy.Policy(loops={}, default=policy.Cap(attempts=3, wall_clock_s=60))
+    assert pol.cap_for("default", {"attempts": 9, "effort": "high"}) == policy.Cap(9, 60)
+
+
+def test_cron_fields_is_a_named_type_not_an_anonymous_tuple():
+    fields = policy._cron_fields("cron", "30 14 10 9 *")
+    assert isinstance(fields, policy.CronFields)
+    assert (fields.minute, fields.hour, fields.day, fields.month, fields.weekday) == (
+        "30",
+        "14",
+        "10",
+        "9",
+        "*",
+    )
+
+
+# ── V1 instance policy: defaults, administrator maxima, layered overrides ──
+
+
+@pytest.fixture
+def instance_policy() -> policy.InstancePolicy:
+    parsed = policy.InstancePolicyInput.model_validate(
+        {
+            "defaults": {
+                "timeout_minutes": 60,
+                "max_attempts": 3,
+                "allowed_harnesses": ["codex_default", "claude_review"],
+            },
+            "maxima": {
+                "token_budget": 2_000_000,
+                "allowed_tools": ["git", "shell", "pytest"],
+                "allowed_harnesses": ["codex_default", "claude_review"],
+            },
+        }
+    )
+    return policy.InstancePolicy.from_input(parsed)
+
+
+def test_template_policy_cannot_widen_allowed_tools(instance_policy):
+    with pytest.raises(policy.PolicyError, match="allowed_tools"):
+        instance_policy.apply_template_override({"allowed_tools": ["shell", "network"]})
+
+
+def test_template_policy_can_narrow_allowed_tools(instance_policy):
+    tightened = instance_policy.apply_template_override({"allowed_tools": ["git"]})
+    assert tightened.allowed_tools == ("git",)
+
+
+def test_template_policy_cannot_exceed_token_budget_ceiling(instance_policy):
+    with pytest.raises(policy.PolicyError, match="token_budget"):
+        instance_policy.apply_template_override({"token_budget": 3_000_000})
+
+
+# ── allowed_harnesses: operational-with-an-administrator-maximum, not a
+# ratchet-only safety field (docs/templates-v1-design.md lists it under both
+# `defaults:` and `maxima:`, unlike `allowed_tools`/`token_budget`) ──
+
+
+def test_template_policy_can_narrow_allowed_harnesses(instance_policy):
+    narrowed = instance_policy.apply_template_override({"allowed_harnesses": ["codex_default"]})
+    assert narrowed.allowed_harnesses == ("codex_default",)
+
+
+def test_template_policy_can_widen_allowed_harnesses_within_maximum(instance_policy):
+    """Unlike `allowed_tools`, `allowed_harnesses` may widen -- as long as it
+    stays within `maxima.allowed_harnesses`."""
+    widened = instance_policy.apply_template_override(
+        {"allowed_harnesses": ["codex_default", "claude_review"]}
+    )
+    assert set(widened.allowed_harnesses) == {"codex_default", "claude_review"}
+
+
+def test_template_policy_cannot_widen_allowed_harnesses_past_maximum(instance_policy):
+    with pytest.raises(policy.PolicyError, match="allowed_harnesses"):
+        instance_policy.apply_template_override({"allowed_harnesses": ["codex_default", "gemini"]})
+
+
+# ── maxima means maxima: `defaults:` is bounded by `maxima:` too
+# (policy-has-defaults-and-administrator-maxima) ──
+
+
+def test_default_timeout_above_its_maximum_is_rejected():
+    with pytest.raises(ValidationError, match="defaults.timeout_minutes 500"):
+        policy.InstancePolicyInput.model_validate(
+            {"defaults": {"timeout_minutes": 500}, "maxima": {"timeout_minutes": 60}}
+        )
+
+
+def test_default_max_attempts_above_its_maximum_is_rejected():
+    with pytest.raises(ValidationError, match="defaults.max_attempts 9"):
+        policy.InstancePolicyInput.model_validate(
+            {"defaults": {"max_attempts": 9}, "maxima": {"max_attempts": 5}}
+        )
+
+
+def test_default_harnesses_outside_its_maximum_are_rejected():
+    with pytest.raises(ValidationError, match="defaults.allowed_harnesses"):
+        policy.InstancePolicyInput.model_validate(
+            {
+                "defaults": {"allowed_harnesses": ["codex_default", "gemini"]},
+                "maxima": {"allowed_harnesses": ["codex_default"]},
+            }
+        )
+
+
+def test_unset_harness_maximum_bounds_nothing():
+    """An unset maximum is no bound at all -- a decision, not an omission: any
+    `defaults:` list is accepted and any override may name any harness."""
+    pol = policy.InstancePolicy.from_input(
+        policy.InstancePolicyInput.model_validate(
+            {"defaults": {"allowed_harnesses": ["codex_default"], "timeout_minutes": 500}}
+        )
+    )
+    widened = pol.apply_template_override({"allowed_harnesses": ["anything_at_all"]})
+    assert widened.allowed_harnesses == ("anything_at_all",)
+
+
+def test_defaults_narrower_than_maxima_can_still_widen_back_to_maxima():
+    """Regression: `InstancePolicy.from_input` seeds the `allowed_harnesses`
+    ceiling from `defaults`, which may be narrower than `maxima`. Treating
+    `allowed_harnesses` as ratchet-only against that seeded value would
+    permanently lower the real ceiling below what the administrator actually
+    allowed -- an operator could never widen back toward `maxima`."""
+    parsed = policy.InstancePolicyInput.model_validate(
+        {
+            "defaults": {"allowed_harnesses": ["codex_default"]},
+            "maxima": {"allowed_harnesses": ["codex_default", "claude_review"]},
+        }
+    )
+    pol = policy.InstancePolicy.from_input(parsed)
+    assert pol.allowed_harnesses == ("codex_default",)
+    widened = pol.apply_template_override({"allowed_harnesses": ["codex_default", "claude_review"]})
+    assert set(widened.allowed_harnesses) == {"codex_default", "claude_review"}
+
+
+def test_template_policy_may_replace_operational_defaults_either_direction(instance_policy):
+    """`timeout_minutes` has no configured administrator maximum here, so it
+    may move up or down freely (`template-policy-may-replace-operational-
+    defaults`)."""
+    raised = instance_policy.apply_template_override({"timeout_minutes": 120})
+    assert raised.timeout_minutes == 120
+    lowered = instance_policy.apply_template_override({"timeout_minutes": 5})
+    assert lowered.timeout_minutes == 5
+
+
+def test_work_item_policy_may_exceed_default_within_admin_maximum():
+    """An explicit administrator maximum on an operational field caps how far
+    a narrower-scope override may raise it
+    (`work-item-policy-may-exceed-default-ceilings-within-admin-maximum`)."""
+    parsed = policy.InstancePolicyInput.model_validate(
+        {"defaults": {"max_attempts": 3}, "maxima": {"max_attempts": 5}}
+    )
+    pol = policy.InstancePolicy.from_input(parsed)
+    within = pol.apply_template_override({"max_attempts": 5})
+    assert within.max_attempts == 5
+    with pytest.raises(policy.PolicyError, match="max_attempts"):
+        pol.apply_template_override({"max_attempts": 6})
+
+
+def test_policy_override_rejects_unknown_fields_field_specifically():
+    """Overrides are validated field by field, not merged as an unrestricted
+    generic dict (`policy-override-rules-are-field-specific`)."""
+    with pytest.raises(Exception):  # noqa: B017 -- pydantic's ValidationError
+        policy.TemplatePolicyOverride.model_validate({"not_a_real_field": 1})
+
+
+def test_policy_is_layered_from_instance_through_repository_to_work_item(instance_policy):
+    """The same override mechanism resolves at every scope, broadest to
+    narrowest (`policy-is-layered-by-execution-scope`); a repository cannot
+    hand a work item back room the instance already closed
+    (`repository-policy-cannot-relax-instance-safety`)."""
+    repository_policy = instance_policy.apply_template_override({"allowed_tools": ["git", "shell"]})
+    work_item_policy = repository_policy.apply_template_override({"allowed_tools": ["git"]})
+    assert work_item_policy.allowed_tools == ("git",)
+    with pytest.raises(policy.PolicyError, match="allowed_tools"):
+        repository_policy.apply_template_override({"allowed_tools": ["git", "shell", "pytest"]})

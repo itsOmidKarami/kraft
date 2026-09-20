@@ -70,7 +70,7 @@ harnesses:
       effort: medium
 
   claude_review:
-    provider: claude_code
+    provider: claude
     enabled: true
     executable: claude
     defaults:
@@ -463,8 +463,11 @@ of every path in the chain. Two further local rules make that sufficient:
   position, is not one of the reserved segments above.
 
 A resolver still builds a path-to-source map, but for diagnostics rather than
-enforcement: it is what lets a duplicate or an invalid reference name both the
-colliding paths and the files they came from.
+enforcement: it is what lets an error name the file a component's definition
+came from when it was inherited. A duplicate is reported as its container's
+path plus the colliding local identifier -- that is where the check happens and
+it is sufficient to locate the collision, so no global path registry is built
+to name "both paths".
 
 Materialization binds a resolved chain to a work item, applying effective
 policy, intake attachments, and an immutable target:
@@ -475,7 +478,7 @@ target:
   workspace: product
   members: [api]
   include_root: false
-  root_pointer: bump
+  root_pointer_policy: bump
 ```
 
 For a workspace item, tasks use an assembled checkout containing selected child
