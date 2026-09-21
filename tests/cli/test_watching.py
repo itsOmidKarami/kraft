@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 import pytest
-from support.harness import fake_templates_dir, isolated_bd, make_repo
+from support.harness import fake_templates_dir, isolated_bd
 
 from kraft import cli, client
 
@@ -19,55 +19,38 @@ _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 # to the ASGI app with the lifespan entered per client.
 
 
-def _make_item(repo, title="watch me"):
-    async def go():
-        async with client.transport.http() as http:
-            response = await http.post(
-                "/api/work-items", json={"title": title, "repo": str(repo), "autostart": False}
-            )
-        assert response.status_code == 201, response.text
-        return response.json()["id"]
-
-    return asyncio.run(go())
-
-
-def test_worker_sessions_is_empty_before_anything_runs(app, tmp_path):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_worker_sessions_is_empty_before_anything_runs(app, make_item, repo):
+    wid = make_item(repo)
     assert asyncio.run(client.worker_sessions(wid)) == []
 
 
-def test_latest_session_says_so_when_nothing_has_run(app, tmp_path):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_latest_session_says_so_when_nothing_has_run(app, make_item, repo):
+    wid = make_item(repo)
     with pytest.raises(ValueError, match="no worker session"):
         asyncio.run(client.latest_session(wid))
 
 
-def test_events_returns_the_chain_history(app, tmp_path):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_events_returns_the_chain_history(app, make_item, repo):
+    wid = make_item(repo)
     rows = asyncio.run(client.events(wid))
     assert isinstance(rows, list)
     assert all("type" in row and "seq" in row for row in rows)
 
 
-def test_events_defaults_to_the_resolved_work_item(app, tmp_path, monkeypatch):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_events_defaults_to_the_resolved_work_item(app, monkeypatch, make_item, repo):
+    wid = make_item(repo)
     monkeypatch.setenv("KRAFT_WORK_ITEM_ID", wid)
     assert asyncio.run(client.events()) == asyncio.run(client.events(wid))
 
 
 @pytest.mark.slow
-def test_stream_log_follows_a_session_and_stops_when_it_stops(tmp_path, monkeypatch):
+def test_stream_log_follows_a_session_and_stops_when_it_stops(tmp_path, monkeypatch, repo):
     """Real uvicorn: SSE through ASGITransport is not the same code path, and a
     stream that never ends is the failure this test exists to catch."""
     from support.server import running_server
 
     templates = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
     tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
     run_dir = tmp_path / "run"
     with running_server(run_dir=run_dir, templates_dir=templates, bd_cwd=tracker) as srv:
         monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
@@ -97,13 +80,14 @@ def test_stream_log_follows_a_session_and_stops_when_it_stops(tmp_path, monkeypa
     assert [line["n"] for line in lines] == sorted(line["n"] for line in lines)
 
 
-def test_events_follow_filters_by_item_and_stops_on_completion(app, tmp_path, monkeypatch, capsys):
+def test_events_follow_filters_by_item_and_stops_on_completion(
+    app, monkeypatch, capsys, make_item, repo
+):
     """The bus is instance-wide and never ends on its own: a foreign-item event
     must not print, and work_item_completed must end the follow rather than
     hang waiting for a frame that never comes."""
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
-    other = _make_item(repo, "someone else's chain")
+    wid = make_item(repo)
+    other = make_item(repo, "someone else's chain")
 
     async def fake_stream(after_seq=0):
         yield {"type": "node_started", "seq": 101, "work_item_id": other}
@@ -123,7 +107,7 @@ def test_events_follow_filters_by_item_and_stops_on_completion(app, tmp_path, mo
 
 
 def test_events_follow_returns_at_once_on_an_item_that_already_ended(
-    app, tmp_path, monkeypatch, capsys
+    app, monkeypatch, capsys, make_item, repo
 ):
     """A finished item's terminal event is in the backlog, not in the stream.
 
@@ -131,8 +115,7 @@ def test_events_follow_returns_at_once_on_an_item_that_already_ended(
     this item -- the exact "armed forever" failure the stop condition exists
     to prevent, just reached from the other side.
     """
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+    wid = make_item(repo)
 
     async def never_ends(after_seq=0):
         yield {"type": "node_started", "seq": 999, "work_item_id": wid}
@@ -152,19 +135,17 @@ def test_events_follow_returns_at_once_on_an_item_that_already_ended(
     assert "999" not in out
 
 
-def test_logs_without_a_session_says_so(app, tmp_path, capsys):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_logs_without_a_session_says_so(app, capsys, make_item, repo):
+    wid = make_item(repo)
     with pytest.raises(SystemExit) as caught:
         cli.main(["view", "logs", wid])
     assert caught.value.code == 1
     assert "no worker session" in capsys.readouterr().err
 
 
-def test_logs_backlog_renders_lines(app, tmp_path, monkeypatch, capsys):
+def test_logs_backlog_renders_lines(app, monkeypatch, capsys, make_item, repo):
     """The backlog path needs no server streaming: it is a plain GET."""
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+    wid = make_item(repo)
 
     async def fake_latest(work_item_id=None):
         return {"id": "sess-1", "status": "stopped"}
@@ -187,9 +168,8 @@ def test_logs_backlog_renders_lines(app, tmp_path, monkeypatch, capsys):
     assert "first" in out and "second" in out
 
 
-def test_logs_n_limits_the_backlog(app, tmp_path, monkeypatch, capsys):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_logs_n_limits_the_backlog(app, monkeypatch, capsys, make_item, repo):
+    wid = make_item(repo)
 
     async def fake_latest(work_item_id=None):
         return {"id": "sess-1", "status": "stopped"}
@@ -209,9 +189,8 @@ def test_logs_n_limits_the_backlog(app, tmp_path, monkeypatch, capsys):
     assert "line9" in out[-1]
 
 
-def test_logs_json_is_ndjson(app, tmp_path, monkeypatch, capsys):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_logs_json_is_ndjson(app, monkeypatch, capsys, make_item, repo):
+    wid = make_item(repo)
 
     async def fake_latest(work_item_id=None):
         return {"id": "sess-1", "status": "stopped"}
@@ -228,25 +207,22 @@ def test_logs_json_is_ndjson(app, tmp_path, monkeypatch, capsys):
     assert not out.startswith("[")
 
 
-def test_events_renders_a_table(app, tmp_path, capsys):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_events_renders_a_table(app, capsys, make_item, repo):
+    wid = make_item(repo)
     cli.main(["view", "events", wid])
     out = capsys.readouterr().out
     assert "SEQ" in out.splitlines()[0]
     assert "TYPE" in out.splitlines()[0]
 
 
-def test_events_filters_by_type(app, tmp_path, capsys):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_events_filters_by_type(app, capsys, make_item, repo):
+    wid = make_item(repo)
     cli.main(["view", "events", wid, "--type", "no-such-type", "--json"])
     assert json.loads(capsys.readouterr().out) == []
 
 
-def test_events_after_seq_is_passed_through(app, tmp_path, monkeypatch, capsys):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_events_after_seq_is_passed_through(app, monkeypatch, capsys, make_item, repo):
+    wid = make_item(repo)
     seen = {}
 
     async def fake_events(work_item_id=None, after_seq=0):
@@ -282,12 +258,11 @@ def test_redraw_returns_the_new_line_count():
 
 
 @pytest.mark.slow
-def test_stream_events_yields_a_frame_when_a_work_item_is_created(tmp_path, monkeypatch):
+def test_stream_events_yields_a_frame_when_a_work_item_is_created(tmp_path, monkeypatch, repo):
     from support.server import running_server
 
     templates = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
     tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
     run_dir = tmp_path / "run"
     with running_server(run_dir=run_dir, templates_dir=templates, bd_cwd=tracker) as srv:
         monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
@@ -309,10 +284,9 @@ def test_stream_events_yields_a_frame_when_a_work_item_is_created(tmp_path, monk
     assert "type" in event
 
 
-def test_logs_n_zero_prints_no_backlog(app, tmp_path, monkeypatch, capsys):
+def test_logs_n_zero_prints_no_backlog(app, monkeypatch, capsys, make_item, repo):
     """`-n 0` means none. Truthiness would read it as "no limit"."""
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+    wid = make_item(repo)
 
     async def fake_latest(work_item_id=None):
         return {"id": "sess-1", "status": "stopped"}
@@ -327,13 +301,12 @@ def test_logs_n_zero_prints_no_backlog(app, tmp_path, monkeypatch, capsys):
 
 
 def test_watch_draws_a_frame_per_event_and_starts_at_the_live_cursor(
-    app, tmp_path, monkeypatch, capsys
+    app, monkeypatch, capsys, make_item, repo
 ):
     """The happy path: one frame before the stream, one per event, and the
     stream is asked to start at the cursor the first board came with — not at
     seq 0, which would replay every event the server ever committed."""
-    repo = make_repo(tmp_path)
-    _make_item(repo, "on the board")
+    make_item(repo, "on the board")
     monkeypatch.setattr("sys.stdout.isatty", lambda: True, raising=False)
     seen = {}
 
@@ -349,7 +322,7 @@ def test_watch_draws_a_frame_per_event_and_starts_at_the_live_cursor(
     assert seen["after_seq"] > 0  # the live cursor, not a full replay
 
 
-def test_watch_reads_the_board_through_the_public_client(app, tmp_path, monkeypatch, capsys):
+def test_watch_reads_the_board_through_the_public_client(app, monkeypatch, capsys, make_item, repo):
     """Kraft-8okl, the same class as Kraft-t5s9: `_cmd_watch` reached for
     `client.transport._get("/work-items")` because `list_work_items` drops the cursor the
     stream has to start from. `board()` returns both, so there is no reason left
@@ -359,8 +332,7 @@ def test_watch_reads_the_board_through_the_public_client(app, tmp_path, monkeypa
     calls it for `/repos`, and the claim being pinned is that the *board* is not
     fetched that way.
     """
-    repo = make_repo(tmp_path)
-    _make_item(repo, "through the front door")
+    make_item(repo, "through the front door")
     monkeypatch.setattr("sys.stdout.isatty", lambda: True, raising=False)
 
     boards = []
@@ -426,12 +398,11 @@ def test_log_backlog_limits_live_in_client(monkeypatch):
     assert asyncio.run(client.log_backlog("sess-1", 0)) == []
 
 
-def test_events_follow_json_is_one_object_per_line(app, tmp_path, monkeypatch, capsys):
+def test_events_follow_json_is_one_object_per_line(app, monkeypatch, capsys, make_item, repo):
     """`kraft logs -f --json` is NDJSON and CLAUDE.md documents that contract.
     A followed stream that emits pretty-printed arrays breaks `read -r`, a
     `split("\\n")`, and any log shipper (Kraft-tom2)."""
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+    wid = make_item(repo)
 
     async def fake_stream(after_seq=0):
         yield {"type": "node_started", "seq": 201, "work_item_id": wid}

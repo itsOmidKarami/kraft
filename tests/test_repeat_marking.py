@@ -20,9 +20,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+from support.chain_run import loop_policy
 from support.harness import isolated_bd, make_repo, v1_fix_loop_node, v1_seeded_chain
 
-from kraft import db, events, executor, policy, store
+from kraft import db, events, executor, store
 from kraft.paths import RunDirs
 
 
@@ -172,19 +173,6 @@ def _template(tmp_path):
     )
 
 
-def _policy(tmp_path, *, attempts=5) -> policy.Policy:
-    p = tmp_path / "policy.yaml"
-    p.write_text(
-        f"loops:\n  review.fix_loop: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
-        f"default: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
-        # Kraft-lpdd: this suite is about finding-repeat marking, not the
-        # unrelated auto-escalate trigger a `needs_human` stop would
-        # otherwise also fire.
-        "auto_escalate_stuck: false\n"
-    )
-    return policy.load_policy(p)
-
-
 _UNFIXED = {
     "severity": "critical",
     "message": "unfixed",
@@ -218,7 +206,7 @@ def test_the_fix_after_a_steered_retry_still_marks_the_finding_repeat(tmp_path, 
         rd = RunDirs(call_dir / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            pol = _policy(call_dir)
+            pol = loop_policy(call_dir, "review.fix_loop", attempts=5)
             wid = await executor.intake(
                 database,
                 rd,

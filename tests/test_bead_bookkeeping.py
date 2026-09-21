@@ -76,57 +76,48 @@ def test_completion_closes_every_sub_bead_the_item_states(bd, tmp_path):
     asyncio.run(scenario())
 
 
-def test_item_filed_while_bd_was_down_still_gets_a_bead_by_completion(bd, tmp_path, monkeypatch):
+async def test_item_filed_while_bd_was_down_still_gets_a_bead_by_completion(
+    bd, tmp_path, monkeypatch, database, run_dirs, repo
+):
     """Kraft-dr3n: bd being unavailable at intake time is a degrade, not a
     permanent hole -- an item that completes still ends up with a closed
     bead, filed late rather than never."""
-    repo = make_repo(tmp_path)  # no .beads at intake time
     monkeypatch.delenv("KRAFT_BD_CWD", raising=False)
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            wid = await executor.intake(
-                database,
-                rd,
-                title="filed while bd was down",
-                repo=str(repo),
-                chain=_quick_task(tmp_path),
-            )
-            assert (
-                database.read(
-                    lambda c: c.execute(
-                        "SELECT bead_id FROM work_items WHERE id = ?", (wid,)
-                    ).fetchone()
-                )["bead_id"]
-                is None
-            )
+    wid = await executor.intake(
+        database,
+        run_dirs,
+        title="filed while bd was down",
+        repo=str(repo),
+        chain=_quick_task(tmp_path),
+    )
+    assert (
+        database.read(
+            lambda c: c.execute("SELECT bead_id FROM work_items WHERE id = ?", (wid,)).fetchone()
+        )["bead_id"]
+        is None
+    )
 
-            # bd shows up before completion -- give the repo a workspace now.
-            bd.init(repo)
+    # bd shows up before completion -- give the repo a workspace now.
+    bd.init(repo)
 
-            result = await executor.run(
-                database,
-                rd,
-                work_item_id=wid,
-                registry=None,
-            )
-            assert result == "completed"
-            row = database.read(
-                lambda c: c.execute(
-                    "SELECT bead_id FROM work_items WHERE id = ?", (wid,)
-                ).fetchone()
-            )
-            assert row["bead_id"], "no bead was filed at completion"
-            assert bd.status(row["bead_id"], cwd=repo) == "closed"
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    result = await executor.run(
+        database,
+        run_dirs,
+        work_item_id=wid,
+        registry=None,
+    )
+    assert result == "completed"
+    row = database.read(
+        lambda c: c.execute("SELECT bead_id FROM work_items WHERE id = ?", (wid,)).fetchone()
+    )
+    assert row["bead_id"], "no bead was filed at completion"
+    assert bd.status(row["bead_id"], cwd=repo) == "closed"
 
 
-def test_no_app_fixture_still_avoids_the_operators_real_home(tmp_path, monkeypatch):
+async def test_no_app_fixture_still_avoids_the_operators_real_home(
+    tmp_path, monkeypatch, database, run_dirs, repo
+):
     """Kraft-t5g: bd's fallback when it finds no `.beads/` walking up from cwd
     is a hardcoded `~/.beads`. A test with no `app` fixture and no explicit
     `bd_cwd` must still land in a fake HOME, not the operator's real one."""
@@ -143,23 +134,13 @@ def test_no_app_fixture_still_avoids_the_operators_real_home(tmp_path, monkeypat
     real_beads = Path(pwd.getpwuid(os.getuid()).pw_dir) / ".beads"
     before = real_beads.exists() and set(real_beads.iterdir())
 
-    repo = make_repo(tmp_path)  # no .beads: intake walks up, would hit ~/.beads
-
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            await executor.intake(
-                database,
-                rd,
-                title="never touches the real home",
-                repo=str(repo),
-                chain=_quick_task(tmp_path),
-            )
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    await executor.intake(
+        database,
+        run_dirs,
+        title="never touches the real home",
+        repo=str(repo),
+        chain=_quick_task(tmp_path),
+    )
 
     after = real_beads.exists() and set(real_beads.iterdir())
     assert before == after, "intake touched the operator's real ~/.beads"
