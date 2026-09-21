@@ -9,52 +9,43 @@ import sys
 import uuid
 from pathlib import Path
 
-from support.harness import fake_registry, isolated_bd, make_repo
+from support.harness import (
+    isolated_bd,
+    make_repo,
+    v1_fix_loop_node,
+    v1_resolved,
+    v1_seeded_chain,
+)
 
 from kraft import db, events, executor, policy, store
 from kraft.executor import dispatch as dispatch_module
 from kraft.paths import RunDirs
-from kraft.templates import Template
 
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
+_FAKE = f"{sys.executable} {_FAKE_AGENT}"
+_SUITE = {"id": "suite", "kind": "subprocess", "command": f"{sys.executable} -m pytest -q"}
+_AGENT = {"id": "implement", "kind": "agent", "harness": "fake", "prompt": "Implement it."}
+#: Where each task's sessions land (its canonical path).
+_AGENT_PATH = "work.main.implement"
+_SUITE_PATH = "work.main.suite"
 
 
-def _registry():
-    return fake_registry(sys.executable, _FAKE_AGENT)
+def _work_node() -> dict:
+    """One agent task and one subprocess task in the same node — which is what
+    makes "the agent is blocked and the subprocess is not" observable."""
+    return {"id": "work", "kind": "exec", "tasks": [_AGENT, _SUITE]}
 
 
-def _template() -> Template:
-    """env_setup (builtin), then one agent task and one subprocess task in the
-    same node — which is what makes "the agent is blocked and the subprocess is
-    not" observable."""
-    return Template(
-        id="budget",
-        nodes=[
-            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None, "fix_loop": None},
-            {
-                "id": "work",
-                "tasks": ["on.implementation.start", "on.test.run"],
-                "gate_after": None,
-                "fix_loop": None,
-            },
-        ],
-    )
+def _template(tmp_path):
+    """The `work` node. No `env_setup` node: V1 prepares the worktree first."""
+    return v1_seeded_chain(tmp_path / "templates", [_work_node()], agent_command=_FAKE)
 
 
-def _fixloop_template() -> Template:
+def _fixloop_template(tmp_path):
     """A fix_loop node measured by a subprocess only, so the node always reaches
     the fix-cycle agent dispatch — the one budget-gated launch a fix_loop has."""
-    return Template(
-        id="budget-fixloop",
-        nodes=[
-            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None, "fix_loop": None},
-            {
-                "id": "verify",
-                "tasks": ["on.test.run"],
-                "gate_after": None,
-                "fix_loop": "verify_fix_loop",
-            },
-        ],
+    return v1_seeded_chain(
+        tmp_path / "templates", [v1_fix_loop_node("verify", _SUITE)], agent_command=_FAKE
     )
 
 
@@ -124,7 +115,7 @@ async def _intake(database, rd, tracker, repo, template=None):
         rd,
         title="budgeted work",
         repo=str(repo),
-        template=template or _template(),
+        chain=template or _template(Path(repo).parent),
         bd_cwd=str(tracker),
     )
 
@@ -134,7 +125,7 @@ async def _run(database, rd, tracker, wid, pol):
         database,
         rd,
         work_item_id=wid,
-        registry=_registry(),
+        registry=None,
         bd_cwd=str(tracker),
         policy=pol,
     )
@@ -155,7 +146,7 @@ def test_under_the_cap_the_agent_launches(tmp_path, monkeypatch):
             await _spend(database, wid, 2.0)
             await _run(database, rd, tracker, wid, _policy(work_item_usd=20.0))
             assert not _budget_stopped(database, wid)
-            assert "on.implementation.start" in _hook_points(database, wid, "work")
+            assert _AGENT_PATH in _hook_points(database, wid, "work")
         finally:
             await database.close()
 
@@ -204,7 +195,7 @@ def test_a_null_cap_never_blocks(tmp_path, monkeypatch):
             await _spend(database, wid, 1000.0)
             await _run(database, rd, tracker, wid, _policy())
             assert not _budget_stopped(database, wid)
-            assert "on.implementation.start" in _hook_points(database, wid, "work")
+            assert _AGENT_PATH in _hook_points(database, wid, "work")
         finally:
             await database.close()
 
@@ -212,7 +203,7 @@ def test_a_null_cap_never_blocks(tmp_path, monkeypatch):
 
 
 def test_the_subprocess_task_in_the_same_node_still_runs(tmp_path, monkeypatch):
-    """The agent is refused; `on.test.run` in the same node has a session row.
+    """The agent is refused; the subprocess in the same node has a session row.
 
     Budget-blocking a subprocess would strand the item mid-node for no saving.
     """
@@ -228,8 +219,8 @@ def test_the_subprocess_task_in_the_same_node_still_runs(tmp_path, monkeypatch):
             await _spend(database, wid, 25.0)
             await _run(database, rd, tracker, wid, _policy(work_item_usd=20.0))
             hooks = _hook_points(database, wid, "work")
-            assert "on.test.run" in hooks
-            assert "on.implementation.start" not in hooks
+            assert _SUITE_PATH in hooks
+            assert _AGENT_PATH not in hooks
         finally:
             await database.close()
 
@@ -289,7 +280,7 @@ def test_yesterdays_spend_does_not_count_against_todays_daily_cap(tmp_path, monk
             )
             await _run(database, rd, tracker, wid, _policy(daily_usd=100.0))
             assert not _budget_stopped(database, wid)
-            assert "on.implementation.start" in _hook_points(database, wid, "work")
+            assert _AGENT_PATH in _hook_points(database, wid, "work")
         finally:
             await database.close()
 
@@ -312,15 +303,15 @@ def test_a_fix_cycle_refused_for_budget_costs_no_attempt(tmp_path, monkeypatch):
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            wid = await _intake(database, rd, tracker, repo, _fixloop_template())
+            wid = await _intake(database, rd, tracker, repo, _fixloop_template(tmp_path))
             await _spend(database, wid, 25.0)
             result = await _run(database, rd, tracker, wid, _policy(work_item_usd=20.0))
             assert result == "needs_human"
             payload = _needs_human_payload(database, wid)
             assert payload["budget"]["scope"] == "work_item"
             # the measuring subprocess ran (it costs nothing); the fix agent did not
-            assert _hook_points(database, wid, "verify") == ["on.test.run"]
-            assert database.read(lambda c: store.read_counter(c, wid, "verify_fix_loop")) is None
+            assert _hook_points(database, wid, "verify") == ["verify.main.suite"]
+            assert database.read(lambda c: store.read_counter(c, wid, "verify.fix_loop")) is None
             types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, wid))]
             assert "fix_cycle_started" not in types
         finally:
@@ -339,21 +330,16 @@ def test_a_co_task_exception_is_logged_even_when_budget_wins(monkeypatch, caplog
         async def write(self, fn):
             return None
 
-    async def fake_dispatch_node(db, run_dirs, task, node, row, registry, worktree, **kw):
-        if task == "on.test.run":
+    async def fake_dispatch_node(db, run_dirs, task, node, row, worktree, **kw):
+        if task.task.id == "suite":
             raise RuntimeError("co-task blew up")
         return executor.BUDGET
 
     monkeypatch.setattr(dispatch_module, "dispatch_node", fake_dispatch_node)
-    node = {
-        "id": "work",
-        "tasks": ["on.implementation.start", "on.test.run"],
-        "gate_after": None,
-        "fix_loop": None,
-    }
+    node = v1_resolved([_work_node()]).nodes[0]
     with caplog.at_level("ERROR", logger="kraft.executor"):
         verdict, failed, excs = asyncio.run(
-            executor.measure_node(_NoopDb(), None, "w1", node, None, None, None)
+            executor.measure_node(_NoopDb(), None, "w1", node, None, None)
         )
     assert verdict == executor.BUDGET
     assert failed == [] and excs == []
