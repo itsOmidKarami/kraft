@@ -388,21 +388,37 @@ async def _run_one(
                 status = "waiting"
             elif review.state == "clean":
                 status = "done"
-            else:
+            elif review.state == "actionable":
                 # Actionable feedback is a failed task *with findings*, which is
                 # what enters the node's recovery and fix loop
-                # (`post-draft-feedback-uses-node-recovery-controls`). An error
-                # is the reviewer's own failure: failed, with nothing to fix.
+                # (`post-draft-feedback-uses-node-recovery-controls`).
                 status = "failed"
-                if review.state == "actionable":
-                    findings = [
-                        {
-                            "severity": "important",
-                            "message": f,
-                            "source_plugin": "mr.automated_review",
-                        }
-                        for f in review.findings
-                    ]
+                findings = [
+                    {
+                        "severity": "important",
+                        "message": f,
+                        "source_plugin": "mr.automated_review",
+                    }
+                    for f in review.findings
+                ]
+            else:
+                # The reviewer itself errored. That says nothing about the
+                # code, so it must not spend a repair or a fix cycle (Ruling
+                # 170, Kraft-sm2r2, 7a's "only a genuine repair outcome spends
+                # an attempt"): the same stop as a pipeline broken by the
+                # forge's own infrastructure, under its own named cause.
+                reason = f"the automated reviewer errored on {hook_point}: " + (
+                    review.detail or "no detail given"
+                )
+                await db.write(
+                    lambda c, r=reason: events.append(
+                        c,
+                        work_item_id,
+                        "automated_review_errored",
+                        {"node_id": node_id, "reason": r},
+                    )
+                )
+                status = "infra_stop"
         case "external_approval":
             # A missing approval is an ordinary pending state, never a failure
             # (`missing-external-approval-is-normal-pending-state`).

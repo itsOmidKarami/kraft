@@ -42,9 +42,9 @@ def _trail(run_forge, task="on.ci.poll") -> list[tuple[str, str | None, str | No
             "failed",
             ["rename `x` to `total`"],
         ),
-        # The reviewer itself broke: an ordinary task failure, with nothing
-        # for a fix loop to treat as review feedback.
-        (forge.ReviewResult("error", detail="reviewer bot crashed"), "failed", None),
+        # The reviewer itself broke: not feedback, so no finding and no
+        # failure a repair would spend on -- a stop for a person (Ruling 170).
+        (forge.ReviewResult("error", detail="reviewer bot crashed"), "infra_stop", None),
     ],
     ids=["pending", "clean", "actionable", "error"],
 )
@@ -53,7 +53,7 @@ async def test_automated_review_reports_ordinary_task_results(
 ):
     """`automated-review-task-uses-ordinary-task-results`: pending waits,
     clean passes, actionable fails *with its feedback as findings* (what the
-    node's recovery and fix loop read), error fails without any."""
+    node's recovery and fix loop read), and error stops without any."""
     fake = await _opened(forge.FakeForge(review_results=[result]), tmp_path)
 
     assert await run_forge(fake, "automated_review", "r1") == (expected, expected)

@@ -413,6 +413,26 @@ def test_a_template_cannot_configure_how_automated_review_is_read(key):
             v1_resolved([{"id": "feedback", "kind": "exec", "tasks": [authored]}])
 
 
+async def test_a_reviewer_error_stops_for_a_human_and_spends_no_repair(walk, item_on):
+    """Kraft-sm2r2, Ruling 170: a reviewer that errored said nothing about the
+    code, so -- unlike actionable feedback, which the test above repairs -- it
+    launches no repair and no fix cycle, and the stop names it."""
+    node = forge_node("feedback", "mr.automated_review")
+    node["on_failure"] = {"tasks": [{"id": "repair", "kind": "subprocess", "command": "true"}]}
+    node["fix_loop"] = {"tasks": [{"id": "fix", "kind": "subprocess", "command": "true"}]}
+    fake = forge.FakeForge(
+        review_results=[forge.ReviewResult("error", detail="reviewer bot crashed")]
+    )
+    it = await item_on([forge_node("open", "mr.open_draft"), node])
+
+    assert await walk(fake, it) == "needs_human"
+
+    assert [s["hook_point"] for s in it.sessions("feedback")] == ["feedback.main.feedback"]
+    assert not it.events("fix_cycle_started")
+    reason = it.events("work_item_needs_human")[-1]["payload"]["reason"]
+    assert "automated reviewer errored" in reason and "reviewer bot crashed" in reason
+
+
 # --- policy bounds the wait (Kraft-5p69g) --------------------------------------
 
 

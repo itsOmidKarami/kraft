@@ -194,14 +194,19 @@ async def stop_for_waiting(
 
 
 async def stop_for_infra(db, work_item_id: str, node: ResolvedNode) -> str:
-    """The persisted `ci_infra:<node_id>` retry cap is spent and the pipeline
-    is still red for a reason that is the forge's fault, not the branch's
-    code (Kraft-h81i, Kraft-s8ul) -- straight to needs_human, no fix cycle, no
-    on_failure repair: neither can fix a runner.
+    """Something outside the code broke and a repair cannot fix it: the
+    persisted `ci_infra:<node_id>` retry cap is spent on a pipeline red for
+    the forge's own reasons (Kraft-h81i, Kraft-s8ul), or the automated
+    reviewer errored (Ruling 170). Straight to needs_human, no fix cycle, no
+    on_failure repair, and the stop names whichever it was.
     """
     info = db.read(lambda c: events.read_after(c, 0, work_item_id))
     reason = next(
-        (e["payload"]["reason"] for e in reversed(info) if e["type"] == "ci_infra_exhausted"),
+        (
+            e["payload"]["reason"]
+            for e in reversed(info)
+            if e["type"] in ("ci_infra_exhausted", "automated_review_errored")
+        ),
         "CI infrastructure failed and retrying it did not recover",
     )
     await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason))
