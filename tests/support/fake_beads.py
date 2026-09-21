@@ -8,14 +8,26 @@ implementation of bd's CLI to keep in step. What bd's CLI actually does is
 pinned by the `e2e` tests that opt out of this fake and run the real binary.
 
 It remembers enough for callers to work: unique ids, intake/complete per
-workspace (`cwd`), and `search`/`ready`/`blocked_by` answered from that state.
+workspace, and `search`/`ready`/`blocked_by` answered from that state.
 `block()` adds an edge for a unit test that wants a blocked bead.
+
+A workspace is found the way bd finds one: the nearest `.beads/` at or above
+`cwd`. Where there is none, `intake` fails the way `bd create` does, and the
+readers answer `[]` the way the adapter does when bd exits non-zero -- so a
+unit test cannot pass on a bead bd would never have filed.
+`tests/test_support_harness.py` runs one scenario against this and real bd.
 """
 
 from __future__ import annotations
 
+import errno
 import itertools
+import json
 import os
+import subprocess
+from pathlib import Path
+
+import pytest
 
 
 class FakeBeads:
@@ -24,8 +36,26 @@ class FakeBeads:
         #: workspace (realpath of cwd) -> bead id -> bead
         self.workspaces: dict[str, dict[str, dict]] = {}
 
+    @staticmethod
+    def _spawn_in(cwd: str | None) -> None:
+        """`subprocess.run(cwd=...)` on a directory that does not exist raises
+        before bd ever runs: `intake` and `complete` let it through, the
+        readers answer `[]` on it."""
+        if cwd is not None and not os.path.isdir(cwd):
+            raise FileNotFoundError(errno.ENOENT, "No such file or directory", cwd)
+
+    @staticmethod
+    def _root(cwd: str | None) -> str | None:
+        """The directory holding the nearest `.beads/` at or above `cwd`, or
+        None -- also for a `cwd` that does not exist, which bd cannot run in."""
+        if cwd is not None and not os.path.isdir(cwd):
+            return None
+        here = Path(os.path.realpath(cwd or os.getcwd()))
+        return next((str(d) for d in (here, *here.parents) if (d / ".beads").is_dir()), None)
+
     def _ws(self, cwd: str | None) -> dict[str, dict]:
-        return self.workspaces.setdefault(os.path.realpath(cwd or os.getcwd()), {})
+        root = self._root(cwd)
+        return self.workspaces.setdefault(root, {}) if root else {}
 
     def all(self) -> dict[str, dict]:
         """Every bead, whichever workspace it was filed in."""
@@ -34,6 +64,10 @@ class FakeBeads:
     async def intake(
         self, title: str, *, description: str | None = None, cwd: str | None = None
     ) -> str:
+        self._spawn_in(cwd)
+        if self._root(cwd) is None:
+            # What the adapter raises for bd's own refusal (Kraft-ibwj).
+            raise RuntimeError("bd create failed (exit 1): Error: no beads database found")
         bead_id = f"TEST-fake{next(self._ids)}"
         self._ws(cwd)[bead_id] = {
             "id": bead_id,
@@ -47,6 +81,7 @@ class FakeBeads:
         return bead_id
 
     async def complete(self, bead_id: str, *, cwd: str | None = None) -> None:
+        self._spawn_in(cwd)
         bead = self._ws(cwd).get(bead_id)
         if bead is None:
             # `bd close` on an unknown id exits non-zero, and `complete` runs it
@@ -83,3 +118,60 @@ class FakeBeads:
     def block(self, bead_id: str, blocker_id: str, *, cwd: str | None = None) -> None:
         """`bd dep add bead_id blocker_id --type blocks`."""
         self._ws(cwd)[bead_id]["blocked_by"].append(blocker_id)
+
+
+#: Run a test that takes the `bd` fixture twice: `[fake]` in the unit tier,
+#: against the in-memory fake, and `[bd]` in the e2e job, against the real
+#: CLI. The switch is the `e2e("bd")` mark on the second case -- it is what
+#: makes the autouse `fake_beads` step aside -- not the parameter value, which
+#: only names the case. For the one real test each bd behaviour Kraft relies
+#: on keeps.
+ON_FAKE_AND_REAL_BD = pytest.mark.parametrize(
+    "bd", ["fake", pytest.param("bd", marks=pytest.mark.e2e("bd"))], indirect=True
+)
+
+
+class Bd:
+    """Bead state a test asserts on, read the same way on either tier: from
+    the in-memory fake when one is installed, from the real `bd` CLI when
+    not (`e2e("bd")`, or `KRAFT_TEST_REAL_BD=1`). The `bd` fixture
+    (tests/conftest.py) hands one out. Filing and searching beads is not
+    here: call `kraft.adapters.beads` itself, which is the fake or the real
+    adapter to match."""
+
+    def __init__(self, fake: FakeBeads | None) -> None:
+        self.fake = fake
+
+    def _cli(self, cwd, *args: str) -> str:
+        return subprocess.run(
+            ["bd", *args], cwd=cwd, capture_output=True, text=True, check=True
+        ).stdout
+
+    def init(self, path: Path) -> Path:
+        """Make `path` a beads workspace (`bd init`)."""
+        if self.fake is not None:
+            (Path(path) / ".beads").mkdir()
+        else:
+            self._cli(path, "init", "--prefix", "TEST")
+        return path
+
+    def status(self, bead_id: str, *, cwd) -> str:
+        """`bd show`'s status for a bead in `cwd`'s workspace (KeyError, or
+        CalledProcessError, when it is not there)."""
+        if self.fake is not None:
+            return self.fake._ws(str(cwd))[bead_id]["status"]
+        return json.loads(self._cli(cwd, "show", bead_id, "--json"))[0]["status"]
+
+    def ids(self, *, cwd) -> list[str]:
+        """Every bead id in `cwd`'s workspace, closed ones included."""
+        if self.fake is not None:
+            return list(self.fake._ws(str(cwd)))
+        out = self._cli(cwd, "list", "--json", "--status", "all")
+        return [r["id"] for r in json.loads(out[out.index("[") :])]
+
+    def block(self, bead_id: str, blocker_id: str, *, cwd) -> None:
+        """`bd dep add bead_id blocker_id --type blocks`."""
+        if self.fake is not None:
+            self.fake.block(bead_id, blocker_id, cwd=str(cwd))
+        else:
+            self._cli(cwd, "dep", "add", bead_id, blocker_id, "--type", "blocks")

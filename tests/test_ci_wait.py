@@ -231,7 +231,11 @@ def test_a_v1_item_is_re_entered_rather_than_stranded_waiting(tmp_path, monkeypa
         )
         from kraft.api import deps as api_deps
 
-        monkeypatch.setattr(api_deps, "spawn", lambda *a, **k: spawned.append(1))
+        def spawn(app, wid, coro):
+            spawned.append(1)
+            api_deps.discard(coro)  # never run: close it, or it leaks unawaited
+
+        monkeypatch.setattr(api_deps, "spawn", spawn)
         await ci_wait.tick(app)
 
     _run(lambda: _stub(tmp_path), body)

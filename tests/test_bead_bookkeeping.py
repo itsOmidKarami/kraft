@@ -10,14 +10,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 from support.harness import make_repo, v1_named_chain
 
 from kraft import db, executor
+from kraft.adapters import beads
 from kraft.paths import RunDirs
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -30,43 +29,15 @@ def _quick_task(tmp_path):
     return v1_named_chain(tmp_path / "templates", agent_command=_FAKE)
 
 
-def _bd_status(repo, bead_id) -> str:
-    out = subprocess.run(
-        ["bd", "show", bead_id, "--json"],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    return json.loads(out)[0]["status"]
-
-
-def _bd_create(repo, title) -> str:
-    out = subprocess.run(
-        ["bd", "create", "--json", "--title", title, "--type", "task"],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    return json.loads(out[out.index("{") :])["id"]
-
-
-@pytest.mark.e2e("bd")
-def test_completion_closes_every_sub_bead_the_item_states(tmp_path):
+def test_completion_closes_every_sub_bead_the_item_states(bd, tmp_path):
     """Kraft-p8q1: the sub-beads a work item states via `implements_beads` close
     with it, not just the tracking bead. Passed explicitly: the description is
     no longer parsed for ids."""
-    tracker = make_repo(tmp_path)
-    # `Kraft-` prefix so the ids the extractor regex matches (`Kraft-[a-z0-9]+`)
-    # are the same ids this repo's own workspace actually has beads for.
-    subprocess.run(
-        ["bd", "init", "--prefix", "Kraft"], cwd=tracker, check=True, capture_output=True
-    )
-    sub_a = _bd_create(tracker, "sub task a")
-    sub_b = _bd_create(tracker, "sub task b")
+    tracker = bd.init(make_repo(tmp_path))
 
     async def scenario():
+        sub_a = await beads.intake("sub task a", cwd=str(tracker))
+        sub_b = await beads.intake("sub task b", cwd=str(tracker))
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
@@ -91,22 +62,21 @@ def test_completion_closes_every_sub_bead_the_item_states(tmp_path):
                 registry=None,
             )
             assert result == "completed"
-            assert _bd_status(tracker, sub_a) == "closed"
-            assert _bd_status(tracker, sub_b) == "closed"
+            assert bd.status(sub_a, cwd=tracker) == "closed"
+            assert bd.status(sub_b, cwd=tracker) == "closed"
             tracking_row = database.read(
                 lambda c: c.execute(
                     "SELECT bead_id FROM work_items WHERE id = ?", (wid,)
                 ).fetchone()
             )
-            assert _bd_status(tracker, tracking_row["bead_id"]) == "closed"
+            assert bd.status(tracking_row["bead_id"], cwd=tracker) == "closed"
         finally:
             await database.close()
 
     asyncio.run(scenario())
 
 
-@pytest.mark.e2e("bd")
-def test_item_filed_while_bd_was_down_still_gets_a_bead_by_completion(tmp_path, monkeypatch):
+def test_item_filed_while_bd_was_down_still_gets_a_bead_by_completion(bd, tmp_path, monkeypatch):
     """Kraft-dr3n: bd being unavailable at intake time is a degrade, not a
     permanent hole -- an item that completes still ends up with a closed
     bead, filed late rather than never."""
@@ -134,9 +104,7 @@ def test_item_filed_while_bd_was_down_still_gets_a_bead_by_completion(tmp_path, 
             )
 
             # bd shows up before completion -- give the repo a workspace now.
-            subprocess.run(
-                ["bd", "init", "--prefix", "LATE"], cwd=repo, check=True, capture_output=True
-            )
+            bd.init(repo)
 
             result = await executor.run(
                 database,
@@ -151,7 +119,7 @@ def test_item_filed_while_bd_was_down_still_gets_a_bead_by_completion(tmp_path, 
                 ).fetchone()
             )
             assert row["bead_id"], "no bead was filed at completion"
-            assert _bd_status(repo, row["bead_id"]) == "closed"
+            assert bd.status(row["bead_id"], cwd=repo) == "closed"
         finally:
             await database.close()
 

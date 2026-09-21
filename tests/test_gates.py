@@ -1,10 +1,7 @@
 import asyncio
-import json
-import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 from support.harness import isolated_bd, make_repo, v1_named_chain
 
 from kraft import db, events, executor, policy, store
@@ -32,13 +29,6 @@ def _payloads(database, wid, etype):
         for e in database.read(lambda c: events.read_after(c, 0, wid))
         if e["type"] == etype
     ]
-
-
-def _bd_status(repo, bead_id):
-    out = subprocess.run(
-        ["bd", "show", bead_id, "--json"], cwd=repo, capture_output=True, text=True, check=True
-    ).stdout
-    return json.loads(out)[0]["status"]
 
 
 def _launch(tmp_path, **repo_entry):
@@ -92,7 +82,7 @@ def test_walk_stops_at_first_gate(tmp_path):
     asyncio.run(scenario())
 
 
-def _walk_default_chain_approving_every_gate(tmp_path, launch):
+def _walk_default_chain_approving_every_gate(tmp_path, launch, bd):
     """Walk the shipped `default` chain, approving each gate as it opens, to
     wherever it first stops. Returns what a test asserts on."""
     tracker = isolated_bd(tmp_path)
@@ -145,7 +135,7 @@ def _walk_default_chain_approving_every_gate(tmp_path, launch):
             return {
                 "result": result,
                 "node": row["current_node_id"],
-                "bead_status": _bd_status(tracker, row["bead_id"]),
+                "bead_status": bd.status(row["bead_id"], cwd=tracker),
                 "reason": _payloads(database, wid, "work_item_needs_human")[-1]["reason"],
                 "types": _events(database, wid),
                 "completed": [p["node_id"] for p in _payloads(database, wid, "node_completed")],
@@ -156,9 +146,8 @@ def _walk_default_chain_approving_every_gate(tmp_path, launch):
     return asyncio.run(scenario())
 
 
-@pytest.mark.e2e("bd")
 def test_approving_the_gates_walks_the_default_chain_to_its_first_unimplemented_node(
-    tmp_path, monkeypatch
+    bd, tmp_path, monkeypatch
 ):
     """Was `test_approving_all_four_gates_completes_chain`. The V1 `default`
     chain cannot complete yet, and this pins exactly where it stops rather than
@@ -170,7 +159,7 @@ def test_approving_the_gates_walks_the_default_chain_to_its_first_unimplemented_
     fake = _forge.FakeForge(ci_states=["success"])
     monkeypatch.setattr(_forge.run, "resolve", lambda name: fake)
     walked = _walk_default_chain_approving_every_gate(
-        tmp_path, _launch(tmp_path, setup_command="", forge="github")
+        tmp_path, _launch(tmp_path, setup_command="", forge="github"), bd
     )
     assert walked["result"] == "needs_human"
     assert walked["node"] == "merge_request_feedback"
@@ -181,14 +170,13 @@ def test_approving_the_gates_walks_the_default_chain_to_its_first_unimplemented_
     assert fake.opened, "the draft merge request was never opened"
 
 
-@pytest.mark.e2e("bd")
-def test_a_repo_on_the_fake_forge_walks_the_default_chain_to_the_same_stop(tmp_path):
+def test_a_repo_on_the_fake_forge_walks_the_default_chain_to_the_same_stop(bd, tmp_path):
     """Ruling 147: `forge: fake` on a repo is how `just dev` reaches the merge-
     request half of the default chain. Nothing is monkeypatched here -- the real
     `backend_for`/`resolve` pair has to turn the repo's `fake` into `FakeForge`,
     or the walk stops at `draft_merge_request` for want of a forge."""
     walked = _walk_default_chain_approving_every_gate(
-        tmp_path, _launch(tmp_path, setup_command="", forge="fake")
+        tmp_path, _launch(tmp_path, setup_command="", forge="fake"), bd
     )
     assert "draft_merge_request" in walked["completed"], walked["reason"]
     assert walked["node"] == "merge_request_feedback"

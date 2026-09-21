@@ -78,10 +78,24 @@ testpaths = ["tests", "plugins/kraft-lite/tests"]
 # current. A thread-based timeout dumps every stack and kills the process.
 timeout = 120
 timeout_method = "thread"
+# `async def test_*` runs under anyio's plugin (a transitive dependency, already
+# installed) without a marker on each test; `tests/conftest.py` pins the
+# backend to asyncio and provides the async `database` fixture. The older
+# `asyncio.run(scenario())` style inside a sync test still works unchanged.
+anyio_mode = "auto"
+# A forgotten `await` is a test that asserts on nothing: make Python's
+# "never awaited" warning fail the test instead of scrolling past. CPython
+# raises it inside the coroutine's finalizer, where it becomes an unraisable
+# exception, hence the second line (pinned in tests/test_suite_config.py).
+filterwarnings = [
+    "error:coroutine .* was never awaited:RuntimeWarning",
+    "error:Exception ignored while finalizing coroutine:pytest.PytestUnraisableExceptionWarning",
+]
 markers = [
     "e2e(*clis): uses a real external CLI (bd, claude, ...) to check a contract; skips unless each named CLI is on PATH (claude also needs KRAFT_E2E=1)",
     "beads_adapter: tests of kraft.adapters.beads itself; keeps the real adapter, with bd stubbed, instead of the suite's in-memory fake",
     "slow: subprocess servers, real uvicorn, multi-second sleeps -- included in the main CI test job, just kept separable for local runs",
+    "api_client(**kwargs): options for the `client` fixture, passed to support.api._client (peer, env, default_setup)",
     "real_executor: opts a test out of a suite-level executor stub; it drives the real executor and real subprocesses",
 ]
 

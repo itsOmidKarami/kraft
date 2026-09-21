@@ -1,6 +1,5 @@
 import asyncio
 import json
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -32,19 +31,7 @@ def _quick_task():
     )
 
 
-def _bd_status(repo, bead_id):
-    out = subprocess.run(
-        ["bd", "show", bead_id, "--json"],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    return json.loads(out)[0]["status"]
-
-
-@pytest.mark.e2e("bd")
-def test_intake_creates_bead_and_row(tmp_path):
+def test_intake_creates_bead_and_row(bd, tmp_path):
     tracker = isolated_bd(tmp_path)
 
     async def scenario():
@@ -71,7 +58,7 @@ def test_intake_creates_bead_and_row(tmp_path):
             stored = json.loads(row["materialized_chain"])
             assert [n["id"] for n in stored["chain"]["nodes"]] == ["implementation"]
             assert row["current_node_id"] is None
-            assert _bd_status(tracker, row["bead_id"]) in ("open", "in_progress")
+            assert bd.status(row["bead_id"], cwd=tracker) == "open"
         finally:
             await database.close()
 
@@ -118,7 +105,6 @@ def test_implements_beads_is_taken_from_the_argument(tmp_path):
     assert json.loads(row["implements_beads"]) == ["Kraft-abc12"]
 
 
-@pytest.mark.e2e("bd")
 def test_intake_bead_failure_still_writes_a_row(tmp_path):
     """Kraft-7gy: a bd failure degrades intake, it does not fail it — the row is
     written with bead_id NULL rather than raising. See tests/test_bd_workspace.py

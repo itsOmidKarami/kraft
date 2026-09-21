@@ -6,7 +6,6 @@ empty diff from a failed one approves unreviewed code.
 
 from __future__ import annotations
 
-import os
 import shutil
 import sqlite3
 import subprocess
@@ -14,10 +13,13 @@ import time
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
-from support.harness import fake_templates_dir, isolated_bd, make_repo
+from support.harness import make_repo
 
 from kraft.paths import RunDirs
+
+#: No default repo entry for an unconnected repo, as before this used the shared client.
+pytestmark = pytest.mark.api_client(default_setup=False)
+
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
@@ -25,18 +27,6 @@ _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 
 def _write(path, text):
     path.write_text(text)
-
-
-def _make_client(tmp_path, monkeypatch):
-    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))))
-    monkeypatch.setenv(
-        "KRAFT_FRONTEND_DIST", os.environ.get("KRAFT_FRONTEND_DIST") or str(tmp_path / "no-dist")
-    )
-    import kraft.api as api
-
-    return TestClient(api.app, client=("127.0.0.1", 54321))
 
 
 def _wait_for_completion(client, wid, timeout=120):
@@ -47,12 +37,6 @@ def _wait_for_completion(client, wid, timeout=120):
             return
         time.sleep(0.2)
     raise AssertionError("work item never completed")
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    with _make_client(tmp_path, monkeypatch) as c:
-        yield c
 
 
 @pytest.fixture

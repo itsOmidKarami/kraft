@@ -6,10 +6,13 @@ from pathlib import Path
 
 import pytest
 import yaml
-from support.api_settings import _client
 from support.harness import fake_templates_dir
 
 from kraft import config
+
+#: No default repo entry for an unconnected repo (`support.api._client`): these read real config.
+pytestmark = pytest.mark.api_client(default_setup=False)
+
 
 _FAKE_AGENT = Path(__file__).resolve().parents[1] / "support" / "fake_agent.py"
 
@@ -17,12 +20,6 @@ _FAKE_AGENT = Path(__file__).resolve().parents[1] / "support" / "fake_agent.py"
 @pytest.fixture
 def templates_dir(tmp_path):
     return fake_templates_dir(tmp_path, "claude")
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch, templates_dir):
-    with _client(tmp_path, monkeypatch, templates_dir) as c:
-        yield c
 
 
 def test_get_theme_defaults_to_nocturne_dark(client):
@@ -109,45 +106,45 @@ def test_binding_off_localhost_without_a_password_is_refused(client):
     assert client.get("/api/access").json()["bind"] == "127.0.0.1"
 
 
-def test_a_lan_bind_locks_the_api_until_a_login(tmp_path, monkeypatch, templates_dir):
-    with _client(tmp_path, monkeypatch, templates_dir, host="0.0.0.0") as client:
-        enabled = client.put("/api/access", json={"bind": "0.0.0.0", "password": "hunter2"})
-        assert enabled.status_code == 200
-        assert enabled.json()["auth_required"] is True
+@pytest.mark.api_client(host="0.0.0.0")
+def test_a_lan_bind_locks_the_api_until_a_login(client):
+    enabled = client.put("/api/access", json={"bind": "0.0.0.0", "password": "hunter2"})
+    assert enabled.status_code == 200
+    assert enabled.json()["auth_required"] is True
 
-        client.cookies.clear()
-        # /access is itself behind the wall it just raised
-        assert client.get("/api/access").status_code == 401
-        assert client.get("/api/work-items").status_code == 401
-        # health stays reachable so a monitor does not need a session
-        assert client.get("/api/health").status_code == 200
+    client.cookies.clear()
+    # /access is itself behind the wall it just raised
+    assert client.get("/api/access").status_code == 401
+    assert client.get("/api/work-items").status_code == 401
+    # health stays reachable so a monitor does not need a session
+    assert client.get("/api/health").status_code == 200
 
-        assert client.post("/api/login", json={"password": "wrong"}).status_code == 401
-        assert client.post("/api/login", json={"password": "hunter2"}).status_code == 200
-        assert client.get("/api/work-items").status_code == 200
+    assert client.post("/api/login", json={"password": "wrong"}).status_code == 401
+    assert client.post("/api/login", json={"password": "hunter2"}).status_code == 200
+    assert client.get("/api/work-items").status_code == 200
 
-        sessions = client.get("/api/sessions").json()["sessions"]
-        assert len(sessions) == 1 and sessions[0]["current"] is True
-        # the cookie's own value is never stored, only its hash
-        cookie = client.cookies["kraft_session"]
-        assert sessions[0]["id"] != cookie
+    sessions = client.get("/api/sessions").json()["sessions"]
+    assert len(sessions) == 1 and sessions[0]["current"] is True
+    # the cookie's own value is never stored, only its hash
+    cookie = client.cookies["kraft_session"]
+    assert sessions[0]["id"] != cookie
 
-        assert client.delete("/api/sessions/nope").status_code == 404
-        # revoking your own session logs you straight back out
-        assert client.delete(f"/api/sessions/{sessions[0]['id']}").status_code == 204
-        assert client.get("/api/work-items").status_code == 401
+    assert client.delete("/api/sessions/nope").status_code == 404
+    # revoking your own session logs you straight back out
+    assert client.delete(f"/api/sessions/{sessions[0]['id']}").status_code == 204
+    assert client.get("/api/work-items").status_code == 401
 
 
-def test_changing_the_password_revokes_every_session(tmp_path, monkeypatch, templates_dir):
-    with _client(tmp_path, monkeypatch, templates_dir, host="0.0.0.0") as client:
-        client.put("/api/access", json={"bind": "0.0.0.0", "password": "first"})
-        client.post("/api/login", json={"password": "first"})
-        assert client.get("/api/work-items").status_code == 200
+@pytest.mark.api_client(host="0.0.0.0")
+def test_changing_the_password_revokes_every_session(client):
+    client.put("/api/access", json={"bind": "0.0.0.0", "password": "first"})
+    client.post("/api/login", json={"password": "first"})
+    assert client.get("/api/work-items").status_code == 200
 
-        client.put("/api/access", json={"password": "second"})
-        assert client.get("/api/work-items").status_code == 401
-        assert client.post("/api/login", json={"password": "first"}).status_code == 401
-        assert client.post("/api/login", json={"password": "second"}).status_code == 200
+    client.put("/api/access", json={"password": "second"})
+    assert client.get("/api/work-items").status_code == 401
+    assert client.post("/api/login", json={"password": "first"}).status_code == 401
+    assert client.post("/api/login", json={"password": "second"}).status_code == 200
 
 
 def test_the_password_is_stored_only_as_a_scrypt_hash(client, templates_dir):

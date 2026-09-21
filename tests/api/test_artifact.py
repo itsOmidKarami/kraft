@@ -7,7 +7,6 @@ indexer has caught up.
 
 from __future__ import annotations
 
-import os
 import shutil
 import time
 from pathlib import Path
@@ -15,11 +14,14 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
-from fastapi.testclient import TestClient
-from support.harness import fake_templates_dir, isolated_bd, make_repo, v1_named_chain
+from support.harness import fake_templates_dir, make_repo, v1_named_chain
 
 from kraft import api
 from kraft.api.routes import board
+
+#: No default repo entry for an unconnected repo, as before this used the shared client.
+pytestmark = pytest.mark.api_client(default_setup=False)
+
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
@@ -58,19 +60,14 @@ def _templates(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(_templates(tmp_path)))
-    # No operator overlay: the bundled method files are what the hook resolves.
-    monkeypatch.setenv("KRAFT_SKILLS_DIR", str(tmp_path / "no-skills"))
-    monkeypatch.setenv(
-        "KRAFT_FRONTEND_DIST", os.environ.get("KRAFT_FRONTEND_DIST") or str(tmp_path / "no-dist")
-    )
-    import kraft.api as api
+def templates_dir(tmp_path):
+    return _templates(tmp_path)
 
-    with TestClient(api.app, client=("127.0.0.1", 54321)) as c:
-        yield c
+
+@pytest.fixture(autouse=True)
+def _no_skill_overlay(tmp_path, monkeypatch):
+    """No operator overlay: the bundled method files are what the hook resolves."""
+    monkeypatch.setenv("KRAFT_SKILLS_DIR", str(tmp_path / "no-skills"))
 
 
 def _await_gate(client, wid, gate, timeout=60):

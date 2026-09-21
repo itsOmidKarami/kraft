@@ -13,7 +13,7 @@ import asyncio
 from pathlib import Path
 
 import pytest
-from conftest import _REAL_AGENT_BINARIES
+from support.harness import REAL_AGENT_BINARIES as _REAL_AGENT_BINARIES
 
 import kraft.adapters.subprocess as sp_mod
 

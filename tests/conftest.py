@@ -7,11 +7,15 @@ from pathlib import Path
 
 import httpx
 import pytest
+from support import api as api_support
 from support import harness
-from support.fake_beads import FakeBeads
-from support.harness import fake_templates_dir, isolated_bd
+from support.fake_beads import Bd, FakeBeads
+from support.harness import REAL_AGENT_BINARIES as _REAL_AGENT_BINARIES
+from support.harness import fake_templates_dir, isolated_bd, make_repo
 
-from kraft import client
+from kraft import client as kraft_client
+from kraft import db
+from kraft.paths import RunDirs
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
@@ -70,15 +74,6 @@ def _default_setup_command_for_tests_without_a_launch_context(monkeypatch):
 
     monkeypatch.setattr(builtins_mod, "ensure_worktree", _ensure_worktree_with_default)
     monkeypatch.setattr(builtins_mod, "prepare_runtime", _prepare_runtime_with_default)
-
-
-#: Agent CLIs this suite must never actually launch. Kraft-jxu39: the only reason
-#: a stray real launch has been cheap so far is that `_isolated_kraft_home`
-#: redirects `HOME` to an empty temp dir and this machine has no
-#: `ANTHROPIC_API_KEY`/`CLAUDE_CODE_OAUTH_TOKEN`, so the binary resolves and
-#: exits in milliseconds. On a developer machine with a key set the same call is
-#: a real agent turn: network, tokens, tens of seconds.
-_REAL_AGENT_BINARIES = frozenset({"claude", "codex", "gemini", "amp", "cursor-agent"})
 
 
 @pytest.fixture(autouse=True)
@@ -216,6 +211,18 @@ def fake_beads(request, monkeypatch):
     )
 
 
+@pytest.fixture
+def bd(request, fake_beads) -> Bd:
+    """Bead state to assert on -- `bd.status(id, cwd=...)`, `bd.ids(cwd=...)`,
+    `bd.block(id, blocker, cwd=...)`, `bd.init(path)` -- answered by the fake
+    in the unit tier and by the real CLI under `e2e("bd")`, so one test body
+    serves both (`support.fake_beads.ON_FAKE_AND_REAL_BD`). A `[bd]` case that
+    lost its `e2e("bd")` mark would quietly run against the fake: refused."""
+    if getattr(request, "param", None) == "bd" and fake_beads is not None:
+        pytest.fail(f"{request.node.nodeid}: a [bd] case must be marked e2e('bd')")
+    return Bd(fake_beads)
+
+
 @pytest.fixture(autouse=True)
 def _contain_hardened_git_env():
     """`sandbox.harden_host_git_env` pins `GIT_CONFIG_*` on the server's own
@@ -269,6 +276,113 @@ def _isolated_kraft_home(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def run_dirs(tmp_path) -> RunDirs:
+    """`tmp_path/run` as a `RunDirs`, directories created: what the executor
+    and every `store` reader take alongside `database`."""
+    return RunDirs(tmp_path / "run").ensure()
+
+
+@pytest.fixture
+async def database(run_dirs):
+    """An open, migrated `db.Database` at `run_dirs.db`, closed after the test.
+
+    Replaces the `async def scenario(): open / try / finally close` +
+    `asyncio.run(scenario())` block. Write the test as `async def` and take
+    the fixture; anyio runs the fixture and the test on one event loop, which
+    the `Database` writer task needs (it is bound to the loop that opened it):
+
+        async def test_x(database):
+            await mk_item(database)
+            await database.write(lambda c: store.create_session(c, ...))
+            assert database.read(lambda c: ...) == ...
+
+    A test that also needs the logs/results/worktrees dirs takes `run_dirs`:
+    it is the same `RunDirs` this database lives in.
+    """
+    database = await db.Database.open(run_dirs.db)
+    try:
+        yield database
+    finally:
+        await database.close()
+
+
+@pytest.fixture
+def item_on(request, database, run_dirs):
+    """`await item_on(chain, node, ...)`: a V1 work item in `database`, on
+    `chain`, standing at `node` -- `support.harness.make_item` with the
+    database, run dirs and (unless `repo=` is given) the `repo` fixture
+    filled in. Returns a `support.harness.Item`:
+
+        async def test_x(item_on, run_dirs, database):
+            it = await item_on(v1_named_chain(run_dirs.base / "t"), "implementation")
+            await it.session("s1", "implementation.main.implement", "done")
+            ...
+            assert it.status() == "completed"
+            assert [e["payload"] for e in it.events("node_completed")] == [...]
+    """
+
+    async def factory(chain, node=None, *, repo=None, **kwargs):
+        repo = repo if repo is not None else request.getfixturevalue("repo")
+        return await harness.make_item(database, run_dirs, chain, node, repo=repo, **kwargs)
+
+    return factory
+
+
+@pytest.fixture
+def templates_dir(tmp_path) -> Path:
+    """`KRAFT_TEMPLATES_DIR` for the `client` fixture: `fake_templates_dir` with
+    every agent on `fixtures/fake-claude.sh`. A file that needs another shape
+    (`noop_verify=True`, planning hooks) overrides this fixture and `client`
+    picks its version up."""
+    return fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
+
+
+@pytest.fixture
+def repo(tmp_path) -> Path:
+    """A committed copy of `tests/support/sample_repo` (`make_repo`)."""
+    return make_repo(tmp_path)
+
+
+@pytest.fixture
+def client(request, tmp_path, monkeypatch, templates_dir):
+    """A started `TestClient` on the Kraft app (lifespan entered), hermetic
+    under `tmp_path`: its own run dir, bd workspace and `templates_dir`.
+    Replaces `with _client(tmp_path, monkeypatch) as client:`.
+
+        def test_x(client, repo):
+            wid = client.post("/api/work-items", json={"repo": str(repo), ...}).json()["id"]
+
+    Options (`support.api._client`'s keywords) go on a marker, per test or per
+    module (`pytestmark = pytest.mark.api_client(...)`); a test's own mark
+    adds to its module's:
+
+        @pytest.mark.api_client(peer=("10.0.0.2", 1), env={"KRAFT_INDEX_REPOS": "..."})
+        @pytest.mark.api_client(default_setup=False)   # a test about repo config
+        @pytest.mark.api_client(host="0.0.0.0")        # the locked-down posture
+        @pytest.mark.api_client(bd_workspace=False)    # no KRAFT_BD_CWD
+
+    Env a lifespan reads at startup that depends on another fixture goes in a
+    module-level autouse fixture: autouse fixtures are set up first. This is
+    the one `client` fixture: a file overrides `templates_dir`, not `client`.
+
+    Monkeypatch what the app reads at request time inside the test; patch
+    anything the lifespan reads at startup in a fixture the test lists before
+    `client`. The run dir is `tmp_path / "run"` (`support.api._set_status`
+    and friends find it through `KRAFT_RUN_DIR`).
+    """
+    # Every `api_client` mark applies, the closest winning key by key: a
+    # module's `pytestmark` sets the file's defaults, a test's own mark adds to
+    # them.
+    options = {}
+    for mark in reversed(list(request.node.iter_markers("api_client"))):
+        options |= mark.kwargs
+    with api_support._client(
+        tmp_path, monkeypatch, templates_dir=templates_dir, **options
+    ) as test_client:
+        yield test_client
+
+
+@pytest.fixture
 def app(tmp_path, monkeypatch):
     """The app wired to client.transport.http(), with its lifespan entered per call.
 
@@ -299,7 +413,7 @@ def app(tmp_path, monkeypatch):
             await self._ctx.__aexit__(*exc)
 
     monkeypatch.setattr(
-        client.transport,
+        kraft_client.transport,
         "http",
         lambda: Lifespan(transport=httpx.ASGITransport(app=api.app), base_url="http://kraft"),
     )

@@ -7,7 +7,9 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -16,6 +18,17 @@ from kraft.templates import Registry, load_registry
 
 _SUPPORT = Path(__file__).parent
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+#: Agent CLIs this suite must never actually launch (tests/conftest.py refuses
+#: them). Kraft-jxu39: the only reason a stray real launch has been cheap so far
+#: is that `_isolated_kraft_home` redirects `HOME` to an empty temp dir and this
+#: machine has no `ANTHROPIC_API_KEY`/`CLAUDE_CODE_OAUTH_TOKEN`, so the binary
+#: resolves and exits in milliseconds. On a developer machine with a key set the
+#: same call is a real agent turn: network, tokens, tens of seconds. Here, not in
+#: the conftest, so a test can import it without `import conftest`, which is
+#: ambiguous now the repo root has a conftest.py too.
+REAL_AGENT_BINARIES = frozenset({"claude", "codex", "gemini", "amp", "cursor-agent"})
 
 
 #: Commits are made at a fixed time so that building the same tree twice gives
@@ -45,7 +58,7 @@ def make_repo(tmp_path: Path, name: str = "sample") -> Path:
     """A committed copy of `sample_repo`. Built once per process and copied,
     the way `isolated_bd` is: five git spawns a call were ~15% of the suite's
     git (Kraft-qmhfc). Commits use `_FIXED_DATE`, so a copy carries the same
-    SHAs a fresh build would."""
+    SHAs a fresh build would, and its index is refreshed, so it reads clean."""
     global _repo_template
     if _repo_template is None:
         tpl = Path(tempfile.mkdtemp(prefix="kraft-repo-tpl-")) / "sample"
@@ -59,6 +72,10 @@ def make_repo(tmp_path: Path, name: str = "sample") -> Path:
         _repo_template = tpl
     dest = tmp_path / name
     shutil.copytree(_repo_template, dest, symlinks=True)
+    # The copy's index still carries the template's stat data (inode, mtime),
+    # so plumbing that does not refresh -- `git diff-index HEAD` -- would call
+    # every tracked file modified. A fresh build would not.
+    _git(dest, "update-index", "-q", "--refresh")
     return dest
 
 
@@ -531,26 +548,40 @@ def e2e_templates_dir(tmp_path: Path) -> Path:
 # column yet (Task 5), and there is deliberately no legacy fallback to walk.
 
 
-def v1_resolved(nodes: list[dict], *, chain_id: str = "t", steering: dict[str, str] | None = None):
-    """A `ResolvedChain` over `nodes` (authored V1 node mappings) -- what
-    `executor.intake` takes, and what `v1_chain` materializes. `steering` is
-    the profile text a library would have resolved (`ResolvedChain.steering`)."""
+def v1_resolved(
+    nodes: list[dict] | str, *, chain_id: str = "t", steering: dict[str, str] | None = None
+):
+    """A `ResolvedChain` over `nodes` (authored V1 node mappings, or the same
+    list as YAML text) -- what `executor.intake` takes, and what `v1_chain`
+    materializes. `steering` is the profile text a library would have resolved
+    (`ResolvedChain.steering`)."""
     from kraft.templates.models import Chain, ResolvedChain
 
+    if isinstance(nodes, str):
+        nodes = yaml.safe_load(nodes)
     return ResolvedChain.from_chain(
         Chain.model_validate({"id": chain_id, "nodes": nodes}), steering=steering
     )
 
 
-def v1_chain(
-    nodes: list[dict], *, repo: Path | str, chain_id: str = "t", steering: dict | None = None
-):
-    """A `MaterializedChain` over `nodes` (authored V1 node mappings), bound to
-    a single-repository target on `repo`."""
+def v1_chain(nodes, *, repo: Path | str, chain_id: str = "t", steering: dict | None = None):
+    """A `MaterializedChain` bound to a single-repository target on `repo`.
+
+    `nodes` is authored V1 node mappings, the same list as YAML text, or an
+    already-resolved `ResolvedChain` (e.g. `v1_named_chain(...)` for a shipped
+    chain). A `MaterializedChain` passes through unchanged."""
     from kraft.policy import InstancePolicy, InstancePolicyInput
     from kraft.templates.environment import Repository, WorkItemTarget
+    from kraft.templates.models import MaterializedChain, ResolvedChain
 
-    return v1_resolved(nodes, chain_id=chain_id, steering=steering).materialize(
+    if isinstance(nodes, MaterializedChain):
+        return nodes
+    resolved = (
+        nodes
+        if isinstance(nodes, ResolvedChain)
+        else v1_resolved(nodes, chain_id=chain_id, steering=steering)
+    )
+    return resolved.materialize(
         target=WorkItemTarget.for_repository(Repository(id="target", path=str(repo))),
         effective_policy=InstancePolicy.from_input(InstancePolicyInput.model_validate({})),
     )
@@ -578,6 +609,130 @@ def v1_item(database, chain, *, repo: Path | str, wid: str = "w1", title: str = 
             **kwargs,
         )
     )
+
+
+@dataclass
+class Item:
+    """One V1 work item in `database`, as `make_item` filed it. The readbacks
+    most executor tests assert on, and `session` to seed a worker session."""
+
+    database: Any
+    run_dirs: Any
+    id: str
+    chain: Any
+    repo: Path
+
+    @property
+    def worktree(self) -> Path:
+        return self.run_dirs.worktrees / self.id
+
+    def row(self) -> dict:
+        return dict(
+            self.database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (self.id,)).fetchone()
+            )
+        )
+
+    def status(self) -> str:
+        return self.row()["status"]
+
+    def events(self, type: str | None = None) -> list[dict]:
+        from kraft import events
+
+        evts = self.database.read(lambda c: events.read_after(c, 0, self.id))
+        return [dict(e) for e in evts if type is None or e["type"] == type]
+
+    def sessions(self, node: str | None = None) -> list[dict]:
+        """This item's worker_sessions rows, oldest first, optionally one node's."""
+        rows = self.database.read(
+            lambda c: c.execute(
+                "SELECT * FROM worker_sessions WHERE work_item_id = ? ORDER BY created_at",
+                (self.id,),
+            ).fetchall()
+        )
+        return [dict(r) for r in rows if node is None or r["node_id"] == node]
+
+    async def session(
+        self,
+        sid: str,
+        path: str,
+        status: str | None = None,
+        *,
+        node: str | None = None,
+        running: tuple[int, float] | None = None,
+        **kwargs,
+    ):
+        """Seed one worker session through the real store writers.
+
+        `path` is the task path (`"implementation.main.implement"`), which is
+        also the session's hook point; its node is the path's first segment.
+        A path with no dots (`"escalation"`) runs on `node`, or the item's
+        current node. `running=(pid, start_time)` marks it running;
+        `status` then exits it (`"done"`, `"failed"`, ...). `kwargs` go to
+        `store.create_session` (`round`, `head_sha`, `thread`, `command`).
+        Returns what `create_session` returns: `(id, log_path, result_path)`.
+        """
+        from kraft import store
+
+        node_id = node or (path.split(".")[0] if "." in path else self.row()["current_node_id"])
+        created = await self.database.write(
+            lambda c: store.create_session(
+                c,
+                id=sid,
+                work_item_id=self.id,
+                node_id=node_id,
+                hook_point=path,
+                log_path=str(self.run_dirs.logs / f"{sid}.log"),
+                result_path=str(self.run_dirs.results / f"{sid}.json"),
+                **kwargs,
+            )
+        )
+        if running is not None:
+            await self.database.write(lambda c: store.session_running(c, sid, *running))
+        if status is not None:
+            await self.database.write(lambda c: store.session_exited(c, sid, status))
+        return created
+
+
+async def make_item(
+    database,
+    run_dirs,
+    chain,
+    node: str | None = None,
+    *,
+    repo: Path | str,
+    wid: str = "w1",
+    worktree: bool = False,
+    **item_kwargs,
+) -> Item:
+    """A V1 work item on `chain`, standing at `node`. Tests take the `item_on`
+    fixture (tests/conftest.py), which supplies `database`, `run_dirs` and a
+    `repo`, and call it as `await item_on(chain, "verify")`.
+
+    - `chain`: authored node mappings, YAML text of the same list, a
+      `ResolvedChain` (`v1_named_chain(...)` for a shipped one) or a
+      `MaterializedChain` -- anything `v1_chain` takes.
+    - `node`: loads the chain at that node and enters it (`load_chain` +
+      `enter_node`, the events a walk writes). `None` leaves the item where
+      intake leaves it: no current node.
+    - `worktree=True` creates the (empty) worktree directory, for code that
+      only checks it exists.
+    - `item_kwargs` go to `store.create_work_item` (`status`, `title`, ...).
+
+    The item has no bead (`bead_id` NULL): filing one is `executor.intake`'s
+    job, and a test about the bead should use that.
+    """
+    from kraft import store
+
+    materialized = v1_chain(chain, repo=repo)
+    await v1_item(database, materialized, repo=repo, wid=wid, **item_kwargs)
+    if node is not None:
+        await database.write(lambda c: store.load_chain(c, wid, node))
+        await database.write(lambda c: store.enter_node(c, wid, node))
+    it = Item(database, run_dirs, wid, materialized, Path(repo))
+    if worktree:
+        it.worktree.mkdir(parents=True, exist_ok=True)
+    return it
 
 
 #: A harness definition for the fake agent: the same shape `src/kraft/harnesses/
