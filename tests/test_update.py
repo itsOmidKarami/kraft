@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import shutil
 
 import httpx
 import pytest
@@ -267,3 +268,132 @@ def test_perform_under_homebrew_without_brew_is_a_readable_failure(monkeypatch):
 def test_is_homebrew_install_is_false_for_a_uv_tool_prefix(monkeypatch):
     monkeypatch.setattr(update.sys, "prefix", "/Users/x/.local/share/uv/tools/kraft-sdlc")
     assert update._is_homebrew_install() is False
+
+
+# ── a major update replaces an incompatible template configuration
+# (major-update-*, migration-helper-is-not-guaranteed) ──
+
+#: What a pre-V1 home holds that V1 has no reader for, and what it holds that
+#: belongs to this machine rather than to the template schema.
+LEGACY_ONLY = {"registry.yaml": "hooks: {}\n", "my-chain.yaml": "id: my-chain\nnodes: []\n"}
+MACHINE = {
+    "access.yaml": "bind: 127.0.0.1\n",
+    "notify.yaml": "enabled: false\n",
+    "repos.yaml": "repos: [{path: /work/mine}]\n",
+    "intake.yaml": "enabled: true\n",
+    "steering/mine.md": "Ask before deleting anything.\n",
+}
+
+
+def _tree(root: pathlib.Path) -> dict[str, bytes]:
+    return {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+
+
+@pytest.fixture
+def legacy_home(tmp_path, monkeypatch):
+    """A pre-V1 `$KRAFT_HOME/templates`, a V1 bundle to replace it with (the
+    repository's own `templates/`), and a release feed that is already current,
+    so `kraft admin update` has only the configuration to do."""
+    from kraft import cli
+
+    repo_templates = pathlib.Path(__file__).resolve().parents[1] / "templates"
+    bundle = tmp_path / "_bundled"
+    shutil.copytree(repo_templates, bundle / "templates")
+    monkeypatch.setattr(cli.admin, "BUNDLED", bundle)
+    home = tmp_path / "home" / "templates"
+    for name, text in {**LEGACY_ONLY, **MACHINE}.items():
+        (home / name).parent.mkdir(parents=True, exist_ok=True)
+        (home / name).write_text(text)
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(home))
+    monkeypatch.setattr(update, "latest", lambda **_: update.Release("v1.0.0", "u"))
+    monkeypatch.setattr(update, "installed", lambda: "1.0.0")
+    return home
+
+
+def _backups(home: pathlib.Path) -> list[pathlib.Path]:
+    return sorted(home.parent.glob(f"{home.name}.pre-v1-*"))
+
+
+@pytest.mark.parametrize("accept", ["flag", "prompt"])
+def test_major_update_requires_acceptance_and_makes_backup(
+    legacy_home, monkeypatch, capsys, accept
+):
+    from kraft import cli
+    from kraft.templates.library import TemplateLibrary
+
+    before = _tree(legacy_home)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "y")
+
+    cli.main(["admin", "update", *(["-y"] if accept == "flag" else [])])
+
+    # The whole configuration it replaced, kept byte for byte beside it.
+    [backup] = _backups(legacy_home)
+    assert _tree(backup) == before
+    # The V1 configuration is installed, and resolves.
+    assert TemplateLibrary.from_yaml_dir(legacy_home).resolve_chain("default").id == "default"
+    # What belongs to this machine, not to the template schema, is carried over.
+    for name, text in MACHINE.items():
+        assert (legacy_home / name).read_text() == text
+    # Nothing is migrated: a legacy chain is not converted into the new home
+    # (migration-helper-is-not-guaranteed); it is only in the backup.
+    assert not (legacy_home / "my-chain.yaml").exists()
+    out = capsys.readouterr().out
+    assert str(backup) in out
+
+
+@pytest.mark.parametrize(
+    ("answer", "tty"), [("n", True), ("", True), (None, False)], ids=["no", "enter", "no-terminal"]
+)
+def test_major_update_without_acceptance_changes_nothing(
+    legacy_home, monkeypatch, capsys, answer, tty
+):
+    from kraft import cli
+
+    before = _tree(legacy_home)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: tty)
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda _prompt: answer if tty else pytest.fail("prompted with no terminal"),
+    )
+
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["admin", "update"])
+
+    assert caught.value.code == 1
+    assert _tree(legacy_home) == before
+    assert _backups(legacy_home) == []
+    err = capsys.readouterr().err
+    assert "-y" in err
+
+
+def test_the_major_update_warns_before_it_asks(legacy_home, monkeypatch, capsys):
+    """`major-update-requires-explicit-acceptance`: the breaking change is
+    stated before the question, not after the answer."""
+    from kraft import cli
+
+    asked = []
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda prompt: asked.append(capsys.readouterr()) or "n")
+
+    with pytest.raises(SystemExit):
+        cli.main(["admin", "update"])
+
+    [seen] = asked
+    assert "not compatible" in seen.err
+    assert "backup" in seen.err
+
+
+def test_an_update_leaves_a_v1_home_alone(legacy_home, monkeypatch):
+    """A home that already has the V1 `library.yaml` is not legacy, whatever
+    else sits beside it -- no prompt, no backup, no change."""
+    from kraft import cli
+
+    (legacy_home / "library.yaml").write_text("tasks: {}\n")
+    before = _tree(legacy_home)
+    monkeypatch.setattr("builtins.input", lambda _prompt: pytest.fail("asked about a V1 home"))
+
+    cli.main(["admin", "update"])
+
+    assert _tree(legacy_home) == before
+    assert _backups(legacy_home) == []

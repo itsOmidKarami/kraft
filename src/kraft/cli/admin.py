@@ -204,6 +204,13 @@ def seed_home(templates_dir: Path) -> bool:
         )
     # Build beside the target and rename: an interrupted copy must not leave a
     # half-seeded home that every later start then treats as already seeded.
+    _stage_bundle(templates_dir).rename(templates_dir)
+    return True
+
+
+def _stage_bundle(templates_dir: Path) -> Path:
+    """The bundled config, copied beside `templates_dir` under a staging name
+    for the caller to rename into place. Returns the staging directory."""
     staging = templates_dir.with_name(templates_dir.name + ".seeding")
     shutil.rmtree(staging, ignore_errors=True)
     shutil.copytree(BUNDLED / "templates", staging)
@@ -217,8 +224,63 @@ def seed_home(templates_dir: Path) -> bool:
     # YAML stamp would be read as a malformed template and surface as degraded
     # health. A non-YAML name sidesteps that instead of documenting it.
     (staging / ".seeded-version").write_text(f"{_version()}\n")
+    return staging
+
+
+#: What a home holds that belongs to this machine rather than to the template
+#: schema: the password hash and bind, the webhook, the theme, the connected
+#: repositories, auto-intake, the operator's steering files and harness
+#: overrides. A major update carries each across unchanged; everything else --
+#: the registry, the chains, `policy.yaml` -- is replaced, and kept in the backup.
+MACHINE_CONFIG = (
+    "access.yaml",
+    "notify.yaml",
+    "theme.yaml",
+    "repos.yaml",
+    "intake.yaml",
+    "steering",
+    "harnesses",
+)
+
+
+def replace_pre_v1_config(templates_dir: Path, backup: Path) -> None:
+    """Install the bundled V1 configuration in place of a pre-V1 home, which
+    moves to `backup` whole (`major-update-preserves-replaced-configuration`).
+
+    Nothing is converted (`migration-helper-is-not-guaranteed`): the old
+    chains and registry are only in the backup. Built beside the home and
+    swapped in with two renames, so at every point the operator's files are
+    either still in place or already in the backup."""
+    if not (BUNDLED / "templates").is_dir():
+        raise SystemExit(
+            "kraft admin update: this build shipped no bundled configuration to install; "
+            "reinstall with `just install`. Nothing was changed."
+        )
+    staging = _stage_bundle(templates_dir)
+    for name in MACHINE_CONFIG:
+        kept = templates_dir / name
+        if kept.is_dir():
+            # The operator's copy wins over a bundled file of the same name.
+            shutil.copytree(kept, staging / name, dirs_exist_ok=True)
+        elif kept.is_file():
+            shutil.copy2(kept, staging / name)
+    templates_dir.rename(backup)
     staging.rename(templates_dir)
-    return True
+
+
+def _warn_if_pre_v1(templates_dir: Path) -> None:
+    """A legacy install's first V1 start: nothing is converted or overwritten.
+    The server comes up degraded and refuses new work until the operator runs
+    `kraft admin update`, and this says so where they are looking."""
+    from kraft.templates.library import is_pre_v1
+
+    if is_pre_v1(templates_dir):
+        print(
+            f"kraft: {templates_dir} holds a pre-V1 template configuration. Starting "
+            "degraded, refusing new work; run `kraft admin update` to back it up and "
+            "install the V1 configuration.",
+            file=sys.stderr,
+        )
 
 
 def _bind(templates_dir: Path) -> tuple[str, int]:
@@ -422,6 +484,7 @@ def _serve() -> None:
         _redirect_output_to_log(log_path)
     if seed_home(templates_dir):
         print(f"kraft: seeded default config in {templates_dir}")
+    _warn_if_pre_v1(templates_dir)
     host, port = _bind(templates_dir)
     _refuse_if_addr_taken(host, port)
     running = _read_pid(pid_path)
@@ -732,8 +795,45 @@ def _version() -> str:
         return "0.0.0+source"
 
 
+def _accept_major_update(templates_dir: Path, assume_yes: bool) -> None:
+    """Replace a pre-V1 `templates_dir` once the operator has said yes, or
+    exit 1 having changed nothing (`major-update-requires-explicit-acceptance`).
+    The breaking change is stated before the question is asked."""
+    backup = templates_dir.with_name(
+        f"{templates_dir.name}.pre-v1-{time.strftime('%Y%m%d-%H%M%S')}"
+    )
+    print(
+        f"kraft: {templates_dir} holds a pre-V1 template configuration (a hook registry\n"
+        "and gate_after chains). It is not compatible with this Kraft, which runs\n"
+        "Template Schema V1 only, and there is no migration: replacing it installs the\n"
+        "V1 configuration and moves the current one, whole, to a backup at\n"
+        f"  {backup}\n"
+        f"Carried across unchanged: {', '.join(MACHINE_CONFIG)}.\n"
+        "Your chains, registry.yaml and policy.yaml are replaced; they stay in the backup.",
+        file=sys.stderr,
+    )
+    # No terminal to ask on is a refusal, never a default yes.
+    if not assume_yes and not (
+        sys.stdin.isatty() and input("Replace it? [y/N] ").strip().lower() in ("y", "yes")
+    ):
+        print(
+            "kraft admin update: nothing changed. Answer y, or pass -y, to replace it.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    replace_pre_v1_config(templates_dir, backup)
+    print(f"kraft: installed the V1 configuration in {templates_dir}; the old one is at {backup}")
+
+
 def _cmd_update(ns: argparse.Namespace) -> None:
     from kraft import update
+    from kraft.templates.library import is_pre_v1
+
+    # The configuration first: a pre-V1 home is what a legacy install's first V1
+    # binary finds, and that binary is the one running this.
+    templates_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    if is_pre_v1(templates_dir):
+        _accept_major_update(templates_dir, ns.yes)
 
     release = update.latest(force=True)
     if release is None:
@@ -795,6 +895,12 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
 
     update_p = subs.add_parser("update", help="install the newest released kraft")
     update_p.add_argument("--force", action="store_true", help="install even when already current")
+    update_p.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="accept replacing a pre-V1 template configuration, which is backed up first",
+    )
     update_p.add_argument(
         "--restart",
         action="store_true",
