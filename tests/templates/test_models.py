@@ -282,8 +282,19 @@ def _ids(chain: tm.ResolvedChain) -> list[str]:
     return [n.id for n in chain.nodes]
 
 
+def _materialized(chain: tm.ResolvedChain, kinds: frozenset[str]) -> tm.ResolvedChain:
+    """`chain` as intake freezes it for an item arriving with `kinds` attached:
+    the production path, `materialize(attachment_kinds=...)`, not the
+    `trim_for_attachments` wrapper nothing in `src/` calls."""
+    return chain.materialize(
+        WorkItemTarget.for_repository(Repository(id="r", path="/r")),
+        InstancePolicy.from_input(InstancePolicyInput.model_validate({})),
+        attachment_kinds=kinds,
+    ).chain
+
+
 def test_an_attachment_drops_the_gate_that_decides_it_and_its_producing_node():
-    trimmed = _attachment_chain().trim_for_attachments(frozenset({"spec"}))
+    trimmed = _materialized(_attachment_chain(), frozenset({"spec"}))
     assert "spec_approval" not in _ids(trimmed)
     # The producing node too: legacy got this for free because the author and
     # its gate were one node. In V1 they are two, so without it the attached
@@ -292,7 +303,7 @@ def test_an_attachment_drops_the_gate_that_decides_it_and_its_producing_node():
 
 
 def test_an_attachment_does_not_drop_a_gate_no_attachment_kind_names():
-    trimmed = _attachment_chain().trim_for_attachments(frozenset({"spec"}))
+    trimmed = _materialized(_attachment_chain(), frozenset({"spec"}))
     assert ["plan", "plan_approval", "build", "done"] == _ids(trimmed)
 
 
@@ -320,6 +331,16 @@ def test_a_trim_that_orphans_a_reject_target_clears_it_rather_than_dangling():
             InstancePolicy.from_input(InstancePolicyInput.model_validate({})),
         ).to_json()
     )
+
+
+def test_dropping_nodes_keeps_the_frozen_steering():
+    """A skip or an attachment drop re-resolves the chain; the steering frozen
+    at resolution has to survive it, or every surviving task that selects
+    steering stops with "materialized before steering was frozen"."""
+    steering = {"careful": "Go slowly."}
+    chain = tm.ResolvedChain.from_chain(_attachment_chain().chain, steering=steering)
+    assert _materialized(chain, frozenset({"spec"})).steering == steering
+    assert chain.without_nodes({"build"}).steering == steering
 
 
 def test_a_trim_leaving_no_nodes_is_refused():
