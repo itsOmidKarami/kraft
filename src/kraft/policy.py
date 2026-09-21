@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -28,7 +29,16 @@ class PolicyError(ValueError):
 
     A `ValueError`, so every intake door's existing `except ValueError` answers
     a chain `policy:` over the instance maxima as the refusal it is (a 422, a
-    skipped trigger), not an unhandled 500 (Kraft-ib2af)."""
+    skipped trigger), not an unhandled 500 (Kraft-ib2af).
+
+    `field` names the policy field an override refusal is about, as data
+    (`policy-override-rules-are-field-specific`), so a caller such as the
+    retry-override validator can point at it without parsing the message.
+    `None` for a refusal of a whole file."""
+
+    def __init__(self, message: str, *, field: str | None = None) -> None:
+        super().__init__(message)
+        self.field = field
 
 
 DEFAULT_LOOP_SEVERITIES = frozenset({"critical", "important"})
@@ -506,19 +516,48 @@ class InstancePolicyInput(BaseModel):
         return self
 
 
-class TemplatePolicyOverride(BaseModel):
-    """A sparse patch a repository, work item, chain, node, step or task
-    layer proposes onto the policy above it. Same shape at every scope --
-    `policy-override-rules-are-field-specific` is enforced once, in
-    `InstancePolicy.apply_template_override`, not reinvented per scope."""
+class SandboxPolicy(BaseModel):
+    """Where a task's process runs: `kind: docker` in `image`
+    (`kraft.worker.sandbox`). A permission-shaped safety field (Ruling 105):
+    once a layer sets one, no narrower layer may change or remove it."""
+
+    model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
+
+    kind: Literal["docker"]
+    image: StrictStr = Field(min_length=1)
+
+
+class TaskPolicyOverride(BaseModel):
+    """The policy fields a task consumes, and so the whole of what a step, a
+    task or a gate may override: every field here is read when a task
+    launches (`MaterializedChain.policy_for`). A sparse patch onto the policy
+    above it; `policy-override-rules-are-field-specific` is enforced once, in
+    `InstancePolicy.apply_template_override`, not reinvented per scope.
+
+    No `max_attempts`/`timeout_minutes`: those bound an execution node's fix
+    loop (`TemplatePolicyOverride`), and a scope with no fix loop of its own
+    refuses them at load rather than accept a value nothing reads
+    (Kraft-q55aw)."""
 
     model_config = ConfigDict(strict=True, extra="forbid")
 
-    timeout_minutes: PositiveInt | None = None
-    max_attempts: PositiveInt | None = None
     allowed_harnesses: list[StrictStr] | None = None
     token_budget: PositiveInt | None = None
     allowed_tools: list[StrictStr] | None = None
+    #: Tools no task under this scope may use, on top of whatever
+    #: `allowed_tools` permits (Ruling 105: the repository's `deny_tools`).
+    #: Only ever accumulates down the layers.
+    deny_tools: list[StrictStr] | None = None
+    sandbox: SandboxPolicy | None = None
+
+
+class TemplatePolicyOverride(TaskPolicyOverride):
+    """A repository, work-item, chain or execution-node override: a task's
+    fields plus the two that bound a node's fix loop (`walk.walk_node`) --
+    `max_attempts`, its attempt cap, and `timeout_minutes`, its wall clock."""
+
+    timeout_minutes: PositiveInt | None = None
+    max_attempts: PositiveInt | None = None
 
 
 @dataclass(frozen=True)
@@ -538,6 +577,10 @@ class InstancePolicy:
     token_budget: int | None
     allowed_tools: tuple[str, ...] | None
     maxima: PolicyMaximaInput
+    #: Instance policy sets neither: `maxima:` has no deny list and no sandbox,
+    #: so both start empty and only a repository or narrower layer adds them.
+    deny_tools: tuple[str, ...] = ()
+    sandbox: SandboxPolicy | None = None
 
     @classmethod
     def from_input(cls, parsed: InstancePolicyInput) -> InstancePolicy:
@@ -557,7 +600,15 @@ class InstancePolicy:
             maxima=m,
         )
 
-    def apply_template_override(self, raw: TemplatePolicyOverride | dict) -> InstancePolicy:
+    def layered(self, overrides: Iterable[TaskPolicyOverride]) -> InstancePolicy:
+        """This policy with each of `overrides` applied in turn, broadest
+        first (`policy-is-layered-by-execution-scope`)."""
+        policy = self
+        for override in overrides:
+            policy = policy.apply_template_override(override)
+        return policy
+
+    def apply_template_override(self, raw: TaskPolicyOverride | dict) -> InstancePolicy:
         """Layer `raw` onto this policy, field by field
         (`policy-override-rules-are-field-specific`): a ratchet-only safety
         field (`allowed_tools`, `token_budget`) may only narrow the inherited
@@ -567,15 +618,27 @@ class InstancePolicy:
         (`work-item-policy-may-exceed-default-ceilings-within-admin-maximum`)
         -- for `allowed_harnesses` that bound is always `maxima`, so a
         `defaults:` value narrower than `maxima:` can still be widened back
-        up to it. The same method resolves a repository override over the
-        instance policy, a work-item override over that, and so on
-        (`policy-is-layered-by-execution-scope`)."""
+        up to it. `deny_tools` only accumulates, and a `sandbox` a broader
+        layer set cannot be changed (Ruling 105). The same method resolves a
+        repository override over the instance policy, a work-item override
+        over that, and so on (`policy-is-layered-by-execution-scope`)."""
         override = (
             raw
-            if isinstance(raw, TemplatePolicyOverride)
+            if isinstance(raw, TaskPolicyOverride)
             else TemplatePolicyOverride.model_validate(raw)
         )
         updates: dict[str, object] = {}
+
+        if override.deny_tools is not None:
+            updates["deny_tools"] = tuple(dict.fromkeys((*self.deny_tools, *override.deny_tools)))
+
+        if override.sandbox is not None:
+            if self.sandbox is not None and override.sandbox != self.sandbox:
+                raise PolicyError(
+                    f"'sandbox' cannot change the inherited sandbox {self.sandbox.model_dump()!r}",
+                    field="sandbox",
+                )
+            updates["sandbox"] = override.sandbox
 
         for field_name in _SAFETY_LIST_FIELDS:
             value = getattr(override, field_name)
@@ -584,9 +647,11 @@ class InstancePolicy:
             ceiling = getattr(self, field_name)
             if ceiling is not None and not set(value) <= set(ceiling):
                 extra = sorted(set(value) - set(ceiling))
+                verb = "is" if len(extra) == 1 else "are"
                 raise PolicyError(
                     f"'{field_name}' cannot widen the inherited safety ceiling "
-                    f"{sorted(ceiling)!r}; {extra} {'is' if len(extra) == 1 else 'are'} not allowed"
+                    f"{sorted(ceiling)!r}; {extra} {verb} not allowed",
+                    field=field_name,
                 )
             updates[field_name] = tuple(value)
 
@@ -597,18 +662,20 @@ class InstancePolicy:
             ceiling = getattr(self, field_name)
             if ceiling is not None and value > ceiling:
                 raise PolicyError(
-                    f"'{field_name}' cannot exceed the inherited safety ceiling {ceiling}"
+                    f"'{field_name}' cannot exceed the inherited safety ceiling {ceiling}",
+                    field=field_name,
                 )
             updates[field_name] = value
 
         for field_name in _OPERATIONAL_NUMERIC_FIELDS:
-            value = getattr(override, field_name)
+            value = getattr(override, field_name, None)
             if value is None:
                 continue
             admin_max = getattr(self.maxima, field_name)
             if admin_max is not None and value > admin_max:
                 raise PolicyError(
-                    f"'{field_name}' cannot exceed the administrator maximum {admin_max}"
+                    f"'{field_name}' cannot exceed the administrator maximum {admin_max}",
+                    field=field_name,
                 )
             updates[field_name] = value
 
@@ -622,7 +689,8 @@ class InstancePolicy:
                 verb = "is" if len(extra) == 1 else "are"
                 raise PolicyError(
                     f"'{field_name}' cannot exceed the administrator maximum "
-                    f"{sorted(admin_max)!r}; {extra} {verb} not allowed"
+                    f"{sorted(admin_max)!r}; {extra} {verb} not allowed",
+                    field=field_name,
                 )
             updates[field_name] = tuple(value)
 
