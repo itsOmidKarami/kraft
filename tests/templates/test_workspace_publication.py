@@ -502,22 +502,61 @@ def _forge(id, target):
 _FINAL = {"id": "final", "kind": "gate", "message": "m", "chain_finalized": True}
 
 
+_WORK = {"id": "w", "kind": "subprocess", "command": "true"}
+
+
+def _placed(where: str, task: dict) -> dict:
+    """An execution node running `task` from position `where`: every task
+    position the executor can run in an execution node (a gate's
+    `auto_review` is an agent task by type, so it cannot publish)."""
+    node = {"id": "n", "kind": "exec", "tasks": [_WORK]}
+    recovery = {"tasks": [task]}
+    match where:
+        case "node-task":
+            node["tasks"] = [task]
+        case "step-task":
+            del node["tasks"]
+            node["steps"] = [{"id": "s", "tasks": [task]}]
+        case "task-on-failure":
+            node["tasks"] = [{**_WORK, "on_failure": recovery}]
+        case "step-on-failure":
+            del node["tasks"]
+            node["steps"] = [{"id": "s", "tasks": [_WORK], "on_failure": recovery}]
+        case "node-on-failure":
+            node["on_failure"] = recovery
+        case "fix-loop":
+            node["fix_loop"] = recovery
+        case "fix-loop-judge":
+            node["fix_loop"] = {"tasks": [_WORK], "judge": task}
+        case "escalation":
+            node["escalation"] = task
+        case "on-conflict":
+            node["on_base_changed"] = {"restart_from": "n", "on_conflict": recovery}
+    return node
+
+
+_POSITIONS = [
+    "node-task",
+    "step-task",
+    "task-on-failure",
+    "step-on-failure",
+    "node-on-failure",
+    "fix-loop",
+    "fix-loop-judge",
+    "escalation",
+    "on-conflict",
+]
+
+
 @pytest.mark.parametrize("target", ["mr.mark_ready", "mr.merge"])
-@pytest.mark.parametrize(
-    "where", ["tasks", "fix_loop", "on_failure"], ids=["node", "fix-loop", "recovery"]
-)
+@pytest.mark.parametrize("where", _POSITIONS)
 def test_nothing_readies_or_merges_before_the_final_gate(target, where):
     """`draft-merge-request-enables-external-checks`: a draft may be opened
     before final-gate approval, but a chain that could mark it ready or merge
-    it before that approval -- from anywhere in a node ahead of the gate -- is
-    refused when it is loaded, not discovered once it has published."""
-    task = {"id": "t", "kind": "forge", "target": target}
-    node = {
-        "id": "n",
-        "kind": "exec",
-        "tasks": [{"id": "w", "kind": "subprocess", "command": "true"}],
-    }
-    node[where] = {"tasks": [task]} if where != "tasks" else [task]
+    it before that approval -- from any task position the executor can run in
+    a node ahead of the gate -- is refused when it is loaded, not discovered
+    once it has published (Kraft-nwonj)."""
+    node = _placed(where, {"id": "t", "kind": "forge", "target": target})
     with pytest.raises(ValueError, match=f"{target}.*before.*'final'"):
         _chain(_forge("draft", "mr.open_draft"), node, _FINAL)
     # After the gate, the same node is the ordinary publication.

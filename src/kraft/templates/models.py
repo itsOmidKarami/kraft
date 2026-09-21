@@ -733,26 +733,26 @@ class Chain(BaseModel):
         """A draft merge request may open before the final gate, but nothing
         may mark it ready or merge it ahead of that gate's approval
         (`draft-merge-request-enables-external-checks`, `final-gate-governs-
-        merge-request-readiness`) -- from any position in a node before it,
-        recovery and fix loop included. A chain with no final gate declares
-        no approval to wait for, and is not constrained here."""
+        merge-request-readiness`) -- from any task position the executor can
+        run in a node before it. The positions come from `ResolvedNode.tasks`,
+        the one walker of them (node and step tasks, every recovery plan down
+        to a task's own, the fix loop and its judge, escalation, on_conflict,
+        a gate's reviewer), never a second list here that could drift from it
+        (Kraft-nwonj). A chain with no final gate declares no approval to wait
+        for, and is not constrained here (Kraft-8tjh7)."""
         final = next(
             (i for i, n in enumerate(self.nodes) if isinstance(n, GateNode) and n.chain_finalized),
             None,
         )
-        for node in self.nodes[:final] if final is not None else ():
-            if not isinstance(node, ExecNode):
-                continue
-            shapes = [node, node.on_failure, node.fix_loop]
-            if node.on_base_changed is not None:
-                shapes.append(node.on_base_changed.on_conflict)
-            for shape in filter(None, shapes):
-                for task in shape.own_tasks():
-                    if isinstance(task, ForgeTask) and task.target in _PUBLISHING:
-                        raise ValueError(
-                            f"node {node.id!r}: {task.target.value} runs before the final gate "
-                            f"{self.nodes[final].id!r} approves it"
-                        )
+        if final is None:
+            return self
+        for node in ResolvedChain.from_chain(self).nodes[:final]:
+            for task in node.tasks():
+                if isinstance(task.task, ForgeTask) and task.task.target in _PUBLISHING:
+                    raise ValueError(
+                        f"{task.path}: {task.task.target.value} runs before the final gate "
+                        f"{self.nodes[final].id!r} approves it"
+                    )
         return self
 
 

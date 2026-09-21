@@ -803,7 +803,7 @@ enforced-by: tests/adapters/forge/test_run_chain.py::test_run_task_opens_a_merge
 The system MAY create a draft merge request before final-gate approval so CI
 and automated merge-request review can run. A draft merge request SHALL NOT be
 marked ready or merged before that approval.
-enforced-by: tests/templates/test_workspace_publication.py::test_nothing_readies_or_merges_before_the_final_gate[node-mr.mark_ready], tests/templates/test_workspace_publication.py::test_nothing_readies_or_merges_before_the_final_gate[node-mr.merge], tests/templates/test_workspace_publication.py::test_nothing_readies_or_merges_before_the_final_gate[fix-loop-mr.merge], tests/templates/test_workspace_publication.py::test_nothing_readies_or_merges_before_the_final_gate[recovery-mr.mark_ready]
+enforced-by: tests/templates/test_workspace_publication.py::test_nothing_readies_or_merges_before_the_final_gate[node-task-mr.mark_ready], tests/templates/test_workspace_publication.py::test_nothing_readies_or_merges_before_the_final_gate[node-task-mr.merge], tests/templates/test_workspace_publication.py::test_nothing_readies_or_merges_before_the_final_gate[fix-loop-mr.merge], tests/templates/test_workspace_publication.py::test_nothing_readies_or_merges_before_the_final_gate[task-on-failure-mr.mark_ready]
 
 ## REQ default-chain-verification-does-not-rerun-the-implementer
 
@@ -860,7 +860,7 @@ enforced-by: tests/templates/test_workspace_publication.py::test_a_pre_draft_gat
 
 After final-gate approval, the system SHALL mark the draft merge request ready
 for external approval and merge.
-enforced-by: tests/templates/test_workspace_publication.py::test_the_seeded_default_chain_publishes_in_the_required_order, tests/templates/test_workspace_publication.py::test_nothing_readies_or_merges_before_the_final_gate[node-mr.mark_ready]
+enforced-by: tests/templates/test_workspace_publication.py::test_the_seeded_default_chain_publishes_in_the_required_order, tests/templates/test_workspace_publication.py::test_nothing_readies_or_merges_before_the_final_gate[node-task-mr.mark_ready]
 
 ## REQ external-wait-has-configurable-timeout-and-polling
 
