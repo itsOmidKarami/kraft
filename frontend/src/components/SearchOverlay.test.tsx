@@ -6,6 +6,7 @@ import * as api from "../api";
 import { useStore } from "../store";
 import type { WorkItem } from "../types";
 import { SearchOverlay } from "./SearchOverlay";
+import { SearchView } from "../views/Search";
 import { item } from "../testFixtures";
 
 const hit = {
@@ -181,5 +182,18 @@ describe("SearchOverlay", () => {
     const sections = document.querySelectorAll(".search-section");
     const labels = [...sections].map((s) => s.querySelector(".section-label")?.textContent);
     expect(labels).toEqual(["Actions", "Documents", "Go to"]);
+  });
+});
+
+describe("SearchView", () => {
+  it("mounts SearchOverlay embedded, with no dialog role", () => {
+    vi.spyOn(api, "search").mockResolvedValue({ query: "", mode: "hybrid", results: [] });
+    render(
+      <MemoryRouter>
+        <SearchView />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("searchbox")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

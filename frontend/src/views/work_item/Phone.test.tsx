@@ -9,6 +9,7 @@ import * as api from "../../api";
 import { useStore } from "../../store";
 import type { WorkItem, WorkerSession } from "../../types";
 import { WorkItemDetail } from ".";
+import { PhoneComposer } from "./PhoneComposer";
 import { detailItem, session as baseSession, setPhoneWidth } from "../../testFixtures";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -140,5 +141,18 @@ describe("WorkItemDetail on a phone (m04)", () => {
     expect(css).toMatch(/\.item-card-actions\s*\{[^}]*flex-wrap:\s*wrap/);
     const phone = css.slice(css.indexOf("@media (max-width: 767px)"));
     expect(phone).toMatch(/\.item-card-actions\s*>\s*\.btn\s*\{[^}]*flex:\s*1/);
+  });
+});
+
+describe("PhoneComposer", () => {
+  it("renders Cancel, the title and the context line", () => {
+    render(
+      <PhoneComposer title="Steer" context="w1 · verify" onCancel={() => {}}>
+        <p>body</p>
+      </PhoneComposer>,
+    );
+    expect(screen.getByRole("button", { name: /cancel/i })).toBeInTheDocument();
+    expect(screen.getByText("Steer")).toBeInTheDocument();
+    expect(screen.getByText("w1 · verify")).toBeInTheDocument();
   });
 });
