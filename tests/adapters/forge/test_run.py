@@ -12,6 +12,7 @@ import pytest
 
 from kraft.adapters import forge
 
+from . import outputs
 from .conftest import back_half
 
 RED = [(forge.FailedJob("test", "failed", "script_failure"),)]
@@ -372,15 +373,14 @@ async def test_a_node_treats_an_already_merged_mr_as_done(run_forge, tmp_path, h
         (
             "glab",
             forge.GlabCli,
-            '[{"iid":54,"state":"merged","source_branch":"kraft/abc",'
-            '"web_url":"https://gitlab.com/itsOmidKarami/kraft/-/merge_requests/54"}]',
+            outputs.GLAB_MR_LIST_MERGED,
             "done",
             "already merged (!54)",
         ),
         (
             "gh",
             forge.GhCli,
-            '[{"number":7,"url":"https://github.com/o/r/pull/7","state":"MERGED"}]',
+            outputs.GH_PR_LIST_MERGED,
             "done",
             "already merged (!7)",
         ),
