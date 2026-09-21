@@ -3,7 +3,6 @@ step's, or the node's -- runs once the step has settled, and exactly that
 scope is retried. The node-level repair's own prompt and findings are
 `test_walk.py`'s; this is which handler runs, when, and what it retries."""
 
-import asyncio
 import shlex
 
 import pytest
@@ -21,43 +20,6 @@ def _sub(task_id, **fields):
 
 def _fix(task_id="fix"):
     return {"tasks": [_sub(task_id)]}
-
-
-class Script:
-    """`dispatch_node`, scripted per task id. `plan[id]` is the statuses that
-    task answers in turn (the last one repeats; `done` when unplanned);
-    `log` is every `("start"|"end", id)` in the order it happened, and
-    `steers[id]` the steer each launch was handed."""
-
-    def __init__(self):
-        self.plan: dict[str, list[str]] = {}
-        self.delay: dict[str, float] = {}
-        self.log: list[tuple[str, str]] = []
-        self.steers: dict[str, list] = {}
-
-    @property
-    def calls(self) -> list[str]:
-        return [task for event, task in self.log if event == "start"]
-
-    def index(self, event: str, task: str, nth: int = 0) -> int:
-        return [i for i, e in enumerate(self.log) if e == (event, task)][nth]
-
-    async def __call__(self, db_, run_dirs_, task, node, row_, wt, **kw):
-        tid = task.task.id
-        self.log.append(("start", tid))
-        self.steers.setdefault(tid, []).append(kw.get("steer"))
-        await asyncio.sleep(self.delay.get(tid, 0))
-        seq = self.plan.get(tid, ["done"])
-        status = seq.pop(0) if len(seq) > 1 else seq[0]
-        self.log.append(("end", tid))
-        return status
-
-
-@pytest.fixture
-def script(monkeypatch) -> Script:
-    spy = Script()
-    monkeypatch.setattr(dispatch, "dispatch_node", spy)
-    return spy
 
 
 def _walk(it, **kwargs):
