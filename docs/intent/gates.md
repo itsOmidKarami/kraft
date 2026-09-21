@@ -11,12 +11,10 @@ where one survives, names a file in this repository.
 ## REQ node-with-gate-after-opens-gate
 WHEN every task in a node has reached a terminal state and that node declares a
 `gate_after` name, the system SHALL open a gate of that name.
-enforced-by: tests/test_gates.py::test_walk_stops_at_first_gate, tests/test_gates.py::test_approving_all_four_gates_completes_chain
 
 ## REQ node-without-gate-after-opens-no-gate
 IF a node declares no `gate_after` name, THEN the system SHALL NOT open a gate
 after that node.
-enforced-by: tests/test_gates.py::test_approving_all_four_gates_completes_chain
 origin: templates/default.yaml
 
 ## REQ open-gate-sets-needs-human
@@ -35,7 +33,6 @@ enforced-by: tests/test_gates.py::test_walk_stops_at_first_gate
 ## REQ approve-emits-gate-approved
 WHEN a gate is approved, the system SHALL emit a `gate_approved` event carrying
 the gate's name in its payload.
-enforced-by: tests/test_gates.py::test_approving_all_four_gates_completes_chain
 
 ## REQ approve-advances-to-next-node
 WHEN a gate is approved, the system SHALL advance the work item to the next node
@@ -114,7 +111,6 @@ IF the loaded chain contains no `plan` node, THEN the system SHALL NOT open the
 ## REQ chain-finalized-approval-splices-the-revised-chain
 WHEN the `chain_finalized` gate is approved, the system SHALL splice the revised
 chain nodes into the work item's `chain_definition`.
-enforced-by: tests/api/test_gates.py::test_chain_review_splice_runs_the_revised_tail
 
 ## REQ chain-revision-leaves-executed-nodes-alone
 WHEN the system splices a revised chain into `chain_definition`, the system SHALL
