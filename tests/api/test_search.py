@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import subprocess
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from support.harness import fake_templates_dir, isolated_bd, make_repo_with_engineering
+
+from kraft.adapters import beads
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
@@ -191,7 +193,6 @@ def test_connecting_a_repo_indexes_it_immediately(tmp_path, monkeypatch):
         ]
 
 
-@pytest.mark.e2e("bd")
 def test_the_bead_strip_searches_connected_repos_when_no_override(tmp_path, monkeypatch):
     """Kraft-ibwj: with no KRAFT_BD_CWD the strip searched the daemon's cwd and
     was permanently empty. It degrades quietly — `beads.search` answers [] on
@@ -199,12 +200,7 @@ def test_the_bead_strip_searches_connected_repos_when_no_override(tmp_path, monk
     one = isolated_bd(tmp_path, name="alpha")
     two = isolated_bd(tmp_path, name="beta")
     for repo, title in ((one, "caulk the alpha transom"), (two, "caulk the beta transom")):
-        subprocess.run(
-            ["bd", "create", "--title", title, "-d", "x", "--type", "task"],
-            cwd=repo,
-            check=True,
-            capture_output=True,
-        )
+        asyncio.run(beads.intake(title, description="x", cwd=str(repo)))
     with _client(tmp_path, monkeypatch) as client:
         monkeypatch.delenv("KRAFT_BD_CWD", raising=False)
         for repo in (one, two):

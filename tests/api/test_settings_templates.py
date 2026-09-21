@@ -9,8 +9,12 @@ from pathlib import Path
 
 import pytest
 import yaml
-from support.api_settings import _client
+from support.api import _client
 from support.harness import fake_templates_dir, make_repo
+
+#: No default repo entry for an unconnected repo (`support.api._client`): these read real config.
+pytestmark = pytest.mark.api_client(default_setup=False)
+
 
 _FAKE_AGENT = Path(__file__).resolve().parents[1] / "support" / "fake_agent.py"
 
@@ -18,12 +22,6 @@ _FAKE_AGENT = Path(__file__).resolve().parents[1] / "support" / "fake_agent.py"
 @pytest.fixture
 def templates_dir(tmp_path):
     return fake_templates_dir(tmp_path, "claude")
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch, templates_dir):
-    with _client(tmp_path, monkeypatch, templates_dir) as c:
-        yield c
 
 
 NODES = [
@@ -175,7 +173,7 @@ def test_templates_lists_only_resolvable_sorted(tmp_path, monkeypatch):
     (bad / "broken.yaml").write_text(
         "id: broken\nnodes:\n  - {id: x, tasks: [on.nope], gate_after: null}\n"
     )
-    with _client(tmp_path, monkeypatch, templates_dir=bad) as client:
+    with _client(tmp_path, monkeypatch, templates_dir=bad, default_setup=False) as client:
         got = client.get("/api/templates").json()
         ids = [t["id"] for t in got]
         assert "broken" not in ids
@@ -300,7 +298,7 @@ def test_one_unparseable_chain_file_degrades_the_instance_instead_of_lying(tmp_p
     templates_dir = fake_templates_dir(tmp_path, "claude")
     (templates_dir / "chains" / "broken.yaml").write_text("id: broken\nnodes: [ unclosed\n")
     repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch, templates_dir) as client:
+    with _client(tmp_path, monkeypatch, templates_dir=templates_dir, default_setup=False) as client:
         health = client.get("/api/health").json()
         assert health["status"] == "degraded"
         # Keyed `library.yaml`, not `library`: `st.templates.invalid` is keyed by
@@ -333,7 +331,7 @@ def test_every_door_names_the_broken_file_rather_than_the_chain_id(tmp_path, mon
 
     templates_dir = fake_templates_dir(tmp_path, "claude")
     repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch, templates_dir) as client:
+    with _client(tmp_path, monkeypatch, templates_dir=templates_dir, default_setup=False) as client:
         # An item filed while the library was still readable -- the state a
         # PATCH arrives in after an operator hand-edits a chain file badly.
         wid = client.post(

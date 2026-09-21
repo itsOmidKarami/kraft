@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from support.fake_beads import ON_FAKE_AND_REAL_BD
 from support.harness import (
     _git,
     isolated_bd,
@@ -79,17 +80,6 @@ async def _file_one_node(database, tmp_path, node: dict, *, wid="wi"):
     return chain.chain.nodes[0], row
 
 
-def _bd_status(repo, bead_id):
-    out = subprocess.run(
-        ["bd", "show", bead_id, "--json"],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    return json.loads(out)[0]["status"]
-
-
 def _events(database, wid):
     return [e["type"] for e in database.read(lambda c: events.read_after(c, 0, wid))]
 
@@ -98,8 +88,7 @@ def _argv_lines(path: Path) -> list[list[str]]:
     return [json.loads(ln) for ln in path.read_text().splitlines() if ln.strip()]
 
 
-@pytest.mark.e2e("bd")
-def test_run_happy_path_completes_and_closes_bead(tmp_path, monkeypatch):
+def test_run_happy_path_completes_and_closes_bead(bd, tmp_path, monkeypatch):
     monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
@@ -140,7 +129,7 @@ def test_run_happy_path_completes_and_closes_bead(tmp_path, monkeypatch):
                 ).fetchone()
             )
             assert row["status"] == "completed"
-            assert _bd_status(tracker, row["bead_id"]) == "closed"
+            assert bd.status(row["bead_id"], cwd=tracker) == "closed"
 
             types = _events(database, wid)
             assert types[0] == "work_item_created"
@@ -211,8 +200,7 @@ def test_done_with_concerns_advances_the_chain(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
-@pytest.mark.e2e("bd")
-def test_run_verify_failure_stops_at_verify(tmp_path, monkeypatch):
+def test_run_verify_failure_stops_at_verify(bd, tmp_path, monkeypatch):
     """C1 (Kraft-s7c04.8) had `implementation` run this same `on.test.run`
     gate directly after its own agent task, so this assertion moved to stop
     at `implementation` instead. C1 met neither of its own bead's acceptance
@@ -271,7 +259,7 @@ def test_run_verify_failure_stops_at_verify(tmp_path, monkeypatch):
             assert types.count("node_started") == 2
             assert types.count("node_completed") == 1
 
-            assert _bd_status(tracker, row["bead_id"]) in ("open", "in_progress")
+            assert bd.status(row["bead_id"], cwd=tracker) == "open"
         finally:
             await database.close()
 
@@ -932,8 +920,8 @@ def test_run_once_threads_local_files_from_the_launch_context(tmp_path, monkeypa
     asyncio.run(scenario())
 
 
-@pytest.mark.e2e("bd")
-def test_run_closes_an_auto_intaken_bead_in_its_own_workspace(tmp_path, monkeypatch):
+@ON_FAKE_AND_REAL_BD
+def test_run_closes_an_auto_intaken_bead_in_its_own_workspace(bd, tmp_path, monkeypatch):
     """Auto-intake adopts a bead that already lives in its repo's own `.beads`
     workspace, not the instance-wide tracker `bd_cwd` points at. Closing it in
     `bd_cwd` fails: the id does not exist there (Kraft-8mu.5.2)."""
@@ -968,7 +956,7 @@ def test_run_closes_an_auto_intaken_bead_in_its_own_workspace(tmp_path, monkeypa
                 )
                 == "completed"
             )
-            assert _bd_status(other, bead_id) == "closed"
+            assert bd.status(bead_id, cwd=other) == "closed"
         finally:
             await database.close()
 
@@ -1414,8 +1402,8 @@ def test_pausing_between_nodes_stops_the_walk_before_the_next_one_starts(tmp_pat
     asyncio.run(scenario())
 
 
-@pytest.mark.e2e("bd")
-def test_a_blocked_bead_pauses_the_walk_before_any_worktree_is_made(tmp_path, monkeypatch):
+@ON_FAKE_AND_REAL_BD
+def test_a_blocked_bead_pauses_the_walk_before_any_worktree_is_made(bd, tmp_path, monkeypatch):
     """Kraft-tsfpk: a work item whose bead is `blocked_by` something must
     never create a worktree or start a session."""
     monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
@@ -1443,13 +1431,7 @@ def test_a_blocked_bead_pauses_the_walk_before_any_worktree_is_made(tmp_path, mo
             )
             bead_id = row["bead_id"]
             assert bead_id
-            subprocess.run(
-                ["bd", "dep", "add", bead_id, blocker_id, "--type", "blocks"],
-                cwd=tracker,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
+            bd.block(bead_id, blocker_id, cwd=tracker)
             result = await executor.run(
                 database,
                 rd,
@@ -1487,8 +1469,7 @@ def test_a_blocked_bead_pauses_the_walk_before_any_worktree_is_made(tmp_path, mo
     asyncio.run(scenario())
 
 
-@pytest.mark.e2e("bd")
-def test_resuming_a_still_blocked_item_re_pauses_cheaply(tmp_path, monkeypatch):
+def test_resuming_a_still_blocked_item_re_pauses_cheaply(bd, tmp_path, monkeypatch):
     """The 'cheap refusal' the bead asks for: a resume of a still-blocked item
     costs one `bd blocked` call and re-pauses -- no worker_sessions row."""
     monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
@@ -1513,13 +1494,7 @@ def test_resuming_a_still_blocked_item_re_pauses_cheaply(tmp_path, monkeypatch):
                     "SELECT bead_id FROM work_items WHERE id = ?", (wid,)
                 ).fetchone()
             )
-            subprocess.run(
-                ["bd", "dep", "add", row["bead_id"], blocker_id, "--type", "blocks"],
-                cwd=tracker,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
+            bd.block(row["bead_id"], blocker_id, cwd=tracker)
             first = await executor.run(
                 database,
                 rd,
@@ -1551,32 +1526,19 @@ def test_resuming_a_still_blocked_item_re_pauses_cheaply(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
-@pytest.mark.e2e("bd")
-def test_a_blocked_sub_bead_the_item_states_pauses_the_walk(tmp_path, monkeypatch):
+def test_a_blocked_sub_bead_the_item_states_pauses_the_walk(bd, tmp_path, monkeypatch):
     """The motivating case plan-review finding 1 named: a manually created
     item's own tracking bead is always edge-free (fresh from `entry.intake`),
     so only a check against `implements_beads` -- the sub-beads the
     item states -- ever catches a real dependency for this path."""
     monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
-    # `Kraft-` prefix -- the same
-    # setup `tests/test_bead_bookkeeping.py`'s own sub-bead test uses, since
-    # `isolated_bd`'s shared template is prefixed `TEST` and would never match.
-    tracker = make_repo(tmp_path, name="tracker")
-    subprocess.run(
-        ["bd", "init", "--prefix", "Kraft"], cwd=tracker, check=True, capture_output=True
-    )
+    tracker = bd.init(make_repo(tmp_path, name="tracker"))
     repo = make_repo(tmp_path)
 
     async def scenario():
         sub = await beads.intake("the sub task", cwd=str(tracker))
         blocker = await beads.intake("the blocker", cwd=str(tracker))
-        subprocess.run(
-            ["bd", "dep", "add", sub, blocker, "--type", "blocks"],
-            cwd=tracker,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
+        bd.block(sub, blocker, cwd=tracker)
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
@@ -1620,29 +1582,19 @@ def test_a_blocked_sub_bead_the_item_states_pauses_the_walk(tmp_path, monkeypatc
     asyncio.run(scenario())
 
 
-@pytest.mark.e2e("bd")
-def test_a_bead_blocked_only_by_its_own_bundlemate_dispatches(tmp_path, monkeypatch):
+def test_a_bead_blocked_only_by_its_own_bundlemate_dispatches(bd, tmp_path, monkeypatch):
     """A work item bundling two beads with a `blocks` edge between them (the
     Kraft-5fx.2..5fx.12 shape) must not read as blocked by a bead it is
     itself implementing -- the blocker here is in the item's own bead set,
     not an outside dependency."""
     monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
-    tracker = make_repo(tmp_path, name="tracker")
-    subprocess.run(
-        ["bd", "init", "--prefix", "Kraft"], cwd=tracker, check=True, capture_output=True
-    )
+    tracker = bd.init(make_repo(tmp_path, name="tracker"))
     repo = make_repo(tmp_path)
 
     async def scenario():
         sub = await beads.intake("the sub task", cwd=str(tracker))
         bundlemate = await beads.intake("bundled dependency", cwd=str(tracker))
-        subprocess.run(
-            ["bd", "dep", "add", sub, bundlemate, "--type", "blocks"],
-            cwd=tracker,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
+        bd.block(sub, bundlemate, cwd=tracker)
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:

@@ -17,6 +17,7 @@ import pytest
 import uvicorn
 import yaml
 from support.harness import fake_templates_dir
+from support.server import child_env
 
 from kraft import cli, client
 from kraft.paths import RunDirs
@@ -492,14 +493,9 @@ def test_kraft_9oab_sigterm_stops_the_real_server(tmp_path):
     """
     run_dir = tmp_path / "run"
     templates = fake_templates_dir(tmp_path, "true")
-    env = {
-        **os.environ,
-        "KRAFT_RUN_DIR": str(run_dir),
-        "KRAFT_TEMPLATES_DIR": str(templates),
-    }
     proc = subprocess.Popen(
         [sys.executable, "-m", "kraft", "admin", "start"],
-        env=env,
+        env=child_env({"KRAFT_RUN_DIR": str(run_dir), "KRAFT_TEMPLATES_DIR": str(templates)}),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
