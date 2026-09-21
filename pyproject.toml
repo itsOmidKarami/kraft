@@ -83,6 +83,14 @@ timeout_method = "thread"
 # backend to asyncio and provides the async `database` fixture. The older
 # `asyncio.run(scenario())` style inside a sync test still works unchanged.
 anyio_mode = "auto"
+# A forgotten `await` is a test that asserts on nothing: make Python's
+# "never awaited" warning fail the test instead of scrolling past. CPython
+# raises it inside the coroutine's finalizer, where it becomes an unraisable
+# exception, hence the second line (pinned in tests/test_suite_config.py).
+filterwarnings = [
+    "error:coroutine .* was never awaited:RuntimeWarning",
+    "error:Exception ignored while finalizing coroutine:pytest.PytestUnraisableExceptionWarning",
+]
 markers = [
     "e2e(*clis): uses a real external CLI (bd, claude, ...) to check a contract; skips unless each named CLI is on PATH (claude also needs KRAFT_E2E=1)",
     "beads_adapter: tests of kraft.adapters.beads itself; keeps the real adapter, with bd stubbed, instead of the suite's in-memory fake",

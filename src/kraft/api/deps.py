@@ -92,6 +92,11 @@ def spawn(app: FastAPI, wid: str, coro) -> asyncio.Task:
         # A refused coroutine that is never awaited raises "coroutine was
         # never awaited" at garbage-collection time and leaks whatever it
         # closed over (the `guard` wrapper, the executor.run frame, ...).
+        # Closing an unstarted `guard(...)` does not reach the coroutine it
+        # was handed as an argument, so close that one too.
+        for arg in coro.cr_frame.f_locals.values() if coro.cr_frame else ():
+            if asyncio.iscoroutine(arg):
+                arg.close()
         coro.close()
         raise AlreadyRunning(wid)
     task = asyncio.ensure_future(coro)
