@@ -8,9 +8,8 @@ from pathlib import Path
 
 pytest_plugins = ("pytester",)
 
-_INI = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())["tool"][
-    "pytest"
-]["ini_options"]
+_ROOT = Path(__file__).resolve().parents[1]
+_INI = tomllib.loads((_ROOT / "pyproject.toml").read_text())["tool"]["pytest"]["ini_options"]
 
 
 def test_a_forgotten_await_fails_the_test(pytester):
@@ -44,3 +43,17 @@ def test_a_forgotten_await_fails_the_test(pytester):
     )
     result = pytester.runpytest_inprocess("-p", "no:cacheprovider")
     result.assert_outcomes(passed=1, failed=2)
+
+
+def test_an_async_test_in_either_tree_keeps_its_plain_id(pytester):
+    """The repo-root conftest pins `anyio_backend` for both testpaths, so an
+    `async def` test anywhere is collected once, under its own name -- not as
+    `test_x[asyncio]`, which would break the intent pins that name it."""
+    pytester.makeini(f"[pytest]\nanyio_mode = {_INI['anyio_mode']}\n")
+    pytester.makeconftest((_ROOT / "conftest.py").read_text())
+    for tree, name in (("tests", "test_a.py"), ("plugins/kraft-lite/tests", "test_b.py")):
+        (pytester.path / tree).mkdir(parents=True)
+        (pytester.path / tree / name).write_text("async def test_x():\n    pass\n")
+    result = pytester.runpytest_inprocess("--collect-only", "-q", "-p", "no:cacheprovider")
+    ids = sorted(line for line in result.outlines if "::" in line)
+    assert ids == ["plugins/kraft-lite/tests/test_b.py::test_x", "tests/test_a.py::test_x"]

@@ -281,18 +281,6 @@ def _isolated_kraft_home(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def anyio_backend():
-    """Every `async def` test runs once, on asyncio.
-
-    `anyio_mode = "auto"` (pyproject) hands every `async def test_*` to anyio's
-    plugin, whose own `anyio_backend` is parametrized over each installed
-    backend. That would rename every async test to `test_x[asyncio]` (breaking
-    intent pins) and run it again on trio the day trio is installed. Kraft is
-    asyncio-only, so pin it here, unparametrized."""
-    return "asyncio"
-
-
-@pytest.fixture
 def run_dirs(tmp_path) -> RunDirs:
     """`tmp_path/run` as a `RunDirs`, directories created: what the executor
     and every `store` reader take alongside `database`."""
