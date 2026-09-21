@@ -64,7 +64,7 @@ origin: src/kraft/templates/models.py §AgentTask -- the single-skill half is th
 The system SHALL provide an agent task's Kraft-owned output and lifecycle
 contract before its selected skill and steering profiles. A selected skill or
 steering profile SHALL NOT remove that contract.
-enforced-by: tests/executor/test_dispatch.py::test_an_agent_task_contract_precedes_its_skill_and_steering
+enforced-by: tests/executor/test_dispatch.py::test_an_agent_task_contract_precedes_its_skill_and_steering, tests/executor/test_dispatch.py::test_the_seeded_library_steers_from_its_own_profiles_with_no_steering_file
 
 ## REQ selected-skill-must-be-available
 
@@ -267,7 +267,7 @@ enforced-by: tests/templates/test_materialization.py::test_the_resolved_chain_is
 
 A materialized chain SHALL contain effective policy values and intake-specific
 decisions for one work item and SHALL NOT change as that item executes.
-enforced-by: tests/templates/test_materialization.py::test_materialization_freezes_chain_policy_and_target, tests/templates/test_materialization.py::test_a_materialized_chain_cannot_be_changed_while_the_item_executes, tests/store/test_chain_gates.py::test_a_materialized_chain_round_trips_through_the_work_item_row, tests/executor/test_gates.py::test_the_typed_override_is_a_read_time_view_and_does_not_touch_the_snapshot
+enforced-by: tests/templates/test_materialization.py::test_materialization_freezes_chain_policy_and_target, tests/templates/test_materialization.py::test_a_materialized_chain_cannot_be_changed_while_the_item_executes, tests/store/test_chain_gates.py::test_a_materialized_chain_round_trips_through_the_work_item_row, tests/executor/test_gates.py::test_the_typed_override_is_a_read_time_view_and_does_not_touch_the_snapshot, tests/executor/test_dispatch.py::test_editing_the_library_after_intake_does_not_change_a_running_items_steering, tests/executor/test_dispatch.py::test_a_snapshot_without_frozen_steering_stops_for_a_human
 
 ## REQ steer-can-address-paused-agent-tasks-individually
 
