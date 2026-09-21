@@ -91,7 +91,7 @@ State lives in `$KRAFT_HOME` (default `~/.kraft`):
 | | |
 |---|---|
 | `~/.kraft/run/` | `orchestrator.db`, `index.db`, `logs/`, `results/`, `worktrees/` |
-| `~/.kraft/templates/` | the YAML the Settings screens edit — chain templates, `registry.yaml`, `policy.yaml`, `repos.yaml`, `access.yaml` |
+| `~/.kraft/templates/` | the YAML the Settings screens edit — `library.yaml`, `chains/`, `harnesses.yaml`, `policy.yaml`, `repos.yaml`, `access.yaml` |
 
 `templates/` is seeded from the packaged defaults on first run and never overwritten
 after, so an upgrade cannot clobber an edited policy. It is a plain directory of
@@ -393,7 +393,7 @@ Everything is `just` — run `just` for the full list.
 ```
 src/kraft/        orchestrator: api, executor, policy, store, adapters/, index/
 frontend/         React SPA (vite)
-templates/        default chain templates + registry/policy — the install seed
+templates/        the V1 library, chains, harness profiles and policy — the install seed
 dev/seed.py       dev-instance seeder
 fixtures/         fake agent + the PATH shim just dev uses
 docs/intent/      intended behaviour as pinned requirements, each tied to a test

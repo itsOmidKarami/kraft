@@ -7,26 +7,24 @@ whenever a decision belongs to a person.
 ## The model
 
 A **work item** is one unit of work and produces one merge request. It enters as
-a **chain**: an ordered list of **nodes** materialized from a YAML template in
-`templates/`. Each node names one or more **hook points** — `on.test.run`,
-`on.mr.open`, `on.review.local.run` — and each hook point is bound to an
-**adapter** by `templates/registry.yaml`.
+a **chain**: an ordered list of **nodes** resolved from one file under
+`templates/chains/` against the reusable components in `templates/library.yaml`
+(Template Schema V1, `src/kraft/templates/`), and frozen onto the item at
+intake. An execution node runs typed **tasks**, of four kinds:
 
-There are four kinds of adapter:
-
-- **agent** (`src/kraft/adapters/`) — runs a headless coding agent, on
-  whichever harness (`claude`, `codex`, `gemini`, ...) the binding names, in a
-  git worktree.
+- **agent** (`src/kraft/adapters/`) — runs a headless coding agent, on the
+  harness profile (`harnesses.yaml`: `claude`, `codex`, `gemini`, ...) the task
+  names, in a git worktree.
 - **subprocess** (`src/kraft/adapters/`) — runs a command.
-- **builtin** (`src/kraft/builtins.py`) — work Kraft does itself: preparing a
-  worktree, copying attachments, scanning for touched submodules.
+- **builtin** (`src/kraft/builtins.py`) — work Kraft does itself, such as
+  running the repo's changed test scopes.
 - **forge** (`src/kraft/adapters/forge/`) — talks to GitHub or GitLab: opening
-  a merge request, polling CI, syncing, merging.
+  a merge request, waiting on CI, marking it ready, merging.
 
 Two things make a chain stop:
 
-- A **gate** — a node declares `gate_after`, the chain halts, and the work item
-  becomes `needs_human`. You approve, reject with a note, or steer.
+- A **gate** — a node of its own (`kind: gate`); the chain halts there and the
+  work item becomes `needs_human`. You approve, reject with a note, or steer.
 - A **cap** — every retry loop is bounded. Hitting the bound escalates to you
   with the full trace rather than looping.
 

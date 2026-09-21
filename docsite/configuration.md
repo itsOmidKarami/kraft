@@ -8,57 +8,74 @@ reports anything that doesn't parse, and `kraft admin reload` picks up an
 on-disk edit without a restart).
 
 Every file in `templates/` is validated when it is loaded, against a model that
-describes both its shape and its references — a chain node may only name a hook
-the registry defines, and a `reject_to` may only name a node at or before the
-one declaring it. A file that does not load is reported with the offending key
-named, and the rest of the configuration keeps working: one broken chain
-template does not stop the server.
+describes both its shape and its references — a chain component may only
+`extends` a library component of its own kind, and a `reject_to` may only name a
+node before the gate declaring it. A file that does not load is reported with
+the offending key named. `kraft admin templates lint` checks the whole library
+and every chain at once, and writes nothing.
 
-## Chain templates (`*.yaml`)
+`registry.yaml`, hook names and `gate_after` do not exist in Template Schema V1.
+A home still holding them is refused until `kraft admin update` replaces it —
+see [CLI → Service and admin](cli.md#service-and-admin).
 
-Any YAML file in `templates/` whose top level is `id:` + `nodes:` is a chain
-template, selectable by that `id` when creating a work item. See
-[Concepts](concepts.md#chain) for the node schema (`tasks`/`steps`,
-`gate_after`, `fix_loop`, `on_failure`, `rebase_bounce_to`, `reject_to`,
-`auto_escalate`, `auto_escalate_stuck`, `auto_escalate_delay_s`) with the
-shipped `default` and `quick-task` templates as worked examples, and
-[Concepts → Composing a template](concepts.md#composing-a-template) for
-building a custom one with `extends`/`remove`/`insert_before`/`insert_after`
-instead of restating a whole node list.
+## `library.yaml` — reusable components
 
-## `registry.yaml` — hook point bindings
+Four sections, each a map of name to definition, which any chain takes with
+`extends: <name>`:
 
-Maps every hook point a chain can name to the adapter that runs it:
+| Section | Holds |
+|---|---|
+| `tasks` | Reusable tasks of any kind — `agent`, `subprocess`, `builtin`, `forge`. |
+| `steps` | Reusable ordered groups of tasks. |
+| `nodes` | Reusable nodes, with their own steps, `on_failure`, `fix_loop` and `escalation`. |
+| `steering` | Named guidance an agent task selects with `steering: [name]`: `{instructions: "..."}`. |
 
 ```yaml
-defaults:
-  agent: { steering: [never-signal-processes-you-didnt-start] }
-hooks:
-  on.env.prepare:          { kind: builtin,    handler: env_setup }
-  on.spec.requested:       { kind: agent,      harness: claude, skill: spec, artifact: spec }
-  on.test.run:             { kind: subprocess, command: [uv, run, pytest, -q] }
-  on.mr.open:              { kind: forge,      handler: open_mr, backend: auto }
-  on.ci.poll:              { kind: forge,      handler: ci_poll, backend: auto, on_failure: [on.ci.repair] }
+tasks:
+  implementer:
+    kind: agent
+    harness: codex_default
+    prompt: Implement the approved plan.
+  code_review:
+    kind: agent
+    harness: claude_review
+    prompt: Review this work item's change for defects its passing tests do not catch.
+    skill: kraft:code-review
+    inputs: [review_package]
 ```
 
-| Key | Applies to | Means |
-|---|---|---|
-| `kind` | every entry | `agent`, `subprocess`, `builtin`, or `forge` — see [Concepts](concepts.md#hook-point-and-adapter). |
-| `harness` | `agent` | Which agent runtime to launch — `claude` (the default), `codex`, `gemini`, or an operator-added one. See [Agent harnesses](harnesses.md). |
-| `command` | `subprocess` | The argv to run, e.g. `on.test.run`'s `[uv, run, pytest, -q]`. |
-| `skill` | `agent` | A named skill the agent is launched with (`spec`, `plan`, `code-review`, `mr-metadata`, ...). |
-| `artifact` | `agent` | What the hook is expected to produce — a spec, a plan, a review brief — surfaced on the gate that follows it. |
-| `model` / `effort` | `agent` | Per-hook overrides of the agent's model and effort, where the default isn't right for that step. |
-| `handler` | `builtin`, `forge` | Which Python function or forge operation runs. |
-| `backend` | `forge` | `auto` resolves per repo from the `forge` field on that repo's `repos.yaml` entry — never pin a forge here, or every repo on the install is forced onto one. |
-| `on_failure` | every entry | Hook points to run when *this task* fails, before the task is re-dispatched on its own. The repair travels with the binding, so every chain that runs the task gets it — `on.ci.poll` ships with `on_failure: [on.ci.repair]`. A repair is believed only when the task passes on the re-dispatch, never on the repair's own say-so. One layer deep: a repair hook's own `on_failure` is never dispatched, and a hook may not name itself. |
-| `defaults.agent.*` | top level | Applied to every `kind: agent` hook that doesn't set its own value. Any of `harness`, `profile`, `model`, `escalate_model`, `effort`, `permission_mode`, `skill`, `artifact`, `command` (overrides the harness executable), `interactive`, and `timeout` (seconds one agent task may run before it is stopped) — plus three that merge as a list instead of binding-wins: `steering` (from `templates/steering/`), `deny_tools`, `allowed_tools` (default's items first, then the binding's own, deduped). Setting `artifact` or `skill` here applies it to *every* agent hook, which is rarely what you want — both are usually per-hook. |
+An `agent` task's keys:
 
-Rebinding a hook — say, pointing `on.test.run` at a different command, or
-`on.review.local.run` at a different skill — is an edit here, not a chain
-template change. `on.review.security.run` ships registered but in no default
-chain; a plan touching auth/sessions/tokens/secrets adds it to `verify`
-dynamically.
+| Key | Means |
+|---|---|
+| `id` | Its local identifier (`[a-z][a-z0-9_-]*`); a library entry is named by its key instead. |
+| `kind` | `agent`. |
+| `harness` | The [harness profile](harnesses.md) it runs on — an id from `harnesses.yaml`. A disabled or missing profile stops the task for a human; nothing substitutes another. |
+| `prompt` | What the task is asked to do. Kraft's own output contract is given before the skill and steering. |
+| `skill` | One skill the agent is launched with, by name (`kraft:code-review`, or a plugin's `plugin:skill`). A skill that cannot be loaded stops the task for a human. |
+| `steering` | Names from the library's `steering` section. |
+| `produces` | The document kind it writes (`spec`, `plan`, `work_brief`, `review_brief`) — what a gate's `artifact` decides and an attachment covers. |
+| `model` / `effort` | This task's runtime options, checked against what the profile's provider accepts. |
+| `inputs` | What Kraft hands the task: `review_package` (the change under review), `carried_findings` (its previous round's findings) and `previous_review` (its previous session's result). |
+| `scope` | `each_repository` fans the task out once per selected repository of a workspace item; the default runs once. |
+| `on_failure` | A recovery pass for this task alone. |
+| `policy` | This task's own policy layer. |
+| `skippable` | `false` to refuse an operator's skip. |
+
+A `subprocess` task has a `command`; a `builtin` task a `ref`
+(`kraft.verify_changed_test_scopes`, which runs the repo's own test scopes); a
+`forge` task a `target` (`mr.open_draft`, `mr.ci`, `mr.automated_review`,
+`mr.mark_ready`, `mr.external_approval`, `mr.merge`, `mr.post_merge_ci`, …) and,
+for a wait, `wait: {timeout: 90m, polling: {initial_interval: 30s,
+max_interval: 5m}}`.
+
+## `chains/*.yaml` — chain templates
+
+One selectable chain per file, named by its `id` (or the file name). See
+[Concepts](concepts.md#chain) for the node schema, with the shipped `default`
+and `quick-task` chains as worked examples. `kraft admin templates show ID
+--resolved` prints one with its library components expanded, and Settings →
+Chains edits the file itself.
 
 ## `policy.yaml` — caps, budget, archiving
 
@@ -212,7 +229,7 @@ repos:
 | `forge` | `null` | `github` or `gitlab`, which forge adapter `backend: auto` resolves to for this repo. `fake` is **dev-only**: an in-process forge that opens nothing, which `just dev`'s seeded repo uses. `null` at load time — `kraft repo connect` is what actually resolves it, from the repo's remote. |
 | `project` | `null` | The GitLab project path, when `forge: gitlab`. Renamed from the legacy `gitlab_project` key, which a hand-edited file may still carry — read transparently, never rewritten out from under you. |
 | `models` | `{}` | The model an agent task runs with on this repo, per harness profile id (`claude_review: opus`): above the profile's own `defaults:`, below a task's `model:` and the work item's override. Keyed by profile because one model name means nothing to another provider. Replaces the retired `default_model`, which a loaded file drops with a warning. |
-| `test_command` | `null` (falls back to the registry's `on.test.run`) | The command CI actually runs for this repo — lets `verify`'s local test run and CI's differ deliberately, rather than drift apart by accident. |
+| `test_command` | `null` | The command CI actually runs for this repo — what the changed-test-scope verification runs, as one scope over every path. A repo with neither this nor `test_scopes` stops that verification for a human rather than inventing a command. |
 | `areas` | `{}` | Path-scoped contexts inside this repo, keyed by id: `{paths: [...], setup: "...", verification: {test_scopes: [...]}}`. An area's test scopes join the repo's and are selected by changed paths the same way; its `setup` runs once before the first of its scopes runs. Areas are never forge targets. |
 | `test_scopes` | `null` | A monorepo's per-directory test commands: a list of `{paths: [...], command: "..."}` mappings, each `paths` non-empty and each `command` a non-empty string. Not synthesized from `test_command` — the two stay independently editable. |
 | `setup_command` | *(required — no fallback)* | Run in every new worktree before any node starts. `""` means "deliberately nothing"; an absent value stops the repo's next work item rather than guessing. |
@@ -220,7 +237,7 @@ repos:
 | `env_passthrough` | `[]` | Names of variables to carry over from the daemon's own environment, for what the baseline allowlist doesn't cover. |
 | `local_files` | `[]` | Relative paths (no globs, no directories) to copy into every new worktree — for files `git worktree add` can't carry, like an untracked `.python-version`. |
 | `deny_tools` | `[]` | Tool names withheld from every agent task on this repo. Part of the repository policy layer (below): frozen into each work item when it is filed, and a later addition still applies to running items. |
-| `steering` | `[]` | Steering docs (from `templates/steering/`) attached to every agent hook on this repo, layered under the registry's own defaults. |
+| `steering` | `[]` | Steering docs (from `templates/steering/`) attached to every agent task on this repo, beside the task's own library steering. |
 | `sandbox` | `null` | `{kind: docker, image: ...}` — run this repo's task processes in that container. Part of the repository policy layer: once set, no chain, node or task can turn it off, and `false` here cannot turn off one a layer set. Set it here or in `policy.sandbox`, not both. |
 | `policy` | `null` | The repository policy layer: any of `allowed_tools`, `deny_tools`, `sandbox`, `token_budget`, `allowed_harnesses`, `timeout_minutes`, `max_attempts`, applied after `policy.yaml` and before the chain, and only ever tightening what `policy.yaml` allows. It binds every work item filed in this repo, whatever its chain; a value `policy.yaml` refuses makes intake refuse the item. See `policy.yaml`'s table above. |
 | `automated_review` | `null` | The one automated reviewer a chain's `mr.automated_review` task waits for, named exactly one way. `bot: <login>` settles when that forge login has reviewed the merge request's current head: on GitHub, changes requested or any inline comment is actionable (one finding per comment) and anything else is clean; on GitLab, the bot's unresolved discussions are actionable and its approval is clean. `check: <name>` settles when that check run or commit status on the head completes: success is clean, failure is actionable with its output as the finding. Unset, the repository expects no automated review: the task settles clean at once and records `automated_review_not_configured`. A reviewer that errors stops the item for a person rather than spending a repair. A dismissed GitHub review doesn't count. Kraft reads only the first page of 100 of each list it asks for: the pull request's reviews, a review's comments, and a GitLab merge request's discussions and commit statuses. A bot with no match on that first page reads as not having reviewed yet. On GitLab an approval isn't tied to a commit, so a bot's approval of an earlier head still reads as clean, unless the project resets approvals on push. |

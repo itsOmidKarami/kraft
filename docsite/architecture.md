@@ -6,8 +6,8 @@ Kraft is one FastAPI process and a React SPA, running on your machine. It takes
 a unit of work, runs it through an ordered series of steps, and stops to ask you
 whenever a decision belongs to a person.
 
-For the vocabulary this page uses — work item, chain, node, hook point, adapter,
-gate, cap — see [Concepts](concepts.md).
+For the vocabulary this page uses — work item, chain, node, task, gate, cap —
+see [Concepts](concepts.md).
 
 ## The process
 

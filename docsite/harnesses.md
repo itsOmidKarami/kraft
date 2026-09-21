@@ -1,24 +1,25 @@
 # Agent harnesses
 
 A **harness** is one agent runtime, described as data — a fact about a CLI, not
-code. An `agent`-kind hook in [`registry.yaml`](configuration.md#registryyaml-hook-point-bindings)
-names one by id in its `harness:` field:
+code. An `agent` task in [`library.yaml`](configuration.md#libraryyaml-reusable-components)
+names a harness *profile* in its `harness:` field, and `harnesses.yaml` says
+which harness (the profile's `provider`) that profile runs:
 
 ```yaml
-on.spec.requested: { kind: agent, harness: claude, skill: spec, artifact: spec }
+spec_author: { kind: agent, harness: codex_default, prompt: "...", produces: spec }
 ```
 
-`harness` defaults to `claude` when omitted. Kraft ships three:
+Kraft ships three harnesses:
 
 | id | Binary | Notable gaps |
 |---|---|---|
 | `claude` | `claude` | Full capability set. |
-| `codex` | `codex exec` | No `deny_tools`, `allowed_tools`, `approval_channel`, `autocompact`, or `rate_limit_signal` — a binding naming one of those is rejected at load. |
+| `codex` | `codex exec` | No `deny_tools`, `allowed_tools`, `approval_channel`, `autocompact`, or `rate_limit_signal` — a profile or task asking for one of those is rejected at load. |
 | `gemini` | `gemini` | No out-of-band context channel (context goes in-band via the prompt), no `effort`, no `resume` at all (Gemini's `--resume` takes an index or `"latest"`, not a session id, so the capability isn't declared). |
 
 ## Capabilities, not flags
 
-A hook's YAML never names a harness's actual CLI flags. It asks for a
+A task's YAML never names a harness's actual CLI flags. It asks for a
 **capability** — `prompt`, `context`, `model`, `effort`, `permission_mode`,
 `deny_tools`, `allowed_tools`, `approval_channel`, `resume`, `autocompact`,
 `structured_log`, `usage`, `rate_limit_signal` — and each harness's own YAML
@@ -50,10 +51,10 @@ a seeded copy would freeze at whichever version was installed when Kraft
 first ran, so this directory only exists once someone has deliberately put
 something in it.
 
-`kraft admin doctor` runs one PATH check per harness the live registry
-actually names (not every bundled one — an install with no `codex` binding
-anywhere isn't told to go install `codex`), plus a failure row for any
-harness file that failed to load at all.
+`kraft admin doctor` runs one PATH check per harness profile the live
+library's chains actually select (not every declared one — an install whose
+chains never select a `codex` profile isn't told to go install `codex`), plus a
+failure row for any harness file that failed to load at all.
 
 ## Adding one
 

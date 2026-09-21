@@ -74,9 +74,9 @@ Each skill is one moment you'd reach for Kraft, not one skill per tool:
 - **`/kraft:gates`** — Approve or reject the gate a work item is waiting on,
   or pause/resume one heading the wrong way.
 - **`/kraft:check`** — Check whether a repo's Kraft config has drifted from
-  what this version ships: a hook stuck on a placeholder, a chain missing a
-  node, a hook naming a skill that isn't installed. Report-only unless asked
-  to fix.
+  what this version ships: a chain missing a node, a chain that no longer
+  resolves, a task naming a skill that isn't installed. Report-only unless
+  asked to fix.
 
 Most call the same MCP tools listed below; `onboard` and `check` instead run
 `kraft admin doctor`/`admin init` directly as shell commands. Either way,

@@ -64,11 +64,11 @@ kraft view watch     # a live board, redrawn on every event
 
 ![The Kraft board: work items grouped by Needs you, Running, Not started, and Done](assets/board.png)
 
-`quick-task` runs `env_setup → implementation → verify` with no gate, so if
-the agent's fix is good, the item reaches **Done** on its own. If `verify`
-fails, it retries within `verify_fix_loop`'s cap
-([policy.yaml](configuration.md#policyyaml-caps-budget-archiving)) before
-stopping for you.
+`quick-task` runs `implementation → verify` with no gate, so if the agent's fix
+is good, the item reaches **Done** on its own. If `verify` fails, the item stops
+for you with the failing scope named; the `default` chain's `verification` node
+is the one that repairs itself within its fix loop's cap
+([policy.yaml](configuration.md#policyyaml-caps-budget-archiving)).
 
 ## 5. Try the real chain, and its gate
 
@@ -109,10 +109,10 @@ rather than merging over untested code.
 
 ## Where to go from here
 
-- **[Concepts](concepts.md)** — the five-word vocabulary this walkthrough used:
-  chain, node, hook point, adapter, gate, cap.
-- **[Configuration](configuration.md)** — every field in `repos.yaml`,
-  `registry.yaml`, `policy.yaml`, `access.yaml`.
+- **[Concepts](concepts.md)** — the vocabulary this walkthrough used: chain,
+  node, task, gate, cap.
+- **[Configuration](configuration.md)** — every field in `library.yaml`,
+  `repos.yaml`, `policy.yaml`, `access.yaml`.
 - **[Agent integration](agent-integration.md)** — doing all of the above from
   inside a coding-agent session instead of this shell.
 - **[Remote access](remote-access.md)** — approving that gate from your phone.

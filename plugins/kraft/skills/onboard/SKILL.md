@@ -142,5 +142,5 @@ zero exit code says the command ran, not that what it did was right.
    open.
 
 Finish by handing off into the `check` skill for the full drift report
-against this repo's registry — that skill already owns the diff, no need to
+against this install's library and chains — that skill already owns the diff, no need to
 repeat it here.
