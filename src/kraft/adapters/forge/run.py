@@ -23,6 +23,7 @@ from kraft.adapters.forge.models import (
     ForgeError,
 )
 from kraft.automated_review import AutomatedReview
+from kraft.templates.environment import RootPointerPolicy
 from kraft.templates.models import DEFAULT_WAIT, WaitBounds
 
 logger = logging.getLogger(__name__)
@@ -929,23 +930,28 @@ async def run_task(
     multi = bool(rows)
     targets = [(r["id"], Path(r["repo_path"]), r["role"]) for r in rows] or [(None, repo, "root")]
     root_has_changes = True
-    root_policy = "bump"
+    # The frozen target's, never a live setting: membership and the pointer
+    # policy were captured when the item was filed
+    # (`work-item-target-selection-is-immutable`).
+    item = db.read(
+        lambda c: c.execute(
+            "SELECT materialized_chain FROM work_items WHERE id = ?", (work_item_id,)
+        ).fetchone()
+    )
+    snapshot = store.materialized_chain_of(item) if item is not None else None
+    workspace = snapshot is not None and snapshot.target.kind == "workspace"
+    root_policy = snapshot.target.root_pointer_policy if workspace else RootPointerPolicy.IGNORE
     if multi:
-        policy_row = db.read(
-            lambda c: c.execute(
-                "SELECT root_merge_policy FROM work_items WHERE id = ?", (work_item_id,)
-            ).fetchone()
-        )
-        root_policy = (policy_row["root_merge_policy"] if policy_row else None) or "bump"
         root_repo = next(t for _, t, role in targets if role == "root")
-        root_has_changes = bool(await git.commits_on(root_repo, branch))
-        if root_policy == "skip" or not root_has_changes:
-            # Nothing of root's own to review -- it never goes through the
-            # ordinary per-repo loop below. Its pointer bump, if any (never
-            # under `skip`), is pushed directly after every submodule merges
-            # (below), not through a merge request -- see the plan's "Design
-            # correction": at `open_mr` time no submodule has merged yet, so
-            # a root MR here would review a pointer that doesn't exist.
+        mounts = {r["submodule_path"] for r in rows if r["role"] == "submodule"}
+        root_has_changes = await git.source_changed(root_repo, branch, exclude=mounts)
+        if not root_has_changes:
+            # A pointer-only root has no source of its own to review -- it
+            # never goes through the ordinary per-repo loop below
+            # (`workspace-root-code-change-gets-a-root-merge-request`). Its
+            # pointer follows the item's root-pointer policy after every
+            # member merges (below): at `open_mr` time no member has merged
+            # yet, so a root MR here would review a pointer that doesn't exist.
             targets = [t for t in targets if t[2] != "root"]
 
     if handler == "merge_watch" and targets:
@@ -988,9 +994,14 @@ async def run_task(
         # target the loop below is on) -- a multi-repo item's submodule paths
         # are not where the agent's `on.mr.describe` artifact lives.
         meta = mr_ops.read_mr_meta(repo, work_item_id)
-        for row_id, target_repo, role in targets:
-            if handler == "open_mr" and role == "root" and multi:
-                await git._assert_submodules_covered(target_repo, {t for _, t, _ in targets})
+        if handler == "open_mr" and workspace:
+            # Every workspace item, before anything opens: a submodule the agent changed
+            # that the target never selected has no branch and no merge
+            # request anywhere, and must stop the chain rather than be dropped
+            # -- whether or not root itself has anything to publish.
+            covered = {Path(r["repo_path"]).resolve() for r in rows if r["role"] == "submodule"}
+            await git._assert_submodules_covered(repo, covered)
+        for row_id, target_repo, _role in targets:
             one_log, one_status, one_findings = await _run_one(
                 live_forge,
                 db,
@@ -1042,7 +1053,7 @@ async def run_task(
         if (
             handler == "merge"
             and multi
-            and root_policy != "skip"
+            and root_policy is RootPointerPolicy.BUMP
             and not root_has_changes
             and status == "done"
         ):

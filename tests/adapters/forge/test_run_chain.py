@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from support.harness import isolated_bd, make_repo_with_submodule
+from support.harness import isolated_bd, make_repo_with_submodule, workspace_target
 
 from kraft import builtins as _builtins
 from kraft import events, executor, policy, store
@@ -266,11 +266,15 @@ async def test_merge_completes_the_merge_after_a_rebase_when_no_bounce_is_config
 # --- multi-repo items ------------------------------------------------------------
 
 
-async def _multi_repo_item(item_on, database, run_dirs, tmp_path, policy_name, *, sub="repos/pkg"):
-    """A root with one submodule at `sub`, filed with `root_merge_policy`, its
+async def _multi_repo_item(
+    item_on, database, run_dirs, tmp_path, policy_name, *, sub="repos/pkg", select=True
+):
+    """A root with one submodule at `sub`, filed as a workspace item selecting
+    it (unless `select=False`) under root-pointer policy `policy_name`, its
     worktree cut. Returns `(item, worktree, branch)`."""
     root, _ = make_repo_with_submodule(tmp_path, submodule_path=sub)
-    it = await item_on(back_half(), repo=root, submodules=[sub], root_merge_policy=policy_name)
+    target = workspace_target({"pkg": sub} if select else {}, root_pointer_policy=policy_name)
+    it = await item_on(back_half(), repo=root, target=target)
     worktree = await _builtins.ensure_worktree(
         database, run_dirs, repo=str(root), work_item_id=it.id, repo_entry=NO_SETUP
     )
@@ -297,20 +301,28 @@ async def _run_task(
     )
 
 
-async def test_run_task_opens_a_merge_request_per_repo_deepest_first(
-    item_on, database, run_dirs, tmp_path, monkeypatch
-):
-    """Root goes through the ordinary loop too, deepest submodule first, when
-    it has changes of its own to review (Task 7 exempts only a root with
-    nothing of its own -- the next test)."""
-    it, worktree, branch = await _multi_repo_item(item_on, database, run_dirs, tmp_path, "bump")
-    # `_commits_on` diffs against origin/main; with no origin, root always reads
-    # as "no changes" and drops out of the loop whatever changed.
+def _with_origin(tmp_path, it, worktree):
+    """Give the item's root an origin: root source changes are read against
+    `origin/<default>`, so with none, root always reads as "no changes"."""
     origin = tmp_path / "origin.git"
     root = Path(it.repo)
     subprocess.run(["git", "clone", "--bare", "-q", str(root), str(origin)], check=True)
     _git(root, "remote", "add", "origin", str(origin))
     _git(worktree, "fetch", "-q", "origin")
+
+
+@pytest.mark.parametrize("policy_name", ["bump", "ignore"])
+async def test_run_task_opens_a_merge_request_per_repo_deepest_first(
+    item_on, database, run_dirs, tmp_path, monkeypatch, policy_name
+):
+    """Root goes through the ordinary loop too, deepest submodule first, when
+    it has source changes of its own -- whatever the pointer policy, which
+    governs only a pointer-only root (`workspace-root-code-change-gets-a-root-
+    merge-request`; the next test)."""
+    it, worktree, branch = await _multi_repo_item(
+        item_on, database, run_dirs, tmp_path, policy_name
+    )
+    _with_origin(tmp_path, it, worktree)
     _commit(worktree, "root-change.txt", "x\n", "root change")
     fake = _RecordingForge(ci_states=["success"])
 
@@ -325,10 +337,12 @@ async def test_run_task_opens_a_merge_request_per_repo_deepest_first(
 async def test_root_with_no_changes_of_its_own_never_opens_a_merge_request(
     item_on, database, run_dirs, tmp_path, monkeypatch
 ):
-    it, worktree, branch = await _multi_repo_item(
-        item_on, database, run_dirs, tmp_path, "bump_no_mr"
-    )
+    """A root whose only change is the member's new pointer has no source to
+    review: its pointer follows the root-pointer policy instead."""
+    it, worktree, branch = await _multi_repo_item(item_on, database, run_dirs, tmp_path, "bump")
+    _with_origin(tmp_path, it, worktree)
     _commit(worktree / "repos" / "pkg", "new.txt", "x\n")  # the agent's half: submodule only
+    _git(worktree, "commit", "-q", "-am", "the pointer, committed in root too")
     fake = forge.FakeForge(ci_states=["success"])
 
     await _run_task(database, run_dirs, it, worktree, branch, fake, monkeypatch)
@@ -394,7 +408,7 @@ async def test_the_shape_that_broke_on_9d0ab38ff3c9439b90506df0f6966660(
     not to bump its pointer: the submodule gets its own merge request and the
     root gets none. The standing regression test for the real occurrence."""
     it, worktree, _ = await _multi_repo_item(
-        item_on, database, run_dirs, tmp_path, "skip", sub="repos/packages"
+        item_on, database, run_dirs, tmp_path, "ignore", sub="repos/packages"
     )
     _commit(worktree / "repos" / "packages", "metrics.py", "ATTRS = 6\n")
     fake = forge.FakeForge(ci_states=["success"])
@@ -403,4 +417,23 @@ async def test_the_shape_that_broke_on_9d0ab38ff3c9439b90506df0f6966660(
 
     assert fake.merged == [1], "only the submodule's MR, never a root one"
     repos = {r["role"]: r["state"] for r in database.read(lambda c: store.repos_for(c, it.id))}
-    assert repos == {"submodule": "merged", "root": "pending"}, "skip: root untouched, as asked"
+    assert repos == {"submodule": "merged", "root": "pending"}, "ignore: root untouched, as asked"
+
+
+async def test_a_member_changed_without_being_selected_stops_publication(
+    item_on, database, run_dirs, tmp_path, monkeypatch
+):
+    """Typed membership replaces the old submodule scan: a submodule the
+    agent changed that the item never selected has no branch and no merge
+    request, so publishing must refuse rather than drop the change -- even
+    when root itself has nothing to publish."""
+    it, worktree, branch = await _multi_repo_item(
+        item_on, database, run_dirs, tmp_path, "ignore", select=False
+    )
+    sub = worktree / "repos" / "pkg"
+    _git(worktree, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "repos/pkg")
+    _commit(sub, "new.txt", "x\n")
+    fake = forge.FakeForge(ci_states=["success"])
+
+    assert await _run_task(database, run_dirs, it, worktree, branch, fake, monkeypatch) == "failed"
+    assert fake.opened == {}

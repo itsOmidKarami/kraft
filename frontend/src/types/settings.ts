@@ -7,6 +7,9 @@ export interface TestScope {
 
 export interface Repo {
   path: string;
+  /** The repository id a workspace names this entry by; only a workspace's
+   *  root and members carry one. */
+  id?: string | null;
   name: string;
   default_chain_template: string;
   test_command: string | null;
@@ -25,6 +28,15 @@ export interface Repo {
   /** A human has touched this entry — not "this has run". One-way: never
    *  returns to false. Drives the Detected section in ReposPage. */
   managed: boolean;
+}
+
+/** A `repos.yaml` workspace: a root repository and members mounted in it,
+ *  each naming a repository by `Repo.id`. */
+export interface Workspace {
+  id: string;
+  root: string;
+  root_pointer_default: "ignore" | "bump";
+  members: Record<string, { repository: string; path: string }>;
 }
 
 export interface RepoProbe {
