@@ -7,15 +7,25 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+from pathlib import Path
 
 import pytest
-from support.harness import v1_chain, v1_item
+from support.harness import v1_chain, v1_item, write_harness_profiles
 
 from kraft import events, executor, gate_review, store
 from kraft import policy as _policy
 from kraft.db import Database
 from kraft.executor import walk
 from kraft.paths import RunDirs
+
+
+@pytest.fixture(autouse=True)
+def _claude_profile():
+    """`_reviewer` selects profile `claude`, on the provider of that name."""
+    write_harness_profiles(
+        Path(os.environ["KRAFT_HOME"]) / "templates", {"claude": {"provider": "claude"}}
+    )
 
 
 def _reviewer(**extra):

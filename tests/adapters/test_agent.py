@@ -1,11 +1,12 @@
 import asyncio
 import json
+import os
 import shlex
 import sys
 from pathlib import Path
 
 import pytest
-from support.harness import make_repo
+from support.harness import make_repo, write_harness_profiles
 
 from kraft import db, skill, store
 from kraft.adapters import agent
@@ -1340,6 +1341,42 @@ def _v1_agent_task(**fields):
     return AgentTask.model_validate({"kind": "agent", **fields})
 
 
+def _claude_profile():
+    """A profile `claude` on the provider of that name, for a task selecting it."""
+    write_harness_profiles(
+        Path(os.environ["KRAFT_HOME"]) / "templates", {"claude": {"provider": "claude"}}
+    )
+
+
+def test_a_task_overrides_its_harness_profiles_defaults():
+    """`agent-task-selects-capability-compatible-runtime-options`: a profile's
+    `defaults:` are the lowest rung. The task's own field beats them, the
+    repo's `default_model` beats them, the item's override beats all three --
+    and what nothing overrides still arrives from the profile, on the
+    profile's provider and executable."""
+    write_harness_profiles(
+        Path(os.environ["KRAFT_HOME"]) / "templates",
+        {
+            "review": {
+                "provider": "claude",
+                "executable": "/opt/claude-wrapper",
+                "defaults": {"model": "sonnet", "effort": "medium", "permission_mode": "plan"},
+            }
+        },
+    )
+    task = _v1_agent_task(id="t", harness="review", prompt="p", effort="high")
+
+    inv = agent.resolve_agent_task(task, None, None)
+    assert (inv.harness, inv.command) == ("claude", "/opt/claude-wrapper")
+    assert (inv.model, inv.effort, inv.permission_mode) == ("sonnet", "high", "plan")
+
+    repo = {"default_model": "haiku"}
+    assert agent.resolve_agent_task(task, repo, None).model == "haiku"
+    item = {"model": "opus", "effort": "low"}
+    overridden = agent.resolve_agent_task(task, repo, None, item_override=item)
+    assert (overridden.model, overridden.effort) == ("opus", "low")
+
+
 def test_a_typed_agent_task_resolves_through_provider_declared_options(tmp_path):
     """`provider-owns-runtime-mechanics` (invocation, runtime options, skill
     loading): the task selects a harness profile and options by name, and the
@@ -1359,6 +1396,7 @@ def test_a_typed_agent_task_resolves_through_provider_declared_options(tmp_path)
         effort="high",
     )
 
+    _claude_profile()
     inv = agent.resolve_agent_task(task, None, None, skills_dir=skills)
 
     assert (inv.harness, inv.model, inv.effort) == ("claude", "opus", "high")
@@ -1398,6 +1436,7 @@ def test_the_provider_spells_session_resumption_for_an_agent_task(tmp_path):
     from kraft import harness as _harness
 
     task = _v1_agent_task(id="turn", harness="claude", prompt="carry on")
+    _claude_profile()
     inv = agent.resolve_agent_task(task, None, None)
     h = _harness.load(None).valid[inv.harness]
 

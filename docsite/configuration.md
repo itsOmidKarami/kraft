@@ -123,23 +123,19 @@ maxima:
 
 ## `harnesses.yaml` — harness profiles
 
-!!! warning "Not read yet"
-
-    This file is validated when it loads — a bad provider or an option the
-    provider does not declare is refused, and a broken file shows up on
-    `kraft admin doctor` — but **nothing dispatches through it yet.** A chain
-    task's `harness:` is currently resolved against the installed harness ids
-    (`claude`, `codex`, `gemini`), not against a profile name, so editing a
-    profile here changes nothing about how an agent is launched. The seeded
-    file exists so the shipped chain's `harness:` names resolve; treat the
-    section below as the shape to write, not as a live dial.
-
 A harness *profile* is a configured instance of an agent-runtime provider: which
 executable to run, and what runtime options to start from. It is never provider
 command syntax or result parsing — the provider package
 (`src/kraft/harnesses/<provider>.yaml`) declares the capability surface, and a
 profile selects only from it. A `defaults` key the provider does not declare, or
 a value it does not accept, is refused when the file is read.
+
+Every agent task's `harness:` names a profile here, never a provider directly,
+and the file is read again at each agent launch, so an edit reaches the next
+one without a restart. A task whose profile is missing or disabled, or whose
+`harnesses.yaml` cannot be read, stops for a human with the reason in its
+session log; Kraft never falls back to another profile or to a provider of the
+same name.
 
 ```yaml
 harnesses:
@@ -163,8 +159,8 @@ harnesses:
 | `<profile id>` | The name a V1 task's `harness:` selects. Lowercase, digits, `_` and `-`. |
 | `provider` | The harness this profile configures. Must be an installed harness id (`claude`, `codex`, `gemini`) — the provider id *is* the harness id. |
 | `enabled` | `false` takes the profile out of service. A task selecting a disabled profile stops for a human; Kraft never substitutes another. Defaults `true`. |
-| `executable` | The command to launch, when it differs from the provider's own default. |
-| `defaults` | Runtime options every task using this profile starts from (`model`, `effort`, ...). Checked against what the provider declares it accepts. |
+| `executable` | The command to launch, when it differs from the provider's own default. It replaces the executable only: the provider's own subcommand (`codex exec`) is kept after it. |
+| `defaults` | Runtime options every task using this profile starts from: `model`, `effort` and `permission_mode`. Checked against what the provider declares it accepts. They are the lowest rung: a work item's own override, the task's own field and the repo's `default_model` all win over them. Any other key stops the task for a human rather than being ignored. |
 
 ## `repos.yaml` — connected repos
 

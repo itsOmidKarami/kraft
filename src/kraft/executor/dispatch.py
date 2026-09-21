@@ -464,19 +464,11 @@ async def dispatch_node(
     if stops.budget_breach(db, work_item_row["id"], budget) is not None:
         return BUDGET
     # A harness the runtime cannot offer stops for a human and never silently
-    # substitutes another (`unavailable-selected-harness-needs-human`).
-    # Checked here rather than left to `run_agent_task`'s `ValueError`, which
+    # substitutes another (`unavailable-selected-harness-needs-human`): the
+    # profile lookup in `resolve_agent_task` raises `HarnessUnavailable`,
+    # caught below, rather than a `ValueError` from `run_agent_task` that
     # would surface as a crash in whatever gathered this task.
     harnesses = _harness.load(None)
-    if t.harness not in harnesses.valid:
-        why = harnesses.invalid.get(t.harness)
-        return await _config_error(
-            db,
-            run_dirs,
-            common,
-            f"{task.path} selects harness {t.harness!r}, which is not available: "
-            f"{why or f'known harnesses are {sorted(harnesses.valid)}'}\n",
-        )
     # Authorship travels with the note, not with the caller: a seeded
     # steer is Kraft's own recap of the last review's unresolved findings,
     # and the human templates in `steer_prefix` would tell the agent a
@@ -531,6 +523,14 @@ async def dispatch_node(
             skills_dir=launch.skills_dir if launch else None,
             escalate=escalate,
             item_override=merged_override or None,
+            harnesses=harnesses,
+        )
+    except _agent.HarnessUnavailable as exc:
+        return await _config_error(
+            db,
+            run_dirs,
+            common,
+            f"{task.path} selects harness {t.harness!r}, which is not available: {exc}\n",
         )
     except _skill.SkillError as exc:
         # A selected skill the environment cannot load stops for a human and

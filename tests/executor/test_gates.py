@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
-from support.harness import make_repo, v1_chain, v1_item, v1_walk
+from support.harness import fake_harness_home, make_repo, v1_chain, v1_item, v1_walk
 
 from kraft import db, events, executor, store
 from kraft.adapters import agent as agent_mod
@@ -1721,6 +1721,9 @@ def test_auto_review_reports_a_verdict_and_cannot_clear_its_own_gate(tmp_path, m
         return "done"
 
     monkeypatch.setattr(agent_adapter, "run_agent_task", _capture)
+    # The reviewer selects profile `fake`; this puts it, and its provider, in
+    # the test's `KRAFT_HOME`. The launch itself is `_capture` above.
+    fake_harness_home(tmp_path, ["true"])
 
     async def scenario():
         database = await db.Database.open(tmp_path / "k.db")

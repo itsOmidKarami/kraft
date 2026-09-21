@@ -149,20 +149,25 @@ def test_the_harness_resolves_a_named_seeded_chain(tmp_path):
 
 
 def test_a_harness_resolved_chain_launches_no_real_agent_and_no_real_builtin(tmp_path):
-    """The seed `v1_library` writes is a rewritten one, on an unseeded directory
-    too.
+    """The seed `v1_library` writes is a neutered one, on an unseeded directory
+    too -- without rewriting a single `harness:` id.
 
-    Seeded without an `agent_command`, the resolved chain carries
-    `codex_default` and the real `kraft.verify_changed_test_scopes` -- a
-    dispatched task would launch the operator's `codex` and run this suite
-    inside itself. Pinned rather than documented, because ~156 of 5b's call
-    sites come through here and would inherit the hazard silently.
+    Seeded without an `agent_command`, the profile `codex_default` launches the
+    operator's `codex` and the real `kraft.verify_changed_test_scopes` runs this
+    suite inside itself. Pinned rather than documented, because ~156 of 5b's
+    call sites come through here and would inherit the hazard silently. The
+    task keeps the shipped id; the *profile* it names is what is on the fake.
     """
+    import yaml
     from support.harness import v1_named_chain
 
     tasks = [t.task for node in v1_named_chain(tmp_path).nodes for t in node.tasks()]
 
-    assert [t.harness for t in tasks if isinstance(t, AgentTask)] == ["fake"]
+    assert [t.harness for t in tasks if isinstance(t, AgentTask)] == ["codex_default"]
+    profile = yaml.safe_load((tmp_path / "harnesses.yaml").read_text())["harnesses"][
+        "codex_default"
+    ]
+    assert profile["provider"] == "fake" and "executable" not in profile, profile
     assert [t for t in tasks if isinstance(t, BuiltinTask)] == []
     assert [t.command for t in tasks if isinstance(t, SubprocessTask)] == ["true"]
 

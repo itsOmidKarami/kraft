@@ -100,20 +100,20 @@ origin: src/kraft/templates/environment.py -- `HarnessProfileTable.from_yaml` is
 A harness profile MAY configure an enabled runtime instance, executable or
 connection choice, and default runtime options. It SHALL NOT require template
 authors to configure provider command syntax or result parsing.
-enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider_declared_options, tests/test_harnesses.py::test_harness_profile_reports_unavailable_when_disabled, tests/templates/test_environment.py::test_harness_profiles_load_against_their_provider_declarations, tests/templates/test_environment.py::test_a_profile_whose_provider_is_not_its_harness_id_is_refused, tests/templates/test_environment.py::test_the_seeded_harnesses_yaml_loads_and_covers_the_seeded_library
-origin: src/kraft/templates/environment.py -- a profile names a provider and its defaults; it carries no command syntax or result parsing, and an unknown provider is refused at load rather than becoming an arbitrary command fragment. NOT YET REACHED AT RUNTIME: `executor/dispatch.py` resolves a task's `harness:` against `kraft.harness.load(...)` -- a harness *id* -- so `HarnessProfileTable` is loaded and validated but no dispatch selects through it. Until that is wired, `templates/harnesses.yaml` is configuration an operator can get wrong without being told, and the docsite section says so.
+enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider_declared_options, tests/test_harnesses.py::test_harness_profile_reports_unavailable_when_disabled, tests/templates/test_environment.py::test_harness_profiles_load_against_their_provider_declarations, tests/templates/test_environment.py::test_a_profile_whose_provider_is_not_its_harness_id_is_refused, tests/templates/test_environment.py::test_the_seeded_harnesses_yaml_loads_and_covers_the_seeded_library, tests/executor/test_dispatch.py::test_the_seeded_library_dispatches_through_its_real_harness_profiles[codex_default], tests/executor/test_dispatch.py::test_the_seeded_library_dispatches_through_its_real_harness_profiles[claude_review]
+origin: src/kraft/templates/environment.py -- a profile names a provider and its defaults; it carries no command syntax or result parsing, and an unknown provider is refused at load rather than becoming an arbitrary command fragment. Reached at runtime through `adapters/agent.py` §harness_profile, which every V1 agent launch (`resolve_agent_task`: chain dispatch and gate auto-review) resolves a task's `harness:` through; the dispatch test drives the seeded library's own `codex_default` and `claude_review` with only their `executable:` pointed at a fake.
 
 ## REQ agent-task-selects-capability-compatible-runtime-options
 
 An agent task MAY select a harness profile and override its runtime defaults
 only with options supported by the selected provider and allowed by policy.
-enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider_declared_options, tests/test_harnesses.py::test_harness_profile_rejects_a_value_the_provider_rejects
+enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider_declared_options, tests/test_harnesses.py::test_harness_profile_rejects_a_value_the_provider_rejects, tests/adapters/test_agent.py::test_a_task_overrides_its_harness_profiles_defaults
 
 ## REQ unavailable-selected-harness-needs-human
 
 When a selected harness profile is unavailable at runtime, the task SHALL stop
 for human action and SHALL NOT silently select a different harness.
-enforced-by: tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human
+enforced-by: tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human[absent], tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human[disabled], tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human[unknown-provider], tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human[no-file], tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human[unapplied-default]
 
 ## REQ agent-roles-use-ordinary-agent-task-runtime-configuration
 

@@ -3,7 +3,6 @@ from __future__ import annotations
 import atexit
 import json
 import os
-import re
 import shlex
 import shutil
 import subprocess
@@ -326,16 +325,24 @@ def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) ->
     """
     templates_dir.mkdir(parents=True, exist_ok=True)
     library = (_REPO_ROOT / "templates" / "library.yaml").read_text()
-    if agent_command is not None:
-        # Every agent task points at one overlaid `fake` harness that launches
-        # `agent_command`, and `harnesses/fake.yaml` beside it declares that
-        # harness. `executor.dispatch` resolves a task's `harness:` against
-        # `kraft.harness.load(None)` -- the harness-*profile* indirection is a
-        # later phase -- so a fixture that left the shipped `codex_default`
-        # there would try to launch a real `codex`. A test using this must
-        # point `KRAFT_HOME` at `templates_dir.parent`, which is where
-        # `default_harnesses_dir()` looks.
-        library = re.sub(r"(?m)^(\s*harness:\s*)\S+$", r"\g<1>fake", library)
+    shipped_profiles = yaml.safe_load((_REPO_ROOT / "templates" / "harnesses.yaml").read_text())
+    if agent_command is None:
+        write_harness_profiles(templates_dir, shipped_profiles["harnesses"])
+    else:
+        # The library keeps its real `harness:` ids -- `codex_default`,
+        # `claude_review` -- and only the *profiles* they name change: each is
+        # put on the overlaid `fake` provider, which launches `agent_command`,
+        # its `executable:` dropped so the provider's own command stands. The
+        # shipped `defaults:` stay, so they reach the launch as they would in
+        # production. `fake` and `claude` are profiles too, for the hand-built
+        # chains that name them. Nothing rewrites a task's `harness:` any more:
+        # that rewrite is how the suite ran a library the product never ships
+        # (Task 5e).
+        profiles = {
+            id: {k: v for k, v in body.items() if k != "executable"} | {"provider": "fake"}
+            for id, body in shipped_profiles["harnesses"].items()
+        }
+        profiles |= {"fake": {"provider": "fake"}, "claude": {"provider": "claude"}}
         # And the `kraft.verify_changed_test_scopes` builtin becomes an inert
         # `true`. This is the same protection `noop_verify` gives the legacy
         # `on.test.run` binding, and it is not optional here: that builtin runs
@@ -390,9 +397,12 @@ def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) ->
         # Swapping one line is what `escalate` naming a harness instead of a
         # command made possible.
         (harnesses / "claude.yaml").write_text(bundled.replace("command: [claude]", command))
-        (templates_dir / "harnesses.yaml").write_text(
-            yaml.safe_dump({"harnesses": {"fake": {"provider": "fake"}}})
-        )
+        # Beside the library, and where dispatch reads it when no
+        # `KRAFT_TEMPLATES_DIR` is set (`agent.harness_profile`) -- the same
+        # two-directory split as the harness files above.
+        write_harness_profiles(templates_dir, profiles)
+        if home:
+            write_harness_profiles(Path(home) / "templates", profiles)
     (templates_dir / "library.yaml").write_text(library)
     # KNOWN GAP, bridged here so a V1 fixture can actually run: a V1 steering
     # profile is *inline* in `library.yaml`, but `adapters/agent.py` still
@@ -414,16 +424,28 @@ def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) ->
     return templates_dir
 
 
+def write_harness_profiles(templates_dir: Path, profiles: dict) -> None:
+    """Merge `profiles` (id -> `harnesses.yaml` body) into
+    `templates_dir/harnesses.yaml`, keeping any profile already there that
+    `profiles` does not name -- two fixtures seeding one home must not undo
+    each other."""
+    path = Path(templates_dir) / "harnesses.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = (yaml.safe_load(path.read_text()) or {}) if path.is_file() else {}
+    merged = {**(existing.get("harnesses") or {}), **profiles}
+    path.write_text(yaml.safe_dump({"harnesses": merged}, sort_keys=False))
+
+
 def v1_library(templates_dir: Path, *, agent_command: str = "true"):
     """The `TemplateLibrary` for `templates_dir`, seeding the V1 layout first
     if it is not already there.
 
-    **The seed it writes is always a rewritten one.** `seed_v1_library` only
-    swaps agent tasks onto the `fake` harness and neuters the
+    **The seed it writes is always a neutered one.** `seed_v1_library` only
+    puts the library's harness profiles on the `fake` provider and neuters the
     `kraft.verify_changed_test_scopes` builtin when it is given an
-    `agent_command`; seeded without one, a resolved chain carries
-    `codex_default` and the real builtin, so a test that dispatched it would
-    launch the operator's `codex` and run this suite inside itself. Nothing was
+    `agent_command`; seeded without one, `codex_default` is the shipped profile
+    and the builtin is real, so a test that dispatched it would launch the
+    operator's `codex` and run this suite inside itself. Nothing was
     walking such a chain when this defaulted to `None`, but `v1_named_chain`
     below is about to be the door ~156 call sites go through, and a helper that
     many callers adopt has to be safe by default rather than safe by accident.
@@ -451,7 +473,7 @@ def v1_named_chain(
     replaces named a template by string -- overwhelmingly `"quick-task"`, which
     is why that is the default. Deliberately resolved from the test's own
     templates directory rather than the packaged one: the dir `v1_library` seeds
-    has every agent task on the `fake` harness and the
+    has every harness profile on the `fake` provider and the
     `verify_changed_test_scopes` builtin neutered, where a chain resolved from
     the packaged tree would launch a real agent and run this suite inside
     itself.
@@ -573,6 +595,8 @@ def fake_harness_home(tmp_path: Path, command: list[str], *, harness_id: str = "
             "id: fake", f"id: {harness_id}"
         )
     )
+    # A task selects a *profile*, so the harness needs one of the same id.
+    write_harness_profiles(home / "templates", {harness_id: {"provider": harness_id}})
     return home
 
 

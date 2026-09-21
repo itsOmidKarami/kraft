@@ -6,6 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from support.harness import (
     _git,
     fake_docker_bin,
@@ -18,6 +19,7 @@ from support.harness import (
     v1_named_chain,
     v1_resolved,
     v1_walk,
+    write_harness_profiles,
 )
 from support.store_fixtures import mk_item, open_db
 
@@ -2197,6 +2199,7 @@ def test_a_chain_can_run_two_harnesses(tmp_path, monkeypatch):
     overlay = Path(os.environ["KRAFT_HOME"]) / "templates" / "harnesses" / "codex.yaml"
     fake_codex = json.dumps([sys.executable, str(_FAKE_AGENT), "codex", "exec"])
     overlay.write_text(bundled.replace("command: [codex, exec]", f"command: {fake_codex}"))
+    write_harness_profiles(overlay.parents[1], {"codex": {"provider": "codex"}})
 
     async def scenario():
         rd = RunDirs(tmp_path / "run").ensure()
@@ -2693,11 +2696,33 @@ def test_an_unloadable_selected_skill_stops_for_a_human(tmp_path, monkeypatch):
     assert "no-such-method" in Path(sessions[0]["log_path"]).read_text()
 
 
-def test_an_unavailable_selected_harness_stops_for_a_human(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("profiles", "why"),
+    [
+        # A task naming no profile -- even though `claude` below *is* an
+        # installed provider, the id a task names is never read as one.
+        ({"claude": {"provider": "claude"}}, "defines no such profile"),
+        ({"ghost": {"provider": "claude", "enabled": False}}, "'ghost' is disabled"),
+        ({"ghost": {"provider": "nonesuch"}}, "provider 'nonesuch' is not an installed harness"),
+        (None, "cannot read/parse"),
+        # A default Kraft would not pass on is refused, not dropped unread.
+        ({"ghost": {"provider": "claude", "defaults": {"autocompact": "50"}}}, "does not apply"),
+    ],
+    ids=["absent", "disabled", "unknown-provider", "no-file", "unapplied-default"],
+)
+def test_an_unavailable_selected_harness_stops_for_a_human(tmp_path, monkeypatch, profiles, why):
     """`unavailable-selected-harness-needs-human`: never silently another
-    harness."""
+    harness. The task selects profile `ghost`; each case makes it unavailable a
+    different way -- absent, disabled, on a provider this install lacks, no
+    `harnesses.yaml` at all, or carrying a default Kraft cannot apply -- and each
+    stops before anything launches."""
     repo = make_repo(tmp_path)
     monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "empty-home"))
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+    if profiles is not None:
+        (templates / "harnesses.yaml").write_text(json.dumps({"harnesses": profiles}))
     chain = v1_chain(
         [
             {
@@ -2722,6 +2747,7 @@ def test_an_unavailable_selected_harness_stops_for_a_human(tmp_path, monkeypatch
     assert [s["status"] for s in sessions] == ["config_error"]
     log = Path(sessions[0]["log_path"]).read_text()
     assert "selects harness 'ghost', which is not available" in log
+    assert why in log, log
 
 
 def test_a_typed_agent_task_reports_the_providers_own_normalized_result(tmp_path, monkeypatch):
@@ -2776,3 +2802,92 @@ def test_a_typed_agent_task_reports_the_providers_own_normalized_result(tmp_path
     assert status == "done_with_concerns"
     assert (session["hook_point"], session["status"]) == ("spec.author.write", status)
     assert "the totals are still Decimal" in Path(session["result_path"]).read_text()
+
+
+_FAKE_CLAUDE_SH = _REPO_ROOT / "fixtures" / "fake-claude.sh"
+
+
+@pytest.mark.parametrize(
+    ("node_id", "argv_marks"),
+    [
+        # `spec_author` sets no effort, so `codex_default`'s own `effort:
+        # medium` is what reaches the provider's `model_reasoning_effort`.
+        ("spec", ["exec", "--json", "model_reasoning_effort=medium"]),
+        # `write_summary` sets no model, so `claude_review`'s `model: sonnet`.
+        ("work_item_summary", ["-p", "--model", "sonnet"]),
+    ],
+    ids=["codex_default", "claude_review"],
+)
+def test_the_seeded_library_dispatches_through_its_real_harness_profiles(
+    tmp_path, monkeypatch, node_id, argv_marks
+):
+    """The library an operator is seeded with names *profile* ids
+    (`codex_default`, `claude_review`), which `templates/harnesses.yaml`
+    defines. Dispatched unrewritten -- the task's `harness:` untouched, only the
+    profile's `executable:` pointed at a fake -- each must launch its
+    provider's argv with the profile's defaults, not stop at "not available".
+    `seed_v1_library(agent_command=...)` rewrites every id to `fake`, which is
+    why nothing caught that it never could."""
+    from kraft.executor.context import LaunchContext
+    from kraft.policy import InstancePolicy, InstancePolicyInput
+    from kraft.templates.environment import Repository, WorkItemTarget
+    from kraft.templates.library import TemplateLibrary
+
+    repo = make_repo(tmp_path)
+    templates = seed_v1_library(tmp_path / "templates")
+    shipped = (_REPO_ROOT / "templates" / "harnesses.yaml").read_text()
+    # The executable only: provider, enabled and defaults stay as shipped.
+    (templates / "harnesses.yaml").write_text(
+        shipped.replace("executable: codex", f"executable: {_FAKE_CLAUDE_SH}").replace(
+            "executable: claude", f"executable: {_FAKE_CLAUDE_SH}"
+        )
+    )
+    assert shipped.count("executable:") == 2
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+    argv_log = tmp_path / "argv.log"
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_ARGV_LOG", str(argv_log))
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "noop")
+
+    chain = (
+        TemplateLibrary.from_yaml_dir(templates)
+        .resolve_chain("default")
+        .materialize(
+            target=WorkItemTarget.for_repository(Repository(id="target", path=str(repo))),
+            effective_policy=InstancePolicy.from_input(InstancePolicyInput.model_validate({})),
+        )
+    )
+    start = [n.id for n in chain.chain.nodes].index(node_id)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await v1_item(database, chain, repo=repo)
+            await executor.run_once(
+                database,
+                rd,
+                work_item_id="w1",
+                registry=None,
+                start_index=start,
+                launch=LaunchContext(
+                    repo_entry={"setup_command": ""}, steering_dir=templates / "steering"
+                ),
+            )
+            return [
+                dict(r)
+                for r in database.read(
+                    lambda c: c.execute(
+                        "SELECT * FROM worker_sessions ORDER BY created_at"
+                    ).fetchall()
+                )
+            ]
+        finally:
+            await database.close()
+
+    sessions = asyncio.run(scenario())
+
+    first = sessions[0]
+    assert first["status"] == "done", Path(first["log_path"]).read_text()
+    argv = argv_log.read_text().split("\n")
+    for mark in argv_marks:
+        assert mark in argv, argv
