@@ -153,7 +153,7 @@ enforced-by: tests/templates/test_models.py::test_builtin_task_accepts_a_code_ow
 Verification of repository test scopes SHALL be an explicitly configured
 typed built-in task and SHALL NOT depend on a node name or another implicit
 template convention.
-enforced-by: tests/executor/test_dispatch.py::test_each_task_kind_reaches_its_own_adapter, tests/executor/test_dispatch.py::test_changed_test_scopes_run_all_scopes_when_nothing_matches
+enforced-by: tests/executor/test_dispatch.py::test_each_task_kind_reaches_its_own_adapter, tests/executor/test_dispatch.py::test_changed_test_scopes_run_all_scopes_when_nothing_matches, tests/executor/test_dispatch.py::test_changed_test_scopes_run_under_a_node_not_named_verify
 
 ## REQ changed-test-scope-verification-selects-safely
 

@@ -2382,14 +2382,14 @@ def _v1_task(node_id: str, step_id: str, raw: dict):
     return node, node.steps[0].tasks[0]
 
 
-async def _dispatch_one(tmp_path, repo, raw: dict, *, repo_entry=None, wid="w1"):
+async def _dispatch_one(tmp_path, repo, raw: dict, *, repo_entry=None, wid="w1", node_id="verify"):
     """Dispatch one typed task against a real work item row and return
     `(status, database, run_dirs, node, task)` with the database still open."""
     from kraft.executor.context import LaunchContext
 
-    node, task = _v1_task("verify", "checks", raw)
+    node, task = _v1_task(node_id, "checks", raw)
     chain = v1_chain(
-        [{"id": "verify", "kind": "exec", "steps": [{"id": "checks", "tasks": [raw]}]}], repo=repo
+        [{"id": node_id, "kind": "exec", "steps": [{"id": "checks", "tasks": [raw]}]}], repo=repo
     )
     rd = RunDirs(tmp_path / "run").ensure()
     database = await db.Database.open(rd.db)
@@ -2525,6 +2525,31 @@ def test_changed_test_scopes_run_all_scopes_when_nothing_matches(tmp_path):
 
     assert [s["cmd"] for s in empty_diff] == [["echo", "src"], ["echo", "tests"]]
     assert [s["cmd"] for s in unmatched] == [["echo", "src"], ["echo", "tests"]]
+
+
+def test_changed_test_scopes_run_under_a_node_not_named_verify(tmp_path):
+    """`changed-test-scope-verification-is-a-typed-built-in-task`: the task's
+    type is what runs it, not the node's name. Every other test puts the builtin
+    under a node called `verify`, so a name check would pass them all."""
+    repo = make_repo(tmp_path)
+    log = tmp_path / "ran.txt"
+
+    async def scenario():
+        status, database, *_ = await _dispatch_one(
+            tmp_path / "run-checks",
+            repo,
+            {"id": "t", "kind": "builtin", "ref": "kraft.verify_changed_test_scopes"},
+            repo_entry={
+                "setup_command": "",
+                "test_scopes": [{"paths": ["**"], "command": f"sh -c 'echo ran >> {log}'"}],
+            },
+            node_id="checks",
+        )
+        await database.close()
+        return status
+
+    assert asyncio.run(scenario()) == "done"
+    assert log.read_text().split() == ["ran"]
 
 
 def _scope_marker(log: Path, name: str) -> dict:
