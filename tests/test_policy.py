@@ -62,26 +62,26 @@ def test_resolve_cap_override_replaces_only_named_fields(tmp_path):
     assert policy.resolve_cap(p, "verify_fix_loop", None) == policy.Cap(5, 10)
 
 
+_BASE = "default: { attempts: 1, wall_clock_s: 1 }\n"
+
+
 @pytest.mark.parametrize(
     "doc",
     [
-        "loops: {}\n",  # no default
-        "default: { attempts: 0, wall_clock_s: 5 }\n",  # attempts < 1
-        "default: { attempts: 3 }\n",  # missing wall_clock_s
-        "default: not-a-mapping\n",
-        "just a string\n",
-        # loop_severities must be a list, not a bare scalar
-        "default: {attempts: 3, wall_clock_s: 60}\nfindings: {loop_severities: critical}\n",
-        # rate_limit_retries must be >= 1
-        "default: { attempts: 2, wall_clock_s: 20 }\nrate_limit_retries: 0\n",
-        # archive.after_days must be non-negative
-        "default: { attempts: 3, wall_clock_s: 600 }\narchive: { after_days: -1 }\n",
-        # max_concurrent must be >= 1
-        "default: { attempts: 1, wall_clock_s: 1 }\nmax_concurrent: 0\n",
-        # auto_escalate_stuck must be a bool
-        "default: { attempts: 1, wall_clock_s: 1 }\nauto_escalate_stuck: maybe\n",
-        # auto_escalate_stuck_cap must be >= 1
-        "default: { attempts: 1, wall_clock_s: 1 }\nauto_escalate_stuck_cap: 0\n",
+        pytest.param("loops: {}\n", id="no-default"),
+        pytest.param("default: { attempts: 0, wall_clock_s: 5 }\n", id="attempts-below-1"),
+        pytest.param("default: { attempts: 3 }\n", id="missing-wall-clock"),
+        pytest.param("default: not-a-mapping\n", id="default-not-a-mapping"),
+        pytest.param("just a string\n", id="not-a-mapping"),
+        pytest.param(_BASE + "findings: {loop_severities: critical}\n", id="severities-not-a-list"),
+        pytest.param(_BASE + "rate_limit_retries: 0\n", id="rate-limit-retries-below-1"),
+        pytest.param(_BASE + "archive: { after_days: -1 }\n", id="archive-after-days-negative"),
+        pytest.param(_BASE + "max_concurrent: 0\n", id="max-concurrent-below-1"),
+        pytest.param(_BASE + "auto_escalate_stuck: maybe\n", id="auto-escalate-stuck-not-bool"),
+        pytest.param(_BASE + "auto_escalate_stuck_cap: 0\n", id="auto-escalate-stuck-cap-below-1"),
+        pytest.param(_BASE + "auto_escalate_delay_s: -1\n", id="auto-escalate-delay-negative"),
+        pytest.param(_BASE + "auto_escalate_delay_s: soon\n", id="auto-escalate-delay-not-int"),
+        pytest.param(_BASE + "forge_cli_timeout_s: 0\n", id="forge-cli-timeout-zero"),
     ],
 )
 def test_load_policy_rejects_malformed(tmp_path, doc):
@@ -239,39 +239,6 @@ def test_policy_defaults_rate_limit_retries_to_five():
     assert p.rate_limit_retries == 5
 
 
-def test_load_policy_reads_rate_limit_retries(tmp_path):
-    d = tmp_path / "policy.yaml"
-    d.write_text("default: { attempts: 2, wall_clock_s: 20 }\nrate_limit_retries: 8\n")
-    p = policy.load_policy(d)
-    assert p.rate_limit_retries == 8
-
-
-def test_load_policy_defaults_rate_limit_retries_when_absent(tmp_path):
-    d = tmp_path / "policy.yaml"
-    d.write_text("default: { attempts: 2, wall_clock_s: 20 }\n")
-    p = policy.load_policy(d)
-    assert p.rate_limit_retries == 5
-
-
-def test_load_shipped_policy_has_rate_limit_retries():
-    p = policy.load_policy(_SHIPPED)
-    assert isinstance(p.rate_limit_retries, int) and p.rate_limit_retries >= 1
-
-
-def test_load_policy_reads_archive_after_days(tmp_path):
-    d = tmp_path / "policy.yaml"
-    d.write_text("default: { attempts: 3, wall_clock_s: 600 }\narchive: { after_days: 30 }\n")
-    p = policy.load_policy(d)
-    assert p.archive_after_days == 30
-
-
-def test_load_policy_defaults_archive_after_days_to_none(tmp_path):
-    d = tmp_path / "policy.yaml"
-    d.write_text("default: { attempts: 3, wall_clock_s: 600 }\n")
-    p = policy.load_policy(d)
-    assert p.archive_after_days is None
-
-
 def test_load_policy_parses_triggers(tmp_path):
     d = tmp_path / "policy.yaml"
     d.write_text(
@@ -293,12 +260,6 @@ def test_load_policy_parses_triggers(tmp_path):
         title="Nightly sweep",
         description="sweep it",
     )
-
-
-def test_load_policy_defaults_triggers_to_empty(tmp_path):
-    d = tmp_path / "policy.yaml"
-    d.write_text("default: { attempts: 2, wall_clock_s: 20 }\n")
-    assert policy.load_policy(d).triggers == []
 
 
 @pytest.mark.parametrize(
@@ -338,16 +299,44 @@ def test_cron_due_matches_star_and_lists():
     assert not policy.cron_due("15,45 14 * * *", dt)
 
 
-def test_load_policy_reads_max_concurrent(tmp_path):
+@pytest.mark.parametrize(
+    ("tail", "attr", "expected"),
+    [
+        pytest.param("rate_limit_retries: 8\n", "rate_limit_retries", 8, id="rate-limit-retries"),
+        pytest.param("", "rate_limit_retries", 5, id="rate-limit-retries-default"),
+        pytest.param(
+            "archive: { after_days: 30 }\n", "archive_after_days", 30, id="archive-after-days"
+        ),
+        pytest.param("", "archive_after_days", None, id="archive-after-days-default"),
+        pytest.param("max_concurrent: 7\n", "max_concurrent", 7, id="max-concurrent"),
+        pytest.param("", "max_concurrent", 3, id="max-concurrent-default"),
+        pytest.param(
+            "auto_escalate_stuck: false\n", "auto_escalate_stuck", False, id="auto-escalate-stuck"
+        ),
+        pytest.param("", "auto_escalate_stuck", True, id="auto-escalate-stuck-default"),
+        pytest.param(
+            "auto_escalate_stuck_cap: 5\n",
+            "auto_escalate_stuck_cap",
+            5,
+            id="auto-escalate-stuck-cap",
+        ),
+        pytest.param("", "auto_escalate_stuck_cap", 3, id="auto-escalate-stuck-cap-default"),
+        pytest.param(
+            "auto_escalate_delay_s: 120\n", "auto_escalate_delay_s", 120, id="auto-escalate-delay"
+        ),
+        pytest.param("", "auto_escalate_delay_s", 0, id="auto-escalate-delay-default"),
+        pytest.param(
+            "forge_cli_timeout_s: 30\n", "forge_cli_timeout_s", 30.0, id="forge-cli-timeout"
+        ),
+        pytest.param("", "forge_cli_timeout_s", 120.0, id="forge-cli-timeout-default"),
+        pytest.param("", "triggers", [], id="triggers-default"),
+    ],
+)
+def test_load_policy_reads_scalar(tmp_path, tail, attr, expected):
+    """A top-level policy.yaml scalar is read as written, or defaulted when absent."""
     d = tmp_path / "policy.yaml"
-    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\nmax_concurrent: 7\n")
-    assert policy.load_policy(d).max_concurrent == 7
-
-
-def test_load_policy_defaults_max_concurrent_to_three(tmp_path):
-    d = tmp_path / "policy.yaml"
-    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\n")
-    assert policy.load_policy(d).max_concurrent == 3
+    d.write_text(_BASE + tail)
+    assert getattr(policy.load_policy(d), attr) == expected
 
 
 def test_load_policy_falls_back_to_legacy_intake_max_concurrent(tmp_path):
@@ -357,84 +346,11 @@ def test_load_policy_falls_back_to_legacy_intake_max_concurrent(tmp_path):
     assert policy.load_policy(d).max_concurrent == 9
 
 
-def test_load_policy_defaults_auto_escalate_stuck_on(tmp_path):
-    d = tmp_path / "policy.yaml"
-    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\n")
-    p = policy.load_policy(d)
-    assert p.auto_escalate_stuck is True
-    assert p.auto_escalate_stuck_cap == 3
-
-
-def test_load_policy_reads_auto_escalate_stuck(tmp_path):
-    d = tmp_path / "policy.yaml"
-    d.write_text(
-        "default: { attempts: 1, wall_clock_s: 1 }\n"
-        "auto_escalate_stuck: false\n"
-        "auto_escalate_stuck_cap: 5\n"
-    )
-    p = policy.load_policy(d)
-    assert p.auto_escalate_stuck is False
-    assert p.auto_escalate_stuck_cap == 5
-
-
-def test_load_policy_rejects_non_bool_auto_escalate_stuck(tmp_path):
-    d = tmp_path / "policy.yaml"
-    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\nauto_escalate_stuck: maybe\n")
-    with pytest.raises(policy.PolicyError):
-        policy.load_policy(d)
-
-
-def test_load_policy_rejects_bad_auto_escalate_stuck_cap(tmp_path):
-    d = tmp_path / "policy.yaml"
-    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\nauto_escalate_stuck_cap: 0\n")
-    with pytest.raises(policy.PolicyError):
-        policy.load_policy(d)
-
-
-def test_load_policy_defaults_auto_escalate_delay_s_to_zero(tmp_path):
-    d = tmp_path / "policy.yaml"
-    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\n")
-    p = policy.load_policy(d)
-    assert p.auto_escalate_delay_s == 0
-
-
-def test_load_policy_reads_auto_escalate_delay_s(tmp_path):
-    d = tmp_path / "policy.yaml"
-    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\nauto_escalate_delay_s: 120\n")
-    p = policy.load_policy(d)
-    assert p.auto_escalate_delay_s == 120
-
-
-def test_load_policy_rejects_negative_auto_escalate_delay_s(tmp_path):
-    d = tmp_path / "policy.yaml"
-    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\nauto_escalate_delay_s: -1\n")
-    with pytest.raises(policy.PolicyError):
-        policy.load_policy(d)
-
-
-def test_load_policy_rejects_non_int_auto_escalate_delay_s(tmp_path):
-    d = tmp_path / "policy.yaml"
-    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\nauto_escalate_delay_s: soon\n")
-    with pytest.raises(policy.PolicyError):
-        policy.load_policy(d)
-
-
 def test_a_cap_rejects_a_zero_attempt_count():
     """`load_policy` checked this; it is now a field constraint that cannot be
     bypassed by constructing a Cap directly, which the dataclass allowed."""
     with pytest.raises(Exception):  # noqa: B017 -- pydantic's ValidationError
         policy.Cap(attempts=0, wall_clock_s=60)
-
-
-def test_load_policy_reads_forge_cli_timeout_s_and_defaults_it(tmp_path):
-    d = tmp_path / "policy.yaml"
-    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\n")
-    assert policy.load_policy(d).forge_cli_timeout_s == 120.0
-    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\nforge_cli_timeout_s: 30\n")
-    assert policy.load_policy(d).forge_cli_timeout_s == 30.0
-    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\nforge_cli_timeout_s: 0\n")
-    with pytest.raises(policy.PolicyError):
-        policy.load_policy(d)
 
 
 # ── model-led boundary: PolicyInput.from_yaml / Policy.from_input / cap_for ──
