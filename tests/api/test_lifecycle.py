@@ -10,6 +10,7 @@ import subprocess
 import time
 from pathlib import Path
 
+import pytest
 from support.api import _force_node, _poll_events, _post_default, _set_status
 
 
@@ -109,37 +110,39 @@ def test_retry_without_explicit_steer_still_works_on_a_node_with_no_agent_task(c
     assert r.status_code == 200, r.text
 
 
-def test_resume_refuses_when_all_slots_are_busy(client, repo):
-    """A manual start is bounded by the same limit as auto-intake (Kraft-n2d).
-
-    The limit lived only in the intake tick, so `resume` started an item no
-    matter how many were already running.
-    """
-    busy = _post_default(client, repo)
-    _poll_events(client, busy, "gate_requested")
-    idle = _post_default(client, repo)
-    _poll_events(client, idle, "gate_requested")
-    _set_status(busy, "active")
-    _set_status(idle, "paused")
-    client.app.state.policy = dataclasses.replace(client.app.state.policy, max_concurrent=1)
-
-    r = client.post(f"/api/work-items/{idle}/resume", json={})
-
-    assert r.status_code == 409, r.text
-    assert "1" in r.json()["detail"]
-    assert client.get(f"/api/work-items/{busy}").json()["status"] == "active"
+#: How each door's item is stopped: `/resume` takes a paused item, `/retry`
+#: a stopped one.
+_STOPPED = {
+    "resume": lambda wid: _set_status(wid, "paused"),
+    "retry": lambda wid: _force_node(wid, "implementation", "needs_human"),
+}
 
 
-def test_resume_works_when_a_slot_is_free(client, repo):
-    """The guard must not wedge the ordinary single-item case shut."""
+@pytest.mark.parametrize("verb", ["resume", "retry"])
+@pytest.mark.parametrize("busy", [True, False], ids=["all-slots-busy", "a-slot-free"])
+def test_a_manual_start_is_bounded_by_the_slot_limit(client, repo, verb, busy):
+    """A manual start is bounded by the same limit as auto-intake (Kraft-n2d):
+    the limit lived only in the intake tick, so `resume` started an item no
+    matter how many were already running, and `/retry` is the same door
+    (notes 10). With a slot free the guard must not wedge the ordinary
+    single-item case shut."""
+    if busy:
+        other = _post_default(client, repo)
+        _poll_events(client, other, "gate_requested")
+        _set_status(other, "active")
     wid = _post_default(client, repo)
     _poll_events(client, wid, "gate_requested")
-    _set_status(wid, "paused")
+    _STOPPED[verb](wid)
     client.app.state.policy = dataclasses.replace(client.app.state.policy, max_concurrent=1)
 
-    r = client.post(f"/api/work-items/{wid}/resume", json={})
+    r = client.post(f"/api/work-items/{wid}/{verb}", json={})
 
-    assert r.status_code == 200, r.text
+    if busy:
+        assert r.status_code == 409, r.text
+        assert "1" in r.json()["detail"]
+        assert client.get(f"/api/work-items/{other}").json()["status"] == "active"
+    else:
+        assert r.status_code == 200, r.text
 
 
 def _post_past_the_still_finishing_walk(client, path, timeout=10, json=None):
@@ -161,26 +164,16 @@ def _post_past_the_still_finishing_walk(client, path, timeout=10, json=None):
     return r
 
 
-def test_resume_non_conflict_rebase_failure_auto_escalates_when_armed(client, repo, monkeypatch):
-    """A git failure that is NOT a conflict (`RebaseConflict` specifically) --
-    still stops and escalates exactly as before Kraft-s7c04.23; only a
-    conflict gets the new resolver path. Kraft-h48r: `resume_work_item`'s
-    rebase-failure branch used to
-    `mark_needs_human` and return without ever giving `auto_escalate_stuck`
-    a chance to fire -- `walk.run`/`resuming.resume` call it after every
-    step, and this route terminates before either of them runs.
-
-    `quick-task` (no gate on any node) rather than the default chain: a
-    `gate_requested` event left open by force-writing status past it reads
-    to `gates.pending_gate` as a still-open gate, which makes
-    `auto_escalate_stuck` no-op regardless of whether it is armed."""
+def _rebase_fails(monkeypatch, error):
+    """`refresh_worktree_base` raises `error`; escalation dispatches are
+    recorded, never run. Returns the recorded `(work_item_id, auto)` calls."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     import kraft.builtins as builtins_mod
 
     calls = []
 
     async def fail_refresh(*a, **kw):
-        raise RuntimeError("rebase conflict: could not apply")
+        raise error(builtins_mod)("rebase conflict: could not apply")
 
     async def fake_dispatch(database, run_dirs, *, work_item_id, message, launch, auto, evts=None):
         calls.append((work_item_id, auto))
@@ -188,174 +181,73 @@ def test_resume_non_conflict_rebase_failure_auto_escalates_when_armed(client, re
 
     monkeypatch.setattr(builtins_mod, "refresh_worktree_base", fail_refresh)
     monkeypatch.setattr("kraft.executor.gates.escalate.dispatch", fake_dispatch)
+    return calls
+
+
+def _completed_quick_task(client, repo):
+    """`quick-task` (no gate on any node) rather than the default chain: a
+    `gate_requested` event left open by force-writing status past it reads
+    to `gates.pending_gate` as a still-open gate, which makes
+    `auto_escalate_stuck` no-op regardless of whether it is armed."""
     wid = client.post(
-        "/api/work-items",
-        json={"title": "x", "repo": str(repo), "chain_template": "quick-task"},
+        "/api/work-items", json={"title": "x", "repo": str(repo), "chain_template": "quick-task"}
     ).json()["id"]
     _poll_events(client, wid, "work_item_completed")
-    _set_status(wid, "paused")
+    return wid
 
-    r = _post_past_the_still_finishing_walk(client, f"/api/work-items/{wid}/resume")
+
+_STOP_STATUS = {"resume": "paused", "retry": "needs_human"}
+
+
+@pytest.mark.parametrize("verb", ["resume", "retry"])
+def test_a_non_conflict_rebase_failure_auto_escalates_when_armed(client, repo, monkeypatch, verb):
+    """A git failure that is NOT a conflict (`RebaseConflict` specifically) --
+    still stops and escalates exactly as before Kraft-s7c04.23; only a
+    conflict gets the new resolver path. Kraft-h48r: the resume and retry
+    routes' rebase-failure branch used to `mark_needs_human` and return
+    without ever giving `auto_escalate_stuck` a chance to fire --
+    `walk.run`/`resuming.resume` call it after every step, and this route
+    terminates before either of them runs."""
+    calls = _rebase_fails(monkeypatch, lambda b: RuntimeError)
+    wid = _completed_quick_task(client, repo)
+    _force_node(wid, "verify", _STOP_STATUS[verb])
+
+    r = _post_past_the_still_finishing_walk(client, f"/api/work-items/{wid}/{verb}")
 
     assert r.status_code == 200, r.text
     assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
     assert calls == [(wid, True)]
 
 
-def test_resume_rebase_conflict_does_not_escalate_when_disarmed(client, repo, monkeypatch):
+@pytest.mark.parametrize("verb", ["resume", "retry"])
+def test_a_rebase_conflict_does_not_escalate_when_disarmed(client, repo, monkeypatch, verb):
     """Regression guard: `auto_escalate_stuck: false` must still no-op here
     exactly like it does on the walk-driven path -- converted to raise
     `RebaseConflict` specifically (Kraft-s7c04.23 review finding: the old
     bare-`RuntimeError` version kept passing after this change landed while
     silently no longer covering the conflict path it is named for). The
-    steer restore is unconditional and must still fire even disarmed."""
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    import kraft.builtins as builtins_mod
-
-    calls = []
-
-    async def fail_refresh(*a, **kw):
-        raise builtins_mod.RebaseConflict("rebase conflict: could not apply")
-
-    async def fake_dispatch(database, run_dirs, *, work_item_id, message, launch, auto, evts=None):
-        calls.append((work_item_id, auto))
-        return "done"
-
-    monkeypatch.setattr(builtins_mod, "refresh_worktree_base", fail_refresh)
-    monkeypatch.setattr("kraft.executor.gates.escalate.dispatch", fake_dispatch)
-    wid = client.post(
-        "/api/work-items",
-        json={"title": "x", "repo": str(repo), "chain_template": "quick-task"},
-    ).json()["id"]
-    _poll_events(client, wid, "work_item_completed")
-    # `implementation`, not wherever the walk left it: that node has an
-    # agent task downstream to steer, unlike `verify`'s subprocess-only
-    # tasks, which `_steer_reachable` refuses on principle -- a refusal
-    # this test does not want to exercise.
-    _force_node(wid, "implementation", "paused")
+    steer restore is unconditional and must still fire even disarmed;
+    `/retry` never persists a steer ahead of the rebase, so for it this is
+    the assertion that the helper writes it at all."""
+    calls = _rebase_fails(monkeypatch, lambda b: b.RebaseConflict)
+    wid = _completed_quick_task(client, repo)
+    # `implementation`, not wherever the walk left it: that node has an agent
+    # task downstream to steer, unlike `verify`'s subprocess-only tasks, which
+    # `_steer_reachable` refuses on principle.
+    _force_node(wid, "implementation", _STOP_STATUS[verb])
     client.app.state.policy = dataclasses.replace(
         client.app.state.policy, auto_escalate_stuck=False
     )
 
     r = _post_past_the_still_finishing_walk(
-        client, f"/api/work-items/{wid}/resume", json={"steer": "watch the auth module"}
+        client, f"/api/work-items/{wid}/{verb}", json={"steer": "watch the auth module"}
     )
 
     assert r.status_code == 200, r.text
-    # The stop is now recorded inside the spawned conflict-resolution
-    # task, not synchronously before the route returns (Kraft-s7c04.23
-    # review finding: awaiting it inline blocked the response and hid it
-    # from `task_is_live`, reopening Kraft-s7c04.20).
-    _poll_events(client, wid, "work_item_needs_human")
-    item = client.get(f"/api/work-items/{wid}").json()
-    assert item["status"] == "needs_human"
-    assert calls == [], "disarmed must not dispatch the resolver or the escalation"
-    assert item["pending_steer_context"] == "watch the auth module"
-
-
-def test_retry_refuses_when_all_slots_are_busy(client, repo):
-    """The same door resume is bounded by (notes 10): a stopped item's
-    /retry must not restart it past the cap either."""
-    busy = _post_default(client, repo)
-    _poll_events(client, busy, "gate_requested")
-    stopped = _post_default(client, repo)
-    _poll_events(client, stopped, "gate_requested")
-    _set_status(busy, "active")
-    _force_node(stopped, "implementation", "needs_human")
-    client.app.state.policy = dataclasses.replace(client.app.state.policy, max_concurrent=1)
-
-    r = client.post(f"/api/work-items/{stopped}/retry", json={})
-
-    assert r.status_code == 409, r.text
-    assert "1" in r.json()["detail"]
-
-
-def test_retry_works_when_a_slot_is_free(client, repo):
-    wid = _post_default(client, repo)
-    _poll_events(client, wid, "gate_requested")
-    _force_node(wid, "implementation", "needs_human")
-    client.app.state.policy = dataclasses.replace(client.app.state.policy, max_concurrent=1)
-
-    r = client.post(f"/api/work-items/{wid}/retry", json={})
-
-    assert r.status_code == 200, r.text
-
-
-def test_retry_non_conflict_rebase_failure_auto_escalates_when_armed(client, repo, monkeypatch):
-    """A git failure that is NOT a conflict (`RebaseConflict` specifically) --
-    still stops and escalates exactly as before Kraft-s7c04.23; only a
-    conflict gets the new resolver path. Kraft-h48r: `retry_work_item`'s
-    rebase-failure branch used to
-    `mark_needs_human` and return without ever giving `auto_escalate_stuck`
-    a chance to fire -- `walk.run`/`resuming.resume` call it after every
-    step, and this route terminates before either of them runs."""
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    import kraft.builtins as builtins_mod
-
-    calls = []
-
-    async def fail_refresh(*a, **kw):
-        raise RuntimeError("rebase conflict: could not apply")
-
-    async def fake_dispatch(database, run_dirs, *, work_item_id, message, launch, auto, evts=None):
-        calls.append((work_item_id, auto))
-        return "done"
-
-    monkeypatch.setattr(builtins_mod, "refresh_worktree_base", fail_refresh)
-    monkeypatch.setattr("kraft.executor.gates.escalate.dispatch", fake_dispatch)
-    wid = client.post(
-        "/api/work-items",
-        json={"title": "x", "repo": str(repo), "chain_template": "quick-task"},
-    ).json()["id"]
-    _poll_events(client, wid, "work_item_completed")
-    _force_node(wid, "verify", "needs_human")
-
-    r = _post_past_the_still_finishing_walk(client, f"/api/work-items/{wid}/retry")
-
-    assert r.status_code == 200, r.text
-    assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
-    assert calls == [(wid, True)]
-
-
-def test_retry_rebase_conflict_does_not_escalate_when_disarmed(client, repo, monkeypatch):
-    """Regression guard: `auto_escalate_stuck: false` must still no-op here
-    exactly like it does on the walk-driven path -- converted to raise
-    `RebaseConflict` specifically, the same review finding as its `/resume`
-    sibling. `/retry` never persists a steer ahead of the rebase, so this is
-    the first assertion that the helper writes it at all."""
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    import kraft.builtins as builtins_mod
-
-    calls = []
-
-    async def fail_refresh(*a, **kw):
-        raise builtins_mod.RebaseConflict("rebase conflict: could not apply")
-
-    async def fake_dispatch(database, run_dirs, *, work_item_id, message, launch, auto, evts=None):
-        calls.append((work_item_id, auto))
-        return "done"
-
-    monkeypatch.setattr(builtins_mod, "refresh_worktree_base", fail_refresh)
-    monkeypatch.setattr("kraft.executor.gates.escalate.dispatch", fake_dispatch)
-    wid = client.post(
-        "/api/work-items",
-        json={"title": "x", "repo": str(repo), "chain_template": "quick-task"},
-    ).json()["id"]
-    _poll_events(client, wid, "work_item_completed")
-    # `implementation`, not `verify`: that node has an agent task
-    # downstream to steer, unlike `verify`'s subprocess-only tasks.
-    _force_node(wid, "implementation", "needs_human")
-    client.app.state.policy = dataclasses.replace(
-        client.app.state.policy, auto_escalate_stuck=False
-    )
-
-    r = _post_past_the_still_finishing_walk(
-        client, f"/api/work-items/{wid}/retry", json={"steer": "watch the auth module"}
-    )
-
-    assert r.status_code == 200, r.text
-    # See the /resume sibling's comment: the stop is recorded inside the
-    # spawned task now, not before the route returns.
+    # The stop is recorded inside the spawned conflict-resolution task, not
+    # synchronously before the route returns (Kraft-s7c04.23 review finding:
+    # awaiting it inline blocked the response and hid it from `task_is_live`,
+    # reopening Kraft-s7c04.20).
     _poll_events(client, wid, "work_item_needs_human")
     item = client.get(f"/api/work-items/{wid}").json()
     assert item["status"] == "needs_human"
@@ -435,83 +327,33 @@ def test_retry_kills_a_strangers_running_escalation_and_proceeds(client, repo, m
     assert "pause_requested" not in types
 
 
-def test_retry_refuses_and_writes_nothing_when_a_walk_is_still_live(client, repo):
-    """A `needs_human` item can still have a live walk task behind it -- a
-    pending gate under auto_escalate review, or the brief window while the
-    walk that just called request_gate/mark_needs_human is still unwinding.
-    `/retry` must refuse before it claims and rebases, not claim, rebase, and
-    clear the fix-loop cap only for `spawn` to 409 on top of those writes."""
-    from kraft.api import deps
-
-    wid = _post_default(client, repo)
-    _poll_events(client, wid, "gate_requested")
-    _force_node(wid, "verify", "needs_human")
-
-    async def _never_returning():
-        await asyncio.Event().wait()
-
-    async def inject():
-        deps.spawn(client.app, wid, _never_returning())
-
-    client.portal.call(inject)
-
-    r = client.post(f"/api/work-items/{wid}/retry", json={})
-
-    assert r.status_code == 409, r.text
-    item = client.get(f"/api/work-items/{wid}").json()
-    assert item["status"] == "needs_human"
-
-    async def cleanup():
-        task = client.app.state.tasks.pop(wid)
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
-
-    client.portal.call(cleanup)
-
-
-def test_resume_refuses_and_writes_nothing_when_a_walk_is_still_live(client, repo):
-    """Same race as retry, from `paused`: `/resume` must not claim, rebase,
-    and `resume_work_item` an item that still has a live walk task behind it."""
-    from kraft.api import deps
-
-    wid = _post_default(client, repo)
-    _poll_events(client, wid, "gate_requested")
-    _set_status(wid, "paused")
-
-    async def _never_returning():
-        await asyncio.Event().wait()
-
-    async def inject():
-        deps.spawn(client.app, wid, _never_returning())
-
-    client.portal.call(inject)
-
-    r = client.post(f"/api/work-items/{wid}/resume", json={})
-
-    assert r.status_code == 409, r.text
-    item = client.get(f"/api/work-items/{wid}").json()
-    assert item["status"] == "paused"
-
-    async def cleanup():
-        task = client.app.state.tasks.pop(wid)
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
-
-    client.portal.call(cleanup)
-
-
-def test_escalate_refuses_and_writes_nothing_when_a_walk_is_still_live(client, repo):
-    """Kraft-s7c04.20: same race as `/retry` and `/resume`, reached through
-    `/escalate` -- a gate's own auto-review is a live walk task under this
-    same `wid`, invisible to `escalation_running`'s check (that only sees
-    another *escalation*), and until this guard existed a human could
+@pytest.mark.parametrize(
+    ("verb", "status", "body"),
+    [
+        ("retry", "needs_human", {}),
+        ("resume", "paused", {}),
+        ("escalate", "needs_human", {"message": "help"}),
+    ],
+    ids=["retry", "resume", "escalate"],
+)
+def test_a_door_refuses_and_writes_nothing_when_a_walk_is_still_live(
+    client, repo, verb, status, body
+):
+    """A stopped item can still have a live walk task behind it -- a pending
+    gate under auto_escalate review, or the brief window while the walk that
+    just called request_gate/mark_needs_human is still unwinding. `/retry`
+    must refuse before it claims and rebases, not claim, rebase, and clear
+    the fix-loop cap only for `spawn` to 409 on top of those writes; `/resume`
+    likewise from `paused`. Kraft-s7c04.20: `/escalate` too -- a gate's own
+    auto-review is a live walk task under this same `wid`, invisible to
+    `escalation_running`'s check, and until this guard existed a human could
     escalate straight into a worktree that live review agent was still
     writing to (43717ee6: two agents, one worktree, both committed)."""
     from kraft.api import deps
 
     wid = _post_default(client, repo)
     _poll_events(client, wid, "gate_requested")
-    _force_node(wid, "verify", "needs_human")
+    _force_node(wid, "verify", status)
 
     async def _never_returning():
         await asyncio.Event().wait()
@@ -520,12 +362,13 @@ def test_escalate_refuses_and_writes_nothing_when_a_walk_is_still_live(client, r
         deps.spawn(client.app, wid, _never_returning())
 
     client.portal.call(inject)
+    before = client.get(f"/api/work-items/{wid}/events").json()
 
-    r = client.post(f"/api/work-items/{wid}/escalate", json={"message": "help"})
+    r = client.post(f"/api/work-items/{wid}/{verb}", json=body)
 
     assert r.status_code == 409, r.text
-    item = client.get(f"/api/work-items/{wid}").json()
-    assert item["status"] == "needs_human"
+    assert client.get(f"/api/work-items/{wid}").json()["status"] == status
+    assert client.get(f"/api/work-items/{wid}/events").json() == before
 
     async def cleanup():
         task = client.app.state.tasks.pop(wid)
@@ -652,36 +495,21 @@ def _counter_exists(wid: str, key: str) -> bool:
         conn.close()
 
 
-def test_retry_clears_the_ci_wait_counter_for_the_current_node(client, repo):
-    """Seed a ci_wait:<node> counter (as if the item had re-entered a wait
-    twice already), stop the item at needs_human, retry it, and assert the
-    counter row is gone -- a fresh ci_wait poll after retry starts back at
-    count 1, not 3."""
+@pytest.mark.parametrize("kind", ["ci_wait", "ci_infra"])
+def test_retry_clears_the_ci_counter_for_the_current_node(client, repo, kind):
+    """A `ci_wait:<node>` counter (the item re-entered a wait twice already) or
+    a `ci_infra:<node>` one (one kick short of the cap): after a retry the row
+    is gone, so the next poll starts at count 1 and an infra-red poll gets a
+    fresh budget, not an instant breach."""
     wid = _post_default(client, repo)
     _poll_events(client, wid, "gate_requested")
     _force_node(wid, "merge_request_feedback", "needs_human")
-    _seed_counter(wid, "ci_wait:merge_request_feedback")
+    _seed_counter(wid, f"{kind}:merge_request_feedback")
 
     r = client.post(f"/api/work-items/{wid}/retry", json={})
 
     assert r.status_code == 200, r.text
-    assert not _counter_exists(wid, "ci_wait:merge_request_feedback")
-
-
-def test_retry_clears_the_ci_infra_counter_for_the_current_node(client, repo):
-    """Same shape, for the persisted infra-retry counter: seed
-    ci_infra:<node> at count 2 (one kick short of the cap), retry, and
-    assert the counter row is gone -- the retried item's next infra-red
-    poll gets a fresh budget, not an instant breach on its first one."""
-    wid = _post_default(client, repo)
-    _poll_events(client, wid, "gate_requested")
-    _force_node(wid, "merge_request_feedback", "needs_human")
-    _seed_counter(wid, "ci_infra:merge_request_feedback")
-
-    r = client.post(f"/api/work-items/{wid}/retry", json={})
-
-    assert r.status_code == 200, r.text
-    assert not _counter_exists(wid, "ci_infra:merge_request_feedback")
+    assert not _counter_exists(wid, f"{kind}:merge_request_feedback")
 
 
 def test_retry_with_no_steer_seeds_the_last_measurements_findings(client, repo):
