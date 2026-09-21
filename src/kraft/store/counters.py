@@ -79,6 +79,21 @@ def clear_loop_counters(
             )
 
 
+def reject_loop_key(gate: str) -> str:
+    """The `retry_counters` key a gate's reject loop counts under.
+
+    One definition for its two sites: `executor.gates.apply_rejection` bumps
+    it, and a retry's run fork (`store.forks.fork_run`) clears it for every
+    gate it reopens. Hand-spelled in each they agreed only because a V1 gate's
+    node id *is* its gate name -- a coincidence that stops being true quietly,
+    and a retry that cleared a key nothing bumped leaves the gate re-opening
+    onto a spent counter, every rejection after it refused forever (Kraft-ko7j
+    §A4, Ruling 67). Here, not in the executor, because the store must not
+    import the executor.
+    """
+    return f"{gate}_reject_loop"
+
+
 def retry_after_cap(
     conn: sqlite3.Connection,
     work_item_id: str,
@@ -86,7 +101,6 @@ def retry_after_cap(
     key: str | None,
     steer,
     *,
-    gate_key: str | None = None,
     escalated: bool = False,
     seeded: bool = False,
 ):
@@ -101,14 +115,10 @@ def retry_after_cap(
     the item still has to be put back to work. A plain task failure strands an
     item exactly as hard as a breached cap does (Kraft-bzwi).
 
-    `gate_key` is `executor.gates.reject_loop_key(<gate>)` -- the key
-    `apply_rejection` bumps -- for the node when the node *is* a gate. Named as
-    that function rather than spelled out again here: a third copy of the format
-    string is a third thing to keep equal to the other two.
-
-    Retry is the human's override of the reject cap too (Kraft-ko7j §A4):
-    without clearing it, the retried node re-opens its gate onto a spent
-    counter and every rejection after that is refused forever.
+    A gate's reject loop is not cleared here: every retry forks its run, and
+    `store.forks.fork_run` clears the reject loop of each gate it reopens --
+    the human's override of that cap (Kraft-ko7j §A4) -- under
+    `reject_loop_key`, the key `apply_rejection` bumps.
 
     Also clears `ci_infra:<node_id>` unconditionally, built here from
     `node_id` rather than threaded in by the caller. A node can have been
@@ -138,11 +148,6 @@ def retry_after_cap(
     (Kraft-11e0), so this only clears counters and narrates the retry.
     """
     clear_loop_counters(conn, work_item_id, node_id, key)
-    if gate_key is not None:
-        conn.execute(
-            "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?",
-            (work_item_id, gate_key),
-        )
     # Item-wide, not node-scoped -- a human's `/retry` is the same explicit
     # "give this a fresh budget" for every node's base-change restarts
     # (`walk._restart_for_base_change`) that it already is for every other

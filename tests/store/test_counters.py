@@ -111,21 +111,6 @@ async def test_clear_loop_counters_with_no_key_still_clears_ci_counters(database
     assert _counter(database, "ci_infra:mr_checks") is None
 
 
-async def test_retry_after_cap_clears_the_gate_reject_counter_too(database):
-    """Kraft-ko7j §A4: without this the cap becomes a dead end one step out —
-    the counter is spent, the gate re-opens after every retry, and every
-    rejection after that is refused forever."""
-    await _bump(database, "spec_approval_reject_loop", attempts=1)
-    await _bump(database, "verify_fix_loop", attempts=1)
-    await database.write(
-        lambda c: store.retry_after_cap(
-            c, "w1", "spec", "verify_fix_loop", None, gate_key="spec_approval_reject_loop"
-        )
-    )
-    assert _counter(database, "verify_fix_loop") is None
-    assert _counter(database, "spec_approval_reject_loop") is None
-
-
 async def test_retry_after_cap_clears_ci_pipeline_ref(database):
     await database.write(lambda c: store.set_ci_pipeline_ref(c, "w1", "abc123:456"))
     await database.write(lambda c: store.retry_after_cap(c, "w1", "mr_checks", None, None))

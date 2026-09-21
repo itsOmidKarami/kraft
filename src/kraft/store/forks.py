@@ -5,7 +5,7 @@ import sqlite3
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store.chain import materialized_chain_of
-from kraft.store.counters import clear_loop_counters
+from kraft.store.counters import clear_loop_counters, reject_loop_key
 
 
 def current_fork(conn: sqlite3.Connection, work_item_id: str):
@@ -80,11 +80,12 @@ def fork_run(conn: sqlite3.Connection, work_item_id: str, target, override=None)
             key = f"{node.id}.fix_loop" if node.fix_loop else None
             clear_loop_counters(conn, work_item_id, node.id, key)
         else:
-            # `gates.reject_loop_key`'s format: a reopened gate gets a fresh
-            # reject budget, the human's override of that cap as it always was.
+            # A reopened gate gets a fresh reject budget, the human's override
+            # of that cap as it always was -- under the key its rejections
+            # counted on.
             conn.execute(
                 "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?",
-                (work_item_id, f"{node.id}_reject_loop"),
+                (work_item_id, reject_loop_key(node.id)),
             )
             if _approved(conn, work_item_id, node.id):
                 reopened.append(node.id)

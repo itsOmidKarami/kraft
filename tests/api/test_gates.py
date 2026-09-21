@@ -355,6 +355,34 @@ def test_a_gate_approval_is_recorded_naming_its_gate(client, repo):
     assert approved["payload"]["by"] == "human"
 
 
+def _reject_loop_rows(wid: str) -> list[tuple[str, int]]:
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    try:
+        return conn.execute(
+            "SELECT key, count FROM retry_counters WHERE work_item_id = ? "
+            "AND key LIKE '%reject_loop'",
+            (wid,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+
+@_reject_cap(escalate=False)
+def test_a_retry_clears_the_reject_loop_its_rejections_counted_on(client, repo):
+    """Kraft-rmpzj (Ruling 67): the key a rejection counts on and the key a
+    retry clears are one key. Two spellings that agree only by coincidence let
+    a retry clear a key nothing bumped -- and every later rejection is then
+    refused at the old, spent cap."""
+    wid = _post_default(client, repo)
+    _reject_past_the_cap(client, wid)
+    counted = _reject_loop_rows(wid)
+    assert [key for key, _ in counted] == ["spec_approval_reject_loop"]
+
+    assert client.post(f"/api/work-items/{wid}/retry", json={}).status_code == 200
+
+    assert _reject_loop_rows(wid) == []
+
+
 @_reject_cap(escalate=False)
 def test_gate_reject_is_bounded_by_its_reject_loop(client, repo):
     """Rejections are capped like a fix loop; the breach stops the item.

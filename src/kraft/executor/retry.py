@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from kraft import policy as _policy
 from kraft import store
-from kraft.executor import gates, walk
+from kraft.executor import walk
 from kraft.executor.context import LaunchContext, OnApprove
 from kraft.templates.forks import ChainPath
 from kraft.templates.models import GateNode
@@ -48,7 +48,6 @@ async def retry(
     node = target.node if target is not None else walk.chain_of(row).chain.nodes[0]
     is_gate = isinstance(node.node, GateNode)
     key = None if is_gate or node.node.fix_loop is None else walk._loop_key(node)
-    gate_key = gates.reject_loop_key(node.id) if is_gate else None
 
     def _record(c):
         store.retry_after_cap(
@@ -57,7 +56,6 @@ async def retry(
             node.id,
             key,
             steer,
-            gate_key=gate_key,
             escalated=escalated,
             seeded=seeded,
         )

@@ -42,20 +42,8 @@ def pending_gate(db, work_item_id: str, evts: list | None = None) -> str | None:
     return None
 
 
-def reject_loop_key(gate: str) -> str:
-    """The `retry_counters` key a gate's reject loop counts under.
-
-    One spelling, two writers. `apply_rejection` bumps it and
-    `api/routes/lifecycle.py`'s retry clears it, and they had the f-string each
-    -- `f"{gate}_reject_loop"` here and `f"{node.id}_reject_loop"` there. Those
-    agree only because a V1 gate's node id *is* its gate name, which is true today
-    and is exactly the kind of coincidence that stops being true quietly: a retry
-    that cleared a key nothing bumped leaves the gate re-opening onto a spent
-    counter, and every rejection after that is refused forever (Kraft-ko7j §A4).
-    `store.retry_after_cap`'s docstring names this function rather than a third
-    spelling of the same format string.
-    """
-    return f"{gate}_reject_loop"
+#: The one definition lives in the store, which both of its sites can import.
+reject_loop_key = store.reject_loop_key
 
 
 def gate_node_index(nodes: Sequence[ResolvedNode], gate: str) -> int:
