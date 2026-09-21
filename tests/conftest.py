@@ -418,3 +418,32 @@ def app(tmp_path, monkeypatch):
         lambda: Lifespan(transport=httpx.ASGITransport(app=api.app), base_url="http://kraft"),
     )
     return api
+
+
+@pytest.fixture
+async def stub_app(database, run_dirs):
+    """`stub_app(**state)`: a stand-in for the FastAPI app a poller's `tick(app)`
+    reads, with `app.state.db`/`.run_dirs`/`.tasks` from the `database` and
+    `run_dirs` fixtures plus whatever `state` names (policy, registry, ...).
+    Every task a tick spawned into `app.state.tasks` is awaited, not cancelled,
+    before the database closes.
+
+        async def test_x(tmp_path, stub_app):
+            app = stub_app(policy=policy.Policy(...), templates_dir=tmp_path / "t")
+            assert await archive.tick(app) == []
+    """
+    import asyncio
+    from types import SimpleNamespace
+
+    apps = []
+
+    def make(**state):
+        app = SimpleNamespace(
+            state=SimpleNamespace(db=database, run_dirs=run_dirs, tasks={}, **state)
+        )
+        apps.append(app)
+        return app
+
+    yield make
+    for app in apps:
+        await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)

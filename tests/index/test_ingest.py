@@ -30,22 +30,17 @@ def test_split_front_matter_present():
     assert body == "# Body\ntext\n"
 
 
-def test_split_front_matter_absent():
-    fm, body = ingest.split_front_matter("# Just a heading\nbody")
-    assert fm == {}
-    assert body == "# Just a heading\nbody"
-
-
-def test_split_front_matter_malformed_yaml_ignored():
-    fm, body = ingest.split_front_matter("---\n: : not : valid :\n---\nbody\n")
-    assert fm == {}
-    assert body == "body\n"
-
-
-def test_split_front_matter_scalar_not_dict():
-    fm, body = ingest.split_front_matter("---\njust a string\n---\nbody\n")
-    assert fm == {}
-    assert body == "body\n"
+@pytest.mark.parametrize(
+    ("text", "body"),
+    [
+        ("# Just a heading\nbody", "# Just a heading\nbody"),
+        ("---\n: : not : valid :\n---\nbody\n", "body\n"),
+        ("---\njust a string\n---\nbody\n", "body\n"),
+    ],
+    ids=["absent", "malformed-yaml-ignored", "scalar-not-dict"],
+)
+def test_split_front_matter_without_a_mapping_yields_none(text, body):
+    assert ingest.split_front_matter(text) == ({}, body)
 
 
 # ---- derive_kind / derive_title ----

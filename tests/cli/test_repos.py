@@ -18,32 +18,18 @@ from kraft import cli, client
 # to the ASGI app with the lifespan entered per client.
 
 
-def _make_item(repo, title="locate me"):
-    async def go():
-        async with client.transport.http() as http:
-            response = await http.post(
-                "/api/work-items", json={"title": title, "repo": str(repo), "autostart": False}
-            )
-        assert response.status_code == 201, response.text
-        return response.json()["id"]
-
-    return asyncio.run(go())
-
-
 def test_repos_is_empty_until_something_is_connected(app):
     assert asyncio.run(client.repos()) == []
 
 
-def test_repos_lists_a_connected_repo(app, tmp_path):
-    repo = make_repo(tmp_path)
+def test_repos_lists_a_connected_repo(app, repo):
     asyncio.run(client.ensure_repo(str(repo)))
     listed = asyncio.run(client.repos())
     assert [entry["path"] for entry in listed] == [str(repo)]
 
 
-def test_open_worktree_without_a_worktree_is_a_readable_404(app, tmp_path):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)  # paused, never run: no worktree yet
+def test_open_worktree_without_a_worktree_is_a_readable_404(app, make_item, repo):
+    wid = make_item(repo)  # paused, never run: no worktree yet
     with pytest.raises(ValueError, match="404"):
         asyncio.run(client.open_worktree(wid))
 
@@ -63,23 +49,20 @@ def test_repos_marks_the_repo_you_are_standing_in(app, tmp_path, monkeypatch, ca
     assert str(here) in marked[0]
 
 
-def test_repos_json_is_the_raw_list(app, tmp_path, capsys):
-    repo = make_repo(tmp_path)
+def test_repos_json_is_the_raw_list(app, capsys, repo):
     asyncio.run(client.ensure_repo(str(repo)))
     cli.main(["repo", "list", "--json"])
     assert json.loads(capsys.readouterr().out) == asyncio.run(client.repos())
 
 
-def test_connect_defaults_to_the_cwd(app, tmp_path, monkeypatch, capsys):
-    repo = make_repo(tmp_path)
+def test_connect_defaults_to_the_cwd(app, monkeypatch, capsys, repo):
     monkeypatch.chdir(repo)
     cli.main(["repo", "connect"])
     assert str(repo) in capsys.readouterr().out
     assert [entry["path"] for entry in asyncio.run(client.repos())] == [str(repo)]
 
 
-def test_connect_twice_is_fine_and_says_so(app, tmp_path, capsys):
-    repo = make_repo(tmp_path)
+def test_connect_twice_is_fine_and_says_so(app, capsys, repo):
     cli.main(["repo", "connect", str(repo)])
     capsys.readouterr()
     cli.main(["repo", "connect", str(repo)])  # must not raise SystemExit
@@ -95,9 +78,8 @@ def test_connect_a_non_git_directory_surfaces_the_api_error(app, tmp_path, capsy
     assert "not a git repository" in capsys.readouterr().err
 
 
-def test_path_prints_exactly_one_line(app, tmp_path, capsys):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_path_prints_exactly_one_line(app, capsys, make_item, repo):
+    wid = make_item(repo)
     cli.main(["repo", "path", wid])
     out = capsys.readouterr().out
     # consumed by cd "$(kraft path ID)": one line, no decoration, nothing else
@@ -106,18 +88,16 @@ def test_path_prints_exactly_one_line(app, tmp_path, capsys):
     assert out.strip() == asyncio.run(client.get_work_item(wid))["worktree_path"]
 
 
-def test_cd_is_an_alias_for_path(app, tmp_path, capsys):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_cd_is_an_alias_for_path(app, capsys, make_item, repo):
+    wid = make_item(repo)
     cli.main(["repo", "path", wid])
     expected = capsys.readouterr().out
     cli.main(["repo", "cd", wid])
     assert capsys.readouterr().out == expected
 
 
-def test_path_defaults_to_the_resolved_work_item(app, tmp_path, monkeypatch, capsys):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_path_defaults_to_the_resolved_work_item(app, monkeypatch, capsys, make_item, repo):
+    wid = make_item(repo)
     monkeypatch.setenv("KRAFT_WORK_ITEM_ID", wid)
     cli.main(["repo", "path"])
     assert wid in capsys.readouterr().out
@@ -130,9 +110,8 @@ def test_path_shell_prints_a_function(capsys):
     assert "kraft path" in out
 
 
-def test_open_on_a_headless_server_is_a_kraft_message(app, tmp_path, monkeypatch, capsys):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_open_on_a_headless_server_is_a_kraft_message(app, monkeypatch, capsys, make_item, repo):
+    wid = make_item(repo)
 
     async def fake_open(work_item_id=None, editor=None):
         raise ValueError("kraft 501: no editor available on the server for default")
@@ -144,9 +123,8 @@ def test_open_on_a_headless_server_is_a_kraft_message(app, tmp_path, monkeypatch
     assert "501" in capsys.readouterr().err
 
 
-def test_open_passes_the_editor_through(app, tmp_path, monkeypatch, capsys):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_open_passes_the_editor_through(app, monkeypatch, capsys, make_item, repo):
+    wid = make_item(repo)
     seen = {}
 
     async def fake_open(work_item_id=None, editor=None):
@@ -158,9 +136,8 @@ def test_open_passes_the_editor_through(app, tmp_path, monkeypatch, capsys):
     assert seen == {"work_item_id": wid, "editor": "zed"}
 
 
-def test_path_rejects_json_rather_than_ignoring_it(app, tmp_path, capsys):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_path_rejects_json_rather_than_ignoring_it(app, capsys, make_item, repo):
+    wid = make_item(repo)
     with pytest.raises(SystemExit) as caught:
         cli.main(["repo", "path", wid, "--json"])
     assert caught.value.code == 1
@@ -237,18 +214,16 @@ def test_repos_json_ignores_the_managed_filter(app, tmp_path, capsys):
     assert paths == {str(root), str(child)}
 
 
-def test_disconnect_removes_the_connected_repo(app, tmp_path, capsys):
-    repo = make_repo(tmp_path)
+def test_disconnect_removes_the_connected_repo(app, capsys, repo):
     asyncio.run(client.ensure_repo(str(repo)))
     cli.main(["repo", "disconnect", str(repo)])
     assert str(repo) in capsys.readouterr().out
     assert asyncio.run(client.repos()) == []
 
 
-def test_disconnect_of_an_unconnected_path_is_a_readable_404(app, tmp_path, capsys):
+def test_disconnect_of_an_unconnected_path_is_a_readable_404(app, capsys, repo):
     """DELETE /repos answers 204 with no body, so the client must not try to
     parse one — and its 404 has to read as a sentence, like every other verb."""
-    repo = make_repo(tmp_path)
     with pytest.raises(SystemExit) as caught:
         cli.main(["repo", "disconnect", str(repo)])
     assert caught.value.code == 1
@@ -258,13 +233,14 @@ def test_disconnect_of_an_unconnected_path_is_a_readable_404(app, tmp_path, caps
     assert "Traceback" not in err
 
 
-def test_disconnect_from_inside_a_worktree_disconnects_the_repo(app, tmp_path, monkeypatch, capsys):
+def test_disconnect_from_inside_a_worktree_disconnects_the_repo(
+    app, tmp_path, monkeypatch, capsys, repo
+):
     """The symmetric half of Kraft-97e: after Task 1 the stored path is the main
     checkout, so sending the raw cwd from a worktree would 404. `disconnect_repo`
     probes first, the way `ensure_repo` does for its 409 branch."""
     import subprocess
 
-    repo = make_repo(tmp_path)
     asyncio.run(client.ensure_repo(str(repo)))
     worktree = tmp_path / "wt"
     subprocess.run(
@@ -279,7 +255,7 @@ def test_disconnect_from_inside_a_worktree_disconnects_the_repo(app, tmp_path, m
 
 
 def test_disconnect_removes_an_entry_registered_under_a_worktree_path(
-    app, tmp_path, monkeypatch, capsys
+    app, tmp_path, monkeypatch, capsys, repo
 ):
     """Kraft-7qgb, the gap Kraft-sws6 + Kraft-97e left between them. An entry
     written before 97e is keyed by a *worktree* path, and every CLI door probes
@@ -293,7 +269,6 @@ def test_disconnect_removes_an_entry_registered_under_a_worktree_path(
     """
     import subprocess
 
-    repo = make_repo(tmp_path)
     asyncio.run(client.ensure_repo(str(repo)))
     worktree = tmp_path / "wt"
     subprocess.run(
@@ -322,20 +297,36 @@ def test_repos_yaml_round_trips_a_test_command(tmp_path):
     assert entry["test_command"] == "just ci"
 
 
-def test_repos_yaml_defaults_test_command_to_none(tmp_path):
+@pytest.mark.parametrize("field", ["test_command", "test_scopes"])
+def test_repos_yaml_defaults_an_absent_test_field_to_none(tmp_path, field):
     from kraft import config
 
     p = tmp_path / "repos.yaml"
     p.write_text("repos:\n  - path: /r\n")
     (entry,) = config.load_repos(p, validate_steering=False)
-    assert entry["test_command"] is None
+    assert entry[field] is None
 
 
-def test_repos_yaml_rejects_a_non_string_test_command(tmp_path):
+@pytest.mark.parametrize(
+    "tail",
+    [
+        "    test_command: 3\n",
+        "    test_scopes:\n      - command: just test\n",
+        "    test_scopes:\n      - paths: ['**']\n        command: ''\n",
+        "    test_scopes: nope\n",
+    ],
+    ids=[
+        "non-string-test-command",
+        "scope-missing-paths",
+        "scope-empty-command",
+        "non-list-scopes",
+    ],
+)
+def test_repos_yaml_rejects_a_malformed_test_field(tmp_path, tail):
     from kraft import config
 
     p = tmp_path / "repos.yaml"
-    p.write_text("repos:\n  - path: /r\n    test_command: 3\n")
+    p.write_text("repos:\n  - path: /r\n" + tail)
     with pytest.raises(config.ConfigError):
         config.load_repos(p, validate_steering=False)
 
@@ -373,15 +364,6 @@ def test_repos_yaml_test_command_edit_is_not_shadowed_by_a_stale_scope(tmp_path)
     assert reloaded["test_scopes"] is None
 
 
-def test_repos_yaml_test_scopes_is_none_when_both_fields_are_absent(tmp_path):
-    from kraft import config
-
-    p = tmp_path / "repos.yaml"
-    p.write_text("repos:\n  - path: /r\n")
-    (entry,) = config.load_repos(p, validate_steering=False)
-    assert entry["test_scopes"] is None
-
-
 def test_repos_yaml_round_trips_explicit_test_scopes(tmp_path):
     from kraft import config
 
@@ -395,43 +377,12 @@ def test_repos_yaml_round_trips_explicit_test_scopes(tmp_path):
     assert entry["test_scopes"] == scopes
 
 
-def test_repos_yaml_rejects_test_scopes_missing_paths(tmp_path):
-    from kraft import config
-
-    p = tmp_path / "repos.yaml"
-    p.write_text("repos:\n  - path: /r\n    test_scopes:\n      - command: just test\n")
-    with pytest.raises(config.ConfigError):
-        config.load_repos(p, validate_steering=False)
-
-
-def test_repos_yaml_rejects_test_scopes_with_an_empty_command(tmp_path):
-    from kraft import config
-
-    p = tmp_path / "repos.yaml"
-    p.write_text(
-        "repos:\n  - path: /r\n    test_scopes:\n      - paths: ['**']\n        command: ''\n"
-    )
-    with pytest.raises(config.ConfigError):
-        config.load_repos(p, validate_steering=False)
-
-
-def test_repos_yaml_rejects_a_non_list_test_scopes(tmp_path):
-    from kraft import config
-
-    p = tmp_path / "repos.yaml"
-    p.write_text("repos:\n  - path: /r\n    test_scopes: nope\n")
-    with pytest.raises(config.ConfigError):
-        config.load_repos(p, validate_steering=False)
-
-
-def test_probe_repo_excludes_the_nested_scope_from_the_root_scope(tmp_path):
+def test_probe_repo_excludes_the_nested_scope_from_the_root_scope(repo):
     """Mirrors Kraft's own layout — root `pyproject.toml`, `package.json`
     under `frontend/` — the failure mode Kraft-9wzy names directly."""
-    from support.harness import make_repo
 
     from kraft import config
 
-    repo = make_repo(tmp_path)
     (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
     frontend = repo / "frontend"
     frontend.mkdir()
@@ -445,16 +396,14 @@ def test_probe_repo_excludes_the_nested_scope_from_the_root_scope(tmp_path):
     assert "pyproject.toml" in root["paths"]
 
 
-def test_probe_repo_root_scope_globs_match_files_inside_its_directories(tmp_path):
+def test_probe_repo_root_scope_globs_match_files_inside_its_directories(repo):
     """A bare directory name in `paths` (e.g. "src") never matches
     `fnmatch`-checked paths like "src/foo.py", so a backend-only diff failed
     open to every scope, nested ones included (verify finding, Kraft-9wzy).
     Root-level directories need the `/**` suffix; root-level files don't."""
-    from support.harness import make_repo
 
     from kraft import config
 
-    repo = make_repo(tmp_path)
     (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
     src = repo / "src"
     src.mkdir()

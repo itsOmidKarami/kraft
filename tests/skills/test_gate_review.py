@@ -112,66 +112,50 @@ def _fake_agent(result: dict | None, seen: dict):
         (None, "undecided"),
     ],
 )
-def test_verdict_resolution(tmp_path, monkeypatch, result, expected):
+async def test_verdict_resolution(monkeypatch, result, expected, database, run_dirs):
     seen = {}
     monkeypatch.setattr("kraft.gate_review._agent.run_agent_task", _fake_agent(result, seen))
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await Database.open(rd.db)
-        try:
-            await _seed(database, rd, "w1")
-            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
-            verdict, _note = await gate_review.review(
-                database,
-                rd,
-                work_item_id="w1",
-                gate="spec_approval",
-                node=_gate(rd),
-                launch=launch,
-            )
-            assert verdict == expected
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    await _seed(database, run_dirs, "w1")
+    launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+    verdict, _note = await gate_review.review(
+        database,
+        run_dirs,
+        work_item_id="w1",
+        gate="spec_approval",
+        node=_gate(run_dirs),
+        launch=launch,
+    )
+    assert verdict == expected
 
 
-def test_item_override_reaches_the_gate_review_dispatch(tmp_path, monkeypatch):
+async def test_item_override_reaches_the_gate_review_dispatch(monkeypatch, database, run_dirs):
     seen = {}
     monkeypatch.setattr(
         "kraft.gate_review._agent.run_agent_task",
         _fake_agent({"status": "done", "verdict": "approve"}, seen),
     )
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await Database.open(rd.db)
-        try:
-            await _seed(database, rd, "w1")
-            await database.write(
-                lambda c: store.set_agent_overrides(
-                    c, "w1", json.dumps({"model": "sonnet", "effort": "low"})
-                )
-            )
-            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
-            await gate_review.review(
-                database,
-                rd,
-                work_item_id="w1",
-                gate="spec_approval",
-                node=_gate(rd),
-                launch=launch,
-            )
-            assert seen["kwargs"]["model"] == "sonnet"
-            assert seen["kwargs"]["effort"] == "low"
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    await _seed(database, run_dirs, "w1")
+    await database.write(
+        lambda c: store.set_agent_overrides(
+            c, "w1", json.dumps({"model": "sonnet", "effort": "low"})
+        )
+    )
+    launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+    await gate_review.review(
+        database,
+        run_dirs,
+        work_item_id="w1",
+        gate="spec_approval",
+        node=_gate(run_dirs),
+        launch=launch,
+    )
+    assert seen["kwargs"]["model"] == "sonnet"
+    assert seen["kwargs"]["effort"] == "low"
 
 
-def test_review_forwards_the_repo_s_resolved_sandbox(tmp_path, monkeypatch):
+async def test_review_forwards_the_repo_s_resolved_sandbox(monkeypatch, database, run_dirs):
     """Kraft-rki: same drop as `escalate.dispatch` -- `inv.sandbox` is
     resolved but has to actually reach `run_agent_task`, or a repo's
     `sandbox:` silently does nothing for its gate reviews.
@@ -182,70 +166,54 @@ def test_review_forwards_the_repo_s_resolved_sandbox(tmp_path, monkeypatch):
         _fake_agent({"status": "done", "verdict": "approve"}, seen),
     )
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await Database.open(rd.db)
-        try:
-            await _seed(database, rd, "w1")
-            launch = executor.LaunchContext(
-                repo_entry={"sandbox": {"kind": "docker", "image": "kraft-worker:py"}},
-                steering_dir=None,
-                skills_dir=None,
-            )
-            await gate_review.review(
-                database,
-                rd,
-                work_item_id="w1",
-                gate="spec_approval",
-                node=_gate(rd),
-                launch=launch,
-            )
-            assert seen["kwargs"]["sandbox"] == {"kind": "docker", "image": "kraft-worker:py"}
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    await _seed(database, run_dirs, "w1")
+    launch = executor.LaunchContext(
+        repo_entry={"sandbox": {"kind": "docker", "image": "kraft-worker:py"}},
+        steering_dir=None,
+        skills_dir=None,
+    )
+    await gate_review.review(
+        database,
+        run_dirs,
+        work_item_id="w1",
+        gate="spec_approval",
+        node=_gate(run_dirs),
+        launch=launch,
+    )
+    assert seen["kwargs"]["sandbox"] == {"kind": "docker", "image": "kraft-worker:py"}
 
 
-def test_dispatch_is_a_worker_with_no_resume(tmp_path, monkeypatch):
+async def test_dispatch_is_a_worker_with_no_resume(monkeypatch, database, run_dirs):
     seen = {}
     monkeypatch.setattr(
         "kraft.gate_review._agent.run_agent_task",
         _fake_agent({"status": "done", "verdict": "approve"}, seen),
     )
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await Database.open(rd.db)
-        try:
-            await _seed(database, rd, "w1")
-            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
-            await gate_review.review(
-                database,
-                rd,
-                work_item_id="w1",
-                gate="spec_approval",
-                node=_gate(rd),
-                launch=launch,
-            )
-            kw = seen["kwargs"]
-            # The safety property: a worker cannot clear its own gate, and
-            # `client.context._forbid_self_action` is what enforces that. Flipping this
-            # flag would silently hand the agent the human's standing.
-            assert kw.get("identify_as_worker", True) is True
-            # The gate's own declared task, by its canonical path.
-            assert kw["hook_point"] == _gate(rd).auto_review.path
-            assert kw.get("resume_session_id") is None
-            assert "spec_approval" in kw["task_instruction"]
-            assert ".engineering/specs/w1.md" in kw["task_instruction"]
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    await _seed(database, run_dirs, "w1")
+    launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+    await gate_review.review(
+        database,
+        run_dirs,
+        work_item_id="w1",
+        gate="spec_approval",
+        node=_gate(run_dirs),
+        launch=launch,
+    )
+    kw = seen["kwargs"]
+    # The safety property: a worker cannot clear its own gate, and
+    # `client.context._forbid_self_action` is what enforces that. Flipping this
+    # flag would silently hand the agent the human's standing.
+    assert kw.get("identify_as_worker", True) is True
+    # The gate's own declared task, by its canonical path.
+    assert kw["hook_point"] == _gate(run_dirs).auto_review.path
+    assert kw.get("resume_session_id") is None
+    assert "spec_approval" in kw["task_instruction"]
+    assert ".engineering/specs/w1.md" in kw["task_instruction"]
 
 
-def test_a_reviewer_on_an_unavailable_profile_launches_nothing_and_claims_nothing(
-    tmp_path, monkeypatch
+async def test_a_reviewer_on_an_unavailable_profile_launches_nothing_and_claims_nothing(
+    monkeypatch, database, run_dirs
 ):
     """`unavailable-selected-harness-needs-human`, at the gate: a reviewer whose
     profile is disabled raises `HarnessUnavailable` before any launch and before
@@ -265,30 +233,19 @@ def test_a_reviewer_on_an_unavailable_profile_launches_nothing_and_claims_nothin
         _fake_agent({"status": "done", "verdict": "approve"}, seen),
     )
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await Database.open(rd.db)
-        try:
-            await _seed(database, rd, "w1")
-            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
-            with pytest.raises(agent.HarnessUnavailable, match="'claude' is disabled"):
-                await gate_review.review(
-                    database,
-                    rd,
-                    work_item_id="w1",
-                    gate="spec_approval",
-                    node=_gate(rd),
-                    launch=launch,
-                )
-            row = database.read(
-                lambda c: c.execute("SELECT * FROM work_items WHERE id = 'w1'").fetchone()
-            )
-            types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, "w1"))]
-            return dict(row), types
-        finally:
-            await database.close()
-
-    row, types = asyncio.run(scenario())
+    await _seed(database, run_dirs, "w1")
+    launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+    with pytest.raises(agent.HarnessUnavailable, match="'claude' is disabled"):
+        await gate_review.review(
+            database,
+            run_dirs,
+            work_item_id="w1",
+            gate="spec_approval",
+            node=_gate(run_dirs),
+            launch=launch,
+        )
+    row = database.read(lambda c: c.execute("SELECT * FROM work_items WHERE id = 'w1'").fetchone())
+    types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, "w1"))]
 
     assert seen == {}
     # Still parked at the gate, as `_seed` left it: nothing claimed it.
@@ -392,55 +349,41 @@ def _stub_walk(monkeypatch, calls, status="completed"):
         ("fixed", 0),
     ],
 )
-def test_verdict_reenters_the_walk_at_the_right_node(
-    tmp_path, monkeypatch, verdict, expected_start
+async def test_verdict_reenters_the_walk_at_the_right_node(
+    monkeypatch, verdict, expected_start, database, run_dirs
 ):
     calls = []
     _stub_review(monkeypatch, verdict)
     _stub_walk(monkeypatch, calls)
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await Database.open(rd.db)
-        try:
-            status = await _review_from_gate(database, rd, auto_gate=True)
-            assert status == "completed"
-            assert [c[0] for c in calls] == [expected_start]
-            # A rejection's reasoning is the steer for whoever redoes the work.
-            if verdict == "approve":
-                assert calls[0][1] is None
-            else:
-                assert calls[0][1] == "because the migration is missing"
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    status = await _review_from_gate(database, run_dirs, auto_gate=True)
+    assert status == "completed"
+    assert [c[0] for c in calls] == [expected_start]
+    # A rejection's reasoning is the steer for whoever redoes the work.
+    if verdict == "approve":
+        assert calls[0][1] is None
+    else:
+        assert calls[0][1] == "because the migration is missing"
 
 
-def test_undecided_leaves_the_gate_pending(tmp_path, monkeypatch):
+async def test_undecided_leaves_the_gate_pending(monkeypatch, database, run_dirs):
     calls = []
     _stub_review(monkeypatch, "undecided")
     _stub_walk(monkeypatch, calls)
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await Database.open(rd.db)
-        try:
-            status = await _review_from_gate(database, rd, auto_gate=True)
-            assert status == "awaiting_gate"
-            assert calls == []
-            row = database.read(
-                lambda c: c.execute("SELECT status FROM work_items WHERE id = 'w1'").fetchone()
-            )
-            assert row["status"] == "needs_human"
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    status = await _review_from_gate(database, run_dirs, auto_gate=True)
+    assert status == "awaiting_gate"
+    assert calls == []
+    row = database.read(
+        lambda c: c.execute("SELECT status FROM work_items WHERE id = 'w1'").fetchone()
+    )
+    assert row["status"] == "needs_human"
 
 
 @pytest.mark.parametrize("auto_gate,auto_escalate", [(False, True), (True, False), (False, False)])
-def test_no_review_unless_both_knobs_are_on(tmp_path, monkeypatch, auto_gate, auto_escalate):
+async def test_no_review_unless_both_knobs_are_on(
+    monkeypatch, auto_gate, auto_escalate, database, run_dirs
+):
     """The AND is this feature's safety property, so it is pinned explicitly
     rather than implied by the happy path. V1: the chain's half of the AND is
     the gate declaring an `auto_review` task."""
@@ -452,21 +395,13 @@ def test_no_review_unless_both_knobs_are_on(tmp_path, monkeypatch, auto_gate, au
 
     monkeypatch.setattr("kraft.executor.gate_review.review", fake_review)
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await Database.open(rd.db)
-        try:
-            chain = _chain2(rd, auto_review=auto_escalate)
-            status = await _review_from_gate(database, rd, chain, auto_gate=auto_gate)
-            assert status == "awaiting_gate"
-            assert reviewed == []
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    chain = _chain2(run_dirs, auto_review=auto_escalate)
+    status = await _review_from_gate(database, run_dirs, chain, auto_gate=auto_gate)
+    assert status == "awaiting_gate"
+    assert reviewed == []
 
 
-def test_a_human_decision_taken_during_the_review_wins(tmp_path, monkeypatch):
+async def test_a_human_decision_taken_during_the_review_wins(monkeypatch, database, run_dirs):
     """The agent worked for minutes and a person approved the gate meanwhile.
     The verdict was computed against state that no longer exists, so it is
     dropped rather than written on top of the human's decision."""
@@ -479,23 +414,15 @@ def test_a_human_decision_taken_during_the_review_wins(tmp_path, monkeypatch):
     monkeypatch.setattr("kraft.executor.gate_review.review", fake_review)
     _stub_walk(monkeypatch, calls)
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await Database.open(rd.db)
-        try:
-            status = await _review_from_gate(database, rd, auto_gate=True)
-            assert status == "active"  # what the human's approval left behind
-            assert calls == []  # the walk was not re-entered
-            types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, "w1"))]
-            assert "gate_rejected" not in types
-            assert types[-1] == "gate_auto_review_discarded"
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    status = await _review_from_gate(database, run_dirs, auto_gate=True)
+    assert status == "active"  # what the human's approval left behind
+    assert calls == []  # the walk was not re-entered
+    types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, "w1"))]
+    assert "gate_rejected" not in types
+    assert types[-1] == "gate_auto_review_discarded"
 
 
-def test_an_agent_fixed_verdict_is_recorded_as_fixed(tmp_path, monkeypatch):
+async def test_an_agent_fixed_verdict_is_recorded_as_fixed(monkeypatch, database, run_dirs):
     """Kraft-s7c04.16. `by: agent` alone cannot tell a reviewer that rejected
     from one that repaired the worktree and committed -- and those differ: a
     `fixed` re-enters at the gate's own node and regenerates the artifact the
@@ -508,25 +435,17 @@ def test_an_agent_fixed_verdict_is_recorded_as_fixed(tmp_path, monkeypatch):
 
     monkeypatch.setattr("kraft.executor.walk.run_once", fake_run_once)
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await Database.open(rd.db)
-        try:
-            await _review_from_gate(database, rd, auto_gate=True)
-            [rej] = [
-                e
-                for e in database.read(lambda c: events.read_after(c, 0, "w1"))
-                if e["type"] == "gate_rejected"
-            ]
-            assert rej["payload"]["verdict"] == "fixed"
-            assert rej["payload"]["by"] == "agent"
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    await _review_from_gate(database, run_dirs, auto_gate=True)
+    [rej] = [
+        e
+        for e in database.read(lambda c: events.read_after(c, 0, "w1"))
+        if e["type"] == "gate_rejected"
+    ]
+    assert rej["payload"]["verdict"] == "fixed"
+    assert rej["payload"]["by"] == "agent"
 
 
-def test_repeated_fixed_verdicts_breach_the_reject_loop(tmp_path, monkeypatch):
+async def test_repeated_fixed_verdicts_breach_the_reject_loop(monkeypatch, database, run_dirs):
     """A reviewer that keeps repairing and re-measuring is bounded by the same
     counter a human's rejections are bounded by, and ends at a person."""
     _stub_review(monkeypatch, "fixed", note="tidied the spec again")
@@ -542,26 +461,18 @@ def test_repeated_fixed_verdicts_breach_the_reject_loop(tmp_path, monkeypatch):
 
     monkeypatch.setattr("kraft.executor.walk.run_once", fake_run_once)
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await Database.open(rd.db)
-        try:
-            status = await _review_from_gate(database, rd, auto_gate=True)
-            assert status == "needs_human"
-            count = database.read(
-                lambda c: c.execute(
-                    "SELECT count FROM retry_counters WHERE work_item_id = 'w1' AND key = ?",
-                    ("human_review_approval_reject_loop",),
-                ).fetchone()
-            )["count"]
-            assert count == 3  # attempts=2, so the third is the breach
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    status = await _review_from_gate(database, run_dirs, auto_gate=True)
+    assert status == "needs_human"
+    count = database.read(
+        lambda c: c.execute(
+            "SELECT count FROM retry_counters WHERE work_item_id = 'w1' AND key = ?",
+            ("human_review_approval_reject_loop",),
+        ).fetchone()
+    )["count"]
+    assert count == 3  # attempts=2, so the third is the breach
 
 
-def test_budget_exhaustion_skips_the_review(tmp_path, monkeypatch):
+async def test_budget_exhaustion_skips_the_review(monkeypatch, database, run_dirs):
     """A review Kraft cannot pay for is not started, and the gate goes to a
     human rather than being cleared by nobody."""
     reviewed = []
@@ -580,22 +491,16 @@ def test_budget_exhaustion_skips_the_review(tmp_path, monkeypatch):
         },
     )
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await Database.open(rd.db)
-        try:
-            status = await _review_from_gate(database, rd, auto_gate=True)
-            assert status == "awaiting_gate"
-            assert reviewed == []
-            types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, "w1"))]
-            assert types[-1] == "gate_auto_review_skipped"
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    status = await _review_from_gate(database, run_dirs, auto_gate=True)
+    assert status == "awaiting_gate"
+    assert reviewed == []
+    types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, "w1"))]
+    assert types[-1] == "gate_auto_review_skipped"
 
 
-def test_approve_without_an_approval_door_leaves_the_gate_for_a_human(tmp_path, monkeypatch):
+async def test_approve_without_an_approval_door_leaves_the_gate_for_a_human(
+    monkeypatch, database, run_dirs
+):
     """`store.approve_gate` is not the whole of an approval: `chain_finalized`
     splices the reviewed nodes in and every artifact-carrying gate indexes its
     document. Without `on_approve` those cannot run, and clearing the gate with
@@ -604,21 +509,13 @@ def test_approve_without_an_approval_door_leaves_the_gate_for_a_human(tmp_path, 
     _stub_review(monkeypatch, "approve")
     _stub_walk(monkeypatch, calls)
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await Database.open(rd.db)
-        try:
-            status = await _review_from_gate(database, rd, auto_gate=True, on_approve=None)
-            assert status == "awaiting_gate"
-            assert calls == []
-            assert executor.pending_gate(database, "w1") == "human_review_approval"
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    status = await _review_from_gate(database, run_dirs, auto_gate=True, on_approve=None)
+    assert status == "awaiting_gate"
+    assert calls == []
+    assert executor.pending_gate(database, "w1") == "human_review_approval"
 
 
-def test_approve_parks_the_item_when_the_approval_refuses(tmp_path, monkeypatch):
+async def test_approve_parks_the_item_when_the_approval_refuses(monkeypatch, database, run_dirs):
     """A `chain_review` artifact that is missing, corrupt, or reports `error`
     makes `apply_approval` return no chain. A person gets it, and the gate is
     not cleared on the way."""
@@ -629,24 +526,14 @@ def test_approve_parks_the_item_when_the_approval_refuses(tmp_path, monkeypatch)
     async def refuse(row, gate):
         return None, "chain_review: no artifact found; the worker did not write one"
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await Database.open(rd.db)
-        try:
-            status = await _review_from_gate(database, rd, auto_gate=True, on_approve=refuse)
-            assert status == "needs_human"
-            assert calls == []
-            row = database.read(
-                lambda c: c.execute("SELECT * FROM work_items WHERE id = 'w1'").fetchone()
-            )
-            assert row["status"] == "needs_human"
-            log = database.read(lambda c: events.read_after(c, 0, "w1"))
-            stops = [e for e in log if e["type"] == "work_item_needs_human"]
-            assert "no artifact found" in stops[-1]["payload"]["reason"]
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    status = await _review_from_gate(database, run_dirs, auto_gate=True, on_approve=refuse)
+    assert status == "needs_human"
+    assert calls == []
+    row = database.read(lambda c: c.execute("SELECT * FROM work_items WHERE id = 'w1'").fetchone())
+    assert row["status"] == "needs_human"
+    log = database.read(lambda c: events.read_after(c, 0, "w1"))
+    stops = [e for e in log if e["type"] == "work_item_needs_human"]
+    assert "no artifact found" in stops[-1]["payload"]["reason"]
 
 
 def test_approve_walks_the_chain_the_approval_returned(tmp_path, monkeypatch):
@@ -692,7 +579,7 @@ def test_approve_walks_the_chain_the_approval_returned(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
-def test_run_calls_auto_escalate_stuck_after_review_gates(tmp_path, monkeypatch):
+async def test_run_calls_auto_escalate_stuck_after_review_gates(monkeypatch, database, run_dirs):
     calls = []
 
     async def fake_run_once(db, run_dirs, **kw):
@@ -705,20 +592,12 @@ def test_run_calls_auto_escalate_stuck_after_review_gates(tmp_path, monkeypatch)
     monkeypatch.setattr("kraft.executor.walk.run_once", fake_run_once)
     monkeypatch.setattr("kraft.executor.gates.auto_escalate_stuck", fake_auto_escalate_stuck)
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await Database.open(rd.db)
-        try:
-            return await executor.run(database, rd, work_item_id="w1", registry=None)
-        finally:
-            await database.close()
-
-    status = asyncio.run(scenario())
+    status = await executor.run(database, run_dirs, work_item_id="w1", registry=None)
     assert status == "sentinel_status"
     assert calls == [("needs_human", "w1")]
 
 
-def test_resume_calls_auto_escalate_stuck_after_review_gates(tmp_path, monkeypatch):
+async def test_resume_calls_auto_escalate_stuck_after_review_gates(monkeypatch, database, run_dirs):
     calls = []
 
     async def fake_resume_once(db, run_dirs, **kw):
@@ -731,20 +610,14 @@ def test_resume_calls_auto_escalate_stuck_after_review_gates(tmp_path, monkeypat
     monkeypatch.setattr("kraft.executor.resuming.resume_once", fake_resume_once)
     monkeypatch.setattr("kraft.executor.gates.auto_escalate_stuck", fake_auto_escalate_stuck)
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await Database.open(rd.db)
-        try:
-            return await executor.resume(database, rd, work_item_id="w1", registry=None, adopted={})
-        finally:
-            await database.close()
-
-    status = asyncio.run(scenario())
+    status = await executor.resume(database, run_dirs, work_item_id="w1", registry=None, adopted={})
     assert status == "sentinel_status"
     assert calls == [("needs_human", "w1")]
 
 
-def test_an_agent_gate_verdict_re_enters_without_claiming_a_human_wrote_it(tmp_path, monkeypatch):
+async def test_an_agent_gate_verdict_re_enters_without_claiming_a_human_wrote_it(
+    monkeypatch, database, run_dirs
+):
     """Kraft-s7c04.6. `review_gates` re-entered `run_once(steer=note)` with no
     source, so the re-run's prompt led with "A human has steered this run" over
     a note an agent wrote -- the exact misattribution `Steer.source` exists to
@@ -758,20 +631,12 @@ def test_an_agent_gate_verdict_re_enters_without_claiming_a_human_wrote_it(tmp_p
 
     monkeypatch.setattr("kraft.executor.walk.run_once", fake_run_once)
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await Database.open(rd.db)
-        try:
-            await _review_from_gate(database, rd, auto_gate=True)
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    await _review_from_gate(database, run_dirs, auto_gate=True)
     assert seen["steer"] == "tidied the spec"
     assert seen["steer_source"] == "gate_review"
 
 
-def test_a_gate_reviewers_note_still_reaches_a_dispatch(tmp_path, monkeypatch):
+def test_a_gate_reviewers_note_still_reaches_a_dispatch(monkeypatch):
     """The other half, and why this is not simply `steer_source="seeded"`. The
     note lives only in the `Steer` -- `take()` empties it and nothing
     re-delivers it -- so a judge stop before delivery would discard the entire

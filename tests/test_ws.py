@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from starlette.websockets import WebSocket, WebSocketDisconnect
-from support.harness import fake_templates_dir, isolated_bd, make_repo
+from support.harness import fake_templates_dir, isolated_bd
 from support.server import running_server
 
 from kraft import db, events
@@ -14,18 +14,6 @@ from kraft.ws import Broadcaster
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
-
-
-def _api_client(tmp_path, monkeypatch):
-    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))))
-    monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "no-dist"))
-    from fastapi.testclient import TestClient
-
-    import kraft.api as api
-
-    return TestClient(api.app, client=("127.0.0.1", 54321))
 
 
 async def _seed(database, wid="w1"):
@@ -179,51 +167,46 @@ def test_broadcaster_survives_a_failing_fanout_iteration(tmp_path):
     asyncio.run(scenario())
 
 
-def test_ws_streams_live_events_after_connect(tmp_path, monkeypatch):
-    with _api_client(tmp_path, monkeypatch) as client:
-        with client.websocket_connect("/api/ws/events?after_seq=0") as ws:
-            r = client.post(
-                "/api/work-items",
-                json={"title": "make the failing test pass", "repo": str(tmp_path)},
-            )
-            assert r.status_code == 201
-            types = set()
-            for _ in range(4):
-                types.add(ws.receive_json()["type"])
-            assert "work_item_created" in types
-
-
-def test_ws_replays_history_then_reconnect_resumes_without_gap(tmp_path, monkeypatch):
-    with _api_client(tmp_path, monkeypatch) as client:
-        wid = client.post(
+def test_ws_streams_live_events_after_connect(tmp_path, monkeypatch, client):
+    with client.websocket_connect("/api/ws/events?after_seq=0") as ws:
+        r = client.post(
             "/api/work-items",
             json={"title": "make the failing test pass", "repo": str(tmp_path)},
-        ).json()["id"]
-        # let a few events accrue
-        _wait_events(client, wid, "chain_loaded")
-        all_ev = client.get(f"/api/work-items/{wid}/events").json()
-        cut = all_ev[len(all_ev) // 2]["seq"]
-
-        with client.websocket_connect(f"/api/ws/events?after_seq={cut}") as ws:
-            first = ws.receive_json()
-            assert first["seq"] > cut  # exclusive replay, no gap below
-
-        # reconnect from the last seq we saw: no duplicate, no gap
-        last_seq = all_ev[-1]["seq"]
-        with client.websocket_connect(f"/api/ws/events?after_seq={last_seq}") as ws:
-            client.post("/api/work-items", json={"title": "another one", "repo": str(tmp_path)})
-            nxt = ws.receive_json()
-            assert nxt["seq"] > last_seq
+        )
+        assert r.status_code == 201
+        types = set()
+        for _ in range(4):
+            types.add(ws.receive_json()["type"])
+        assert "work_item_created" in types
 
 
-def test_ws_rejects_cross_site_origin(tmp_path, monkeypatch):
-    with _api_client(tmp_path, monkeypatch) as client:
-        with pytest.raises(WebSocketDisconnect) as exc:
-            with client.websocket_connect(
-                "/api/ws/events", headers={"origin": "https://evil.example"}
-            ):
-                pass
-        assert exc.value.code == 1008
+def test_ws_replays_history_then_reconnect_resumes_without_gap(tmp_path, monkeypatch, client):
+    wid = client.post(
+        "/api/work-items",
+        json={"title": "make the failing test pass", "repo": str(tmp_path)},
+    ).json()["id"]
+    # let a few events accrue
+    _wait_events(client, wid, "chain_loaded")
+    all_ev = client.get(f"/api/work-items/{wid}/events").json()
+    cut = all_ev[len(all_ev) // 2]["seq"]
+
+    with client.websocket_connect(f"/api/ws/events?after_seq={cut}") as ws:
+        first = ws.receive_json()
+        assert first["seq"] > cut  # exclusive replay, no gap below
+
+    # reconnect from the last seq we saw: no duplicate, no gap
+    last_seq = all_ev[-1]["seq"]
+    with client.websocket_connect(f"/api/ws/events?after_seq={last_seq}") as ws:
+        client.post("/api/work-items", json={"title": "another one", "repo": str(tmp_path)})
+        nxt = ws.receive_json()
+        assert nxt["seq"] > last_seq
+
+
+def test_ws_rejects_cross_site_origin(monkeypatch, client):
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with client.websocket_connect("/api/ws/events", headers={"origin": "https://evil.example"}):
+            pass
+    assert exc.value.code == 1008
 
 
 def _require_auth(client, monkeypatch):
@@ -240,82 +223,76 @@ def _require_auth(client, monkeypatch):
     monkeypatch.setattr(state, "access", {**state.access, "password_hash": "x"}, raising=False)
 
 
-def test_ws_events_refuses_a_client_with_no_credential(tmp_path, monkeypatch):
-    with _api_client(tmp_path, monkeypatch) as client:
-        _require_auth(client, monkeypatch)
-        with pytest.raises(WebSocketDisconnect) as exc:
-            with client.websocket_connect("/api/ws/events"):
-                pass
-        assert exc.value.code == 1008
+def test_ws_events_refuses_a_client_with_no_credential(monkeypatch, client):
+    _require_auth(client, monkeypatch)
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with client.websocket_connect("/api/ws/events"):
+            pass
+    assert exc.value.code == 1008
 
 
-def test_ws_events_accepts_the_mcp_bearer_token(tmp_path, monkeypatch):
+def test_ws_events_accepts_the_mcp_bearer_token(monkeypatch, client):
     """Non-browser clients carry a bearer, not a cookie. `kraft watch` is one.
 
     The HTTP middleware has always accepted this token; the websocket accepting
     only the session cookie made the live stream the one endpoint a CLI could
     not reach.
     """
-    with _api_client(tmp_path, monkeypatch) as client:
-        _require_auth(client, monkeypatch)
-        token = client.app.state.mcp_token
-        assert token, "the server mints an MCP token at startup"
+    _require_auth(client, monkeypatch)
+    token = client.app.state.mcp_token
+    assert token, "the server mints an MCP token at startup"
+    with client.websocket_connect(
+        "/api/ws/events", headers={"Authorization": f"Bearer {token}"}
+    ) as ws:
+        assert ws is not None  # the handshake completed; frame delivery is covered above
+
+
+def test_ws_events_refuses_a_wrong_bearer(monkeypatch, client):
+    _require_auth(client, monkeypatch)
+    with pytest.raises(WebSocketDisconnect) as exc:
         with client.websocket_connect(
-            "/api/ws/events", headers={"Authorization": f"Bearer {token}"}
-        ) as ws:
-            assert ws is not None  # the handshake completed; frame delivery is covered above
+            "/api/ws/events", headers={"Authorization": "Bearer not-the-token"}
+        ):
+            pass
+    assert exc.value.code == 1008
 
 
-def test_ws_events_refuses_a_wrong_bearer(tmp_path, monkeypatch):
-    with _api_client(tmp_path, monkeypatch) as client:
-        _require_auth(client, monkeypatch)
-        with pytest.raises(WebSocketDisconnect) as exc:
-            with client.websocket_connect(
-                "/api/ws/events", headers={"Authorization": "Bearer not-the-token"}
-            ):
-                pass
-        assert exc.value.code == 1008
-
-
-def test_ws_no_gap_or_dup_when_events_land_in_register_window(tmp_path, monkeypatch):
+def test_ws_no_gap_or_dup_when_events_land_in_register_window(tmp_path, monkeypatch, client):
     """Spec §6.1: events committed between register() and the catch-up read are
     delivered exactly once. Force that race by writing two events inside a
     monkeypatched WebSocket.accept()."""
-    with _api_client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={"title": "make the failing test pass", "repo": str(tmp_path)},
-        ).json()["id"]
-        _wait_events(client, wid, "chain_loaded")
+    wid = client.post(
+        "/api/work-items",
+        json={"title": "make the failing test pass", "repo": str(tmp_path)},
+    ).json()["id"]
+    _wait_events(client, wid, "chain_loaded")
 
-        real_accept = WebSocket.accept
-        fired = {"done": False}
+    real_accept = WebSocket.accept
+    fired = {"done": False}
 
-        async def racing_accept(self, *a, **kw):
-            if not fired["done"]:
-                fired["done"] = True
-                for name in ("race_a", "race_b"):
-                    await self.app.state.db.write(
-                        lambda c, name=name: events.append(c, wid, name, {})
-                    )
-            return await real_accept(self, *a, **kw)
+    async def racing_accept(self, *a, **kw):
+        if not fired["done"]:
+            fired["done"] = True
+            for name in ("race_a", "race_b"):
+                await self.app.state.db.write(lambda c, name=name: events.append(c, wid, name, {}))
+        return await real_accept(self, *a, **kw)
 
-        monkeypatch.setattr(WebSocket, "accept", racing_accept)
+    monkeypatch.setattr(WebSocket, "accept", racing_accept)
 
-        seen_types: list[str] = []
-        seqs: list[int] = []
-        with client.websocket_connect("/api/ws/events?after_seq=0") as ws:
-            for _ in range(60):
-                ev = ws.receive_json()
-                seqs.append(ev["seq"])
-                seen_types.append(ev["type"])
-                if {"race_a", "race_b"} <= set(seen_types):
-                    break
+    seen_types: list[str] = []
+    seqs: list[int] = []
+    with client.websocket_connect("/api/ws/events?after_seq=0") as ws:
+        for _ in range(60):
+            ev = ws.receive_json()
+            seqs.append(ev["seq"])
+            seen_types.append(ev["type"])
+            if {"race_a", "race_b"} <= set(seen_types):
+                break
 
-        assert {"race_a", "race_b"} <= set(seen_types)
-        assert seen_types.count("race_a") == 1 and seen_types.count("race_b") == 1
-        # strictly increasing, contiguous from the first replayed seq (no gap, no dup)
-        assert seqs == list(range(seqs[0], seqs[0] + len(seqs)))
+    assert {"race_a", "race_b"} <= set(seen_types)
+    assert seen_types.count("race_a") == 1 and seen_types.count("race_b") == 1
+    # strictly increasing, contiguous from the first replayed seq (no gap, no dup)
+    assert seqs == list(range(seqs[0], seqs[0] + len(seqs)))
 
 
 def _wait_events(client, wid, want, timeout=30):
@@ -331,14 +308,13 @@ def _wait_events(client, wid, want, timeout=30):
 
 
 @pytest.mark.slow
-def test_ws_events_delivered_under_real_uvicorn(tmp_path):
+def test_ws_events_delivered_under_real_uvicorn(tmp_path, repo):
     """The TestClient does WS in-process; this proves a real uvicorn handshake to
     /api/ws/events works (needs the `websockets` protocol lib) and streams frames."""
     from websockets.sync.client import connect
 
     templates = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
     tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
     with running_server(run_dir=tmp_path / "run", templates_dir=templates, bd_cwd=tracker) as srv:
         with connect(f"ws://127.0.0.1:{srv.port}/api/ws/events?after_seq=0") as ws:
             r = srv.client.post(

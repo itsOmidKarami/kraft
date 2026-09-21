@@ -309,22 +309,15 @@ def test_rollup_sums_per_node_and_per_item(tmp_path):
     assert s1["round"] == 0
 
 
-def test_rollup_of_an_item_with_no_sessions_is_empty_not_an_error(tmp_path):
-    async def scenario():
-        database = await db.Database.open(tmp_path / "orchestrator.db")
-        try:
-            await database.write(
-                lambda c: c.execute(
-                    "INSERT INTO work_items (id, title, repo, chain_template, "
-                    "chain_definition, status, created_at, updated_at) VALUES "
-                    "('w','t','/r','quick-task','{}','active','now','now')"
-                )
-            )
-            return database.read(lambda c: store.usage_rollup(c, "w"))
-        finally:
-            await database.close()
-
-    rollup = asyncio.run(scenario())
+async def test_rollup_of_an_item_with_no_sessions_is_empty_not_an_error(database):
+    await database.write(
+        lambda c: c.execute(
+            "INSERT INTO work_items (id, title, repo, chain_template, "
+            "chain_definition, status, created_at, updated_at) VALUES "
+            "('w','t','/r','quick-task','{}','active','now','now')"
+        )
+    )
+    rollup = database.read(lambda c: store.usage_rollup(c, "w"))
     assert rollup["by_node"] == []
     assert rollup["total"] == {
         "tokens_in": 0,
@@ -339,34 +332,23 @@ def test_rollup_of_an_item_with_no_sessions_is_empty_not_an_error(tmp_path):
     }
 
 
-def test_a_session_with_tokens_and_no_cost_marks_the_rollup_incomplete(tmp_path):
+async def test_a_session_with_tokens_and_no_cost_marks_the_rollup_incomplete(database):
     """Summing an unreported cost as zero would quietly under-report the bill —
     the one thing a cost figure must not do. The rollup says the sum is a floor."""
 
-    async def scenario():
-        database = await db.Database.open(tmp_path / "orchestrator.db")
-        try:
-            await database.write(
-                lambda c: c.execute(
-                    "INSERT INTO work_items (id, title, repo, chain_template, "
-                    "chain_definition, status, created_at, updated_at) VALUES "
-                    "('w','t','/r','quick-task','{}','active','now','now')"
-                )
-            )
-            await database.write(
-                lambda c: _session(c, "priced", "verify", u=Usage(100, 10, 0.5, "m"))
-            )
-            # tokens, but the agent reported no cost
-            await database.write(
-                lambda c: _session(c, "unpriced", "verify", u=Usage(900, 90, None, "m"))
-            )
-            # no tokens at all — a subprocess task, not a gap in the billing
-            await database.write(lambda c: _session(c, "free", "env_setup"))
-            return database.read(lambda c: store.usage_rollup(c, "w"))
-        finally:
-            await database.close()
-
-    rollup = asyncio.run(scenario())
+    await database.write(
+        lambda c: c.execute(
+            "INSERT INTO work_items (id, title, repo, chain_template, "
+            "chain_definition, status, created_at, updated_at) VALUES "
+            "('w','t','/r','quick-task','{}','active','now','now')"
+        )
+    )
+    await database.write(lambda c: _session(c, "priced", "verify", u=Usage(100, 10, 0.5, "m")))
+    # tokens, but the agent reported no cost
+    await database.write(lambda c: _session(c, "unpriced", "verify", u=Usage(900, 90, None, "m")))
+    # no tokens at all — a subprocess task, not a gap in the billing
+    await database.write(lambda c: _session(c, "free", "env_setup"))
+    rollup = database.read(lambda c: store.usage_rollup(c, "w"))
     verify = next(n for n in rollup["by_node"] if n["node"] == "verify")
     env = next(n for n in rollup["by_node"] if n["node"] == "env_setup")
 
@@ -377,48 +359,41 @@ def test_a_session_with_tokens_and_no_cost_marks_the_rollup_incomplete(tmp_path)
     assert rollup["total"]["cost_complete"] is False
 
 
-def test_rollup_counts_a_paused_session_s_real_span(tmp_path):
+async def test_rollup_counts_a_paused_session_s_real_span(database):
     """Kraft-s7c04.18: `wall_ms or 0` erased the time of every session that
     never reached `session_exited`. The stamps to answer with are on the row.
 
     The still-running case is Task 1's unit test, not this one: derived against
     `now`, it would make this assertion a moving target."""
 
-    async def scenario():
-        database = await db.Database.open(tmp_path / "orchestrator.db")
-        try:
-            await database.write(
-                lambda c: c.execute(
-                    "INSERT INTO work_items (id, title, repo, chain_template, "
-                    "chain_definition, status, created_at, updated_at) VALUES "
-                    "('w','t','/r','quick-task','{}','active','now','now')"
-                )
-            )
-            # exited: 1000 ms, recorded on the row by session_exited
-            await database.write(
-                lambda c: c.execute(
-                    "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, "
-                    "log_path, result_path, status, attempt, created_at, started_at, "
-                    "exited_at, round, wall_ms) VALUES ('s1','w','verify','on.test.run',"
-                    "'l','r','done',1,'2026-09-15T10:00:00+00:00','2026-09-15T10:00:00+00:00',"
-                    "'2026-09-15T10:00:01+00:00',0,1000)"
-                )
-            )
-            # paused: NULL wall_ms, 90 s between its own stamps
-            await database.write(
-                lambda c: c.execute(
-                    "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, "
-                    "log_path, result_path, status, attempt, created_at, started_at, "
-                    "exited_at, round, wall_ms) VALUES ('s2','w','verify','on.review.local.run',"
-                    "'l','r','paused',1,'2026-09-15T10:00:00+00:00','2026-09-15T10:00:00+00:00',"
-                    "'2026-09-15T10:01:30+00:00',0,NULL)"
-                )
-            )
-            return database.read(lambda c: store.usage_rollup(c, "w"))
-        finally:
-            await database.close()
-
-    rollup = asyncio.run(scenario())
+    await database.write(
+        lambda c: c.execute(
+            "INSERT INTO work_items (id, title, repo, chain_template, "
+            "chain_definition, status, created_at, updated_at) VALUES "
+            "('w','t','/r','quick-task','{}','active','now','now')"
+        )
+    )
+    # exited: 1000 ms, recorded on the row by session_exited
+    await database.write(
+        lambda c: c.execute(
+            "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, "
+            "log_path, result_path, status, attempt, created_at, started_at, "
+            "exited_at, round, wall_ms) VALUES ('s1','w','verify','on.test.run',"
+            "'l','r','done',1,'2026-09-15T10:00:00+00:00','2026-09-15T10:00:00+00:00',"
+            "'2026-09-15T10:00:01+00:00',0,1000)"
+        )
+    )
+    # paused: NULL wall_ms, 90 s between its own stamps
+    await database.write(
+        lambda c: c.execute(
+            "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, "
+            "log_path, result_path, status, attempt, created_at, started_at, "
+            "exited_at, round, wall_ms) VALUES ('s2','w','verify','on.review.local.run',"
+            "'l','r','paused',1,'2026-09-15T10:00:00+00:00','2026-09-15T10:00:00+00:00',"
+            "'2026-09-15T10:01:30+00:00',0,NULL)"
+        )
+    )
+    rollup = database.read(lambda c: store.usage_rollup(c, "w"))
     verify = next(n for n in rollup["by_node"] if n["node"] == "verify")
     assert verify["wall_ms"] == 91_000
     assert rollup["total"]["wall_ms"] == 91_000
