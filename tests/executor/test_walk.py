@@ -575,6 +575,7 @@ async def test_a_failed_node_repairs_itself_once_and_measures_again(
     for recovery in started:
         assert recovery["payload"] == {
             "node_id": "checks",
+            "scope": "node",
             "failed_tasks": ["checks.main.poll"],
             "tasks": ["checks.on_failure.main.sync"],
         }
@@ -845,13 +846,17 @@ def dispatched(monkeypatch):
     return spy
 
 
-async def test_a_fix_loop_retry_resumes_at_the_failed_group(item_on, tmp_path, dispatched):
-    """verify is [[prep], [test]]: a failing test re-ran the prep step on every
-    cycle. The retry re-measures from the step that failed.
+async def test_a_fix_loop_attempt_remeasures_the_node_from_its_first_step(
+    item_on, tmp_path, dispatched
+):
+    """`fix-loop-remeasures-the-whole-node` (Kraft-mq752): verify is
+    [[prep], [test]], and after the repair the node is measured again from
+    `prep`, not from the step that failed. A repair can break what an earlier
+    step already passed -- on the seeded `post_draft_feedback` a repaired merge
+    request must be awaited on CI again, not only on the review that failed.
 
-    The legacy version also kept a leading rebase step re-running as an
-    exemption; that rebase layer is gone in V1 (4a), so there is no exemption
-    left to pin."""
+    Inverts `test_a_fix_loop_retry_resumes_at_the_failed_group`, which pinned
+    the opposite (Rulings 149/151)."""
     marker = tmp_path / "first-run-done"
     # fails once, then passes: the fix cycle is what turns it green
     fail_once = (
@@ -873,9 +878,7 @@ async def test_a_fix_loop_retry_resumes_at_the_failed_group(item_on, tmp_path, d
     )
 
     assert await _walk(it, policy=_loop_policy(tmp_path)) == "completed"
-    assert dispatched.calls.count("test") == 2, dispatched.calls
-    assert dispatched.calls.count("prep") == 1, dispatched.calls
-    assert dispatched.calls.count("fix") == 1, dispatched.calls
+    assert dispatched.calls == ["prep", "test", "fix", "prep", "test"]
 
 
 async def test_a_fix_loop_node_stops_at_a_moved_base_without_spending_a_cycle(

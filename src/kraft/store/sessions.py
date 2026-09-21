@@ -266,12 +266,31 @@ def reusable_session(
     already-closed-out attempt (Kraft-s15p0's same shape, a stale `failed`
     row a later `done` one supersedes) does not share this (round, head_sha)
     at all and is unaffected.
+
+    Also excluded: a session from before a `/retry` (`work_item_retried`) or
+    a base-change restart (`base_change_restart`). Both start a new pass that
+    restarts the round numbers -- a retry deletes the loop counter a round is
+    seeded from, a restart clears every counter in its span -- so a new pass
+    measures, repairs and recovers at the very rounds the old one used, and a
+    steered retry of a task that makes no commit leaves `head_sha` where it
+    was too. Without this, the steered repair a human asked for is "reused"
+    from before the retry and never dispatched (Kraft-znsvg: the fix loop's
+    repair and `walk.recover_node`'s on_failure repair alike). Decided here,
+    once, rather than by any one caller: the fix loop's repair used to be
+    exempted from reuse at its own call site, which left every other caller
+    open.
     """
     if head_sha is None:
         return None
     return conn.execute(
         "SELECT * FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
         "AND hook_point = ? AND round = ? AND status = 'done' AND head_sha = ? "
+        "AND NOT EXISTS ("
+        "  SELECT 1 FROM events restarted "
+        "  WHERE restarted.work_item_id = worker_sessions.work_item_id "
+        "  AND restarted.type IN ('work_item_retried', 'base_change_restart') "
+        "  AND restarted.created_at > worker_sessions.created_at"
+        ") "
         "AND NOT EXISTS ("
         "  SELECT 1 FROM events WHERE events.work_item_id = worker_sessions.work_item_id "
         "  AND events.type = 'node_completed' "
