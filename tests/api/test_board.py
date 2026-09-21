@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pytest
 from support.api import (
-    _client,
     _force_node,
     _poll_events,
     _post_default,
@@ -52,76 +51,64 @@ def test_list_work_items_empty(client):
     assert body == {"items": [], "cursor": 0}
 
 
-def test_spa_catchall_serves_index_when_dist_present(tmp_path, monkeypatch):
-    dist = tmp_path / "fe-dist"
-    (dist / "assets").mkdir(parents=True)
-    (dist / "index.html").write_text("<!doctype html><title>kraft</title>")
-    (dist / "assets" / "app.js").write_text("console.log(1)")
-    monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(dist))
-    with _client(tmp_path, monkeypatch) as client:
-        assert "<title>kraft</title>" in client.get("/").text
-        # browser deep-link on a client-side route -> index.html, regardless of
-        # headers, because /work-items/<id> is not a real route: the catch-all
-        # is all that's left to answer it.
-        html = {"accept": "text/html,application/xhtml+xml"}
-        assert "<title>kraft</title>" in client.get("/work-items/abc123", headers=html).text
-        assert (
-            "<title>kraft</title>"
-            in client.get("/work-items/abc123", headers={"accept": "application/json"}).text
-        )
-        # a genuine 404 under /api/ is always JSON, even from a browser
-        # navigation — that prefix is unambiguous, no header can turn it HTML
-        r = client.get("/api/work-items/abc123", headers=html)
-        assert r.status_code == 404
-        assert "detail" in r.json()
-        r = client.get("/api/worker-sessions/does-not-exist/log", headers=html)
-        assert r.status_code == 404
-        assert "detail" in r.json()
-        # a bad /api/ path with no matching route at all is also a plain JSON
-        # 404, not the shell
-        r = client.get("/api/nope", headers=html)
-        assert r.status_code == 404
-        assert "detail" in r.json()
-        # real asset -> that file
-        assert client.get("/assets/app.js").text == "console.log(1)"
-        # real API routes work
-        assert client.get("/api/health").json()["status"] in ("ok", "degraded")
-        assert client.get("/api/work-items").json() == {"items": [], "cursor": 0}
-        # a forged browser-navigation header on /api/ does nothing: that prefix
-        # is unambiguous, so it still answers with real JSON, not the shell
-        nav = {"sec-fetch-dest": "document"}
-        assert client.get("/api/work-items", headers=nav).json() == {"items": [], "cursor": 0}
-        assert client.get("/api/health", headers=nav).json()["status"] in ("ok", "degraded")
-        # the same header on a client-side route still fast-paths to the shell,
-        # with cache headers so a refresh can't be answered from a stale cache
-        shell = client.get("/work-items/abc123", headers=nav)
-        assert "<title>kraft</title>" in shell.text
-        assert shell.headers["cache-control"] == "no-store"
-        assert shell.headers["vary"] == "sec-fetch-dest"
+def test_spa_catchall_serves_index_when_dist_present(dist, client):
+    assert "<title>kraft</title>" in client.get("/").text
+    # browser deep-link on a client-side route -> index.html, regardless of
+    # headers, because /work-items/<id> is not a real route: the catch-all
+    # is all that's left to answer it.
+    html = {"accept": "text/html,application/xhtml+xml"}
+    assert "<title>kraft</title>" in client.get("/work-items/abc123", headers=html).text
+    assert (
+        "<title>kraft</title>"
+        in client.get("/work-items/abc123", headers={"accept": "application/json"}).text
+    )
+    # a genuine 404 under /api/ is always JSON, even from a browser
+    # navigation — that prefix is unambiguous, no header can turn it HTML
+    r = client.get("/api/work-items/abc123", headers=html)
+    assert r.status_code == 404
+    assert "detail" in r.json()
+    r = client.get("/api/worker-sessions/does-not-exist/log", headers=html)
+    assert r.status_code == 404
+    assert "detail" in r.json()
+    # a bad /api/ path with no matching route at all is also a plain JSON
+    # 404, not the shell
+    r = client.get("/api/nope", headers=html)
+    assert r.status_code == 404
+    assert "detail" in r.json()
+    # real asset -> that file
+    assert client.get("/assets/app.js").text == "console.log(1)"
+    # real API routes work
+    assert client.get("/api/health").json()["status"] in ("ok", "degraded")
+    assert client.get("/api/work-items").json() == {"items": [], "cursor": 0}
+    # a forged browser-navigation header on /api/ does nothing: that prefix
+    # is unambiguous, so it still answers with real JSON, not the shell
+    nav = {"sec-fetch-dest": "document"}
+    assert client.get("/api/work-items", headers=nav).json() == {"items": [], "cursor": 0}
+    assert client.get("/api/health", headers=nav).json()["status"] in ("ok", "degraded")
+    # the same header on a client-side route still fast-paths to the shell,
+    # with cache headers so a refresh can't be answered from a stale cache
+    shell = client.get("/work-items/abc123", headers=nav)
+    assert "<title>kraft</title>" in shell.text
+    assert shell.headers["cache-control"] == "no-store"
+    assert shell.headers["vary"] == "sec-fetch-dest"
 
 
 @pytest.mark.parametrize(
     "path",
     ["../secret", "../../etc/passwd", "/etc/passwd", "//etc/passwd", "assets/../../secret"],
 )
-def test_spa_catchall_never_serves_files_outside_dist(tmp_path, monkeypatch, path):
-    dist = tmp_path / "fe-dist"
-    (dist / "assets").mkdir(parents=True)
-    (dist / "index.html").write_text("<!doctype html><title>kraft shell</title>")
+def test_spa_catchall_never_serves_files_outside_dist(dist, client, tmp_path, path):
     (tmp_path / "secret").write_text("TOP SECRET")
-    monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(dist))
-    with _client(tmp_path, monkeypatch) as client:
-        r = client.get(f"/{path}")
-        assert r.status_code == 200
-        assert "TOP SECRET" not in r.text
-        assert "kraft shell" in r.text
+    r = client.get(f"/{path}")
+    assert r.status_code == 200
+    assert "TOP SECRET" not in r.text
+    assert "<title>kraft</title>" in r.text
 
 
-def test_spa_catchall_404s_when_dist_absent(tmp_path, monkeypatch):
-    monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "nope"))
-    with _client(tmp_path, monkeypatch) as client:
-        assert client.get("/some/spa/route").status_code == 404
-        assert client.get("/api/health").status_code == 200
+@pytest.mark.api_client(env={"KRAFT_FRONTEND_DIST": "/nonexistent/kraft-dist"})
+def test_spa_catchall_404s_when_dist_absent(client):
+    assert client.get("/some/spa/route").status_code == 404
+    assert client.get("/api/health").status_code == 200
 
 
 def test_list_hides_abandoned_items(client, repo):

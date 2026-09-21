@@ -18,18 +18,6 @@ def _set_password(client, monkeypatch):
     monkeypatch.setattr(st, "access", {**st.access, "password_hash": "x"}, raising=False)
 
 
-@pytest.fixture
-def dist(tmp_path, monkeypatch):
-    """A built SPA (`index.html` and one asset), pinned as `KRAFT_FRONTEND_DIST`.
-    List it before `client`: the app reads it at startup."""
-    dist = tmp_path / "dist"
-    (dist / "assets").mkdir(parents=True)
-    (dist / "index.html").write_text("<!doctype html>")
-    (dist / "assets" / "app.js").write_text("console.log(1)")
-    monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(dist))
-    return dist
-
-
 _LAN = pytest.mark.api_client(peer=("10.0.0.5", 54321))
 
 
@@ -269,7 +257,7 @@ def test_the_spa_bundle_loads_before_a_session_exists(dist, client):
     # file outside dist. 200 here is the shell, not a leak.
     r = client.get("/../pyproject.toml")
     assert r.status_code == 200, r.text
-    assert r.text == "<!doctype html>"
+    assert r.text.startswith("<!doctype html>")
 
 
 @pytest.mark.api_client(host="0.0.0.0")

@@ -3,32 +3,44 @@
 from __future__ import annotations
 
 import pytest
-from support.api import _client
-from support.harness import fake_templates_dir
 
 from kraft import auth as auth_mod
 
 
-def test_health_ok_and_degraded(tmp_path, monkeypatch):
-    # a templates dir with one bad-hook template
-    bad = fake_templates_dir(tmp_path, "claude")
-    (bad / "broken.yaml").write_text(
+def _broken_template(tdir):
+    (tdir / "broken.yaml").write_text(
         "id: broken\nnodes:\n  - {id: x, tasks: [on.nope], gate_after: null}\n"
     )
-    with _client(tmp_path, monkeypatch, templates_dir=bad) as client:
-        body = client.get("/api/health").json()
-        assert body["status"] == "degraded"
-        assert "broken" in body["invalid_templates"]
-        assert "reattach_summary" in body
 
 
-def test_health_reports_invalid_policy(tmp_path, monkeypatch):
-    bad = fake_templates_dir(tmp_path, "claude")
-    (bad / "policy.yaml").write_text("default: { attempts: 0, wall_clock_s: 1 }\n")
-    with _client(tmp_path, monkeypatch, templates_dir=bad) as client:
-        h = client.get("/api/health").json()
-        assert h["status"] == "degraded"
-        assert h["invalid_policy"]
+def _invalid_policy(tdir):
+    (tdir / "policy.yaml").write_text("default: { attempts: 0, wall_clock_s: 1 }\n")
+
+
+@pytest.mark.parametrize(
+    ("key", "names"),
+    [
+        pytest.param(
+            "invalid_templates",
+            "broken",
+            marks=pytest.mark.api_client(edit_templates=_broken_template),
+            id="a-bad-hook-template",
+        ),
+        pytest.param(
+            "invalid_policy",
+            None,
+            marks=pytest.mark.api_client(edit_templates=_invalid_policy),
+            id="an-invalid-policy",
+        ),
+    ],
+)
+def test_health_is_degraded_by(client, key, names):
+    body = client.get("/api/health").json()
+    assert body["status"] == "degraded"
+    assert body[key]
+    if names:
+        assert names in body[key]
+    assert "reattach_summary" in body
 
 
 def test_health_ok_with_valid_policy(client):
