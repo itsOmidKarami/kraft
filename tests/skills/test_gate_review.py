@@ -9,57 +9,62 @@ import asyncio
 import json
 
 import pytest
+from support.harness import v1_chain, v1_item
 
 from kraft import events, executor, gate_review, store
 from kraft import policy as _policy
 from kraft.db import Database
+from kraft.executor import walk
 from kraft.paths import RunDirs
-from kraft.templates import Registry
 
-CHAIN = {
-    "nodes": [
-        {
-            "id": "spec",
-            "tasks": ["on.spec.requested"],
-            "gate_after": "spec_approval",
-            "auto_escalate": True,
-        }
-    ]
-}
+
+def _reviewer(**extra):
+    """The gate's own declared reviewing task (`GateNode.auto_review`). Its
+    launch is monkeypatched out in every test here; `claude` is only what
+    `resolve_agent_task` resolves a command from."""
+    return {"id": "reviewer", "kind": "agent", "harness": "claude", "prompt": "Review it.", **extra}
+
+
+def _chain(rd):
+    """spec (exec) -> spec_approval (gate, artifact: spec, reviewed)."""
+    return v1_chain(
+        [
+            {
+                "id": "spec",
+                "kind": "exec",
+                "tasks": [{"id": "author", "kind": "subprocess", "command": "true"}],
+            },
+            {
+                "id": "spec_approval",
+                "kind": "gate",
+                "artifact": "spec",
+                "reject_to": "spec",
+                "auto_review": _reviewer(),
+            },
+        ],
+        repo=rd.base,
+    )
+
+
+def _gate(rd):
+    return _chain(rd).chain.nodes[1]
 
 
 async def _seed(database, rd, wid):
-    await database.write(
-        lambda c: store.create_work_item(
-            c,
-            id=wid,
-            bead_id=None,
-            title="the widget",
-            description="make it stop throwing",
-            repo=str(rd.base),
-            chain_template="default",
-            chain_definition=json.dumps(CHAIN),
-            auto_gate=True,
-        )
+    await v1_item(
+        database,
+        _chain(rd),
+        repo=rd.base,
+        wid=wid,
+        title="the widget",
+        description="make it stop throwing",
+        auto_gate=True,
     )
-    await database.write(lambda c: store.enter_node(c, wid, "spec"))
-    await database.write(lambda c: store.request_gate(c, wid, "spec", "spec_approval"))
+    await database.write(lambda c: store.enter_node(c, wid, "spec_approval"))
+    await database.write(lambda c: store.request_gate(c, wid, "spec_approval", "spec_approval"))
     doc = rd.worktrees / wid / ".engineering" / "specs" / f"{wid}.md"
     doc.parent.mkdir(parents=True, exist_ok=True)
     doc.write_text("# the design\n")
-
-
-def _registry():
-    return Registry(
-        hooks={
-            "on.spec.requested": {
-                "kind": "agent",
-                "command": "claude",
-                "skill": "spec",
-                "artifact": "spec",
-            }
-        }
-    )
 
 
 def _fake_agent(result: dict | None, seen: dict):
@@ -112,8 +117,7 @@ def test_verdict_resolution(tmp_path, monkeypatch, result, expected):
                 rd,
                 work_item_id="w1",
                 gate="spec_approval",
-                node=CHAIN["nodes"][0],
-                registry=_registry(),
+                node=_gate(rd),
                 launch=launch,
             )
             assert verdict == expected
@@ -146,8 +150,7 @@ def test_item_override_reaches_the_gate_review_dispatch(tmp_path, monkeypatch):
                 rd,
                 work_item_id="w1",
                 gate="spec_approval",
-                node=CHAIN["nodes"][0],
-                registry=_registry(),
+                node=_gate(rd),
                 launch=launch,
             )
             assert seen["kwargs"]["model"] == "sonnet"
@@ -184,8 +187,7 @@ def test_review_forwards_the_repo_s_resolved_sandbox(tmp_path, monkeypatch):
                 rd,
                 work_item_id="w1",
                 gate="spec_approval",
-                node=CHAIN["nodes"][0],
-                registry=_registry(),
+                node=_gate(rd),
                 launch=launch,
             )
             assert seen["kwargs"]["sandbox"] == {"kind": "docker", "image": "kraft-worker:py"}
@@ -213,8 +215,7 @@ def test_dispatch_is_a_worker_with_no_resume(tmp_path, monkeypatch):
                 rd,
                 work_item_id="w1",
                 gate="spec_approval",
-                node=CHAIN["nodes"][0],
-                registry=_registry(),
+                node=_gate(rd),
                 launch=launch,
             )
             kw = seen["kwargs"]
@@ -222,7 +223,8 @@ def test_dispatch_is_a_worker_with_no_resume(tmp_path, monkeypatch):
             # `client.context._forbid_self_action` is what enforces that. Flipping this
             # flag would silently hand the agent the human's standing.
             assert kw.get("identify_as_worker", True) is True
-            assert kw["hook_point"] == "gate_review"
+            # The gate's own declared task, by its canonical path.
+            assert kw["hook_point"] == _gate(rd).auto_review.path
             assert kw.get("resume_session_id") is None
             assert "spec_approval" in kw["task_instruction"]
             assert ".engineering/specs/w1.md" in kw["task_instruction"]
@@ -232,59 +234,61 @@ def test_dispatch_is_a_worker_with_no_resume(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
-CHAIN2 = {
-    "nodes": [
-        {"id": "implementation", "tasks": [], "gate_after": None, "auto_escalate": None},
-        {
-            "id": "human_review",
-            "tasks": [],
-            "gate_after": "human_review_approval",
-            "reject_to": "implementation",
-            "auto_escalate": True,
-        },
-    ]
-}
+def _chain2(rd, *, auto_review=True):
+    """implementation (exec) -> human_review_approval (gate, reject_to
+    implementation, reviewed unless `auto_review=False`)."""
+    gate = {"id": "human_review_approval", "kind": "gate", "reject_to": "implementation"}
+    if auto_review:
+        gate["auto_review"] = _reviewer()
+    return v1_chain(
+        [
+            {
+                "id": "implementation",
+                "kind": "exec",
+                "tasks": [{"id": "build", "kind": "subprocess", "command": "true"}],
+            },
+            gate,
+        ],
+        repo=rd.base,
+    )
+
 
 POLICY = _policy.Policy(loops={}, default=_policy.Cap(attempts=2, wall_clock_s=3600))
 
 
 async def _seed_at_gate(database, rd, wid, chain, *, auto_gate):
-    await database.write(
-        lambda c: store.create_work_item(
-            c,
-            id=wid,
-            bead_id=None,
-            title="the widget",
-            description="make it stop throwing",
-            repo=str(rd.base),
-            chain_template="default",
-            chain_definition=json.dumps(chain),
-            auto_gate=auto_gate,
-        )
+    await v1_item(
+        database,
+        chain,
+        repo=rd.base,
+        wid=wid,
+        title="the widget",
+        description="make it stop throwing",
+        auto_gate=auto_gate,
     )
-    await database.write(lambda c: store.enter_node(c, wid, "human_review"))
+    await database.write(lambda c: store.enter_node(c, wid, "human_review_approval"))
     await database.write(
-        lambda c: store.request_gate(c, wid, "human_review", "human_review_approval")
+        lambda c: store.request_gate(c, wid, "human_review_approval", "human_review_approval")
     )
 
 
 async def _passthrough_approve(row, gate):
     """What `kraft.api.routes.gates.apply_approval` returns for a gate with nothing to splice."""
-    return json.loads(row["chain_definition"]), None
+    return walk.chain_of(row).chain.nodes, None
 
 
 async def _review_from_gate(
-    database, rd, chain, *, auto_gate, wid="w1", on_approve=_passthrough_approve
+    database, rd, chain=None, *, auto_gate, wid="w1", on_approve=_passthrough_approve
 ):
     """Enter `kraft.executor.gates.review_gates` exactly as `run` does when
     its walk stopped at a gate."""
-    await _seed_at_gate(database, rd, wid, chain, auto_gate=auto_gate)
+    await _seed_at_gate(database, rd, wid, chain or _chain2(rd), auto_gate=auto_gate)
     return await executor.review_gates(
         "awaiting_gate",
         database,
         rd,
         work_item_id=wid,
-        registry=_registry(),
+        registry=None,
         policy=POLICY,
         launch=executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None),
         bd_cwd=None,
@@ -336,7 +340,7 @@ def test_verdict_reenters_the_walk_at_the_right_node(
         rd = RunDirs(tmp_path / "run").ensure()
         database = await Database.open(rd.db)
         try:
-            status = await _review_from_gate(database, rd, CHAIN2, auto_gate=True)
+            status = await _review_from_gate(database, rd, auto_gate=True)
             assert status == "completed"
             assert [c[0] for c in calls] == [expected_start]
             # A rejection's reasoning is the steer for whoever redoes the work.
@@ -359,7 +363,7 @@ def test_undecided_leaves_the_gate_pending(tmp_path, monkeypatch):
         rd = RunDirs(tmp_path / "run").ensure()
         database = await Database.open(rd.db)
         try:
-            status = await _review_from_gate(database, rd, CHAIN2, auto_gate=True)
+            status = await _review_from_gate(database, rd, auto_gate=True)
             assert status == "awaiting_gate"
             assert calls == []
             row = database.read(
@@ -375,7 +379,8 @@ def test_undecided_leaves_the_gate_pending(tmp_path, monkeypatch):
 @pytest.mark.parametrize("auto_gate,auto_escalate", [(False, True), (True, False), (False, False)])
 def test_no_review_unless_both_knobs_are_on(tmp_path, monkeypatch, auto_gate, auto_escalate):
     """The AND is this feature's safety property, so it is pinned explicitly
-    rather than implied by the happy path."""
+    rather than implied by the happy path. V1: the chain's half of the AND is
+    the gate declaring an `auto_review` task."""
     reviewed = []
 
     async def fake_review(db, run_dirs, **kw):
@@ -383,13 +388,12 @@ def test_no_review_unless_both_knobs_are_on(tmp_path, monkeypatch, auto_gate, au
         return "approve", ""
 
     monkeypatch.setattr("kraft.executor.gate_review.review", fake_review)
-    chain = json.loads(json.dumps(CHAIN2))
-    chain["nodes"][1]["auto_escalate"] = True if auto_escalate else None
 
     async def scenario():
         rd = RunDirs(tmp_path / "run").ensure()
         database = await Database.open(rd.db)
         try:
+            chain = _chain2(rd, auto_review=auto_escalate)
             status = await _review_from_gate(database, rd, chain, auto_gate=auto_gate)
             assert status == "awaiting_gate"
             assert reviewed == []
@@ -416,7 +420,7 @@ def test_a_human_decision_taken_during_the_review_wins(tmp_path, monkeypatch):
         rd = RunDirs(tmp_path / "run").ensure()
         database = await Database.open(rd.db)
         try:
-            status = await _review_from_gate(database, rd, CHAIN2, auto_gate=True)
+            status = await _review_from_gate(database, rd, auto_gate=True)
             assert status == "active"  # what the human's approval left behind
             assert calls == []  # the walk was not re-entered
             types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, "w1"))]
@@ -445,7 +449,7 @@ def test_an_agent_fixed_verdict_is_recorded_as_fixed(tmp_path, monkeypatch):
         rd = RunDirs(tmp_path / "run").ensure()
         database = await Database.open(rd.db)
         try:
-            await _review_from_gate(database, rd, CHAIN2, auto_gate=True)
+            await _review_from_gate(database, rd, auto_gate=True)
             [rej] = [
                 e
                 for e in database.read(lambda c: events.read_after(c, 0, "w1"))
@@ -467,7 +471,9 @@ def test_repeated_fixed_verdicts_breach_the_reject_loop(tmp_path, monkeypatch):
     async def fake_run_once(db, run_dirs, *, work_item_id, **kw):
         # Each re-entry walks straight back into the same pending gate.
         await db.write(
-            lambda c: store.request_gate(c, work_item_id, "human_review", "human_review_approval")
+            lambda c: store.request_gate(
+                c, work_item_id, "human_review_approval", "human_review_approval"
+            )
         )
         return "awaiting_gate"
 
@@ -477,7 +483,7 @@ def test_repeated_fixed_verdicts_breach_the_reject_loop(tmp_path, monkeypatch):
         rd = RunDirs(tmp_path / "run").ensure()
         database = await Database.open(rd.db)
         try:
-            status = await _review_from_gate(database, rd, CHAIN2, auto_gate=True)
+            status = await _review_from_gate(database, rd, auto_gate=True)
             assert status == "needs_human"
             count = database.read(
                 lambda c: c.execute(
@@ -515,7 +521,7 @@ def test_budget_exhaustion_skips_the_review(tmp_path, monkeypatch):
         rd = RunDirs(tmp_path / "run").ensure()
         database = await Database.open(rd.db)
         try:
-            status = await _review_from_gate(database, rd, CHAIN2, auto_gate=True)
+            status = await _review_from_gate(database, rd, auto_gate=True)
             assert status == "awaiting_gate"
             assert reviewed == []
             types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, "w1"))]
@@ -539,7 +545,7 @@ def test_approve_without_an_approval_door_leaves_the_gate_for_a_human(tmp_path, 
         rd = RunDirs(tmp_path / "run").ensure()
         database = await Database.open(rd.db)
         try:
-            status = await _review_from_gate(database, rd, CHAIN2, auto_gate=True, on_approve=None)
+            status = await _review_from_gate(database, rd, auto_gate=True, on_approve=None)
             assert status == "awaiting_gate"
             assert calls == []
             assert executor.pending_gate(database, "w1") == "human_review_approval"
@@ -564,9 +570,7 @@ def test_approve_parks_the_item_when_the_approval_refuses(tmp_path, monkeypatch)
         rd = RunDirs(tmp_path / "run").ensure()
         database = await Database.open(rd.db)
         try:
-            status = await _review_from_gate(
-                database, rd, CHAIN2, auto_gate=True, on_approve=refuse
-            )
+            status = await _review_from_gate(database, rd, auto_gate=True, on_approve=refuse)
             assert status == "needs_human"
             assert calls == []
             row = database.read(
@@ -590,26 +594,35 @@ def test_approve_walks_the_chain_the_approval_returned(tmp_path, monkeypatch):
     _stub_review(monkeypatch, "approve")
     _stub_walk(monkeypatch, calls)
 
-    spliced = {
-        "nodes": [
-            CHAIN2["nodes"][0],
-            CHAIN2["nodes"][1],
-            {"id": "extra", "tasks": [], "gate_after": None},
-        ]
-    }
-
-    async def splice(row, gate):
-        return spliced, None
-
     async def scenario():
         rd = RunDirs(tmp_path / "run").ensure()
         database = await Database.open(rd.db)
         try:
-            status = await _review_from_gate(
-                database, rd, CHAIN2, auto_gate=True, on_approve=splice
-            )
+            # The returned chain puts one more node *ahead* of the gate, so the
+            # walk re-entering at the gate's index in the chain it opened on
+            # (2 -> index 2 is past the end) is told apart from re-entering at
+            # its index in the returned chain (3).
+            spliced = v1_chain(
+                [
+                    {
+                        "id": "extra",
+                        "kind": "exec",
+                        "tasks": [{"id": "x", "kind": "subprocess", "command": "true"}],
+                    },
+                    *[
+                        n.node.model_dump(mode="json", exclude_none=True)
+                        for n in _chain2(rd).chain.nodes
+                    ],
+                ],
+                repo=rd.base,
+            ).chain.nodes
+
+            async def splice(row, gate):
+                return spliced, None
+
+            status = await _review_from_gate(database, rd, auto_gate=True, on_approve=splice)
             assert status == "completed"
-            assert [c[0] for c in calls] == [2]
+            assert [c[0] for c in calls] == [3]
         finally:
             await database.close()
 
@@ -633,7 +646,7 @@ def test_run_calls_auto_escalate_stuck_after_review_gates(tmp_path, monkeypatch)
         rd = RunDirs(tmp_path / "run").ensure()
         database = await Database.open(rd.db)
         try:
-            return await executor.run(database, rd, work_item_id="w1", registry=_registry())
+            return await executor.run(database, rd, work_item_id="w1", registry=None)
         finally:
             await database.close()
 
@@ -659,9 +672,7 @@ def test_resume_calls_auto_escalate_stuck_after_review_gates(tmp_path, monkeypat
         rd = RunDirs(tmp_path / "run").ensure()
         database = await Database.open(rd.db)
         try:
-            return await executor.resume(
-                database, rd, work_item_id="w1", registry=_registry(), adopted={}
-            )
+            return await executor.resume(database, rd, work_item_id="w1", registry=None, adopted={})
         finally:
             await database.close()
 
@@ -688,7 +699,7 @@ def test_an_agent_gate_verdict_re_enters_without_claiming_a_human_wrote_it(tmp_p
         rd = RunDirs(tmp_path / "run").ensure()
         database = await Database.open(rd.db)
         try:
-            await _review_from_gate(database, rd, CHAIN2, auto_gate=True)
+            await _review_from_gate(database, rd, auto_gate=True)
         finally:
             await database.close()
 
