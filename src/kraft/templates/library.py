@@ -382,7 +382,31 @@ class _Resolution:
             expanded["escalation"] = self._task(
                 expanded["escalation"], f"{path}{PATH_SEPARATOR}escalation", (*loc, "escalation")
             )
+        base_change = expanded.get("on_base_changed")
+        if isinstance(base_change, Mapping) and isinstance(base_change.get("on_conflict"), Mapping):
+            where = f"{path}{PATH_SEPARATOR}on_base_changed{PATH_SEPARATOR}on_conflict"
+            expanded["on_base_changed"] = {
+                **base_change,
+                "on_conflict": self._container(
+                    base_change["on_conflict"], where, (*loc, "on_base_changed", "on_conflict")
+                ),
+            }
         return expanded
+
+    def _with_handler(
+        self, component: Mapping[str, object], path: str, loc: tuple[object, ...]
+    ) -> Mapping[str, object]:
+        """`component` with its own `on_failure` recovery plan expanded, if it
+        declares one (a step's or a task's, `nearest-recovery-handler-wins`)."""
+        handler = component.get("on_failure")
+        if not isinstance(handler, Mapping):
+            return component
+        return {
+            **component,
+            "on_failure": self._container(
+                handler, f"{path}{PATH_SEPARATOR}on_failure", (*loc, "on_failure")
+            ),
+        }
 
     def _container(
         self, raw: Mapping[str, object], path: str, loc: tuple[object, ...]
@@ -415,7 +439,7 @@ class _Resolution:
     ) -> Mapping[str, object]:
         step = self._expand(raw, Namespace.STEPS, self._provisional(raw, prefix, index), loc)
         path = self._record(step, loc, prefix=prefix, fallback=f"steps[{index}]")
-        return self._container(step, path, loc)
+        return self._with_handler(self._container(step, path, loc), path, loc)
 
     def _task(
         self,
@@ -435,8 +459,8 @@ class _Resolution:
             # authored id never becomes a path segment of its own.
             self._locate(loc, f"{prefix}{PATH_SEPARATOR}{segment}")
             return task
-        self._record(task, loc, prefix=prefix, fallback="task")
-        return task
+        path = self._record(task, loc, prefix=prefix, fallback="task")
+        return self._with_handler(task, path, loc)
 
     def _provisional(self, raw: object, prefix: str, index: int) -> str:
         """The best path available *before* expansion, for an error raised by

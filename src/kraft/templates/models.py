@@ -255,6 +255,12 @@ class TaskBase(BaseModel):
     id: Identifier
     scope: Annotated[TaskScope, _LOOSE] = TaskScope.ONCE
     steering: list[Identifier] = Field(default_factory=list)
+    #: Task-level recovery: the nearest handler for this task's own failure
+    #: (`nearest-recovery-handler-wins`). Only a task in one of an execution
+    #: node's own steps may declare one; every other position refuses it
+    #: (`_refuse_nested_handlers`), since a handler inside a handler, a fix
+    #: loop or a dedicated slot has no failure of its own to recover.
+    on_failure: RecoveryPlan | None = None
 
 
 class BuiltinTask(TaskBase):
@@ -301,6 +307,9 @@ class Step(BaseModel):
 
     id: Identifier
     tasks: list[AnyTask] = Field(min_length=1)
+    #: Step-level recovery: the handler for a failed task in this step that
+    #: declares none of its own (`nearest-recovery-handler-wins`).
+    on_failure: RecoveryPlan | None = None
 
     @model_validator(mode="after")
     def _local_identifiers(self) -> Self:
@@ -350,25 +359,86 @@ class ExecutionShape(BaseModel):
         steps = (
             self.steps
             if self.steps is not None
-            else [Step.model_construct(id=MAIN_STEP, tasks=list(self.tasks or ()))]
+            else [Step.model_construct(id=MAIN_STEP, tasks=list(self.tasks or ()), on_failure=None)]
         )
         return tuple(
             ResolvedStep(
                 path=(path := f"{prefix}{PATH_SEPARATOR}{step.id}"),
                 id=step.id,
                 tasks=tuple(
-                    ResolvedTask(path=f"{path}{PATH_SEPARATOR}{task.id}", task=task)
+                    ResolvedTask(
+                        path=(task_path := f"{path}{PATH_SEPARATOR}{task.id}"),
+                        task=task,
+                        on_failure=_handler_steps(task.on_failure, task_path),
+                    )
                     for task in step.tasks
                 ),
+                on_failure=_handler_steps(step.on_failure, path),
             )
             for step in steps
         )
 
+    def own_tasks(self) -> Iterator[AnyTask]:
+        """Every task this shape runs directly, whichever form it took."""
+        yield from self.tasks or ()
+        for step in self.steps or ():
+            yield from step.tasks
+
+
+def _handler_steps(plan: RecoveryPlan | None, owner: str) -> tuple[ResolvedStep, ...]:
+    """`plan`'s steps at `<owner>.on_failure`, or none."""
+    return plan.resolve_steps(f"{owner}{PATH_SEPARATOR}on_failure") if plan is not None else ()
+
+
+def _refuse_nested_handlers(where: str, shape: ExecutionShape | None) -> None:
+    """A recovery plan, a fix loop and a conflict handler are themselves the
+    response to a failure, so nothing inside one may declare `on_failure`
+    (`recovery-plan-supports-task-groups-or-steps`: no nested recovery
+    handlers). The one place a handler belongs is an execution node's own
+    steps and their tasks."""
+    if shape is None:
+        return
+    for step in shape.steps or ():
+        if step.on_failure is not None:
+            raise ValueError(f"{where}: step {step.id!r} cannot declare its own on_failure")
+    for task in shape.own_tasks():
+        if task.on_failure is not None:
+            raise ValueError(f"{where}: task {task.id!r} cannot declare its own on_failure")
+
+
+def _refuse_handler_on(where: str, task: TaskBase | None) -> None:
+    if task is not None and task.on_failure is not None:
+        raise ValueError(f"{where} {task.id!r} cannot declare its own on_failure")
+
 
 class RecoveryPlan(ExecutionShape):
-    """An `on_failure` handler. No gates, no nested handler, no fix loop --
-    by omission, not by a runtime check (`recovery-plan-supports-task-groups-
+    """An `on_failure` handler. No gates and no fix loop by omission; no nested
+    handler by `_refuse_nested_handlers` (`recovery-plan-supports-task-groups-
     or-steps`)."""
+
+    @model_validator(mode="after")
+    def _no_nested_handler(self) -> Self:
+        _refuse_nested_handlers("a recovery plan", self)
+        return self
+
+
+class BaseChangePolicy(BaseModel):
+    """`on_base_changed`: what an execution node does when its own work moves
+    the worktree base (`base-change-restarts-a-declared-chain-span`).
+
+    `restart_from` names the execution node the chain restarts at -- this one
+    or an earlier one, never a later one or a gate (`base-change-restart-
+    target-is-backward`, checked by `Chain`, which alone can see the order).
+
+    `on_conflict` is the only way Kraft attempts to resolve a rebase conflict
+    (`rebase-conflict-requires-explicit-handler`): a recovery-shaped handler,
+    run when a task of this node fails on a conflict. Absent, a conflict is an
+    ordinary task failure."""
+
+    model_config = _CONFIG
+
+    restart_from: Identifier
+    on_conflict: RecoveryPlan | None = None
 
 
 class FixLoop(ExecutionShape):
@@ -381,6 +451,12 @@ class FixLoop(ExecutionShape):
     #: cannot collide with anything. No reserved check belongs here.
     judge: AnyTask | None = None
     max_attempts: Annotated[int, Field(gt=0)] | None = None
+
+    @model_validator(mode="after")
+    def _no_nested_handler(self) -> Self:
+        _refuse_nested_handlers("a fix loop", self)
+        _refuse_handler_on("a fix loop's judge", self.judge)
+        return self
 
 
 class ExecNode(ExecutionShape):
@@ -398,6 +474,7 @@ class ExecNode(ExecutionShape):
     #: `escalation` is the container segment and the task's own id follows it,
     #: so -- unlike a fix loop's judge -- this id *is* a path segment.
     escalation: AnyTask | None = None
+    on_base_changed: BaseChangePolicy | None = None
 
     @model_validator(mode="after")
     def _escalation_identifier(self) -> Self:
@@ -405,6 +482,7 @@ class ExecNode(ExecutionShape):
         # (`node.escalation.<id>`), so it obeys the reserved-segment rule.
         if self.escalation is not None:
             _not_reserved(self.escalation.id)
+        _refuse_handler_on("the escalation task", self.escalation)
         return self
 
 
@@ -446,6 +524,11 @@ class GateNode(BaseModel):
     #: `chain-finalized-remains-a-dedicated-marker`.
     chain_finalized: StrictBool = False
 
+    @model_validator(mode="after")
+    def _no_handler(self) -> Self:
+        _refuse_handler_on("a gate's auto_review task", self.auto_review)
+        return self
+
 
 AnyNode = Annotated[ExecNode | GateNode, Field(discriminator="kind")]
 
@@ -466,21 +549,28 @@ class Chain(BaseModel):
         ids = [n.id for n in self.nodes]
         _unique("node", ids)
         index = {n.id: i for i, n in enumerate(self.nodes)}
+        where = self.id or "this chain"
+
+        def backward_exec(target: str, limit: int) -> bool:
+            at = index.get(target)
+            return at is not None and isinstance(self.nodes[at], ExecNode) and at <= limit
+
         for position, node in enumerate(self.nodes):
-            target = node.reject_to if isinstance(node, GateNode) else None
-            if target is None:
-                continue
-            where = self.id or "this chain"
-            target_position = index.get(target)
-            if (
-                target_position is None
-                or not isinstance(self.nodes[target_position], ExecNode)
-                or target_position >= position
-            ):
-                raise ValueError(
-                    f"node {node.id!r}: reject_to {target!r} must name an earlier "
-                    f"execution node in {where}"
-                )
+            if isinstance(node, GateNode):
+                if node.reject_to is not None and not backward_exec(node.reject_to, position - 1):
+                    raise ValueError(
+                        f"node {node.id!r}: reject_to {node.reject_to!r} must name an earlier "
+                        f"execution node in {where}"
+                    )
+            elif node.on_base_changed is not None:
+                # This node itself is allowed: restarting the node whose work
+                # moved the base is the narrowest span there is.
+                target = node.on_base_changed.restart_from
+                if not backward_exec(target, position):
+                    raise ValueError(
+                        f"node {node.id!r}: on_base_changed.restart_from {target!r} must name "
+                        f"this or an earlier execution node in {where}"
+                    )
         return self
 
 
@@ -491,6 +581,8 @@ class ResolvedTask:
 
     path: str
     task: BuiltinTask | AgentTask | SubprocessTask | ForgeTask
+    #: The task's own recovery plan, at `<task path>.on_failure`.
+    on_failure: tuple[ResolvedStep, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -498,6 +590,8 @@ class ResolvedStep:
     path: str
     id: str
     tasks: tuple[ResolvedTask, ...]
+    #: The step's own recovery plan, at `<step path>.on_failure`.
+    on_failure: tuple[ResolvedStep, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -517,11 +611,16 @@ class ResolvedNode:
     #: becomes a path segment; a gate has no steps, so nothing else can occupy
     #: that path.
     auto_review: ResolvedTask | None = None
+    #: `on_base_changed.on_conflict`, at `<node>.on_base_changed.on_conflict`.
+    on_conflict: tuple[ResolvedStep, ...] = ()
 
     def tasks(self) -> Iterator[ResolvedTask]:
-        for group in (self.steps, self.on_failure, self.fix_loop):
+        for group in (self.steps, self.on_failure, self.fix_loop, self.on_conflict):
             for step in group:
                 yield from step.tasks
+                for handler in (step.on_failure, *(t.on_failure for t in step.tasks)):
+                    for inner in handler:
+                        yield from inner.tasks
         for dedicated in (self.judge, self.escalation, self.auto_review):
             if dedicated is not None:
                 yield dedicated
@@ -629,6 +728,14 @@ class ResolvedChain:
                         )
                         if node.escalation is not None
                         else None
+                    ),
+                    on_conflict=(
+                        node.on_base_changed.on_conflict.resolve_steps(
+                            f"{node.id}{PATH_SEPARATOR}on_base_changed{PATH_SEPARATOR}on_conflict"
+                        )
+                        if node.on_base_changed is not None
+                        and node.on_base_changed.on_conflict is not None
+                        else ()
                     ),
                 )
             )
