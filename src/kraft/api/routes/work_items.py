@@ -198,10 +198,14 @@ async def create_work_item(body: NewWorkItem, request: Request):
     # (The legacy `rebase_bounce_to` dangling-target check is gone with the
     # field: Task 4a deleted `walk.bounce`, and a V1 gate's `reject_to` is
     # nulled rather than left dangling by the same drop.)
+    # The repository layer, once: the dry run and the intake below must
+    # materialize from the same policy (`repository-policy-cannot-relax-
+    # instance-safety`).
+    policy = deps.item_policy_or_422(st, body.repo)
     try:
         chain.materialize(
             target=entry.single_repo_target(body.repo),
-            effective_policy=st.instance_policy,
+            effective_policy=policy,
             attachment_kinds=attachment_kinds,
             skip_nodes=frozenset(body.skip_nodes),
         )
@@ -221,7 +225,7 @@ async def create_work_item(body: NewWorkItem, request: Request):
             description=body.description,
             repo=body.repo,
             chain=chain,
-            effective_policy=st.instance_policy,
+            effective_policy=policy,
             # The raw request value, not the resolved template's id (Kraft-cd47):
             # None here means no explicit template was chosen, and must stay
             # None in the row -- `intake`'s own default would otherwise store
@@ -336,6 +340,7 @@ async def fire_trigger(body: TriggerBody, request: Request):
         )
     if not Path(body.repo).is_dir():
         raise HTTPException(422, f"repo path does not exist: {body.repo}")
+    policy = deps.item_policy_or_422(st, body.repo)
     try:
         wid = await executor.intake(
             st.db,
@@ -344,7 +349,7 @@ async def fire_trigger(body: TriggerBody, request: Request):
             description=body.description,
             repo=body.repo,
             chain=chain,
-            effective_policy=st.instance_policy,
+            effective_policy=policy,
             chain_template=body.chain_template,
             bd_cwd=deps.bd_cwd(),
             status="paused",
@@ -492,11 +497,12 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
                     target=previous.target
                     if previous is not None
                     else entry.single_repo_target(row["repo"]),
-                    # The instance policy, never `previous.policy`: that one
-                    # already carries the old chain's own override, and
-                    # layering the new chain's on top of it stacks the two
-                    # (Kraft-yaq99). Filing on the new chain would start here.
-                    effective_policy=st.instance_policy,
+                    # The instance and repository layers, never
+                    # `previous.policy`: that one already carries the old
+                    # chain's own override, and layering the new chain's on
+                    # top of it stacks the two (Kraft-yaq99). Filing on the
+                    # new chain would start here.
+                    effective_policy=deps.item_policy(st, row["repo"]),
                     attachment_kinds=frozenset(
                         a.get("kind") for a in json.loads(row["attachments"] or "[]")
                     )

@@ -9,6 +9,7 @@ from kraft import harness as _harness
 from kraft import skill as _skill
 from kraft.adapters import subprocess as _subprocess
 from kraft.paths import default_templates_dir
+from kraft.policy import InstancePolicy
 from kraft.templates.environment import (
     HarnessProfile,
     HarnessProfileTable,
@@ -161,7 +162,10 @@ class Invocation(NamedTuple):
     steering_texts: tuple[str, ...]
     method_text: str | None = None
     effort: str | None = None
-    allowed_tools: tuple[str, ...] = ()
+    #: `None` is unbounded -- no layer of the task's policy set one -- and
+    #: `()` allows nothing. Never conflate them: an absent allowlist silently
+    #: reading as "every tool" is how a restriction goes missing.
+    allowed_tools: tuple[str, ...] | None = None
     permission_mode: str | None = None
     sandbox: dict | None = None
 
@@ -269,7 +273,9 @@ def resolve_invocation(
         # repo allowlist with a hook's would *widen* the narrower one, which is
         # the opposite of what an allowlist is for; a deny list only ever
         # narrows, which is why that one unions.
-        allowed_tools=tuple(binding.get("allowed_tools", ())),
+        allowed_tools=(
+            tuple(binding["allowed_tools"]) if binding.get("allowed_tools") is not None else None
+        ),
         permission_mode=binding.get("permission_mode") or pd.get("permission_mode"),
         sandbox=_sandbox.resolve(binding, repo),
     )
@@ -332,6 +338,7 @@ def resolve_agent_task(
     item_override: dict | None = None,
     harnesses: _harness.HarnessSet | None = None,
     steering: dict[str, str] | None = None,
+    policy: InstancePolicy | None = None,
 ) -> Invocation:
     """One V1 `AgentTask`'s launch.
 
@@ -346,6 +353,14 @@ def resolve_agent_task(
     `defaults` fill whatever nothing else chose -- they are the lowest rung,
     under the item's override, the task's own field and the repo's
     `default_model`. Raises `HarnessUnavailable`.
+
+    `policy` is the task's resolved policy (`MaterializedChain.policy_for`),
+    the only source of its tool lists and the winning source of its sandbox:
+    `allowed_tools` is the policy's (unbounded only when no layer set it),
+    `deny_tools` the policy's plus the repository entry's live ones (a later
+    denial still applies), and a policy `sandbox` wins over the entry's, which
+    cannot turn it off. `None` -- the escalation turn, which is no chain task
+    -- leaves all three to the repository entry.
 
     `steering` is the item's snapshot's frozen steering (`ResolvedChain.steering`),
     and the only place a task's `steering:` names are read from -- never
@@ -369,7 +384,7 @@ def resolve_agent_task(
     profile = harness_profile(
         task.harness, harnesses if harnesses is not None else _harness.load(None)
     )
-    return resolve_invocation(
+    inv = resolve_invocation(
         {
             "kind": "agent",
             "harness": profile.provider,
@@ -377,6 +392,7 @@ def resolve_agent_task(
             **({"skill": task.skill} if task.skill is not None else {}),
             **({"model": task.model} if task.model is not None else {}),
             **({"effort": task.effort} if task.effort is not None else {}),
+            **({"deny_tools": list(policy.deny_tools)} if policy is not None else {}),
         },
         repo_entry,
         steering_dir,
@@ -385,6 +401,12 @@ def resolve_agent_task(
         item_override=item_override,
         profile_defaults=profile.defaults,
         steering_texts=tuple(steering[n] for n in task.steering) if task.steering else (),
+    )
+    if policy is None:
+        return inv
+    return inv._replace(
+        allowed_tools=policy.allowed_tools,
+        sandbox=policy.sandbox.model_dump() if policy.sandbox is not None else inv.sandbox,
     )
 
 
@@ -549,7 +571,7 @@ async def run_agent_task(
     model: str | None = None,
     deny_tools: tuple[str, ...] = (),
     effort: str | None = None,
-    allowed_tools: tuple[str, ...] = (),
+    allowed_tools: tuple[str, ...] | None = None,
     permission_mode: str | None = None,
     sandbox: dict | None = None,
     steering_texts: tuple[str, ...] = (),
@@ -605,7 +627,9 @@ async def run_agent_task(
             ("effort", effort),
             ("permission_mode", permission_mode),
             ("deny_tools", tuple(deny_tools) or None),
-            ("allowed_tools", tuple(allowed_tools) or None),
+            # `()` -- allow nothing -- cannot be spelled as a flag, so it passes
+            # none and every ask reaches the permission gate, which denies it.
+            ("allowed_tools", tuple(allowed_tools or ()) or None),
             ("autocompact", autocompact),
         )
         if v

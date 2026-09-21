@@ -249,6 +249,25 @@ async def _config_error(db, run_dirs, common: dict, log: str) -> str:
     )
 
 
+def scope_policy(row, scope: ResolvedNode | ResolvedStep | ResolvedTask) -> _policy.InstancePolicy:
+    """The effective policy `scope` runs under, from its item's snapshot
+    (`MaterializedChain.policy_for`). A V1 walk only ever runs a chain read out
+    of that snapshot, so a row without one has no policy anyone could know --
+    and running it unbounded is the silent reading this refuses."""
+    snapshot = store.materialized_chain_of(row)
+    if snapshot is None:
+        raise LookupError(f"work item {row['id']} has no materialized chain to read policy from")
+    return snapshot.policy_for(scope)
+
+
+def _task_sandbox(frozen: _policy.SandboxPolicy | None, repo_entry: dict | None) -> dict | None:
+    """The sandbox a task's process runs in. One its policy froze wins, and the
+    repository entry's live value -- `false` included -- cannot turn it off
+    (Ruling 105: `sandbox` only tightens); without one, the entry's live value
+    applies as it always has."""
+    return frozen.model_dump() if frozen is not None else _sandbox.resolve({}, repo_entry)
+
+
 def _frozen_steering(row) -> dict[str, str] | None:
     """The steering text frozen into this item's snapshot at intake."""
     snapshot = store.materialized_chain_of(row)
@@ -277,6 +296,7 @@ async def _run_changed_test_scopes(
     execution: ExecutionMode,
     launch: LaunchContext | None,
     round: int,
+    policy_sandbox: _policy.SandboxPolicy | None = None,
 ) -> str:
     """`kraft.verify_changed_test_scopes`: run the repo's own test scopes that
     the branch's changed paths select, and report one aggregate result.
@@ -304,6 +324,7 @@ async def _run_changed_test_scopes(
     to_run, sandbox = _select_scopes(
         db, work_item_row["id"], worktree, node.id, task.path, round, repo_entry
     )
+    sandbox = _task_sandbox(policy_sandbox, repo_entry) if policy_sandbox else sandbox
     if not to_run:
         return await _config_error(
             db,
@@ -377,6 +398,10 @@ async def dispatch_node(
     reused by two nodes never was.
     """
     t = task.task
+    # The policy this task runs under, resolved at the scope it sits in
+    # (`MaterializedChain.policy_for`): its sandbox, tool lists, harness
+    # allowlist and token budget are all read from here.
+    task_policy = scope_policy(work_item_row, task)
     session_id = uuid.uuid4().hex
     # The commit the measurement is about (Kraft-lu2). Resolved here, once, at
     # dispatch: a sha read later would be whatever HEAD moved to while the task
@@ -420,6 +445,7 @@ async def dispatch_node(
             execution=t.execution,
             launch=launch,
             round=round,
+            policy_sandbox=task_policy.sandbox,
         )
 
     if isinstance(t, SubprocessTask):
@@ -438,7 +464,7 @@ async def dispatch_node(
             cwd=worktree,
             repo_entry=(launch.repo_entry or {}) if launch else {},
             env={"PYTHONDONTWRITEBYTECODE": "1"},
-            sandbox=_sandbox.resolve({}, launch.repo_entry if launch else None),
+            sandbox=_task_sandbox(task_policy.sandbox, launch.repo_entry if launch else None),
             **common,
         )
 
@@ -483,8 +509,29 @@ async def dispatch_node(
 
     # Only agent tasks. A subprocess or builtin costs nothing, and stopping
     # verification for a budget would strand the item mid-node for no saving.
-    if stops.budget_breach(db, work_item_row["id"], budget) is not None:
+    breach = stops.budget_breach(
+        db, work_item_row["id"], budget, token_budget=task_policy.token_budget
+    )
+    if breach is not None:
+        if breach["scope"] == "tokens":
+            await db.write(
+                lambda c: events.append(
+                    c, work_item_row["id"], "token_budget_reached", {**breach, "task": task.path}
+                )
+            )
         return BUDGET
+    # A snapshot materialization never checked (an older build's, a hand-edited
+    # row) is held to its policy here too: a profile outside
+    # `allowed_harnesses` never launches.
+    allowed = task_policy.allowed_harnesses
+    if allowed is not None and t.harness not in allowed:
+        return await _config_error(
+            db,
+            run_dirs,
+            common,
+            f"{task.path} selects harness {t.harness!r}, which its policy's allowed_harnesses "
+            f"{sorted(allowed)!r} does not include\n",
+        )
     # A harness the runtime cannot offer stops for a human and never silently
     # substitutes another (`unavailable-selected-harness-needs-human`): the
     # profile lookup in `resolve_agent_task` raises `HarnessUnavailable`,
@@ -547,6 +594,7 @@ async def dispatch_node(
             item_override=merged_override or None,
             harnesses=harnesses,
             steering=_frozen_steering(work_item_row),
+            policy=task_policy,
         )
     except _agent.HarnessUnavailable as exc:
         return await _config_error(

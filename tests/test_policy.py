@@ -671,3 +671,56 @@ def test_the_shipped_policy_yaml_has_no_unknown_key():
     # would have raised on an unknown key, but a bare no-raise wouldn't prove
     # the loader actually read the file's contents rather than a stub.
     assert parsed.default.attempts == 3
+
+
+# ── Ruling 105: `deny_tools` and `sandbox` are permission-shaped safety fields,
+# tightened like `allowed_tools` -- a narrower layer can add to them, never
+# take away ──
+
+_SANDBOX = {"kind": "docker", "image": "kraft/worker:1"}
+
+
+def test_deny_tools_only_accumulate_down_the_layers(instance_policy):
+    """A deny list narrows what `allowed_tools` permits, so a narrower layer
+    adds to it and can never drop an inherited entry."""
+    outer = instance_policy.apply_template_override({"deny_tools": ["WebFetch"]})
+    inner = outer.apply_template_override({"deny_tools": ["Bash", "WebFetch"]})
+    assert inner.deny_tools == ("WebFetch", "Bash")
+    assert outer.apply_template_override({"deny_tools": []}).deny_tools == ("WebFetch",)
+
+
+def test_a_sandbox_once_set_cannot_be_changed_by_a_narrower_layer(instance_policy):
+    sandboxed = instance_policy.apply_template_override({"sandbox": _SANDBOX})
+    assert sandboxed.sandbox is not None and sandboxed.sandbox.image == "kraft/worker:1"
+    assert sandboxed.apply_template_override({"sandbox": _SANDBOX}).sandbox == sandboxed.sandbox
+    with pytest.raises(policy.PolicyError, match="sandbox") as refused:
+        sandboxed.apply_template_override({"sandbox": {"kind": "docker", "image": "other"}})
+    assert refused.value.field == "sandbox"
+
+
+@pytest.mark.parametrize(
+    ("override", "field"),
+    [
+        ({"allowed_tools": ["network"]}, "allowed_tools"),
+        ({"token_budget": 3_000_000}, "token_budget"),
+        ({"allowed_harnesses": ["gemini"]}, "allowed_harnesses"),
+    ],
+    ids=["allowed_tools", "token_budget", "allowed_harnesses"],
+)
+def test_a_policy_refusal_names_the_field_it_refused(instance_policy, override, field):
+    """`policy-override-rules-are-field-specific`: a refusal says which field,
+    as data, so a retry override's error can point at it."""
+    with pytest.raises(policy.PolicyError) as refused:
+        instance_policy.apply_template_override(override)
+    assert refused.value.field == field
+
+
+def test_a_task_scope_override_refuses_the_loop_bounds():
+    """`max_attempts` and `timeout_minutes` bound an execution node's fix loop
+    and nothing a task, step or gate runs, so those scopes refuse them at load
+    rather than accept a value nothing reads (Kraft-q55aw)."""
+    with pytest.raises(ValidationError, match="max_attempts"):
+        policy.TaskPolicyOverride.model_validate({"max_attempts": 2})
+    with pytest.raises(ValidationError, match="timeout_minutes"):
+        policy.TaskPolicyOverride.model_validate({"timeout_minutes": 5})
+    assert policy.TemplatePolicyOverride.model_validate({"max_attempts": 2}).max_attempts == 2

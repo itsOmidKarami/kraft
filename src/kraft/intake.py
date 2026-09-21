@@ -149,7 +149,7 @@ async def _start(app, repo: dict, row: dict) -> str | None:
             description=row.get("description"),
             repo=repo["path"],
             chain=chain,
-            effective_policy=st.instance_policy,
+            effective_policy=deps.item_policy(st, repo["path"]),
             bd_cwd=deps.bd_cwd(),
             bead_id=row["id"],
             # the bead was never filed in KRAFT_BD_CWD — it is adopted from the

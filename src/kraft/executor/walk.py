@@ -610,6 +610,35 @@ def _loop_key(node: ResolvedNode) -> str:
     return f"{node.id}.fix_loop"
 
 
+def fix_loop_cap(
+    policy: _policy.Policy,
+    key: str,
+    node_policy: _policy.InstancePolicy,
+    loop_attempts: int | None,
+    override: dict | None,
+) -> _policy.Cap:
+    """The bound one node's fix loop counts under, narrowest source last:
+
+    1. `policy.yaml`'s `loops:` entry for `key`, else its `default:`;
+    2. the V1 policy resolved at the node's scope -- `max_attempts` for the
+       attempts and `timeout_minutes` for the wall clock, when any layer set
+       them (`template-policy-may-replace-operational-defaults`);
+    3. the loop's own `max_attempts`, which materialization already held to
+       `maxima.max_attempts`;
+    4. an operator's per-item node override (`node_overrides`), which wins over
+       all of them.
+    """
+    cap = policy.cap_for(key)
+    # Replaced only where set: `replace` re-validates the whole `Cap`.
+    if node_policy.max_attempts is not None:
+        cap = replace(cap, attempts=node_policy.max_attempts)
+    if node_policy.timeout_minutes is not None:
+        cap = replace(cap, wall_clock_s=node_policy.timeout_minutes * 60)
+    if loop_attempts is not None:
+        cap = replace(cap, attempts=loop_attempts)
+    return _policy.with_cap_override(cap, override)
+
+
 async def walk_node(
     db,
     run_dirs,
@@ -806,13 +835,13 @@ async def _walk_node_once(
         raise RuntimeError(f"node {node.id!r} has fix_loop but no policy was provided")
 
     override_row = fresh_row if fresh_row is not None else row
-    cap = _policy.resolve_cap(policy, key, store.node_overrides_of(override_row).get(node.id))
-    if loop.max_attempts is not None:
-        # The chain's own number wins over `policy.yaml`'s default for this key
-        # (`template-policy-may-replace-operational-defaults`); a per-item node
-        # override still wins over both, because `resolve_cap` applied it above
-        # only when the operator set one.
-        cap = replace(cap, attempts=loop.max_attempts)
+    cap = fix_loop_cap(
+        policy,
+        key,
+        dispatch.scope_policy(override_row, node),
+        loop.max_attempts,
+        store.node_overrides_of(override_row).get(node.id),
+    )
     # `round` is the fix-cycle index every session in this pass is stamped with,
     # so per-round usage can be read back without joining against the events.
     #

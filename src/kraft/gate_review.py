@@ -152,6 +152,8 @@ async def review(
         item_override=json.loads(row["agent_overrides"]) if row["agent_overrides"] else None,
         # The reviewer's steering, frozen with the chain at intake.
         steering=snapshot.chain.steering if snapshot is not None else None,
+        # The gate scope's policy: its tool lists and sandbox, as for any task.
+        policy=executor.scope_policy(row, auto_review),
     )
     status = await _agent.run_agent_task(
         db,

@@ -15,6 +15,8 @@ def _state(tmp_path, *, policy_obj) -> dict:
         # The seeded V1 library: `triggers.tick` resolves a trigger's chain
         # through it (`deps.resolve_chain`), never a template set.
         "library": v1_library(tmp_path / "templates"),
+        # Where intake reads the repository policy layer (`repos.yaml`).
+        "templates_dir": tmp_path / "templates",
         "policy": policy_obj,
         "trigger_last_fired": {},
     }
@@ -102,3 +104,29 @@ async def test_a_trigger_whose_chain_exceeds_the_ceiling_is_skipped_not_the_whol
         lambda c: [r["title"] for r in c.execute("SELECT title FROM work_items")]
     )
     assert titles == ["filed"]
+
+
+async def test_a_triggered_item_is_bound_by_its_repositorys_policy(tmp_path, stub_app):
+    """`repository-policy-cannot-relax-instance-safety` at the cron door: the
+    repository layer is frozen into what the trigger files."""
+    import yaml
+
+    from kraft import store
+
+    repo = isolated_bd(tmp_path)
+    pol = policy.Policy(
+        loops={},
+        default=policy.Cap(attempts=3, wall_clock_s=3600),
+        triggers=[policy.Trigger(cron="30 14 * * *", repo=str(repo), chain="default", title="t")],
+    )
+    app = stub_app(**_state(tmp_path, policy_obj=pol))
+    (tmp_path / "templates" / "repos.yaml").write_text(
+        yaml.safe_dump({"repos": [{"path": str(repo), "deny_tools": ["WebFetch"]}]})
+    )
+
+    (wid,) = await triggers.tick(app, now=datetime(2026, 9, 10, 14, 30, tzinfo=UTC))
+
+    row = app.state.db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id=?", (wid,)).fetchone()
+    )
+    assert store.materialized_chain_of(row).policy.deny_tools == ("WebFetch",)

@@ -159,6 +159,24 @@ async def test_starts_one_bead_when_enabled(tmp_path, monkeypatch, stub_app):
     ]
 
 
+async def test_an_auto_intaken_item_is_bound_by_its_repositorys_policy(
+    tmp_path, monkeypatch, stub_app
+):
+    """`repository-policy-cannot-relax-instance-safety` at the unattended
+    door: the repository layer is frozen into what auto-intake files."""
+    monkeypatch.setattr(
+        intake_mod.beads, "ready", _ready([{"id": "B-1", "title": "t", "priority": 3}])
+    )
+    app = stub_app(**_state(tmp_path, repo_entry={"deny_tools": ["WebFetch"]}))
+
+    (wid,) = await intake_mod.tick(app)
+
+    row = app.state.db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id=?", (wid,)).fetchone()
+    )
+    assert store.materialized_chain_of(row).policy.deny_tools == ("WebFetch",)
+
+
 async def test_a_started_pickup_is_recorded_with_source_and_priority(
     tmp_path, monkeypatch, stub_app
 ):

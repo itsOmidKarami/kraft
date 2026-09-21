@@ -635,7 +635,7 @@ DOCKER = {"kind": "docker", "image": "kraft-worker"}
         ({**C, "model": "sonnet"}, {}, {"item_override": None}, "model", "sonnet"),
         ({**C, "effort": "low"}, {}, {"item_override": None}, "effort", "low"),
         ({**C, "allowed_tools": ["Read", "Grep"]}, {}, {}, "allowed_tools", ("Read", "Grep")),
-        (C, {}, {}, "allowed_tools", ()),
+        (C, {}, {}, "allowed_tools", None),  # unbounded; `()` would allow nothing
         ({**C, "permission_mode": "plan"}, {}, {}, "permission_mode", "plan"),
         (C, {}, {}, "permission_mode", None),
         # Unioning two allowlists widens the narrower one, the opposite of
