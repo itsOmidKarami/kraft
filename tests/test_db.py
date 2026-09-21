@@ -13,6 +13,38 @@ def _tables(conn):
     return {r[0] for r in rows}
 
 
+def _columns(conn, table):
+    return {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _version(conn):
+    return conn.execute("PRAGMA user_version").fetchone()[0]
+
+
+def _fresh(tmp_path):
+    """A connection to a database `migrate` built from empty (SCHEMA_SQL)."""
+    conn = db._connect(tmp_path / "orchestrator.db")
+    db.migrate(conn)
+    return conn
+
+
+def _insert_item(conn, wid="w1", status="active", chain_definition="{}"):
+    conn.execute(
+        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+        "status, created_at, updated_at) VALUES (?, 't', '/r', 'quick-task', ?, ?, 'now', 'now')",
+        (wid, chain_definition, status),
+    )
+
+
+def _insert_session(conn, sid="s1", status="pending", wid="w1"):
+    conn.execute(
+        "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, log_path, "
+        "result_path, status, created_at) VALUES (?, ?, 'verify', 'on.test.run', '/l', '/r', ?, "
+        "'now')",
+        (sid, wid, status),
+    )
+
+
 def test_migrations_keys_are_contiguous():
     """Two branches adding a migration under the same key merge as a silent
     last-write-wins dict literal, not a guaranteed git conflict -- nothing else
@@ -21,32 +53,37 @@ def test_migrations_keys_are_contiguous():
     assert keys == list(range(min(keys), db.SCHEMA_VERSION))
 
 
-def test_waiting_is_an_allowed_work_item_status(tmp_path):
-    """The row state a CI wait becomes (Kraft-ru98)."""
-    conn = db._connect(tmp_path / "orchestrator.db")
-    db.migrate(conn)
-    conn.execute(
-        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
-        "status, created_at, updated_at) VALUES ('w1', 't', '/r', 'quick-task', '{}', "
-        "'waiting', '2026-01-01', '2026-01-01')"
-    )  # must not raise IntegrityError
-
-
-def test_waiting_is_an_allowed_session_status(tmp_path):
-    """`forge.run_task` closes its session with the handler's own status, so the
-    sentinel has to be legal on both tables the way 'rate_limited' is."""
-    conn = db._connect(tmp_path / "orchestrator.db")
-    db.migrate(conn)
-    conn.execute(
-        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
-        "status, created_at, updated_at) VALUES ('w1', 't', '/r', 'quick-task', '{}', "
-        "'active', '2026-01-01', '2026-01-01')"
-    )
-    conn.execute(
-        "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, log_path, "
-        "result_path, status, created_at) VALUES ('s1', 'w1', 'mr_checks', 'on.ci.poll', "
-        "'/l', '/r.json', 'waiting', '2026-01-01')"
-    )  # must not raise IntegrityError
+@pytest.mark.parametrize(
+    ("table", "status", "allowed"),
+    [
+        # the row state a CI wait becomes (Kraft-ru98)
+        ("work_items", "waiting", True),
+        ("work_items", "rate_limited", True),
+        ("work_items", "bogus", False),
+        # `forge.run_task` closes its session with the handler's own status, so
+        # the sentinel has to be legal on both tables the way 'rate_limited' is
+        ("worker_sessions", "waiting", True),
+        # a missing binary is a bad-config stop, not an IntegrityError three
+        # frames up (Kraft-579)
+        ("worker_sessions", "config_error", True),
+        ("worker_sessions", "done_with_concerns", True),
+        ("worker_sessions", "needs_context", True),
+        ("worker_sessions", "bogus", False),
+    ],
+    ids=lambda v: v if isinstance(v, str) else ("allowed" if v else "refused"),
+)
+def test_status_check_constraint(tmp_path, table, status, allowed):
+    """Each table's status CHECK admits exactly the statuses Kraft writes."""
+    conn = _fresh(tmp_path)
+    _insert_item(conn)
+    _insert_session(conn)
+    update = f"UPDATE {table} SET status = ?"
+    if not allowed:
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(update, (status,))
+        return
+    conn.execute(update, (status,))
+    assert conn.execute(f"SELECT status FROM {table}").fetchone()[0] == status
 
 
 def test_migrate_creates_schema_from_empty(tmp_path):
@@ -139,7 +176,8 @@ INVALID SQL STATEMENT;
 
 
 # The worker_sessions columns schema v4 added. Old-schema fixtures are built by
-# subtraction from the current SCHEMA_SQL, so they have to name what to remove.
+# subtraction from the current SCHEMA_SQL, so `_build_old_db` has to name what
+# to remove for every version.
 V4_COLS = (
     "-- usage capture",
     "started_at     TEXT,",
@@ -167,12 +205,22 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
 
     # columns and tables introduced after `version` were not there yet — decided
     # before the schema is built, or the drop never reaches it
+    if version < 2:
+        skip_stmts = (*skip_stmts, "retry_counters")
+    if version < 3:
+        drop_lines = (*drop_lines, "session_summary_ref")
+    if version < 4:
+        drop_lines = (*drop_lines, *V4_COLS)
     if version < 6:
         skip_stmts = (*skip_stmts, "auth_sessions")
     if version < 18:
         skip_stmts = (*skip_stmts, "work_item_repos")
     if version < 7:
         drop_lines = (*drop_lines, "submodules", "root_merge_policy", "-- cross-repo")
+    if version < 8:
+        drop_lines = (*drop_lines, "attachments      TEXT,")
+    if version < 9:
+        drop_lines = (*drop_lines, "base_ref         TEXT,")
     if version < 11:
         drop_lines = (*drop_lines, "bead_cwd")
     if version < 13:
@@ -195,6 +243,19 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         )
     if version < 17:
         drop_lines = (*drop_lines, "retry_at         TEXT,", "-- set while status = 'rate_limited'")
+    if version < 20:
+        drop_lines = (*drop_lines, "escalation_session_id TEXT,")
+    if version < 21:
+        drop_lines = (*drop_lines, "auto_gate        INTEGER NOT NULL DEFAULT 0,")
+    if version < 22:
+        drop_lines = (*drop_lines, "agent_overrides TEXT,")
+    if version < 25:
+        drop_lines = (
+            *drop_lines,
+            "budget_set INTEGER NOT NULL DEFAULT 0,",
+            "budget_usd REAL,",
+            "node_overrides TEXT,",
+        )
     if version < 26:
         drop_lines = (
             *drop_lines,
@@ -262,14 +323,8 @@ def test_migrate_creates_retry_counters(tmp_path):
 def test_migrate_v1_to_v2_adds_retry_counters(tmp_path):
     path = tmp_path / "orchestrator.db"
     conn = db._connect(path)
-    _build_old_db(
-        conn, 1, drop_lines=("session_summary_ref", *V4_COLS), skip_stmts=("retry_counters",)
-    )
-    conn.execute(
-        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
-        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
-        "'active','now','now')"
-    )
+    _build_old_db(conn, 1)
+    _insert_item(conn)
     conn.commit()
     conn.close()
 
@@ -288,13 +343,7 @@ def test_bump_counter_inserts_then_increments(tmp_path):
     async def scenario():
         database = await db.Database.open(tmp_path / "orchestrator.db")
         try:
-            await database.write(
-                lambda c: c.execute(
-                    "INSERT INTO work_items (id, title, repo, chain_template, "
-                    "chain_definition, status, created_at, updated_at) VALUES "
-                    "('w','t','/r','quick-task','{}','active','now','now')"
-                )
-            )
+            await database.write(lambda c: _insert_item(c, "w"))
             cap = policy.Cap(attempts=3, wall_clock_s=100)
             n1, s1, c1 = await database.write(
                 lambda c: store.bump_counter(c, "w", "verify_fix_loop", cap)
@@ -319,144 +368,56 @@ def test_bump_counter_inserts_then_increments(tmp_path):
     _a.run(scenario())
 
 
-def test_status_check_constraints(tmp_path):
-    conn = db._connect(tmp_path / "orchestrator.db")
-    db.migrate(conn)
-    conn.execute(
-        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
-        "status, created_at, updated_at) VALUES ('w1', 't', '/r', 'quick-task', '{}', "
-        "'active', 'now', 'now')"
+async def test_write_commits_on_success(tmp_path, database):
+    await database.write(lambda c: _insert_item(c))
+    row = database.read(
+        lambda c: c.execute("SELECT title FROM work_items WHERE id = 'w1'").fetchone()
     )
-    with pytest.raises(sqlite3.IntegrityError):
-        conn.execute("UPDATE work_items SET status = 'bogus' WHERE id = 'w1'")
+    assert row["title"] == "t"
 
 
-def test_worker_sessions_status_check_constraint(tmp_path):
-    """Nothing in test_status_check_constraints touches worker_sessions, so its
-    CHECK could be dropped entirely and the suite would not notice."""
-    conn = db._connect(tmp_path / "orchestrator.db")
-    db.migrate(conn)
-    conn.execute(
-        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
-        "status, created_at, updated_at) VALUES ('w1', 't', '/r', 'quick-task', '{}', "
-        "'active', 'now', 'now')"
+async def test_write_rolls_back_on_exception(tmp_path, database):
+    def failing(c):
+        _insert_item(c, "w2")
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError):
+        await database.write(failing)
+
+    count = database.read(
+        lambda c: c.execute("SELECT count(*) FROM work_items WHERE id = 'w2'").fetchone()[0]
     )
-    conn.execute(
-        "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, log_path, "
-        "result_path, status, created_at) VALUES ('s1', 'w1', 'verify', 'on.test.run', "
-        "'/l', '/r', 'pending', 'now')"
+    assert count == 0
+
+
+async def test_writes_are_serialized_in_order(tmp_path, database):
+    await database.write(lambda c: _insert_item(c, "w"))
+
+    async def bump(n):
+        await database.write(
+            lambda c: c.execute("UPDATE work_items SET title = ? WHERE id = 'w'", (str(n),))
+        )
+
+    await asyncio.gather(*(bump(n) for n in range(20)))
+    title = database.read(
+        lambda c: c.execute("SELECT title FROM work_items WHERE id = 'w'").fetchone()["title"]
     )
-    with pytest.raises(sqlite3.IntegrityError):
-        conn.execute("UPDATE worker_sessions SET status = 'bogus' WHERE id = 's1'")
-    # and the two new statuses this task adds are accepted
-    conn.execute("UPDATE worker_sessions SET status = 'done_with_concerns' WHERE id = 's1'")
-    conn.execute("UPDATE worker_sessions SET status = 'needs_context' WHERE id = 's1'")
+    assert title == "19"
 
 
-def test_write_commits_on_success(tmp_path):
-    async def scenario():
-        database = await db.Database.open(tmp_path / "orchestrator.db")
-        try:
-            await database.write(
-                lambda c: c.execute(
-                    "INSERT INTO work_items (id, title, repo, chain_template, "
-                    "chain_definition, status, created_at, updated_at) "
-                    "VALUES ('w1', 't', '/r', 'quick-task', '{}', 'active', 'now', 'now')"
-                )
-            )
-            row = database.read(
-                lambda c: c.execute("SELECT title FROM work_items WHERE id = 'w1'").fetchone()
-            )
-            assert row["title"] == "t"
-        finally:
-            await database.close()
+async def test_writer_survives_failing_fn_and_serves_next_write(tmp_path, database):
+    def failing(c):
+        raise RuntimeError("boom")
 
-    asyncio.run(scenario())
+    with pytest.raises(RuntimeError):
+        await database.write(failing)
 
-
-def test_write_rolls_back_on_exception(tmp_path):
-    async def scenario():
-        database = await db.Database.open(tmp_path / "orchestrator.db")
-        try:
-
-            def failing(c):
-                c.execute(
-                    "INSERT INTO work_items (id, title, repo, chain_template, "
-                    "chain_definition, status, created_at, updated_at) "
-                    "VALUES ('w2', 't', '/r', 'quick-task', '{}', 'active', 'now', 'now')"
-                )
-                raise RuntimeError("boom")
-
-            with pytest.raises(RuntimeError):
-                await database.write(failing)
-
-            count = database.read(
-                lambda c: c.execute("SELECT count(*) FROM work_items WHERE id = 'w2'").fetchone()[0]
-            )
-            assert count == 0
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
-
-
-def test_writes_are_serialized_in_order(tmp_path):
-    async def scenario():
-        database = await db.Database.open(tmp_path / "orchestrator.db")
-        try:
-            await database.write(
-                lambda c: c.execute(
-                    "INSERT INTO work_items (id, title, repo, chain_template, "
-                    "chain_definition, status, created_at, updated_at) "
-                    "VALUES ('w', 't', '/r', 'quick-task', '{}', 'active', 'now', 'now')"
-                )
-            )
-
-            async def bump(n):
-                await database.write(
-                    lambda c: c.execute("UPDATE work_items SET title = ? WHERE id = 'w'", (str(n),))
-                )
-
-            await asyncio.gather(*(bump(n) for n in range(20)))
-            title = database.read(
-                lambda c: c.execute("SELECT title FROM work_items WHERE id = 'w'").fetchone()[
-                    "title"
-                ]
-            )
-            assert title == "19"
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
-
-
-def test_writer_survives_failing_fn_and_serves_next_write(tmp_path):
-    async def scenario():
-        database = await db.Database.open(tmp_path / "orchestrator.db")
-        try:
-
-            def failing(c):
-                raise RuntimeError("boom")
-
-            with pytest.raises(RuntimeError):
-                await database.write(failing)
-
-            # writer task must still be alive and serving
-            await database.write(
-                lambda c: c.execute(
-                    "INSERT INTO work_items (id, title, repo, chain_template, "
-                    "chain_definition, status, created_at, updated_at) "
-                    "VALUES ('w1', 't', '/r', 'quick-task', '{}', 'active', 'now', 'now')"
-                )
-            )
-            row = database.read(
-                lambda c: c.execute("SELECT title FROM work_items WHERE id = 'w1'").fetchone()
-            )
-            assert row["title"] == "t"
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    # writer task must still be alive and serving
+    await database.write(lambda c: _insert_item(c))
+    row = database.read(
+        lambda c: c.execute("SELECT title FROM work_items WHERE id = 'w1'").fetchone()
+    )
+    assert row["title"] == "t"
 
 
 def test_write_after_close_raises_instead_of_hanging(tmp_path):
@@ -501,13 +462,7 @@ def test_raising_rollback_still_informs_caller_and_next_db_works(tmp_path, monke
         monkeypatch.undo()
         fresh = await db.Database.open(tmp_path / "orchestrator.db")
         try:
-            await fresh.write(
-                lambda c: c.execute(
-                    "INSERT INTO work_items (id, title, repo, chain_template, "
-                    "chain_definition, status, created_at, updated_at) "
-                    "VALUES ('w1', 't', '/r', 'quick-task', '{}', 'active', 'now', 'now')"
-                )
-            )
+            await fresh.write(lambda c: _insert_item(c))
             assert (
                 fresh.read(lambda c: c.execute("SELECT count(*) FROM work_items").fetchone()[0])
                 == 1
@@ -518,101 +473,13 @@ def test_raising_rollback_still_informs_caller_and_next_db_works(tmp_path, monke
     asyncio.run(scenario())
 
 
-def test_migrate_v25_to_v26_adds_archive_columns(tmp_path):
-    """A v25 database migrates forward and gains archived_at/archived_by."""
-    conn = db._connect(tmp_path / "orchestrator.db")
-    _build_old_db(conn, 25)
-
-    db.migrate(conn)
-
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(work_items)").fetchall()}
-    assert {"archived_at", "archived_by"} <= cols
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
-
-
-def test_migrate_v32_to_v33_adds_the_v1_columns_and_keeps_the_legacy_chain(tmp_path):
-    """Template schema V1 is additive: an existing item keeps the
-    `chain_definition` it materialized under the legacy loader and simply gains
-    two NULL columns, because a legacy chain cannot be faithfully translated
-    into a V1 one (`_MIGRATIONS[32]`)."""
-    conn = db._connect(tmp_path / "orchestrator.db")
-    _build_old_db(conn, 32)
-    conn.execute(
-        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
-        "status, created_at, updated_at) VALUES ('w1','t','/r','default','{\"nodes\": []}',"
-        "'active','now','now')"
-    )
-    conn.commit()
-
-    db.migrate(conn)
-
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(work_items)").fetchall()}
-    assert {"materialized_chain", "run_fork_parent"} <= cols
-    row = conn.execute("SELECT * FROM work_items WHERE id = 'w1'").fetchone()
-    assert row["chain_definition"] == '{"nodes": []}'
-    assert row["materialized_chain"] is None
-    assert row["run_fork_parent"] is None
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
-
-
-def test_migrate_v27_to_v28_adds_ci_pipeline_ref(tmp_path):
-    """A v27 database migrates forward and gains work_items.ci_pipeline_ref."""
-    conn = db._connect(tmp_path / "orchestrator.db")
-    _build_old_db(conn, 27)
-
-    db.migrate(conn)
-
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(work_items)").fetchall()}
-    assert "ci_pipeline_ref" in cols
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
-
-
-def test_migrate_v28_to_v29_adds_worker_sessions_thread(tmp_path):
-    """A v28 database migrates forward and gains worker_sessions.thread,
-    defaulted to 1 for every pre-existing row (Kraft-dkb6g)."""
-    conn = db._connect(tmp_path / "orchestrator.db")
-    _build_old_db(conn, 28)
-    conn.execute(
-        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
-        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
-        "'active','now','now')"
-    )
-    conn.execute(
-        "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, log_path, "
-        "result_path, status, attempt, created_at) VALUES "
-        "('s1','w1','implementation','escalation','l','r','done',1,'now')"
-    )
-    conn.commit()
-
-    db.migrate(conn)
-
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(worker_sessions)").fetchall()}
-    assert "thread" in cols
-    assert conn.execute("SELECT thread FROM worker_sessions WHERE id = 's1'").fetchone()[0] == 1
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
-
-
-def test_migrate_v2_to_v3_adds_session_summary_ref(tmp_path):
-    """A v2 database migrates forward and gains worker_sessions.session_summary_ref."""
-    conn = db._connect(tmp_path / "orchestrator.db")
-    _build_old_db(conn, 2, drop_lines=("session_summary_ref", *V4_COLS))
-
-    db.migrate(conn)
-
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(worker_sessions)").fetchall()}
-    assert "session_summary_ref" in cols
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
-
-
 def test_migrate_mid_step_failure_rolls_back_whole_run(monkeypatch, tmp_path):
     """A v1 database has two steps to apply. If the second raises, the first must
     be rolled back too and user_version must stay where it started — the runner's
     BEGIN spans the whole range, not one step (Kraft-g5x)."""
     path = tmp_path / "orchestrator.db"
     conn = db._connect(path)
-    _build_old_db(
-        conn, 1, drop_lines=("session_summary_ref", *V4_COLS), skip_stmts=("retry_counters",)
-    )
+    _build_old_db(conn, 1)
     assert "retry_counters" not in _tables(conn)
 
     broken = dict(db._MIGRATIONS)
@@ -657,11 +524,7 @@ def test_migrate_v4_to_v5_rebuilds_work_items_for_the_paused_status(tmp_path):
             ),
         ),
     )
-    conn.execute(
-        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
-        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
-        "'active','now','now')"
-    )
+    _insert_item(conn)
     conn.execute(
         "INSERT INTO events (work_item_id, type, payload, created_at) "
         "VALUES ('w1','node_started','{}','now')"
@@ -681,53 +544,6 @@ def test_migrate_v4_to_v5_rebuilds_work_items_for_the_paused_status(tmp_path):
     assert "pending_steer_context" in cols
     # the events FK still points somewhere real after the drop/rename
     assert conn2.execute("PRAGMA foreign_key_check").fetchall() == []
-
-
-def test_migration_7_adds_attachments_column(tmp_path):
-    conn = db._connect(tmp_path / "s.db")
-    db.migrate(conn)
-    conn.execute("PRAGMA user_version = 7")
-    # Every column the 7 -> 11 steps add, or migrate() re-adds one that exists.
-    conn.execute("ALTER TABLE work_items DROP COLUMN attachments")
-    conn.execute("ALTER TABLE work_items DROP COLUMN base_ref")
-    conn.execute("ALTER TABLE work_items DROP COLUMN bead_cwd")
-    # Replaying from v7 re-applies every later step too, including v18's
-    # CREATE TABLE work_item_repos -- drop it as well, or that step collides
-    # with the table the earlier full migrate() already created.
-    conn.execute("DROP TABLE work_item_repos")
-    db.migrate(conn)
-    cols = {r["name"] for r in conn.execute("PRAGMA table_info(work_items)")}
-    assert "attachments" in cols
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
-
-
-def test_migrate_v8_to_v9_adds_base_ref(tmp_path):
-    """The base_ref migration adds the column via ALTER TABLE, and pre-existing rows
-    survive with their other values intact.
-
-    Keyed v8 -> v9: origin/main's `attachments` migration took key 7 first, so
-    base_ref renumbered to 8 when the two branches merged."""
-    path = tmp_path / "orchestrator.db"
-    conn = db._connect(path)
-    _build_old_db(conn, 8, drop_lines=("base_ref",))
-    conn.execute(
-        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
-        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
-        "'active','now','now')"
-    )
-    conn.commit()
-    conn.close()
-
-    conn2 = db._connect(path)
-    db.migrate(conn2)
-    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
-    cols = {r["name"] for r in conn2.execute("PRAGMA table_info(work_items)")}
-    assert "base_ref" in cols
-    assert conn2.execute("SELECT count(*) FROM work_items").fetchone()[0] == 1
-    row = conn2.execute("SELECT id, title, status FROM work_items WHERE id='w1'").fetchone()
-    assert row["id"] == "w1"
-    assert row["title"] == "t"
-    assert row["status"] == "active"
 
 
 def test_migrate_v9_to_v10_widens_worker_sessions_status(tmp_path):
@@ -750,11 +566,7 @@ def test_migrate_v9_to_v10_widens_worker_sessions_status(tmp_path):
             ("                    'waiting', 'conflict', 'infra', 'infra_stop')),", ""),
         ),
     )
-    conn.execute(
-        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
-        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
-        "'active','now','now')"
-    )
+    _insert_item(conn)
     conn.execute(
         "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, pid, "
         "pid_start_time, log_path, result_path, status, attempt, session_summary_ref, "
@@ -822,11 +634,7 @@ def test_migrate_v26_to_v27_widens_worker_sessions_status_for_ci_verdicts(tmp_pa
             ),
         ),
     )
-    conn.execute(
-        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
-        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
-        "'active','now','now')"
-    )
+    _insert_item(conn)
     conn.execute(
         "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, pid, "
         "pid_start_time, log_path, result_path, status, attempt, session_summary_ref, "
@@ -857,112 +665,92 @@ def test_migrate_v26_to_v27_widens_worker_sessions_status_for_ci_verdicts(tmp_pa
     assert "idx_worker_sessions_status" in index_names
 
 
-def test_migration_adds_base_ref(tmp_path):
-    path = tmp_path / "m.db"
+def test_a_fresh_schema_and_a_fully_migrated_one_agree(tmp_path):
+    """SCHEMA_SQL and the migration path must agree -- a fresh install and an
+    upgraded one are the same database. Every column of every table, from the
+    oldest schema `_build_old_db` can build."""
+    fresh = db._connect(tmp_path / "fresh.db")
+    db.migrate(fresh)
+    old = db._connect(tmp_path / "old.db")
+    _build_old_db(old, 1)
+    db.migrate(old)
+
+    def shape(conn):
+        return {
+            table: {
+                (r["name"], r["type"], r["notnull"], r["dflt_value"], r["pk"])
+                for r in conn.execute(f"PRAGMA table_info({table})")
+            }
+            for table in _tables(conn)
+            if not table.startswith("sqlite_")
+        }
+
+    assert shape(old) == shape(fresh)
+
+
+ADDED_COLUMNS = [
+    (2, "worker_sessions", ("session_summary_ref",), None),
+    (7, "work_items", ("attachments",), None),
+    # keyed v8 -> v9: origin/main's `attachments` took key 7 first
+    (8, "work_items", ("base_ref",), None),
+    # an auto-intaken bead's own workspace (Kraft-8mu.5.2); NULL means
+    # KRAFT_BD_CWD
+    (10, "work_items", ("bead_cwd",), None),
+    (12, "work_items", ("description",), None),
+    # NULL keeps an in-flight item on the `kraft/<id>` branch its worktree
+    # is already checked out on
+    (13, "work_items", ("branch",), None),
+    # NULL: no sub-beads extracted (Kraft-p8q1)
+    (15, "work_items", ("implements_beads",), None),
+    (19, "work_items", ("escalation_session_id",), None),
+    (20, "work_items", ("auto_gate",), 0),
+    (21, "work_items", ("agent_overrides",), None),
+    (25, "work_items", ("archived_at", "archived_by"), None),
+    (27, "work_items", ("ci_pipeline_ref",), None),
+    # 1 for every pre-existing session (Kraft-dkb6g)
+    (28, "worker_sessions", ("thread",), 1),
+    (30, "worker_sessions", ("command",), None),
+    (31, "work_items", ("current_step",), 0),
+    # template schema V1 is additive: an existing item keeps the
+    # `chain_definition` it has and gains two NULL columns (`_MIGRATIONS[32]`)
+    (32, "work_items", ("materialized_chain", "run_fork_parent"), None),
+]
+
+
+@pytest.mark.parametrize(
+    ("version", "table", "columns", "old_row_value"),
+    ADDED_COLUMNS,
+    ids=[f"v{v}-{'+'.join(cols)}" for v, _, cols, _ in ADDED_COLUMNS],
+)
+def test_an_old_db_gains_the_column_and_keeps_its_rows(
+    tmp_path, version, table, columns, old_row_value
+):
+    """Built at `version` (the shape before `_MIGRATIONS[version]`), holding a
+    work item and a session, then migrated: the column is there, the rows are
+    intact and read the column's value for a row written before it existed."""
+    path = tmp_path / "orchestrator.db"
+    conn = db._connect(path)
+    _build_old_db(conn, version)
+    _insert_item(conn, chain_definition='{"nodes": []}')
+    _insert_session(conn, status="done")
+    conn.commit()
+    conn.close()
+
     conn = db._connect(path)
     db.migrate(conn)
-    cols = {r["name"] for r in conn.execute("PRAGMA table_info(work_items)")}
-    assert "base_ref" in cols
-    (version,) = conn.execute("PRAGMA user_version").fetchone()
-    assert version == db.SCHEMA_VERSION
-
-
-def test_migrate_v10_to_v11_adds_bead_cwd(tmp_path):
-    """An auto-intaken bead lives in its own repo's `.beads`, not the
-    instance-wide `KRAFT_BD_CWD`, so closing it needs a per-item workspace
-    (Kraft-8mu.5.2). Pre-existing rows survive with NULL, meaning KRAFT_BD_CWD."""
-    path = tmp_path / "orchestrator.db"
-    conn = db._connect(path)
-    _build_old_db(conn, 10)
-    conn.execute(
-        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
-        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
-        "'active','now','now')"
+    assert _version(conn) == db.SCHEMA_VERSION
+    assert set(columns) <= _columns(conn, table)
+    item = conn.execute("SELECT * FROM work_items WHERE id = 'w1'").fetchone()
+    assert (item["title"], item["status"], item["chain_definition"]) == (
+        "t",
+        "active",
+        '{"nodes": []}',
     )
-    conn.commit()
-    conn.close()
-
-    conn2 = db._connect(path)
-    db.migrate(conn2)
-    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
-    cols = {r["name"] for r in conn2.execute("PRAGMA table_info(work_items)")}
-    assert "bead_cwd" in cols
-    row = conn2.execute("SELECT id, bead_cwd FROM work_items WHERE id='w1'").fetchone()
-    assert row["bead_cwd"] is None
-
-
-def test_migrate_v12_to_v13_adds_description(tmp_path):
-    """The description migration adds the column via ALTER TABLE, and pre-existing
-    rows survive with their other values intact and a NULL description."""
-    path = tmp_path / "orchestrator.db"
-    conn = db._connect(path)
-    _build_old_db(conn, 12, drop_lines=("description",))
-    conn.execute(
-        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
-        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
-        "'active','now','now')"
+    assert (
+        conn.execute("SELECT status FROM worker_sessions WHERE id = 's1'").fetchone()[0] == "done"
     )
-    conn.commit()
-    conn.close()
-
-    conn2 = db._connect(path)
-    db.migrate(conn2)
-    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
-    cols = {r["name"] for r in conn2.execute("PRAGMA table_info(work_items)")}
-    assert "description" in cols
-    row = conn2.execute("SELECT title, description FROM work_items WHERE id='w1'").fetchone()
-    assert row["title"] == "t"
-    assert row["description"] is None
-
-
-def test_migrate_v13_to_v14_adds_branch(tmp_path):
-    """The branch migration adds the column via ALTER TABLE; a pre-existing row
-    survives with a NULL branch, which is what keeps in-flight items on the
-    `kraft/<id>` branch their worktree is already checked out on."""
-    path = tmp_path / "orchestrator.db"
-    conn = db._connect(path)
-    _build_old_db(conn, 13)
-    conn.execute(
-        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
-        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
-        "'active','now','now')"
-    )
-    conn.commit()
-    conn.close()
-
-    conn2 = db._connect(path)
-    db.migrate(conn2)
-    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
-    cols = {r["name"] for r in conn2.execute("PRAGMA table_info(work_items)")}
-    assert "branch" in cols
-    row = conn2.execute("SELECT title, branch FROM work_items WHERE id='w1'").fetchone()
-    assert row["title"] == "t"
-    assert row["branch"] is None
-
-
-def test_migrate_v15_to_v16_adds_implements_beads(tmp_path):
-    """The `implements_beads` migration adds the column via ALTER TABLE; a
-    pre-existing row survives with it NULL, meaning "no sub-beads extracted"
-    (Kraft-p8q1)."""
-    path = tmp_path / "orchestrator.db"
-    conn = db._connect(path)
-    _build_old_db(conn, 15)
-    conn.execute(
-        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
-        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
-        "'active','now','now')"
-    )
-    conn.commit()
-    conn.close()
-
-    conn2 = db._connect(path)
-    db.migrate(conn2)
-    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
-    cols = {r["name"] for r in conn2.execute("PRAGMA table_info(work_items)")}
-    assert "implements_beads" in cols
-    row = conn2.execute("SELECT title, implements_beads FROM work_items WHERE id='w1'").fetchone()
-    assert row["title"] == "t"
-    assert row["implements_beads"] is None
+    row = conn.execute(f"SELECT {', '.join(columns)} FROM {table}").fetchone()
+    assert [row[c] for c in columns] == [old_row_value] * len(columns)
 
 
 def test_migrate_v16_to_v17_drops_chain_template_not_null(tmp_path):
@@ -978,11 +766,7 @@ def test_migrate_v16_to_v17_drops_chain_template_not_null(tmp_path):
         16,
         replace=(("chain_template   TEXT,", "chain_template   TEXT NOT NULL,"),),
     )
-    conn.execute(
-        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
-        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
-        "'active','now','now')"
-    )
+    _insert_item(conn)
     conn.commit()
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute(
@@ -1011,57 +795,6 @@ def test_migrate_v16_to_v17_drops_chain_template_not_null(tmp_path):
     assert row2[0] is None
 
 
-def test_fresh_schema_has_description(tmp_path):
-    """SCHEMA_SQL and the migration path must agree — a fresh install and an
-    upgraded one are the same database."""
-    conn = db._connect(tmp_path / "fresh.db")
-    db.migrate(conn)
-    cols = {r["name"] for r in conn.execute("PRAGMA table_info(work_items)")}
-    assert "description" in cols
-
-
-def test_migration_19_adds_escalation_session_id_column(tmp_path):
-    conn = db._connect(tmp_path / "s.db")
-    db.migrate(conn)
-    conn.execute("PRAGMA user_version = 19")
-    conn.execute("ALTER TABLE work_items DROP COLUMN escalation_session_id")
-    # Drop the columns every migration since v19 adds, so replaying those
-    # migrations from a v19 snapshot doesn't collide with a fresh schema's
-    # CREATE TABLE (which already carries every column current code knows).
-    conn.execute("ALTER TABLE work_items DROP COLUMN auto_gate")
-    conn.execute("ALTER TABLE work_items DROP COLUMN agent_overrides")
-    db.migrate(conn)
-    cols = {r["name"] for r in conn.execute("PRAGMA table_info(work_items)")}
-    assert "escalation_session_id" in cols
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
-
-
-def test_migration_20_adds_auto_gate_column(tmp_path):
-    conn = db._connect(tmp_path / "s.db")
-    db.migrate(conn)
-    conn.execute("PRAGMA user_version = 20")
-    conn.execute("ALTER TABLE work_items DROP COLUMN auto_gate")
-    # v20 replays v21 too, so its column has to come off the fresh schema as well.
-    conn.execute("ALTER TABLE work_items DROP COLUMN agent_overrides")
-    db.migrate(conn)
-    row = conn.execute("SELECT auto_gate FROM work_items LIMIT 0").fetchone()
-    assert row is None  # empty table; the column existing is what matters
-    cols = {r["name"] for r in conn.execute("PRAGMA table_info(work_items)")}
-    assert "auto_gate" in cols
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
-
-
-def test_migration_21_adds_agent_overrides_column(tmp_path):
-    conn = db._connect(tmp_path / "s.db")
-    db.migrate(conn)
-    conn.execute("PRAGMA user_version = 21")
-    conn.execute("ALTER TABLE work_items DROP COLUMN agent_overrides")
-    db.migrate(conn)
-    cols = {r["name"] for r in conn.execute("PRAGMA table_info(work_items)")}
-    assert "agent_overrides" in cols
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
-
-
 def test_migration_14_backfills_worker_session_attempts(tmp_path):
     """Every row ever written carried the literal attempt = 1 (Kraft-kq8m), so
     fixing the INSERT alone leaves the observed items wrong for the life of the
@@ -1070,11 +803,7 @@ def test_migration_14_backfills_worker_session_attempts(tmp_path):
     path = tmp_path / "orchestrator.db"
     conn = db._connect(path)
     _build_old_db(conn, 13)
-    conn.execute(
-        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
-        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
-        "'active','now','now')"
-    )
+    _insert_item(conn)
     for sid, hook, created in [
         ("s1", "on.ci.poll", "2026-01-01T00:00:00"),
         ("s2", "on.ci.poll", "2026-01-01T00:00:01"),
@@ -1110,11 +839,7 @@ def test_migration_29_clears_the_unreliable_model_column(tmp_path):
     conn = db._connect(path)
     _build_old_db(conn, 29)
     conn.execute("PRAGMA user_version = 29")
-    conn.execute(
-        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
-        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
-        "'active','now','now')"
-    )
+    _insert_item(conn)
     conn.execute(
         "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, log_path, "
         "result_path, status, created_at, model, cost_usd) VALUES "
@@ -1159,16 +884,8 @@ def test_migrate_v16_to_v17_rebuilds_for_rate_limited(tmp_path):
             ),
         ),
     )
-    conn.execute(
-        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
-        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
-        "'active','now','now')"
-    )
-    conn.execute(
-        "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, log_path, "
-        "result_path, status, created_at) VALUES ('s1', 'w1', 'verify', 'on.test.run', "
-        "'/l', '/r', 'pending', 'now')"
-    )
+    _insert_item(conn)
+    _insert_session(conn)
     conn.commit()
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute("UPDATE work_items SET status = 'rate_limited' WHERE id = 'w1'")
@@ -1192,75 +909,6 @@ def test_migrate_v16_to_v17_rebuilds_for_rate_limited(tmp_path):
     assert conn2.execute("PRAGMA foreign_key_check").fetchall() == []
     index_names = {r[0] for r in conn2.execute("SELECT name FROM sqlite_master WHERE type='index'")}
     assert "idx_worker_sessions_status" in index_names
-
-
-def test_fresh_schema_has_retry_at(tmp_path):
-    """SCHEMA_SQL and the migration path must agree — a fresh install and an
-    upgraded one are the same database."""
-    conn = db._connect(tmp_path / "fresh.db")
-    db.migrate(conn)
-    cols = {r["name"] for r in conn.execute("PRAGMA table_info(work_items)")}
-    assert "retry_at" in cols
-    conn.execute(
-        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
-        "status, created_at, updated_at) VALUES ('w1','t','/r','quick-task','{}',"
-        "'rate_limited','now','now')"
-    )
-
-
-def test_migrating_v13_adds_the_branch_column(tmp_path):
-    conn = db._connect(tmp_path / "orchestrator.db")
-    db.migrate(conn)
-    conn.execute("PRAGMA user_version = 13")
-    conn.execute("ALTER TABLE work_items DROP COLUMN branch")
-    # Replaying from v13 re-applies every later step too, including the
-    # implements_beads ALTER (Kraft-p8q1) and v18's CREATE TABLE
-    # work_item_repos -- drop both as well, or those steps collide with what
-    # the earlier full migrate() already added.
-    conn.execute("ALTER TABLE work_items DROP COLUMN implements_beads")
-    conn.execute("DROP TABLE work_item_repos")
-
-    db.migrate(conn)
-
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(work_items)").fetchall()}
-    assert "branch" in cols
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
-
-
-def test_config_error_is_an_allowed_session_status(tmp_path):
-    """The CHECK constraint has to know the status before the adapter can write
-    it — otherwise a missing binary turns a bad-config stop into an
-    IntegrityError three frames up (Kraft-579)."""
-    conn = db._connect(tmp_path / "orchestrator.db")
-    db.migrate(conn)
-    conn.execute(
-        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
-        "status, created_at, updated_at) VALUES ('w1', 't', '/r', 'quick-task', '{}', "
-        "'active', '2026-01-01', '2026-01-01')"
-    )
-    conn.execute(
-        "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, log_path, "
-        "result_path, status, created_at) VALUES ('s1', 'w1', 'verify', 'on.test.run', "
-        "'/l', '/r.json', 'config_error', '2026-01-01')"
-    )  # must not raise IntegrityError
-
-
-def test_worker_sessions_carries_a_head_sha(tmp_path):
-    """Kraft-lu2's column rides along in this migration's table rebuild rather
-    than paying for a second one."""
-    conn = db._connect(tmp_path / "orchestrator.db")
-    db.migrate(conn)
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(worker_sessions)").fetchall()}
-    assert "head_sha" in cols
-
-
-def test_worker_sessions_carries_a_command(tmp_path):
-    """Kraft-s7c04.35's column: the exact command a subprocess session ran,
-    not the registry binding's default."""
-    conn = db._connect(tmp_path / "orchestrator.db")
-    db.migrate(conn)
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(worker_sessions)").fetchall()}
-    assert "command" in cols
 
 
 def test_migrate_v33_to_v34_renames_stored_task_progress_events(tmp_path):
