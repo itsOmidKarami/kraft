@@ -95,7 +95,7 @@ An agent-runtime provider SHALL own invocation, context delivery, supported
 runtime options, session resumption, skill loading, and normalized task
 results for its runtime.
 enforced-by: tests/executor/test_dispatch.py::test_each_task_kind_reaches_its_own_adapter, tests/executor/test_dispatch.py::test_an_agent_task_contract_precedes_its_skill_and_steering, tests/executor/test_dispatch.py::test_a_typed_agent_task_reports_the_providers_own_normalized_result, tests/adapters/test_agent.py::test_a_typed_agent_task_resolves_through_provider_declared_options
-origin: src/kraft/harness.py §build_argv -- five of the six mechanics are pinned above (invocation, context delivery, runtime options, skill loading, normalized results), each through a typed dispatch. **Session resumption is not**, and cannot be yet: a V1 `AgentTask` has no field that asks for a resumed provider session, so no chain dispatch reaches `build_argv`'s `resume` path. Its only caller is `kraft.escalate.dispatch`, whose own typed task arrives with the escalation controls (Task 7/8 of the template-schema-v1 plan); the provider-side spelling meanwhile is covered by tests/adapters/test_agent.py::test_the_provider_spells_session_resumption_for_an_agent_task, which is harness-level and deliberately not claimed as this requirement's evidence.
+origin: src/kraft/harness.py §build_argv -- five of the six mechanics are pinned above (invocation, context delivery, runtime options, skill loading, normalized results), each through a typed dispatch. **Session resumption is not**, and cannot be yet: a V1 `AgentTask` has no field that asks for a resumed provider session, so no chain dispatch reaches `build_argv`'s `resume` path. Its only caller is `kraft.escalate.dispatch`, whose launch is an ordinary typed `AgentTask` since Task 7a (`escalate.ESCALATION_TASK`) but which resumes its thread by its own session id rather than through any task field; the provider-side spelling meanwhile is covered by tests/adapters/test_agent.py::test_the_provider_spells_session_resumption_for_an_agent_task, which is harness-level and deliberately not claimed as this requirement's evidence.
 
 ## REQ provider-declares-harness-capabilities
 
@@ -130,11 +130,35 @@ enforced-by: tests/executor/test_dispatch.py::test_an_unavailable_selected_harne
 Ordinary work, recovery, fixing, judging, and escalation agent roles SHALL use
 ordinary agent-task harness and runtime configuration. The system SHALL NOT
 require special runtime fields for escalation or judging.
+enforced-by: tests/test_escalate.py::test_dispatch_resolves_its_agent_through_its_harness_profile, tests/test_escalate.py::test_an_escalation_on_an_unavailable_profile_launches_nothing, tests/executor/test_stuck_escalation.py::test_escalation_runs_only_after_recovery_and_the_fix_loop_and_retries_the_node, tests/executor/test_seeded_failure_walk.py::test_the_judge_launches_on_its_own_runtime_not_the_fixers
 
 ## REQ judge-runtime-is-independent-from-fixer-runtime
 
 A judge's selected harness and runtime options SHALL be independent from the
 fixing tasks it assesses.
+enforced-by: tests/executor/test_seeded_failure_walk.py::test_the_judge_launches_on_its_own_runtime_not_the_fixers
+
+## REQ review-package-is-delivered-to-a-task-that-declares-it
+
+An agent task that declares the `review_package` input SHALL be handed the
+change under review -- the whole branch on its first session, then only what
+changed since its previous session -- and a task that does not declare it
+SHALL NOT be.
+enforced-by: tests/executor/test_agent_inputs.py::test_the_review_package_reaches_only_a_task_that_declares_it[declared], tests/executor/test_agent_inputs.py::test_the_review_package_reaches_only_a_task_that_declares_it[undeclared]
+origin: src/kraft/templates/models.py §AgentInput -- declared on the task (`inputs: [review_package]`), not keyed on a task's name (Ruling 47). Delivered by `executor/dispatch.py` §dispatch_node through `prompts.review_package` and `adapters/agent.py`'s `$KRAFT_REVIEW_PACKAGE`; the seeded fix-loop judge is its first consumer.
+
+## REQ carried-findings-are-delivered-to-a-reviewing-task
+
+A reviewing agent task SHALL be shown the findings its previous round
+reported, each with its stable identity, so that it can report a reworded
+repeat as the same finding.
+origin: src/kraft/executor/prompts.py §carried_findings_note -- parked under V1: no `AgentTask` declaration asks for it yet, so no dispatch delivers it, and `findings.resolve_identity` records what its absence costs (Kraft-y406q). Unenforced until an input declaration and a consumer exist.
+
+## REQ continuity-note-is-delivered-to-a-resumed-reviewer
+
+A reviewing agent task on its second or later session SHALL be pointed at its
+own previous session's result and summary.
+origin: src/kraft/executor/prompts.py §previous_review_note -- parked under V1 with `carried_findings_note`, for the same reason (Kraft-y406q). Unenforced until an input declaration and a consumer exist.
 
 ## REQ resumed-escalation-preserves-original-runtime
 
@@ -445,132 +469,157 @@ origin: src/kraft/templates/models.py §trim_for_attachments -- both ends are de
 
 When a task-level recovery succeeds, the system SHALL retry only the failed
 task.
+enforced-by: tests/executor/test_recovery.py::test_a_task_recovery_retries_only_the_failed_task, tests/executor/test_recovery.py::test_a_task_recovery_is_told_the_failure_it_repairs
 
 ## REQ step-recovery-retries-the-entire-step
 
 When a step-level recovery succeeds, the system SHALL retry every task in the
 failed concurrent step and SHALL NOT rerun preceding successful steps.
+enforced-by: tests/executor/test_recovery.py::test_a_step_recovery_reruns_every_task_in_the_step_and_no_earlier_step, tests/executor/test_recovery.py::test_a_step_handler_reruns_a_task_its_own_handler_already_recovered
 
 ## REQ node-recovery-retries-the-entire-node
 
 When an execution-node recovery succeeds, the system SHALL retry that node
 from its first step.
+enforced-by: tests/executor/test_recovery.py::test_a_node_recovery_reruns_the_node_from_its_first_step
 
 ## REQ parallel-step-settles-before-recovery
 
 When one task in a concurrent step fails, the system SHALL allow already
 started sibling tasks to settle and SHALL NOT start a later step before
 recovery begins.
+enforced-by: tests/executor/test_recovery.py::test_a_concurrent_step_settles_before_recovery_begins, tests/executor/test_recovery.py::test_no_recovery_launches_while_a_sibling_in_the_step_stopped[paused-task], tests/executor/test_recovery.py::test_no_recovery_launches_while_a_sibling_in_the_step_stopped[paused-step], tests/executor/test_recovery.py::test_no_recovery_launches_while_a_sibling_in_the_step_stopped[paused-node], tests/executor/test_recovery.py::test_no_recovery_launches_while_a_sibling_in_the_step_stopped[budget-task], tests/executor/test_recovery.py::test_no_recovery_launches_while_a_sibling_in_the_step_stopped[budget-step], tests/executor/test_recovery.py::test_no_recovery_launches_while_a_sibling_in_the_step_stopped[budget-node], tests/executor/test_recovery.py::test_no_recovery_launches_while_a_sibling_in_the_step_stopped[rate_limited-task], tests/executor/test_recovery.py::test_no_recovery_launches_while_a_sibling_in_the_step_stopped[rate_limited-step], tests/executor/test_recovery.py::test_no_recovery_launches_while_a_sibling_in_the_step_stopped[rate_limited-node], tests/executor/test_recovery.py::test_no_recovery_launches_while_a_sibling_in_the_step_stopped[config_error-task], tests/executor/test_recovery.py::test_no_recovery_launches_while_a_sibling_in_the_step_stopped[config_error-step], tests/executor/test_recovery.py::test_no_recovery_launches_while_a_sibling_in_the_step_stopped[config_error-node], tests/executor/test_recovery.py::test_no_recovery_launches_while_a_sibling_in_the_step_stopped[waiting-task], tests/executor/test_recovery.py::test_no_recovery_launches_while_a_sibling_in_the_step_stopped[waiting-step], tests/executor/test_recovery.py::test_no_recovery_launches_while_a_sibling_in_the_step_stopped[waiting-node], tests/executor/test_recovery.py::test_no_recovery_launches_while_a_sibling_in_the_step_stopped[infra_stop-task], tests/executor/test_recovery.py::test_no_recovery_launches_while_a_sibling_in_the_step_stopped[infra_stop-step], tests/executor/test_recovery.py::test_no_recovery_launches_while_a_sibling_in_the_step_stopped[infra_stop-node], tests/executor/test_recovery.py::test_no_recovery_launches_while_a_sibling_in_the_step_stopped[base_moved-task], tests/executor/test_recovery.py::test_no_recovery_launches_while_a_sibling_in_the_step_stopped[base_moved-step], tests/executor/test_recovery.py::test_no_recovery_launches_while_a_sibling_in_the_step_stopped[base_moved-node], tests/executor/test_recovery.py::test_a_measure_without_a_spent_set_runs_no_handler
 
 ## REQ recovery-plan-supports-task-groups-or-steps
 
 A recovery plan SHALL define exactly one of a concurrent task group or ordered
 steps and SHALL NOT contain gates, nested recovery handlers, or a fix loop.
+enforced-by: tests/templates/test_failure_controls.py::test_a_handler_cannot_nest_inside_another_control[recovery-task], tests/templates/test_failure_controls.py::test_a_handler_cannot_nest_inside_another_control[recovery-step], tests/templates/test_failure_controls.py::test_a_handler_cannot_nest_inside_another_control[fix-loop-task], tests/templates/test_failure_controls.py::test_a_handler_cannot_nest_inside_another_control[judge], tests/templates/test_failure_controls.py::test_a_handler_cannot_nest_inside_another_control[escalation], tests/templates/test_failure_controls.py::test_a_handler_cannot_nest_inside_another_control[on-conflict], tests/templates/test_failure_controls.py::test_a_recovery_plan_is_one_shape_with_no_gate_or_fix_loop, tests/templates/test_models.py::test_recovery_plan_and_fix_loop_also_require_one_execution_shape
 
 ## REQ nearest-recovery-handler-wins
 
 For a task failure, the system SHALL select at most one recovery handler, in
 task, step, then execution-node precedence order.
+enforced-by: tests/executor/test_recovery.py::test_the_nearest_handler_wins_and_only_it_runs[task-wins], tests/executor/test_recovery.py::test_the_nearest_handler_wins_and_only_it_runs[step-wins], tests/executor/test_recovery.py::test_the_nearest_handler_wins_and_only_it_runs[node-only], tests/executor/test_recovery.py::test_a_stop_or_a_question_spends_no_recovery[paused], tests/executor/test_recovery.py::test_a_stop_or_a_question_spends_no_recovery[budget], tests/executor/test_recovery.py::test_a_stop_or_a_question_spends_no_recovery[rate_limited], tests/executor/test_recovery.py::test_a_stop_or_a_question_spends_no_recovery[needs_context]
 
 ## REQ recovery-tasks-run-after-a-concurrent-step-settles
 
 When several failed tasks in one concurrent step have task-level recovery
 handlers, the system SHALL run those recovery handlers only after that step has
 settled and SHALL run them sequentially.
+enforced-by: tests/executor/test_recovery.py::test_sibling_task_recoveries_run_one_at_a_time_after_the_step_settles
 
 ## REQ failed-recovery-enters-node-fix-loop-or-needs-human
 
 When a selected recovery handler does not restore its scope, the system SHALL
 enter the declaring execution node's fix loop when one exists, or otherwise
 stop for a human.
+enforced-by: tests/executor/test_recovery.py::test_a_recovery_that_does_not_take_enters_the_fix_loop_or_stops[fix-loop], tests/executor/test_recovery.py::test_a_recovery_that_does_not_take_enters_the_fix_loop_or_stops[no-fix-loop]
 
 ## REQ fix-loop-is-an-exec-node-control
 
 A fix loop SHALL be configured only on an execution node and SHALL name its
 fixing tasks explicitly.
+enforced-by: tests/templates/test_failure_controls.py::test_a_fix_loop_is_an_execution_node_control_naming_its_fixing_tasks
 
 ## REQ fix-loop-supports-one-ordered-repair-shape
 
 A fix loop SHALL define exactly one concurrent task group or ordered steps.
+enforced-by: tests/templates/test_models.py::test_recovery_plan_and_fix_loop_also_require_one_execution_shape, tests/templates/test_models.py::test_a_fix_loop_tasks_group_resolves_to_a_main_step_under_its_container, tests/executor/test_fix_loop_outcomes.py::test_a_failed_sync_step_stops_naming_it_without_spending_an_attempt
 
 ## REQ fix-loop-remeasures-the-whole-node
 
 After each successful fix-loop attempt, the system SHALL rerun the execution
 node from its first step before deciding whether another attempt is needed.
+enforced-by: tests/executor/test_walk.py::test_a_fix_loop_attempt_remeasures_the_node_from_its_first_step
 
 ## REQ fix-loop-is-bounded-and-detects-stall
 
 A fix loop SHALL enforce its effective attempt and duration limits and SHALL
 stop for a human when the loop is exhausted or detects that it is not making
 progress.
+enforced-by: tests/test_fix_loop.py::test_fix_loop_cap_breach, tests/test_fix_loop.py::test_fix_loop_wall_clock_breach, tests/test_fix_loop_memory.py::test_a_reworded_repeat_is_recognised_as_the_same_finding, tests/skills/test_fix_loop_judge.py::test_stuck_fingerprint_found_once_it_survives_enough_fixes, tests/executor/test_seeded_failure_walk.py::test_a_failing_item_walks_recovery_then_the_fix_loop_then_escalation, tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[rate_limited-rate_limited-rate_limited], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[waiting-waiting-waiting], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[infra_stop-needs_human-needs_human], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[config_error-needs_human-needs_human], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[paused-paused-active], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_ran_and_failed_is_a_spent_attempt, tests/executor/test_fix_loop_outcomes.py::test_a_refunded_cycle_does_not_read_as_no_progress_on_re_entry
 
 ## REQ fix-loop-judge-is-optional
 
 A fix loop MAY declare a judge. Without a judge, the system SHALL repeat
 measurement and fixing until the node is clean or the loop reaches another
 stopping condition.
+enforced-by: tests/test_fix_loop.py::test_fix_loop_succeeds_first_cycle, tests/skills/test_fix_loop_judge.py::test_judge_verdict_fails_open_when_the_hook_is_not_registered
 
 ## REQ fix-loop-judge-runs-after-the-first-attempt
 
 When configured, a fix-loop judge SHALL assess a measured result only after at
 least one fixing attempt has run.
+enforced-by: tests/skills/test_fix_loop_judge.py::test_round_one_fixes_freely_no_judge_call, tests/skills/test_fix_loop_judge.py::test_retry_fixes_freely_no_judge_call_on_the_first_post_retry_cycle
 
 ## REQ fix-loop-judge-has-three-decisions
 
 A fix-loop judge SHALL decide whether to continue fixing, accept a clean
 execution result, or stop for a human.
+enforced-by: tests/skills/test_fix_loop_judge.py::test_judge_continue_behaves_like_no_judge_present, tests/skills/test_fix_loop_judge.py::test_judge_stop_needs_human_preempts_the_cap, tests/skills/test_fix_loop_judge.py::test_judge_stop_downgrade_exits_the_loop_clean, tests/skills/test_fix_loop_judge.py::test_judge_stop_downgrade_does_not_downgrade_a_failing_task, tests/executor/test_agent_inputs.py::test_the_seeded_fix_loop_judge_declares_the_package_and_its_method
 
 ## REQ fix-loop-judge-cannot-override-limits
 
 A fix-loop judge SHALL NOT cause the system to exceed the loop's effective
 attempt or duration limits.
+enforced-by: tests/skills/test_fix_loop_judge.py::test_judge_continue_behaves_like_no_judge_present
 
 ## REQ invalid-judge-result-does-not-block-the-loop
 
 When a fix-loop judge cannot provide a valid decision, the system SHALL
 continue under the loop's ordinary limits and stall detection.
+enforced-by: tests/skills/test_fix_loop_judge.py::test_judge_result_resolution[done-STOP EVERYTHING-continue], tests/skills/test_fix_loop_judge.py::test_judge_result_resolution[done-None-continue], tests/skills/test_fix_loop_judge.py::test_judge_result_resolution[failed-stop_needs_human-continue], tests/skills/test_fix_loop_judge.py::test_judge_result_resolution[needs_context-continue-continue], tests/skills/test_fix_loop_judge.py::test_judge_dispatch_failure_falls_open_to_continue
 
 ## REQ stuck-escalation-is-an-exec-node-control
 
 An execution node MAY declare a bounded escalation task that runs only after
 its recovery and fix-loop controls cannot advance the node.
+enforced-by: tests/executor/test_stuck_escalation.py::test_escalation_runs_only_after_recovery_and_the_fix_loop_and_retries_the_node, tests/executor/test_stuck_escalation.py::test_escalation_is_bounded_per_node, tests/executor/test_stuck_escalation.py::test_a_stop_the_controls_did_not_reach_is_not_escalated[needs_context], tests/executor/test_stuck_escalation.py::test_a_stop_the_controls_did_not_reach_is_not_escalated[config_error]
 
 ## REQ successful-stuck-escalation-retries-the-node
 
 When a stuck escalation succeeds, the system SHALL retry that execution node
 from its first step.
+enforced-by: tests/executor/test_stuck_escalation.py::test_escalation_runs_only_after_recovery_and_the_fix_loop_and_retries_the_node
 
 ## REQ failed-or-questioning-stuck-escalation-needs-human
 
 When a stuck escalation fails or asks a question, the system SHALL leave the
 work item for a human.
+enforced-by: tests/executor/test_stuck_escalation.py::test_a_failed_or_questioning_escalation_leaves_the_item_for_a_human[failed], tests/executor/test_stuck_escalation.py::test_a_failed_or_questioning_escalation_leaves_the_item_for_a_human[needs_context], tests/executor/test_stuck_escalation.py::test_the_generic_auto_escalation_does_not_follow_a_declared_one
 
 ## REQ base-change-restarts-a-declared-chain-span
 
 An execution node MAY declare `on_base_changed.restart_from` to restart the
 chain at an earlier execution node when its work changes the worktree base.
+enforced-by: tests/executor/test_base_change.py::test_a_moved_base_restarts_the_declared_span_and_spends_no_attempt, tests/executor/test_base_change.py::test_a_base_moved_stop_skips_the_nodes_later_steps_until_the_restart[loopless], tests/executor/test_base_change.py::test_a_base_moved_stop_skips_the_nodes_later_steps_until_the_restart[fix-loop], tests/executor/test_base_change.py::test_no_movement_and_no_declaration_mean_no_restart, tests/executor/test_base_change.py::test_restarts_are_bounded_by_the_nodes_own_counter
 
 ## REQ base-change-is-not-an-execution-failure
 
 When `on_base_changed` applies, the system SHALL restart the declared chain
 span without spending a recovery attempt or fix-loop attempt on that base
 change.
+enforced-by: tests/executor/test_base_change.py::test_a_moved_base_restarts_the_declared_span_and_spends_no_attempt, tests/executor/test_base_change.py::test_a_base_moved_stop_skips_the_nodes_later_steps_until_the_restart[loopless], tests/executor/test_base_change.py::test_a_base_moved_stop_skips_the_nodes_later_steps_until_the_restart[fix-loop], tests/executor/test_base_change.py::test_a_base_moved_stop_on_an_undeclared_node_completes_it_and_spends_nothing[loopless], tests/executor/test_base_change.py::test_a_base_moved_stop_on_an_undeclared_node_completes_it_and_spends_nothing[fix-loop]
 
 ## REQ base-change-restart-target-is-backward
 
 The system SHALL reject an `on_base_changed.restart_from` target that is
 missing, is not an execution node, or is later than the declaring node.
+enforced-by: tests/templates/test_failure_controls.py::test_a_restart_target_must_be_this_or_an_earlier_execution_node[missing], tests/templates/test_failure_controls.py::test_a_restart_target_must_be_this_or_an_earlier_execution_node[gate], tests/templates/test_failure_controls.py::test_a_restart_target_must_be_this_or_an_earlier_execution_node[later], tests/templates/test_failure_controls.py::test_a_backward_restart_target_is_accepted[earlier], tests/templates/test_failure_controls.py::test_a_backward_restart_target_is_accepted[itself]
 
 ## REQ rebase-conflict-requires-explicit-handler
 
 The system SHALL attempt automatic rebase-conflict resolution only when the
 relevant execution node's `on_base_changed` configuration declares an explicit
 `on_conflict` handler.
+enforced-by: tests/executor/test_base_change.py::test_a_conflict_without_an_explicit_handler_is_an_ordinary_failure, tests/executor/test_base_change.py::test_a_conflict_handler_that_rebases_restarts_the_declared_span
 
 ## REQ resolved-conflict-restarts-from-base-change-target
 
 When an explicit conflict handler resolves a conflict and changes the worktree
 base, the system SHALL apply that node's `on_base_changed` restart behaviour.
+enforced-by: tests/executor/test_base_change.py::test_a_conflict_handler_that_rebases_restarts_the_declared_span, tests/executor/test_base_change.py::test_a_conflict_handler_that_did_not_resolve_it_stops_for_a_human[did-not-rebase], tests/executor/test_base_change.py::test_a_conflict_handler_that_did_not_resolve_it_stops_for_a_human[failed], tests/executor/test_base_change.py::test_a_conflict_handler_that_did_not_resolve_it_stops_for_a_human[asked]
 
 ## REQ policy-is-layered-by-execution-scope
 

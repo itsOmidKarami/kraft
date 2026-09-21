@@ -205,6 +205,8 @@ tasks:
     harness: claude_review
     effort: high
     prompt: Decide whether another repair attempt is justified.
+    skill: kraft:fix-loop-judge
+    inputs: [review_package]
 
   open_draft_mr:
     kind: forge
@@ -311,6 +313,7 @@ nodes:
           tasks:
             - id: repair_feedback
               extends: repair_mr_feedback
+              skill: kraft:mr-checks-repair
         - id: sync
           tasks:
             - id: sync_mr

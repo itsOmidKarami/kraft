@@ -450,12 +450,8 @@ def build_context(
     hook_point: str,
     session_id: str,
     artifact: str | None = None,
-    #: PARKED under Template Schema V1: nothing passes this. A V1 chain has no
-    #: way to say "this task reviews the change" (the `inputs:` channel went
-    #: with the hook registry), so `executor.prompts.review_package` has no
-    #: caller -- see its own `REVIEW_HOOKS` note. Task 7 of the
-    #: template-schema-v1 plan rewires it through an `AgentTask` input
-    #: declaration; the parameter and the paragraph below stay for that.
+    #: The path `executor.prompts.review_package` wrote, for a task declaring
+    #: `inputs: [review_package]` (`AgentTask.inputs`); None for every other.
     review_package: str | None = None,
     method_text: str | None = None,
     steering_texts: tuple[str, ...] = (),

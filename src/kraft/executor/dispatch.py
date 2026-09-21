@@ -28,6 +28,7 @@ from kraft.executor.context import (
     BASE_MOVED,
     BUDGET,
     CONFIG_ERROR,
+    CONFLICT,
     INFRA_STOP,
     RATE_LIMITED,
     SCOPE,
@@ -37,6 +38,7 @@ from kraft.executor.context import (
 )
 from kraft.store import _now as _now
 from kraft.templates.models import (
+    AgentInput,
     AgentTask,
     BuiltinTask,
     ExecutionMode,
@@ -467,6 +469,11 @@ async def dispatch_node(
             orig_repo=Path(work_item_row["repo"]),
             branch=store.branch_for(work_item_row),
             title=work_item_row["title"],
+            # A node that declares `on_base_changed` restarts its span when a
+            # rebase moves the base, so the forge may report the move instead
+            # of re-verifying the rebased head itself (`merge`'s conflict
+            # rebase leans on this).
+            has_rebase_bounce=getattr(node.node, "on_base_changed", None) is not None,
             **poll,
             **common,
         )
@@ -556,6 +563,13 @@ async def dispatch_node(
         # to stop with `needs_context` instead. A steering selection the
         # snapshot cannot supply stops the same way rather than run unsteered.
         return await _config_error(db, run_dirs, common, f"{task.path}: {exc}\n")
+    # Delivered only to a task that declares it (`AgentTask.inputs`, Ruling 47):
+    # the change under review, written out for this session.
+    package = (
+        prompts.review_package(db, run_dirs, work_item_row["id"], worktree, task.path, session_id)
+        if AgentInput.REVIEW_PACKAGE in t.inputs
+        else None
+    )
     try:
         status = await _agent.run_agent_task(
             db,
@@ -582,6 +596,7 @@ async def dispatch_node(
             repo_path=work_item_row["repo"],
             cwd=worktree,
             repo_entry=launch.repo_entry if launch else None,
+            review_package=package,
             **common,
         )
     except _agent.LaunchRefused as exc:
@@ -647,6 +662,7 @@ async def measure_node(
     budget: _policy.Budget = _policy.NO_BUDGET,
     loop_severities: frozenset[str] = _policy.DEFAULT_LOOP_SEVERITIES,
     start_step: int = 0,
+    spent: set[str] | None = None,
 ) -> tuple[str, list[ResolvedTask], list[BaseException]]:
     """Run `steps` (the node's own, by default) and report one verdict.
 
@@ -654,6 +670,19 @@ async def measure_node(
     loop are the same ordered-steps walk over a different group of steps from
     the same node, so `walk` hands its own group in rather than this function
     growing a second branch for each.
+
+    `spent` arms task- and step-level recovery for the node's own steps
+    (`nearest-recovery-handler-wins`): once a step has settled
+    (`parallel-step-settles-before-recovery`), each failed task's nearest
+    handler below the node runs -- task handlers one at a time
+    (`recovery-tasks-run-after-a-concurrent-step-settles`) and each followed by
+    a retry of that task alone (`task-recovery-retries-only-the-task`), then
+    the step's handler for the failed tasks that declare none, followed by a
+    retry of the whole step (`step-recovery-retries-the-entire-step`). Each
+    handler's path goes into `spent`, so it runs at most once for as long as
+    the caller keeps the set -- `walk.walk_node` keeps one per entry into the
+    node. A node-level handler is `walk`'s, not this function's. `None`, as
+    for a recovery plan or a fix loop, means no handler here runs at all.
     """
     groups = node.steps if steps is None else steps
     # Only the node's own steps are the node's progress. A recovery plan or a
@@ -673,29 +702,25 @@ async def measure_node(
     def _head() -> str | None:
         return _config.git_read(Path(worktree), "rev-parse", "HEAD") if worktree else None
 
-    async def _measure(task: ResolvedTask) -> str:
+    async def _measure(task: ResolvedTask, *, retry: bool = False) -> str:
         # Kraft-gl9d: a crash/resume re-entry into this same (node, round) must
         # not re-spend an agent session on a task whose session already reached
         # 'done' against the worktree as it stands right now.
         head_sha = _head()
         # A null head_sha is never reusable (`reusable_session` itself would
         # say so) -- skip the read entirely rather than asking a test double
-        # that has no worktree, and thus no HEAD, to answer it.
-        #
-        # Nor is a dispatch under `instruction_override`: that is the fix
-        # loop's repair, told this cycle's findings (and any steer). A done
-        # session at the same round and head answered a *different*
-        # instruction -- after a `/retry` clears the loop counter the round
-        # numbers restart, so a noop fix from before the retry would be
-        # "reused" and the human's steer never reach an agent. The legacy walk
-        # dispatched the fix directly and never asked this question.
+        # that has no worktree, and thus no HEAD, to answer it. Nor is a
+        # recovery's retry: it exists to run the task again, and a sibling's
+        # `done` from the settled step is exactly what it must not stand in for.
+        # Whether a session from before a `/retry` is stale is
+        # `reusable_session`'s own call (Kraft-znsvg), for every caller alike.
         reused = (
             db.read(
                 lambda c: store.reusable_session(
                     c, work_item_id, node.id, task.path, round, head_sha
                 )
             )
-            if head_sha is not None and instruction_override is None
+            if head_sha is not None and not retry
             else None
         )
         if reused is not None:
@@ -722,6 +747,77 @@ async def measure_node(
     # step that stops the node leaves `results` shorter than the task list, and
     # `tasks[i]` would then name the wrong task in `failed` -- silently, into
     # the fix loop and the on_failure repair.
+    async def _settle(tasks, *, retry: bool = False) -> list:
+        results = await asyncio.gather(
+            *(_measure(t, retry=retry) for t in tasks), return_exceptions=True
+        )
+        # An `AssertionError` is Kraft's own broken invariant (and, under
+        # pytest, the real-agent guard), never evidence about the code a task
+        # measured -- so it is not a failed task for a fix loop to spend paid
+        # cycles on. It propagates, once every co-task has settled: the daemon's
+        # `deps` crash handler stops the item naming it, and a test fails
+        # (Kraft-cpotk).
+        for r in results:
+            if isinstance(r, AssertionError):
+                raise r
+        return list(results)
+
+    async def _handle(handler, scope: str, failed: list[ResolvedTask]):
+        if scope == "step":
+            note = prompts.failure_note(node, [t.task.id for t in failed])
+        else:
+            session = _latest_session(db, work_item_id, node, failed[0])
+            status = session["status"] if session is not None else "failed"
+            note = prompts.task_failure_note(failed[0].task.id, status, session)
+        return await run_recovery(
+            db,
+            run_dirs,
+            work_item_id,
+            node,
+            row,
+            worktree,
+            handler=handler,
+            scope=scope,
+            failed=failed,
+            note=note,
+            steer=steer,
+            launch=launch,
+            budget=budget,
+            measured_round=round,
+            round=round,
+            loop_severities=loop_severities,
+        )
+
+    async def _recover(step: ResolvedStep, results: list) -> tuple[list, tuple | None]:
+        """`results` after this step's own handlers ran, or the handler's own
+        stop when one could not finish (a pause, a config error, a rate limit
+        ...): that is the verdict, not the task failure it was answering."""
+        if spent is None or any(_is_stop(r) for r in results):
+            return results, None
+        status = {t.path: r for t, r in zip(step.tasks, results, strict=True)}
+        failed = [t for t in step.tasks if _recoverable(status[t.path], node)]
+        if not failed:
+            return results, None
+        for task in failed:
+            if not task.on_failure or task.path in spent:
+                continue
+            spent.add(task.path)
+            verdict, h_failed, h_excs = await _handle(task.on_failure, "task", [task])
+            if verdict == "ok":
+                (status[task.path],) = await _settle([task], retry=True)
+            elif verdict != "failed":
+                return results, (verdict, h_failed, h_excs)
+        rest = [t for t in failed if not t.on_failure]
+        if rest and step.on_failure and step.path not in spent:
+            spent.add(step.path)
+            verdict, h_failed, h_excs = await _handle(step.on_failure, "step", rest)
+            if verdict == "ok":
+                # Every task, a task-recovered one too (step-recovery-retries-the-entire-step).
+                return await _settle(step.tasks, retry=True), None
+            if verdict != "failed":
+                return results, (verdict, h_failed, h_excs)
+        return [status[t.path] for t in step.tasks], None
+
     outcomes: list[tuple[ResolvedTask, object]] = []
     for index, step in enumerate(groups):
         # A resumed node skips the steps before `start_step` -- they already
@@ -732,16 +828,11 @@ async def measure_node(
             # Recorded before the step runs, not after, so a crash mid-step
             # resumes at that step rather than past it.
             await db.write(lambda c, i=index: store.set_current_step(c, work_item_id, i))
-        results = await asyncio.gather(*(_measure(t) for t in step.tasks), return_exceptions=True)
-        # An `AssertionError` is Kraft's own broken invariant (and, under
-        # pytest, the real-agent guard), never evidence about the code a task
-        # measured -- so it is not a failed task for a fix loop to spend paid
-        # cycles on. It propagates, once every co-task has settled: the daemon's
-        # `deps` crash handler stops the item naming it, and a test fails
-        # (Kraft-cpotk).
-        for r in results:
-            if isinstance(r, AssertionError):
-                raise r
+        results = await _settle(step.tasks)
+        if own:
+            results, stopped = await _recover(step, results)
+            if stopped is not None:
+                return stopped
         outcomes.extend(zip(step.tasks, results, strict=True))
         # Anything but a clean pass stops the node: a later step exists
         # precisely because it must not run against an unsettled earlier one.
@@ -771,6 +862,16 @@ async def measure_node(
     # on_failure repair. The node stopped on purpose.
     if any(r == BASE_MOVED for r in results):
         return BASE_MOVED, [], []
+    # A rebase conflict, in a node that declares the handler for one
+    # (`rebase-conflict-requires-explicit-handler`): that handler, not a
+    # recovery or a fix cycle, answers it. Without one it is a task failure
+    # like any other, below.
+    if own and node.on_conflict:
+        conflicted = [
+            t for t, r in outcomes if r == CONFLICT or isinstance(r, _builtins.RebaseConflict)
+        ]
+        if conflicted:
+            return CONFLICT, conflicted, [r for r in results if isinstance(r, BaseException)]
     # Logged before the BUDGET rung returns: a co-task can raise in the same node
     # as a budget-refused agent, and that traceback is the only record of it.
     excs = [r for r in results if isinstance(r, BaseException)]
@@ -797,6 +898,109 @@ async def measure_node(
 #: A task in one of these states failed outright. `measure_node` fails these
 #: and, closed, any status it does not recognize too.
 _FAILING_STATUSES = tuple(s for s, tier in SCOPE.items() if tier == "task")
+
+#: Every status that stops a node rather than failing it (`context.SCOPE`'s
+#: `stop` and `chain` tiers). None of them is evidence about the code, so none
+#: of them may spend a recovery.
+_STOPS = frozenset(s for s, tier in SCOPE.items() if tier in ("stop", "chain"))
+
+
+def _is_stop(result: object) -> bool:
+    return not isinstance(result, BaseException) and result in _STOPS
+
+
+def _recoverable(result: object, node: ResolvedNode) -> bool:
+    """Whether a task's result is a failure a recovery handler answers.
+
+    Not a stop (`_STOPS`), not a pass, and not `needs_context`: a question an
+    agent asked is addressed to a human, and no repair task can answer it
+    (Kraft-rv6i). A rebase `conflict` belongs to the node's explicit conflict
+    handler when it declares one (`rebase-conflict-requires-explicit-
+    handler`), so no recovery handler spends itself on it first."""
+    if isinstance(result, BaseException) and not isinstance(result, _builtins.RebaseConflict):
+        return True
+    if result in _ADVANCING or result in _STOPS or result == "needs_context":
+        return False
+    conflict = result == CONFLICT or isinstance(result, _builtins.RebaseConflict)
+    return not (conflict and node.on_conflict)
+
+
+def _latest_session(db, work_item_id: str, node: ResolvedNode, task: ResolvedTask):
+    return db.read(
+        lambda c: c.execute(
+            "SELECT * FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
+            "AND hook_point = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            (work_item_id, node.id, task.path),
+        ).fetchone()
+    )
+
+
+async def run_recovery(
+    db,
+    run_dirs,
+    work_item_id: str,
+    node: ResolvedNode,
+    row,
+    worktree,
+    *,
+    handler: tuple[ResolvedStep, ...],
+    scope: str,
+    failed: list[ResolvedTask],
+    note: str,
+    steer: Steer | None,
+    launch: LaunchContext | None,
+    budget: _policy.Budget,
+    measured_round: int,
+    round: int,
+    loop_severities: frozenset[str] = _policy.DEFAULT_LOOP_SEVERITIES,
+) -> tuple[str, list[ResolvedTask], list[BaseException]]:
+    """Run one recovery handler -- a task's, a step's, the node's, or the
+    node's conflict handler -- and report its own verdict. Retrying what it
+    recovered is the caller's, because only the caller knows the scope.
+
+    The handler is told what the orchestrator already knows (`note`, and the
+    findings the failing measurement left) so it does not rediscover it
+    (Kraft-s7c04.26). A person's own steer leads and keeps its own template;
+    Kraft's context is appended to it, never substituted for it.
+    """
+    await db.write(
+        lambda c: events.append(
+            c,
+            work_item_id,
+            "node_recovery_started",
+            {
+                "node_id": node.id,
+                "scope": scope,
+                "failed_tasks": [t.path for t in failed],
+                "tasks": [t.path for step in handler for t in step.tasks],
+            },
+        )
+    )
+    found, _reported = collect_findings(db, work_item_id, node, measured_round)
+    seeded = prompts.seeded_findings_note(found) if found else None
+    context = f"{note}\n\n{seeded}" if seeded else note
+    if steer is not None and steer:
+        # `.take()` because the incoming note is folded into the one replacing
+        # it -- leaving it undelivered here would deliver it twice
+        # (Kraft-s7c04.58 covers the two-hook case this single Steer cannot
+        # serve).
+        repair_steer = Steer(f"{steer.take()}\n\n{context}", source=steer.source)
+    else:
+        repair_steer = Steer(context, source="seeded")
+    return await measure_node(
+        db,
+        run_dirs,
+        work_item_id,
+        node,
+        row,
+        worktree,
+        steps=handler,
+        round=round,
+        steer=repair_steer,
+        launch=launch,
+        budget=budget,
+        loop_severities=loop_severities,
+    )
 
 
 def measured_tasks(
@@ -1058,10 +1262,17 @@ def last_measurement(
     """
     evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
     fix_seen = False
+    # A cycle that started and was refunded (`fix_cycle_refunded`, Kraft-jdkoq)
+    # never repaired anything, so it is not a fix having run.
+    refunded: set[int] = set()
     for e in reversed(evts):
-        if e["type"] == "fix_cycle_started" and e["payload"].get("node_id") == node_id:
+        if e["payload"].get("node_id") != node_id:
+            continue
+        if e["type"] == "fix_cycle_refunded":
+            refunded.add(e["payload"].get("cycle"))
+        elif e["type"] == "fix_cycle_started" and e["payload"].get("cycle") not in refunded:
             fix_seen = True
-        elif e["type"] == "findings_measured" and e["payload"].get("node_id") == node_id:
+        elif e["type"] == "findings_measured":
             return (
                 [_findings.from_payload(f) for f in e["payload"].get("findings", [])],
                 fix_seen,

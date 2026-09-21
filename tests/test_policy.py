@@ -208,26 +208,14 @@ def test_a_policy_file_with_invalid_bytes_is_bad_config_not_a_crash(tmp_path):
         policy.load_policy(p)
 
 
-def test_escalate_after_is_parsed_onto_the_cap(tmp_path):
-    """`escalate_after` is "how many cycles before a capability bump", the same
-    kind of per-loop decision as "how many cycles before stopping", so it lives
-    beside them (sub-project G spec §6)."""
+def test_a_loop_cap_refuses_the_retired_escalate_after(tmp_path):
+    """`escalate_after` bumped a legacy hook to its `escalate_model` after N fix
+    cycles. V1 has no such field on any task; a stuck node escalates through its
+    declared `escalation` task instead (`stuck-escalation-is-an-exec-node-
+    control`). A key that binds nothing is refused rather than silently kept."""
     p = tmp_path / "policy.yaml"
     p.write_text(
-        "loops:\n  verify_fix_loop: { attempts: 5, wall_clock_s: 60, escalate_after: 2 }\n"
-        "default: { attempts: 3, wall_clock_s: 60 }\n"
-    )
-    pol = policy.load_policy(p)
-    assert pol.loops["verify_fix_loop"].escalate_after == 2
-    # absent means no escalation, which is the pre-existing behaviour
-    assert pol.default.escalate_after is None
-
-
-@pytest.mark.parametrize("bad", ["0", "-1", "'2'", "true", "1.5"])
-def test_escalate_after_must_be_a_positive_int(tmp_path, bad):
-    p = tmp_path / "policy.yaml"
-    p.write_text(
-        f"loops:\n  verify_fix_loop: {{ attempts: 5, wall_clock_s: 60, escalate_after: {bad} }}\n"
+        "loops:\n  build.fix_loop: { attempts: 5, wall_clock_s: 60, escalate_after: 2 }\n"
         "default: { attempts: 3, wall_clock_s: 60 }\n"
     )
     with pytest.raises(policy.PolicyError, match="escalate_after"):

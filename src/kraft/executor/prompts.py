@@ -94,17 +94,31 @@ def seeded_findings_note(found: list[_findings.Finding]) -> str:
     return _SEEDED_FINDINGS_STEER.format(findings=format_findings(found, repeats=set()))
 
 
-def task_failure_note(task: str, status: str, session=None) -> str:
-    """**Parked, not live.** The task-level repair layer it fed was a per-task
-    `on_failure` in `registry.yaml`; V1 declares `on_failure` on the node only,
-    so `dispatch.measure_node` no longer has a per-task repair to narrate. Task 7
-    of the template-schema-v1 plan owns the recovery controls and decides whether
-    a task-scoped layer comes back (`task-recovery-retries-only-the-task`).
+def failure_note(node, failed: list[str]) -> str:
+    """What a step- or node-level recovery is told: the orchestrator already
+    knows it, and the repair would otherwise have to go and rediscover it
+    (Kraft-s7c04.26: on work item 6c712ea8 a repair agent spent 4 of its 16
+    tool calls hunting for a log it was told to read but given no path to).
 
-    What a binding-level repair is told about the task it repairs: which
-    task, how it ended, and where its own output is. Without it the repair
-    starts blind -- `on.ci.repair` reported that the `on.ci.poll` diagnosis
-    was absent from its prompt and from the item's events."""
+    The re-measure sentence is not decoration. A repair is believed only when
+    the tasks it repaired pass afterwards -- that has been the design since
+    Kraft-rv6i -- and an agent that does not know it will be checked has every
+    incentive to declare success.
+    """
+    which = ", ".join(failed) if failed else "the node"
+    return (
+        f"The failing task(s) in node {node.id}: {which}.\n"
+        f"After you finish, {which} will be re-measured and that result, not "
+        "your own report, decides whether this repair worked."
+    )
+
+
+def task_failure_note(task: str, status: str, session=None) -> str:
+    """What a task-level recovery (`TaskBase.on_failure`,
+    `task-recovery-retries-only-the-task`) is told about the task it repairs:
+    which task, how it ended, and where its own output is. Without it the
+    repair starts blind -- `on.ci.repair` reported that the `on.ci.poll`
+    diagnosis was absent from its prompt and from the item's events."""
     note = (
         f"The task {task} ended {status}. After you finish, {task} will be "
         "re-measured and that result, not your own report, decides whether this "
@@ -409,25 +423,14 @@ def scope_note(task: AgentTask, repo_entry: dict | None) -> str:
     return _SCOPE_NOTE.format(rows=rows)
 
 
-#: PARKED under Template Schema V1, with everything keyed on it: `review_package`,
-#: `_last_review_session`, `carried_findings_note`, `previous_review_note` and
-#: `fix_attempt_note` have no `src/` caller any more. A V1 task is identified by
-#: its canonical path, not by a hook name, and no task field says "this one
-#: reviews the change" -- so there is nothing left to key the delivery on. Task 7
-#: of the template-schema-v1 plan adds an explicit `AgentTask` input declaration
-#: and rewires them; they are kept intact for that, and `findings.
-#: resolve_identity` records what their absence costs meanwhile. Nothing below
-#: this line describes behaviour that currently happens.
-#:
-#: The hooks whose job is to judge a change rather than make one. They were the
-#: only ones handed a review package and the previous round's findings:
-#: everything else is working *in* the diff.
-#:
-#: `on.review.security.run` belongs here and was missing (Kraft-s7c04.2 review).
-#: It is a real agent hook -- `chain_review` adds it to `verify` whenever a plan
-#: touches auth, sessions, tokens, secrets or permission checks -- so leaving it
-#: out meant a security review was dispatched with no diff by any route at all.
-REVIEW_HOOKS = frozenset({"on.review.local.run", "on.review.mr.run", "on.review.security.run"})
+#: PARKED under Template Schema V1: `_last_review_session`'s other readers,
+#: `carried_findings_note`, `previous_review_note` and `fix_attempt_note`, have
+#: no `src/` caller. `review_package` is live again, delivered to an agent task
+#: that declares `inputs: [review_package]` (`AgentTask.inputs`, Ruling 47);
+#: carried findings and the continuity note have no declaration yet, and
+#: `findings.resolve_identity` records what their absence costs
+#: (`carried-findings-are-delivered-to-a-reviewing-task`,
+#: `continuity-note-is-delivered-to-a-resumed-reviewer`, both unenforced).
 
 
 #: What the reviewer said last round, handed back to it (Kraft-s7c04.1). The
@@ -458,11 +461,12 @@ def carried_findings_note(previous: list[_findings.Finding]) -> str:
     "" when there is no previous round, so a work item's first and most
     important review is byte-identical to what it is today.
 
-    **Parked, not live.** No `src/` caller under Template Schema V1: delivering the change
-    under review, and the previous round's findings, was keyed on three hook *names*
-    (`REVIEW_HOOKS`) and V1 has no name to key on. Task 7 of the template-schema-v1 plan
-    rebuilds this on an explicit `AgentTask` input declaration, which is why these are kept
-    rather than deleted. Do not read them as describing what runs today.
+    **Parked, not live.** No `src/` caller under Template Schema V1: delivering the
+    previous round's findings was keyed on legacy hook *names*, and V1 has no name to key
+    on. The change under review came back as a declared `AgentTask` input
+    (`inputs: [review_package]`); this has no declaration yet
+    (`carried-findings-are-delivered-to-a-reviewing-task`, unenforced), which is why it is
+    kept rather than deleted. Do not read it as describing what runs today.
     """
     if not previous:
         return ""
@@ -517,12 +521,12 @@ def _session_note(row, template: str, summary_template: str) -> str:
 
 
 def previous_review_note(row) -> str:
-    """**Parked: see `REVIEW_HOOKS`.**"""
+    """**Parked: see `carried_findings_note`.**"""
     return _session_note(row, _PREVIOUS_REVIEW, _PREVIOUS_REVIEW_SUMMARY)
 
 
 def fix_attempt_note(row) -> str:
-    """**Parked: see `REVIEW_HOOKS`.**"""
+    """**Parked: see `carried_findings_note`.**"""
     return _session_note(row, _FIX_ATTEMPT, _FIX_ATTEMPT_SUMMARY)
 
 
@@ -533,8 +537,8 @@ _REVIEWED_STATUS = ("done", "done_with_concerns")
 
 
 def _last_review_session(db, work_item_id: str, task_hook: str) -> sqlite3.Row | None:
-    """The previous *completed* session on this hook, or None (Kraft-s7c04.1).
-    **Parked: see `REVIEW_HOOKS`.**
+    """The previous *completed* session on this hook, or None (Kraft-s7c04.1):
+    where `review_package`'s range starts from a task's second session on.
 
     Its `head_sha` is the head that session was dispatched at.
 
@@ -574,12 +578,13 @@ def _last_review_session(db, work_item_id: str, task_hook: str) -> sqlite3.Row |
 def review_package(
     db, run_dirs, work_item_id: str, worktree, task_hook: str, session_id: str
 ) -> str | None:
-    """The change under review, written out for a reviewer, or None. **Parked:
-    see `REVIEW_HOOKS`.**
+    """The change under review, written out for the task at `task_hook`, or
+    None. `dispatch.dispatch_node` calls it for an agent task that declares
+    `inputs: [review_package]` and for no other.
 
-    None on every non-review hook, on an item with no `base_ref` (pre-migration
-    items and any template with no env_setup node), and on a git failure -- a
-    review with no diff is worse than one whose prompt never promised a file.
+    None on an item with no `base_ref` (pre-migration items), and on a git
+    failure -- a review with no diff is worse than one whose prompt never
+    promised a file.
 
     `base_ref` is read fresh rather than off the `work_items` row `run` opened
     with: `env_setup` stamps it during the chain's first node, so that row is
@@ -598,8 +603,6 @@ def review_package(
     which is noisy but never hides anything, and a bounce is exactly the case
     where a wider look is wanted (`rebase_bounce_to: verify` exists for it).
     """
-    if task_hook not in REVIEW_HOOKS:
-        return None
     row = db.read(
         lambda c: c.execute(
             "SELECT base_ref FROM work_items WHERE id = ?", (work_item_id,)
@@ -627,6 +630,27 @@ def previous_attempt_note(previous_fix) -> str:
     if previous_fix["session_summary_ref"]:
         note += _FIX_PREVIOUS_SUMMARY.format(summary_ref=previous_fix["session_summary_ref"])
     return note
+
+
+#: What a node's declared stuck escalation is told, after its own prompt
+#: (`stuck-escalation-is-an-exec-node-control`). The last paragraph is the
+#: contract `walk._escalate_stuck` acts on: a clean finish retries the node from
+#: its first step, and anything else leaves the item for a human.
+_STUCK_ESCALATION = (
+    "{prompt}\n\n"
+    "Node {node_id} of this work item is stuck: its recovery and its fix loop "
+    "could not advance it. Why it stopped:\n\n{reason}\n\n"
+    "Resolve what is blocking it if you can, and commit what you change. When "
+    "you finish cleanly, Kraft reruns node {node_id} from its first step. If you "
+    "cannot resolve it, report `failed`; if a person has to decide something, "
+    "report `needs_context` and ask in `question`. Either way the work item "
+    "then waits for a human.\n"
+)
+
+
+def stuck_escalation_instruction(task: ResolvedTask, node, reason: str) -> str:
+    prompt = getattr(task.task, "prompt", "")
+    return _STUCK_ESCALATION.format(prompt=prompt, node_id=node.id, reason=reason)
 
 
 def named_with_kind(task: ResolvedTask) -> str:

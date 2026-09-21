@@ -36,13 +36,27 @@ def bump_counter(
         "UPDATE retry_counters SET count = ?, updated_at = ? WHERE work_item_id = ? AND key = ?",
         (new_count, now, work_item_id, key),
     )
-    # `escalate_after` comes from the freshly-resolved cap, not the row: it is a
-    # routing hint for the next launch, not a limit the item was admitted under,
-    # so there is nothing to hold steady across an edited policy.yaml.
-    return (
-        new_count,
-        row["started_at"],
-        Cap(row["cap_attempts"], row["cap_wall_s"], escalate_after=cap.escalate_after),
+    return new_count, row["started_at"], Cap(row["cap_attempts"], row["cap_wall_s"])
+
+
+def refund_counter(conn: sqlite3.Connection, work_item_id: str, key: str) -> None:
+    """Give back the attempt the last `bump_counter` spent, for an attempt that
+    never became one (Kraft-jdkoq: a fix pass that was paused, rate limited or
+    could not run). A first attempt refunded leaves no row, so the next bump
+    starts the clock afresh exactly as if it had never fired."""
+    conn.execute(
+        "UPDATE retry_counters SET count = count - 1 WHERE work_item_id = ? AND key = ?",
+        (work_item_id, key),
+    )
+    conn.execute(
+        "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ? AND count <= 0",
+        (work_item_id, key),
+    )
+
+
+def delete_counter(conn: sqlite3.Connection, work_item_id: str, key: str) -> None:
+    conn.execute(
+        "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?", (work_item_id, key)
     )
 
 
@@ -52,12 +66,12 @@ def clear_loop_counters(
     """Delete the loop clocks a fresh pass over `node_id` must not inherit.
 
     `key` is the node's `fix_loop`, None for a node without one. The
-    `ci_wait:`/`ci_infra:` keys are built from `node_id` here rather than
-    threaded in, the same way `retry_after_cap` already does -- see its
-    docstring for why that duplication with `ci_wait.py` is contained
-    rather than spread.
+    `ci_wait:`/`ci_infra:` keys and the node's stuck-escalation bound
+    (`walk._escalation_key`) are built from `node_id` here rather than threaded
+    in, the same way `retry_after_cap` already does -- see its docstring for
+    why that duplication with `ci_wait.py` is contained rather than spread.
     """
-    for counter in (key, f"ci_wait:{node_id}", f"ci_infra:{node_id}"):
+    for counter in (key, f"ci_wait:{node_id}", f"ci_infra:{node_id}", f"{node_id}.escalation"):
         if counter is not None:
             conn.execute(
                 "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?",
@@ -137,11 +151,13 @@ def retry_after_cap(
             (work_item_id, gate_key),
         )
     # Item-wide, not node-scoped -- a human's `/retry` is the same explicit
-    # "give this a fresh budget" for the rebase-conflict resolver
-    # (Kraft-s7c04.23) that it already is for every other loop cap here.
+    # "give this a fresh budget" for every node's base-change restarts
+    # (`walk._restart_for_base_change`) that it already is for every other
+    # loop cap here. A restart span never clears these itself: that is what
+    # bounds a base that keeps moving.
     conn.execute(
-        "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?",
-        (work_item_id, "rebase_conflict"),
+        "DELETE FROM retry_counters WHERE work_item_id = ? AND key LIKE ?",
+        (work_item_id, "%.on_base_changed"),
     )
     # A stale pinned pipeline must not survive a manual retry any more than
     # the exhausted ci_wait/ci_infra counters above do (Kraft-ivh1).

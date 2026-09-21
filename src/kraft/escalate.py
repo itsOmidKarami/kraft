@@ -19,6 +19,7 @@ from kraft import events, store
 from kraft.adapters import agent as _agent
 from kraft.adapters.subprocess import result_path_for
 from kraft.executor import LaunchContext
+from kraft.templates.models import AgentTask, TaskKind
 
 #: Prepended to every turn's prompt, regenerated fresh each call rather than
 #: diffed against a prior turn -- the live state is always correct to hand
@@ -249,22 +250,43 @@ def session_status(db, session_id: str) -> str | None:
     return row["status"] if row else None
 
 
-#: Which harness an escalation turn runs on.
-#:
-#: Escalation is not a chain node: it has no `AgentTask`, so nothing in a
-#: template declares a harness for it the way every other V1 agent launch does.
-#: **Decided (Omid, fix round 3): leave it named here.** Giving it a real home
-#: needs the harness-*profile* mechanism wired first -- Ruling 104's work, still
-#: unwired, which is why `templates/harnesses.yaml` loads and validates while
-#: `executor/dispatch.py` resolves a task's `harness:` against installed harness
-#: *ids* and the seeded chain cannot dispatch an agent task at all. Inventing a
-#: `policy.yaml` key or a reserved library task now means revising it then, and
-#: an honest marker is worth more than a config surface we would take back.
-#:
-#: A constant rather than a literal so the next reader finds one place, and so a
-#: test fixture can see what to overlay (`tests/support/harness.seed_v1_library`
-#: writes a `claude` harness pointed at the fake agent for exactly this reason).
-_ESCALATION_HARNESS = "claude"
+#: The escalation role, as an ordinary agent task
+#: (`agent-roles-use-ordinary-agent-task-runtime-configuration`): its launch
+#: resolves `harness:` through `adapters.agent.harness_profile` like every other
+#: V1 agent launch, so the runtime is `harnesses.yaml`'s `claude_review` profile
+#: -- its executable and defaults -- and no field special to escalation exists.
+#: A `claude` profile because the turn is a resumable conversation: the thread
+#: id is read off the provider's own `system`/`init` line
+#: (`_extract_cli_session_id`). A disabled or missing profile stops the turn as
+#: a config error rather than substituting another
+#: (`unavailable-selected-harness-needs-human`).
+ESCALATION_TASK = AgentTask(
+    id="escalation",
+    kind=TaskKind.AGENT,
+    harness="claude_review",
+    prompt="Help resolve a stopped work item.",
+)
+
+
+async def _refused(db, run_dirs, *, session_id: str, row, log: str) -> str:
+    """An escalation turn that could not launch, recorded as its own session so
+    the stop names why (the same shape `dispatch._config_error` gives a chain
+    task)."""
+    from kraft import builtins as _builtins
+    from kraft.executor.context import CONFIG_ERROR
+
+    _, log_path, result_path = await _builtins.start_session(
+        db,
+        run_dirs,
+        session_id=session_id,
+        work_item_id=row["id"],
+        node_id=row["current_node_id"],
+        hook_point="escalation",
+        round=0,
+    )
+    return await _builtins.finish_session(
+        db, log_path, result_path, session_id=session_id, status=CONFIG_ERROR, log=log
+    )
 
 
 async def dispatch(
@@ -362,12 +384,22 @@ async def dispatch(
     # harness's own declared command when `command` is empty
     # (`adapters/agent.py`'s `command=command or None`), which is what every
     # other V1 agent launch already does.
-    inv = _agent.resolve_invocation(
-        {"harness": _ESCALATION_HARNESS},
-        launch.repo_entry,
-        launch.steering_dir,
-        skills_dir=launch.skills_dir,
-    )
+    try:
+        inv = _agent.resolve_agent_task(
+            ESCALATION_TASK,
+            launch.repo_entry,
+            launch.steering_dir,
+            skills_dir=launch.skills_dir,
+        )
+    except _agent.HarnessUnavailable as exc:
+        return await _refused(
+            db,
+            run_dirs,
+            session_id=session_id,
+            row=row,
+            log=f"escalation selects harness {ESCALATION_TASK.harness!r}, which is not "
+            f"available: {exc}\n",
+        )
     status = await _agent.run_agent_task(
         db,
         run_dirs,
@@ -378,6 +410,8 @@ async def dispatch(
         command=inv.command,
         harness=inv.harness,
         model=inv.model,
+        effort=inv.effort,
+        permission_mode=inv.permission_mode,
         deny_tools=inv.deny_tools,
         steering_texts=inv.steering_texts,
         sandbox=inv.sandbox,

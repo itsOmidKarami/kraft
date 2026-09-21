@@ -5,12 +5,10 @@ scenario(): ...` under `asyncio.run`) rather than editing that file or
 `tests/test_findings_loop.py`, both of which stay green and unedited.
 """
 
-import json
 import shlex
 import sys
 from pathlib import Path
 
-import pytest
 from support.chain_run import loop_policy, run_chain
 from support.harness import isolated_bd, v1_fix_loop_node, v1_seeded_chain
 
@@ -335,61 +333,3 @@ def test_previous_attempt_note_includes_the_summary_sentence_when_present():
 
 def test_previous_attempt_note_is_empty_with_no_previous_attempt():
     assert executor.previous_attempt_note(None) == ""
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="V1 fix-loop escalation is Task 7 (node.fix_loop / node.escalation); "
-    "legacy escalate_after is superseded",
-)
-async def test_a_fix_cycle_past_escalate_after_launches_with_escalate_model(
-    tmp_path, monkeypatch, database, run_dirs, repo
-):
-    """Spec §6: cycles at or below `escalate_after` use `model`, cycles above it
-    use `escalate_model`. Rounds 1-3 resume the same approach; a loop that
-    survives them usually needs a capability bump, not another identical try."""
-    argv_log = tmp_path / "argv.jsonl"
-    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")  # never patches calc.py, so it never converges
-    monkeypatch.setenv("KRAFT_FAKE_AGENT_ARGV_LOG", str(argv_log))
-    monkeypatch.setenv("KRAFT_FAKE_TESTRUN_COUNTER", str(tmp_path / "attempt.count"))
-    tracker = isolated_bd(tmp_path)
-
-    chain = _fixloop_template(tmp_path, fix_model="sonnet")
-
-    p = tmp_path / "policy.yaml"
-    p.write_text(
-        "loops:\n  verify.fix_loop: { attempts: 4, wall_clock_s: 3600, escalate_after: 2 }\n"
-        "default: { attempts: 4, wall_clock_s: 3600 }\n"
-        "auto_escalate_stuck: false\n"
-    )
-    pol = policy.load_policy(p)
-
-    wid = await executor.intake(
-        database,
-        run_dirs,
-        title="never fixed",
-        repo=str(repo),
-        chain=chain,
-        bd_cwd=str(tracker),
-        # A V1 task carries no `escalate_model`; the item's own node
-        # override is where one is set now.
-        node_overrides={"verify": {"escalate_model": "opus"}},
-    )
-    assert (
-        await executor.run(
-            database,
-            run_dirs,
-            work_item_id=wid,
-            registry=None,
-            bd_cwd=str(tracker),
-            policy=pol,
-        )
-        == "needs_human"  # the cap breaches; the models used on the way are the point
-    )
-
-    models = []
-    for line in argv_log.read_text().splitlines():
-        argv = json.loads(line)
-        models.append(argv[argv.index("--model") + 1] if "--model" in argv else None)
-    # cycles 1 and 2 are at or below the threshold, cycle 3 is past it
-    assert models[:3] == ["sonnet", "sonnet", "opus"]
