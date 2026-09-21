@@ -6,7 +6,6 @@ from kraft import policy as _policy
 from kraft import store
 from kraft.executor import gates, walk
 from kraft.executor.context import LaunchContext, OnApprove
-from kraft.templates import Registry
 from kraft.templates.forks import ChainPath
 from kraft.templates.models import GateNode
 from kraft.templates.retry import RetryOverride
@@ -18,7 +17,6 @@ async def retry(
     *,
     work_item_id: str,
     target: ChainPath | None,
-    registry: Registry,
     override: RetryOverride | None = None,
     steer: str | None = None,
     seeded: bool = False,
@@ -71,7 +69,6 @@ async def retry(
         db,
         run_dirs,
         work_item_id=work_item_id,
-        registry=registry,
         bd_cwd=bd_cwd,
         start_index=start_index,
         start_step=start_step,

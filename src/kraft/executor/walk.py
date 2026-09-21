@@ -27,7 +27,6 @@ from kraft.executor.context import (
     Steer,
 )
 from kraft.store import _now as _now
-from kraft.templates import Registry
 from kraft.templates.models import (
     ExecNode,
     ForgeTask,
@@ -1550,7 +1549,6 @@ async def run_once(
     run_dirs,
     *,
     work_item_id: str,
-    registry: Registry,
     bd_cwd: str | None = None,
     start_index: int | None = None,
     start_step: int | None = None,
@@ -1814,7 +1812,6 @@ async def run(
     run_dirs,
     *,
     work_item_id: str,
-    registry: Registry,
     bd_cwd: str | None = None,
     start_index: int | None = None,
     start_step: int | None = None,
@@ -1830,7 +1827,6 @@ async def run(
         db,
         run_dirs,
         work_item_id=work_item_id,
-        registry=registry,
         bd_cwd=bd_cwd,
         start_index=start_index,
         start_step=start_step,
@@ -1846,7 +1842,6 @@ async def run(
         db,
         run_dirs,
         work_item_id=work_item_id,
-        registry=registry,
         policy=policy,
         launch=launch,
         bd_cwd=bd_cwd,
@@ -1857,7 +1852,6 @@ async def run(
         db,
         run_dirs,
         work_item_id=work_item_id,
-        registry=registry,
         policy=policy,
         launch=launch,
         bd_cwd=bd_cwd,

@@ -283,7 +283,7 @@ def parse(data: object, *, where: str, path: Path | None = None) -> Harness:
 def load(harnesses_dir: Path | None) -> HarnessSet:
     """Every harness, overlay-first then bundled, by bare name.
 
-    Per-file validity, like `templates.load_templates`: one malformed harness
+    Per-file validity: one malformed harness
     is quarantined by name with its reason and the rest still load. An
     unusable harness nobody references is not an outage.
     """

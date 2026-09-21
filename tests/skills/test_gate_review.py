@@ -308,7 +308,6 @@ async def _review_from_gate(
         database,
         rd,
         work_item_id=wid,
-        registry=None,
         policy=POLICY,
         launch=executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None),
         bd_cwd=None,
@@ -592,7 +591,7 @@ async def test_run_calls_auto_escalate_stuck_after_review_gates(monkeypatch, dat
     monkeypatch.setattr("kraft.executor.walk.run_once", fake_run_once)
     monkeypatch.setattr("kraft.executor.gates.auto_escalate_stuck", fake_auto_escalate_stuck)
 
-    status = await executor.run(database, run_dirs, work_item_id="w1", registry=None)
+    status = await executor.run(database, run_dirs, work_item_id="w1")
     assert status == "sentinel_status"
     assert calls == [("needs_human", "w1")]
 
@@ -610,7 +609,7 @@ async def test_resume_calls_auto_escalate_stuck_after_review_gates(monkeypatch, 
     monkeypatch.setattr("kraft.executor.resuming.resume_once", fake_resume_once)
     monkeypatch.setattr("kraft.executor.gates.auto_escalate_stuck", fake_auto_escalate_stuck)
 
-    status = await executor.resume(database, run_dirs, work_item_id="w1", registry=None, adopted={})
+    status = await executor.resume(database, run_dirs, work_item_id="w1", adopted={})
     assert status == "sentinel_status"
     assert calls == [("needs_human", "w1")]
 

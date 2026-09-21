@@ -200,12 +200,20 @@ def _concerns(st, wid: str) -> list[str]:
     concern the human owes an answer for, rather than the judge's own routine
     chatter.
     """
+    row = st.db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+    )
+    snapshot = store.materialized_chain_of(row) if row is not None else None
+    # A judge's session is recorded under its canonical path
+    # (`<node>.fix_loop.judge`), the key `walk._diagnosis_bundle` skips too.
+    judges = [n.judge.path for n in snapshot.chain.nodes if n.judge] if snapshot else []
     judge_session_ids = st.db.read(
         lambda c: {
             r["id"]
             for r in c.execute(
-                "SELECT id FROM worker_sessions WHERE work_item_id = ? AND hook_point = ?",
-                (wid, executor.JUDGE_HOOK),
+                "SELECT id FROM worker_sessions WHERE work_item_id = ? AND hook_point IN "
+                f"({','.join('?' * len(judges))})",
+                (wid, *judges),
             ).fetchall()
         }
     )
@@ -363,7 +371,7 @@ async def get_work_item(wid: str, request: Request):
         # 409 on. Fails open (True) when the node isn't in its own chain --
         # an unmapped edge case is not a reason to hide a control that may
         # still work.
-        "steerable": lifecycle.steer_reachable(row, st.registry),
+        "steerable": lifecycle.steer_reachable(row),
     }
 
 

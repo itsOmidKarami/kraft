@@ -216,7 +216,7 @@ def test_the_fix_after_a_steered_retry_still_marks_the_finding_repeat(tmp_path, 
                 bd_cwd=str(tracker),
             )
             first = await executor.run(
-                database, rd, work_item_id=wid, registry=None, bd_cwd=str(tracker), policy=pol
+                database, rd, work_item_id=wid, bd_cwd=str(tracker), policy=pol
             )
             assert first == "needs_human"
             evts = database.read(lambda c: events.read_after(c, 0, wid))
@@ -235,7 +235,6 @@ def test_the_fix_after_a_steered_retry_still_marks_the_finding_repeat(tmp_path, 
                 database,
                 rd,
                 work_item_id=wid,
-                registry=None,
                 bd_cwd=str(tracker),
                 policy=pol,
                 start_index=0,

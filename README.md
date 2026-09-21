@@ -227,16 +227,16 @@ trigger-specific. See "Remote access" above for reaching this from off-machine.
 
 ## Without the orchestrator
 
-`plugins/kraft-lite/` runs the same chain inside a single agent session — same
-node list, same gates, same caps, no service. It is the attended half of Kraft:
-one chain, in front of you, resumable across sessions but not outliving your
-terminal. Chain and policy come from `templates/`, rendered by `just lite-build`.
+`plugins/kraft-lite/` runs a chain inside a single agent session — gates, fix
+loops and caps, no service. It is the attended half of Kraft: one chain, in front
+of you, resumable across sessions but not outliving your terminal. Its chain,
+`plugins/kraft-lite/chains/default.json`, is its own: it keeps the pre-V1 node
+shape Kraft's templates had when it was last rendered from them, and Kraft's
+Template Schema V1 does not feed it.
 
 That directory is published as a standalone repo, so it
 must stay self-contained: no import above `plugins/kraft-lite/`, no dependency
-beyond the standard library. `dev/build_lite_chain.py` and
-`tests/kraft_lite_artifact_test.py` are the two pieces that deliberately live
-outside it, because they are the seam between the two repos.
+beyond the standard library.
 
 See [`plugins/kraft-lite/README.md`](plugins/kraft-lite/README.md).
 

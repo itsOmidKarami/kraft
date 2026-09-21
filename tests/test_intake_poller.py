@@ -18,7 +18,6 @@ from support.harness import fake_templates_dir, isolated_bd, make_repo, v1_libra
 from kraft import config, policy, store
 from kraft import intake as intake_mod
 from kraft.adapters import beads
-from kraft.templates import load_registry, load_templates
 
 
 def _ready(rows, *, seen: list | None = None):
@@ -47,10 +46,7 @@ def _state(
     entry = {"path": str(repo), "enabled": True, "default_chain_template": "default"}
     entry.update(repo_entry or {})
     (templates_dir / "repos.yaml").write_text(yaml.safe_dump({"repos": [entry]}))
-    registry = load_registry(templates_dir / "registry.yaml")
     return {
-        "registry": registry,
-        "templates": load_templates(templates_dir, registry),
         "library": v1_library(templates_dir),
         "templates_dir": templates_dir,
         "skills_dir": tmp_path / "skills",

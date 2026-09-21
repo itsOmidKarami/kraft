@@ -3,20 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-import sys
-from pathlib import Path
 
-from support.harness import fake_registry, isolated_bd
+from support.harness import isolated_bd
 
 from kraft import events, policy, rate_limit_retry, store
-
-_FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
 
 
 def _state(tmp_path, *, rate_limit_retries: int = 5) -> dict:
     """What `rate_limit_retry.tick` reads off `app.state` besides the database (`stub_app`)."""
     return {
-        "registry": fake_registry(sys.executable, _FAKE_AGENT),
         "templates_dir": tmp_path / "templates",  # no repos.yaml: _launch degrades cleanly
         "skills_dir": tmp_path / "skills",
         "policy": policy.Policy(

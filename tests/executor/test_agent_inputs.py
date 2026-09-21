@@ -30,7 +30,6 @@ async def test_the_review_package_reaches_only_a_task_that_declares_it(
             it.database,
             it.run_dirs,
             work_item_id=it.id,
-            registry=None,
             launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
         )
         == "completed"

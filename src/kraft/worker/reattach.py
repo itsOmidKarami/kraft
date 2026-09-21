@@ -22,7 +22,6 @@ from kraft.executor import gates
 from kraft.executor.context import LaunchContext, OnApprove
 from kraft.executor.dispatch import ESCALATION_HOOK
 from kraft.store._common import _now, _span_ms
-from kraft.templates import Registry
 from kraft.templates.models import AgentTask
 from kraft.worker import sandbox as _sandbox
 
@@ -146,7 +145,6 @@ async def _resume_adopted_escalation(
     *,
     work_item_id: str,
     session_id: str,
-    registry: Registry | None,
     policy: _policy.Policy | None,
     launch_factory: Callable[[str], LaunchContext] | None,
     bd_cwd: str | None,
@@ -202,7 +200,6 @@ async def _resume_adopted_escalation(
         run_dirs,
         work_item_id=work_item_id,
         cursor=sent["seq"],
-        registry=registry,
         policy=policy,
         launch=launch,
         bd_cwd=bd_cwd,
@@ -217,7 +214,6 @@ async def _guarded_resume_adopted_escalation(
     work_item_id: str,
     node_id: str,
     session_id: str,
-    registry: Registry | None,
     policy: _policy.Policy | None,
     launch_factory: Callable[[str], LaunchContext] | None,
     bd_cwd: str | None,
@@ -234,7 +230,6 @@ async def _guarded_resume_adopted_escalation(
             run_dirs,
             work_item_id=work_item_id,
             session_id=session_id,
-            registry=registry,
             policy=policy,
             launch_factory=launch_factory,
             bd_cwd=bd_cwd,
@@ -253,14 +248,15 @@ async def _guarded_resume_adopted_escalation(
             logger.exception("could not mark %s needs_human after resume crash", work_item_id)
 
 
-def _is_agent_hook(db, registry: Registry | None, row) -> bool:
+def _is_agent_hook(db, row) -> bool:
     """Whether this session is an agent's, defaulting to yes when unknown.
 
     A V1 item answers off its own frozen chain: `hook_point` is the task's
     canonical path, which no legacy registry hook matches -- reading the
     registry made every V1 subprocess and builtin session an "agent" and
-    recorded a green adopted run as failed (Kraft-hwrks, b5afe84c). A legacy
-    item still answers off the registry.
+    recorded a green adopted run as failed (Kraft-hwrks, b5afe84c). A row with
+    no snapshot was filed by the legacy loader, which no V1 walk can run; it
+    takes the conservative answer below.
 
     Only `_adopted_status` asks, and its unknown-hook direction has to be the
     conservative one: calling an agent a subprocess would let its exit code
@@ -278,9 +274,7 @@ def _is_agent_hook(db, registry: Registry | None, row) -> bool:
             None,
         )
         return task is None or isinstance(task.task, AgentTask)
-    if registry is None:
-        return True
-    return registry.hooks.get(row["hook_point"], {}).get("kind", "agent") == "agent"
+    return True
 
 
 def _adopted_status(result_path, *, is_agent: bool) -> str:
@@ -295,9 +289,8 @@ def _adopted_status(result_path, *, is_agent: bool) -> str:
     `require_result_file` for those (`adapters/agent.py`): an agent that exits
     clean without writing its result file broke its contract and is `failed`.
     Letting a 0 exit code speak for it would record a real failure as `done`,
-    which is the one direction that must never happen -- so an unresolvable
-    hook (no registry, or a binding this Kraft no longer ships) is treated as
-    an agent too.
+    which is the one direction that must never happen -- so a session whose
+    task cannot be found in its item's chain is treated as an agent too.
     """
     file_status = _resolve_result_file(result_path)
     if file_status is not None:
@@ -315,7 +308,6 @@ async def _adopt(
     progress_s: float = 5.0,
     *,
     run_dirs=None,
-    registry: Registry | None = None,
     policy: _policy.Policy | None = None,
     launch_factory: Callable[[str], LaunchContext] | None = None,
     bd_cwd: str | None = None,
@@ -355,7 +347,7 @@ async def _adopt(
         session_id,
         log_path,
         result_path,
-        _adopted_status(result_path, is_agent=_is_agent_hook(db, registry, row)),
+        _adopted_status(result_path, is_agent=_is_agent_hook(db, row)),
     )
     if row["hook_point"] == ESCALATION_HOOK and run_dirs is not None:
         await _resume_adopted_escalation(
@@ -363,7 +355,6 @@ async def _adopt(
             run_dirs,
             work_item_id=row["work_item_id"],
             session_id=session_id,
-            registry=registry,
             policy=policy,
             launch_factory=launch_factory,
             bd_cwd=bd_cwd,
@@ -379,7 +370,6 @@ async def _guarded_adopt(
     pid: int,
     *,
     run_dirs=None,
-    registry: Registry | None = None,
     policy: _policy.Policy | None = None,
     launch_factory: Callable[[str], LaunchContext] | None = None,
     bd_cwd: str | None = None,
@@ -400,7 +390,6 @@ async def _guarded_adopt(
             session_id,
             pid,
             run_dirs=run_dirs,
-            registry=registry,
             policy=policy,
             launch_factory=launch_factory,
             bd_cwd=bd_cwd,
@@ -429,7 +418,6 @@ async def _guarded_adopt(
 async def reattach(
     db,
     run_dirs,
-    registry,
     *,
     policy: _policy.Policy | None = None,
     launch_factory: Callable[[str], LaunchContext] | None = None,
@@ -527,7 +515,6 @@ async def reattach(
                     r["node_id"],
                     pid,
                     run_dirs=run_dirs,
-                    registry=registry,
                     policy=policy,
                     launch_factory=launch_factory,
                     bd_cwd=bd_cwd,
@@ -579,7 +566,6 @@ async def reattach(
                 work_item_id=pending["work_item_id"],
                 node_id=pending["node_id"],
                 session_id=sid,
-                registry=registry,
                 policy=policy,
                 launch_factory=launch_factory,
                 bd_cwd=bd_cwd,

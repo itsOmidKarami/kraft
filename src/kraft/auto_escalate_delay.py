@@ -162,7 +162,6 @@ async def tick(app) -> list[str]:
                     st.db,
                     st.run_dirs,
                     work_item_id=wid,
-                    registry=st.registry,
                     policy=st.policy,
                     launch=deps.launch(st, row["repo"]),
                     bd_cwd=deps.bd_cwd(),

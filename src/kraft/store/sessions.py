@@ -582,20 +582,6 @@ def session_status(conn: sqlite3.Connection, session_id: str) -> str | None:
     return row["status"] if row else None
 
 
-def recent_sessions_for_hook(
-    conn: sqlite3.Connection, hook_point: str, limit: int = 5
-) -> list[dict]:
-    """The Plugins binding detail's "LAST RUNS" (design 28): the most recent
-    sessions dispatched for one hook, across every work item — not filtered
-    to one item, the same way the binding itself isn't."""
-    rows = conn.execute(
-        "SELECT work_item_id, node_id, round, status, wall_ms, created_at "
-        "FROM worker_sessions WHERE hook_point = ? ORDER BY created_at DESC LIMIT ?",
-        (hook_point, limit),
-    ).fetchall()
-    return [dict(r) for r in rows]
-
-
 def running_sessions_for_node(conn: sqlite3.Connection, work_item_id: str) -> list[sqlite3.Row]:
     """Every running session on the item's current node — all of them on a
     concurrent node like `verify` — plus any running escalation session

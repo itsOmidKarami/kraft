@@ -13,7 +13,6 @@ from kraft.executor import stops
 from kraft.executor.context import LaunchContext, OnApprove
 from kraft.executor.dispatch import scope_policy
 from kraft.store import _now as _now
-from kraft.templates import Registry
 from kraft.templates.models import ExecNode, GateNode, ResolvedNode
 
 logger = logging.getLogger(__name__)
@@ -236,7 +235,6 @@ async def review_gates(
     run_dirs,
     *,
     work_item_id: str,
-    registry: Registry,
     policy: _policy.Policy | None = None,
     launch: LaunchContext | None = None,
     bd_cwd: str | None = None,
@@ -402,7 +400,6 @@ async def review_gates(
                 db,
                 run_dirs,
                 work_item_id=work_item_id,
-                registry=registry,
                 policy=policy,
                 launch=launch,
                 bd_cwd=bd_cwd,
@@ -768,7 +765,6 @@ async def auto_escalate_stuck(
     run_dirs,
     *,
     work_item_id: str,
-    registry: Registry,
     policy: _policy.Policy | None = None,
     launch: LaunchContext | None = None,
     bd_cwd: str | None = None,
@@ -888,7 +884,6 @@ async def auto_escalate_stuck(
         run_dirs,
         work_item_id=work_item_id,
         cursor=cursor,
-        registry=registry,
         policy=policy,
         launch=launch,
         bd_cwd=bd_cwd,
@@ -902,7 +897,6 @@ async def resume_after_escalation(
     *,
     work_item_id: str,
     cursor: int,
-    registry: Registry,
     policy: _policy.Policy | None = None,
     launch: LaunchContext | None = None,
     bd_cwd: str | None = None,
@@ -1036,7 +1030,6 @@ async def resume_after_escalation(
                 # The override the route validated when the agent asked,
                 # applied as a direct `/retry` would (Kraft-vvj32).
                 override=override_from_record(carried) if carried else None,
-                registry=registry,
                 steer=steer,
                 seeded=seeded,
                 escalated=True,

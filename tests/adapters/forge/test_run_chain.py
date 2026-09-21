@@ -52,7 +52,6 @@ def walk(database, run_dirs, monkeypatch):
             database,
             run_dirs,
             work_item_id=it.id,
-            registry=None,
             policy=pol,
             launch=executor.LaunchContext(repo_entry=entry, steering_dir=None),
         )
@@ -149,7 +148,6 @@ async def test_post_merge_watch_delays_completion_and_bead_close_until_it_runs(
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         bd_cwd=str(tracker),
         launch=executor.LaunchContext(repo_entry=ON_A_FORGE, steering_dir=None),
     )

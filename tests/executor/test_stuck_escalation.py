@@ -45,7 +45,6 @@ def _walk(it, policy=None):
         it.database,
         it.run_dirs,
         work_item_id=it.id,
-        registry=None,
         policy=policy or _policy_(),
         launch=LAUNCH,
     )
@@ -145,7 +144,6 @@ async def test_the_generic_auto_escalation_does_not_follow_a_declared_one(
         it.database,
         it.run_dirs,
         work_item_id=it.id,
-        registry=None,
         policy=_policy.Policy(loops={}, default=_policy.Cap(1, 1), auto_escalate_delay_s=0),
         launch=LAUNCH,
     )

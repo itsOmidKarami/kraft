@@ -370,7 +370,7 @@ async def lint_templates() -> dict:
 
 
 async def template(template_id: str) -> dict:
-    """One chain template as it is saved."""
+    """One chain template's file, as its author wrote it."""
     return await transport._get(f"/templates/{template_id}")
 
 

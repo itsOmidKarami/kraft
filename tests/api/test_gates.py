@@ -1,4 +1,4 @@
-"""Gate approve/reject, chain-review splice, and the reject loop."""
+"""Gate approve/reject and the reject loop."""
 
 from __future__ import annotations
 
@@ -704,13 +704,3 @@ def test_the_mcp_transport_announces_itself_and_the_bare_cli_does_not(monkeypatc
 
     monkeypatch.setenv("KRAFT_CLIENT", "mcp")
     assert transport.http().headers["X-Kraft-Client"] == "mcp"
-
-
-def test_carry_forward_keeps_steps_for_unchanged_tasks():
-    from kraft.templates import carry_forward_node_fields, with_steps
-
-    old = [{"id": "impl", "steps": [["a"], ["b"]], "tasks": ["a", "b"]}]
-    same = with_steps(carry_forward_node_fields(old, [{"id": "impl", "tasks": ["a", "b"]}])[0])
-    assert same["steps"] == [["a"], ["b"]]
-    changed = with_steps(carry_forward_node_fields(old, [{"id": "impl", "tasks": ["b", "a"]}])[0])
-    assert changed["steps"] == [["b", "a"]]

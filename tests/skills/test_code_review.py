@@ -19,7 +19,7 @@ from kraft.policy import DEFAULT_LOOP_SEVERITIES
 SKILL = (
     Path(__file__).resolve().parents[2] / "src" / "kraft" / "skills" / "code-review" / "SKILL.md"
 )
-REGISTRY = Path(__file__).resolve().parents[2] / "templates" / "registry.yaml"
+LIBRARY = Path(__file__).resolve().parents[2] / "templates" / "library.yaml"
 
 
 @pytest.fixture(scope="module")
@@ -56,23 +56,14 @@ def test_it_documents_the_result_file_keys(text):
         assert f"`{key}`" in text
 
 
-def test_the_hook_is_bound_to_this_skill():
-    hooks = yaml.safe_load(REGISTRY.read_text())["hooks"]
-    assert hooks["on.review.local.run"] == {
-        "kind": "agent",
-        "harness": "claude",
-        "skill": "code-review",
-    }
+def test_the_seeded_code_review_task_selects_this_skill():
+    """V1 selects a skill by name from a task (`skill: kraft:code-review`); the
+    seeded in-loop reviewer is the task that does."""
+    tasks = yaml.safe_load(LIBRARY.read_text())["tasks"]
+    assert tasks["code_review"]["skill"] == "kraft:code-review"
 
 
-def test_the_mr_hook_is_left_alone():
-    """Kraft-7eqc reframes on.review.mr.run as reading MR comments; it must not
-    be rebound to this skill by a well-meaning edit."""
-    hooks = yaml.safe_load(REGISTRY.read_text())["hooks"]
-    assert hooks["on.review.mr.run"] == {"kind": "builtin", "handler": "noop"}
-
-
-def test_every_hook_point_it_cites_is_registered(text):
-    cited = set(re.findall(r"`(on\.[\w.]+)`", text))
-    registered = set(yaml.safe_load(REGISTRY.read_text())["hooks"])
-    assert cited <= registered, f"skill cites unregistered hooks: {cited - registered}"
+def test_it_names_no_legacy_hook_point(text):
+    """V1 has no hook points; an `on.x.y` name in the method text points the
+    agent at a chain shape that no longer exists (Ruling 72)."""
+    assert re.findall(r"`(on\.[\w.]+)`", text) == []

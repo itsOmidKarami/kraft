@@ -9,7 +9,7 @@ from kraft.store import _now as _now  # test seam for wall-clock checks
 
 #: Node fields a per-item override may touch (UI v2 · 04, point 1). Anything
 #: else in a `node_overrides` patch is rejected by the route before it gets
-#: here -- keep this list and `templates.validate_agent_overrides`-style
+#: here -- keep this list and `overrides.validate_agent_overrides`-style
 #: validation in the route in sync.
 OVERRIDABLE_NODE_FIELDS = frozenset(
     {
@@ -63,20 +63,6 @@ def complete_node(conn: sqlite3.Connection, work_item_id, node_id) -> None:
         return
     conn.execute("UPDATE work_items SET updated_at = ? WHERE id = ?", (_now(), work_item_id))
     events.append(conn, work_item_id, "node_completed", {"node_id": node_id})
-
-
-def splice_chain(conn: sqlite3.Connection, work_item_id, chain_definition: str) -> None:
-    """Replace the item's `chain_definition` with a chain-review revision
-    (Kraft-hm0), already validated and already the complete tail. Its own
-    event, separate from `gate_approved`, so the timeline shows the row
-    changed underneath the approval rather than folding it into a payload
-    nothing reads.
-    """
-    conn.execute(
-        "UPDATE work_items SET chain_definition = ?, updated_at = ? WHERE id = ?",
-        (chain_definition, _now(), work_item_id),
-    )
-    events.append(conn, work_item_id, "chain_spliced", {})
 
 
 def set_chain_template(
@@ -431,7 +417,7 @@ def effective_chain(chain_definition: dict, node_overrides: dict) -> dict:
     *to*. Anything asking what a V1 node looks like calls `effective_nodes`.
 
     A read-time view, not a write: `chain_definition` stays exactly what
-    `templates.materialize` produced at intake (or the last `chain_template`
+    the legacy loader produced at intake (or the last `chain_template`
     switch), and `node_overrides` is a separate, always-small delta layer on
     top of it. Anything that decides node behaviour at run time (auto-gate
     review, the Config tab, the effective-chain YAML) must call this instead

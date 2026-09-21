@@ -221,9 +221,8 @@ def _stage_bundle(templates_dir: Path) -> Path:
     # Written into `staging`, before the rename, so an interrupted seed can never
     # leave a stamp describing config that is not there.
     #
-    # Deliberately not `.yaml`: `templates.load_templates` globs `*.yaml`, and a
-    # YAML stamp would be read as a malformed template and surface as degraded
-    # health. A non-YAML name sidesteps that instead of documenting it.
+    # Deliberately not `.yaml`, so nothing that globs this directory's YAML
+    # ever reads the stamp as configuration.
     (staging / ".seeded-version").write_text(f"{_version()}\n")
     return staging
 
@@ -827,7 +826,7 @@ def _cmd_templates_show(ns: argparse.Namespace) -> None:
         common.emit(payload, lambda p: yaml.safe_dump(p["chain"], sort_keys=False), ns.json)
     else:
         payload = asyncio.run(client.template(ns.template_id))
-        common.emit(payload, lambda p: yaml.safe_dump(p, sort_keys=False), ns.json)
+        common.emit(payload, lambda p: p["text"].rstrip("\n"), ns.json)
 
 
 def _cmd_mcp(ns: argparse.Namespace) -> None:
@@ -981,7 +980,7 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
     reindex.set_defaults(func=_cmd_reindex)
 
     reload_p = subs.add_parser(
-        "reload", parents=[common], help="reread templates and registry from disk, no restart"
+        "reload", parents=[common], help="reread the template library from disk, no restart"
     )
     reload_p.set_defaults(func=_cmd_reload)
 

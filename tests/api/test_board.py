@@ -406,14 +406,14 @@ def test_concerns_excludes_the_judges_own_reasoning(client, repo):
     join `walk._diagnosis_bundle` uses to skip the judge's own sessions, that
     routine reasoning would show up here as a concern the human owes an
     answer for."""
-    from kraft.executor import dispatch
-
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+        json={"repo": str(repo), "title": "t", "chain_template": "default", "autostart": False},
     ).json()["id"]
-    _seed_session(client, wid, session_id="measure-1", hook_point="on.check")
-    _seed_session(client, wid, session_id="judge-1", hook_point=dispatch.JUDGE_HOOK)
+    _seed_session(client, wid, session_id="measure-1", hook_point="verification.tests.check")
+    _seed_session(
+        client, wid, session_id="judge-1", hook_point="merge_request_feedback.fix_loop.judge"
+    )
     _seed_events(
         client,
         wid,
@@ -628,7 +628,7 @@ async def test_steerable_is_answered_off_the_v1_snapshot(item_on, repo, node, st
         repo=repo,
     )
     it = await item_on(chain, node)
-    assert lifecycle.steer_reachable(it.row(), None) is steerable
+    assert lifecycle.steer_reachable(it.row()) is steerable
 
 
 def test_a_v1_item_lists_and_renders_its_chain_nodes(client, repo):

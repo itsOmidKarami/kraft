@@ -3,22 +3,17 @@
 from __future__ import annotations
 
 import subprocess
-import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from support.harness import fake_registry
 
 from kraft import archive, policy, store
-
-_FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
 
 
 def _state(tmp_path, *, archive_after_days) -> dict:
     """What `archive.tick` reads off `app.state` besides the database (`stub_app`)."""
     return {
-        "registry": fake_registry(sys.executable, _FAKE_AGENT),
         "templates_dir": tmp_path / "templates",
         "skills_dir": tmp_path / "skills",
         "policy": policy.Policy(

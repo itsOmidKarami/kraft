@@ -17,7 +17,6 @@ from support.harness import fake_templates_dir, isolated_bd
 
 from kraft import config, events, notify
 from kraft import db as kdb
-from kraft.templates import CONFIG_FILES
 
 
 def test_missing_notify_yaml_reads_as_the_shipped_default(tmp_path):
@@ -49,12 +48,6 @@ def test_save_notify_writes_only_the_known_keys(tmp_path):
     path = tmp_path / "notify.yaml"
     config.save_notify(path, {**config.NOTIFY_DEFAULT, "nonsense": 1})
     assert set(config.load_notify(path).model_dump()) == set(config.NOTIFY_DEFAULT)
-
-
-def test_notify_yaml_is_not_read_as_a_chain_template():
-    # load_templates skips CONFIG_FILES; without this, every settings file the
-    # UI writes shows up as a broken template and /health goes degraded.
-    assert "notify.yaml" in CONFIG_FILES
 
 
 async def _database(tmp_path):

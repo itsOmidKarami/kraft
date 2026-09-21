@@ -14,10 +14,7 @@ from kraft.adapters import beads as beads_mod
 from kraft.api import api_router, deps
 from kraft.api.routes import board
 from kraft.executor import entry
-from kraft.templates import (
-    validate_agent_overrides,
-    validate_node_override_fields,
-)
+from kraft.overrides import validate_agent_overrides, validate_node_override_fields
 from kraft.templates.environment import RootPointerPolicy
 
 
@@ -64,7 +61,7 @@ class NewWorkItem(BaseModel):
     #: Node ids to drop from the materialized chain at intake (UI v2 · 04
     #: point 6; design 10/m09's click-to-skip). Rejected (422) if any name
     #: is not a node of the resolved template. A gated node may be named --
-    #: see `templates.materialize`'s docstring for why that is not a bypass.
+    #: see `ResolvedChain.materialize`'s docstring for why that is not a bypass.
     skip_nodes: list[str] = []
     #: Per-item spend cap at intake (point 6), same presence-vs-null rule as
     #: the PATCH route: omitted means "use the policy default", `null` means
@@ -296,7 +293,6 @@ async def create_work_item(body: NewWorkItem, request: Request):
                 st.db,
                 st.run_dirs,
                 work_item_id=wid,
-                registry=st.registry,
                 bd_cwd=deps.bd_cwd(),
                 policy=st.policy,
                 launch=deps.launch(st, body.repo),

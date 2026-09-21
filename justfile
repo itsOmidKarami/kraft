@@ -133,10 +133,6 @@ intent:
 check-tests:
     uv run python dev/check_tests.py
 
-# Regenerate the Lite plugin's chain artifact from the YAML templates.
-lite-build:
-    uv run python dev/build_lite_chain.py
-
 # Frontend typecheck + unit tests. `npm test` is vitest, which does NOT typecheck;
 # CI's `npm run build` runs `tsc -b` and will fail on errors vitest sails past. Keep
 # the two in step here, or the only way to find a type error is to spend a pipeline.

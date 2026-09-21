@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -17,12 +18,6 @@ from kraft import policy as policy_mod
 from kraft import store
 from kraft.adapters import beads
 from kraft.api import api_router, deps, perimeter
-from kraft.templates import (
-    CONFIG_FILES,
-    RegistryError,
-    load_registry,
-    load_templates,
-)
 from kraft.templates.library import (
     CHAINS_DIR,
     LIBRARY_FILE,
@@ -40,31 +35,26 @@ from kraft.worker import steering as steering_mod
 # so a bad save is refused rather than discovered at the next restart.
 
 
-class TemplateBody(BaseModel):
-    nodes: list[dict]
-
-
-def _template_path(st, tid: str) -> Path:
-    if not tid.isidentifier() and not tid.replace("-", "_").isidentifier():
-        raise HTTPException(400, f"invalid template id {tid!r}")
-    return st.templates_dir / f"{tid}.yaml"
+def _chain_summary(library: TemplateLibrary, id: str) -> dict:
+    """One saved chain as the chain picker and the intake preview show it:
+    the resolved nodes in the SPA's `ChainNode` shape, which carry the
+    `covered_by` an attachment strikes by. A chain that does not resolve is
+    listed with its error rather than dropped, so the Chains screen can still
+    open it to fix it."""
+    try:
+        nodes = [store.node_view(n) for n in library.resolve_chain(id).nodes]
+    except TemplateLibraryError as exc:
+        return {"id": id, "nodes": [], "gates": 0, "error": str(exc)}
+    gates = sum(1 for n in nodes if n["kind"] == "gate")
+    return {"id": id, "nodes": nodes, "gates": gates, "error": None}
 
 
 @api_router.get("/templates")
 async def list_templates(request: Request):
-    st = request.app.state
-    return [
-        {
-            "id": tid,
-            "nodes": [dict(n.items()) for n in t.nodes],
-            # A gate is a node of its own kind now, not a `gate_after` string
-            # on the node in front of it (`gate-is-an-ordered-node`). The wider
-            # V1 load boundary for this route is Task 5a's; only the count is
-            # converted here.
-            "gates": sum(1 for n in t.nodes if n.get("kind") == "gate"),
-        }
-        for tid, t in sorted(st.templates.valid.items())
-    ]
+    """Every saved V1 chain -- the chains intake materializes, so the intake
+    preview and intake agree (Kraft-pplyo)."""
+    library = deps.library_or_503(request.app.state)
+    return [_chain_summary(library, id) for id in sorted(library.chain_ids)]
 
 
 # ── Template Schema V1 inspection (docs/templates-v1-design.md "Validation
@@ -185,61 +175,64 @@ async def resolve_templates(body: ResolveBody, request: Request):
     return {"chains": chains, "issues": [_issue_view(i) for i in issues]}
 
 
+#: An authored chain id, the same rule as every other V1 identifier: it names
+#: the file `PUT /templates/{id}` writes, so it can never walk out of `chains/`.
+_CHAIN_ID = re.compile(r"[a-z][a-z0-9_-]*")
+
+
 @api_router.get("/templates/{tid}")
 async def get_template(tid: str, request: Request):
-    st = request.app.state
-    template = st.templates.valid.get(tid)
-    if template is None:
-        raise HTTPException(404, f"unknown template {tid!r}")
-    return {"id": tid, "nodes": [n.model_dump(exclude_unset=True) for n in template.authored]}
+    """One saved chain as its author wrote it: the file's text, which is what
+    the Chains screen edits, and the mapping it parses to."""
+    library = deps.library_or_503(request.app.state)
+    if tid not in library.chain_ids:
+        raise HTTPException(404, f"unknown chain template {tid!r}")
+    path = library.chain_file(tid)
+    try:
+        text = path.read_text()
+    except OSError as exc:
+        raise HTTPException(500, f"{path}: cannot read: {exc}") from exc
+    return {"id": tid, "file": str(path), "text": text, "chain": yaml.safe_load(text) or {}}
 
 
-def _validate_template(st, tid: str, nodes: list[dict]) -> dict:
-    """Write the candidate to a scratch dir and run the real loader over it.
-
-    Re-using `load_templates` rather than re-deriving the rules is the point:
-    there is one definition of a valid chain, and this is it.
-    """
-    with tempfile.TemporaryDirectory() as tmp:
-        scratch = Path(tmp)
-        (scratch / "registry.yaml").write_text((st.templates_dir / "registry.yaml").read_text())
-        (scratch / f"{tid}.yaml").write_text(yaml.safe_dump({"id": tid, "nodes": nodes}))
-        result = load_templates(scratch, st.registry)
-    return {
-        "id": tid,
-        "valid": tid in result.valid,
-        "error": result.invalid.get(tid),
-        # Per node and per task, not per repo. `by_repo.resolvable` was
-        # `all(h in st.registry.hooks for h in hooks)` -- one bit of information
-        # repeated once per connected repo, computed without consulting the repo
-        # at all, despite the comment that used to sit above it. "unresolvable"
-        # named a repo; the human editing a chain needs the node. Replaced, not
-        # repaired: two answers to one question, one of them wrong, is worse
-        # than one.
-        "unresolved": [
-            {"node": n.get("id"), "task": task}
-            for n in nodes
-            for task in (n.get("tasks") or [])
-            if task not in st.registry.hooks
-        ],
-    }
-
-
-@api_router.post("/templates/{tid}/validate")
-async def validate_template(tid: str, body: TemplateBody, request: Request):
-    return _validate_template(request.app.state, tid, body.nodes)
+class ChainText(BaseModel):
+    text: str
 
 
 @api_router.put("/templates/{tid}")
-async def put_template(tid: str, body: TemplateBody, request: Request):
+async def put_template(tid: str, body: ChainText, request: Request):
+    """Save one chain file, only if the library still resolves it: the text is
+    checked as a candidate against the installed library -- the same check
+    `POST /templates/resolve` runs -- and written verbatim, so the author's
+    comments and layout survive. A new id becomes `chains/<id>.yaml`."""
     st = request.app.state
-    path = _template_path(st, tid)
-    report = _validate_template(st, tid, body.nodes)
-    if not report["valid"]:
-        raise HTTPException(422, report["error"] or f"template {tid!r} is not valid")
-    config_mod.write_yaml(path, {"id": tid, "nodes": body.nodes})
+    if not _CHAIN_ID.fullmatch(tid):
+        raise HTTPException(400, f"invalid chain template id {tid!r}")
+    library = deps.library_or_503(st)
+    path = (
+        library.chain_file(tid)
+        if tid in library.chain_ids
+        else st.templates_dir / CHAINS_DIR / f"{tid}.yaml"
+    )
+    try:
+        chain = yaml.safe_load(body.text)
+    except yaml.YAMLError as exc:
+        raise HTTPException(422, f"not YAML: {exc}") from exc
+    if not isinstance(chain, dict):
+        raise HTTPException(422, "a chain file is a mapping")
+    if chain.get("id", tid) != tid:
+        raise HTTPException(422, f"the file declares id {chain['id']!r}, not {tid!r}")
+    try:
+        candidate, _ = library.with_chain(path, {**chain, "id": tid})
+    except TemplateLibraryError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    issues = [i for i in candidate.lint(getattr(st, "instance_policy", None)) if i.chain == tid]
+    if issues:
+        raise HTTPException(422, issues[0].message)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    config_mod.write_text(path, body.text)
     deps._reload_templates(st)
-    return {"id": tid, "nodes": body.nodes}
+    return {"id": tid, "file": str(path), "text": body.text}
 
 
 class ParseBody(BaseModel):
@@ -248,84 +241,30 @@ class ParseBody(BaseModel):
 
 @api_router.post("/templates/parse")
 async def parse_template_yaml(body: ParseBody):
-    """The YAML pane's other direction (UI v2 · 09): typed text back into the
-    node list the graph/form render from. Parsing only — `/templates/{tid}/validate`
-    is the separate, existing check against the registry. No YAML library ships
-    in the frontend; this is the server doing the one direction that's genuinely
-    hard to hand-roll (arbitrary operator-typed YAML), reusing pyyaml already
-    imported here.
-    """
+    """Operator-typed YAML into the mapping `POST /templates/resolve` checks.
+    No YAML library ships in the frontend; this is the server doing the one
+    direction that is genuinely hard to hand-roll. Parsing only."""
     try:
         data = yaml.safe_load(body.text)
     except yaml.YAMLError as exc:
         # str(exc) is safe here: pyyaml's message is a parse-position
         # description of the operator's own submitted text, not a traceback.
-        return {"nodes": None, "error": str(exc)}
-    if not isinstance(data, dict) or not isinstance(data.get("nodes"), list):
-        return {"nodes": None, "error": "expected a mapping with a 'nodes' list"}
-    if not all(isinstance(n, dict) for n in data["nodes"]):
-        return {"nodes": None, "error": "every node must be a mapping"}
-    return {"nodes": data["nodes"], "error": None}
-
-
-class RegistryBody(BaseModel):
-    hooks: dict
-
-
-@api_router.get("/registry")
-async def get_registry(request: Request):
-    # `raw`, not `hooks`: `hooks` has load-time defaults (`harness: claude`)
-    # normalised into every binding for dispatch/doctor to read without
-    # re-deriving them, which would show up here as keys nobody wrote and
-    # break the GET/PUT round trip.
-    return {"hooks": request.app.state.registry.raw}
-
-
-@api_router.put("/registry")
-async def put_registry(body: RegistryBody, request: Request):
-    """Save bindings, then re-run the chain validator over every template.
-
-    A binding change affects intake only — a live work item keeps the
-    `chain_definition` it materialized — but a template that stops resolving
-    has to surface immediately, not at the next intake.
-    """
-    st = request.app.state
-    current = yaml.safe_load((st.templates_dir / "registry.yaml").read_text()) or {}
-    doc = {"hooks": body.hooks}
-    if "defaults" in current:
-        doc["defaults"] = current["defaults"]
-    with tempfile.TemporaryDirectory() as tmp:
-        candidate = Path(tmp) / "registry.yaml"
-        candidate.write_text(yaml.safe_dump(doc))
-        try:
-            registry = load_registry(
-                candidate, steering_dir=st.templates_dir / "steering", skills_dir=st.skills_dir
-            )
-        except RegistryError as exc:
-            raise HTTPException(422, str(exc)) from exc
-        for src in st.templates_dir.glob("*.yaml"):
-            if src.name not in CONFIG_FILES:
-                (Path(tmp) / src.name).write_text(src.read_text())
-        checked = load_templates(Path(tmp), registry)
-    config_mod.write_yaml(st.templates_dir / "registry.yaml", doc)
-    deps._reload_templates(st)
-    return {"hooks": body.hooks, "invalid_templates": checked.invalid}
-
-
-@api_router.get("/registry/{hook}/runs")
-async def hook_runs(hook: str, request: Request):
-    st = request.app.state
-    return {"runs": st.db.read(lambda c: store.recent_sessions_for_hook(c, hook))}
+        return {"chain": None, "error": str(exc)}
+    if not isinstance(data, dict):
+        return {"chain": None, "error": "a chain file is a mapping"}
+    return {"chain": data, "error": None}
 
 
 @api_router.post("/templates/reload")
 async def reload_templates_endpoint(request: Request):
+    """Reread the V1 library from disk into the running server. A library that
+    does not load is reported, not raised: the daemon keeps running degraded,
+    exactly as it would have started."""
     st = request.app.state
-    try:
-        deps._reload_templates(st)
-    except RegistryError as exc:
-        raise HTTPException(422, str(exc)) from exc
-    return {"valid": sorted(st.templates.valid), "invalid_templates": st.templates.invalid}
+    deps._reload_templates(st)
+    invalid = {LIBRARY_FILE: "; ".join(st.invalid_library)} if st.invalid_library else {}
+    valid = sorted(st.library.chain_ids) if st.library is not None else []
+    return {"valid": valid, "invalid_templates": invalid}
 
 
 class PolicyBody(BaseModel):
@@ -420,7 +359,7 @@ def _check_steering_change(st, name: str, body: str | None) -> None:
     """Would the configs still load with this change applied? Raise if not.
 
     Names resolve at config-load time, not at write time, so the edited file is
-    only half the question: `registry.yaml` and `repos.yaml` name it, and a body
+    only half the question: `repos.yaml` names it, and a body
     that pushes an assembled block past the injection budget -- or a delete that
     orphans a name -- breaks a launch nowhere near this screen.
 
@@ -460,11 +399,8 @@ def _check_steering_change(st, name: str, body: str | None) -> None:
         else:
             target.write_text(body)
         try:
-            load_registry(
-                st.templates_dir / "registry.yaml", steering_dir=scratch, skills_dir=st.skills_dir
-            )
             config_mod.load_repos(deps.repos_path(st), steering_dir=scratch)
-        except (RegistryError, config_mod.ConfigError) as exc:
+        except config_mod.ConfigError as exc:
             raise HTTPException(422, str(exc)) from exc
 
 

@@ -8,7 +8,6 @@ import time
 from pathlib import Path
 
 import pytest
-import yaml
 from support.harness import fake_templates_dir, make_repo
 
 #: No default repo entry for an unconnected repo, as before this used the shared client.
@@ -20,17 +19,7 @@ _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 
 
 def _templates(tmp_path: Path) -> Path:
-    d = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
-    registry = yaml.safe_load((d / "registry.yaml").read_text())
-    for hook, kind in (("on.spec.requested", "spec"), ("on.plan.requested", "plan")):
-        registry["hooks"][hook] = {
-            "kind": "agent",
-            "command": str(_FAKE_CLAUDE),
-            "skill": kind,
-            "artifact": kind,
-        }
-    (d / "registry.yaml").write_text(yaml.safe_dump(registry))
-    return d
+    return fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
 
 
 @pytest.fixture

@@ -252,7 +252,6 @@ async def _re_enter_one(app, row) -> bool:
                         st.db,
                         st.run_dirs,
                         work_item_id=wid,
-                        registry=st.registry,
                         bd_cwd=deps.bd_cwd(),
                         # No position: the walk resumes at the item's own
                         # cursor, the step group that is waiting.

@@ -405,7 +405,6 @@ async def test_an_item_budget_overrides_a_looser_policy_default(
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         bd_cwd=str(tracker),
         policy=_policy(work_item_usd=20.0),
     )
@@ -438,7 +437,6 @@ async def test_an_item_explicit_no_cap_overrides_a_capped_policy(
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         bd_cwd=str(tracker),
         policy=_policy(work_item_usd=5.0),
     )
@@ -460,7 +458,6 @@ async def test_an_item_explicit_no_cap_overrides_a_capped_policy(
         database,
         run_dirs,
         work_item_id=wid2,
-        registry=None,
         bd_cwd=str(tracker),
         policy=_policy(daily_usd=100.0),
     )

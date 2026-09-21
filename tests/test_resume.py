@@ -72,7 +72,6 @@ async def test_resume_from_verify_with_env_and_impl_done(
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         adopted={},
         bd_cwd=str(tracker),
     )
@@ -126,7 +125,6 @@ async def test_resume_no_session_for_current_node_dispatches_fresh(
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         adopted={},
         bd_cwd=str(tracker),
     )
@@ -172,7 +170,6 @@ async def test_resume_current_node_failed_session_is_needs_human(
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         adopted={},
         bd_cwd=str(tracker),
     )
@@ -251,7 +248,7 @@ async def test_resume_still_gives_a_node_the_repair_its_template_declared(
     await database.write(lambda c: store.session_exited(c, "s-poll", "failed"))
 
     result = await executor.resume(
-        database, run_dirs, work_item_id=wid, registry=None, adopted={}, bd_cwd=str(tracker)
+        database, run_dirs, work_item_id=wid, adopted={}, bd_cwd=str(tracker)
     )
     types = _types(database, wid)
 
@@ -297,7 +294,6 @@ async def test_resume_awaits_adopted_task_before_reading_status(tmp_path, databa
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         adopted={sid: task},
         bd_cwd=str(tracker),
     )
@@ -326,7 +322,6 @@ async def test_resume_after_gate_approval_does_not_re_request_gate(
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         bd_cwd=str(tracker),
         launch=_launch(tmp_path),
     )
@@ -346,7 +341,6 @@ async def test_resume_after_gate_approval_does_not_re_request_gate(
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         adopted={},
         bd_cwd=str(tracker),
         launch=_launch(tmp_path),
@@ -389,7 +383,6 @@ async def test_resume_before_gate_approval_still_re_requests_gate(
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         bd_cwd=str(tracker),
         launch=_launch(tmp_path),
     )
@@ -404,7 +397,6 @@ async def test_resume_before_gate_approval_still_re_requests_gate(
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         adopted={},
         bd_cwd=str(tracker),
         launch=_launch(tmp_path),

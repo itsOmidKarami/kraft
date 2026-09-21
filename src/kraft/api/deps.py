@@ -20,14 +20,13 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 
 from kraft import config as config_mod
-from kraft import executor, harness, store
+from kraft import executor, store
 from kraft.policy import (
     InstancePolicy,
     InstancePolicyInput,
     PolicyError,
     TemplatePolicyOverride,
 )
-from kraft.templates import load_registry, load_templates
 from kraft.templates.environment import (
     RootPointerPolicy,
     TemplateEnvironmentError,
@@ -208,15 +207,6 @@ def _work_item_row(st, wid):
 
 
 def _reload_templates(st) -> None:
-    # Loaded once per reload and shared, so a registry with twelve agent
-    # hooks reads the harness directory once rather than twelve times.
-    st.harnesses = harness.load(None)
-    st.registry = load_registry(
-        st.templates_dir / "registry.yaml",
-        skills_dir=st.skills_dir,
-        harnesses=st.harnesses,
-    )
-    st.templates = load_templates(st.templates_dir, st.registry)
     st.library, st.invalid_library = load_library(st.templates_dir, st.skills_dir)
 
 

@@ -1,159 +1,14 @@
 from __future__ import annotations
 
-import json
-
 from fastapi import HTTPException, Request
 from pydantic import BaseModel
 
 from kraft import executor, store
-from kraft.adapters import agent as agent_mod
 from kraft.api import api_router, deps
 from kraft.api.routes import artifacts, board
 from kraft.api.routes.lifecycle import _stop_live_sessions
 from kraft.executor import gates, stops
-from kraft.templates import (
-    CHAIN_REVIEW_GATE,
-    carry_forward_node_fields,
-    strip_non_proposable_carryover_fields,
-    validate_nodes,
-    validate_proposed_node_overrides,
-    with_steps,
-)
 from kraft.templates.models import GateNode
-
-
-def _strip_front_matter(text: str) -> str:
-    """The body of an artifact file, after its mandatory YAML front matter
-    (`agent._ARTIFACT`'s contract, shared by every artifact-carrying hook).
-    The whole text back if there is no front-matter block, so a hand-edited
-    or malformed file still gets a chance to parse as-is."""
-    if not text.startswith("---\n"):
-        return text
-    end = text.find("\n---\n", 4)
-    return text[end + 5 :] if end != -1 else text
-
-
-def _splice_chain_review(st, row) -> tuple[dict | None, dict | None, str | None]:
-    """The chain_finalized gate's approval decision (Kraft-hm0, extended
-    Kraft-df4tc for escalation targets and the per-node model/effort dial).
-
-    **PARKED since Template Schema V1 (Task 4b): no `src/` caller.** Every line
-    below speaks the legacy `chain_definition` node dict -- the reviewer's
-    envelope schema, `validate_nodes`, `with_steps`,
-    `carry_forward_node_fields`, `store.splice_chain`. Revising a *materialized*
-    chain in place is a different feature from revising a template-shaped one,
-    so `apply_approval` no longer calls this, and a reviewer's
-    `revised_chain_nodes` are currently ignored. Kept rather than deleted
-    because the rules it enforces (one bad field rejects the whole approval, a
-    started node's config is locked, a carried-forward `reject_to` is
-    re-validated against the revised tail) are the feature, not the plumbing.
-
-    Returns `(spliced_chain, node_override_patch, None)` when the gate may
-    advance -- `node_override_patch` is `{}` when the reviewer proposed no
-    `proposed_node_overrides` at all -- or `(None, None, reason)` when it
-    must not: one bad field anywhere in the envelope stops the whole
-    approval, never a partial apply.
-    """
-    rel = agent_mod.artifact_path("chain_review", row["id"])
-    path = st.run_dirs.worktrees / row["id"] / rel
-    if not path.is_file():
-        return None, None, "chain_review: no artifact found; the worker did not write one"
-    try:
-        envelope = json.loads(_strip_front_matter(path.read_text()))
-    except (OSError, ValueError) as exc:
-        return None, None, f"chain_review: could not parse artifact: {exc}"
-    if not isinstance(envelope, dict) or envelope.get("status") not in (
-        "ready_for_approval",
-        "error",
-    ):
-        return None, None, "chain_review: artifact is missing a valid 'status'"
-    if envelope["status"] == "error":
-        return None, None, envelope.get("rationale") or "chain_review: reported status 'error'"
-
-    nodes = envelope.get("revised_chain_nodes")
-    chain = json.loads(row["chain_definition"])
-    tail_start = board._gate_node_index(chain, CHAIN_REVIEW_GATE) + 1
-    preceding_ids = frozenset(n["id"] for n in chain["nodes"][:tail_start])
-    errs = (
-        validate_nodes(nodes, st.registry, preceding_ids=preceding_ids)
-        if isinstance(nodes, list)
-        else ["not a list"]
-    )
-    if errs:
-        return None, None, f"chain_review: revised_chain_nodes invalid: {errs[0]}"
-
-    # proposed_node_overrides (Kraft-df4tc point 2): reviewer-authored per-
-    # node model/effort dial, not a chain_definition field -- pull it off
-    # every node before the carryover/splice below ever sees it, validating
-    # as we go. Only model/escalate_model/effort are the reviewer's to
-    # propose (point 5); auto_escalate and everything else stay the human
-    # PATCH route's alone. One bad field anywhere rejects the whole approval.
-    proposals: dict[str, dict] = {}
-    for n in nodes:
-        proposed = n.pop("proposed_node_overrides", None)
-        if not proposed:
-            continue
-        if not isinstance(proposed, dict):
-            return (
-                None,
-                None,
-                (f"chain_review: node {n['id']!r} proposed_node_overrides must be an object"),
-            )
-        field_errs = validate_proposed_node_overrides(proposed)
-        if field_errs:
-            return (
-                None,
-                None,
-                (f"chain_review: node {n['id']!r} proposed_node_overrides: {field_errs[0]}"),
-            )
-        proposals[n["id"]] = proposed
-    if proposals:
-        started = st.db.read(
-            lambda c: {nid for nid in proposals if store.node_started(c, row["id"], nid)}
-        )
-        if started:
-            bad = sorted(started)[0]
-            return (
-                None,
-                None,
-                (f"chain_review: node {bad!r} has already started; its config is locked"),
-            )
-
-    # auto_escalate/auto_escalate_stuck/auto_escalate_delay_s are never the
-    # reviewer's to set (SKILL.md, point 5's PATCH-route boundary) -- unlike
-    # on_failure/reject_to/rebase_bounce_to, `validate_nodes` above does not
-    # (and cannot, since a template author legitimately sets these) reject
-    # them, so an agent-authored value must be dropped here, before it can
-    # ever reach `carry_forward_node_fields`, which only fills fields a node
-    # omits and would otherwise leave an explicit value in place untouched.
-    nodes = strip_non_proposable_carryover_fields(nodes)
-
-    # No special-case for an unchanged tail (spec: splicing the same list back
-    # in is a no-op in effect) -- one code path for both, not two that drift.
-    # `nodes` only carries the schema-taught fields (Kraft-eod0); carry the
-    # rest -- auto_escalate*, and any of on_failure/reject_to/
-    # rebase_bounce_to the reviewer chose not to set explicitly -- forward
-    # from the node each one replaces, or an "unchanged" node silently loses
-    # config it had.
-    # `materialize` is not the only producer of chain_definition nodes: an
-    # approved chain review replaces the tail with agent-authored dicts, and
-    # the reviewer's schema only knows `tasks` (SKILL.md's node shape). Both
-    # producers run the same normalizer so `measure_node` never has to ask
-    # which path a node came from.
-    nodes = [with_steps(n) for n in carry_forward_node_fields(chain["nodes"][tail_start:], nodes)]
-    # Validate once more over the *merged* tail: the check above only saw the
-    # reviewer's own values, and a `reject_to`/`rebase_bounce_to` carried
-    # forward from the node being replaced can dangle against the revised tail
-    # (the reviewer renamed or dropped the target) or now point forward (the
-    # target moved later). Either one reaches walk.py's bare
-    # `next(j for j, n in ... if n["id"] == bounce_to)` -- StopIteration
-    # mid-walk, or a bounce that silently skips the nodes in between. Intake's
-    # `skip_nodes` route guards the identical case (work_items.py).
-    errs = validate_nodes(nodes, st.registry, preceding_ids=preceding_ids)
-    if errs:
-        return None, None, f"chain_review: revised_chain_nodes invalid: {errs[0]}"
-    chain["nodes"][tail_start:] = nodes
-    return chain, proposals, None
 
 
 def gate_nodes(st, row) -> tuple:
@@ -192,8 +47,7 @@ async def apply_approval(st, row, gate: str) -> tuple[tuple | None, str | None]:
 
     **The final-review gate is selected by `GateNode.chain_finalized`, never by
     its name** (`chain-finalized-remains-a-dedicated-marker`): a chain may call
-    that gate whatever it likes, and `CHAIN_REVIEW_GATE`'s hardcoded
-    `"chain_finalized"` string was the last name-table read on this path.
+    that gate whatever it likes.
 
     What the marker still buys, and it is the difference an ordinary gate must
     not have: **a final-review gate cannot be approved without its document.**
@@ -204,15 +58,11 @@ async def apply_approval(st, row, gate: str) -> tuple[tuple | None, str | None]:
     Kraft-iv4y's posture: a clear 422 telling the human to `kraft item retry` the
     node that owed the document, not a 200 that changed nothing.
 
-    **What a `chain_finalized` approval does not do yet: splice.**
-    `_splice_chain_review` rewrites the legacy `chain_definition` column from an
-    envelope of legacy node dicts (`validate_nodes`, `with_steps`,
-    `carry_forward_node_fields`), and neither the envelope schema nor
-    `store.splice_chain` has a V1 equivalent -- revising a *materialized* chain
-    in place is a different feature from revising a template-shaped one, and it
-    belongs with the chain-review skill's own V1 conversion. So the approval
-    ingests the artifact and advances, and a reviewer's `revised_chain_nodes`
-    are currently ignored. Reported as a deferral, not silently dropped.
+    **What a `chain_finalized` approval does not do: revise the chain.** The
+    legacy splice rewrote `chain_definition` from a reviewer's legacy node
+    list; revising a *materialized* V1 chain in place is a different feature,
+    with no V1 requirement and no V1 schema, so the approval ingests the
+    artifact and advances.
     """
     nodes = gate_nodes(st, row)
     node = _gate_or_404(nodes, gate)
@@ -323,7 +173,6 @@ async def approve_gate(wid: str, gate: str, request: Request):
                         st.db,
                         st.run_dirs,
                         work_item_id=wid,
-                        registry=st.registry,
                         bd_cwd=deps.bd_cwd(),
                         start_index=start,
                         policy=st.policy,
@@ -422,7 +271,6 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
                             st.db,
                             st.run_dirs,
                             work_item_id=wid,
-                            registry=st.registry,
                             policy=st.policy,
                             launch=deps.launch(st, row["repo"]),
                             bd_cwd=deps.bd_cwd(),
@@ -445,7 +293,6 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
                         st.db,
                         st.run_dirs,
                         work_item_id=wid,
-                        registry=st.registry,
                         bd_cwd=deps.bd_cwd(),
                         start_index=target,
                         policy=st.policy,

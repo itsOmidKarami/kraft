@@ -91,16 +91,16 @@ def access_fields() -> set[str]:
     return set(config.ACCESS_DEFAULT)
 
 
-def registry_agent_default_keys() -> set[str]:
-    from kraft import templates
+def agent_task_keys() -> set[str]:
+    from kraft.templates.models import AgentTask
 
-    return set(templates._AGENT_ONLY_KEYS)
+    return set(AgentTask.model_fields)
 
 
-def template_composition_keys() -> set[str]:
-    from kraft import templates
+def library_sections() -> set[str]:
+    from kraft.templates.library import Namespace
 
-    return set(templates._COMPOSITION_KEYS)
+    return {n.value for n in Namespace}
 
 
 def harness_capabilities() -> set[str]:
@@ -116,8 +116,8 @@ CHECKS: list[tuple[str, Callable[[], set[str]], str]] = [
     ("MCP tools", mcp_tool_names, "agent-integration.md"),
     ("policy.yaml fields", policy_fields, "configuration.md"),
     ("access.yaml fields", access_fields, "configuration.md"),
-    ("registry.yaml defaults.agent keys", registry_agent_default_keys, "configuration.md"),
-    ("chain template composition keys", template_composition_keys, "concepts.md"),
+    ("library.yaml agent task keys", agent_task_keys, "configuration.md"),
+    ("library.yaml sections", library_sections, "configuration.md"),
     ("harness capabilities", harness_capabilities, "harnesses.md"),
 ]
 

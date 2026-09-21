@@ -59,7 +59,7 @@ def _reviewed(*, declare=True):
 
 def _walk(it, **kwargs):
     return executor.run_once(
-        it.database, it.run_dirs, work_item_id=it.id, registry=None, launch=NO_SETUP, **kwargs
+        it.database, it.run_dirs, work_item_id=it.id, launch=NO_SETUP, **kwargs
     )
 
 
@@ -89,7 +89,7 @@ async def _requested(it, gate="spec_approval"):
 
 def _review(it, **kwargs):
     return gates_module.review_gates(
-        "awaiting_gate", it.database, it.run_dirs, work_item_id=it.id, registry=None, **kwargs
+        "awaiting_gate", it.database, it.run_dirs, work_item_id=it.id, **kwargs
     )
 
 
@@ -334,7 +334,7 @@ async def test_a_walk_re_entered_at_an_approved_gate_passes_over_it(item_on):
 
 def _resume(it):
     return resuming.resume_once(
-        it.database, it.run_dirs, work_item_id=it.id, registry=None, adopted={}, launch=NO_SETUP
+        it.database, it.run_dirs, work_item_id=it.id, adopted={}, launch=NO_SETUP
     )
 
 

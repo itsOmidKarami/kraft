@@ -145,9 +145,9 @@ async def _rebase_conflict_away(
     conflict against wherever main was when this branch was cut may not
     exist against main's current tip. Shared by `ci_poll` (Kraft-9h7v, the
     original) and `merge` (draft-MR workflow spec): same rebase, same
-    "done, not conflict" report that lets `run_once`'s `rebase_bounce_to`
-    machinery see the moved `base_ref` and bounce the chain back to
-    `verify` in the same walk, before either node ever calls `forge.merge`.
+    "done, not conflict" report that lets the node's `on_base_changed`
+    restart see the moved `base_ref` and re-run its declared span in the
+    same walk, before either node ever calls `forge.merge`.
 
     Returns ("<why it didn't take>\\n", "conflict") unchanged on a rebase
     that could not resolve it (a real conflict, `git rebase --abort`ed, or
@@ -196,10 +196,10 @@ async def _run_one(
     not `repo` -- a multi-repo item's submodule targets are not where the
     agent's `on.mr.describe` artifact lives.
 
-    `has_rebase_bounce` is whether *this* node's own `chain_definition` entry
-    carries `rebase_bounce_to` -- read from the frozen chain, not from
-    whatever `templates/default.yaml` says today. The `merge` handler's
-    conflict rebase relies on it: without a configured bounce nothing will
+    `has_rebase_bounce` is whether *this* node declares `on_base_changed`
+    -- read from the frozen chain, not from whatever the library says
+    today. The `merge` handler's conflict rebase relies on it: without a
+    base-change restart nothing will
     ever re-verify the rebased head, so reporting "done" without calling
     `forge.merge` would leave the branch unmerged while the walk moves on
     regardless (code-review).
@@ -882,8 +882,8 @@ async def run_task(
     #: reviewer. Read only by `mr.automated_review`.
     automated_review: AutomatedReview | None = None,
     head_sha: str | None = None,
-    #: Whether this node's own `chain_definition` entry carries
-    #: `rebase_bounce_to` -- see `_run_one`'s docstring. Defaults to False,
+    #: Whether this node declares `on_base_changed` -- see `_run_one`'s
+    #: docstring. Defaults to False,
     #: the safe assumption for any caller (a test, a future handler) that
     #: does not know any better.
     has_rebase_bounce: bool = False,

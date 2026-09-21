@@ -1459,17 +1459,9 @@ def last_measurement(
     return None, False, None
 
 
-#: The fix loop's judge hook (2026-09-12-verify-fix-loop-judge-design):
-#: dispatched directly by `kraft.executor.walk.walk_node`, the same way
-#: `on.implementation.start` is -- not from a node's own `tasks` list, so it
-#: never contaminates `collect_findings`/`needs_context_question`'s per-task
-#: reads, and every node with a `fix_loop` gets it unconditionally (spec
-#: decision 4: no new policy field).
-JUDGE_HOOK = "on.fix_loop.judge"
-
 #: The escalation hook's own `hook_point`. Not a node task and not dispatched
 #: from a `tasks` list -- `escalate.dispatch` writes it directly -- so, like
-#: `JUDGE_HOOK`, its session rows sit in the same `(node, round)` scan that
+#: the node's judge, its session rows sit in the same `(node, round)` scan that
 #: `needs_context_question` reads and must be skipped there. Named rather than
 #: spelled out at each site because `reattach` compares against it too.
 ESCALATION_HOOK = "escalation"

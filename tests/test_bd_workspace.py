@@ -143,7 +143,6 @@ async def test_a_bead_less_item_completes_without_calling_bd(
             database,
             run_dirs,
             work_item_id=wid,
-            registry=None,
         )
     assert result == "completed"
     assert "bead close failed" not in caplog.text

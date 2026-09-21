@@ -27,7 +27,6 @@ def _walk(it, **kwargs):
         it.database,
         it.run_dirs,
         work_item_id=it.id,
-        registry=None,
         launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
         **kwargs,
     )

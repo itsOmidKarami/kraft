@@ -25,7 +25,7 @@ from support.harness import (
 )
 
 from kraft import db as kdb
-from kraft import events, store, templates
+from kraft import events, store
 from kraft.api.routes.repos import RepoBody, RepoPatch
 from kraft.paths import RunDirs
 
@@ -619,7 +619,7 @@ def test_add_repo_enabled_with_no_test_command_is_refused(tmp_path, monkeypatch)
     # `command` too, so this actually exercises "nothing to run anywhere" —
     # the default `client` fixture's `on.test.run` is a real subprocess
     # command, which the repo is now allowed to fall back on.
-    no_fallback_templates_dir = fake_templates_dir(tmp_path, "claude", noop_verify=True)
+    no_fallback_templates_dir = fake_templates_dir(tmp_path, "claude")
     with _client(
         tmp_path, monkeypatch, templates_dir=no_fallback_templates_dir, default_setup=False
     ) as client:
@@ -649,7 +649,7 @@ def test_add_repo_disabled_with_no_test_command_is_allowed(tmp_path, client):
 
 
 def test_patch_repo_cannot_enable_without_a_test_command(tmp_path, monkeypatch):
-    no_fallback_templates_dir = fake_templates_dir(tmp_path, "claude", noop_verify=True)
+    no_fallback_templates_dir = fake_templates_dir(tmp_path, "claude")
     with _client(
         tmp_path, monkeypatch, templates_dir=no_fallback_templates_dir, default_setup=False
     ) as client:
@@ -674,19 +674,6 @@ def test_patch_repo_can_enable_alongside_a_test_command_in_the_same_request(
     path = client.post("/api/repos", json={"path": str(repo), "enabled": False}).json()["path"]
     r = client.patch(f"/api/repos?path={path}", json={"enabled": True, "test_command": "pytest"})
     assert r.status_code == 200, r.text
-
-
-def test_packaged_registry_wires_the_never_signal_steering_rule():
-    """Kraft-f8u3: the rule the spec asks for actually ships wired to every
-    repo, via the hook binding -- not just to the one repo happening to be
-    listed in repos.yaml, which every real repo registered through POST
-    /api/repos would never see."""
-    templates_dir = Path(__file__).resolve().parents[2] / "templates"
-    registry = templates.load_registry(
-        templates_dir / "registry.yaml", steering_dir=templates_dir / "steering"
-    )
-    binding = registry.hooks["on.implementation.start"]
-    assert "never-signal-processes-you-didnt-start" in binding.get("steering", [])
 
 
 def test_startup_hardens_the_git_env_for_everything_the_server_spawns(tmp_path, monkeypatch):

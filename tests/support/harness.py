@@ -13,9 +13,6 @@ from typing import Any
 
 import yaml
 
-from kraft.executor import dispatch
-from kraft.templates import Registry, load_registry
-
 _SUPPORT = Path(__file__).parent
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -211,138 +208,19 @@ def fake_docker_bin(tmp_path: Path) -> Path:
     return bin_dir
 
 
-def fake_registry(
-    python_exe: str,
-    fake_agent_path: Path,
-    harnesses: dict[str, str] | None = None,
-) -> Registry:
-    """`harnesses` maps a hook point to the harness it should be bound to, for
-    a test that needs more than one harness in a single chain. Unnamed hooks
-    keep the shipped default (`claude`)."""
-    base = load_registry(_REPO_ROOT / "templates" / "registry.yaml")
-    hooks = dict(base.hooks)
-    fake = f"{python_exe} {fake_agent_path}"
-    hooks["on.implementation.start"] = {"kind": "agent", "command": fake}
-    hooks[dispatch.JUDGE_HOOK] = {"kind": "agent", "command": fake}
-    # The shipped registry binds these to `claude`. A test that drives the
-    # default chain must not shell out to the operator's real agent, and a
-    # missing binary would land the item in needs_human rather than at a gate.
-    # on.review.local.run joined this list when it stopped being a noop
-    # (Kraft-yenu) -- it is now a real `claude` skill hook like the others.
-    for hook in (
-        "on.spec.requested",
-        "on.plan.requested",
-        "on.chain.review_ready",
-        "on.review.local.run",
-    ):
-        hooks[hook] = {**hooks[hook], "command": fake}
-    # The shipped registry's back half is real now (Kraft-33j): four forge
-    # hooks on `backend: auto`, and a human_review hook bound to the operator's
-    # `claude`. A test driving the default chain must reach neither a forge CLI
-    # nor a real agent, so they go back to noop here — the same reason the spec
-    # and plan commands are swapped above.
-    for hook in (
-        "on.mr.describe",
-        "on.mr.open",
-        "on.mr.sync",
-        "on.ci.poll",
-        "on.merge",
-        "on.merge.watch",
-        "on.human_review.requested",
-    ):
-        hooks[hook] = {"kind": "builtin", "handler": "noop"}
-    for hook, hid in (harnesses or {}).items():
-        hooks[hook] = {**hooks[hook], "harness": hid}
-    return Registry(hooks=hooks)
-
-
-def fake_templates_dir(
-    tmp_path: Path, agent_command: str, *, planning_hooks: bool = False, noop_verify: bool = False
-) -> Path:
-    """Registry + `quick-task`/`default` chains against a throwaway templates dir.
-
-    `on.spec.requested`/`on.plan.requested` default to `builtin: noop` — most
-    callers drive chains that never reach those gates and must not shell out.
-    Pass `planning_hooks=True` to bind them to `agent_command` instead, the way
-    `fake_registry` above does: spread the shipped binding and swap only the
-    command, so its `skill:`/`artifact:` keys survive.
-
-    `on.test.run` defaults to a real `python -m pytest -q` subprocess against
-    the worktree. Pass `noop_verify=True` for a caller whose assertions are
-    about an earlier node (e.g. pause/resume/rebase) and only needs the chain
-    to *reach* completed — that subprocess is pure incidental cost there.
-
-    `on.chain.review_ready` is always bound to `agent_command`, unlike spec and
-    plan: `POST .../gates/chain_finalized/approve` reads and parses its
-    artifact unconditionally now (Kraft-hm0), so a `noop` binding would leave
-    every caller that approves that gate stuck at needs_human for a missing
-    artifact. `fixtures/fake-claude.sh` answers with the chain's own unchanged
-    tail, read back out of `chain_definition`, so a caller that never touches
-    chain review still walks the rest of the chain exactly as before.
-    """
+def fake_templates_dir(tmp_path: Path, agent_command: str) -> Path:
+    """A throwaway templates dir holding the shipped V1 layout -- `library.yaml`,
+    `chains/`, `harnesses.yaml` and `policy.yaml` -- with every agent profile
+    launching `agent_command` (`seed_v1_library`). The steering file the seed
+    names is copied in too, and nothing else of the real steering dir: its
+    README is documentation, not a steering file."""
     d = tmp_path / "templates"
     d.mkdir(parents=True, exist_ok=True)
-    shutil.copy(_REPO_ROOT / "templates" / "quick-task.yaml", d / "quick-task.yaml")
-    shutil.copy(_REPO_ROOT / "templates" / "default.yaml", d / "default.yaml")
-    # Only the file the shipped registry's `steering:` keys actually name, not
-    # the whole real steering/ dir (its README.md is documentation, not a
-    # steering file, and copying it in shows up as a phantom entry in every
-    # steering-listing test). `exist_ok=True` on both: a caller that spins up
-    # more than one `_client()` against the same `tmp_path` calls this twice.
     steering_dir = d / "steering"
     steering_dir.mkdir(exist_ok=True)
     shutil.copy(
         _REPO_ROOT / "templates" / "steering" / "never-signal-processes-you-didnt-start.md",
         steering_dir / "never-signal-processes-you-didnt-start.md",
-    )
-
-    def noop() -> dict:
-        # A fresh dict per call, not one shared object: `yaml.safe_dump` aliases
-        # repeated *identical objects* with `&id001`/`*id001` anchors, which would
-        # make a GET/PUT round trip through JSON (which de-aliases) an unrelated
-        # byte diff rather than a real one.
-        return {"kind": "builtin", "handler": "noop"}
-
-    shipped = load_registry(_REPO_ROOT / "templates" / "registry.yaml").hooks
-    if planning_hooks:
-        spec_hook = {**shipped["on.spec.requested"], "command": agent_command}
-        plan_hook = {**shipped["on.plan.requested"], "command": agent_command}
-    else:
-        spec_hook = noop()
-        plan_hook = noop()
-
-    (d / "registry.yaml").write_text(
-        yaml.safe_dump(
-            {
-                "hooks": {
-                    "on.env.prepare": {"kind": "builtin", "handler": "env_setup"},
-                    "on.implementation.start": {"kind": "agent", "command": agent_command},
-                    "on.repos.scan": {"kind": "builtin", "handler": "scan_submodules"},
-                    "on.test.run": (
-                        noop()
-                        if noop_verify
-                        else {"kind": "subprocess", "command": ["python", "-m", "pytest", "-q"]}
-                    ),
-                    "on.spec.requested": spec_hook,
-                    "on.plan.requested": plan_hook,
-                    "on.chain.review_ready": {
-                        **shipped["on.chain.review_ready"],
-                        "command": agent_command,
-                    },
-                    "on.review.local.run": noop(),
-                    "on.mr.rebase": {"kind": "builtin", "handler": "mr_rebase"},
-                    "on.mr.describe": noop(),
-                    "on.mr.open": noop(),
-                    "on.ci.poll": noop(),
-                    "on.review.mr.run": noop(),
-                    "on.mr_checks.repair": noop(),
-                    "on.mr.sync": noop(),
-                    "on.human_review.requested": noop(),
-                    "on.merge": noop(),
-                    "on.merge.watch": noop(),
-                }
-            }
-        )
     )
     shutil.copy(_REPO_ROOT / "templates" / "policy.yaml", d / "policy.yaml")
     seed_v1_library(d, agent_command=agent_command)
@@ -351,12 +229,7 @@ def fake_templates_dir(
 
 def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) -> Path:
     """Put the shipped V1 layout -- `library.yaml` plus `chains/*.yaml` -- into
-    `templates_dir`, beside whatever legacy files are already there.
-
-    Beside, not instead: 5b owns converting the 60 callers that still read
-    `registry.yaml` and the legacy chain files, so both layouts have to load
-    out of one directory until then. They do not collide -- the V1 loader reads
-    only `library.yaml` and `chains/`, and `load_templates` reads neither.
+    `templates_dir`.
 
     The *shipped* seed, copied rather than hand-written, so a fixture cannot
     drift from the chain an operator actually gets.
@@ -382,8 +255,7 @@ def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) ->
         }
         profiles |= {"fake": {"provider": "fake"}, "claude": {"provider": "claude"}}
         # And the `kraft.verify_changed_test_scopes` builtin becomes an inert
-        # `true`. This is the same protection `noop_verify` gives the legacy
-        # `on.test.run` binding, and it is not optional here: that builtin runs
+        # `true`. Not optional: that builtin runs
         # **the connected repo's own `test_command`**, and several tests in this
         # suite connect a repo declaring `pytest` or `just test`. A V1 chain
         # reaching it in a unit test runs this suite inside itself --
@@ -804,7 +676,6 @@ async def v1_walk(
             database,
             rd,
             work_item_id=wid,
-            registry=None,
             policy=policy,
             steer=steer,
             start_index=start_index,

@@ -31,7 +31,7 @@ def run_chain(workdir: Path, chain, *, policy, title: str = "t") -> dict:
                 database, rd, title=title, repo=str(repo), chain=chain, bd_cwd=str(tracker)
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=None, bd_cwd=str(tracker), policy=policy
+                database, rd, work_item_id=wid, bd_cwd=str(tracker), policy=policy
             )
             return {
                 "wid": wid,

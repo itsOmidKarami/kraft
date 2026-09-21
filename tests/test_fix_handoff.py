@@ -174,7 +174,7 @@ async def test_fix_cycle_names_the_post_retry_attempt_not_the_abandoned_one(
         bd_cwd=str(tracker),
     )
     first = await executor.run(
-        database, run_dirs, work_item_id=wid, registry=None, bd_cwd=str(tracker), policy=pol
+        database, run_dirs, work_item_id=wid, bd_cwd=str(tracker), policy=pol
     )
     assert first == "needs_human"  # cap breached; 2 abandoned fix sessions exist
 
@@ -184,7 +184,6 @@ async def test_fix_cycle_names_the_post_retry_attempt_not_the_abandoned_one(
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         bd_cwd=str(tracker),
         policy=pol,
         start_index=0,
@@ -296,7 +295,6 @@ async def test_fix_dispatch_after_resume_still_carries_the_previous_attempt(
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         adopted={},
         bd_cwd=str(tracker),
         policy=pol,

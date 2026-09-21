@@ -29,7 +29,7 @@ _IMPLEMENT = "implementation.main.implement"
 def templates_dir(tmp_path):
     """noop_verify: these tests assert on pause/resume/rebase, not on verify's
     real `python -m pytest -q` subprocess -- pure incidental cost here."""
-    return fake_templates_dir(tmp_path, str(_FAKE_CLAUDE), noop_verify=True)
+    return fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
 
 
 # ponytail: the four "resumed item to complete" waits below run real git

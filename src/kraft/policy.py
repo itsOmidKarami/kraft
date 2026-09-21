@@ -377,7 +377,7 @@ class CapOverride(BaseModel):
     """A sparse patch onto one `Cap`, as a stored node override supplies it
     (`store.node_overrides_of(row).get(node_id)`). That row also carries
     fields no `Cap` owns (`model`, `effort`, `auto_escalate`, ...), already
-    validated elsewhere (`kraft.templates.validate_node_override_fields`), so
+    validated elsewhere (`kraft.overrides.validate_node_override_fields`), so
     unknown keys are ignored here rather than re-litigated."""
 
     model_config = ConfigDict(extra="ignore")

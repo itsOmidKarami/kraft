@@ -309,9 +309,7 @@ async def test_a_gate_reviewer_is_not_launched_past_its_token_budget(item_on, mo
     await _spend(it, 30, 20)
     await _requested(it)
 
-    status = await gates.review_gates(
-        "awaiting_gate", it.database, it.run_dirs, work_item_id=it.id, registry=None
-    )
+    status = await gates.review_gates("awaiting_gate", it.database, it.run_dirs, work_item_id=it.id)
 
     assert status == "awaiting_gate"
     assert [e["payload"]["reason"] for e in it.events("gate_auto_review_skipped")] == ["budget"]

@@ -58,7 +58,6 @@ async def _retry(it, path):
         it.run_dirs,
         work_item_id=it.id,
         target=ChainPath.parse(chain, path) if path else None,
-        registry=None,
         launch=LAUNCH,
     )
 
