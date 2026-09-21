@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-import os
 import time
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
-from support.harness import fake_templates_dir, isolated_bd, make_repo
+from support.harness import make_repo
+
+#: No default repo entry: an autostarted item stops where an unconfigured repo stops.
+pytestmark = pytest.mark.api_client(default_setup=False)
+
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
@@ -26,20 +28,6 @@ def _poll_for(client, wid, event_type, timeout=30):
             return matching
         time.sleep(0.2)
     raise AssertionError(f"{event_type} never arrived for {wid}")
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))))
-    monkeypatch.setenv(
-        "KRAFT_FRONTEND_DIST", os.environ.get("KRAFT_FRONTEND_DIST") or str(tmp_path / "no-dist")
-    )
-    import kraft.api as api
-
-    with TestClient(api.app, client=("127.0.0.1", 54321)) as c:
-        yield c
 
 
 def test_autostart_false_lands_paused_and_never_ran(client, tmp_path):

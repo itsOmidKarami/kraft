@@ -602,7 +602,7 @@ def v1_item(database, chain, *, repo: Path | str, wid: str = "w1", title: str = 
 
 @dataclass
 class Item:
-    """One V1 work item in `database`, as `item_on` filed it. The readbacks
+    """One V1 work item in `database`, as `make_item` filed it. The readbacks
     most executor tests assert on, and `session` to seed a worker session."""
 
     database: Any
@@ -683,7 +683,7 @@ class Item:
         return created
 
 
-async def item_on(
+async def make_item(
     database,
     run_dirs,
     chain,

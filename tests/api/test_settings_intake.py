@@ -6,10 +6,13 @@ from pathlib import Path
 
 import pytest
 import yaml
-from support.api_settings import _client
 from support.harness import fake_templates_dir
 
 from kraft import config
+
+#: No default repo entry for an unconnected repo (`support.api._client`): these read real config.
+pytestmark = pytest.mark.api_client(default_setup=False)
+
 
 _FAKE_AGENT = Path(__file__).resolve().parents[1] / "support" / "fake_agent.py"
 
@@ -17,12 +20,6 @@ _FAKE_AGENT = Path(__file__).resolve().parents[1] / "support" / "fake_agent.py"
 @pytest.fixture
 def templates_dir(tmp_path):
     return fake_templates_dir(tmp_path, "claude")
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch, templates_dir):
-    with _client(tmp_path, monkeypatch, templates_dir) as c:
-        yield c
 
 
 def test_get_intake_returns_the_defaults_when_no_file_was_written(client):

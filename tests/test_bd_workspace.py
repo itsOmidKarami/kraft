@@ -15,12 +15,16 @@ import sys
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 from support.fake_beads import ON_FAKE_AND_REAL_BD
-from support.harness import fake_templates_dir, isolated_bd, make_repo, v1_named_chain
+from support.harness import isolated_bd, make_repo, v1_named_chain
 
 from kraft import db, executor
 from kraft.paths import RunDirs
+
+#: The app with KRAFT_BD_CWD *unset* -- the installed-daemon default, and the
+#: state tests/conftest.py never lets the rest of the suite reach.
+pytestmark = pytest.mark.api_client(bd_workspace=False, default_setup=False)
+
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
@@ -41,22 +45,8 @@ def _row(database, wid, columns="*"):
     )
 
 
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    """The app with KRAFT_BD_CWD *deleted* — the installed-daemon default, and
-    the state tests/conftest.py never lets the rest of the suite reach."""
-    monkeypatch.delenv("KRAFT_BD_CWD", raising=False)
-    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))))
-    monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "no-dist"))
-    import kraft.api as api
-
-    with TestClient(api.app, client=("127.0.0.1", 54321)) as c:
-        yield c
-
-
 @ON_FAKE_AND_REAL_BD
-def test_intake_files_the_bead_in_the_work_items_repo(tier, bd, tmp_path, monkeypatch):
+def test_intake_files_the_bead_in_the_work_items_repo(bd, tmp_path, monkeypatch):
     """Kraft-ibwj: with no KRAFT_BD_CWD, the bead goes to the item's repo, not
     to whatever directory the server process happens to be sitting in."""
     monkeypatch.delenv("KRAFT_BD_CWD", raising=False)

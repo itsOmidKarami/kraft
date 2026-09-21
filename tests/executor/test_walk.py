@@ -921,7 +921,7 @@ def test_run_once_threads_local_files_from_the_launch_context(tmp_path, monkeypa
 
 
 @ON_FAKE_AND_REAL_BD
-def test_run_closes_an_auto_intaken_bead_in_its_own_workspace(tier, bd, tmp_path, monkeypatch):
+def test_run_closes_an_auto_intaken_bead_in_its_own_workspace(bd, tmp_path, monkeypatch):
     """Auto-intake adopts a bead that already lives in its repo's own `.beads`
     workspace, not the instance-wide tracker `bd_cwd` points at. Closing it in
     `bd_cwd` fails: the id does not exist there (Kraft-8mu.5.2)."""
@@ -1403,9 +1403,7 @@ def test_pausing_between_nodes_stops_the_walk_before_the_next_one_starts(tmp_pat
 
 
 @ON_FAKE_AND_REAL_BD
-def test_a_blocked_bead_pauses_the_walk_before_any_worktree_is_made(
-    tier, bd, tmp_path, monkeypatch
-):
+def test_a_blocked_bead_pauses_the_walk_before_any_worktree_is_made(bd, tmp_path, monkeypatch):
     """Kraft-tsfpk: a work item whose bead is `blocked_by` something must
     never create a worktree or start a session."""
     monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)

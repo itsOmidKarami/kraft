@@ -220,11 +220,14 @@ def fake_beads(request, monkeypatch):
 
 
 @pytest.fixture
-def bd(fake_beads) -> Bd:
+def bd(request, fake_beads) -> Bd:
     """Bead state to assert on -- `bd.status(id, cwd=...)`, `bd.ids(cwd=...)`,
     `bd.block(id, blocker, cwd=...)`, `bd.init(path)` -- answered by the fake
     in the unit tier and by the real CLI under `e2e("bd")`, so one test body
-    serves both (`support.fake_beads.ON_FAKE_AND_REAL_BD`)."""
+    serves both (`support.fake_beads.ON_FAKE_AND_REAL_BD`). A `[bd]` case that
+    lost its `e2e("bd")` mark would quietly run against the fake: refused."""
+    if getattr(request, "param", None) == "bd" and fake_beads is not None:
+        pytest.fail(f"{request.node.nodeid}: a [bd] case must be marked e2e('bd')")
     return Bd(fake_beads)
 
 
@@ -314,7 +317,7 @@ async def database(run_dirs):
 @pytest.fixture
 def item_on(request, database, run_dirs):
     """`await item_on(chain, node, ...)`: a V1 work item in `database`, on
-    `chain`, standing at `node` -- `support.harness.item_on` with the
+    `chain`, standing at `node` -- `support.harness.make_item` with the
     database, run dirs and (unless `repo=` is given) the `repo` fixture
     filled in. Returns a `support.harness.Item`:
 
@@ -328,7 +331,7 @@ def item_on(request, database, run_dirs):
 
     async def factory(chain, node=None, *, repo=None, **kwargs):
         repo = repo if repo is not None else request.getfixturevalue("repo")
-        return await harness.item_on(database, run_dirs, chain, node, repo=repo, **kwargs)
+        return await harness.make_item(database, run_dirs, chain, node, repo=repo, **kwargs)
 
     return factory
 
@@ -358,19 +361,31 @@ def client(request, tmp_path, monkeypatch, templates_dir):
             wid = client.post("/api/work-items", json={"repo": str(repo), ...}).json()["id"]
 
     Options (`support.api._client`'s keywords) go on a marker, per test or per
-    module (`pytestmark = pytest.mark.api_client(...)`):
+    module (`pytestmark = pytest.mark.api_client(...)`); a test's own mark
+    adds to its module's:
 
         @pytest.mark.api_client(peer=("10.0.0.2", 1), env={"KRAFT_INDEX_REPOS": "..."})
         @pytest.mark.api_client(default_setup=False)   # a test about repo config
+        @pytest.mark.api_client(host="0.0.0.0")        # the locked-down posture
+        @pytest.mark.api_client(bd_workspace=False)    # no KRAFT_BD_CWD
+
+    Env a lifespan reads at startup that depends on another fixture goes in a
+    module-level autouse fixture: autouse fixtures are set up first. This is
+    the one `client` fixture: a file overrides `templates_dir`, not `client`.
 
     Monkeypatch what the app reads at request time inside the test; patch
     anything the lifespan reads at startup in a fixture the test lists before
     `client`. The run dir is `tmp_path / "run"` (`support.api._set_status`
     and friends find it through `KRAFT_RUN_DIR`).
     """
-    marker = request.node.get_closest_marker("api_client")
+    # Every `api_client` mark applies, the closest winning key by key: a
+    # module's `pytestmark` sets the file's defaults, a test's own mark adds to
+    # them.
+    options = {}
+    for mark in reversed(list(request.node.iter_markers("api_client"))):
+        options |= mark.kwargs
     with api_support._client(
-        tmp_path, monkeypatch, templates_dir=templates_dir, **(marker.kwargs if marker else {})
+        tmp_path, monkeypatch, templates_dir=templates_dir, **options
     ) as test_client:
         yield test_client
 

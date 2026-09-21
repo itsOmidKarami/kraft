@@ -4,14 +4,16 @@ the human's note, and approving moves on to the plan node."""
 
 from __future__ import annotations
 
-import os
 import time
 from pathlib import Path
 
 import pytest
 import yaml
-from fastapi.testclient import TestClient
-from support.harness import fake_templates_dir, isolated_bd, make_repo
+from support.harness import fake_templates_dir, make_repo
+
+#: No default repo entry for an unconnected repo, as before this used the shared client.
+pytestmark = pytest.mark.api_client(default_setup=False)
+
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
@@ -37,19 +39,15 @@ def prompt_log(tmp_path) -> Path:
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch, prompt_log):
-    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(_templates(tmp_path)))
+def templates_dir(tmp_path):
+    return _templates(tmp_path)
+
+
+@pytest.fixture(autouse=True)
+def _agent_env(tmp_path, monkeypatch, prompt_log):
+    """Read at startup, so set before `client` starts the app (autouse runs first)."""
     monkeypatch.setenv("KRAFT_SKILLS_DIR", str(tmp_path / "no-skills"))
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_PROMPT_LOG", str(prompt_log))
-    monkeypatch.setenv(
-        "KRAFT_FRONTEND_DIST", os.environ.get("KRAFT_FRONTEND_DIST") or str(tmp_path / "no-dist")
-    )
-    import kraft.api as api
-
-    with TestClient(api.app, client=("127.0.0.1", 54321)) as c:
-        yield c
 
 
 def _await_gate(client, wid, gate, timeout=60):

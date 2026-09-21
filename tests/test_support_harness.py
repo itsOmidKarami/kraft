@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from support import harness
+from support.fake_beads import ON_FAKE_AND_REAL_BD
 from support.harness import _git, isolated_bd, make_repo
 
 
@@ -72,8 +73,8 @@ def test_a_server_child_finds_the_loud_bd_stub_before_the_real_one(tmp_path, mon
     assert str(server._bd_stub_dir()) not in real_env["PATH"].split(os.pathsep)
 
 
-@pytest.mark.parametrize("backend", ["fake", pytest.param("bd", marks=pytest.mark.e2e("bd"))])
-def test_the_beads_fake_and_real_bd_agree(backend, fake_beads, tmp_path):
+@ON_FAKE_AND_REAL_BD
+def test_the_beads_fake_and_real_bd_agree(bd, tmp_path):
     """One scenario, run against the autouse fake (tests/support/fake_beads.py)
     and against real bd: filing, blocking, closing, `ready`, `blocked_by` and
     `search` must answer the same from both, per workspace, and both must
@@ -82,27 +83,13 @@ def test_the_beads_fake_and_real_bd_agree(backend, fake_beads, tmp_path):
     test fails there, next to the fake it has to change with."""
     from kraft.adapters import beads
 
-    if backend == "fake" and fake_beads is None:
-        pytest.skip("KRAFT_TEST_REAL_BD=1: no fake installed to check")
     ws, other = str(isolated_bd(tmp_path)), str(isolated_bd(tmp_path, "other"))
-
-    def block(bead, blocker):
-        if backend == "fake":
-            fake_beads.block(bead, blocker, cwd=ws)
-        else:
-            subprocess.run(
-                ["bd", "dep", "add", bead, blocker, "--type", "blocks"],
-                cwd=ws,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
 
     async def scenario():
         a = await beads.intake("the blocker", cwd=ws)
         b = await beads.intake("the blocked", description="brief", cwd=ws)
         assert a != b
-        block(b, a)
+        bd.block(b, a, cwd=ws)
         assert await beads.blocked_by([b], cwd=ws) == [a]
         assert await beads.blocked_by([a], cwd=ws) == []
         assert [r["id"] for r in await beads.ready(cwd=ws)] == [a]

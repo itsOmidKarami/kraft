@@ -14,7 +14,7 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
-from support.api_settings import _client
+from support.api import _client
 from support.harness import (
     fake_templates_dir,
     isolated_bd,
@@ -29,18 +29,16 @@ from kraft import db as kdb
 from kraft.api.routes.repos import RepoBody, RepoPatch
 from kraft.paths import RunDirs
 
+#: No default repo entry for an unconnected repo (`support.api._client`): these read real config.
+pytestmark = pytest.mark.api_client(default_setup=False)
+
+
 _FAKE_AGENT = Path(__file__).resolve().parents[1] / "support" / "fake_agent.py"
 
 
 @pytest.fixture
 def templates_dir(tmp_path):
     return fake_templates_dir(tmp_path, "claude")
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch, templates_dir):
-    with _client(tmp_path, monkeypatch, templates_dir) as c:
-        yield c
 
 
 def _gated_chain():
@@ -674,7 +672,7 @@ def test_a_broken_repos_yaml_does_not_500_the_approve_path(tmp_path, monkeypatch
         run_dir, wid="w-gated", node_id="human_review_approval", gate="human_review_approval"
     )
 
-    with _client(tmp_path, monkeypatch, templates_dir) as client:
+    with _client(tmp_path, monkeypatch, templates_dir=templates_dir, default_setup=False) as client:
         r = client.post("/api/work-items/w-gated/gates/human_review_approval/approve")
         assert r.status_code == 200
 
@@ -704,7 +702,7 @@ def test_connected_repos_default_model_reaches_the_agent_launch(tmp_path, monkey
     monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
     repo = make_repo(tmp_path)
 
-    with _client(tmp_path, monkeypatch, templates_dir) as client:
+    with _client(tmp_path, monkeypatch, templates_dir=templates_dir, default_setup=False) as client:
         added = client.post(
             "/api/repos",
             json={
@@ -744,7 +742,7 @@ def test_connected_repos_steering_reaches_the_agent_launch(tmp_path, monkeypatch
     monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
     repo = make_repo(tmp_path)
 
-    with _client(tmp_path, monkeypatch, templates_dir) as client:
+    with _client(tmp_path, monkeypatch, templates_dir=templates_dir, default_setup=False) as client:
         added = client.post(
             "/api/repos",
             json={
@@ -784,7 +782,7 @@ def test_get_repos_with_a_deleted_steering_file_does_not_lock_out_the_screen(tmp
     templates_dir = fake_templates_dir(tmp_path, "claude")
     _broken_repos_yaml(templates_dir)
 
-    with _client(tmp_path, monkeypatch, templates_dir) as client:
+    with _client(tmp_path, monkeypatch, templates_dir=templates_dir, default_setup=False) as client:
         got = client.get("/api/repos")
         assert got.status_code == 200
         assert got.json()["repos"][0]["steering"] == ["deleted"]
@@ -1118,7 +1116,9 @@ def test_add_repo_enabled_with_no_test_command_is_refused(tmp_path, monkeypatch)
     # the default `client` fixture's `on.test.run` is a real subprocess
     # command, which the repo is now allowed to fall back on.
     no_fallback_templates_dir = fake_templates_dir(tmp_path, "claude", noop_verify=True)
-    with _client(tmp_path, monkeypatch, no_fallback_templates_dir) as client:
+    with _client(
+        tmp_path, monkeypatch, templates_dir=no_fallback_templates_dir, default_setup=False
+    ) as client:
         repo = make_repo(tmp_path)  # sample_repo has no pyproject.toml/package.json marker
         r = client.post("/api/repos", json={"path": str(repo), "enabled": True})
         assert r.status_code == 422, r.text
@@ -1146,7 +1146,9 @@ def test_add_repo_disabled_with_no_test_command_is_allowed(tmp_path, client):
 
 def test_patch_repo_cannot_enable_without_a_test_command(tmp_path, monkeypatch):
     no_fallback_templates_dir = fake_templates_dir(tmp_path, "claude", noop_verify=True)
-    with _client(tmp_path, monkeypatch, no_fallback_templates_dir) as client:
+    with _client(
+        tmp_path, monkeypatch, templates_dir=no_fallback_templates_dir, default_setup=False
+    ) as client:
         repo = make_repo(tmp_path)
         path = client.post("/api/repos", json={"path": str(repo), "enabled": False}).json()["path"]
         r = client.patch(f"/api/repos?path={path}", json={"enabled": True})

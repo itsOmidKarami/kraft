@@ -30,6 +30,8 @@ def _client(
     peer=("127.0.0.1", 54321),
     env: dict[str, str] | None = None,
     default_setup: bool = True,
+    host: str | None = None,
+    bd_workspace: bool = True,
 ):
     """A `TestClient` on `kraft.api.app` with a hermetic environment: its own
     run dir, bd workspace and templates dir under `tmp_path`, no frontend
@@ -41,9 +43,18 @@ def _client(
     - `env`: extra env vars, set before the app starts (e.g. KRAFT_INDEX_REPOS).
     - `default_setup`: give a repo that was never connected a repo entry with
       `setup_command: ""` (see below). `False` for a test about repo config.
+    - `host`: what the process binds (`KRAFT_HOST`). Auth follows that, not
+      access.yaml, so a test about the locked-down posture sets it here.
+    - `bd_workspace`: `False` leaves `KRAFT_BD_CWD` unset -- the installed
+      daemon's default, where the bd workspace comes from each item's repo.
     """
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
+    if bd_workspace:
+        monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
+    else:
+        monkeypatch.delenv("KRAFT_BD_CWD", raising=False)
+    if host:
+        monkeypatch.setenv("KRAFT_HOST", host)
     monkeypatch.setenv(
         "KRAFT_TEMPLATES_DIR",
         str(templates_dir or fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))),

@@ -120,11 +120,14 @@ class FakeBeads:
         self._ws(cwd)[bead_id]["blocked_by"].append(blocker_id)
 
 
-#: Parametrize a test over both tiers: `fake` runs in the unit tier against
-#: the in-memory fake, `bd` runs the same body against the real CLI in the
-#: e2e job. For the one real test each bd behaviour Kraft relies on keeps.
+#: Run a test that takes the `bd` fixture twice: `[fake]` in the unit tier,
+#: against the in-memory fake, and `[bd]` in the e2e job, against the real
+#: CLI. The switch is the `e2e("bd")` mark on the second case -- it is what
+#: makes the autouse `fake_beads` step aside -- not the parameter value, which
+#: only names the case. For the one real test each bd behaviour Kraft relies
+#: on keeps.
 ON_FAKE_AND_REAL_BD = pytest.mark.parametrize(
-    "tier", ["fake", pytest.param("bd", marks=pytest.mark.e2e("bd"))]
+    "bd", ["fake", pytest.param("bd", marks=pytest.mark.e2e("bd"))], indirect=True
 )
 
 
