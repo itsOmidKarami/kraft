@@ -130,42 +130,27 @@ describe("until", () => {
 });
 
 describe("logLineText", () => {
-  it("uses a real server summary", () => {
-    const l = logLine({ text: '{"type":"result"}', summary: "result: success" });
-    expect(logLineText(l)).toBe("result: success");
-  });
-
-  it("falls back to the parsed type when the server's summary is just the raw line", () => {
-    // logs.py summary() returns _shorten(line) for a shape it doesn't
-    // recognise (e.g. tool_progress), so `summary` equals `text` -- that is
-    // not a real summary and must not render as raw JSON (Kraft-av3t).
-    const raw = '{"type":"tool_progress","tokens":12}';
-    const l = logLine({ text: raw, summary: raw });
-    expect(logLineText(l)).toBe("tool_progress");
-  });
-
-  it("falls back to the parsed type with no summary at all", () => {
-    const l = logLine({ text: '{"type":"tool_progress"}' });
-    expect(logLineText(l)).toBe("tool_progress");
-  });
-
-  it("passes plain stdout/sys text through untouched", () => {
-    const l = logLine({ src: "stdout", text: "collected 12 items" });
-    expect(logLineText(l)).toBe("collected 12 items");
+  // logs.py summary() returns _shorten(line) for a shape it doesn't recognise
+  // (e.g. tool_progress), so `summary` equal to `text` is not a real summary
+  // and must not render as raw JSON (Kraft-av3t).
+  const raw = '{"type":"tool_progress","tokens":12}';
+  it.each<[string, Partial<LogLine>, string]>([
+    ["uses a real server summary", { text: '{"type":"result"}', summary: "result: success" }, "result: success"],
+    ["falls back to the parsed type when the summary is just the raw line", { text: raw, summary: raw }, "tool_progress"],
+    ["falls back to the parsed type with no summary at all", { text: '{"type":"tool_progress"}' }, "tool_progress"],
+    ["passes plain stdout/sys text through untouched", { src: "stdout", text: "collected 12 items" }, "collected 12 items"],
+  ])("%s", (_, over, want) => {
+    expect(logLineText(logLine(over))).toBe(want);
   });
 });
 
 describe("statusWord", () => {
-  it("renders rate_limited in plain words", () => {
-    expect(statusWord("rate_limited")).toBe("rate limited");
-  });
-
-  it("renders waiting in plain words", () => {
-    expect(statusWord("waiting")).toBe("waiting on CI");
-  });
-
-  it("falls back to the raw string for anything unmapped", () => {
-    expect(statusWord("active")).toBe("active");
+  it.each([
+    ["rate_limited", "rate limited"],
+    ["waiting", "waiting on CI"],
+    ["active", "active"], // anything unmapped falls back to the raw string
+  ])("renders %s as %s", (status, word) => {
+    expect(statusWord(status)).toBe(word);
   });
 });
 
@@ -183,28 +168,18 @@ describe("docBody (W8.2)", () => {
 
 describe("cleanTitle (W13 · B.3)", () => {
   const item = { title: "Chain review: cover hook configs and escalation logic", bead_id: "Kraft-df4tc" };
-  it("drops a trailing bead id in parentheses", () => {
-    expect(cleanTitle({ title: "Chain-review diff review (Kraft-df4tc)" }, item)).toBe("Chain-review diff review");
-  });
-  it("drops an em dash, the bead id and everything after it", () => {
-    expect(cleanTitle({ title: "Security review — Kraft-df4tc (chain review: hook configs and escalation logic)" }, item)).toBe(
-      "Security review",
-    );
-  });
-  it("leaves a title with no bead id or item title alone", () => {
-    expect(cleanTitle({ title: "Fix-loop judge: verify (round 4 decision)" }, item)).toBe("Fix-loop judge: verify (round 4 decision)");
-  });
-  it("is empty for a title that is only the item's title", () => {
-    expect(cleanTitle({ title: "Chain review: cover hook configs and escalation logic" }, item)).toBe("");
-  });
-  it("takes the item's title out only as whole words", () => {
-    expect(cleanTitle({ title: "Review: Design the caching layer" }, { title: "T", bead_id: null })).toBe("Review: Design the caching layer");
-    expect(cleanTitle({ title: "Security review of chain review: cover hook configs and escalation logic" }, item)).toBe("Security review of");
-  });
-
-  it("drops a leading `Bead-id:` and still finds a bead id without the item", () => {
-    expect(cleanTitle({ title: "Kraft-df4tc: tighten the judge prompt" }, item)).toBe("tighten the judge prompt");
-    expect(cleanTitle({ title: "Chain-review diff review (Kraft-df4tc)" })).toBe("Chain-review diff review");
+  const bare = { title: "T", bead_id: null };
+  it.each<[string, string, { title: string; bead_id: string | null } | undefined, string]>([
+    ["drops a trailing bead id in parentheses", "Chain-review diff review (Kraft-df4tc)", item, "Chain-review diff review"],
+    ["drops an em dash, the bead id and everything after it", "Security review — Kraft-df4tc (chain review: hook configs and escalation logic)", item, "Security review"],
+    ["leaves a title with no bead id or item title alone", "Fix-loop judge: verify (round 4 decision)", item, "Fix-loop judge: verify (round 4 decision)"],
+    ["is empty for a title that is only the item's title", "Chain review: cover hook configs and escalation logic", item, ""],
+    ["takes the item's title out only as whole words", "Review: Design the caching layer", bare, "Review: Design the caching layer"],
+    ["takes the item's title out as a trailing phrase", "Security review of chain review: cover hook configs and escalation logic", item, "Security review of"],
+    ["drops a leading `Bead-id:`", "Kraft-df4tc: tighten the judge prompt", item, "tighten the judge prompt"],
+    ["still finds a bead id without the item", "Chain-review diff review (Kraft-df4tc)", undefined, "Chain-review diff review"],
+  ])("%s", (_, title, it_, want) => {
+    expect(cleanTitle({ title }, it_)).toBe(want);
   });
 });
 

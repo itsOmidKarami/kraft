@@ -192,20 +192,17 @@ describe("applyEvent", () => {
     ]);
   });
 
-  it("work_item_completed sets status", () => {
-    useStore.getState().applyEvent(ev({ type: "work_item_completed", payload: {} }));
-    expect(useStore.getState().workItems.w1.status).toBe("completed");
-  });
-
-  it("work_item_needs_human sets status", () => {
-    useStore.getState().applyEvent(ev({ type: "work_item_needs_human", payload: { node_id: "verify", reason: "x" } }));
-    expect(useStore.getState().workItems.w1.status).toBe("needs_human");
-  });
-  it("work_item_abandoned sets status", () => {
-    // A live board holding a row for an item someone abandoned elsewhere would
-    // keep offering actions on a worktree that no longer exists.
-    useStore.getState().applyEvent(ev({ type: "work_item_abandoned", payload: {} }));
-    expect(useStore.getState().workItems.w1.status).toBe("abandoned");
+  // abandoned: a live board holding a row for an item abandoned elsewhere
+  // would keep offering actions on a worktree that no longer exists.
+  it.each<[string, Record<string, unknown>, Partial<WorkItem>]>([
+    ["work_item_completed", {}, { status: "completed" }],
+    ["work_item_needs_human", { node_id: "verify", reason: "x" }, { status: "needs_human" }],
+    ["work_item_abandoned", {}, { status: "abandoned" }],
+    ["work_item_rate_limited", { retry_at: "2026-01-01T00:00:00Z", node_id: "n" }, { status: "rate_limited", retry_at: "2026-01-01T00:00:00Z" }],
+    ["work_item_waiting", { retry_at: "2026-01-01T00:00:00Z", node_id: "n" }, { status: "waiting", retry_at: "2026-01-01T00:00:00Z" }],
+  ])("%s patches the item", (type, payload, patch) => {
+    useStore.getState().applyEvent(ev({ type, payload }));
+    expect(useStore.getState().workItems.w1).toMatchObject(patch);
   });
 
   it("work_item_needs_human carries the needs_context question off the live stream", () => {
@@ -244,22 +241,6 @@ describe("applyEvent", () => {
     },
   );
 
-  it("work_item_rate_limited patches status and retry_at", () => {
-    useStore.getState().applyEvent(
-      ev({ type: "work_item_rate_limited", payload: { retry_at: "2026-01-01T00:00:00Z", node_id: "n" } }),
-    );
-    expect(useStore.getState().workItems.w1.status).toBe("rate_limited");
-    expect(useStore.getState().workItems.w1.retry_at).toBe("2026-01-01T00:00:00Z");
-  });
-
-  it("work_item_waiting patches status and retry_at", () => {
-    useStore.getState().applyEvent(
-      ev({ type: "work_item_waiting", payload: { retry_at: "2026-01-01T00:00:00Z", node_id: "n" } }),
-    );
-    expect(useStore.getState().workItems.w1.status).toBe("waiting");
-    expect(useStore.getState().workItems.w1.retry_at).toBe("2026-01-01T00:00:00Z");
-  });
-
   it("work_item_archived sets archived_at/archived_by", () => {
     useStore.setState({ workItems: { w1: baseItem({ status: "completed" }) } });
     useStore.getState().applyEvent(ev({ type: "work_item_archived", payload: { by: "you" } }));
@@ -283,27 +264,16 @@ describe("applyEvent", () => {
     expect(useStore.getState().eventsByItem.w1).toHaveLength(1);
   });
 
-  it("work_item_created for an unknown id triggers hydrateItem", async () => {
-    const spy = vi
-      .spyOn(useStore.getState(), "hydrateItem")
-      .mockResolvedValue(undefined);
-    useStore.getState().applyEvent(ev({ work_item_id: "w2", type: "work_item_created", payload: {} }));
-    await new Promise((r) => setTimeout(r));
-    expect(spy).toHaveBeenCalledWith("w2");
-  });
-
-  it("chain_loaded for an unknown id triggers hydrateItem", async () => {
+  // gate_requested: so a stale deferred_findings roll-up isn't left showing.
+  it.each([
+    ["work_item_created for an unknown id", "w2", "work_item_created", {}],
+    ["chain_loaded for an unknown id", "w2", "chain_loaded", {}],
+    ["gate_requested", "w1", "gate_requested", { gate: "human_review_approval" }],
+  ])("%s triggers hydrateItem", async (_, id, type, payload) => {
     const spy = vi.spyOn(useStore.getState(), "hydrateItem").mockResolvedValue(undefined);
-    useStore.getState().applyEvent(ev({ work_item_id: "w2", type: "chain_loaded", payload: {} }));
+    useStore.getState().applyEvent(ev({ work_item_id: id, type, payload }));
     await new Promise((r) => setTimeout(r));
-    expect(spy).toHaveBeenCalledWith("w2");
-  });
-
-  it("gate_requested re-hydrates so a stale deferred_findings roll-up isn't left showing", async () => {
-    const spy = vi.spyOn(useStore.getState(), "hydrateItem").mockResolvedValue(undefined);
-    useStore.getState().applyEvent(ev({ type: "gate_requested", payload: { gate: "human_review_approval" } }));
-    await new Promise((r) => setTimeout(r));
-    expect(spy).toHaveBeenCalledWith("w1");
+    expect(spy).toHaveBeenCalledWith(id);
   });
 
   it("lastSeq never goes backward", () => {
