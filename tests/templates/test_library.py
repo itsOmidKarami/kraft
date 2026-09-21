@@ -352,6 +352,58 @@ def test_an_unknown_steering_reference_is_rejected(tmp_path):
         write(tmp_path, library, chain).resolve_chain("default")
 
 
+@pytest.mark.parametrize("name", ["kraft:no-such-method", "no-such-method"])
+def test_a_skill_that_resolves_to_nothing_is_a_lint_error(tmp_path, name):
+    """Kraft-vhcop: a selected skill that names no method is refused when the
+    chain resolves -- lint, intake -- not discovered by an agent at launch or
+    silently replaced by an instruction to load a plugin nobody ships."""
+    library = {"tasks": {"base": agent_task(skill=name)}}
+    chain = {
+        "id": "default",
+        "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "base"}]}],
+    }
+    lib = write(tmp_path, library, chain)
+    with pytest.raises(TemplateLibraryError, match=f"n.main.t.*{name}"):
+        lib.resolve_chain("default")
+    assert [i.chain for i in lib.lint()] == ["default"]
+
+
+def test_a_skill_the_operator_overlay_provides_resolves(tmp_path):
+    """The overlay is a real source: a method only the operator ships is not a
+    lint error."""
+    skills = tmp_path / "skills"
+    (skills / "house-method").mkdir(parents=True)
+    (skills / "house-method" / "SKILL.md").write_text("ours")
+    library = {"tasks": {"base": agent_task(skill="kraft:house-method")}}
+    chain = {
+        "id": "default",
+        "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "base"}]}],
+    }
+    write(tmp_path / "templates", library, chain)
+    lib = TemplateLibrary.from_yaml_dir(tmp_path / "templates", skills_dir=skills)
+    assert lib.lint() == []
+
+
+def test_every_seeded_skill_reaches_the_agent_as_its_bundled_method():
+    """Kraft-vhcop: the seed named `kraft:spec`, `kraft:plan` and
+    `kraft:review-brief`, none of which resolved, so the bundled methods never
+    reached an agent. Every seeded skill must read as its shipped method."""
+    from kraft import skill
+
+    seed = Path(__file__).resolve().parents[2] / "templates"
+    lib = TemplateLibrary.from_yaml_dir(seed)
+    seen = set()
+    for cid in lib.chain_ids:
+        for node in lib.resolve_chain(cid).nodes:
+            for t in node.tasks():
+                if isinstance(t.task, AgentTask) and t.task.skill is not None:
+                    name = t.task.skill.removeprefix("kraft:")
+                    bundled = (skill.BUNDLED / name / "SKILL.md").read_text()
+                    assert skill.read(None, t.task.skill) == bundled, t.path
+                    seen.add(t.task.skill)
+    assert {"kraft:spec", "kraft:plan", "kraft:review-brief"} <= seen
+
+
 def test_a_malformed_template_file_is_a_configuration_error(tmp_path):
     (tmp_path / "chains").mkdir()
     (tmp_path / "library.yaml").write_text("tasks: [not, a, mapping]\n")

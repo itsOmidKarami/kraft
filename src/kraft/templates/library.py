@@ -25,6 +25,7 @@ from pathlib import Path
 import yaml
 from pydantic import ValidationError
 
+from kraft import skill as _skill
 from kraft.templates.models import (
     JUDGE_SEGMENT,
     MAIN_STEP,
@@ -154,16 +155,21 @@ class TemplateLibrary:
         components: Mapping[Namespace, Mapping[str, RawComponent]],
         chains: Mapping[str, RawComponent],
         steering: Mapping[str, SteeringProfile],
+        skills_dir: Path | None = None,
     ) -> None:
         self._components = components
         self._chains = chains
         self.steering = steering
+        #: Where an operator may overlay a method file (`kraft.skill`); `None`
+        #: means the bundled methods only.
+        self.skills_dir = skills_dir
 
     @classmethod
-    def from_yaml_dir(cls, path: str | Path) -> TemplateLibrary:
+    def from_yaml_dir(cls, path: str | Path, *, skills_dir: Path | None = None) -> TemplateLibrary:
         """Read `library.yaml` and every `chains/*.yaml` under `path`. The only
         boundary I/O here; a read or parse failure becomes a
-        `TemplateLibraryError` naming the file."""
+        `TemplateLibraryError` naming the file. `skills_dir` is the method
+        overlay a task's `skill:` resolves against, beside the bundled ones."""
         root = Path(path)
         library_path = root / LIBRARY_FILE
         if not library_path.is_file():
@@ -201,7 +207,7 @@ class TemplateLibrary:
             chains[id] = RawComponent(
                 {**body, "id": id}, ComponentSource(chain_path, Namespace.NODES, id)
             )
-        return cls(components, chains, steering)
+        return cls(components, chains, steering, skills_dir)
 
     @property
     def chain_ids(self) -> tuple[str, ...]:
@@ -279,6 +285,19 @@ class TemplateLibrary:
                         raise TemplateLibraryError(
                             f"{resolution.at(task.path)}: selects no steering profile {name!r}"
                         )
+                # A skill that names no method is refused here, where lint and
+                # intake see it, never discovered by an agent at launch
+                # (Kraft-vhcop). Another plugin's skill cannot be looked up
+                # from here; `skill.UNAVAILABLE` has the agent stop on it.
+                selected = getattr(task.task, "skill", None)
+                if selected is not None:
+                    try:
+                        _skill.validate(self.skills_dir, selected, where=task.path)
+                    except _skill.SkillError as exc:
+                        raise TemplateLibraryError(
+                            f"{resolution.at(task.path)}: selects skill {selected!r}, "
+                            f"which resolves to no method: {exc}"
+                        ) from exc
         # The text, not the names: `materialize` freezes it into the item's
         # snapshot, so a later edit to `library.yaml` cannot reach a running item.
         return replace(

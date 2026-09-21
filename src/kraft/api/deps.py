@@ -197,10 +197,12 @@ def _reload_templates(st) -> None:
         harnesses=st.harnesses,
     )
     st.templates = load_templates(st.templates_dir, st.registry)
-    st.library, st.invalid_library = load_library(st.templates_dir)
+    st.library, st.invalid_library = load_library(st.templates_dir, st.skills_dir)
 
 
-def load_library(templates_dir: Path) -> tuple[TemplateLibrary | None, list[str]]:
+def load_library(
+    templates_dir: Path, skills_dir: Path | None = None
+) -> tuple[TemplateLibrary | None, list[str]]:
     """The V1 template library for `templates_dir`, and why it is missing.
 
     Degrades rather than raising, the same way `policy.yaml` does at startup: a
@@ -209,7 +211,7 @@ def load_library(templates_dir: Path) -> tuple[TemplateLibrary | None, list[str]
     for `None`; nothing falls back to the legacy loader.
     """
     try:
-        return TemplateLibrary.from_yaml_dir(templates_dir), []
+        return TemplateLibrary.from_yaml_dir(templates_dir, skills_dir=skills_dir), []
     except TemplateLibraryError as exc:
         logger.warning("template library unreadable: %s", exc)
         return None, [str(exc)]

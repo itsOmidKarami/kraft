@@ -73,7 +73,7 @@ async def lifespan(app: FastAPI):
     app.state.skills_dir = Path(os.environ.get("KRAFT_SKILLS_DIR") or default_skills_dir())
     registry = load_registry(templates_dir / "registry.yaml", skills_dir=app.state.skills_dir)
     templates = load_templates(templates_dir, registry)
-    library, invalid_library = deps.load_library(templates_dir)
+    library, invalid_library = deps.load_library(templates_dir, app.state.skills_dir)
 
     # Config the Settings screens edit. Read once here and re-read on every save,
     # so a hand edit and a UI edit are the same operation to the rest of the app.

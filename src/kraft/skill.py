@@ -7,9 +7,10 @@ the config dict would inline a method body into the operator's YAML.
 
 Where it differs is the fallback. Steering is operator-authored and exists only
 under `$KRAFT_HOME`; a method is Kraft-authored and *shipped*, with the operator
-directory as an optional overlay on top. And a value containing `:` is not a
-file at all: it names a skill in some other tool's plugin system, which Kraft
-cannot read, so the agent is told to load it by name.
+directory as an optional overlay on top. A value containing `:` is not a file
+at all: it names a skill in some other tool's plugin system, which Kraft cannot
+read, so the agent is told to load it by name. The one exception is Kraft's own
+qualifier: `kraft:spec` is the method Kraft ships as `spec`.
 """
 
 from __future__ import annotations
@@ -39,13 +40,25 @@ UNAVAILABLE = (
 PLUGIN_PROMPT = "Follow the {ref} skill for how to do this work. Load it before you start."
 
 
+#: The plugin Kraft itself is. A V1 skill name is plugin-qualified
+#: (`templates.models.AgentTask.skill`), and `kraft:spec` names Kraft's own
+#: shipped method -- the same file a bare `spec` does (Kraft-vhcop).
+OWN_PLUGIN = "kraft:"
+
+
 class SkillError(Exception):
     pass
 
 
+def _own_name(value: str) -> str:
+    """`value` with Kraft's own plugin qualifier removed, if it has one."""
+    return value.removeprefix(OWN_PLUGIN)
+
+
 def is_plugin_ref(value: str) -> bool:
-    """A `:` means "somebody else's skill system", not a file name."""
-    return ":" in value
+    """A `:` means "somebody else's skill system", not a file name -- except
+    Kraft's own `kraft:` qualifier, which names a method Kraft ships."""
+    return not value.startswith(OWN_PLUGIN) and ":" in value
 
 
 def _local_path(skills_dir: Path | None, name: str, where: str) -> Path:
@@ -68,8 +81,9 @@ def _local_path(skills_dir: Path | None, name: str, where: str) -> Path:
 
 
 def path_for(skills_dir: Path | None, name: str, *, where: str) -> Path:
-    """The file a bare skill name resolves to, or raise. Not for plugin refs."""
-    return _local_path(skills_dir, name, where)
+    """The file a bare or `kraft:` skill name resolves to, or raise. Not for
+    another plugin's refs."""
+    return _local_path(skills_dir, _own_name(name), where)
 
 
 def validate(skills_dir: Path | None, value, *, where: str) -> None:
@@ -83,14 +97,14 @@ def validate(skills_dir: Path | None, value, *, where: str) -> None:
         raise SkillError(f"{where}: 'skill' must be a non-empty string")
     if is_plugin_ref(value):
         return
-    _local_path(skills_dir, value, where)
+    _local_path(skills_dir, _own_name(value), where)
 
 
 def read(skills_dir: Path | None, value: str) -> str:
     """The method text to inject. Called at dispatch, after `validate`."""
     if is_plugin_ref(value):
         return PLUGIN_PROMPT.format(ref=value)
-    path = _local_path(skills_dir, value, "skill")
+    path = _local_path(skills_dir, _own_name(value), "skill")
     try:
         return path.read_text()
     except (OSError, ValueError) as exc:
