@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 33
+SCHEMA_VERSION = 34
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -702,6 +702,12 @@ FROM worker_sessions""",
         "ALTER TABLE work_items ADD COLUMN materialized_chain TEXT",
         "ALTER TABLE work_items ADD COLUMN run_fork_parent TEXT",
     ],
+    # The agent's progress event was renamed `task_progress` -> `plan_progress`
+    # (it reports a plan task, and V1 made "task" a chain-task word). Every
+    # reader -- the Timeline's grouping, the board's "Task N of M" -- matches
+    # the new name only, so stored rows are renamed once here rather than each
+    # reader learning both (Kraft-7hy7x).
+    33: ["UPDATE events SET type = 'plan_progress' WHERE type = 'task_progress'"],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins
