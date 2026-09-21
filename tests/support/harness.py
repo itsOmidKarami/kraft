@@ -463,6 +463,33 @@ def v1_named_chain(
     return v1_library(templates_dir, agent_command=agent_command).resolve_chain(chain_id)
 
 
+def v1_seeded_chain(templates_dir: Path, nodes: list[dict], *, agent_command: str, chain_id="t"):
+    """`nodes` (authored V1 node mappings) as a `ResolvedChain`, after seeding
+    `templates_dir` so the `fake` harness an agent task names launches
+    `agent_command` (see `seed_v1_library`)."""
+    seed_v1_library(Path(templates_dir), agent_command=agent_command)
+    return v1_resolved(nodes, chain_id=chain_id)
+
+
+def v1_fix_loop_node(node_id: str, measure: dict, *, judge: bool = True) -> dict:
+    """The legacy `verify_fix_loop` shape as one V1 node: `measure` is the
+    node's task, the fix loop's one task is an agent on the `fake` harness
+    (legacy: `on.implementation.start`), and -- unless `judge=False` -- an
+    agent judge on the same harness (legacy: `on.fix_loop.judge`). Its loop
+    key is `f"{node_id}.fix_loop"` (`walk._loop_key`)."""
+    fix_loop: dict = {
+        "tasks": [{"id": "fix", "kind": "agent", "harness": "fake", "prompt": "Fix it."}]
+    }
+    if judge:
+        fix_loop["judge"] = {
+            "id": "judge",
+            "kind": "agent",
+            "harness": "fake",
+            "prompt": "Decide whether another repair attempt is justified.",
+        }
+    return {"id": node_id, "kind": "exec", "tasks": [measure], "fix_loop": fix_loop}
+
+
 def e2e_templates_dir(tmp_path: Path) -> Path:
     return fake_templates_dir(tmp_path, "claude --model claude-haiku-4-5-20251001")
 

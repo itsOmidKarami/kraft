@@ -658,13 +658,21 @@ async def measure_node(
         # A null head_sha is never reusable (`reusable_session` itself would
         # say so) -- skip the read entirely rather than asking a test double
         # that has no worktree, and thus no HEAD, to answer it.
+        #
+        # Nor is a dispatch under `instruction_override`: that is the fix
+        # loop's repair, told this cycle's findings (and any steer). A done
+        # session at the same round and head answered a *different*
+        # instruction -- after a `/retry` clears the loop counter the round
+        # numbers restart, so a noop fix from before the retry would be
+        # "reused" and the human's steer never reach an agent. The legacy walk
+        # dispatched the fix directly and never asked this question.
         reused = (
             db.read(
                 lambda c: store.reusable_session(
                     c, work_item_id, node.id, task.path, round, head_sha
                 )
             )
-            if head_sha is not None
+            if head_sha is not None and instruction_override is None
             else None
         )
         if reused is not None:
