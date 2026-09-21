@@ -2664,6 +2664,39 @@ def test_an_agent_task_contract_precedes_its_skill_and_steering(tmp_path, monkey
     assert context.index("THE-METHOD") < context.index("THE-STEERING")
 
 
+def test_a_config_error_stop_carries_a_bounded_cause(tmp_path, monkeypatch):
+    """The card carries the cause, but never an unbounded log line: past the
+    cap it is cut, and the full line stays in the session log."""
+    repo = make_repo(tmp_path)
+    monkeypatch.setenv("KRAFT_HOME", str(fake_harness_home(tmp_path, [sys.executable, "-c", ""])))
+    skill = "no-such-method-" + "x" * 400
+    chain = v1_chain(
+        [
+            {
+                "id": "spec",
+                "kind": "exec",
+                "tasks": [
+                    {
+                        "id": "write",
+                        "kind": "agent",
+                        "harness": "fake",
+                        "prompt": "Produce the specification.",
+                        "skill": skill,
+                    }
+                ],
+            }
+        ],
+        repo=repo,
+    )
+
+    _status, evts, sessions, _row = asyncio.run(v1_walk(tmp_path, chain, repo=repo))
+
+    reason = next(e for e in evts if e["type"] == "work_item_needs_human")["payload"]["reason"]
+    assert "no-such-method-" in reason and reason.endswith("…")
+    assert len(reason) < 400
+    assert skill in Path(sessions[0]["log_path"]).read_text()
+
+
 def test_an_unloadable_selected_skill_stops_for_a_human(tmp_path, monkeypatch):
     """`selected-skill-must-be-available`: no substitute method, no launch."""
     repo = make_repo(tmp_path)
@@ -2694,6 +2727,8 @@ def test_an_unloadable_selected_skill_stops_for_a_human(tmp_path, monkeypatch):
     reason = next(e for e in evts if e["type"] == "work_item_needs_human")["payload"]["reason"]
     assert "could not start write in node spec" in reason
     assert "no-such-method" in Path(sessions[0]["log_path"]).read_text()
+    # The card names the cause itself, not only the log (Round 3 of Task 6b).
+    assert "no-such-method" in reason
 
 
 @pytest.mark.parametrize(

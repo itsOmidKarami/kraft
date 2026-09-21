@@ -298,6 +298,44 @@ async def recover_node(
     )
 
 
+#: How much of a config_error's own log line the card carries. A human reads
+#: the cause on the board; the full log is one click away for anything longer.
+_STOP_CAUSE_MAX = 300
+
+
+def _config_error_cause(db, work_item_id: str, node: ResolvedNode, task: ResolvedTask) -> str:
+    """The first line of the newest config_error session log for `task` -- the
+    task's own account of why it could not start -- or "" when there is none."""
+    row = db.read(
+        lambda c: c.execute(
+            "SELECT log_path FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
+            "AND hook_point = ? AND status = 'config_error' "
+            "ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            (work_item_id, node.id, task.path),
+        ).fetchone()
+    )
+    try:
+        text = Path(row["log_path"]).read_text() if row else ""
+    except OSError:
+        return ""
+    line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
+    return line if len(line) <= _STOP_CAUSE_MAX else line[: _STOP_CAUSE_MAX - 1] + "…"
+
+
+async def _stop_for_config_error(
+    db, work_item_id: str, node: ResolvedNode, failed: list[ResolvedTask]
+) -> str:
+    """A task that could not start stops for a human, and the stop names its
+    cause (Task 4b: an unmapped forge target stops "for a human naming the
+    target") rather than only pointing at the session log."""
+    named = ", ".join(t.task.id for t in failed)
+    causes = [c for t in failed if (c := _config_error_cause(db, work_item_id, node, t))]
+    detail = "; ".join(causes) if causes else "see the session log"
+    reason = f"could not start {named} in node {node.id}: {detail}"
+    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason))
+    return "needs_human"
+
+
 async def _stop_at_moved_base(db, work_item_id: str, node: ResolvedNode) -> str:
     """A step moved `base_ref`: the node stops there and completes like a clean
     pass. The declared restart span a base change re-enters is Task 7's
@@ -374,12 +412,7 @@ async def walk_node(
         if verdict == "paused":
             return "paused"
         if verdict == CONFIG_ERROR:
-            named = ", ".join(t.task.id for t in failed)
-            reason = f"could not start {named} in node {node.id} — see the session log"
-            await db.write(
-                lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node.id, reason)
-            )
-            return "needs_human"
+            return await _stop_for_config_error(db, work_item_id, node, failed)
         if verdict == RATE_LIMITED:
             return await stops.stop_for_rate_limit(db, work_item_id, node)
         if verdict == WAITING:
@@ -502,12 +535,7 @@ async def walk_node(
         if verdict == CONFIG_ERROR:
             # Checked before bump_counter: a repair pass cannot install a
             # binary either, and the counter must stay untouched (Kraft-579).
-            named = ", ".join(t.task.id for t in failed)
-            reason = f"could not start {named} in node {node.id} — see the session log"
-            await db.write(
-                lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node.id, reason)
-            )
-            return "needs_human"
+            return await _stop_for_config_error(db, work_item_id, node, failed)
         if verdict == RATE_LIMITED:
             return await stops.stop_for_rate_limit(db, work_item_id, node)
         if verdict == WAITING:
@@ -559,14 +587,7 @@ async def walk_node(
             # checks above already use for these sentinels, so a repair's
             # re-measure stops exactly the way an ordinary measure would have.
             if r_verdict == CONFIG_ERROR:
-                named = ", ".join(t.task.id for t in r_failed)
-                reason = f"could not start {named} in node {node.id} — see the session log"
-                await db.write(
-                    lambda c, reason=reason: store.mark_needs_human(
-                        c, work_item_id, node.id, reason
-                    )
-                )
-                return "needs_human"
+                return await _stop_for_config_error(db, work_item_id, node, r_failed)
             if r_verdict == RATE_LIMITED:
                 return await stops.stop_for_rate_limit(db, work_item_id, node)
             if r_verdict == WAITING:

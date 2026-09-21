@@ -190,6 +190,9 @@ def test_a_repo_on_the_fake_forge_walks_the_default_chain_to_the_same_stop(tmp_p
     assert "draft_merge_request" in walked["completed"], walked["reason"]
     assert walked["node"] == "merge_request_feedback"
     assert "await_review" in walked["reason"]
+    # The stop names its own cause on the card (Task 4b: "for a human naming
+    # the target"), not merely "see the session log".
+    assert "mr.automated_review" in walked["reason"] and "Task 9" in walked["reason"]
 
 
 def test_reject_records_the_note_and_reopen_flips_the_row(tmp_path):
