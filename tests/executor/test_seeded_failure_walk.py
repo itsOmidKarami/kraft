@@ -6,6 +6,7 @@ every launch whose context names `KRAFT_FAIL`; git is real, the forge is fake.""
 
 from pathlib import Path
 
+import pytest
 from support.harness import seed_v1_library, v1_named_chain
 
 from kraft import executor
@@ -27,11 +28,14 @@ TRAIL = (
 )
 
 
-async def test_a_failing_item_walks_recovery_then_the_fix_loop_then_escalation(
-    item_on, tmp_path, monkeypatch
-):
+@pytest.fixture
+async def failed_walk(item_on, tmp_path, monkeypatch):
+    """The walk this file is about, once: `(item, status, argv of every agent
+    launch)`."""
     templates = seed_v1_library(tmp_path / "templates", agent_command=str(FAKE_CLAUDE))
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+    argv_log = tmp_path / "argv.log"
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_ARGV_LOG", str(argv_log))
     monkeypatch.setattr(
         forge.run,
         "resolve",
@@ -50,6 +54,12 @@ async def test_a_failing_item_walks_recovery_then_the_fix_loop_then_escalation(
         policy=_policy.Policy(loops={}, default=_policy.Cap(9, 3600), auto_escalate_delay_s=0),
         launch=executor.LaunchContext(repo_entry=ON_A_FORGE, steering_dir=None),
     )
+    records = argv_log.read_text().split("\x00\n") if argv_log.exists() else []
+    return it, status, [r.splitlines() for r in records if r.strip()]
+
+
+async def test_a_failing_item_walks_recovery_then_the_fix_loop_then_escalation(failed_walk):
+    it, status, _launches = failed_walk
 
     trail = [(e["type"], e["payload"]) for e in it.events() if e["type"] in TRAIL]
     for kind, payload in trail:  # the report's event trail: `just test ... -s`
@@ -74,3 +84,24 @@ async def test_a_failing_item_walks_recovery_then_the_fix_loop_then_escalation(
     [escalation] = [p for k, p in trail if k == "escalation_message"]
     assert escalation["auto"] is True
     assert it.status() == "needs_human"
+
+
+def _option(argv: list[str], flag: str) -> str | None:
+    return argv[argv.index(flag) + 1] if flag in argv else None
+
+
+async def test_the_judge_launches_on_its_own_runtime_not_the_fixers(failed_walk):
+    """`judge-runtime-is-independent-from-fixer-runtime`: the seeded judge
+    (`strict_judge`, profile `claude_review`) and the repair it judges
+    (`repair_mr_feedback`, profile `codex_default` with its own model) each
+    launch on their own task's configuration."""
+    _it, _status, launches = failed_walk
+
+    def prompt(argv):
+        return _option(argv, "-p") or ""
+
+    judges = [a for a in launches if prompt(a).startswith("The fix loop on node")]
+    repairs = [a for a in launches if prompt(a).startswith(f"The checks in node {NODE} failed")]
+    assert judges and repairs
+    assert {(_option(a, "--model"), _option(a, "--effort")) for a in judges} == {("sonnet", "high")}
+    assert {_option(a, "--model") for a in repairs} == {"gpt-5.6-terra"}
