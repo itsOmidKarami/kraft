@@ -1571,6 +1571,34 @@ def test_steps_run_in_order_and_a_failing_group_stops_the_node(tmp_path, monkeyp
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("status", ["infra", "unknown", "capped_out", "no-such-status"])
+def test_an_unrecognized_task_status_fails_the_node_closed(tmp_path, monkeypatch, status):
+    """Kraft-tfnjt: a status outside every known outcome stopped the step loop
+    and then fell through the verdict ladder to "ok" -- a pass for a task that
+    reported nothing Kraft understands, with the later step never run."""
+
+    async def scenario():
+        database, rd, worktree, wid, row = await _setup_measure_node_scenario(tmp_path)
+        try:
+
+            async def fake_dispatch_node(db_, run_dirs_, task, node, row_, wt, **kw):
+                return status if task.task.id == "a" else "done"
+
+            monkeypatch.setattr(dispatch, "dispatch_node", fake_dispatch_node)
+            node = _node_of(_two_step(["a"], ["b"]))
+
+            verdict, failed, _excs = await dispatch.measure_node(
+                database, rd, wid, node, row, worktree, round=0
+            )
+
+            assert verdict == "failed", verdict
+            assert [t.task.id for t in failed] == ["a"]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
 def test_a_later_group_runs_only_after_the_earlier_one_finishes(tmp_path, monkeypatch):
     async def scenario():
         database, rd, worktree, wid, row = await _setup_measure_node_scenario(tmp_path)

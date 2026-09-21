@@ -760,18 +760,19 @@ async def measure_node(
     # spend policy refusing to start, not an external constraint the agent hit.
     if any(r == BUDGET for r in results):
         return BUDGET, [], []
-    failed = [
-        t
-        for t, r in outcomes
-        if isinstance(r, BaseException) or r in ("failed", "needs_context", "conflict")
-    ]
+    # Fail closed: only an advancing status is a pass. `failed`, `needs_context`
+    # and `conflict` are the statuses a task is expected to fail with, and
+    # anything else -- `infra`, `unknown`, a status some adapter invents later --
+    # is a result nobody here understands, which must never read as success
+    # (Kraft-tfnjt). Every stop sentinel has already returned above.
+    failed = [t for t, r in outcomes if isinstance(r, BaseException) or r not in _ADVANCING]
     if failed:
         return "failed", failed, excs
     return "ok", [], []
 
 
-#: A task in one of these states failed outright -- the same set
-#: `measure_node` treats as failed.
+#: A task in one of these states failed outright. `measure_node` fails these
+#: and, closed, any status it does not recognize too.
 _FAILING_STATUSES = tuple(s for s, tier in SCOPE.items() if tier == "task")
 
 
