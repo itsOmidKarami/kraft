@@ -606,7 +606,7 @@ enforced-by: tests/test_policy.py::test_template_policy_cannot_widen_allowed_too
 
 Repository policy overrides SHALL only tighten inherited safety ceilings and
 SHALL remain effective for every chain and task that runs in that repository.
-origin: NOT ENFORCED YET, and no task in docs/superpowers/plans/2026-09-20-template-schema-v1.md builds it. `Repository` (src/kraft/templates/environment.py) has no `policy:` field, and nothing applies a repository-scoped override: `apply_template_override`'s only `src/` caller is the chain policy in `templates/models.py`. Ruling 105 fixed the destination (`sandbox`/`deny_tools` move into a Repository `policy:` block) but no plan task owns building it. Task 2 pinned only the typing, and Task 8 adds the node/step/task layers, not this one. Tracked as Kraft-jzv1l; pin it at materialization when the layer exists.
+origin: src/kraft/templates/environment.py -- NOT ENFORCED YET. `Repository` has no `policy:` field, and nothing applies a repository-scoped override: `apply_template_override`'s only `src/` caller is the chain policy in `templates/models.py`. The layer (where `sandbox`/`deny_tools` belong) is built with the template schema's runtime policy enforcement, tracked as Kraft-jzv1l; pin it at materialization when the layer exists.
 
 ## REQ repositories-workspaces-and-areas-are-distinct
 
