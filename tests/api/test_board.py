@@ -17,7 +17,6 @@ from support.api import (
     _set_status,
     _wait_for_status,
 )
-from support.harness import make_repo
 
 from kraft import events, store
 
@@ -592,24 +591,22 @@ def test_judge_stop_note_stops_at_the_last_resolved_gate(client, repo):
     assert [n["reasoning"] for n in notes] == ["new, after the gate"]
 
 
-def test_steerable_is_answered_off_the_v1_snapshot(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("node", "steerable"),
+    [("implementation", True), ("merge", False)],
+    ids=["an-agent-task-follows", "a-forge-only-tail"],
+)
+async def test_steerable_is_answered_off_the_v1_snapshot(item_on, repo, node, steerable):
     """Kraft-bz9b on a V1 row. `chain_definition` is `"{}"` now, so a reader
     that still looked there would either 500 on a missing `nodes` key or fail
     open for every item -- offering a steer box on a node whose remaining chain
-    runs no agent at all, and then 409ing the text.
+    runs no agent at all, and then 409ing the text. Both ends of the answer
+    are pinned: a node with an agent task after it is steerable, one whose
+    tail is forge-only is not."""
+    from support.harness import v1_chain
 
-    Both ends of the answer are pinned: a node with an agent task after it is
-    steerable, one whose tail is forge-only is not.
-    """
-    import asyncio
-
-    from support.harness import v1_chain, v1_item, v1_walk  # noqa: F401
-
-    from kraft import db as _db
     from kraft.api.routes import lifecycle
-    from kraft.paths import RunDirs
 
-    repo = make_repo(tmp_path)
     chain = v1_chain(
         [
             {
@@ -630,28 +627,8 @@ def test_steerable_is_answered_off_the_v1_snapshot(tmp_path, monkeypatch):
         ],
         repo=repo,
     )
-
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await _db.Database.open(rd.db)
-        try:
-            await v1_item(database, chain, repo=repo, wid="w1")
-            answers = {}
-            for node_id in ("implementation", "merge"):
-                await database.write(
-                    lambda c, n=node_id: c.execute(
-                        "UPDATE work_items SET current_node_id = ? WHERE id = 'w1'", (n,)
-                    )
-                )
-                row = database.read(
-                    lambda c: c.execute("SELECT * FROM work_items WHERE id = 'w1'").fetchone()
-                )
-                answers[node_id] = lifecycle.steer_reachable(row, None)
-            return answers
-        finally:
-            await database.close()
-
-    assert asyncio.run(scenario()) == {"implementation": True, "merge": False}
+    it = await item_on(chain, node)
+    assert lifecycle.steer_reachable(it.row(), None) is steerable
 
 
 def test_a_v1_item_lists_and_renders_its_chain_nodes(client, repo):
