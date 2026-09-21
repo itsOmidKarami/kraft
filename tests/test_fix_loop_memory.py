@@ -274,7 +274,7 @@ def _seed_session(tmp_path, rows, whole_row=False):
                         (f"s{i}", hook, status, created, head),
                     )
                 )
-            row = prompts._last_review_session(database, "w1", "on.review.local.run")
+            row = prompts.last_review_session(database, "w1", "on.review.local.run")
             if whole_row:
                 return row
             return row["head_sha"] if row else None

@@ -313,6 +313,10 @@ def test_gate_reject_requires_note_and_re_runs_the_producer(client, repo):
     assert (
         client.post(f"/api/work-items/{wid}/gates/spec_approval/reject", json={}).status_code == 422
     )
+    # Refused, not half-applied: the gate is still the one waiting, unrejected.
+    assert client.get(f"/api/work-items/{wid}").json()["pending_gate"] == "spec_approval"
+    events_so_far = client.get(f"/api/work-items/{wid}/events").json()
+    assert not [e for e in events_so_far if e["type"] == "gate_rejected"]
 
     r = client.post(f"/api/work-items/{wid}/gates/spec_approval/reject", json={"note": "too vague"})
     assert r.status_code == 200, r.text
@@ -333,6 +337,22 @@ def test_gate_reject_requires_note_and_re_runs_the_producer(client, repo):
     item = client.get(f"/api/work-items/{wid}").json()
     assert item["pending_gate"] == "spec_approval"
     assert client.post(f"/api/work-items/{wid}/gates/spec_approval/approve").status_code == 200
+
+
+def test_a_gate_approval_is_recorded_naming_its_gate(client, repo):
+    """Carried from the legacy gate spec (`approve-emits-gate-approved`,
+    Ruling 139a): an approval is an event of its own, naming the gate it
+    decided and who decided it -- the timeline, notifications and analytics
+    all read it."""
+    wid = _post_default(client, repo)
+    _await_gate(client, wid, "spec_approval")
+
+    assert client.post(f"/api/work-items/{wid}/gates/spec_approval/approve").status_code == 200
+
+    evts = client.get(f"/api/work-items/{wid}/events").json()
+    [approved] = [e for e in evts if e["type"] == "gate_approved"]
+    assert approved["payload"]["gate"] == "spec_approval"
+    assert approved["payload"]["by"] == "human"
 
 
 @_reject_cap(escalate=False)

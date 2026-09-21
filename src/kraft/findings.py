@@ -203,18 +203,9 @@ def resolve_identity(found: list[Finding], known: frozenset[str] | set[str]) -> 
     whose claim fails falls back to its own prose hash, which is what it would
     have had before it claimed anything.
 
-    **Inert under Template Schema V1, and deliberately left in place.** V1 has
-    no way for a task to declare that it is fed the previous round's findings
-    (the `inputs:` channel went with the hook registry, and `AgentTask` has no
-    replacement yet -- Task 7 of the template-schema-v1 plan adds an explicit
-    input declaration). `carried_findings_note` therefore has no caller, no
-    reviewer is shown a tag, and no `same_as` can legitimately arrive: every
-    call currently strips nothing because there is nothing to strip. The check
-    stays because it is the guard that makes the *restored* delivery safe, and
-    rebuilding it later from a deleted function is how the hallucinated-tag hole
-    gets reopened. What is lost meanwhile: a reworded repeat gets a fresh
-    fingerprint each round, so `stuck_fingerprint` and `prints ==
-    previous_prints` only see repeats whose prose is unchanged.
+    Under Template Schema V1 a reviewer is shown tags only when its task
+    declares `inputs: [carried_findings]`; for one that does not, no `same_as`
+    can legitimately arrive and this strips any that does.
     """
     return [f if not f.same_as or f.same_as in known else replace(f, same_as=None) for f in found]
 

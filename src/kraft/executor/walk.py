@@ -1053,10 +1053,9 @@ async def _walk_node_once(
         # A `same_as` is only believable for a tag this round's reviewer was
         # actually shown. An invented or stale tag would collapse two distinct
         # defects onto one identity and fire the stuck detector on a fiction
-        # (Kraft-s7c04.2). Under V1 nothing shows a reviewer its previous
-        # findings at all -- see `findings.resolve_identity`, which says what
-        # that costs and why the call stays: as it stands this strips nothing
-        # because no `same_as` can arrive.
+        # (Kraft-s7c04.2). A reviewer is shown the tags of this node's last
+        # measurement when its task declares `inputs: [carried_findings]`
+        # (`dispatch.dispatch_node`), which is exactly `previous_found`.
         found = _findings.resolve_identity(
             found, known={f.fingerprint for f in previous_found or []}
         )

@@ -38,7 +38,7 @@ tasks:
     harness: claude_review
     prompt: Review this work item's change for defects its passing tests do not catch.
     skill: kraft:code-review
-    inputs: [review_package]
+    inputs: [review_package, carried_findings, previous_review]
 
   repair_verification:
     kind: agent
