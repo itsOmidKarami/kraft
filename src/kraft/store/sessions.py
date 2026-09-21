@@ -617,3 +617,15 @@ def running_sessions_for_node(conn: sqlite3.Connection, work_item_id: str) -> li
         "AND (s.node_id = w.current_node_id OR s.hook_point = 'escalation')",
         (work_item_id,),
     ).fetchall()
+
+
+def running_sessions_under(conn: sqlite3.Connection, work_item_id: str, path: str) -> list:
+    """The running (or just-started) sessions of the task at `path`, or of
+    every task under a step path -- what a skip of that scope stops, and
+    nothing beside it."""
+    return conn.execute(
+        "SELECT id, pid, hook_point FROM worker_sessions WHERE work_item_id = ? "
+        "AND status IN ('running', 'pending') "
+        "AND (hook_point = ? OR substr(hook_point, 1, length(?)) = ?)",
+        (work_item_id, path, path + ".", path + "."),
+    ).fetchall()

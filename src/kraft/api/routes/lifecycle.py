@@ -50,6 +50,10 @@ class Retry(BaseModel):
 
 class Skip(BaseModel):
     note: str | None = None
+    #: What to skip, by canonical path: the node the item stands on, or a
+    #: `node.step` or `node.step.task` inside it. Absent, the current node or
+    #: pending gate.
+    path: str | None = None
 
 
 class Progress(BaseModel):
@@ -1031,6 +1035,17 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
             # already recorded skipped and no walk behind it.
             raise HTTPException(409, "a walk is already running for this work item")
 
+        target = _skip_target(row, body.path)
+        if target is not None and target.task is None and target.step is None:
+            target = None if target.node.id == _skip_node_id(st, wid, row) else target
+            if target is not None:
+                raise HTTPException(
+                    409,
+                    f"path: {body.path!r} is not the node the item stands on "
+                    f"({row['current_node_id']!r}) or its pending gate",
+                )
+        if target is not None:
+            return await _skip_within_node(st, request, wid, row, target, body.note)
         if row["status"] in ("active", "waiting"):
             # Cancel the old walk *first*, before the claim and before
             # skip_node. Cancelling afterwards left a window -- every await
@@ -1060,6 +1075,8 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
         if node_index is None or node_index >= len(node_ids):
             raise HTTPException(409, "work item has no current node to skip")
         node_id = node_ids[node_index]
+        if not ChainPath.parse(walk.chain_of(row), node_id).skippable:
+            raise HTTPException(409, f"path: {node_id!r} does not allow skipping")
 
         sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
 
@@ -1125,6 +1142,91 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
             except deps.AlreadyRunning:
                 raise HTTPException(409, "a walk is already running for this work item") from None
             return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+
+
+def _skip_node_id(st, wid: str, row) -> str | None:
+    """The node a node skip would skip: the pending gate, or the current node."""
+    return board._pending_gate(st, wid) or row["current_node_id"]
+
+
+def _skip_target(row, path: str | None) -> ChainPath | None:
+    """`path` resolved against the item's chain, refused when it names nothing
+    there or a component that does not allow skipping
+    (`task-step-and-node-are-skippable-by-default`)."""
+    if path is None:
+        return None
+    try:
+        target = ChainPath.parse(walk.chain_of(row), path)
+    except PathError as exc:
+        raise HTTPException(422, f"path: {exc}") from None
+    if not target.skippable:
+        raise HTTPException(409, f"path: {path!r} does not allow skipping")
+    return target
+
+
+async def _skip_within_node(st, request: Request, wid: str, row, target: ChainPath, note):
+    """Skip a task or a step of the node the item stands on
+    (`skip-stops-only-the-selected-scope`).
+
+    Only the sessions inside the scope stop; a sibling keeps running. On an
+    active item the walk that owns them goes on and counts the scope as done
+    (`dispatch.measure_node`). A stopped or paused item is walked again from its
+    cursor, where the skipped scope now counts as done.
+    """
+    if target.node.id != row["current_node_id"]:
+        raise HTTPException(
+            409,
+            f"path: {target.path!r} is not inside the node the item stands on "
+            f"({row['current_node_id']!r})",
+        )
+    note = (note or "").strip() or None
+    sessions = st.db.read(lambda c: store.running_sessions_under(c, wid, target.path))
+    session_ids = [s["id"] for s in sessions]
+    if row["status"] == "active":
+        # mark first, then signal: the same race `pause_work_item` guards against.
+        await st.db.write(
+            lambda c: store.skip_scope(c, wid, target.path, note, session_ids=session_ids)
+        )
+        for s in sessions:
+            _terminate(s["pid"])
+        return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+    async with stops.claimed_or_stopped(
+        st.db,
+        wid,
+        target.node.id,
+        reason="skip could not start a walk past the skipped scope",
+        handed_off=lambda: deps.task_is_live(request.app, wid),
+    ):
+        claimed = await st.db.write(
+            lambda c: store.claim_for_run(
+                c, wid, from_statuses=["waiting", "paused", "needs_human"]
+            )
+        )
+        if not claimed:
+            raise HTTPException(409, "work item status changed; try again")
+        await st.db.write(lambda c: store.skip_scope(c, wid, target.path, note))
+        try:
+            deps.spawn(
+                request.app,
+                wid,
+                deps.guard(
+                    st.db,
+                    wid,
+                    executor.run(
+                        st.db,
+                        st.run_dirs,
+                        work_item_id=wid,
+                        registry=st.registry,
+                        bd_cwd=deps.bd_cwd(),
+                        policy=st.policy,
+                        launch=deps.launch(st, row["repo"]),
+                        on_approve=deps._on_approve(st),
+                    ),
+                ),
+            )
+        except deps.AlreadyRunning:
+            raise HTTPException(409, "a walk is already running for this work item") from None
+        return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
 
 
 @api_router.post("/work-items/{wid}/escalate")

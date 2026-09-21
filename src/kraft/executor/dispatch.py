@@ -751,7 +751,22 @@ async def measure_node(
     def _head() -> str | None:
         return _config.git_read(Path(worktree), "rev-parse", "HEAD") if worktree else None
 
+    def _skipped(task: ResolvedTask) -> bool:
+        """Under a task or step path an operator skipped in this run."""
+        if not own:
+            return False
+        skipped = db.read(lambda c: store.skipped_paths(c, work_item_id))
+        return any(task.path == p or task.path.startswith(p + ".") for p in skipped)
+
     async def _measure(task: ResolvedTask, *, retry: bool = False) -> str:
+        if _skipped(task):
+            return "done"
+        verdict = await _measure_task(task, retry=retry)
+        # Skipped while it ran: the skip stopped its session, which ends
+        # `paused`, and a skip is not a pause of the walk.
+        return "done" if verdict == "paused" and _skipped(task) else verdict
+
+    async def _measure_task(task: ResolvedTask, *, retry: bool = False) -> str:
         if task.path in preserve and not retry:
             # A task retry's completed sibling (`RunFork.preserved`): its latest
             # outcome stands, whatever HEAD the retried task later moves.

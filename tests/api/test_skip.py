@@ -6,6 +6,7 @@ import asyncio
 import time
 
 import httpx
+import pytest
 from support.api import _poll_events, _poll_node_started, _wait_for_status
 
 
@@ -229,3 +230,168 @@ def test_skip_cancels_the_live_walk_before_it_writes(client, repo, monkeypatch):
     assert r.status_code == 200, r.text
 
     assert live_at_write == [False], "skip wrote skip_node with the old walk still live"
+
+
+def _unskippable_verification(templates_dir):
+    chain = templates_dir / "chains" / "default.yaml"
+    text = chain.read_text()
+    old = "  - id: verification\n    extends: verification\n"
+    assert old in text
+    chain.write_text(text.replace(old, old + "    skippable: false\n"))
+
+
+def _stopped_in_verification(client, repo):
+    """An item stopped in `verification`, never walked there: the node is
+    forced, so nothing about the stop depends on an agent."""
+    from support.api import _force_node
+
+    wid = client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
+    ).json()["id"]
+    _force_node(wid, "verification", "needs_human")
+    return wid
+
+
+@pytest.fixture
+def walked(monkeypatch):
+    """What `executor.run` was handed, instead of walking it."""
+    from kraft import executor
+
+    seen = []
+
+    async def fake(*args, **kwargs):
+        seen.append(kwargs)
+        return "completed"
+
+    monkeypatch.setattr(executor, "run", fake)
+    return seen
+
+
+@pytest.mark.parametrize(
+    "path", ["verification.review.code_review", "verification.review"], ids=["task", "step"]
+)
+def test_skipping_a_task_or_step_records_it_and_walks_on_from_the_cursor(
+    client, repo, walked, path
+):
+    """A stopped item is walked again from where it stands, the skipped scope
+    now counted done (tests/executor/test_skip_scopes.py). The node itself is
+    not skipped."""
+    wid = _stopped_in_verification(client, repo)
+
+    r = client.post(f"/api/work-items/{wid}/skip", json={"path": path, "note": "known"})
+
+    assert r.status_code == 200, r.text
+    for _ in range(200):
+        if walked:
+            break
+        time.sleep(0.02)
+    assert walked and "start_index" not in walked[0]
+    evts = client.get(f"/api/work-items/{wid}/events").json()
+    assert [e["payload"] for e in evts if e["type"] == "scope_skipped"] == [
+        {"path": path, "note": "known"}
+    ]
+    assert not [e for e in evts if e["type"] == "node_skipped"]
+
+
+def test_skipping_a_task_stops_only_its_own_session(client, repo, monkeypatch):
+    """`skip-stops-only-the-selected-scope`, at the route: of two sessions
+    running in the node, only the skipped task's is stopped, and the item stays
+    active under the walk that owns the other."""
+    from kraft import store
+    from kraft.api.routes import lifecycle
+
+    signalled = []
+    monkeypatch.setattr(lifecycle, "_terminate", signalled.append)
+    wid = _stopped_in_verification(client, repo)
+    db = client.app.state.db
+
+    async def seed():
+        for sid, path, pid in (
+            ("s-test", "verification.tests.test_changed_scopes", 111),
+            ("s-review", "verification.review.code_review", 222),
+        ):
+            await db.write(
+                lambda c, sid=sid, path=path: store.create_session(
+                    c,
+                    id=sid,
+                    work_item_id=wid,
+                    node_id="verification",
+                    hook_point=path,
+                    log_path="/l",
+                    result_path="/r",
+                )
+            )
+            await db.write(lambda c, sid=sid, pid=pid: store.session_running(c, sid, pid, 1.0))
+        await db.write(
+            lambda c: c.execute("UPDATE work_items SET status = 'active' WHERE id = ?", (wid,))
+        )
+
+    client.portal.call(seed)
+
+    r = client.post(f"/api/work-items/{wid}/skip", json={"path": "verification.review.code_review"})
+
+    assert r.status_code == 200, r.text
+    assert signalled == [222]
+    sessions = {
+        s["id"]: s["status"] for s in client.get(f"/api/work-items/{wid}").json()["worker_sessions"]
+    }
+    assert (sessions["s-review"], sessions["s-test"]) == ("paused", "running")
+    assert client.get(f"/api/work-items/{wid}").json()["status"] == "active"
+
+
+@pytest.mark.parametrize(
+    ("path", "status", "says"),
+    [
+        ("verification.nope", 422, "path: 'verification.nope': node"),
+        ("spec.main.author", 409, "is not inside the node the item stands on"),
+        ("merge", 409, "is not the node the item stands on"),
+    ],
+    ids=["unknown", "another-nodes-task", "another-node"],
+)
+def test_a_skip_path_the_item_cannot_take_is_refused(client, repo, walked, path, status, says):
+    wid = _stopped_in_verification(client, repo)
+
+    r = client.post(f"/api/work-items/{wid}/skip", json={"path": path})
+
+    assert r.status_code == status, r.text
+    assert says in r.json()["detail"]
+    assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
+    assert walked == []
+
+
+@pytest.mark.api_client(edit_templates=_unskippable_verification)
+@pytest.mark.parametrize("path", [None, "verification"], ids=["current-node", "by-path"])
+def test_a_node_that_disallows_skipping_is_not_skipped(client, repo, walked, path):
+    """`task-step-and-node-are-skippable-by-default` -- unless the component
+    says `skippable: false`."""
+    wid = _stopped_in_verification(client, repo)
+
+    r = client.post(f"/api/work-items/{wid}/skip", json={"path": path} if path else {})
+
+    assert r.status_code == 409, r.text
+    assert "'verification' does not allow skipping" in r.json()["detail"]
+    assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
+
+
+def _unskippable_code_review(templates_dir):
+    import yaml
+
+    library = templates_dir / "library.yaml"
+    parsed = yaml.safe_load(library.read_text())
+    review = parsed["nodes"]["verification"]["steps"][1]["tasks"][0]
+    assert review["id"] == "code_review"
+    review["skippable"] = False
+    library.write_text(yaml.safe_dump(parsed, sort_keys=False))
+
+
+@pytest.mark.api_client(edit_templates=_unskippable_code_review)
+def test_a_task_that_disallows_skipping_is_not_skipped(client, repo, walked):
+    """The task's own flag: its step still allows skipping as a whole."""
+    wid = _stopped_in_verification(client, repo)
+
+    r = client.post(f"/api/work-items/{wid}/skip", json={"path": "verification.review.code_review"})
+
+    assert r.status_code == 409, r.text
+    assert "does not allow skipping" in r.json()["detail"]
+    assert walked == []

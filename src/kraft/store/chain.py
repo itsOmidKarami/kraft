@@ -145,6 +145,45 @@ def skip_node(
         events.append(conn, work_item_id, "worker_session_paused", {"session_id": sid})
 
 
+def skip_scope(
+    conn: sqlite3.Connection,
+    work_item_id: str,
+    path: str,
+    note: str | None,
+    *,
+    session_ids: list[str] | None = None,
+) -> None:
+    """Skip a task or a step (`skip-stops-only-the-selected-scope`): the walk
+    counts everything under `path` as done from here on, in this run.
+
+    `session_ids` are the running sessions inside the scope, and only those:
+    marked `paused` here, before the caller signals them, the same ordering
+    `skip_node` keeps. The item's own status is untouched -- a sibling of the
+    skipped task may still be running, and the walk it belongs to goes on.
+    """
+    now = _now()
+    for sid in session_ids or []:
+        conn.execute(
+            "UPDATE worker_sessions SET status = 'paused', exited_at = ? WHERE id = ?",
+            (now, sid),
+        )
+        events.append(conn, work_item_id, "worker_session_paused", {"session_id": sid})
+    events.append(conn, work_item_id, "scope_skipped", {"path": path, "note": note})
+
+
+def skipped_paths(conn: sqlite3.Connection, work_item_id: str) -> frozenset[str]:
+    """Every task or step path skipped in the current run fork. A retry's fork
+    starts with none: it reruns what it covers, a skipped task included."""
+    rows = conn.execute(
+        "SELECT json_extract(payload, '$.path') FROM events WHERE work_item_id = ? "
+        "AND type = 'scope_skipped' AND seq > ("
+        "  SELECT COALESCE(MAX(after_seq), 0) FROM run_forks WHERE work_item_id = ?"
+        ")",
+        (work_item_id, work_item_id),
+    ).fetchall()
+    return frozenset(r[0] for r in rows)
+
+
 def materialized_chain_of(row):
     """`row["materialized_chain"]` as the model that wrote it, or None.
 
