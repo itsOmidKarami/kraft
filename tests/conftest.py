@@ -362,6 +362,12 @@ def client(request, tmp_path, monkeypatch, templates_dir):
         @pytest.mark.api_client(bd_workspace=False)    # no KRAFT_BD_CWD
         @pytest.mark.api_client(edit_templates=fn)     # fn(templates_dir) first
 
+    `edit_templates` does not follow the "closest wins" rule above: a
+    module-level `pytestmark` editor and a test's own editor both run
+    (module's first, so a test's edits land on top of its module's, not the
+    other way round). Nothing else on the marker composes this way — every
+    other key is a plain value, so the closest one simply replaces it.
+
     Env a lifespan reads at startup that depends on another fixture goes in a
     module-level autouse fixture: autouse fixtures are set up first. This is
     the one `client` fixture: a file overrides `templates_dir`, not `client`.
@@ -373,13 +379,20 @@ def client(request, tmp_path, monkeypatch, templates_dir):
     """
     # Every `api_client` mark applies, the closest winning key by key: a
     # module's `pytestmark` sets the file's defaults, a test's own mark adds to
-    # them.
+    # them. `edit_templates` is the one exception: a plain `|=` would let a
+    # test's own mark silently replace its module's instead of adding to it,
+    # so every marker's `edit_templates` is collected and called, module first
+    # then test, instead of only the closest one winning.
     options = {}
+    edit_templates_fns = []
     for mark in reversed(list(request.node.iter_markers("api_client"))):
-        options |= mark.kwargs
+        kwargs = dict(mark.kwargs)
+        if "edit_templates" in kwargs:
+            edit_templates_fns.append(kwargs.pop("edit_templates"))
+        options |= kwargs
     # A test's own templates (a policy, a chain, a broken file), written into
     # `templates_dir` before the lifespan reads it.
-    if edit_templates := options.pop("edit_templates", None):
+    for edit_templates in edit_templates_fns:
         edit_templates(templates_dir)
     # A test that also lists `dist` needs KRAFT_FRONTEND_DIST set before this
     # fixture's lifespan starts. Pulling it here — rather than relying on
