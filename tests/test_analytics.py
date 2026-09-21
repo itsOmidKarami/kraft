@@ -526,12 +526,18 @@ def test_a_paused_session_s_time_reaches_the_node_and_the_totals(tmp_path):
     assert report["totals"]["wall_ms"] == 180_000
 
 
-def test_an_assistant_clearing_a_gate_still_counts_as_a_human_touch(tmp_path):
+@pytest.mark.parametrize(
+    ("by", "touches"),
+    [("assistant", 1), ("agent", 0)],
+    ids=["an-assistant-is-a-human-touch", "a-worker-agent-is-not"],
+)
+def test_who_cleared_a_gate_decides_whether_it_was_a_human_touch(tmp_path, by, touches):
     """Kraft-s7c04.43 added a third `by` value, and the tempting change is to
     treat `assistant` like `agent` here. It is the wrong change. `agent` is
-    skipped because it is the machinery unblocking itself; an assistant cleared
-    this gate because a person told it to, and this metric counts stops that
-    needed a person. Same reasoning pins `executor.gates._auto_dispatch_count`.
+    Kraft's own gate auto-review -- the machinery unblocking itself, the run
+    closed without anyone being paged; an assistant cleared this gate because a
+    person told it to, and this metric counts stops that needed a person. Same
+    reasoning pins `executor.gates._auto_dispatch_count`.
     """
     conn = _episode_conn(
         tmp_path,
@@ -544,38 +550,14 @@ def test_an_assistant_clearing_a_gate_still_counts_as_a_human_touch(tmp_path):
                     "capped": {"cycles": 2, "attempts": 3},
                 },
             ),
-            ("gate_approved", {"gate": "human_review_approval", "by": "assistant"}),
+            ("gate_approved", {"gate": "human_review_approval", "by": by}),
         ],
     )
     try:
         t = analytics.compute(conn, range_="all")["totals"]
     finally:
         conn.close()
-    assert t["unplanned_touches_per_item"] == 1
-
-
-def test_a_worker_agent_clearing_its_own_gate_is_still_not_a_human_touch(tmp_path):
-    """The other half, unchanged: `agent` is Kraft's own gate auto-review, and
-    the run closed without anyone being paged."""
-    conn = _episode_conn(
-        tmp_path,
-        [
-            (
-                "work_item_needs_human",
-                {
-                    "node_id": "verify",
-                    "reason": "verify_fix_loop exhausted after 2 fix cycle(s)",
-                    "capped": {"cycles": 2, "attempts": 3},
-                },
-            ),
-            ("gate_approved", {"gate": "human_review_approval", "by": "agent"}),
-        ],
-    )
-    try:
-        t = analytics.compute(conn, range_="all")["totals"]
-    finally:
-        conn.close()
-    assert t["unplanned_touches_per_item"] == 0
+    assert t["unplanned_touches_per_item"] == touches
 
 
 def _v1_item(conn, wid, resolved, *, created):

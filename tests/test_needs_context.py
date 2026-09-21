@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 import httpx
+import pytest
 from support import api as api_support
 from support.chain_run import loop_policy
 from support.harness import (
@@ -309,7 +310,12 @@ def _approve_retrying(client, wid, gate, timeout=30):
     raise AssertionError(f"timed out approving {gate!r}: last status {r.status_code}")
 
 
-def test_steer_accepts_a_needs_context_stop(monkeypatch, repo, client):
+@pytest.mark.parametrize(
+    ("verb", "body"),
+    [("steer", {"text": "use the fork"}), ("resume", {"steer": "use the fork"})],
+    ids=["steer", "resume"],
+)
+def test_steer_and_resume_accept_a_needs_context_stop(monkeypatch, repo, client, verb, body):
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_STATUS", "needs_context")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_QUESTION", "which repo does this target?")
     wid = client.post(
@@ -318,21 +324,7 @@ def test_steer_accepts_a_needs_context_stop(monkeypatch, repo, client):
     ).json()["id"]
     _wait_for_status(client, wid, "needs_human")
 
-    r = client.post(f"/api/work-items/{wid}/steer", json={"text": "use the fork"})
-    assert r.status_code == 200
-    assert r.json()["steer"] == "use the fork"
-
-
-def test_resume_accepts_a_needs_context_stop(monkeypatch, repo, client):
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_STATUS", "needs_context")
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_QUESTION", "which repo does this target?")
-    wid = client.post(
-        "/api/work-items",
-        json={"repo": str(repo), "title": "needs a decision", "chain_template": "quick-task"},
-    ).json()["id"]
-    _wait_for_status(client, wid, "needs_human")
-
-    r = client.post(f"/api/work-items/{wid}/resume", json={"steer": "use the fork"})
+    r = client.post(f"/api/work-items/{wid}/{verb}", json=body)
     assert r.status_code == 200
     assert r.json()["steer"] == "use the fork"
 
