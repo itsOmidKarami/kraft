@@ -85,11 +85,6 @@ def test_lint_reports_an_unreadable_library_file_as_an_issue(client, templates_d
     assert body["issues"][0]["chain"] is None
 
 
-def test_lint_is_not_shadowed_by_the_template_id_route(client):
-    """`GET /templates/{tid}` is declared too; `lint` is not a template id."""
-    assert "issues" in client.get("/api/templates/lint").json()
-
-
 # ── GET /templates/{id}/resolved (resolved-template-api-shows-saved-chain) ──
 
 

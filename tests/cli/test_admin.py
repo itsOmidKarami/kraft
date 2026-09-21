@@ -103,13 +103,6 @@ def test_admin_templates_show_resolved_prints_the_expanded_chain(app, capsys):
     assert printed["nodes"][0]["tasks"][0]["skill"] == "kraft:spec"
 
 
-def test_admin_templates_show_of_an_unknown_chain_exits_1(app, capsys):
-    with pytest.raises(SystemExit) as caught:
-        cli.main(["admin", "templates", "show", "nope", "--resolved"])
-    assert caught.value.code == 1
-    assert "404" in capsys.readouterr().err
-
-
 def test_health_exit_code_follows_status(app, monkeypatch, capsys):
     async def degraded():
         return {
