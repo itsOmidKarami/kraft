@@ -11,6 +11,7 @@ import shlex
 import sys
 from pathlib import Path
 
+import pytest
 from support.harness import isolated_bd, make_repo, v1_fix_loop_node, v1_seeded_chain
 
 from kraft import db, executor, policy, store
@@ -397,6 +398,11 @@ def test_previous_attempt_note_is_empty_with_no_previous_attempt():
     assert executor.previous_attempt_note(None) == ""
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="V1 fix-loop escalation is Task 7 (node.fix_loop / node.escalation); "
+    "legacy escalate_after is superseded",
+)
 def test_a_fix_cycle_past_escalate_after_launches_with_escalate_model(tmp_path, monkeypatch):
     """Spec §6: cycles at or below `escalate_after` use `model`, cycles above it
     use `escalate_model`. Rounds 1-3 resume the same approach; a loop that
