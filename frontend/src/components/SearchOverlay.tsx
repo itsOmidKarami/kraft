@@ -352,7 +352,7 @@ export function SearchOverlay({
                     {row.progress && (
                       <>
                         {" · "}
-                        <TaskLine progress={row.progress} form="short" />
+                        <TaskLine progress={row.progress} />
                       </>
                     )}
                   </span>

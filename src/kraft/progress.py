@@ -1,4 +1,4 @@
-"""Where the implementer is in its plan: "Task 3 of 6".
+"""Where the implementer is in its plan: "3 of 6 · title".
 
 Derived on read, never stored. The plan's `## Task N` headings give the tasks;
 the agent's latest `plan_progress` event and the highest `task N` its commits
@@ -8,6 +8,7 @@ name give the position. Tasks are numbered by position in the plan.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
 
@@ -15,6 +16,8 @@ from kraft import events
 from kraft import store as _store
 from kraft.adapters.agent import artifact_path
 from kraft.config import git_read
+
+logger = logging.getLogger(__name__)
 
 IMPLEMENTATION_HOOK = "on.implementation.start"
 
@@ -105,40 +108,65 @@ def implementation_node(chain: dict) -> str | None:
 
     Legacy chains only -- `chain` is the `chain_view`/`chain_definition` dict
     shape. A V1 chain has no hook-name strings on its nodes; see
-    `_v1_implementation_node` for the V1 rule."""
+    `implementing_nodes` for the V1 rule."""
     return next(
         (n["id"] for n in chain.get("nodes", []) if IMPLEMENTATION_HOOK in n.get("tasks", [])),
         None,
     )
 
 
-def _v1_implementation_node(chain) -> str | None:
-    """V1's rule for "the node doing the work from the brief": the node
-    containing an `AgentTask` whose `skill` is `None` -- the same predicate
+def implementing_nodes(chain) -> list[str]:
+    """Every node of a V1 `ResolvedChain` doing the work from the brief: a node
+    whose own steps hold an `AgentTask` with no `skill` -- the predicate
     `prompts.py` depends on twice (`progress_note`, `scope_note`, both citing
-    Kraft-s7c04.45 "never a node id"). No new marker field: against the seeded
-    library this selects `implementer` alone -- `spec_author`, `plan_author`
-    and `write_summary` all declare a skill."""
+    Kraft-s7c04.45 "never a node id"). No new marker field.
+
+    The node's own steps only, the scope `ResolvedNode.produces()` uses. A
+    fix loop's or `on_failure` pass's repair task is an agent task with no
+    skill too (`merge_request_feedback` has two), but it repairs the node's
+    output rather than saying what the node is for. Against the seeded
+    library this is `implementation` alone."""
     from kraft.templates.models import AgentTask
 
-    return next(
-        (
-            node.id
-            for node in chain.nodes
-            if any(isinstance(t.task, AgentTask) and t.task.skill is None for t in node.tasks())
-        ),
-        None,
-    )
+    return [
+        node.id
+        for node in chain.nodes
+        if any(
+            isinstance(t.task, AgentTask) and t.task.skill is None
+            for step in node.steps
+            for t in step.tasks
+        )
+    ]
+
+
+def v1_implementation_node(chain) -> str | None:
+    """The one implementing node of a V1 chain, or None when it has none. Two
+    is an authoring ambiguity: the first wins, and the log says so."""
+    found = implementing_nodes(chain)
+    if len(found) > 1:
+        logger.warning(
+            "chain %s has %d implementing nodes (%s); plan progress follows %s",
+            chain.chain.id,
+            len(found),
+            ", ".join(found),
+            found[0],
+        )
+    return found[0] if found else None
+
+
+def chain_implementation_node(row) -> str | None:
+    """The id of the node in `row`'s chain that implements the plan, whatever
+    the item is doing now. None means the chain has no such node, so it has no
+    plan progress to show at all."""
+    v1 = _store.materialized_chain_of(row)
+    if v1 is not None:
+        return v1_implementation_node(v1.chain)
+    return implementation_node(_store.chain_view(row))
 
 
 def active_implementation_node(row) -> str | None:
     """The implementation node's id while `row` is running it, else None."""
-    v1 = _store.materialized_chain_of(row)
-    node_id = (
-        _v1_implementation_node(v1.chain)
-        if v1 is not None
-        else implementation_node(_store.chain_view(row))
-    )
+    node_id = chain_implementation_node(row)
     if node_id and row["status"] == "active" and row["current_node_id"] == node_id:
         return node_id
     return None

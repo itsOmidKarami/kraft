@@ -200,6 +200,52 @@ def test_a_report_off_the_running_implementation_node_is_a_409(tmp_path, monkeyp
         assert _plan_progress_events(wid) == []
 
 
+def _give_every_agent_task_a_skill(wid: str) -> None:
+    """A custom chain whose implementer declares a `skill:` -- so no node is
+    doing the work from the brief, and the chain has no plan progress at all."""
+
+    def walk(value):
+        if isinstance(value, dict):
+            if value.get("kind") == "agent" and "skill" in value and value["skill"] is None:
+                value["skill"] = "kraft:plan"
+            for v in value.values():
+                walk(v)
+        elif isinstance(value, list):
+            for v in value:
+                walk(v)
+
+    conn = _db()
+    try:
+        (raw,) = conn.execute(
+            "SELECT materialized_chain FROM work_items WHERE id = ?", (wid,)
+        ).fetchone()
+        doc = json.loads(raw)
+        walk(doc)
+        conn.execute(
+            "UPDATE work_items SET materialized_chain = ? WHERE id = ?", (json.dumps(doc), wid)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_a_chain_without_an_implementing_node_says_so_in_the_409(tmp_path, monkeypatch):
+    """Not "not running its implementation node" -- that sends the operator to
+    look at where the item is, when the chain itself has no such node."""
+    repo = make_repo(tmp_path)
+    with _client(tmp_path, monkeypatch) as client:
+        wid = _paused_item(client, repo)
+        _worktree(wid)
+        _give_every_agent_task_a_skill(wid)
+        _force_node(wid, "implementation", "active")
+
+        response = client.post(f"/api/work-items/{wid}/progress", json={"task": 1})
+
+        assert response.status_code == 409
+        assert "no implementing node was found in this chain" in response.json()["detail"]
+        assert _plan_progress_events(wid) == []
+
+
 def test_a_task_outside_the_plan_is_a_400(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:

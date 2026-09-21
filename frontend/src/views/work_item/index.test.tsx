@@ -616,7 +616,14 @@ describe("WorkItemDetail (item page)", () => {
     renderDetailWithProgress();
     expect(document.querySelector(".hero-task-seg")).toBeNull();
     expect(await screen.findByTestId("task-bar")).toBeTruthy();
-    expect(screen.getByText("Task 3 of 6")).toBeTruthy();
+    expect(screen.getByText("3 of 6")).toBeTruthy();
+  });
+
+  it("the maximized strip names progress as `3 of 6 · title`, never a bare task noun", () => {
+    renderDetailWithProgress("#node=verify&max=1");
+    const strip = document.querySelector(".item-max-node") as HTMLElement;
+    expect(strip.textContent).toMatch(/ · 3 of 6 · wire the thing$/);
+    expect(strip.textContent).not.toMatch(/\btask\b/i);
   });
 
   it("puts the task fraction on the current stage pill", () => {

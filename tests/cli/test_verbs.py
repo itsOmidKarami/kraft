@@ -572,7 +572,9 @@ def test_show_renders_progress_as_a_task_list(app, monkeypatch, capsys):
     monkeypatch.setattr(client, "get_work_item", fake_get)
     cli.main(["view", "show", "w1"])
     out = capsys.readouterr().out
-    assert "Task 2/3 — serve" in out
+    assert "2 of 3 · serve" in out
+    # A bare "task" could mean a chain task; the plan task's title says which.
+    assert "task" not in out.lower()
     assert "✓ 1. parse" in out
     assert "▸ 2. serve" in out
     assert "· 3. render" in out

@@ -584,10 +584,10 @@ function rowReason(
       return {
         text: (
           <>
-            <span className="task-count">Task {p.current}/{p.total}</span> · <span>{p.title}</span>
+            <span className="task-count">{`${p.current} of ${p.total}`}</span> · <span>{p.title}</span>
           </>
         ),
-        plain: `Task ${p.current}/${p.total} · ${p.title}`,
+        plain: `${p.current} of ${p.total} · ${p.title}`,
         tone: "neutral",
       };
     }

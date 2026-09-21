@@ -164,7 +164,7 @@ describe("SearchOverlay", () => {
     expect(spy).toHaveBeenCalledWith("w2", "spec_approval");
   });
 
-  it("puts repo · node · Task N/M · title on a work-item row's second line", async () => {
+  it("puts repo · node · N of M · title on a work-item row's second line, no bare task noun", async () => {
     useStore.setState({
       workItems: {
         w1: wi({
@@ -179,8 +179,9 @@ describe("SearchOverlay", () => {
     await userEvent.type(screen.getByRole("searchbox"), "fix flaky");
     const row = await screen.findByRole("button", { name: /fix flaky test/ });
     expect(row.querySelector(".search-row-sub")?.textContent).toMatch(
-      /implementation.*Task 3\/6.*open_mr refuses/,
+      /implementation.*3 of 6.*open_mr refuses/,
     );
+    expect(row.querySelector(".search-row-sub")?.textContent).not.toMatch(/\btask\b/i);
   });
 
   it("sections render in order: Actions, Work items, Documents, Go to", () => {

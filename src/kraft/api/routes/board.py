@@ -324,7 +324,7 @@ async def get_work_item(wid: str, request: Request):
         "attachments": json.loads(row["attachments"]) if row["attachments"] else [],
         "worker_sessions": [{k: s[k] for k in s.keys()} for s in sessions],
         "usage": st.db.read(lambda c: store.usage_rollup(c, wid)),
-        # Where the implementer is in its plan ("Task 3 of 6"), or None off the
+        # Where the implementer is in its plan ("3 of 6 · title"), or None off the
         # implementation node or for a plan with no `## Task N` headings.
         "progress": progress_mod.for_item(st.db, row, st.run_dirs.worktrees / wid),
         # empty on a single-repo item; the detail's repos panel is multi-repo only

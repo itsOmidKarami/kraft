@@ -122,7 +122,7 @@ describe("PeekPane", () => {
     renderPeek();
     const hero = document.querySelector(".peek-hero") as HTMLElement;
     expect(within(hero).getByText("verify")).toBeTruthy();
-    expect(within(hero).getByText("Task 3 of 6")).toBeTruthy();
+    expect(within(hero).getByText("3 of 6")).toBeTruthy();
     expect(within(hero).getByTestId("task-bar")).toBeTruthy();
   });
 

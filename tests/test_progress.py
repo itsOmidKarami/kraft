@@ -162,6 +162,43 @@ def test_a_chain_without_the_hook_has_no_implementation_node():
     )
 
 
+def _seeded_default_chain():
+    from pathlib import Path
+
+    from kraft.templates.library import TemplateLibrary
+
+    root = Path(__file__).resolve().parents[1] / "templates"
+    return TemplateLibrary.from_yaml_dir(root).resolve_chain("default")
+
+
+def test_the_seeded_default_chain_has_exactly_one_implementing_node():
+    """A repair task in a fix loop or `on_failure` pass is an agent task with
+    no skill too (`merge_request_feedback`'s), but it repairs a node's output,
+    it is not the node's work -- so only a node's own steps count."""
+    assert progress.implementing_nodes(_seeded_default_chain()) == ["implementation"]
+
+
+def test_the_implementing_node_does_not_depend_on_node_order():
+    import dataclasses
+
+    chain = _seeded_default_chain()
+    reversed_chain = dataclasses.replace(chain, nodes=tuple(reversed(chain.nodes)))
+    assert progress.v1_implementation_node(reversed_chain) == "implementation"
+
+
+def test_two_implementing_nodes_is_said_out_loud(caplog):
+    import dataclasses
+
+    chain = _seeded_default_chain()
+    impl = next(n for n in chain.nodes if n.id == "implementation")
+    doubled = dataclasses.replace(
+        chain, nodes=(*chain.nodes, dataclasses.replace(impl, id="implementation_again"))
+    )
+    with caplog.at_level("WARNING", logger="kraft.progress"):
+        assert progress.v1_implementation_node(doubled) == "implementation"
+    assert "2 implementing nodes (implementation, implementation_again)" in caplog.text
+
+
 def test_read_tasks_prefers_the_plan_attachment(tmp_path):
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "p.md").write_text("## Task 1 — attached\n")

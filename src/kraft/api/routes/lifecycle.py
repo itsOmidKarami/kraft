@@ -295,6 +295,12 @@ async def report_progress(wid: str, body: Progress, request: Request):
     row = deps._work_item_row(st, wid)
     node_id = progress_mod.active_implementation_node(row)
     if node_id is None:
+        if progress_mod.chain_implementation_node(row) is None:
+            raise HTTPException(
+                409,
+                "no implementing node was found in this chain (a node whose own steps "
+                "hold an agent task with no `skill:`), so it has no plan progress",
+            )
         raise HTTPException(409, "work item is not running its implementation node")
     worktree = st.run_dirs.worktrees / wid
     tasks = progress_mod.tasks_for(row, worktree)

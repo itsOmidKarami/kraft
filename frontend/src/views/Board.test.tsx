@@ -293,7 +293,7 @@ describe("Board", () => {
     ["question", { status: "needs_human", needs_context_question: "x".repeat(80) }, /agent asks: x{60}…$/, "Answer"],
     ["budget", { status: "needs_human", budget: { scope: "work_item", spent_usd: 5, cap_usd: 5 } }, /spend cap reached$/, "Raise budget"],
     ["paused", { status: "paused" }, /paused at verify$/, "Resume"],
-    ["running", { status: "active", progress: { current: 3, total: 6, title: "wire the store" } }, /Task 3\/6 · wire the store$/, null],
+    ["running", { status: "active", progress: { current: 3, total: 6, title: "wire the store" } }, /(?<!Task )3 of 6 · wire the store$/, null],
     ["rate limited", { status: "rate_limited", retry_at: new Date(Date.now() + 4 * 60_000 + 30_000).toISOString() }, /retry in 4m$/, null],
   ])("%s: the meta line ends in its reason, and the button matches (W11 · B.2, B.3)", (_, over, reason, button) => {
     setItems(wi({ id: "w9", ...over }));
@@ -458,13 +458,16 @@ describe("Board", () => {
     expect(screen.getByText(/retry/i)).toBeInTheDocument();
   });
 
-  it("Task N/M · title renders in the meta line when progress is set", () => {
+  it("N of M · title renders in the meta line when progress is set, with no bare task noun", () => {
     setItems(
       wi({ id: "w1", status: "active", progress: { current: 3, total: 6, title: "wire the store" } }),
     );
     renderBoard();
-    expect(screen.getByText("Task 3/6")).toBeInTheDocument();
+    expect(screen.getByText("3 of 6")).toBeInTheDocument();
     expect(screen.getByText("wire the store")).toBeInTheDocument();
+    expect(screen.queryByText(/\btask \d/i)).toBeNull();
+    // The ellipsized meta line's tooltip carries the same words.
+    expect(document.querySelector(".board-row-meta")?.getAttribute("title")).toMatch(/(?<!Task )3 of 6 · wire the store$/);
   });
 
   it("plain click toggles the peek param; ⌘-click navigates instead", async () => {

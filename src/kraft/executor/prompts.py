@@ -347,7 +347,7 @@ def attachment_note(attachments: list[dict], *, method_is_own: bool = False) -> 
 
 
 # How the implementer reports where it is in the plan, so the board can say
-# "Task 3 of 6" instead of leaving a human to read the log. The commit tag is
+# "3 of 6 · title" instead of leaving a human to read the log. The commit tag is
 # the fallback Kraft reads when a report was never made.
 _PROGRESS_NOTE = (
     "\n\nThis plan has {total} tasks. When you start task K, run "

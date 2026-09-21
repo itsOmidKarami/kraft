@@ -39,7 +39,7 @@ _PROGRESS_MARKS = {"done": "✓", "current": "▸", "pending": "·"}
 
 
 def _progress_text(p: dict) -> str:
-    lines = [f"Task {p['current']}/{p['total']} — {p['title']}"]
+    lines = [f"{p['current']} of {p['total']} · {p['title']}"]
     lines += [f"{_PROGRESS_MARKS[t['state']]} {t['n']}. {t['title']}" for t in p.get("tasks", [])]
     return "\n".join(lines)
 

@@ -10,13 +10,12 @@ const NODES = [
 ];
 
 describe("TaskLine", () => {
-  it("renders the long form by default and the short form on request", () => {
+  it("renders `3 of 6` and the plan task's title, never a bare task noun", () => {
     const p = { current: 3, total: 6, title: "open_mr refuses a dirty worktree" };
-    const { rerender } = render(<TaskLine progress={p} />);
-    expect(screen.getByText("Task 3 of 6")).toBeTruthy();
+    const { container } = render(<TaskLine progress={p} />);
+    expect(screen.getByText("3 of 6")).toBeTruthy();
     expect(screen.getByText(p.title)).toBeTruthy();
-    rerender(<TaskLine progress={p} form="short" />);
-    expect(screen.getByText("Task 3/6")).toBeTruthy();
+    expect(container.textContent).not.toMatch(/\btask\b/i);
   });
 });
 
