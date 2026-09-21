@@ -522,32 +522,32 @@ describe("IntakeModal", () => {
     expect(screen.getByText("implementation").tagName).not.toBe("S");
   });
 
-  // Kraft-ene04. The case above is the shape GET /api/templates serves today
-  // (legacy nodes carrying `gate_after`), and attachments.visual.spec proves
-  // the strikethrough end to end on it. A V1 chain has no `gate_after`: its
-  // gate is a node of its own whose `artifact` names the kind it decides
-  // (`trim_for_attachments`). The preview does not read that shape, so this
-  // case fails. It flips to passing (and it.fails to failing) when the fix
-  // lands; then make it a plain `it`.
-  it.fails("V1 chain: an attached spec strikes through the gate that decides it", async () => {
+  // Kraft-ene04. A V1 chain has no `gate_after`: its gate is a node of its
+  // own, and each node names the attachment kind that drops it
+  // (`covered_by`, from `ResolvedNode.covered_by`) -- the gate that decides the
+  // document and the node that would have written it, both.
+  it("V1 chain: an attached spec strikes through its gate and the node that writes it", async () => {
     vi.spyOn(api, "getTemplates").mockResolvedValue([
       {
         id: "default",
         gates: 2,
         nodes: [
-          { id: "spec", kind: "exec", tasks: ["spec.main.author"], gate_after: null },
-          { id: "spec_approval", kind: "gate", artifact: "spec", tasks: [], gate_after: null },
-          { id: "plan", kind: "exec", tasks: ["plan.main.author"], gate_after: null },
-          { id: "plan_approval", kind: "gate", artifact: "plan", tasks: [], gate_after: null },
-          { id: "implementation", kind: "exec", tasks: ["implementation.main.implement"], gate_after: null },
+          { id: "spec", kind: "exec", tasks: ["spec.main.author"], gate_after: null, covered_by: "spec" },
+          { id: "spec_approval", kind: "gate", tasks: [], gate_after: "spec_approval", covered_by: "spec" },
+          { id: "plan", kind: "exec", tasks: ["plan.main.author"], gate_after: null, covered_by: "plan" },
+          { id: "plan_approval", kind: "gate", tasks: [], gate_after: "plan_approval", covered_by: "plan" },
+          { id: "implementation", kind: "exec", tasks: ["implementation.main.implement"], gate_after: null, covered_by: null },
         ],
       },
-    ] as never);
+    ]);
     renderModal();
     await fillBasics();
     await userEvent.type(screen.getByLabelText("spec"), ".engineering/specs/x.md{Enter}");
-    expect(await screen.findByText("spec_approval", { selector: "s" }, { timeout: 500 })).toBeInTheDocument();
+    expect(await screen.findByText("spec_approval", { selector: "s" })).toBeInTheDocument();
+    expect(screen.getByText("spec", { selector: "s" })).toBeInTheDocument();
     expect(screen.getByText("plan_approval").tagName).not.toBe("S");
+    expect(screen.getByText("plan").tagName).not.toBe("S");
+    expect(screen.getByText("implementation").tagName).not.toBe("S");
   });
 
   it("accepts a path typed by hand for a document that is not indexed", async () => {

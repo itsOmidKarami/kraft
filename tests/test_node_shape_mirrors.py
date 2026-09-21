@@ -101,10 +101,11 @@ def test_every_node_field_is_declared_or_named_in_the_interface(path: str) -> No
 #: Fields a node type may carry beyond `ChainNodeIn`, per interface. The
 #: board's `ChainNode` is what `store.chain_view` projects a V1 materialized
 #: chain into, and that projection adds `kind` -- how a V1 gate node is told
-#: apart from an execution node (`gate-is-an-ordered-node`). The Settings
+#: apart from an execution node (`gate-is-an-ordered-node`) -- and
+#: `covered_by`, the attachment kind that would drop the node at intake. The Settings
 #: editor's `TemplateNode` still edits the legacy template shape, so nothing.
 PROJECTED: dict[str, frozenset[str]] = {
-    "frontend/src/types/work_item.ts": frozenset({"kind"}),
+    "frontend/src/types/work_item.ts": frozenset({"kind", "covered_by"}),
     "frontend/src/types/settings.ts": frozenset(),
 }
 

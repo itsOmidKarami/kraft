@@ -7,6 +7,10 @@ export interface ChainNode {
    *  node in front of it, so this is how the two are told apart -- never by
    *  faking `gate_after` onto the gate node. */
   kind?: "exec" | "gate";
+  /** On a V1 node, the attachment kind that drops it at intake -- the gate
+   *  deciding that document and the node that would write it
+   *  (`ResolvedNode.covered_by`, Kraft-ene04). Absent on a legacy node. */
+  covered_by?: string | null;
   tasks: string[];
   /** Ordered groups of concurrent tasks. Always present on a materialized
    *  chain (`templates.with_steps`); `tasks` is the same list flattened, in

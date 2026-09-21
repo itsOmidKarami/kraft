@@ -166,6 +166,15 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
       ({ gate }) => gate,
     ),
   );
+  const attachedKinds = new Set<unknown>(attachments.map((a) => a.kind));
+  // A V1 node (it has a `kind`) says which attachment drops it: `covered_by`,
+  // the server's own `ResolvedNode.covered_by` -- the gate that decides the
+  // document and the node that would write it (Kraft-ene04). A legacy node
+  // only has the gate name it carries.
+  const coveredByAttachment = (n: TemplateSummary["nodes"][number]) =>
+    n.kind
+      ? attachedKinds.has(n.covered_by)
+      : n.gate_after != null && satisfiedGates.has(n.gate_after);
   const selectedNodes =
     templateSummaries.find((t) => t.id === tpl)?.nodes ?? [];
   const autoEscalateOverrides: NodeOverrides = autoEscalate
@@ -487,8 +496,7 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
                 </p>
                 <p className="field-hint">
                   {selectedNodes.map((n, i) => {
-                    const autoSkipped =
-                      n.gate_after != null && satisfiedGates.has(n.gate_after);
+                    const autoSkipped = coveredByAttachment(n);
                     const struck = autoSkipped || skipped.has(n.id);
                     return (
                       <span key={n.id}>
