@@ -145,7 +145,12 @@ def test_skip_bypasses_a_pending_gate_without_approving_it(tmp_path, monkeypatch
 
         evts = _poll_node_started(client, wid, "plan")
         skipped = [e for e in evts if e["type"] == "node_skipped"]
-        assert skipped[0]["payload"] == {"node_id": "spec", "gate": "spec_approval", "note": None}
+        # A V1 gate is its own node, so skipping it skips the gate node.
+        assert skipped[0]["payload"] == {
+            "node_id": "spec_approval",
+            "gate": "spec_approval",
+            "note": None,
+        }
         assert not any(e["type"] == "gate_approved" for e in evts)
         assert any(e["type"] == "node_started" and e["payload"]["node_id"] == "plan" for e in evts)
 

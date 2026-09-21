@@ -558,11 +558,12 @@ def test_work_item_usage_rollup_is_captured_from_the_agent_envelope(tmp_path, mo
         assert impl["cost_complete"] is True
         assert impl["wall_ms"] is not None and impl["rounds"] == 1
 
-        # the subprocess and builtin nodes ran but report no tokens — that is not
-        # a hole in the billing, and must not make the total read as a floor
-        env = next(n for n in usage["by_node"] if n["node"] == "env_setup")
-        assert env["tokens_in"] == 0
-        assert env["cost_complete"] is True
+        # the non-agent node ran but reports no tokens — that is not a hole in
+        # the billing, and must not make the total read as a floor. (V1
+        # quick-task has no `env_setup` node; `verify` is the non-agent one.)
+        verify = next(n for n in usage["by_node"] if n["node"] == "verify")
+        assert verify["tokens_in"] == 0
+        assert verify["cost_complete"] is True
 
         assert usage["total"]["tokens_in"] == impl["tokens_in"]
         assert usage["total"]["cost_usd"] == pytest.approx(0.035)
