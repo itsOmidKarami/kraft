@@ -576,3 +576,73 @@ def test_a_worker_agent_clearing_its_own_gate_is_still_not_a_human_touch(tmp_pat
     finally:
         conn.close()
     assert t["unplanned_touches_per_item"] == 0
+
+
+def _v1_item(conn, wid, resolved, *, created):
+    """A V1 row: `chain_definition` is `"{}"` (as `executor.entry.intake` writes
+    it) and the chain lives only in `materialized_chain`."""
+    from kraft.policy import InstancePolicy, InstancePolicyInput
+    from kraft.templates.environment import Repository, WorkItemTarget
+
+    materialized = resolved.materialize(
+        target=WorkItemTarget.for_repository(Repository(id="a", path="/a")),
+        effective_policy=InstancePolicy.from_input(InstancePolicyInput()),
+    )
+    _item(conn, wid, status="completed", created=created)
+    conn.execute(
+        "UPDATE work_items SET chain_definition = '{}', materialized_chain = ? WHERE id = ?",
+        (materialized.to_json(), wid),
+    )
+
+
+def test_merges_and_fix_cycles_are_read_off_a_v1_items_materialized_chain(tmp_path):
+    """Kraft-hicln: V1 rows have no `on.merge` in `chain_definition` and no node
+    named `verify`, so Insights read 0 merges and 0 fix cycles for every one.
+    Both now come from what a node DOES in the materialized chain: a forge task
+    targeting `mr.merge`, a declared `fix_loop`. `w2` names its merge node `land`
+    and has a `verify` node with no loop, so a by-name reading gets it wrong."""
+    from pathlib import Path
+
+    from support.harness import v1_resolved
+
+    from kraft.templates.library import TemplateLibrary
+
+    seed = TemplateLibrary.from_yaml_dir(Path(__file__).resolve().parents[1] / "templates")
+    custom = v1_resolved(
+        [
+            {
+                "id": "verify",
+                "kind": "exec",
+                "tasks": [{"id": "t", "kind": "agent", "harness": "fake", "prompt": "p"}],
+            },
+            {
+                "id": "land",
+                "kind": "exec",
+                "tasks": [{"id": "m", "kind": "forge", "target": "mr.merge"}],
+            },
+        ]
+    )
+    conn = db._connect(tmp_path / "orchestrator.db")
+    db.migrate(conn)
+    _v1_item(conn, "w1", seed.resolve_chain("default"), created=_at(2))
+    _v1_item(conn, "w2", custom, created=_at(2))
+    # w1: the seed's fix-loop nodes are `implementation` and
+    # `merge_request_feedback`; `spec` has none and must not count.
+    _session(conn, "s1", "w1", "spec")
+    _session(conn, "s2", "w1", "implementation", round=0)
+    _session(conn, "s3", "w1", "implementation", round=1)
+    _session(conn, "s4", "w1", "merge_request_feedback", round=0, status="capped_out")
+    _event(conn, "w1", "node_completed", {"node_id": "merge"}, _at(1))
+    # w2: a loopless `verify` is not a fix cycle, and `land` is a merge.
+    _session(conn, "s5", "w2", "verify", round=0, status="capped_out")
+    _event(conn, "w2", "node_completed", {"node_id": "verify"}, _at(1))
+    _event(conn, "w2", "node_completed", {"node_id": "land"}, _at(1))
+    conn.commit()
+    try:
+        t = analytics.compute(conn, range_="7d", now=NOW)["totals"]
+    finally:
+        conn.close()
+
+    assert t["mrs_merged"] == 2
+    assert t["fix_cycles"] == pytest.approx(3.0)  # 3 loop rounds / 1 item with a loop
+    assert t["fix_cycles_capped"] == 1
