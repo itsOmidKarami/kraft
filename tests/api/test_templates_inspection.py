@@ -176,7 +176,7 @@ def test_a_candidate_that_does_not_resolve_is_reported_not_raised(client):
 
 @pytest.mark.parametrize(
     "body",
-    [{}, {"chain": SOLO, "library": {}}, {"chains": [SOLO]}],
+    [{}, {"chain": SOLO, "library": {}}, {"chain": SOLO, "chains": [SOLO]}],
     ids=["neither", "both", "chains-without-library"],
 )
 def test_resolve_takes_exactly_one_input(client, body):

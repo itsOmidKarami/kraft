@@ -323,7 +323,10 @@ def test_major_update_requires_acceptance_and_makes_backup(
 
     before = _tree(legacy_home)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda _prompt: "y")
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda _prompt: "y" if accept == "prompt" else pytest.fail("asked despite -y"),
+    )
 
     cli.main(["admin", "update", *(["-y"] if accept == "flag" else [])])
 
