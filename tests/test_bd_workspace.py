@@ -68,6 +68,7 @@ def client(tmp_path, monkeypatch):
         yield c
 
 
+@pytest.mark.e2e("bd")
 def test_intake_files_the_bead_in_the_work_items_repo(tmp_path, monkeypatch):
     """Kraft-ibwj: with no KRAFT_BD_CWD, the bead goes to the item's repo, not
     to whatever directory the server process happens to be sitting in."""
@@ -95,6 +96,7 @@ def test_intake_files_the_bead_in_the_work_items_repo(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
+@pytest.mark.e2e("bd")
 def test_kraft_bd_cwd_still_overrides_the_repo(tmp_path, monkeypatch):
     """The repo is the *default*, not the winner. An operator who set
     KRAFT_BD_CWD as the workaround for Kraft-ibwj must not silently start
@@ -125,6 +127,7 @@ def test_kraft_bd_cwd_still_overrides_the_repo(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
+@pytest.mark.e2e("bd")
 def test_a_repo_with_no_beads_workspace_still_files_a_work_item(client, tmp_path):
     """The Kraft-ibwj repro, inverted: this must not be a 502. bd's own words
     reach the caller, and the timeline records why there is no bead."""
@@ -146,6 +149,7 @@ def test_a_repo_with_no_beads_workspace_still_files_a_work_item(client, tmp_path
     assert filed[0]["payload"]["cwd"] == str(repo)
 
 
+@pytest.mark.beads_adapter
 def test_no_bd_on_path_still_files_a_work_item(client, tmp_path, monkeypatch):
     """Kraft-7gy: bd is a tracker a newcomer has never heard of. Not having it
     installed is not an intake failure."""
@@ -160,6 +164,7 @@ def test_no_bd_on_path_still_files_a_work_item(client, tmp_path, monkeypatch):
     assert client.get(f"/api/work-items/{resp.json()['id']}").json()["bead_id"] is None
 
 
+@pytest.mark.e2e("bd")
 def test_a_bead_less_item_completes_without_calling_bd(tmp_path, monkeypatch, caplog):
     """Without the `if row["bead_id"]` guard, `bd close None` raises TypeError
     inside the except and gets logged as a bead close failure that never

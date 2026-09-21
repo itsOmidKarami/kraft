@@ -805,6 +805,7 @@ def test_merge_watch_green_path_never_reads_through_the_merged_away_mr(tmp_path,
     assert asyncio.run(scenario()) == "done"
 
 
+@pytest.mark.e2e("bd")
 def test_merge_watch_files_a_follow_up_bead_and_pauses_items_on_the_broken_sha(
     tmp_path, monkeypatch
 ):
@@ -2703,6 +2704,7 @@ def _bd_status(repo, bead_id):
     return json.loads(out)[0]["status"]
 
 
+@pytest.mark.e2e("bd")
 def test_post_merge_watch_delays_completion_and_bead_close_until_it_runs(tmp_path, monkeypatch):
     """Kraft-43kw: open_mr -> mr_checks -> merge -> post_merge_watch, driven
     through a real `executor.run` walk. `work_item_completed` and the bead

@@ -7,6 +7,8 @@ from pathlib import Path
 
 import httpx
 import pytest
+from support import harness
+from support.fake_beads import FakeBeads
 from support.harness import fake_templates_dir, isolated_bd
 
 from kraft import client
@@ -96,7 +98,7 @@ def _no_real_agent_binary(request, monkeypatch):
     launch through; `KRAFT_E2E` still gates the tests that mean to reach a real
     agent.
     """
-    if "real_executor" in request.keywords or "e2e" in request.keywords:
+    if "real_executor" in request.keywords or _REAL_AGENT_BINARIES & _e2e_binaries(request.node):
         return
 
     import kraft.adapters.subprocess as sp_mod
@@ -141,13 +143,69 @@ def _forward_fake_agent_env_vars_into_worker_env(monkeypatch):
     monkeypatch.setattr(sp_mod, "worker_env", patched)
 
 
+def _e2e_binaries(item) -> set[str]:
+    """The real CLIs an `e2e` test names: `@pytest.mark.e2e("bd")`."""
+    return {name for mark in item.iter_markers("e2e") for name in mark.args}
+
+
 def pytest_collection_modifyitems(config, items):
-    if os.environ.get("KRAFT_E2E") == "1" and shutil.which("claude"):
-        return
-    skip = pytest.mark.skip(reason="e2e: set KRAFT_E2E=1 and install `claude` to run")
+    """An e2e test runs only where every CLI it names is installed, and one
+    naming a real agent also needs KRAFT_E2E=1, since it spends tokens. Each
+    skip names what is missing. A CLI listed in KRAFT_E2E_REQUIRE (CI's e2e
+    job sets `bd`) makes that skip an error, so the job cannot go green having
+    run nothing."""
+    required = set(filter(None, os.environ.get("KRAFT_E2E_REQUIRE", "").split(",")))
     for item in items:
-        if "e2e" in item.keywords:
-            item.add_marker(skip)
+        if "e2e" not in item.keywords:
+            continue
+        needs = _e2e_binaries(item)
+        if not needs:
+            raise pytest.UsageError(f"{item.nodeid}: name its CLIs, e.g. @pytest.mark.e2e('bd')")
+        missing = sorted(b for b in needs if not shutil.which(b))
+        if missing and required & set(missing):
+            raise pytest.UsageError(f"{item.nodeid}: KRAFT_E2E_REQUIRE, but {missing} not on PATH")
+        if _REAL_AGENT_BINARIES & needs and os.environ.get("KRAFT_E2E") != "1":
+            missing.append("KRAFT_E2E=1 (a real agent spends tokens)")
+        if missing:
+            item.add_marker(pytest.mark.skip(reason=f"e2e: needs {', '.join(missing)}"))
+
+
+@pytest.fixture(autouse=True)
+def fake_beads(request, monkeypatch):
+    """Every test gets an in-memory `kraft.adapters.beads` (Kraft-qmhfc): a
+    test that needs a work item to exist should not spawn `bd` (~0.5s a call,
+    ~44% of the suite). Two opt-outs keep the real adapter:
+
+    - `@pytest.mark.e2e("bd")`: the real binary, for tests that pin bd's CLI
+      contract or assert on bead state bd itself holds.
+    - `@pytest.mark.beads_adapter`: tests of the adapter module itself, which
+      stub `subprocess.run` or put a stub `bd` on PATH.
+
+    `KRAFT_TEST_REAL_BD=1` turns the fake off suite-wide: the check that the
+    fake is not what makes a test pass. Returns the fake (None when off), so
+    a test can read or seed its state.
+    """
+    if "bd" in _e2e_binaries(request.node) or os.environ.get("KRAFT_TEST_REAL_BD") == "1":
+        return None
+    # Past here nothing needs a real workspace, so no test pays for `bd init`.
+    monkeypatch.setattr(harness, "REAL_BD", False)
+    if "beads_adapter" in request.keywords:
+        return None
+    import kraft.adapters.beads as beads_mod
+
+    fake = FakeBeads()
+    for name in ("intake", "complete", "search", "ready", "blocked_by"):
+        monkeypatch.setattr(beads_mod, name, getattr(fake, name))
+
+    def _refuse(argv, *a, **k):
+        raise AssertionError(
+            f"{request.node.nodeid} reached the real `bd` through kraft.adapters.beads "
+            f"({argv!r}) with the fake installed: fake the new function in "
+            f"tests/support/fake_beads.py, or mark the test e2e('bd')."
+        )
+
+    monkeypatch.setattr(beads_mod, "subprocess", type("_NoBd", (), {"run": staticmethod(_refuse)}))
+    return fake
 
 
 @pytest.fixture(autouse=True)

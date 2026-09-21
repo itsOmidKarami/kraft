@@ -77,33 +77,41 @@ def make_repo_with_engineering(tmp_path: Path, files: dict[str, str], name: str 
     return dest
 
 
-_bd_template_dir: Path | None = None
+_bd_templates: dict[bool, Path] = {}
+
+#: Whether `isolated_bd` hands out a real `bd init`ed workspace. `True` for any
+#: caller outside pytest (frontend/e2e/serve.py); `tests/conftest.py` turns it
+#: off for every test the in-memory beads fake covers, so those never pay for
+#: `bd init` or need `bd` installed (Kraft-qmhfc).
+REAL_BD = True
 
 
-def _bd_template() -> Path:
-    """One `bd init`ed workspace per test-run process, built lazily and reused.
+def _bd_template(real: bool) -> Path:
+    """One workspace template per test-run process, built lazily and reused.
 
     `bd init` spins up Dolt (~3.6s); doing it per test dominated the suite. Every
-    caller only needs a *working* bd workspace (adapters run `bd create`/`close`,
-    tests run `bd show <id>` — no test inspects cross-issue state), so we init
-    once and hand out `copytree` copies.
+    caller only needs a *working* bd workspace, so we init once and hand out
+    `copytree` copies. The fake's template is a git repo with an empty `.beads/`,
+    which is all Kraft itself looks for (search's repo filter, doctor).
     """
-    global _bd_template_dir
-    if _bd_template_dir is None:
+    if real not in _bd_templates:
         tpl = Path(tempfile.mkdtemp(prefix="kraft-bd-tpl-"))
         _git(tpl, "init", "-q", "-b", "main")
         _git(tpl, "config", "user.email", "t@t")
         _git(tpl, "config", "user.name", "t")
-        subprocess.run(
-            ["bd", "init", "--prefix", "TEST"],
-            cwd=tpl,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
+        if real:
+            subprocess.run(
+                ["bd", "init", "--prefix", "TEST"],
+                cwd=tpl,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        else:
+            (tpl / ".beads").mkdir()
         atexit.register(shutil.rmtree, tpl, ignore_errors=True)
-        _bd_template_dir = tpl
-    return _bd_template_dir
+        _bd_templates[real] = tpl
+    return _bd_templates[real]
 
 
 def isolated_bd(tmp_path: Path, name: str = "tracker") -> Path:
@@ -113,7 +121,7 @@ def isolated_bd(tmp_path: Path, name: str = "tracker") -> Path:
     auto-intaken bead lives in its own repo's `.beads`, not the instance-wide
     tracker (Kraft-8mu.5.2)."""
     repo = tmp_path / name
-    shutil.copytree(_bd_template(), repo)
+    shutil.copytree(_bd_template(REAL_BD), repo)
     return repo
 
 

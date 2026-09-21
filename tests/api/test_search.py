@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from support.harness import fake_templates_dir, isolated_bd, make_repo_with_engineering
 
@@ -190,6 +191,7 @@ def test_connecting_a_repo_indexes_it_immediately(tmp_path, monkeypatch):
         ]
 
 
+@pytest.mark.e2e("bd")
 def test_the_bead_strip_searches_connected_repos_when_no_override(tmp_path, monkeypatch):
     """Kraft-ibwj: with no KRAFT_BD_CWD the strip searched the daemon's cwd and
     was permanently empty. It degrades quietly — `beads.search` answers [] on

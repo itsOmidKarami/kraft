@@ -499,6 +499,7 @@ def _poll_for(client, wid, event_type, timeout=30):
 
 
 @pytest.mark.real_executor
+@pytest.mark.e2e("bd")
 def test_an_auto_started_item_stops_at_its_first_gate(tmp_path, monkeypatch):
     """The line auto-intake must not cross (spec §5).
 

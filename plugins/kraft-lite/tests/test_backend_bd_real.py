@@ -19,7 +19,13 @@ import pytest
 
 PLUGIN = Path(__file__).resolve().parents[1]
 
-pytestmark = pytest.mark.skipif(shutil.which("bd") is None, reason="bd is not installed")
+# e2e("bd"): the main suite runs this in CI's e2e-cli job, not the unit job.
+# The skipif stays for lite-floor, which runs this directory without
+# tests/conftest.py's e2e hook.
+pytestmark = [
+    pytest.mark.e2e("bd"),
+    pytest.mark.skipif(shutil.which("bd") is None, reason="bd is not installed"),
+]
 
 
 @pytest.fixture(scope="session")
