@@ -121,5 +121,15 @@ def test_the_beads_fake_and_real_bd_agree(backend, fake_beads, tmp_path):
             await beads.intake("filed nowhere", cwd=str(nowhere))
         assert await beads.ready(cwd=str(nowhere)) == []
         assert await beads.search("blocker", cwd=str(nowhere)) == []
+        # A cwd that does not exist, even inside a workspace: bd never
+        # starts. Filing and closing raise the OSError, the readers answer
+        # nothing rather than the enclosing workspace's beads.
+        gone = str(Path(ws) / "gone")
+        with pytest.raises(OSError):
+            await beads.intake("filed nowhere", cwd=gone)
+        with pytest.raises(OSError):
+            await beads.complete(b, cwd=gone)
+        assert await beads.ready(cwd=gone) == []
+        assert await beads.blocked_by([b], cwd=gone) == []
 
     asyncio.run(scenario())

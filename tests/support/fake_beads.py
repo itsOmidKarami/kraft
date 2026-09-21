@@ -20,6 +20,7 @@ unit test cannot pass on a bead bd would never have filed.
 
 from __future__ import annotations
 
+import errno
 import itertools
 import json
 import os
@@ -36,8 +37,19 @@ class FakeBeads:
         self.workspaces: dict[str, dict[str, dict]] = {}
 
     @staticmethod
+    def _spawn_in(cwd: str | None) -> None:
+        """`subprocess.run(cwd=...)` on a directory that does not exist raises
+        before bd ever runs: `intake` and `complete` let it through, the
+        readers answer `[]` on it."""
+        if cwd is not None and not os.path.isdir(cwd):
+            raise FileNotFoundError(errno.ENOENT, "No such file or directory", cwd)
+
+    @staticmethod
     def _root(cwd: str | None) -> str | None:
-        """The directory holding the nearest `.beads/` at or above `cwd`."""
+        """The directory holding the nearest `.beads/` at or above `cwd`, or
+        None -- also for a `cwd` that does not exist, which bd cannot run in."""
+        if cwd is not None and not os.path.isdir(cwd):
+            return None
         here = Path(os.path.realpath(cwd or os.getcwd()))
         return next((str(d) for d in (here, *here.parents) if (d / ".beads").is_dir()), None)
 
@@ -52,6 +64,7 @@ class FakeBeads:
     async def intake(
         self, title: str, *, description: str | None = None, cwd: str | None = None
     ) -> str:
+        self._spawn_in(cwd)
         if self._root(cwd) is None:
             # What the adapter raises for bd's own refusal (Kraft-ibwj).
             raise RuntimeError("bd create failed (exit 1): Error: no beads database found")
@@ -68,6 +81,7 @@ class FakeBeads:
         return bead_id
 
     async def complete(self, bead_id: str, *, cwd: str | None = None) -> None:
+        self._spawn_in(cwd)
         bead = self._ws(cwd).get(bead_id)
         if bead is None:
             # `bd close` on an unknown id exits non-zero, and `complete` runs it
