@@ -84,7 +84,7 @@ def resolve(name: str) -> Forge:
         case "gh":
             return GhCli()
         case "fake":
-            return FakeForge()
+            return _DEV_FAKE
         case _:
             raise ForgeError(f"unknown forge backend {name!r}; known: gh, glab, fake")
 
@@ -93,9 +93,15 @@ def resolve(name: str) -> Forge:
 #: vocabularies on purpose: `forge` is a fact about the remote, the backend is
 #: a fact about this machine, and a self-hosted GitLab is `gitlab` with `glab`.
 #: `fake` is dev-only (Ruling 147): the in-process `FakeForge`, so `just dev`
-#: reaches the merge-request half of a chain. It opens nothing anywhere, and
-#: each call gets a fresh instance -- no MR survives from one node to the next.
+#: reaches the merge-request half of a chain. It opens nothing anywhere.
 _FORGE_CLI = {"gitlab": "glab", "github": "gh", "fake": "fake"}
+
+#: The one `FakeForge` a `fake` repo gets, for the life of the process: every
+#: forge node resolves afresh, and a per-call instance forgot the draft MR
+#: `open_mr` made before `sync_mr`/`mark_ready`/`merge` could find it.
+#: ponytail: in memory only, so a server restart forgets every fake MR --
+#: persist it if a dev walk ever needs to span a restart.
+_DEV_FAKE = FakeForge()
 
 
 def backend_for(backend: str, repo_forge: str | None) -> str:

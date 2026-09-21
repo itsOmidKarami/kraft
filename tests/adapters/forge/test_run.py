@@ -121,6 +121,59 @@ def test_a_repo_with_no_forge_is_told_the_remedy_v1_actually_reads():
     assert "`forge: fake`" in message and "dev" in message
 
 
+def test_the_dev_fake_forge_remembers_an_mr_across_nodes(tmp_path):
+    """Ruling 147, round 3: a repo on `forge: fake` resolves afresh at every
+    forge node, so the fake must be one instance per process -- otherwise the
+    draft MR `open_mr` created is gone by the time `sync_mr` (and later
+    `mark_ready`, `merge`) look for it. Nothing is monkeypatched: each
+    `run_task` below goes through the real `backend_for`/`resolve`."""
+    repo = make_repo(tmp_path)
+    branch = f"kraft/{tmp_path.name}"
+    subprocess.run(["git", "checkout", "-qb", branch], cwd=repo, check=True)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at) VALUES "
+                    "('w1','t',?,'default','{}','active','now','now')",
+                    (str(repo),),
+                )
+            )
+            statuses = []
+            for handler in ("open_mr", "sync_mr"):
+                statuses.append(
+                    await forge.run_task(
+                        database,
+                        rd,
+                        session_id=f"s-{handler}",
+                        work_item_id="w1",
+                        node_id=handler,
+                        hook_point=handler,
+                        handler=handler,
+                        backend="auto",
+                        repo_forge="fake",
+                        repo=repo,
+                        orig_repo=repo,
+                        branch=branch,
+                        title="t",
+                    )
+                )
+            return statuses
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario()) == ["done", "done"]
+    fake = forge.resolve(forge.backend_for("auto", "fake"))
+    found = asyncio.run(fake.find_mr(repo=repo, branch=branch))
+    assert found is not None and found.state == "open"
+    assert branch in fake.bodies, "sync_mr's description never reached the MR open_mr made"
+    assert fake.opened_draft[found.number] is False
+
+
 def test_an_explicit_backend_ignores_the_repo_forge():
     """A registry that pins a backend wins over the repo entry — that is the
     escape hatch for a self-hosted host `config._FORGES` cannot recognise."""
