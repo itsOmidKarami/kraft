@@ -193,8 +193,9 @@ async def test_ci_poll_stops_for_a_human_on_a_real_rebase_conflict(
     `test_refresh_worktree_base_raises_and_aborts_on_conflict` pins for
     `refresh_worktree_base` alone, driven through the whole node. With no
     `fix_loop`/`on_failure`, `walk_node` stops for a human; `base_ref` is
-    never touched. V1 has no `rebase_bounce_to` (the restart span a base
-    change re-enters is Task 7's), so only the real-conflict stop is pinned."""
+    never touched. The node declares no `on_base_changed.on_conflict`, so the
+    conflict is an ordinary task failure (`rebase-conflict-requires-explicit-
+    handler`; the handler's own path is tests/executor/test_base_change.py)."""
     monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
     _commit(repo, ".gitignore", ".engineering/\n", "gitignore .engineering")
     verify = {
