@@ -15,7 +15,14 @@ import yaml
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from support.api_settings import _client
-from support.harness import fake_templates_dir, isolated_bd, make_repo, make_repo_with_submodule
+from support.harness import (
+    fake_templates_dir,
+    isolated_bd,
+    make_repo,
+    make_repo_with_submodule,
+    v1_chain,
+    v1_item,
+)
 
 from kraft import config, events, store, templates
 from kraft import db as kdb
@@ -36,15 +43,19 @@ def client(tmp_path, monkeypatch, templates_dir):
         yield c
 
 
-_GATED_CHAIN = {
-    "nodes": [
-        {
-            "id": "review",
-            "tasks": ["on.human_review.requested"],
-            "gate_after": "human_review_approval",
-        },
-    ]
-}
+def _gated_chain():
+    """`review` (exec) -> `human_review_approval` (gate)."""
+    return v1_chain(
+        [
+            {
+                "id": "review",
+                "kind": "exec",
+                "tasks": [{"id": "run", "kind": "subprocess", "command": "true"}],
+            },
+            {"id": "human_review_approval", "kind": "gate"},
+        ],
+        repo="/r",
+    )
 
 
 def test_probe_reads_the_repo_without_touching_it(tmp_path, client):
@@ -606,18 +617,7 @@ def _seed_active_work_item(
     async def seed():
         database = await kdb.Database.open(rd.db)
         try:
-            await database.write(
-                lambda c: store.create_work_item(
-                    c,
-                    id=wid,
-                    bead_id="B-1",
-                    title="t",
-                    repo="/r",
-                    chain_template="quick-task",
-                    chain_definition=json.dumps(_GATED_CHAIN),
-                    status="active",
-                )
-            )
+            await v1_item(database, _gated_chain(), repo="/r", wid=wid, status="active")
             await database.write(lambda c: store.load_chain(c, wid, node_id))
             if gate:
                 await database.write(
@@ -669,7 +669,10 @@ def test_a_broken_repos_yaml_does_not_500_the_approve_path(tmp_path, monkeypatch
     templates_dir = fake_templates_dir(tmp_path, "claude")
     _broken_repos_yaml(templates_dir)
     run_dir = tmp_path / "run"
-    _seed_active_work_item(run_dir, wid="w-gated", node_id="review", gate="human_review_approval")
+    # A V1 gate is its own node, and the walk stands on it.
+    _seed_active_work_item(
+        run_dir, wid="w-gated", node_id="human_review_approval", gate="human_review_approval"
+    )
 
     with _client(tmp_path, monkeypatch, templates_dir) as client:
         r = client.post("/api/work-items/w-gated/gates/human_review_approval/approve")
@@ -683,6 +686,19 @@ def test_connected_repos_default_model_reaches_the_agent_launch(tmp_path, monkey
     reason `_connected` exists over `r["path"] == repo`), then post a work item
     against the same, unresolved path and check `--model` reaches the agent."""
     templates_dir = fake_templates_dir(tmp_path, f"{sys.executable} {_FAKE_AGENT}")
+    # An agent task that names no `model:` of its own: the shipped implementer
+    # names one, and a task's own model rightly beats the repo's default.
+    (templates_dir / "chains" / "impl-only.yaml").write_text(
+        "id: impl-only\n"
+        "nodes:\n"
+        "  - id: implementation\n"
+        "    kind: exec\n"
+        "    tasks:\n"
+        "      - id: implement\n"
+        "        kind: agent\n"
+        "        harness: fake\n"
+        "        prompt: Implement the work item.\n"
+    )
     argv_log = tmp_path / "argv.jsonl"
     monkeypatch.setenv("KRAFT_FAKE_AGENT_ARGV_LOG", str(argv_log))
     monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
@@ -700,13 +716,9 @@ def test_connected_repos_default_model_reaches_the_agent_launch(tmp_path, monkey
         )
         assert added.status_code == 201
 
-        # quick-task: the only agent hook this fixture binds is
-        # `on.implementation.start`, and on the default chain that sits behind
-        # three gates the item never gets past (`on.spec.requested` is a noop
-        # here), so no agent would ever launch to inspect.
         wid = client.post(
             "/api/work-items",
-            json={"title": "x", "repo": str(repo), "chain_template": "quick-task"},
+            json={"title": "x", "repo": str(repo), "chain_template": "impl-only"},
         ).json()["id"]
 
         deadline = time.monotonic() + 30
