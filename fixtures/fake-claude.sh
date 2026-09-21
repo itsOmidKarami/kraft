@@ -120,6 +120,7 @@ if [ -z "$kind" ]; then
   case "$ctx" in
     *".engineering/specs/"*) kind="spec" ;;
     *".engineering/plans/"*) kind="plan" ;;
+    *".engineering/review_briefs/"*) kind="review_brief" ;;
   esac
 fi
 # Only on a status that advances the chain (executor._ADVANCING), mirroring

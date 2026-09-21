@@ -10,8 +10,6 @@ import sys
 from pathlib import Path
 
 import httpx
-import pytest
-import yaml
 from support.api import (
     _FAKE_CLAUDE,
     _approve_gate,
@@ -27,16 +25,52 @@ from support.harness import fake_templates_dir, make_repo
 _FAKE_REVIEWER = Path(__file__).resolve().parents[1] / "support" / "fake_reviewer.py"
 
 
-def _chain_review_path(client, wid):
+#: The shipped `default` chain reaches its `chain_finalized` gate only after the
+#: draft merge request's automated-review wait, which has no handler until Task
+#: 9. This is the shortest V1 chain that reaches one for real: the summary
+#: author writes the review brief the gate is about.
+_REVIEW_EARLY = """\
+id: review-early
+nodes:
+  - id: implementation
+    kind: exec
+    tasks:
+      - id: implement
+        extends: implementer
+  - id: work_item_summary
+    kind: exec
+    tasks:
+      - id: author
+        extends: write_summary
+  - id: chain_review
+    kind: gate
+    chain_finalized: true
+    artifact: review_brief
+    reject_to: implementation
+"""
+
+
+def _review_early(tmp_path):
+    """A templates dir whose `review-early` chain reaches a final-review gate."""
+    tdir = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
+    (tdir / "chains" / "review-early.yaml").write_text(_REVIEW_EARLY)
+    return tdir
+
+
+def _post(client, repo, chain_template):
+    return client.post(
+        "/api/work-items",
+        json={
+            "title": "make the failing test pass",
+            "repo": str(repo),
+            "chain_template": chain_template,
+        },
+    ).json()["id"]
+
+
+def _review_brief_path(client, wid):
     run_dir = Path(client.app.state.run_dirs.base)
-    return run_dir / "worktrees" / wid / ".engineering" / "chain_reviews" / f"{wid}.md"
-
-
-def _write_chain_review(client, wid, envelope):
-    path = _chain_review_path(client, wid)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    front_matter = f"---\nwork_item_ids: [{wid}]\nkind: chain_reviews\ntitle: t\n---\n\n"
-    path.write_text(front_matter + json.dumps(envelope) + "\n")
+    return run_dir / "worktrees" / wid / ".engineering" / "review_briefs" / f"{wid}.md"
 
 
 def _create_running_session(wid: str, session_id: str, node_id: str, *, pid: int) -> None:
@@ -56,18 +90,17 @@ def _create_running_session(wid: str, session_id: str, node_id: str, *, pid: int
         conn.close()
 
 
-def test_default_chain_fix_loop_breach_over_http(tmp_path, monkeypatch):
-    """This test's target is specifically `verify`'s cap-breach machinery
-    over HTTP, so `on.test.run` is noop'd everywhere (`noop_verify=True`)
-    and the fix loop is driven by `on.review.local.run`'s own findings
-    instead -- the same scripted-reviewer approach `test_findings_loop.py`
-    uses."""
+def test_a_fix_loop_breach_over_http(tmp_path, monkeypatch):
+    """Was `test_default_chain_fix_loop_breach_over_http`. This test's target is
+    a fix loop's cap-breach machinery over HTTP, driven by the scripted
+    reviewer's own findings -- the same approach `test_findings_loop.py` uses.
+    The shipped `default` chain's fix loop measures the changed-test-scope
+    builtin, which the fixture neuters to `true`, so the loop is its own chain
+    here."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "noop")
     repo = make_repo(tmp_path)
     # Own policy fixture — do not gate on the shipped attempts value.
-    tdir = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE), noop_verify=True)
-    registry_path = tdir / "registry.yaml"
-    registry = yaml.safe_load(registry_path.read_text())
+    tdir = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
     plan_path = tmp_path / "review-plan.json"
     plan_path.write_text(
         json.dumps(
@@ -88,33 +121,31 @@ def test_default_chain_fix_loop_breach_over_http(tmp_path, monkeypatch):
         )
     )
     monkeypatch.setenv("KRAFT_FAKE_REVIEW_PLAN", str(plan_path))
-    registry["hooks"]["on.review.local.run"] = {
-        "kind": "subprocess",
-        "command": [sys.executable, str(_FAKE_REVIEWER)],
-    }
-    registry_path.write_text(yaml.safe_dump(registry))
+    (tdir / "chains" / "fixloop.yaml").write_text(
+        "id: fixloop\n"
+        "nodes:\n"
+        "  - id: verify\n"
+        "    kind: exec\n"
+        "    tasks:\n"
+        "      - id: review\n"
+        "        kind: subprocess\n"
+        f"        command: {sys.executable} {_FAKE_REVIEWER}\n"
+        "    fix_loop:\n"
+        "      tasks:\n"
+        "        - id: repair\n"
+        "          extends: repair_mr_feedback\n"
+    )
     # attempts=1, not 2: an identical fingerprint recurring at round 1
     # correctly trips the stuck-detector before a 2-attempt cap would ever be
     # reached. attempts=1 breaches the cap on the second bump, strictly
     # before the stuck-check runs, so this test still exercises the
     # cap-breach path specifically.
     (tdir / "policy.yaml").write_text(
-        "loops:\n  verify_fix_loop: { attempts: 1, wall_clock_s: 3600 }\n"
+        "loops:\n  verify.fix_loop: { attempts: 1, wall_clock_s: 3600 }\n"
         "default: { attempts: 1, wall_clock_s: 3600 }\n"
     )
     with _client(tmp_path, monkeypatch, templates_dir=tdir) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={
-                "title": "make the failing test pass",
-                "repo": str(repo),
-                "chain_template": "default",
-            },
-        ).json()["id"]
-        # verify (fix_loop) sits before the human_review gate, so the cap breach
-        # drops the item to needs_human before human_review_approval is ever reached.
-        for gate in ("spec_approval", "plan_approval", "chain_finalized"):
-            assert _approve_gate(client, wid, gate, timeout=60).status_code == 200
+        wid = _post(client, repo, "fixloop")
         events = _poll_events(client, wid, "work_item_needs_human", timeout=60)
 
         assert len([e for e in events if e["type"] == "fix_cycle_started"]) == 1
@@ -144,40 +175,6 @@ def test_gate_approve_advances_chain(tmp_path, monkeypatch):
         assert any(e["type"] == "node_started" and e["payload"]["node_id"] == "plan" for e in evts)
 
 
-def test_approve_accepts_a_custom_gate_in_this_items_chain(tmp_path, monkeypatch):
-    repo = make_repo(tmp_path)
-    templates_dir = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
-    path = templates_dir / "default.yaml"
-    chain = yaml.safe_load(path.read_text())
-    chain["nodes"][0]["gate_after"] = "release/ready#1"
-    path.write_text(yaml.safe_dump(chain, sort_keys=False))
-
-    with _client(tmp_path, monkeypatch, templates_dir=templates_dir) as client:
-        wid = _post_default(client, repo)
-        _await_gate(client, wid, "release/ready#1")
-        response = client.post(f"/api/work-items/{wid}/gates/release%2Fready%231/approve")
-        assert response.status_code == 200, response.text
-        assert _poll_node_started(client, wid, "plan")
-
-
-def test_reject_accepts_an_encoded_slash_containing_custom_gate(tmp_path, monkeypatch):
-    repo = make_repo(tmp_path)
-    templates_dir = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
-    path = templates_dir / "default.yaml"
-    chain = yaml.safe_load(path.read_text())
-    chain["nodes"][0]["gate_after"] = "release/ready#1"
-    path.write_text(yaml.safe_dump(chain, sort_keys=False))
-
-    with _client(tmp_path, monkeypatch, templates_dir=templates_dir) as client:
-        wid = _post_default(client, repo)
-        _await_gate(client, wid, "release/ready#1")
-        response = client.post(
-            f"/api/work-items/{wid}/gates/release%2Fready%231/reject", json={"note": "redo"}
-        )
-
-    assert response.status_code == 200, response.text
-
-
 def test_approve_rejects_gate_absent_from_this_items_chain(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
@@ -187,422 +184,18 @@ def test_approve_rejects_gate_absent_from_this_items_chain(tmp_path, monkeypatch
     assert response.status_code == 404
 
 
-def test_chain_review_splice_runs_the_revised_tail(tmp_path, monkeypatch):
-    """Kraft-hm0: a genuinely revised tail is spliced into `chain_definition`
-    on `chain_finalized` approval, and the next node runs the added task, not
-    whatever the template originally had there."""
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        for gate in ("spec_approval", "plan_approval"):
-            _await_gate(client, wid, gate)
-            assert _approve_gate(client, wid, gate).status_code == 200
-        _await_gate(client, wid, "chain_finalized")
-
-        tail = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
-        original = [n for n in tail if n["id"] not in ("spec", "plan", "chain_review")]
-        revised = [
-            {"id": "extra_check", "tasks": ["on.review.local.run"], "gate_after": None},
-            *original,
-        ]
-        _write_chain_review(
-            client,
-            wid,
-            {"status": "ready_for_approval", "revised_chain_nodes": revised, "rationale": "t"},
-        )
-
-        r = _approve_gate(client, wid, "chain_finalized")
-        assert r.status_code == 200, r.text
-        _await_gate(client, wid, "human_review_approval")
-        started = [
-            e["payload"]["node_id"]
-            for e in client.get(f"/api/work-items/{wid}/events").json()
-            if e["type"] == "node_started"
-        ]
-        assert "extra_check" in started
-        assert client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"][3][
-            "id"
-        ] == ("extra_check")
-
-
-def test_chain_review_unchanged_tail_round_trips(tmp_path, monkeypatch):
-    """The skill's own documented common case: emitting the tail unchanged is
-    a no-op in effect, the same code path as a real splice (Kraft-hm0)."""
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        for gate in ("spec_approval", "plan_approval"):
-            _await_gate(client, wid, gate)
-            assert _approve_gate(client, wid, gate).status_code == 200
-        _await_gate(client, wid, "chain_finalized")
-        before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
-
-        # fake-claude.sh's default answer for on.chain.review_ready is the
-        # unchanged tail — no override needed here.
-        r = _approve_gate(client, wid, "chain_finalized")
-        assert r.status_code == 200, r.text
-        after = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
-        assert after == before
-
-
-def test_chain_review_splice_keeps_on_failure_from_schema_only_nodes(tmp_path, monkeypatch):
-    """Kraft-eod0: the skill's documented node schema is only 4 of a node's 8
-    real keys. A reviewer following it to the letter emits nodes with just
-    `{id, tasks, gate_after, fix_loop}` -- the splice must not read that as
-    "delete on_failure", or a node-level repair hook silently stops firing on
-    every chain review that says the chain is fine as-is.
-
-    The shipped `default` chain no longer carries a node-level `on_failure`
-    itself (Kraft-uhev1 phase 2 moved the CI repair onto its binding), so
-    this test gives `mr_checks` one directly -- an install whose chain
-    predates that move still has one, and the splice must still preserve it.
-    """
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    repo = make_repo(tmp_path)
-    templates_dir = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
-    default_path = templates_dir / "default.yaml"
-    default = yaml.safe_load(default_path.read_text())
-    for node in default["nodes"]:
-        if node["id"] == "mr_checks":
-            node["on_failure"] = ["on.mr_checks.repair"]
-    default_path.write_text(yaml.safe_dump(default, sort_keys=False))
-    with _client(tmp_path, monkeypatch, templates_dir=templates_dir) as client:
-        wid = _post_default(client, repo)
-        for gate in ("spec_approval", "plan_approval"):
-            _await_gate(client, wid, gate)
-            assert _approve_gate(client, wid, gate).status_code == 200
-        _await_gate(client, wid, "chain_finalized")
-
-        before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
-        mr_checks_before = next(n for n in before if n["id"] == "mr_checks")
-        assert mr_checks_before["on_failure"] == ["on.mr_checks.repair"]
-
-        tail = [n for n in before if n["id"] not in ("spec", "plan", "chain_review")]
-        # Only the 4 keys the skill's schema teaches -- reproduces a reviewer
-        # that followed it to the letter, not one that happened to echo extra
-        # keys back.
-        schema_only = [
-            {
-                "id": n["id"],
-                "tasks": n["tasks"],
-                "gate_after": n["gate_after"],
-                "fix_loop": n["fix_loop"],
-            }
-            for n in tail
-        ]
-        _write_chain_review(
-            client,
-            wid,
-            {
-                "status": "ready_for_approval",
-                "revised_chain_nodes": schema_only,
-                "rationale": "no change",
-            },
-        )
-
-        r = _approve_gate(client, wid, "chain_finalized")
-        assert r.status_code == 200, r.text
-        after = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
-        mr_checks_after = next(n for n in after if n["id"] == "mr_checks")
-        assert mr_checks_after["on_failure"] == ["on.mr_checks.repair"]
-
-
-def test_a_spliced_schema_only_node_gets_its_steps_derived(tmp_path, monkeypatch):
-    """The reviewer's schema teaches `tasks`; `measure_node` reads `steps`.
-    `materialize` is not the only producer of chain_definition nodes, so
-    without the normalizer on the splice path a spliced node arrives with no
-    `steps` key at all."""
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    repo = make_repo(tmp_path)
-    templates_dir = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
-    with _client(tmp_path, monkeypatch, templates_dir=templates_dir) as client:
-        wid = _post_default(client, repo)
-        for gate in ("spec_approval", "plan_approval"):
-            _await_gate(client, wid, gate)
-            assert _approve_gate(client, wid, gate).status_code == 200
-        _await_gate(client, wid, "chain_finalized")
-
-        before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
-        tail = [n for n in before if n["id"] not in ("spec", "plan", "chain_review")]
-        schema_only = [
-            {
-                "id": n["id"],
-                "tasks": n["tasks"],
-                "gate_after": n["gate_after"],
-                "fix_loop": n["fix_loop"],
-            }
-            for n in tail
-        ]
-        _write_chain_review(
-            client,
-            wid,
-            {
-                "status": "ready_for_approval",
-                "revised_chain_nodes": schema_only,
-                "rationale": "no change",
-            },
-        )
-        assert _approve_gate(client, wid, "chain_finalized").status_code == 200
-
-        after = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
-        for node in after:
-            assert node.get("steps"), f"{node['id']} spliced without steps"
-            assert node["tasks"] == [t for g in node["steps"] for t in g], node["id"]
-
-
-def test_chain_review_cannot_set_auto_escalate_directly(tmp_path, monkeypatch):
-    """Kraft-df4tc: auto_escalate/auto_escalate_stuck/auto_escalate_delay_s are
-    never the reviewer's to set -- only the human PATCH route's. A node dict
-    that sets one directly must have it stripped before the splice, not
-    spliced straight into chain_definition (where gates._auto_review_due and
-    store.effective_auto_escalate_stuck would read it back)."""
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        for gate in ("spec_approval", "plan_approval"):
-            _await_gate(client, wid, gate)
-            assert _approve_gate(client, wid, gate).status_code == 200
-        _await_gate(client, wid, "chain_finalized")
-
-        before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
-        tail = [n for n in before if n["id"] not in ("spec", "plan", "chain_review")]
-        revised = [
-            {**n, "auto_escalate": True, "auto_escalate_stuck": True, "auto_escalate_delay_s": 999}
-            if n["id"] == "human_review"
-            else n
-            for n in tail
-        ]
-        _write_chain_review(
-            client,
-            wid,
-            {"status": "ready_for_approval", "revised_chain_nodes": revised, "rationale": "t"},
-        )
-        r = _approve_gate(client, wid, "chain_finalized")
-        assert r.status_code == 200, r.text
-        after = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
-        human_review_after = next(n for n in after if n["id"] == "human_review")
-        human_review_before = next(n for n in before if n["id"] == "human_review")
-        assert human_review_after["auto_escalate"] == human_review_before["auto_escalate"]
-        assert (
-            human_review_after["auto_escalate_stuck"] == human_review_before["auto_escalate_stuck"]
-        )
-        assert (
-            human_review_after["auto_escalate_delay_s"]
-            == human_review_before["auto_escalate_delay_s"]
-        )
-
-
-def test_chain_review_may_set_reject_to_directly(tmp_path, monkeypatch):
-    """Kraft-df4tc point 1: a reviewer's revised node may name reject_to
-    itself -- not just carry it forward -- and it survives the splice."""
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        for gate in ("spec_approval", "plan_approval"):
-            _await_gate(client, wid, gate)
-            assert _approve_gate(client, wid, gate).status_code == 200
-        _await_gate(client, wid, "chain_finalized")
-
-        before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
-        tail = [n for n in before if n["id"] not in ("spec", "plan", "chain_review")]
-        revised = [{**n, "reject_to": "plan"} if n["id"] == "human_review" else n for n in tail]
-        _write_chain_review(
-            client,
-            wid,
-            {"status": "ready_for_approval", "revised_chain_nodes": revised, "rationale": "t"},
-        )
-        r = _approve_gate(client, wid, "chain_finalized")
-        assert r.status_code == 200, r.text
-        after = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
-        assert next(n for n in after if n["id"] == "human_review")["reject_to"] == "plan"
-
-
-def test_chain_review_forward_reject_to_rejects_the_whole_approval(tmp_path, monkeypatch):
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        for gate in ("spec_approval", "plan_approval"):
-            _await_gate(client, wid, gate)
-            assert _approve_gate(client, wid, gate).status_code == 200
-        _await_gate(client, wid, "chain_finalized")
-
-        before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
-        tail = [n for n in before if n["id"] not in ("spec", "plan", "chain_review")]
-        revised = [{**n, "reject_to": "merge"} if n["id"] == "verify" else n for n in tail]
-        _write_chain_review(
-            client,
-            wid,
-            {"status": "ready_for_approval", "revised_chain_nodes": revised, "rationale": "t"},
-        )
-        r = _approve_gate(client, wid, "chain_finalized")
-        assert r.status_code == 422
-        after = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
-        assert after == before  # nothing spliced
-
-
-def test_chain_review_proposed_node_overrides_applies_atomically_with_the_splice(
-    tmp_path, monkeypatch
-):
-    """Kraft-df4tc point 2: a reviewer's proposed_node_overrides lands in
-    node_overrides in the same approval as the splice, and reaches the next
-    dispatch for that node."""
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        for gate in ("spec_approval", "plan_approval"):
-            _await_gate(client, wid, gate)
-            assert _approve_gate(client, wid, gate).status_code == 200
-        _await_gate(client, wid, "chain_finalized")
-
-        before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
-        tail = [n for n in before if n["id"] not in ("spec", "plan", "chain_review")]
-        revised = [
-            {**n, "proposed_node_overrides": {"effort": "high"}} if n["id"] == "verify" else n
-            for n in tail
-        ]
-        _write_chain_review(
-            client,
-            wid,
-            {"status": "ready_for_approval", "revised_chain_nodes": revised, "rationale": "t"},
-        )
-        r = _approve_gate(client, wid, "chain_finalized")
-        assert r.status_code == 200, r.text
-        item = client.get(f"/api/work-items/{wid}").json()
-        assert item["node_overrides"]["verify"] == {"effort": "high"}
-        # the node itself does not carry the key -- it's a separate override layer
-        after = item["chain_definition"]["nodes"]
-        assert "proposed_node_overrides" not in next(n for n in after if n["id"] == "verify")
-
-
-def test_chain_review_bad_proposed_node_overrides_rejects_the_whole_approval(tmp_path, monkeypatch):
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        for gate in ("spec_approval", "plan_approval"):
-            _await_gate(client, wid, gate)
-            assert _approve_gate(client, wid, gate).status_code == 200
-        _await_gate(client, wid, "chain_finalized")
-
-        before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
-        tail = [n for n in before if n["id"] not in ("spec", "plan", "chain_review")]
-        revised = [
-            {**n, "proposed_node_overrides": {"effort": "turbo"}} if n["id"] == "verify" else n
-            for n in tail
-        ]
-        _write_chain_review(
-            client,
-            wid,
-            {"status": "ready_for_approval", "revised_chain_nodes": revised, "rationale": "t"},
-        )
-        r = _approve_gate(client, wid, "chain_finalized")
-        assert r.status_code == 422
-        item = client.get(f"/api/work-items/{wid}").json()
-        assert item.get("node_overrides", {}) == {}
-        assert item["chain_definition"]["nodes"] == before  # nothing spliced either
-
-
-def test_chain_review_proposed_node_overrides_rejects_unwhitelisted_fields(tmp_path, monkeypatch):
-    """Kraft-df4tc security finding: a reviewer may only propose model/
-    escalate_model/effort -- anything else (auto_escalate, attempts, ...) is
-    the human-facing PATCH route's territory and must 422 here too, not land
-    in node_overrides where effective_chain would fold it onto the node."""
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        for gate in ("spec_approval", "plan_approval"):
-            _await_gate(client, wid, gate)
-            assert _approve_gate(client, wid, gate).status_code == 200
-        _await_gate(client, wid, "chain_finalized")
-
-        before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
-        tail = [n for n in before if n["id"] not in ("spec", "plan", "chain_review")]
-        revised = [
-            {**n, "proposed_node_overrides": {"auto_escalate": True, "attempts": 9999}}
-            if n["id"] == "human_review"
-            else n
-            for n in tail
-        ]
-        _write_chain_review(
-            client,
-            wid,
-            {"status": "ready_for_approval", "revised_chain_nodes": revised, "rationale": "t"},
-        )
-        r = _approve_gate(client, wid, "chain_finalized")
-        assert r.status_code == 422
-        item = client.get(f"/api/work-items/{wid}").json()
-        assert item.get("node_overrides", {}) == {}
-        assert item["chain_definition"]["nodes"] == before
-
-
-@pytest.mark.parametrize(
-    ("envelope", "reason_has"),
-    [
-        (
-            {"status": "error", "revised_chain_nodes": [], "rationale": "cannot decide"},
-            "cannot decide",
-        ),
-        (
-            {"status": "ready_for_approval", "revised_chain_nodes": [{"bad": "shape"}]},
-            "chain_review",
-        ),
-    ],
-)
-def test_chain_review_error_or_invalid_tail_stops_at_needs_human(
-    tmp_path, monkeypatch, envelope, reason_has
-):
-    """Kraft-hm0/unk: `status: "error"` and an invalid `revised_chain_nodes`
-    both stop the item at needs_human rather than advancing, and never touch
-    `chain_definition`.
-
-    Kraft-iv4y: the approve call itself now errors instead of returning 200
-    with nothing changed -- a human retrying the same broken approval needs
-    to hear "no" clearly, not read it off the row's unchanged status."""
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        for gate in ("spec_approval", "plan_approval"):
-            _await_gate(client, wid, gate)
-            assert _approve_gate(client, wid, gate).status_code == 200
-        _await_gate(client, wid, "chain_finalized")
-        before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
-
-        _write_chain_review(client, wid, envelope)
-        r = _approve_gate(client, wid, "chain_finalized")
-        assert r.status_code == 422, r.text
-        assert reason_has in r.json()["detail"]
-        assert "kraft item retry" in r.json()["detail"]
-        item = client.get(f"/api/work-items/{wid}").json()
-        assert item["status"] == "needs_human"
-        assert item["chain_definition"]["nodes"] == before
-        stops = [
-            e
-            for e in client.get(f"/api/work-items/{wid}/events").json()
-            if e["type"] == "work_item_needs_human"
-        ]
-        assert stops and reason_has in stops[-1]["payload"]["reason"]
-
-
 def test_chain_review_missing_artifact_stops_at_needs_human(tmp_path, monkeypatch):
+    """A final-review gate cannot be approved without the document it is about
+    (`apply_approval`, `chain-finalized-remains-a-dedicated-marker`). V1's
+    final-review document is the review brief its gate names."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        for gate in ("spec_approval", "plan_approval"):
-            _await_gate(client, wid, gate)
-            assert _approve_gate(client, wid, gate).status_code == 200
-        _await_gate(client, wid, "chain_finalized")
-        _chain_review_path(client, wid).unlink()
+    with _client(tmp_path, monkeypatch, templates_dir=_review_early(tmp_path)) as client:
+        wid = _post(client, repo, "review-early")
+        _await_gate(client, wid, "chain_review")
+        _review_brief_path(client, wid).unlink()
 
-        r = _approve_gate(client, wid, "chain_finalized")
+        r = _approve_gate(client, wid, "chain_review")
         assert r.status_code == 422, r.text
         assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
 
@@ -615,18 +208,15 @@ def test_chain_review_repeated_approve_keeps_erroring(tmp_path, monkeypatch):
     return 200 with the row unchanged."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        for gate in ("spec_approval", "plan_approval"):
-            _await_gate(client, wid, gate)
-            assert _approve_gate(client, wid, gate).status_code == 200
-        _await_gate(client, wid, "chain_finalized")
-        _chain_review_path(client, wid).unlink()
+    with _client(tmp_path, monkeypatch, templates_dir=_review_early(tmp_path)) as client:
+        wid = _post(client, repo, "review-early")
+        _await_gate(client, wid, "chain_review")
+        _review_brief_path(client, wid).unlink()
 
-        first = _approve_gate(client, wid, "chain_finalized")
-        second = client.post(f"/api/work-items/{wid}/gates/chain_finalized/approve")
+        first = _approve_gate(client, wid, "chain_review")
+        second = client.post(f"/api/work-items/{wid}/gates/chain_review/approve")
         assert first.status_code == second.status_code == 422
-        assert client.get(f"/api/work-items/{wid}").json()["pending_gate"] == "chain_finalized"
+        assert client.get(f"/api/work-items/{wid}").json()["pending_gate"] == "chain_review"
 
 
 def test_gate_approve_wrong_gate_409(tmp_path, monkeypatch):
@@ -807,23 +397,20 @@ def test_gate_reject_loop_breach_does_not_escalate_when_disarmed(tmp_path, monke
 
 
 def test_rejecting_the_final_gate_re_enters_at_implementation(tmp_path, monkeypatch):
-    """Kraft-ko7j. `human_review_approval` used to be terminal: the note went
+    """Kraft-ko7j. The final review gate used to be terminal: the note went
     into an event nothing read and the item sat in needs_human with approve
     or abandon as its only exits. It now routes to the node named by the
-    chain's `reject_to`, carrying the note as that node's steer."""
+    gate's `reject_to`, carrying the note as that node's steer."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     prompts = tmp_path / "prompts.log"
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_PROMPT_LOG", str(prompts))
     repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        for gate in ("spec_approval", "plan_approval", "chain_finalized"):
-            _await_gate(client, wid, gate)
-            assert _approve_gate(client, wid, gate).status_code == 200
-        _await_gate(client, wid, "human_review_approval")
+    with _client(tmp_path, monkeypatch, templates_dir=_review_early(tmp_path)) as client:
+        wid = _post(client, repo, "review-early")
+        _await_gate(client, wid, "chain_review")
 
         r = client.post(
-            f"/api/work-items/{wid}/gates/human_review_approval/reject",
+            f"/api/work-items/{wid}/gates/chain_review/reject",
             json={"note": "the retry path is untested"},
         )
         assert r.status_code == 200, r.text
@@ -834,18 +421,16 @@ def test_rejecting_the_final_gate_re_enters_at_implementation(tmp_path, monkeypa
         ]
         assert rejected[-1]["payload"]["node"] == "implementation"
 
-        # ...walked implementation -> verify -> open_mr -> mr_checks -> human_review
-        # and asked for the same gate a second time
-        _poll_events(client, wid, "gate_requested", count=5)
+        # ...walked implementation -> work_item_summary -> chain_review and
+        # asked for the same gate a second time
+        _poll_events(client, wid, "gate_requested", count=2)
         starts = [
             e["payload"]["node_id"]
             for e in client.get(f"/api/work-items/{wid}/events").json()
             if e["type"] == "node_started"
         ]
         assert starts.count("implementation") == 2
-        assert client.get(f"/api/work-items/{wid}").json()["pending_gate"] == (
-            "human_review_approval"
-        )
+        assert client.get(f"/api/work-items/{wid}").json()["pending_gate"] == "chain_review"
 
         # and the note led the re-run's instruction rather than dying in an event
         assert "the retry path is untested" in prompts.read_text()
@@ -1025,7 +610,8 @@ def test_approve_gate_stops_a_live_auto_review_session_first(tmp_path, monkeypat
     with _client(tmp_path, monkeypatch) as client:
         wid = _post_default(client, repo)
         _poll_events(client, wid, "gate_requested")
-        _create_running_session(wid, "r1", "spec", pid=4242)
+        # V1: the gate is its own node, so its review session sits on it.
+        _create_running_session(wid, "r1", "spec_approval", pid=4242)
 
         r = client.post(f"/api/work-items/{wid}/gates/spec_approval/approve")
 
@@ -1043,7 +629,8 @@ def test_reject_gate_stops_a_live_auto_review_session_first(tmp_path, monkeypatc
     with _client(tmp_path, monkeypatch) as client:
         wid = _post_default(client, repo)
         _poll_events(client, wid, "gate_requested")
-        _create_running_session(wid, "r1", "spec", pid=4242)
+        # V1: the gate is its own node, so its review session sits on it.
+        _create_running_session(wid, "r1", "spec_approval", pid=4242)
 
         r = client.post(
             f"/api/work-items/{wid}/gates/spec_approval/reject",
@@ -1068,7 +655,8 @@ def test_reject_with_a_bad_node_leaves_a_live_auto_review_running(tmp_path, monk
     with _client(tmp_path, monkeypatch) as client:
         wid = _post_default(client, repo)
         _poll_events(client, wid, "gate_requested")
-        _create_running_session(wid, "r1", "spec", pid=4242)
+        # V1: the gate is its own node, so its review session sits on it.
+        _create_running_session(wid, "r1", "spec_approval", pid=4242)
 
         r = client.post(
             f"/api/work-items/{wid}/gates/spec_approval/reject",
@@ -1083,90 +671,6 @@ def test_reject_with_a_bad_node_leaves_a_live_auto_review_running(tmp_path, monk
         assert "pause_requested" not in [
             e["type"] for e in client.get(f"/api/work-items/{wid}/events").json()
         ]
-
-
-def test_chain_review_model_override_reaches_the_next_dispatch_of_that_node(tmp_path, monkeypatch):
-    """End to end: a reviewer's proposed_node_overrides on a tail node is
-    spliced in atomically with the chain revision, and the very next
-    dispatch of that node launches with the overridden model -- not just
-    stored, actually read at dispatch time (Task 3's merge). The reported
-    "model" on worker_sessions comes from the agent's own usage payload
-    (fixtures/fake-claude.sh always reports "fake-agent"), so this checks
-    the launch argv via KRAFT_FAKE_CLAUDE_ARGV_LOG instead."""
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    argv_log = tmp_path / "argv.log"
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_ARGV_LOG", str(argv_log))
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        for gate in ("spec_approval", "plan_approval"):
-            _await_gate(client, wid, gate)
-            assert _approve_gate(client, wid, gate).status_code == 200
-        _await_gate(client, wid, "chain_finalized")
-
-        before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
-        tail = [n for n in before if n["id"] not in ("spec", "plan", "chain_review")]
-        # `implementation` is the only tail node bound to a real agent hook
-        # under this test fixture's registry (`on.implementation.start`) --
-        # `verify`'s tasks are a subprocess and a noop, neither of which ever
-        # reaches `resolve_invocation`, so the override would never surface
-        # in an argv if targeted there.
-        revised = [
-            {**n, "proposed_node_overrides": {"model": "picked-model"}}
-            if n["id"] == "implementation"
-            else n
-            for n in tail
-        ]
-        _write_chain_review(
-            client,
-            wid,
-            {"status": "ready_for_approval", "revised_chain_nodes": revised, "rationale": "t"},
-        )
-        assert _approve_gate(client, wid, "chain_finalized").status_code == 200
-        _await_gate(client, wid, "human_review_approval")
-
-        records = [r.splitlines() for r in argv_log.read_text().split("\x00\n") if r.strip()]
-        # The override only ever applies to implementation's own dispatch --
-        # no other node in this chain carries a node_overrides entry -- so
-        # any recorded argv carrying "picked-model" proves the override
-        # reached that launch, not just node_overrides storage.
-        assert any("picked-model" in r for r in records), records
-
-
-def test_chain_review_carried_forward_bounce_target_must_still_exist(tmp_path, monkeypatch):
-    """Kraft-df4tc: `validate_nodes` runs on the reviewer's own values, before
-    `carry_forward_node_fields`. A reviewer that renames `verify` leaves
-    `pre_mr_rebase`'s carried-forward `rebase_bounce_to: verify` dangling --
-    walk.py's bare `next(...)` would raise StopIteration mid-walk. The merged
-    tail has to be re-validated, and the whole approval rejected."""
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        for gate in ("spec_approval", "plan_approval"):
-            _await_gate(client, wid, gate)
-            assert _approve_gate(client, wid, gate).status_code == 200
-        _await_gate(client, wid, "chain_finalized")
-
-        before = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
-        tail = [n for n in before if n["id"] not in ("spec", "plan", "chain_review")]
-        # rename `verify`; every other node comes back untouched, so
-        # `pre_mr_rebase` says nothing about rebase_bounce_to itself
-        revised = [
-            {k: v for k, v in n.items() if k != "rebase_bounce_to"}
-            | ({"id": "verify_all"} if n["id"] == "verify" else {})
-            for n in tail
-        ]
-        _write_chain_review(
-            client,
-            wid,
-            {"status": "ready_for_approval", "revised_chain_nodes": revised, "rationale": "t"},
-        )
-        r = _approve_gate(client, wid, "chain_finalized")
-        assert r.status_code == 422, r.text
-        assert "rebase_bounce_to" in r.json()["detail"]
-        after = client.get(f"/api/work-items/{wid}").json()["chain_definition"]["nodes"]
-        assert after == before  # nothing spliced
 
 
 def test_a_worker_agent_s_gate_approval_is_not_recorded_as_a_person_s(tmp_path, monkeypatch):
