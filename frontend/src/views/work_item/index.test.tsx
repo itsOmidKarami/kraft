@@ -138,7 +138,7 @@ describe("WorkItemDetail (item page)", () => {
     expect(window.location.hash).toContain("node=spec");
   });
 
-  it("Approve repeats in the pane when the open document is the gate's own artifact", async () => {
+  it("Approve repeats in the pane for the gate's own artifact; editor controls are desktop-only", async () => {
     vi.spyOn(api, "getWorkItemDocuments").mockResolvedValue({
       work_item_id: "w1",
       documents: [
@@ -160,6 +160,11 @@ describe("WorkItemDetail (item page)", () => {
     await userEvent.click(screen.getByRole("tab", { name: /documents/i }));
     const pane = await screen.findByTestId("right-pane-doc");
     expect(within(pane).getByRole("button", { name: /^Approve$/ })).toBeInTheDocument();
+    // A phone cannot launch an editor: those controls sit in the wrapper the
+    // phone stylesheet hides (css.contract.test.ts); Copy path stays.
+    expect(within(pane).getByRole("button", { name: /open in/i }).closest(".desktop-only")).not.toBeNull();
+    expect(within(pane).getByRole("button", { name: /choose editor/i }).closest(".desktop-only")).not.toBeNull();
+    expect(within(pane).getByTitle("Copy path").closest(".desktop-only")).toBeNull();
   });
 
   it("renders a plan_progress event as a task row and filters to it", async () => {

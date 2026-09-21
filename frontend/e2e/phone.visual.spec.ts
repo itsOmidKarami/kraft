@@ -1,4 +1,4 @@
-import { connectRepo, expect, test } from "./fixtures";
+import { createItem, expect, test } from "./fixtures";
 import { scaledTimeout } from "../e2e-timing";
 
 /**
@@ -13,8 +13,6 @@ import { scaledTimeout } from "../e2e-timing";
  * enough that mobile Safari zooms the page on focus and never zooms back.
  */
 
-const REPO = process.env.KRAFT_E2E_REPO!;
-const REPO_NAME = REPO.split("/").pop()!;
 const SHOTS = "e2e-shots";
 
 // iPhone 14 CSS pixels. Comfortably inside the 767px phone breakpoint, and the
@@ -25,21 +23,6 @@ test.use({ viewport: { width: 390, height: 844 } });
 const overflowsX = (locator: any) =>
   locator.evaluate((el: HTMLElement) => el.scrollWidth > el.clientWidth + 1);
 
-async function createItem(page: any, title: string, template: string) {
-  await connectRepo(page, REPO);
-  await page.goto("/");
-  await page.getByRole("button", { name: /new work item/i }).click();
-  const modal = page.getByRole("dialog", { name: "New work item" });
-  await modal.getByLabel("repo").selectOption({ label: REPO_NAME });
-  await modal.getByLabel("title").fill(title);
-  await modal
-    .getByRole("radiogroup", { name: "template" })
-    .getByRole("radio", { name: new RegExp(`^${template}\\b`) })
-    .click();
-  await modal.getByRole("button", { name: /create and start/i }).click();
-  await expect(page.locator(".detail h2")).toHaveText(title);
-}
-
 test("the board fits a phone", async ({ page }) => {
   await createItem(page, "phone board", "default");
   await page.goto("/");
@@ -48,10 +31,29 @@ test("the board fits a phone", async ({ page }) => {
   expect(await overflowsX(page.locator("body"))).toBe(false);
 });
 
-test("the gate, its reject textarea and the diff viewer all fit a phone", async ({ page }) => {
+test("the gate, its chain bar and its reject textarea all fit a phone", async ({ page }) => {
   await createItem(page, "phone gate", "default");
   await expect(page.getByText(/approve the spec to continue/i)).toBeVisible({ timeout: scaledTimeout(30_000) });
   await page.screenshot({ path: `${SHOTS}/phone-02-gate.png`, fullPage: true });
+
+  // The chain bar renders one label per node. The shipped `default` template
+  // has ten, which at 390px leaves ~39px each for names like `human_review` —
+  // they overlap into an unreadable smear. The gate screen is one of the two
+  // screens a notification links to, so this is on the phone contract.
+  //
+  // Measure text overflow, not box positions. The labels are `nowrap` flex
+  // children, so their *boxes* tile neatly while their *text* paints straight
+  // over the neighbour — a box-overlap check passes while the screen is a
+  // smear. `scrollWidth > clientWidth` is the one that sees it.
+  const overflowing = await page.locator(".chain-bar.lg .chain-label").evaluateAll((els) =>
+    els
+      .filter((el) => (el as HTMLElement).offsetParent !== null)
+      .filter((el) => el.scrollWidth > el.clientWidth + 1)
+      .map((el) => el.textContent),
+  );
+  // Either the labels are hidden at this width (the detail hero already names
+  // the current node and counts the rest), or each one fits its own box.
+  expect(overflowing).toEqual([]);
 
   // §4: the reject textarea is the one place a phone user types.
   await page.getByRole("button", { name: /^Reject$/ }).first().click();
@@ -61,7 +63,7 @@ test("the gate, its reject textarea and the diff viewer all fit a phone", async 
 
   // Under 16px, mobile Safari zooms the viewport on focus and does not zoom
   // back out — which strands the reader mid-rejection. This is the assertion
-  // the styles.order unit test cannot make.
+  // the css.contract unit test cannot make.
   const noteFontPx = await note.evaluate((el: HTMLElement) =>
     parseFloat(getComputedStyle(el).fontSize),
   );
@@ -140,55 +142,11 @@ test("the diff viewer wraps a real diff instead of scrolling sideways", async ({
   expect(await lines.count()).toBeGreaterThan(0);
 });
 
-test("the chain bar's node labels do not collide on a phone", async ({ page }) => {
-  // The detail screen renders one label per node. The shipped `default` template
-  // has ten, which at 390px leaves ~39px each for names like `human_review` —
-  // they overlap into an unreadable smear. The gate screen is one of the two
-  // screens a notification links to, so this is on the phone contract.
-  await createItem(page, "phone chain", "default");
-  await expect(page.getByText(/approve the spec to continue/i)).toBeVisible({ timeout: scaledTimeout(30_000) });
-  await page.screenshot({ path: `${SHOTS}/phone-06-chain.png`, fullPage: true });
-
-  // Measure text overflow, not box positions. The labels are `nowrap` flex
-  // children, so their *boxes* tile neatly while their *text* paints straight
-  // over the neighbour — a box-overlap check passes while the screen is a
-  // smear. `scrollWidth > clientWidth` is the one that sees it.
-  const overflowing = await page.locator(".chain-bar.lg .chain-label").evaluateAll((els) =>
-    els
-      .filter((el) => (el as HTMLElement).offsetParent !== null)
-      .filter((el) => el.scrollWidth > el.clientWidth + 1)
-      .map((el) => el.textContent),
-  );
-  // Either the labels are hidden at this width (the detail hero already names
-  // the current node and counts the rest), or each one fits its own box.
-  expect(overflowing).toEqual([]);
-});
-
-test("the document viewer hides what a phone cannot do", async ({ page }) => {
-  await createItem(page, "phone documents", "default");
-  await expect(page.getByText(/approve the spec to continue/i)).toBeVisible({ timeout: scaledTimeout(30_000) });
-  // DocumentModal is gone — Documents lives behind a tab on the m05 node
-  // page, opened by tapping a stage on the phone list (m04).
-  await page.locator('[data-testid^="phone-stage-"]').first().click();
-  const nodePage = page.getByTestId("phone-node-page");
-  await expect(nodePage).toBeVisible();
-  await nodePage.getByRole("tab", { name: /documents/i }).click();
-  const doc = nodePage.locator(".doc-row").first();
-  if ((await doc.count()) === 0) test.skip(true, "no linked document to open");
-  await doc.click();
-  const viewer = nodePage.getByTestId("right-pane-doc");
-  await expect(viewer).toBeVisible();
-  await page.screenshot({ path: `${SHOTS}/phone-05-document.png`, fullPage: true });
-
-  // Launching an editor needs a window on one machine or the other; a phone has
-  // neither the server's desktop nor a vscode:// handler. Copy path does work.
-  await expect(viewer.getByRole("button", { name: /open in/i })).toBeHidden();
-  await expect(viewer.getByRole("button", { name: /choose editor/i })).toBeHidden();
-  await expect(viewer.getByTitle("Copy path")).toBeVisible();
-});
-
-test("the bottom nav reaches every screen and highlights the active tab", async ({ page }) => {
-  await createItem(page, "phone shell", "default");
+// Which tab is active is BottomNav.test.tsx's; this is the real phone layout:
+// touch targets, the routes, no sideways scroll. No work item: the nav is on
+// every page, and a live one only added a race (Kraft-utvg3).
+test("the bottom nav reaches every screen at touch size", async ({ page }) => {
+  await page.goto("/");
   const nav = page.getByRole("navigation", { name: "primary" });
   await expect(nav).toBeVisible();
 
@@ -200,14 +158,12 @@ test("the bottom nav reaches every screen and highlights the active tab", async 
 
   await nav.getByRole("link", { name: "Analytics" }).click();
   await expect(page).toHaveURL(/\/analytics$/);
-  await expect(nav.getByRole("link", { name: "Analytics" })).toHaveClass(/active/);
 
   await nav.getByRole("link", { name: "Settings" }).click();
   await expect(page).toHaveURL(/\/settings/);
 
   await nav.getByRole("link", { name: "Board" }).click();
   await expect(page).toHaveURL(/\/$/);
-  await expect(nav.getByRole("link", { name: "Board" })).toHaveClass(/active/);
 
   await expect(overflowsX(page.locator("body"))).resolves.toBe(false);
 });

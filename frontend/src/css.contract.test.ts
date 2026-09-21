@@ -30,6 +30,20 @@ describe("styles.css cascade order", () => {
     expect(overridePos).toBeGreaterThan(-1);
     expect(overridePos).toBeGreaterThan(basePos);
   });
+
+  // Was e2e phone.visual "the document viewer hides what a phone cannot do",
+  // which CI always skipped (no linked doc at the spec gate). The wrapper's
+  // `display: flex` outranks `.desktop-only { display: none }`, so the phone
+  // block has to hide it again with the same selector, later in the file.
+  it("re-hides the document pane's editor controls inside the phone block", () => {
+    const css = readFileSync(join(here, "styles.css"), "utf-8");
+    const rule = ".doc-modal-actions > .desktop-only {";
+    const base = css.indexOf(`${rule} display: flex`);
+    const phone = css.indexOf(`${rule} display: none; }`);
+    expect(base).toBeGreaterThan(-1);
+    expect(phone).toBeGreaterThan(base);
+    expect(css.lastIndexOf("@media (max-width: 767px) {", phone)).toBeGreaterThan(base);
+  });
 });
 
 // Specificity, not order: `textarea.input { min-height: 90px }` in
