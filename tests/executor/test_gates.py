@@ -1753,6 +1753,60 @@ def test_auto_review_reports_a_verdict_and_cannot_clear_its_own_gate(tmp_path, m
     assert "identify_as_worker" not in seen
 
 
+def test_auto_review_launches_with_the_method_mode_and_tools_it_resolved(tmp_path, monkeypatch):
+    """Kraft-k2tb2: `resolve_agent_task` answers the reviewer's `skill:` method,
+    its profile's `permission_mode` and its `allowed_tools`, and the launch
+    dropped all three -- a reviewer ran without the method it selected and
+    still returned a verdict, so the drop looked like a working reviewer."""
+    import kraft.adapters.agent as agent_adapter
+
+    repo = make_repo(tmp_path)
+    chain = _reviewed_chain(repo)
+    rd = RunDirs(tmp_path / "run").ensure()
+    seen = {}
+    resolved = agent_adapter.Invocation(
+        command="",
+        harness="fake",
+        model=None,
+        deny_tools=(),
+        steering_texts=(),
+        method_text="THE GATE-REVIEW METHOD",
+        permission_mode="plan",
+        allowed_tools=("Read", "Grep"),
+    )
+    monkeypatch.setattr(agent_adapter, "resolve_agent_task", lambda *a, **kw: resolved)
+
+    async def _capture(_db, _rd, **kw):
+        seen.update(kw)
+        (rd.results / f"{kw['session_id']}.json").write_text(
+            json.dumps({"status": "done", "verdict": "approve", "concerns": "ok"})
+        )
+        return "done"
+
+    monkeypatch.setattr(agent_adapter, "run_agent_task", _capture)
+
+    async def scenario():
+        database = await db.Database.open(tmp_path / "k.db")
+        try:
+            await v1_item(database, chain, repo=repo, auto_gate=True)
+            await _seed_pending_gate(database)
+            return await gates_module.gate_review.review(
+                database,
+                rd,
+                work_item_id="w1",
+                gate="spec_approval",
+                node=chain.chain.nodes[1],
+                launch=LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None),
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    assert seen.get("method_text") == "THE GATE-REVIEW METHOD", "skill method dropped"
+    assert seen.get("permission_mode") == "plan", "permission_mode dropped"
+    assert tuple(seen.get("allowed_tools") or ()) == ("Read", "Grep"), "allowed_tools dropped"
+
+
 def test_a_gate_declaring_no_agent_reviewer_is_left_to_a_human(tmp_path):
     repo = make_repo(tmp_path)
     chain = _reviewed_chain(repo, declare=False)
