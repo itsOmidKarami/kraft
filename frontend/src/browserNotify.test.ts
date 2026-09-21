@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { KraftEvent } from "./types";
 import { isEnabled, maybeNotify, requestPermission, setEnabled } from "./browserNotify";
 
@@ -25,10 +25,6 @@ beforeEach(() => {
   FakeNotification.requestPermission.mockClear();
   vi.stubGlobal("Notification", FakeNotification as unknown as typeof Notification);
   Object.defineProperty(document, "hidden", { value: true, configurable: true });
-});
-
-afterEach(() => {
-  vi.unstubAllGlobals();
 });
 
 describe("isEnabled/setEnabled", () => {

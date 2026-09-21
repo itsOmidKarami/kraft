@@ -1,20 +1,9 @@
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import { hooks, renderAt, setupSettingsMocks } from "./testing";
-
-function setPhoneWidth(matches: boolean) {
-  vi.stubGlobal(
-    "matchMedia",
-    vi.fn().mockImplementation((query: string) => ({
-      matches,
-      media: query,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    })),
-  );
-}
+import { setPhoneWidth } from "../../testFixtures";
 
 beforeEach(() => {
   setupSettingsMocks();
@@ -105,7 +94,6 @@ describe("Settings · plugins (5c)", () => {
 
 describe("phone", () => {
   beforeEach(() => setPhoneWidth(true));
-  afterEach(() => vi.unstubAllGlobals());
 
   it("shows the hook list with a filter input and no binding detail", async () => {
     renderAt("/settings/plugins");

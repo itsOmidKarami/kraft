@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { applyDensity, applyTheme, PALETTES, savedTheme } from "./theme";
 
 function mockMatchMedia(initialMatches: boolean) {
@@ -26,10 +26,6 @@ function mockMatchMedia(initialMatches: boolean) {
 beforeEach(() => {
   document.documentElement.removeAttribute("data-palette");
   document.documentElement.removeAttribute("data-mode");
-});
-
-afterEach(() => {
-  vi.unstubAllGlobals();
 });
 
 describe("PALETTES", () => {

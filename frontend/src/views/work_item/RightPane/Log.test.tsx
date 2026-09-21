@@ -5,14 +5,10 @@ import * as api from "../../../api";
 import { useStore } from "../../../store";
 import type { LogLine, WorkerSession } from "../../../types";
 import { Log } from "./Log";
+import { session as baseSession } from "../../../testFixtures";
 
 const session = (over: Partial<WorkerSession> = {}): WorkerSession =>
-  ({
-    id: "s1", work_item_id: "w1", node_id: "verify", hook_point: "on.test.run",
-    status: "done", attempt: 1, round: 0, created_at: "t", started_at: null, exited_at: null,
-    tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, model: null, head_sha: null,
-    ...over,
-  }) as WorkerSession;
+  baseSession({ status: "done", started_at: null, thread: undefined, ...over });
 
 const line = (n: number): LogLine => ({ n, t: null, src: "stdout", text: `line ${n}` });
 

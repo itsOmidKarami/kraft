@@ -1,5 +1,5 @@
-import { useRef } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useContext, useRef } from "react";
+import { UNSAFE_NavigationContext, useLocation, useNavigate } from "react-router-dom";
 import { type InspectorTab, type Selection } from "./selection";
 import { usePhone } from "./usePhone";
 
@@ -37,6 +37,9 @@ const TABS: InspectorTab[] = ["tasks", "changes", "documents", "timeline", "conf
 export function useItemUrlState(defaultNodeId: string | null) {
   const location = useLocation();
   const navigate = useNavigate();
+  // The history object itself: its `location` is live, where `location` above
+  // is whatever this render committed.
+  const history = useContext(UNSAFE_NavigationContext).navigator as { location?: { pathname: string } };
   const phone = usePhone();
   const params = new URLSearchParams(location.hash.replace(/^#/, ""));
 
@@ -51,6 +54,10 @@ export function useItemUrlState(defaultNodeId: string | null) {
     const next = new URLSearchParams(location.hash.replace(/^#/, ""));
     mutate(next);
     if (next.toString() === params.toString()) return; // no-op: nothing actually changed
+    // The router commits a navigation in a transition, so the URL can already
+    // be elsewhere while this page is still rendered. A hash write now would
+    // resolve against the stale path and replace the new entry (Kraft-utvg3).
+    if (history.location && history.location.pathname !== location.pathname) return;
     navigate({ hash: next.toString() }, opts?.push ? undefined : { replace: true });
   };
 

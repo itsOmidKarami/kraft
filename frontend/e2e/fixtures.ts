@@ -1,8 +1,12 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 
 // Extension point for shared Playwright fixtures. Specs import from here so
 // any future fixture wiring lands in one place.
 export { expect, test } from "@playwright/test";
+
+/** The fixture repo e2e/serve.py seeds, and the name its chip shows. */
+export const REPO = process.env.KRAFT_E2E_REPO!;
+export const REPO_NAME = REPO.split("/").pop()!;
 
 /**
  * UI v2 · 06/07: the New work item dialog's Repo field is chips off
@@ -29,4 +33,24 @@ export async function connectRepo(page: Page, path: string): Promise<void> {
   if (!res.ok() && res.status() !== 409) {
     throw new Error(`connectRepo(${path}) failed: ${res.status()} ${await res.text()}`);
   }
+}
+
+/**
+ * Files a work item through the real New work item dialog on `template` and
+ * starts it, then waits for the detail page. Returns the new item's id.
+ */
+export async function createItem(page: Page, title: string, template: string): Promise<string> {
+  await connectRepo(page, REPO);
+  await page.goto("/");
+  await page.getByRole("button", { name: /new work item/i }).click();
+  const modal = page.getByRole("dialog", { name: "New work item" });
+  await modal.getByLabel("repo").selectOption({ label: REPO_NAME });
+  await modal.getByLabel("title").fill(title);
+  await modal
+    .getByRole("radiogroup", { name: "template" })
+    .getByRole("radio", { name: new RegExp(`^${template}\\b`) })
+    .click();
+  await modal.getByRole("button", { name: /create and start/i }).click();
+  await expect(page.locator(".detail h2")).toHaveText(title);
+  return new URL(page.url()).pathname.split("/").pop()!;
 }
