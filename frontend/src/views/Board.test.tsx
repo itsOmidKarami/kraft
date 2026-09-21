@@ -8,27 +8,9 @@ import { useStore } from "../store";
 import type { KraftEvent, WorkerSession, WorkItem } from "../types";
 import type { ToastPayload } from "../components/Toast";
 import { Board } from "./Board";
+import { item, QUICK, setPhoneWidth } from "../testFixtures";
 
-const wi = (over: Partial<WorkItem>): WorkItem =>
-  ({
-    id: over.id ?? "w1",
-    title: over.title ?? "Item",
-    repo: over.repo ?? "/repo-a",
-    status: over.status ?? "active",
-    chain_template: over.chain_template ?? "quick-task",
-    chain_definition: {
-      template_id: "quick-task",
-      nodes: [
-        { id: "plan", tasks: ["a"], gate_after: "plan_approval" },
-        { id: "verify", tasks: ["b"], gate_after: null },
-      ],
-    },
-    current_node_id: "verify",
-    bead_id: "B",
-    created_at: "t",
-    updated_at: "t",
-    ...over,
-  }) as WorkItem;
+const wi = (over: Partial<WorkItem>): WorkItem => item({ title: "Item", repo: "/repo-a", ...QUICK, ...over });
 
 const setItems = (...items: WorkItem[]) =>
   useStore.setState({ workItems: Object.fromEntries(items.map((i) => [i.id, i])), sessionsByItem: {}, eventsByItem: {} } as never);
@@ -293,13 +275,17 @@ describe("Board", () => {
     ["question", { status: "needs_human", needs_context_question: "x".repeat(80) }, /agent asks: x{60}…$/, "Answer"],
     ["budget", { status: "needs_human", budget: { scope: "work_item", spent_usd: 5, cap_usd: 5 } }, /spend cap reached$/, "Raise budget"],
     ["paused", { status: "paused" }, /paused at verify$/, "Resume"],
-    ["running", { status: "active", progress: { current: 3, total: 6, title: "wire the store" } }, /(?<!Task )3 of 6 · wire the store$/, null],
+    // N of M · title, with no bare task noun in front
+    ["running", { status: "active", progress: { current: 3, total: 6, title: "wire the store" } }, /(?<!task )3 of 6 · wire the store$/i, null],
     ["rate limited", { status: "rate_limited", retry_at: new Date(Date.now() + 4 * 60_000 + 30_000).toISOString() }, /retry in 4m$/, null],
-  ])("%s: the meta line ends in its reason, and the button matches (W11 · B.2, B.3)", (_, over, reason, button) => {
+    ["waiting", { status: "waiting", retry_at: new Date(Date.now() + 4 * 60_000 + 30_000).toISOString() }, /retry in 4m$/, null],
+  ])("%s: the meta line and its tooltip end in its reason, and the button matches (W11 · B.2, B.3)", (_, over, reason, button) => {
     setItems(wi({ id: "w9", ...over }));
     renderBoard();
     const row = screen.getByTestId("board-card");
-    expect(row.querySelector(".board-row-meta")?.textContent).toMatch(reason);
+    const meta = row.querySelector(".board-row-meta")!;
+    expect(meta.textContent).toMatch(reason);
+    expect(meta.getAttribute("title")).toMatch(reason);
     expect([...row.querySelectorAll(".board-row-action button")].map((b) => b.textContent)).toEqual(button ? [button] : []);
   });
 
@@ -428,46 +414,14 @@ describe("Board", () => {
     expect(meta.getAttribute("title")).toMatch(/^repo-a · B · quick-task/);
   });
 
-  it("groups a rate_limited item under Running, not Needs you", () => {
-    setItems(wi({ id: "w3", status: "rate_limited", current_node_id: "implementation" }));
+  // Kraft-knym: ru98 landed 'waiting' on the backend with no frontend
+  // treatment at all, so a parked item matched no board group and vanished
+  // from the board entirely.
+  it.each(["rate_limited", "waiting"] as const)("groups a %s item under Running, not Needs you", (status) => {
+    setItems(wi({ id: "w3", status }));
     renderBoard();
     expect(within(group("Running")).getByText("Item")).toBeInTheDocument();
     expect(within(group("Needs you")).queryByText("Item")).not.toBeInTheDocument();
-  });
-
-  it("shows the retry time on a rate_limited card", () => {
-    setItems(wi({ id: "w3", status: "rate_limited", retry_at: "2026-09-10T05:00:00Z" }));
-    renderBoard();
-    expect(screen.getByText(/retry/i)).toBeInTheDocument();
-  });
-
-  it("groups a waiting item under Running, not Needs you", () => {
-    // Kraft-knym: ru98 landed 'waiting' on the backend with no frontend
-    // treatment at all, so a parked item matched no board group and vanished
-    // from the board entirely -- worse than the "looks hung" bug it was filed
-    // to fix.
-    setItems(wi({ id: "w3", status: "waiting", current_node_id: "mr_checks" }));
-    renderBoard();
-    expect(within(group("Running")).getByText("Item")).toBeInTheDocument();
-    expect(within(group("Needs you")).queryByText("Item")).not.toBeInTheDocument();
-  });
-
-  it("shows the retry time on a waiting card", () => {
-    setItems(wi({ id: "w3", status: "waiting", retry_at: "2026-09-10T05:00:00Z" }));
-    renderBoard();
-    expect(screen.getByText(/retry/i)).toBeInTheDocument();
-  });
-
-  it("N of M · title renders in the meta line when progress is set, with no bare task noun", () => {
-    setItems(
-      wi({ id: "w1", status: "active", progress: { current: 3, total: 6, title: "wire the store" } }),
-    );
-    renderBoard();
-    expect(screen.getByText("3 of 6")).toBeInTheDocument();
-    expect(screen.getByText("wire the store")).toBeInTheDocument();
-    expect(screen.queryByText(/\btask \d/i)).toBeNull();
-    // The ellipsized meta line's tooltip carries the same words.
-    expect(document.querySelector(".board-row-meta")?.getAttribute("title")).toMatch(/(?<!Task )3 of 6 · wire the store$/);
   });
 
   it("plain click toggles the peek param; ⌘-click navigates instead", async () => {
@@ -528,7 +482,7 @@ describe("Board", () => {
   });
 
   it("long-press opens the peek pane instead of navigating (phone)", async () => {
-    vi.stubGlobal("matchMedia", (q: string) => ({ matches: true, media: q }) as never);
+    setPhoneWidth();
     setItems(wi({ id: "w1" }));
     renderBoard();
     const row = screen.getByTestId("board-card");
@@ -540,7 +494,7 @@ describe("Board", () => {
   });
 
   it("a plain tap navigates to the item on phone instead of toggling peek", async () => {
-    vi.stubGlobal("matchMedia", (q: string) => ({ matches: true, media: q }) as never);
+    setPhoneWidth();
     setItems(wi({ id: "w1" }));
     const { container } = render(
       <MemoryRouter

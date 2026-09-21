@@ -1,5 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useLayoutEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import { useStore } from "./store";
@@ -28,6 +29,44 @@ describe("App", () => {
     expect(screen.getByRole("dialog", { name: "Search" })).toBeInTheDocument();
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "Search" })).toBeNull();
+  });
+
+  // Kraft-utvg3 / Kraft-ica3: the chord must work the moment the app's DOM is
+  // committed. A listener attached in a passive effect misses a press that
+  // lands between commit and the scheduler's later effect flush (a real
+  // window under CPU load). A sibling's layout effect runs in that window.
+  it("Ctrl-K pressed as soon as the DOM commits still opens search", () => {
+    const PressOnCommit = () => {
+      useLayoutEffect(() => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+      }, []);
+      return null;
+    };
+    render(<><App /><PressOnCommit /></>);
+    expect(screen.getByRole("dialog", { name: "Search" })).toBeInTheDocument();
+  });
+
+  // Was e2e search.spec "Escape in the document viewer closes only the viewer".
+  it("Escape in the document viewer closes only the viewer", async () => {
+    const hit = {
+      id: "d1", repo: "/r", source_kind: "artifact" as const, kind: "specs",
+      title: "WS transport design", path: ".engineering/specs/ws.md",
+      snippet: "reconnect", score: -1, links: [],
+    };
+    vi.spyOn(api, "searchBeads").mockResolvedValue({ query: "", beads: [] });
+    vi.spyOn(api, "search").mockResolvedValue({ query: "r", mode: "fts", results: [hit] });
+    vi.spyOn(api, "getDocument").mockResolvedValue({
+      ...hit, content: "body", metadata: {}, source_created_at: null, source_updated_at: null, indexed_at: "t",
+    });
+    render(<App />);
+    await userEvent.keyboard("{Control>}k{/Control}");
+    const overlay = screen.getByRole("dialog", { name: "Search" });
+    await userEvent.type(within(overlay).getByRole("searchbox"), "reconnect");
+    await userEvent.click(await screen.findByText("WS transport design"));
+    expect(await screen.findByRole("dialog", { name: "document" })).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "document" })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Search" })).toBeInTheDocument();
   });
 
   it("opens the search overlay from the header button", async () => {

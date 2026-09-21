@@ -35,6 +35,7 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test-setup.ts"],
+    unstubGlobals: true,
     exclude: ["e2e/**", "sweep/**", "node_modules/**"],
     execArgv,
   },

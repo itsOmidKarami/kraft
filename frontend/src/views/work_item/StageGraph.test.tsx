@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import type { ChainNode, WorkItem } from "../../types";
 import { StageGraph } from "./StageGraph";
+import { item as baseItem } from "../../testFixtures";
 
 vi.mock("../../api");
 
@@ -12,13 +13,7 @@ const NODES: ChainNode[] = [
 ];
 
 const item = (over: Partial<WorkItem> = {}): WorkItem =>
-  ({
-    id: "wi_01HX3K9", title: "T", repo: "/r", status: "active", chain_template: "default",
-    chain_definition: { template_id: "default", nodes: NODES },
-    current_node_id: "implement", bead_id: "B", created_at: "t", updated_at: "t",
-    completedNodes: ["plan"],
-    ...over,
-  }) as WorkItem;
+  baseItem({ id: "wi_01HX3K9", chain_definition: { template_id: "default", nodes: NODES }, current_node_id: "implement", completedNodes: ["plan"], ...over });
 
 describe("StageGraph (W0.6: gate mark)", () => {
   it("flags the current pill whenever pending_gate is set, auto_escalate or not", () => {

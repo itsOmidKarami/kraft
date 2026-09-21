@@ -1,59 +1,9 @@
-import { connectRepo, expect, test } from "./fixtures";
+import { createItem, expect, test } from "./fixtures";
 import { scaledTimeout } from "../e2e-timing";
 
 // Manual regression round, part 2: the human-in-the-loop controls on the detail
-// screen — gates, pause/steer/resume — driven from the real UI.
-const REPO = process.env.KRAFT_E2E_REPO!;
-const REPO_NAME = REPO.split("/").pop()!;
-
-async function createItem(page: any, title: string, template: string) {
-  await connectRepo(page, REPO);
-  await page.goto("/");
-  await page.getByRole("button", { name: /new work item/i }).click();
-  const modal = page.getByRole("dialog", { name: "New work item" });
-  await modal.getByLabel("repo").selectOption({ label: REPO_NAME });
-  await modal.getByLabel("title").fill(title);
-  await modal
-    .getByRole("radiogroup", { name: "template" })
-    .getByRole("radio", { name: new RegExp(`^${template}\\b`) })
-    .click();
-  await modal.getByRole("button", { name: /create and start/i }).click();
-  await expect(page.locator(".detail h2")).toHaveText(title);
-  return new URL(page.url()).pathname.split("/").pop()!;
-}
-
-test("gate: approve advances the chain from the UI", async ({ page }) => {
-  await createItem(page, "ui gate approve", "default");
-  await expect(page.getByText(/approve the spec to continue/i)).toBeVisible({ timeout: scaledTimeout(30_000) });
-  await page.getByRole("button", { name: "Approve" }).first().click();
-  // the next gate is the plan gate
-  await expect(page.getByText(/approve the plan to continue/i)).toBeVisible({ timeout: scaledTimeout(30_000) });
-});
-
-test("gate: reject offers a way forward", async ({ page }) => {
-  await createItem(page, "ui gate reject", "default");
-  await expect(page.getByText(/approve the spec to continue/i)).toBeVisible({ timeout: scaledTimeout(30_000) });
-  await page.getByRole("button", { name: /^Reject$/ }).first().click();
-  await page.getByLabel("composer message").fill("the spec misses the error path");
-  // "Reject and send back", not "Reject and re-plan": the composer's label is
-  // `rejectTarget(item, gate)`-dependent, and a V1 gate node authors an
-  // explicit `reject_to` (`chains/default.yaml`: `spec_approval` sends back to
-  // `spec`) where the legacy chain's `spec` node carried none and the reject
-  // just re-ran the current node. The label naming the target is the V1
-  // behaviour, so this asserts it rather than accepting either word.
-  await page.getByRole("button", { name: /Reject and send back/ }).click();
-  // The reject sends the item back to `spec`, which re-runs with the note and
-  // asks for its gate again — the item must never be left with no control at
-  // all.
-  await expect(page.locator(".item-card-title")).toContainText(/approve the spec/i, {
-    timeout: scaledTimeout(60_000),
-  });
-  await expect(page.getByRole("button", { name: "Approve" }).first()).toBeEnabled();
-  await page.getByRole("button", { name: "Approve" }).first().click();
-  await expect(page.locator(".item-card-title")).toContainText(/approve the plan/i, {
-    timeout: scaledTimeout(60_000),
-  });
-});
+// screen — pause/steer/resume — driven from the real UI.
+// Gate approve and reject-and-send-back are walked in planning.spec.ts.
 
 test("pause, steer and resume from the detail screen", async ({ page }) => {
   // The fake agent finishes in milliseconds, so there is nothing to pause

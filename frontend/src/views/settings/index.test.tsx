@@ -1,23 +1,12 @@
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { renderAt, setupSettingsMocks } from "./testing";
+import { setPhoneWidth } from "../../testFixtures";
 
 beforeEach(() => {
   setupSettingsMocks();
 });
-
-function setPhoneWidth(matches: boolean) {
-  vi.stubGlobal(
-    "matchMedia",
-    vi.fn().mockImplementation((query: string) => ({
-      matches,
-      media: query,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    })),
-  );
-}
 
 describe("Settings shell phone drill-down (Kraft-j92g)", () => {
   it("is a real index page at desktop width too, a line per section (W7.9)", async () => {

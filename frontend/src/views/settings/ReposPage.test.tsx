@@ -124,19 +124,13 @@ describe("Settings · repos (5a)", () => {
     return dialog;
   };
 
-  it("shows the detected forge and project", async () => {
-    const dialog = await renderProbe({ forge: "github", project: "owner/repo" });
-    expect(await within(dialog).findByText("github · owner/repo")).toBeInTheDocument();
-  });
-
-  it("says so when no forge was detected", async () => {
-    const dialog = await renderProbe({ forge: null, project: null });
-    expect(await within(dialog).findByText("no forge remote detected")).toBeInTheDocument();
-  });
-
-  it("shows the forge alone when no project was recorded", async () => {
-    const dialog = await renderProbe({ forge: "gitea", project: null });
-    expect(await within(dialog).findByText("gitea")).toBeInTheDocument();
+  it.each([
+    ["the detected forge and project", { forge: "github", project: "owner/repo" }, "github · owner/repo"],
+    ["that no forge was detected", { forge: null, project: null }, "no forge remote detected"],
+    ["the forge alone when no project was recorded", { forge: "gitea", project: null }, "gitea"],
+  ])("shows %s", async (_, probe, text) => {
+    const dialog = await renderProbe(probe);
+    expect(await within(dialog).findByText(text)).toBeInTheDocument();
   });
 
   it("/settings with no page is the Settings index, not a redirect to Repos (W7.9)", async () => {
