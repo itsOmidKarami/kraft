@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 from support.harness import fake_templates_dir, isolated_bd
 
 from kraft import cli, client
@@ -50,6 +51,12 @@ def test_stream_log_follows_a_session_and_stops_when_it_stops(tmp_path, monkeypa
     from support.server import running_server
 
     templates = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
+    # Declared, so the chain's own first agent runs. Undeclared, the item
+    # stopped on a config error and the only session was an auto-escalation
+    # onto it, which Ruling 176 no longer dispatches.
+    (templates / "repos.yaml").write_text(
+        yaml.safe_dump({"repos": [{"path": str(repo), "setup_command": ""}]})
+    )
     tracker = isolated_bd(tmp_path)
     run_dir = tmp_path / "run"
     with running_server(run_dir=run_dir, templates_dir=templates, bd_cwd=tracker) as srv:
@@ -262,6 +269,12 @@ def test_stream_events_yields_a_frame_when_a_work_item_is_created(tmp_path, monk
     from support.server import running_server
 
     templates = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
+    # Declared, so the chain's own first agent runs. Undeclared, the item
+    # stopped on a config error and the only session was an auto-escalation
+    # onto it, which Ruling 176 no longer dispatches.
+    (templates / "repos.yaml").write_text(
+        yaml.safe_dump({"repos": [{"path": str(repo), "setup_command": ""}]})
+    )
     tracker = isolated_bd(tmp_path)
     run_dir = tmp_path / "run"
     with running_server(run_dir=run_dir, templates_dir=templates, bd_cwd=tracker) as srv:
