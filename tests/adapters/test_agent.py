@@ -471,9 +471,10 @@ def test_identify_as_worker_sets_the_work_item_env_var(run, identify, work_item_
     ],
     ids=["statuses-and-fields", "one-question-per-stop", "no-backgrounding", "commit", "no-push"],
 )
-def test_the_injected_context_says(phrases):
+def test_the_injected_context_says(run, phrases):
+    prompt = _system_prompt(run()["cmd"])
     for phrase in phrases:
-        assert phrase in agent._CTX
+        assert phrase in prompt
 
 
 @pytest.mark.parametrize(
