@@ -761,3 +761,17 @@ def test_repository_layers_with_two_different_sandboxes_have_no_meet():
             ]
         )
     assert refused.value.field == "sandbox"
+
+
+def test_the_docsite_policy_example_leaves_allowed_tools_unset(tmp_path):
+    """Review E #2 (Kraft-6pbq4): a `maxima.allowed_tools` binds every task,
+    and codex cannot enforce a tool list, so it refuses to launch -- copying the
+    docs' example stopped every `codex_default` task on the shipped chain."""
+    import re
+
+    page = (Path(__file__).resolve().parents[1] / "docsite" / "configuration.md").read_text()
+    block = re.search(r"## `policy.yaml`.*?```yaml\n(.*?)```", page, re.DOTALL).group(1)
+    path = tmp_path / "policy.yaml"
+    path.write_text(block)
+    instance = policy.PolicyInput.from_yaml(path).instance_policy()
+    assert instance.allowed_tools is None and instance.maxima.allowed_tools is None
