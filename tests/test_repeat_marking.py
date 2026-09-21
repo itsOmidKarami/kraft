@@ -15,15 +15,15 @@ backward-compatibility guarantee and stays unedited.
 
 import asyncio
 import json
+import shlex
 import sys
 import tempfile
 from pathlib import Path
 
-from support.harness import fake_registry, isolated_bd, make_repo
+from support.harness import isolated_bd, make_repo, v1_fix_loop_node, v1_seeded_chain
 
 from kraft import db, events, executor, policy, store
 from kraft.paths import RunDirs
-from kraft.templates import Registry, Template
 
 
 def _seed(tmp_path, seq):
@@ -157,35 +157,25 @@ _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
 _FAKE_REVIEWER = Path(__file__).parent / "support" / "fake_reviewer.py"
 
 
-def _registry():
-    base = fake_registry(sys.executable, _FAKE_AGENT)
-    hooks = dict(base.hooks)
-    hooks["on.review.local.run"] = {
+def _template(tmp_path):
+    """`review` measured by the scripted reviewer, with the fix loop and judge
+    on the fake agent. No `env_setup` node: V1 prepares the worktree first."""
+    reviewer = {
+        "id": "review",
         "kind": "subprocess",
-        "command": [sys.executable, str(_FAKE_REVIEWER)],
+        "command": shlex.join([sys.executable, str(_FAKE_REVIEWER)]),
     }
-    return Registry(hooks=hooks)
-
-
-def _template() -> Template:
-    return Template(
-        id="findings",
-        nodes=[
-            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None, "fix_loop": None},
-            {
-                "id": "review",
-                "tasks": ["on.review.local.run"],
-                "gate_after": None,
-                "fix_loop": "verify_fix_loop",
-            },
-        ],
+    return v1_seeded_chain(
+        tmp_path / "templates",
+        [v1_fix_loop_node("review", reviewer)],
+        agent_command=f"{sys.executable} {_FAKE_AGENT}",
     )
 
 
 def _policy(tmp_path, *, attempts=5) -> policy.Policy:
     p = tmp_path / "policy.yaml"
     p.write_text(
-        f"loops:\n  verify_fix_loop: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
+        f"loops:\n  review.fix_loop: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
         f"default: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
         # Kraft-lpdd: this suite is about finding-repeat marking, not the
         # unrelated auto-escalate trigger a `needs_human` stop would
@@ -228,17 +218,17 @@ def test_the_fix_after_a_steered_retry_still_marks_the_finding_repeat(tmp_path, 
         rd = RunDirs(call_dir / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            registry, pol = _registry(), _policy(call_dir)
+            pol = _policy(call_dir)
             wid = await executor.intake(
                 database,
                 rd,
                 title="review me",
                 repo=str(repo),
-                template=_template(),
+                chain=_template(call_dir),
                 bd_cwd=str(tracker),
             )
             first = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+                database, rd, work_item_id=wid, registry=None, bd_cwd=str(tracker), policy=pol
             )
             assert first == "needs_human"
             evts = database.read(lambda c: events.read_after(c, 0, wid))
@@ -251,16 +241,16 @@ def test_the_fix_after_a_steered_retry_still_marks_the_finding_repeat(tmp_path, 
                 lambda c: store.claim_for_run(c, wid, from_statuses=["needs_human"])
             )
             await database.write(
-                lambda c: store.retry_after_cap(c, wid, "review", "verify_fix_loop", None)
+                lambda c: store.retry_after_cap(c, wid, "review", "review.fix_loop", None)
             )
             await executor.run(
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 bd_cwd=str(tracker),
                 policy=pol,
-                start_index=1,
+                start_index=0,
             )
             return before
         finally:
