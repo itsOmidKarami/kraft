@@ -6,6 +6,7 @@ its own tests in test_client_*.py.
 
 from __future__ import annotations
 
+import inspect
 import json
 import pathlib
 import re
@@ -15,21 +16,6 @@ import pytest
 from support.harness import make_repo
 
 from kraft import cli, client
-
-
-def test_bare_kraft_still_serves(monkeypatch):
-    """The zero-argument default predates the CLI and must survive it."""
-    served = []
-    monkeypatch.setattr(cli.admin, "_serve", lambda: served.append(True))
-    cli.main([])
-    assert served == [True]
-
-
-def test_an_unknown_verb_is_a_usage_error(capsys):
-    with pytest.raises(SystemExit) as caught:
-        cli.main(["nonsense"])
-    assert caught.value.code == 2
-    assert "nonsense" in capsys.readouterr().err
 
 
 def test_mcp_still_dispatches(monkeypatch):
@@ -55,89 +41,70 @@ def test_init_still_dispatches_and_honours_repo_scope(monkeypatch, tmp_path, cap
     assert "written.json" in capsys.readouterr().out
 
 
-def _make_item(app, repo, title="a thing"):
-    """Create one work item through the API, returning its id."""
-    import asyncio
-
-    async def go():
-        async with client.transport.http() as http:
-            response = await http.post(
-                "/api/work-items",
-                json={"title": title, "repo": str(repo), "autostart": False},
-            )
-        assert response.status_code == 201, response.text
-        return response.json()["id"]
-
-    return asyncio.run(go())
-
-
 def _connect(repo):
     import asyncio
 
     return asyncio.run(client.ensure_repo(str(repo)))
 
 
-def test_list_renders_a_table_with_a_header(app, tmp_path, capsys):
-    repo = make_repo(tmp_path)
-    _make_item(app, repo, "first thing")
+def test_list_renders_a_table_with_a_header(app, capsys, make_item, repo):
+    make_item(repo, "first thing")
     cli.main(["view", "list"])
     out = capsys.readouterr().out
     assert "ID" in out.splitlines()[0] and "TITLE" in out.splitlines()[0]
     assert "first thing" in out
 
 
-def test_list_json_matches_the_client_payload(app, tmp_path, capsys):
+def test_list_json_matches_the_client_payload(app, capsys, make_item, repo):
     import asyncio
 
-    repo = make_repo(tmp_path)
-    _make_item(app, repo, "first thing")
+    make_item(repo, "first thing")
     cli.main(["view", "list", "--json"])
     printed = json.loads(capsys.readouterr().out)
     assert printed == asyncio.run(client.list_work_items())
 
 
-def test_list_filters_by_status(app, tmp_path, capsys):
-    repo = make_repo(tmp_path)
-    _make_item(app, repo, "first thing")
+def test_list_filters_by_status(app, capsys, make_item, repo):
+    make_item(repo, "first thing")
     cli.main(["view", "list", "--status", "completed", "--json"])
     assert json.loads(capsys.readouterr().out) == []
 
 
-def test_list_scopes_to_the_cwd_repo(app, tmp_path, monkeypatch, capsys):
+def test_list_scopes_to_the_cwd_repo(app, tmp_path, monkeypatch, capsys, make_item):
     here = make_repo(tmp_path, name="here")
     elsewhere = make_repo(tmp_path, name="elsewhere")
     _connect(here)
-    _make_item(app, here, "mine")
-    _make_item(app, elsewhere, "theirs")
+    make_item(here, "mine")
+    make_item(elsewhere, "theirs")
     monkeypatch.chdir(here)
     cli.main(["view", "list", "--json"])
     titles = [item["title"] for item in json.loads(capsys.readouterr().out)]
     assert titles == ["mine"]
 
 
-def test_list_all_ignores_the_cwd_scope(app, tmp_path, monkeypatch, capsys):
+def test_list_all_ignores_the_cwd_scope(app, tmp_path, monkeypatch, capsys, make_item):
     here = make_repo(tmp_path, name="here")
     elsewhere = make_repo(tmp_path, name="elsewhere")
     _connect(here)
-    _make_item(app, here, "mine")
-    _make_item(app, elsewhere, "theirs")
+    make_item(here, "mine")
+    make_item(elsewhere, "theirs")
     monkeypatch.chdir(here)
     cli.main(["view", "list", "--all", "--json"])
     titles = sorted(item["title"] for item in json.loads(capsys.readouterr().out))
     assert titles == ["mine", "theirs"]
 
 
-def test_show_takes_an_explicit_id(app, tmp_path, capsys):
-    repo = make_repo(tmp_path)
-    wid = _make_item(app, repo, "detail me")
+def test_show_takes_an_explicit_id(app, capsys, make_item, repo):
+    wid = make_item(repo, "detail me")
     cli.main(["view", "show", wid])
     out = capsys.readouterr().out
     assert wid in out and "detail me" in out
 
 
-def test_show_defaults_to_the_work_item_this_session_is_in(app, tmp_path, monkeypatch, capsys):
-    repo = make_repo(tmp_path)
-    wid = _make_item(app, repo, "implicit")
+def test_show_defaults_to_the_work_item_this_session_is_in(
+    app, monkeypatch, capsys, make_item, repo
+):
+    wid = make_item(repo, "implicit")
     monkeypatch.setenv("KRAFT_WORK_ITEM_ID", wid)
     cli.main(["view", "show"])
     assert "implicit" in capsys.readouterr().out
@@ -166,8 +133,7 @@ def test_an_operation_failure_is_a_kraft_message_on_stderr(app, capsys):
     assert "404" in captured.err
 
 
-def test_create_uses_the_cwd_repo_and_lands_paused(app, tmp_path, monkeypatch, capsys):
-    repo = make_repo(tmp_path)
+def test_create_uses_the_cwd_repo_and_lands_paused(app, monkeypatch, capsys, repo):
     _connect(repo)
     monkeypatch.chdir(repo)
     cli.main(["item", "create", "filed from a terminal", "--json"])
@@ -177,8 +143,7 @@ def test_create_uses_the_cwd_repo_and_lands_paused(app, tmp_path, monkeypatch, c
     assert created["status"] == "paused"
 
 
-def test_create_carries_the_description(app, tmp_path, monkeypatch, capsys):
-    repo = make_repo(tmp_path)
+def test_create_carries_the_description(app, monkeypatch, capsys, repo):
     _connect(repo)
     monkeypatch.chdir(repo)
     cli.main(["item", "create", "short label", "--description", "the brief", "--json"])
@@ -227,19 +192,18 @@ def test_create_outside_any_git_repo_says_something_else(app, tmp_path, monkeypa
     assert "no repo" in err
 
 
-def test_create_through_the_mcp_door_resolves_the_cwd_repo(app, tmp_path, monkeypatch):
+def test_create_through_the_mcp_door_resolves_the_cwd_repo(app, monkeypatch, repo):
     """The resolution the CLI does in `_repo_scope` lives in `client.py` too, so
     an agent standing in a connected repo does not have to name it (spec F §2.4)."""
     import asyncio
 
-    repo = make_repo(tmp_path)
     _connect(repo)
     monkeypatch.chdir(repo)
     created = asyncio.run(client.create_work_item("filed by an agent"))
     assert created["status"] == "paused"
 
 
-def test_create_attaches_a_spec_from_the_flag(app, tmp_path, monkeypatch, capsys):
+def test_create_attaches_a_spec_from_the_flag(app, tmp_path, monkeypatch, capsys, repo):
     """Kraft-82gz end to end: a spec that exists only in the worktree the agent
     is standing in, named by a relative path, reaching the stored item.
 
@@ -247,7 +211,6 @@ def test_create_attaches_a_spec_from_the_flag(app, tmp_path, monkeypatch, capsys
     linked worktree and finds no connected repo there (Kraft-tc33); a Kraft
     worker does not hit that, it inherits its repo from $KRAFT_WORK_ITEM_ID.
     """
-    repo = make_repo(tmp_path)
     _connect(repo)
     worktree = tmp_path / "wt"
     subprocess.run(
@@ -292,13 +255,12 @@ def test_create_attaches_a_spec_from_the_flag(app, tmp_path, monkeypatch, capsys
     assert "spec_approval" not in [n["gate_after"] for n in full["chain_definition"]["nodes"]]
 
 
-def test_create_through_the_mcp_door_attaches(app, tmp_path, monkeypatch):
+def test_create_through_the_mcp_door_attaches(app, tmp_path, monkeypatch, repo):
     """The MCP tool's whole body is this client call (mcp.py is a dispatch table
     and nothing more), so the round-trip is tested here and the tool's own
     schema is tested in test_mcp.py."""
     import asyncio
 
-    repo = make_repo(tmp_path)
     _connect(repo)
     plan = repo / ".engineering" / "plans" / "p.md"
     plan.parent.mkdir(parents=True)
@@ -329,10 +291,9 @@ def test_reject_requires_a_note(app, capsys):
     assert "--note" in capsys.readouterr().err
 
 
-def test_a_worker_cannot_act_on_its_own_work_item(app, tmp_path, monkeypatch, capsys):
+def test_a_worker_cannot_act_on_its_own_work_item(app, monkeypatch, capsys, make_item, repo):
     """The §6 rule-2 guard fires through the CLI door too, not only through MCP."""
-    repo = make_repo(tmp_path)
-    wid = _make_item(app, repo, "mine to do, not to approve")
+    wid = make_item(repo, "mine to do, not to approve")
     monkeypatch.setenv("KRAFT_WORK_ITEM_ID", wid)
     with pytest.raises(SystemExit) as caught:
         cli.main(["item", "approve"])
@@ -340,71 +301,69 @@ def test_a_worker_cannot_act_on_its_own_work_item(app, tmp_path, monkeypatch, ca
     assert "cannot act on its own work item" in capsys.readouterr().err
 
 
-def test_resume_starts_a_paused_item(app, tmp_path, capsys):
-    repo = make_repo(tmp_path)
-    wid = _make_item(app, repo, "start me")
+def test_resume_starts_a_paused_item(app, capsys, make_item, repo):
+    wid = make_item(repo, "start me")
     cli.main(["item", "resume", wid, "--steer", "go left", "--json"])
     assert capsys.readouterr().out.strip()  # the API's response, whatever shape it has
 
 
-def test_pause_on_a_paused_item_surfaces_the_api_error(app, tmp_path, capsys):
-    repo = make_repo(tmp_path)
-    wid = _make_item(app, repo, "already paused")
+def test_pause_on_a_paused_item_surfaces_the_api_error(app, capsys, make_item, repo):
+    wid = make_item(repo, "already paused")
     with pytest.raises(SystemExit) as caught:
         cli.main(["item", "pause", wid])
     assert caught.value.code == 1
     assert capsys.readouterr().err.startswith("kraft: ")
 
 
-def test_retry_passes_the_id_and_steer_through(app, monkeypatch, capsys):
+@pytest.mark.parametrize(
+    ("argv", "fn", "expected"),
+    [
+        (
+            ["item", "retry", "w1", "--steer", "try the other adapter"],
+            "retry",
+            {"steer": "try the other adapter", "work_item_id": "w1"},
+        ),
+        (
+            ["item", "skip", "w1", "--note", "known flake"],
+            "skip",
+            {"note": "known flake", "work_item_id": "w1"},
+        ),
+        (
+            ["item", "escalate", "w1", "--message", "please look at this"],
+            "escalate",
+            {"message": "please look at this", "work_item_id": "w1", "new_thread": False},
+        ),
+        (
+            ["item", "escalate", "w1", "--message", "please look at this", "--new-thread"],
+            "escalate",
+            {"message": "please look at this", "work_item_id": "w1", "new_thread": True},
+        ),
+        (["item", "progress", "2", "w1"], "report_progress", {"task": 2, "work_item_id": "w1"}),
+    ],
+    ids=["retry-steer", "skip-note", "escalate-message", "escalate-new-thread", "progress-task"],
+)
+def test_a_verb_passes_its_arguments_through(app, monkeypatch, capsys, argv, fn, expected):
+    """Each argument lands on the client function's own parameter, as the real
+    function would bind it (defaults included), and the reply names the item."""
+    real = getattr(client, fn)
     seen = {}
 
-    async def fake_retry(steer=None, work_item_id=None):
-        seen.update(steer=steer, work_item_id=work_item_id)
-        return {"id": work_item_id, "node_id": "n", "steer": steer}
+    async def fake(*args, **kwargs):
+        bound = inspect.signature(real).bind(*args, **kwargs)
+        bound.apply_defaults()
+        seen.update(bound.arguments)
+        return {
+            "id": "w1",
+            "node_id": "n",
+            "steer": None,
+            "status": "active",
+            "progress": {"current": 2, "total": 3, "title": "serve"},
+        }
 
-    monkeypatch.setattr(client, "retry", fake_retry)
-    cli.main(["item", "retry", "w1", "--steer", "try the other adapter"])
-    assert seen == {"steer": "try the other adapter", "work_item_id": "w1"}
+    monkeypatch.setattr(client, fn, fake)
+    cli.main(argv)
+    assert seen == expected
     assert "w1" in capsys.readouterr().out
-
-
-def test_skip_passes_the_id_and_note_through(app, monkeypatch, capsys):
-    seen = {}
-
-    async def fake_skip(note=None, work_item_id=None):
-        seen.update(note=note, work_item_id=work_item_id)
-        return {"id": work_item_id, "status": "active"}
-
-    monkeypatch.setattr(client, "skip", fake_skip)
-    cli.main(["item", "skip", "w1", "--note", "known flake"])
-    assert seen == {"note": "known flake", "work_item_id": "w1"}
-    assert "w1" in capsys.readouterr().out
-
-
-def test_escalate_passes_the_id_and_message_through(app, monkeypatch, capsys):
-    seen = {}
-
-    async def fake_escalate(message=None, work_item_id=None, new_thread=False):
-        seen.update(message=message, work_item_id=work_item_id, new_thread=new_thread)
-        return {"id": work_item_id, "status": "escalating"}
-
-    monkeypatch.setattr(client, "escalate", fake_escalate)
-    cli.main(["item", "escalate", "w1", "--message", "please look at this"])
-    assert seen == {"message": "please look at this", "work_item_id": "w1", "new_thread": False}
-    assert "w1" in capsys.readouterr().out
-
-
-def test_escalate_passes_new_thread_through(app, monkeypatch, capsys):
-    seen = {}
-
-    async def fake_escalate(message=None, work_item_id=None, new_thread=False):
-        seen.update(message=message, work_item_id=work_item_id, new_thread=new_thread)
-        return {"id": work_item_id, "status": "escalating"}
-
-    monkeypatch.setattr(client, "escalate", fake_escalate)
-    cli.main(["item", "escalate", "w1", "--message", "please look at this", "--new-thread"])
-    assert seen["new_thread"] is True
 
 
 def test_reject_passes_the_node_through(app, monkeypatch, capsys):
@@ -537,19 +496,6 @@ def test_no_source_string_tells_a_user_to_run_a_removed_verb():
             if pattern.search(line):
                 offenders.append(f"{path.relative_to(src)}:{n}: {line.strip()}")
     assert not offenders, "\n".join(offenders)
-
-
-def test_progress_passes_the_task_and_id_through(app, monkeypatch, capsys):
-    seen = {}
-
-    async def fake_report(task, work_item_id=None):
-        seen.update(task=task, work_item_id=work_item_id)
-        return {"id": work_item_id, "progress": {"current": task, "total": 3, "title": "serve"}}
-
-    monkeypatch.setattr(client, "report_progress", fake_report)
-    cli.main(["item", "progress", "2", "w1"])
-    assert seen == {"task": 2, "work_item_id": "w1"}
-    assert "w1" in capsys.readouterr().out
 
 
 def test_show_renders_progress_as_a_task_list(app, monkeypatch, capsys):

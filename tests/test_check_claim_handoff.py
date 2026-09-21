@@ -285,81 +285,79 @@ def test_a_door_named_after_the_store_function_it_wraps_is_not_promoted(tmp_path
     assert [r[2] for r in _bad(root)] == ["resume_work_item"]
 
 
-def test_an_uncalled_function_is_not_promoted_into_invisibility(tmp_path):
-    """The same guard from the other side: a handler nobody calls from inside a
-    bracket is nobody's delegate, so its claim is its own."""
-    root = _tree(
-        tmp_path,
-        """
-        async def route(db, wid):
-            await db.write(lambda c: store.claim_for_run(c, wid))
-            return "escaped"
-        """,
-    )
-    assert [r[2] for r in _bad(root)] == ["route"]
+@pytest.mark.parametrize(
+    ("source", "reported"),
+    [
+        # A handler nobody calls from inside a bracket is nobody's delegate, so
+        # its claim is its own.
+        pytest.param(
+            """
+            async def route(db, wid):
+                await db.write(lambda c: store.claim_for_run(c, wid))
+                return "escaped"
+            """,
+            ["route"],
+            id="an-uncalled-function-is-not-promoted-into-invisibility",
+        ),
+        # Re-review 4's V5. One helper, two doors, one of them bracketed: the
+        # helper delegates (so its own row stands aside) and the *unbracketed
+        # door* is the violation. Getting this wrong in either direction is a
+        # whole class -- flag the helper and the clean tree never goes green,
+        # flag neither and a real door hides.
+        pytest.param(
+            """
+            async def apply_it(db, wid):
+                await db.write(lambda c: store.claim_for_run(c, wid))
+                return 3
 
+            async def good_door(db, wid):
+                async with stops.claimed_or_stopped(db, wid, None, reason="r"):
+                    return await apply_it(db, wid)
 
-def test_a_delegating_helper_flags_only_its_unbracketed_door(tmp_path):
-    """Re-review 4's V5. One helper, two doors, one of them bracketed: the helper
-    delegates (so its own row stands aside) and the *unbracketed door* is the
-    violation. Getting this wrong in either direction is a whole class -- flag the
-    helper and the clean tree never goes green, flag neither and a real door
-    hides."""
-    root = _tree(
-        tmp_path,
-        """
-        async def apply_it(db, wid):
-            await db.write(lambda c: store.claim_for_run(c, wid))
-            return 3
-
-        async def good_door(db, wid):
-            async with stops.claimed_or_stopped(db, wid, None, reason="r"):
+            async def bad_door(db, wid):
                 return await apply_it(db, wid)
+            """,
+            ["bad_door"],
+            id="a-delegating-helper-flags-only-its-unbracketed-door",
+        ),
+        # Re-review 4's V6. `ci_wait` writes its claim inside a `db.write`
+        # transaction body, so the bracket test crosses function boundaries on
+        # purpose -- which must not turn into crediting a nested def with a
+        # bracket that is not there.
+        pytest.param(
+            """
+            async def f(db, wid):
+                def txn(c):
+                    store.claim_for_run(c, wid)
 
-        async def bad_door(db, wid):
-            return await apply_it(db, wid)
-        """,
-    )
-    assert [r[2] for r in _bad(root)] == ["bad_door"]
+                await db.write(txn)
+                return "escaped"
+            """,
+            ["txn"],
+            id="a-claim-in-a-nested-def-of-an-unbracketed-function-is-caught",
+        ),
+        # `rate_limit_retry._retry_one`'s shape. Round 4 promoted any owner that
+        # was called anywhere, so removing a poller's bracket promoted
+        # `_retry_one`, then its caller `poller`, then `lifespan` -- a cascade of
+        # 7 to 100+ bogus rows with the real line absent. Promotion now needs the
+        # codebase to *say* the bracket belongs to the callers, by having at
+        # least one bracketed call site.
+        pytest.param(
+            """
+            async def _retry_one(db, wid):
+                await db.write(lambda c: store.claim_for_run(c, wid))
+                return False
 
-
-def test_a_claim_in_a_nested_def_of_an_unbracketed_function_is_caught(tmp_path):
-    """Re-review 4's V6. `ci_wait` writes its claim inside a `db.write`
-    transaction body, so the bracket test crosses function boundaries on purpose
-    -- which must not turn into crediting a nested def with a bracket that is not
-    there."""
-    root = _tree(
-        tmp_path,
-        """
-        async def f(db, wid):
-            def txn(c):
-                store.claim_for_run(c, wid)
-
-            await db.write(txn)
-            return "escaped"
-        """,
-    )
-    assert [r[2] for r in _bad(root)] == ["txn"]
-
-
-def test_a_helper_called_only_from_unbracketed_sites_keeps_its_own_row(tmp_path):
-    """`rate_limit_retry._retry_one`'s shape. Round 4 promoted any owner that was
-    called anywhere, so removing a poller's bracket promoted `_retry_one`, then
-    its caller `poller`, then `lifespan` -- a cascade of 7 to 100+ bogus rows with
-    the real line absent. Promotion now needs the codebase to *say* the bracket
-    belongs to the callers, by having at least one bracketed call site."""
-    root = _tree(
-        tmp_path,
-        """
-        async def _retry_one(db, wid):
-            await db.write(lambda c: store.claim_for_run(c, wid))
-            return False
-
-        async def poller(db, wid):
-            return await _retry_one(db, wid)
-        """,
-    )
-    assert [r[2] for r in _bad(root)] == ["_retry_one"], "no cascade, and the real site named"
+            async def poller(db, wid):
+                return await _retry_one(db, wid)
+            """,
+            ["_retry_one"],
+            id="a-helper-called-only-from-unbracketed-sites-keeps-its-own-row",
+        ),
+    ],
+)
+def test_the_unbracketed_function_is_the_one_reported(tmp_path, source, reported):
+    assert [r[2] for r in _bad(_tree(tmp_path, source))] == reported
 
 
 def test_claims_are_derived_from_store_not_hand_listed(tmp_path):

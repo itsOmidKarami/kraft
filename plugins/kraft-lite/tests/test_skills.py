@@ -179,26 +179,28 @@ def test_a_skill_says_the_registry_can_be_edited_mid_run(texts):
     assert "registry.yaml" in body
 
 
-def test_a_key_with_a_body_is_bound():
-    assert kl._bound_hooks("on.merge:\n  kind: skill\n  skill: x:y\n") == {"on.merge"}
-
-
-def test_a_key_with_no_body_is_not_bound():
-    # The Kraft-l5z case: this passed validation and died at dispatch, six nodes in.
-    assert kl._bound_hooks("on.ci.poll:\non.merge:\n  kind: skill\n") == {"on.merge"}
-
-
-def test_a_comment_only_body_is_not_bound():
-    text = "on.ci.poll:\n# TODO: pick a client\non.merge:\n  kind: skill\n"
+@pytest.mark.parametrize(
+    "text",
+    [
+        "on.merge:\n  kind: skill\n  skill: x:y\n",
+        # the Kraft-l5z case: this passed validation and died at dispatch, six nodes in
+        "on.ci.poll:\non.merge:\n  kind: skill\n",
+        "on.ci.poll:\n# TODO: pick a client\non.merge:\n  kind: skill\n",
+        "on.ci.poll:\n  # TODO: pick a client\non.merge:\n  kind: skill\n",
+        "on.merge:\n  kind: skill\non.ci.poll:\n",
+        "on.merge:\n\n  kind: skill\n",
+    ],
+    ids=[
+        "a-key-with-a-body",
+        "a-key-with-no-body-is-not",
+        "a-comment-only-body-is-not",
+        "an-indented-comment-only-body-is-not",
+        "a-trailing-key-with-no-body-is-not",
+        "blank-lines-before-the-body-do-not-unbind",
+    ],
+)
+def test_only_a_key_with_a_body_is_bound(text):
     assert kl._bound_hooks(text) == {"on.merge"}
-
-
-def test_a_trailing_key_with_no_body_is_not_bound():
-    assert kl._bound_hooks("on.merge:\n  kind: skill\non.ci.poll:\n") == {"on.merge"}
-
-
-def test_blank_lines_between_a_key_and_its_body_do_not_unbind_it():
-    assert kl._bound_hooks("on.merge:\n\n  kind: skill\n") == {"on.merge"}
 
 
 def test_kl_parses_on_the_oldest_supported_python():

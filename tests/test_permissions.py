@@ -15,11 +15,9 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 from support.harness import (
     fake_harness_home,
     fake_templates_dir,
-    isolated_bd,
     v1_chain,
     write_harness_profiles,
 )
@@ -41,15 +39,10 @@ def _templates(tmp_path, monkeypatch):
     return d
 
 
-def _client(tmp_path, monkeypatch, templates_dir=None):
-    templates_dir = templates_dir or _templates(tmp_path, monkeypatch)
-    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates_dir))
-    monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "no-dist"))
-    import kraft.api as api
-
-    return TestClient(api.app, client=("127.0.0.1", 54321))
+@pytest.fixture
+def templates_dir(tmp_path, monkeypatch):
+    """The `client` fixture's templates: a `fake` harness profile on `true`."""
+    return _templates(tmp_path, monkeypatch)
 
 
 def _seed_session(sid="s1", wid="w1", hook_point=_PATH, harness="fake"):
@@ -113,31 +106,29 @@ def _resolving_to(monkeypatch, allowed):
     monkeypatch.setattr(agent_mod, "resolve_agent_task", resolve)
 
 
-def test_permission_request_allows_when_the_task_declares_no_allowlist(tmp_path, monkeypatch):
+def test_permission_request_allows_when_the_task_declares_no_allowlist(client):
     """`--permission-mode auto` resolves these asks silently today, and a V1
     task declares no allowlist of its own -- an unset `maxima.allowed_tools`
     bounds nothing (`policy-has-defaults-and-administrator-maxima`). The event
     says so, about the task the session actually is."""
-    with _client(tmp_path, monkeypatch) as client:
-        _seed_session()
-        body = _ask(client).json()
-        reasons = [
-            e["payload"]["reason"]
-            for e in client.get("/api/work-items/w1/events").json()
-            if e["type"] == "permission_decision"
-        ]
+    _seed_session()
+    body = _ask(client).json()
+    reasons = [
+        e["payload"]["reason"]
+        for e in client.get("/api/work-items/w1/events").json()
+        if e["type"] == "permission_decision"
+    ]
     assert body == {"behavior": "allow", "updatedInput": {"command": "ls"}}
     assert reasons == [f"{_PATH} declares no allowed_tools"]
 
 
-def test_permission_request_denies_a_tool_outside_the_task_allowlist(tmp_path, monkeypatch):
+def test_permission_request_denies_a_tool_outside_the_task_allowlist(monkeypatch, client):
     """Kraft-hwrks: the gate read the legacy registry by `hook_point`, which on
     V1 is a task path no registry hook has, so it allowed everything."""
     _resolving_to(monkeypatch, ["Read", "Grep"])
-    with _client(tmp_path, monkeypatch) as client:
-        _seed_session()
-        denied = _ask(client, "Bash").json()
-        allowed = _ask(client, "Read").json()
+    _seed_session()
+    denied = _ask(client, "Bash").json()
+    allowed = _ask(client, "Read").json()
     assert denied["behavior"] == "deny"
     assert _PATH in denied["message"], "a denial has to name the task"
     assert "Bash" in denied["message"]
@@ -155,40 +146,37 @@ def test_permission_request_denies_a_tool_outside_the_task_allowlist(tmp_path, m
     ids=["unknown-path", "legacy-hook", "unresolvable-profile", "not-an-agent-task"],
 )
 def test_permission_request_denies_a_session_whose_grant_cannot_be_resolved(
-    tmp_path, monkeypatch, hook_point, harness
+    client, hook_point, harness
 ):
     """Not knowing the grant is not a grant: a session whose task or profile
     no longer resolves is denied, naming why, rather than read as declaring
     nothing."""
-    with _client(tmp_path, monkeypatch) as client:
-        _seed_session(hook_point=hook_point, harness=harness)
-        body = _ask(client).json()
+    _seed_session(hook_point=hook_point, harness=harness)
+    body = _ask(client).json()
     assert body["behavior"] == "deny"
     assert "cannot resolve" in body["message"], body
     if hook_point.endswith(".check"):
         assert "is no agent task" in body["message"], body
 
 
-def test_permission_request_allows_the_escalation_turn(tmp_path, monkeypatch):
+def test_permission_request_allows_the_escalation_turn(client):
     """An escalation turn is not a chain task: it launches on a minimal binding
     with no allowlist (`escalate.dispatch`), so it declares none."""
-    with _client(tmp_path, monkeypatch) as client:
-        _seed_session(hook_point="escalation")
-        body = _ask(client).json()
+    _seed_session(hook_point="escalation")
+    body = _ask(client).json()
     assert body["behavior"] == "allow"
 
 
-def test_permission_decision_is_recorded_as_an_event(tmp_path, monkeypatch):
+def test_permission_decision_is_recorded_as_an_event(monkeypatch, client):
     _resolving_to(monkeypatch, ["Read"])
-    with _client(tmp_path, monkeypatch) as client:
-        _seed_session()
-        _ask(client, "Bash")
-        _ask(client, "Read")
-        events = [
-            e
-            for e in client.get("/api/work-items/w1/events").json()
-            if e["type"] == "permission_decision"
-        ]
+    _seed_session()
+    _ask(client, "Bash")
+    _ask(client, "Read")
+    events = [
+        e
+        for e in client.get("/api/work-items/w1/events").json()
+        if e["type"] == "permission_decision"
+    ]
     assert [e["payload"]["decision"] for e in events] == ["deny", "allow"]
     assert events[0]["payload"] == {
         "session_id": "s1",
@@ -199,9 +187,8 @@ def test_permission_decision_is_recorded_as_an_event(tmp_path, monkeypatch):
     }
 
 
-def test_permission_request_on_an_unknown_session_is_404(tmp_path, monkeypatch):
-    with _client(tmp_path, monkeypatch) as client:
-        assert _ask(client, sid="nope").status_code == 404
+def test_permission_request_on_an_unknown_session_is_404(monkeypatch, client):
+    assert _ask(client, sid="nope").status_code == 404
 
 
 def test_the_worker_side_fails_closed(monkeypatch):

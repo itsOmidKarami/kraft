@@ -12,6 +12,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from support.chain_run import loop_policy, run_chain
 from support.harness import isolated_bd, make_repo, seed_v1_library, v1_resolved
 
 from kraft import db, events, executor, policy, store
@@ -57,20 +58,12 @@ def _chain(templates_parent: Path, node: dict):
 
 
 def _policy(tmp_path, *, attempts=3, severities=None) -> policy.Policy:
-    p = tmp_path / "policy.yaml"
-    text = (
-        f"loops:\n  review.fix_loop: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
-        f"  verify.fix_loop: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
-        f"default: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
-        # Kraft-lpdd: this suite is about the findings loop's own cap, not
-        # the unrelated auto-escalate trigger a `needs_human` cap breach
-        # would otherwise also fire.
-        "auto_escalate_stuck: false\n"
+    extra = (
+        "" if severities is None else f"findings:\n  loop_severities: {json.dumps(severities)}\n"
     )
-    if severities is not None:
-        text += f"findings:\n  loop_severities: {json.dumps(severities)}\n"
-    p.write_text(text)
-    return policy.load_policy(p)
+    return loop_policy(
+        tmp_path, "review.fix_loop", "verify.fix_loop", attempts=attempts, extra=extra
+    )
 
 
 def _finding(message, severity="critical", *, file="a.py", line=3):
@@ -84,7 +77,7 @@ def _finding(message, severity="critical", *, file="a.py", line=3):
 
 
 def _run(tmp_path, monkeypatch, entries, *, attempts=3, severities=None, measure=None):
-    """Drive one work item through the review node. Returns a dict of what happened.
+    """Drive one work item through the review node. Returns `run_chain`'s dict.
 
     Each call gets its own scratch subdirectory rather than writing straight into
     `tmp_path`: `tmp_path` is per-test, not per-call, and `isolated_bd`/`make_repo`
@@ -100,43 +93,12 @@ def _run(tmp_path, monkeypatch, entries, *, attempts=3, severities=None, measure
     plan = call_dir / "review-plan.json"
     plan.write_text(json.dumps(entries))
     monkeypatch.setenv("KRAFT_FAKE_REVIEW_PLAN", str(plan))
-    tracker = isolated_bd(call_dir)
-    repo = make_repo(call_dir)
-    chain = _chain(call_dir, _loop_node("review", measure or _reviewer()))
-    out = {}
-
-    async def scenario():
-        rd = RunDirs(call_dir / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            wid = await executor.intake(
-                database,
-                rd,
-                title="review me",
-                repo=str(repo),
-                chain=chain,
-                bd_cwd=str(tracker),
-            )
-            out["result"] = await executor.run(
-                database,
-                rd,
-                work_item_id=wid,
-                registry=None,
-                bd_cwd=str(tracker),
-                policy=_policy(call_dir, attempts=attempts, severities=severities),
-            )
-            out["events"] = database.read(lambda c: events.read_after(c, 0, wid))
-            out["sessions"] = database.read(
-                lambda c: list(
-                    c.execute("SELECT * FROM worker_sessions WHERE work_item_id = ?", (wid,))
-                )
-            )
-            out["wid"] = wid
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
-    return out
+    return run_chain(
+        call_dir,
+        _chain(call_dir, _loop_node("review", measure or _reviewer())),
+        policy=_policy(call_dir, attempts=attempts, severities=severities),
+        title="review me",
+    )
 
 
 def _cycles(out):
@@ -662,38 +624,12 @@ def _run_template(tmp_path, monkeypatch, node, *, attempts=3):
     scripted-reviewer `review` node -- the blind-failure tests need a real
     subprocess, not the fake reviewer's plan file."""
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
-    chain = _chain(tmp_path, node)
-    out = {}
-
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            wid = await executor.intake(
-                database,
-                rd,
-                title="blind failure",
-                repo=str(repo),
-                chain=chain,
-                bd_cwd=str(tracker),
-            )
-            out["result"] = await executor.run(
-                database,
-                rd,
-                work_item_id=wid,
-                registry=None,
-                bd_cwd=str(tracker),
-                policy=_policy(tmp_path, attempts=attempts),
-            )
-            out["events"] = database.read(lambda c: events.read_after(c, 0, wid))
-            out["wid"] = wid
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
-    return out
+    return run_chain(
+        tmp_path,
+        _chain(tmp_path, node),
+        policy=_policy(tmp_path, attempts=attempts),
+        title="blind failure",
+    )
 
 
 def test_blind_subprocess_failure_becomes_a_synthetic_finding(tmp_path, monkeypatch):

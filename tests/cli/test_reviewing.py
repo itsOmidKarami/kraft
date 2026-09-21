@@ -6,7 +6,6 @@ import asyncio
 import json
 
 import pytest
-from support.harness import make_repo
 
 from kraft import cli, client, render
 
@@ -14,21 +13,8 @@ from kraft import cli, client, render
 # to the ASGI app with the lifespan entered per client.
 
 
-def _make_item(repo, title="review me"):
-    async def go():
-        async with client.transport.http() as http:
-            response = await http.post(
-                "/api/work-items", json={"title": title, "repo": str(repo), "autostart": False}
-            )
-        assert response.status_code == 201, response.text
-        return response.json()["id"]
-
-    return asyncio.run(go())
-
-
-def test_diff_on_an_item_with_no_baseline_is_explicit(app, tmp_path):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_diff_on_an_item_with_no_baseline_is_explicit(app, make_item, repo):
+    wid = make_item(repo)
     payload = asyncio.run(client.diff(wid))
     # a paused, never-run item has no env_setup node stamped yet
     assert payload["base_ref"] is None
@@ -36,16 +22,14 @@ def test_diff_on_an_item_with_no_baseline_is_explicit(app, tmp_path):
     assert payload["truncated"] is False
 
 
-def test_diff_defaults_to_the_resolved_work_item(app, tmp_path, monkeypatch):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_diff_defaults_to_the_resolved_work_item(app, monkeypatch, make_item, repo):
+    wid = make_item(repo)
     monkeypatch.setenv("KRAFT_WORK_ITEM_ID", wid)
     assert asyncio.run(client.diff())["work_item_id"] == wid
 
 
-def test_documents_is_empty_for_a_fresh_item(app, tmp_path):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_documents_is_empty_for_a_fresh_item(app, make_item, repo):
+    wid = make_item(repo)
     assert asyncio.run(client.documents(wid)) == []
 
 
@@ -59,16 +43,14 @@ def test_open_document_404_is_a_readable_message(app):
         asyncio.run(client.open_document("no-such-doc"))
 
 
-def test_diff_no_baseline_prints_the_explicit_line(app, tmp_path, capsys):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_diff_no_baseline_prints_the_explicit_line(app, capsys, make_item, repo):
+    wid = make_item(repo)
     cli.main(["view", "diff", wid])
     assert "no baseline" in capsys.readouterr().out
 
 
-def test_diff_stat_and_truncation_reach_stdout(app, tmp_path, monkeypatch, capsys):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_diff_stat_and_truncation_reach_stdout(app, monkeypatch, capsys, make_item, repo):
+    wid = make_item(repo)
 
     async def fake_diff(work_item_id=None):
         return {
@@ -88,9 +70,8 @@ def test_diff_stat_and_truncation_reach_stdout(app, tmp_path, monkeypatch, capsy
     assert "truncated" in out.lower()  # asserted on the rendered output, not the payload
 
 
-def test_diff_name_only_prints_paths_one_per_line(app, tmp_path, monkeypatch, capsys):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_diff_name_only_prints_paths_one_per_line(app, monkeypatch, capsys, make_item, repo):
+    wid = make_item(repo)
 
     async def fake_diff(work_item_id=None):
         return {
@@ -111,17 +92,15 @@ def test_diff_name_only_prints_paths_one_per_line(app, tmp_path, monkeypatch, ca
     assert capsys.readouterr().out.split() == ["a.py", "b.py", "c.py"]
 
 
-def test_diff_json_is_the_raw_payload(app, tmp_path, capsys):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_diff_json_is_the_raw_payload(app, capsys, make_item, repo):
+    wid = make_item(repo)
     cli.main(["view", "diff", wid, "--json"])
     printed = json.loads(capsys.readouterr().out)
     assert printed == asyncio.run(client.diff(wid))
 
 
-def test_docs_lists_linked_documents(app, tmp_path, monkeypatch, capsys):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_docs_lists_linked_documents(app, monkeypatch, capsys, make_item, repo):
+    wid = make_item(repo)
 
     async def fake_documents(work_item_id=None):
         return [
@@ -140,9 +119,8 @@ def test_docs_lists_linked_documents(app, tmp_path, monkeypatch, capsys):
     assert "doc-1" in out and "spec" in out and "docs/a.md" in out
 
 
-def test_docs_empty_says_nothing_rather_than_crashing(app, tmp_path, capsys):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_docs_empty_says_nothing_rather_than_crashing(app, capsys, make_item, repo):
+    wid = make_item(repo)
     cli.main(["view", "docs", wid])
     assert "(nothing)" in capsys.readouterr().out
 
@@ -180,10 +158,9 @@ def test_doc_open_on_a_headless_server_is_a_kraft_message(app, capsys, monkeypat
     assert "501" in capsys.readouterr().err
 
 
-def test_diff_name_only_without_a_baseline_says_so(app, tmp_path, capsys):
+def test_diff_name_only_without_a_baseline_says_so(app, capsys, make_item, repo):
     """Empty and unknown are different answers in every view, --name-only too."""
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+    wid = make_item(repo)
     cli.main(["view", "diff", wid, "--name-only"])
     assert "no baseline" in capsys.readouterr().out
 
@@ -202,7 +179,7 @@ def _truncated_payload(wid, worktree="/tmp/kraft/worktrees/wi-1", **extra):
     }
 
 
-def test_the_truncation_warning_names_the_limit_and_the_worktree(app, tmp_path, capsys):
+def test_the_truncation_warning_names_the_limit_and_the_worktree(app, capsys):
     text = render.diff_stat(_truncated_payload("wi-1"))
     assert "1000000 bytes" in text
     assert "/tmp/kraft/worktrees/wi-1" in text
@@ -214,9 +191,8 @@ def test_an_untruncated_diff_says_nothing_about_a_limit(app):
     assert "1000000" not in render.diff_stat(payload)
 
 
-def test_the_diff_api_carries_the_limit_and_the_worktree(app, tmp_path):
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+def test_the_diff_api_carries_the_limit_and_the_worktree(app, make_item, repo):
+    wid = make_item(repo)
     payload = asyncio.run(client.diff(wid))
     # present even when nothing was truncated: the renderer must not have to ask
     assert payload["diff_max_bytes"] > 0
@@ -283,11 +259,10 @@ def test_an_untruncated_artifact_says_nothing_about_a_limit(app, monkeypatch, ca
     assert "1000000" not in capsys.readouterr().out
 
 
-def test_view_diff_prints_landed_and_in_flight_sections(app, tmp_path, monkeypatch, capsys):
+def test_view_diff_prints_landed_and_in_flight_sections(app, monkeypatch, capsys, make_item, repo):
     """Kraft-nceo from the CLI side: not printing `landed` would drop committed
     work from `kraft view diff` — the same bug from the other direction."""
-    repo = make_repo(tmp_path)
-    wid = _make_item(repo)
+    wid = make_item(repo)
 
     async def fake_diff(work_item_id=None):
         return {
