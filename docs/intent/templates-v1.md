@@ -153,27 +153,27 @@ enforced-by: tests/templates/test_models.py::test_builtin_task_accepts_a_code_ow
 Verification of repository test scopes SHALL be an explicitly configured
 typed built-in task and SHALL NOT depend on a node name or another implicit
 template convention.
-enforced-by: tests/executor/test_dispatch.py::test_each_task_kind_reaches_its_own_adapter, tests/executor/test_dispatch.py::test_changed_test_scopes_run_all_scopes_when_nothing_matches, tests/executor/test_dispatch.py::test_changed_test_scopes_run_under_a_node_not_named_verify
+enforced-by: tests/executor/test_dispatch.py::test_each_task_kind_reaches_its_own_adapter, tests/executor/test_scopes.py::test_changed_test_scopes_run_all_scopes_when_nothing_matches, tests/executor/test_scopes.py::test_changed_test_scopes_run_under_a_node_not_named_verify
 
 ## REQ changed-test-scope-verification-selects-safely
 
 The changed-test-scope task SHALL run every scope selected by changed paths.
 When the changed paths are empty or do not match a configured scope, it SHALL
 run every configured scope.
-enforced-by: tests/executor/test_dispatch.py::test_changed_test_scopes_run_all_scopes_when_nothing_matches, tests/executor/test_dispatch.py::test_select_scopes_on_the_first_round_uses_the_whole_branch_diff
+enforced-by: tests/executor/test_scopes.py::test_changed_test_scopes_run_all_scopes_when_nothing_matches, tests/executor/test_scopes.py::test_select_scopes_on_the_first_round_uses_the_whole_branch_diff
 
 ## REQ changed-test-scope-verification-is-sequential-by-default
 
 The changed-test-scope task SHALL run selected scopes sequentially by default.
 It MAY run scopes in bounded parallelism only when its configuration explicitly
 requests it.
-enforced-by: tests/executor/test_dispatch.py::test_changed_test_scopes_run_sequentially_unless_configured_parallel
+enforced-by: tests/executor/test_scopes.py::test_changed_test_scopes_run_sequentially_unless_configured_parallel
 
 ## REQ changed-test-scope-verification-aggregates-results
 
 The changed-test-scope task SHALL await all selected scope results and report
 one aggregate task result.
-enforced-by: tests/executor/test_dispatch.py::test_changed_test_scopes_report_one_aggregate_result
+enforced-by: tests/executor/test_scopes.py::test_changed_test_scopes_report_one_aggregate_result
 
 ## REQ exec-node-orders-concurrent-task-groups
 
