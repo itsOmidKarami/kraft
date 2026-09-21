@@ -4,19 +4,21 @@ import subprocess
 import sys
 from pathlib import Path
 
-from support.harness import fake_registry, isolated_bd, make_repo
+from support.harness import isolated_bd, make_repo, v1_named_chain
 
 from kraft import db, events, executor, policy, store
+from kraft.adapters import forge as _forge
 from kraft.paths import RunDirs
-from kraft.templates import load_registry, load_templates
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
 
 
-def _default_template():
-    reg = load_registry(_REPO_ROOT / "templates" / "registry.yaml")
-    return load_templates(_REPO_ROOT / "templates", reg).valid["default"]
+def _default_template(tmp_path):
+    """The shipped V1 `default` chain, its agent tasks on the fake agent."""
+    return v1_named_chain(
+        tmp_path / "templates", "default", agent_command=f"{sys.executable} {_FAKE_AGENT}"
+    )
 
 
 def _events(database, wid):
@@ -38,17 +40,11 @@ def _bd_status(repo, bead_id):
     return json.loads(out)[0]["status"]
 
 
-def _gate_index(chain_json, gate):
-    nodes = json.loads(chain_json)["nodes"]
-    return next(i for i, n in enumerate(nodes) if n.get("gate_after") == gate)
-
-
-def _launch():
-    # `fake_registry` spreads the shipped `on.spec.requested`/etc bindings, so
-    # they carry the real `steering:` key -- a dispatch that reaches them needs
-    # a real steering_dir to resolve against, same as production.
+def _launch(tmp_path, **repo_entry):
+    # The shipped spec task names a `steering:` profile, which dispatch still
+    # resolves to a file (`seed_v1_library` writes it out beside the library).
     return executor.LaunchContext(
-        repo_entry=None, steering_dir=_REPO_ROOT / "templates" / "steering"
+        repo_entry=repo_entry or None, steering_dir=tmp_path / "templates" / "steering"
     )
 
 
@@ -60,22 +56,21 @@ def test_walk_stops_at_first_gate(tmp_path):
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            registry = fake_registry(sys.executable, _FAKE_AGENT)
             wid = await executor.intake(
                 database,
                 rd,
                 title="make the failing test pass",
                 repo=str(repo),
-                template=_default_template(),
+                chain=_default_template(tmp_path),
                 bd_cwd=str(tracker),
             )
             result = await executor.run(
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 bd_cwd=str(tracker),
-                launch=_launch(),
+                launch=_launch(tmp_path),
             )
             assert result == "awaiting_gate"
             row = database.read(
@@ -84,7 +79,8 @@ def test_walk_stops_at_first_gate(tmp_path):
                 ).fetchone()
             )
             assert row["status"] == "needs_human"
-            assert row["current_node_id"] == "spec"
+            # A V1 gate is its own node, so the walk stands on it.
+            assert row["current_node_id"] == "spec_approval"
             types = _events(database, wid)
             assert types.count("gate_requested") == 1
             assert _payloads(database, wid, "gate_requested")[0]["gate"] == "spec_approval"
@@ -95,71 +91,75 @@ def test_walk_stops_at_first_gate(tmp_path):
     asyncio.run(scenario())
 
 
-def test_approving_all_four_gates_completes_chain(tmp_path):
+def test_approving_the_gates_walks_the_default_chain_to_its_first_unimplemented_node(
+    tmp_path, monkeypatch
+):
+    """Was `test_approving_all_four_gates_completes_chain`. The V1 `default`
+    chain cannot complete yet, and this pins exactly where it stops rather than
+    pretending otherwise: its `merge_request_feedback` node waits on
+    `mr.automated_review`, which has no handler until Task 9 and stops for a
+    human (`forge.run._UNIMPLEMENTED_TARGETS`). Everything before it -- both
+    planning gates, implementation, `local_review`, the draft merge request and
+    its CI -- walks for real."""
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
+    fake = _forge.FakeForge(ci_states=["success"])
+    monkeypatch.setattr(_forge.run, "resolve", lambda name: fake)
+    launch = _launch(tmp_path, setup_command="", forge="github")
+    chain = _default_template(tmp_path)
 
     async def scenario():
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            registry = fake_registry(sys.executable, _FAKE_AGENT)
             pol = policy.load_policy(_REPO_ROOT / "templates" / "policy.yaml")
             wid = await executor.intake(
                 database,
                 rd,
                 title="make the failing test pass",
                 repo=str(repo),
-                template=_default_template(),
+                chain=chain,
                 bd_cwd=str(tracker),
             )
-            chain_json = database.read(
-                lambda c: c.execute(
-                    "SELECT chain_definition FROM work_items WHERE id=?", (wid,)
-                ).fetchone()
-            )["chain_definition"]
+            ids = [n.id for n in chain.nodes]
 
             result = await executor.run(
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 bd_cwd=str(tracker),
                 policy=pol,
-                launch=_launch(),
+                launch=launch,
             )
-            for gate in (
-                "spec_approval",
-                "plan_approval",
-                "chain_finalized",
-                "human_review_approval",
-            ):
+            for gate in ("spec_approval", "plan_approval", "local_review"):
                 assert result == "awaiting_gate"
                 assert _payloads(database, wid, "gate_requested")[-1]["gate"] == gate
                 await database.write(lambda c, g=gate: store.approve_gate(c, wid, g))
-                start = _gate_index(chain_json, gate) + 1
                 result = await executor.run(
                     database,
                     rd,
                     work_item_id=wid,
-                    registry=registry,
+                    registry=None,
                     bd_cwd=str(tracker),
-                    start_index=start,
+                    start_index=ids.index(gate) + 1,
                     policy=pol,
-                    launch=_launch(),
+                    launch=launch,
                 )
-            assert result == "completed"
+            assert result == "needs_human"
             row = database.read(
                 lambda c: c.execute(
-                    "SELECT status, bead_id FROM work_items WHERE id=?", (wid,)
+                    "SELECT status, current_node_id, bead_id FROM work_items WHERE id=?", (wid,)
                 ).fetchone()
             )
-            assert row["status"] == "completed"
-            assert _bd_status(tracker, row["bead_id"]) == "closed"
+            assert row["current_node_id"] == "merge_request_feedback"
+            assert _bd_status(tracker, row["bead_id"]) != "closed"
+            reason = _payloads(database, wid, "work_item_needs_human")[-1]["reason"]
+            assert "await_review" in reason
             types = _events(database, wid)
-            assert types.count("gate_requested") == 4
-            assert types.count("gate_approved") == 4
-            assert types.count("node_completed") == 10
+            assert types.count("gate_requested") == 3
+            assert types.count("gate_approved") == 3
+            assert fake.opened, "the draft merge request was never opened"
         finally:
             await database.close()
 
@@ -174,17 +174,21 @@ def test_reject_records_the_note_and_reopen_flips_the_row(tmp_path):
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            registry = fake_registry(sys.executable, _FAKE_AGENT)
             wid = await executor.intake(
                 database,
                 rd,
                 title="t",
                 repo=str(repo),
-                template=_default_template(),
+                chain=_default_template(tmp_path),
                 bd_cwd=str(tracker),
             )
             await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=None,
+                bd_cwd=str(tracker),
+                launch=_launch(tmp_path),
             )
             status = lambda: database.read(  # noqa: E731
                 lambda c: c.execute("SELECT status FROM work_items WHERE id=?", (wid,)).fetchone()
@@ -246,21 +250,29 @@ def test_a_spec_worker_that_wrote_no_artifact_opens_no_gate(tmp_path, monkeypatc
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            registry = fake_registry(sys.executable, _FAKE_AGENT)
             wid = await executor.intake(
                 database,
                 rd,
                 title="make the failing test pass",
                 repo=str(repo),
-                template=_default_template(),
+                chain=_default_template(tmp_path),
                 bd_cwd=str(tracker),
             )
             await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database,
+                rd,
+                work_item_id=wid,
+                registry=None,
+                bd_cwd=str(tracker),
+                launch=_launch(tmp_path),
             )
             types = _events(database, wid)
             assert "gate_requested" not in types
             assert "node_completed" not in types
+            # ...and for the missing document, not for something incidental:
+            # without a steering dir the spec task fails before it ever runs.
+            stopped = _payloads(database, wid, "worker_session_exited")
+            assert [p["status"] for p in stopped] == ["failed"]
             assert not (rd.worktrees / wid / ".engineering" / "specs" / f"{wid}.md").exists()
         finally:
             await database.close()
