@@ -7,16 +7,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
-from support.harness import isolated_bd
+from support.harness import isolated_bd, v1_library
 
 from kraft import db, policy, triggers
 from kraft.paths import RunDirs
-from kraft.templates import Template, TemplateSet
-
-_TEMPLATES = TemplateSet(
-    valid={"default": Template(id="default", nodes=[{"id": "n1", "tasks": ["on.env.prepare"]}])},
-    invalid={},
-)
 
 
 @dataclass
@@ -31,7 +25,9 @@ async def _stub(tmp_path, *, policy_obj) -> _Stub:
         state=SimpleNamespace(
             db=database,
             run_dirs=rd,
-            templates=_TEMPLATES,
+            # The seeded V1 library: `triggers.tick` resolves a trigger's
+            # chain through it (`deps.resolve_chain`), never a template set.
+            library=v1_library(tmp_path / "templates"),
             policy=policy_obj,
             trigger_last_fired={},
             tasks={},
