@@ -87,17 +87,21 @@ def task_is_live(app: FastAPI, wid: str) -> bool:
     return existing is not None and not existing.done()
 
 
+def discard(coro) -> None:
+    """Close a coroutine that will never run, and any coroutine it was handed
+    as an argument. One that is never awaited raises "coroutine was never
+    awaited" at garbage-collection time and leaks whatever it closed over;
+    closing an unstarted `guard(...)` does not reach the `executor.run(...)`
+    it wraps, so that one is closed too."""
+    for arg in coro.cr_frame.f_locals.values() if coro.cr_frame else ():
+        if asyncio.iscoroutine(arg):
+            arg.close()
+    coro.close()
+
+
 def spawn(app: FastAPI, wid: str, coro) -> asyncio.Task:
     if task_is_live(app, wid):
-        # A refused coroutine that is never awaited raises "coroutine was
-        # never awaited" at garbage-collection time and leaks whatever it
-        # closed over (the `guard` wrapper, the executor.run frame, ...).
-        # Closing an unstarted `guard(...)` does not reach the coroutine it
-        # was handed as an argument, so close that one too.
-        for arg in coro.cr_frame.f_locals.values() if coro.cr_frame else ():
-            if asyncio.iscoroutine(arg):
-                arg.close()
-        coro.close()
+        discard(coro)
         raise AlreadyRunning(wid)
     task = asyncio.ensure_future(coro)
     app.state.tasks[wid] = task

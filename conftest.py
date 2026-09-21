@@ -2,7 +2,17 @@
 `plugins/kraft-lite/tests/`), so what has to hold for every test lives here.
 Everything else stays in tests/conftest.py."""
 
+import sys
+
 import pytest
+
+
+def pytest_configure(config):
+    """A coroutine that is never awaited fails its test (pyproject
+    `filterwarnings`), but the warning can land on whichever later test is
+    running when the garbage collector reaches it. Recording where each
+    coroutine was created puts the leaker's own file and line in the message."""
+    sys.set_coroutine_origin_tracking_depth(8)
 
 
 @pytest.fixture
