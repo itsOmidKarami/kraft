@@ -119,15 +119,16 @@ async def test_a_gate_already_reopened_is_not_reopened_twice(item_on, database):
 async def test_a_retry_clears_loop_counters_across_its_span_only(item_on, database):
     it = await item_on(CHAIN, "c", status="needs_human")
     cap = policy.Cap(3, 3600)
-    for key in ("a.fix_loop", "b.fix_loop", "ci_wait:c"):
+    keys = ("a.fix_loop", "g1_reject_loop", "b.fix_loop", "g2_reject_loop", "ci_wait:c")
+    for key in keys:
         await database.write(lambda c, k=key: store.bump_counter(c, it.id, k, cap))
 
     await _fork(database, it, "b")
 
     left = database.read(
-        lambda c: [r["key"] for r in c.execute("SELECT key FROM retry_counters").fetchall()]
+        lambda c: {r["key"] for r in c.execute("SELECT key FROM retry_counters").fetchall()}
     )
-    assert left == ["a.fix_loop"]
+    assert left == {"a.fix_loop", "g1_reject_loop"}
 
 
 async def test_a_rerun_node_completes_again_in_its_fork(item_on, database):

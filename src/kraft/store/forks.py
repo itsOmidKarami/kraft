@@ -79,9 +79,18 @@ def fork_run(conn: sqlite3.Connection, work_item_id: str, target, override=None)
             # `walk._loop_key`'s format; the store must not import the executor.
             key = f"{node.id}.fix_loop" if node.fix_loop else None
             clear_loop_counters(conn, work_item_id, node.id, key)
-        elif _approved(conn, work_item_id, node.id):
-            reopened.append(node.id)
-            events.append(conn, work_item_id, "gate_reopened", {"gate": node.id, "reason": "retry"})
+        else:
+            # `gates.reject_loop_key`'s format: a reopened gate gets a fresh
+            # reject budget, the human's override of that cap as it always was.
+            conn.execute(
+                "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?",
+                (work_item_id, f"{node.id}_reject_loop"),
+            )
+            if _approved(conn, work_item_id, node.id):
+                reopened.append(node.id)
+                events.append(
+                    conn, work_item_id, "gate_reopened", {"gate": node.id, "reason": "retry"}
+                )
     events.append(
         conn,
         work_item_id,

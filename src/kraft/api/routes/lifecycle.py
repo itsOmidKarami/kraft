@@ -23,6 +23,13 @@ from kraft.api.routes.search import OpenDocument
 from kraft.config import git_read
 from kraft.executor import gates, stops, walk
 from kraft.templates import Registry
+from kraft.templates.forks import (
+    ChainPath,
+    PathError,
+    RetryOverride,
+    RetryOverrideError,
+    validate_retry_override,
+)
 from kraft.templates.models import AgentTask, GateNode
 
 logger = logging.getLogger(__name__)
@@ -30,6 +37,15 @@ logger = logging.getLogger(__name__)
 
 class Retry(BaseModel):
     steer: str | None = None
+    #: What to rerun, by canonical path: `node`, `node.step` or
+    #: `node.step.task`. Absent, the node the item stopped on.
+    path: str | None = None
+    #: Rerun the whole chain from its first node instead
+    #: (`work-item-restart-reruns-the-complete-chain`).
+    restart: bool = False
+    #: Task configuration and policy for the retried task
+    #: (`retry-overrides-are-policy-bounded`).
+    override: RetryOverride | None = None
 
 
 class Skip(BaseModel):
@@ -657,10 +673,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     """
     st = request.app.state
     row = deps._work_item_row(st, wid)
-    node_id = row["current_node_id"]
-    nodes = store.effective_nodes(walk.chain_of(row), store.node_overrides_of(row))
-    node = next((n for n in nodes if n.id == node_id), None)
-    if node is None:
+    if row["current_node_id"] not in store.chain_node_ids(row):
         raise HTTPException(409, "work item has no current node to retry")
     if row["status"] != "needs_human":
         # Cheap precondition, ahead of the steer and slot checks: claim_for_run
@@ -668,14 +681,17 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         # those meant an item that was never stopped got told its steer text
         # was unreachable instead of that it is not stopped.
         raise HTTPException(409, "work item is not stopped")
-    # Which counters this retry clears. Both are read off the node's *kind* and
-    # shape now, not off a `fix_loop` string or a `gate_after` name: a V1 gate
-    # is its own node, so "the gate this node has" is "this node is a gate".
+    chain = walk.chain_of(row)
+    target = _retry_target(chain, row, body)
+    override = _retry_override(chain, target, body.override)
+    # The node the rerun starts at: what a steer has to reach from, whose
+    # findings seed one, and which counters the retry clears (Kraft-bzwi: a
+    # node with no fix loop just has none to clear).
+    node = target.node if target is not None else chain.chain.nodes[0]
+    node_id = node.id
     is_gate = isinstance(node.node, GateNode)
     key = None if is_gate or node.node.fix_loop is None else walk._loop_key(node)
     gate_key = gates.reject_loop_key(node.id) if is_gate else None
-    if row["status"] != "needs_human":
-        raise HTTPException(409, "work item is not stopped")
     caller_session_id = request.headers.get("x-kraft-session-id")
     running = escalate.escalation_running(st.db, wid)
     if running is not None and running != caller_session_id:
@@ -755,6 +771,8 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                 {
                     "session_id": caller_session_id,
                     "node_id": node_id,
+                    "path": target.path if target is not None else None,
+                    "restart": body.restart,
                     "key": key,
                     "gate_key": gate_key,
                     "steer": steer,
@@ -877,16 +895,6 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
             )
             await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
 
-        await st.db.write(
-            lambda c: store.retry_after_cap(
-                c, wid, node_id, key, steer, gate_key=gate_key, seeded=seeded
-            )
-        )
-        # Same reason as `resume`'s: `retry_after_cap` above has already written the
-        # row, so this must not raise. `node` was resolved off the V1 nodes at the
-        # top of this handler, so a missing index here means the two disagree --
-        # 0 restarts the chain rather than stranding it claimed.
-        start = store.node_index(row, node_id, default=0)
         try:
             deps.spawn(
                 request.app,
@@ -894,16 +902,17 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                 deps.guard(
                     st.db,
                     wid,
-                    executor.run(
+                    executor.retry(
                         st.db,
                         st.run_dirs,
                         work_item_id=wid,
+                        target=target,
+                        override=override,
                         registry=st.registry,
                         bd_cwd=deps.bd_cwd(),
-                        start_index=start,
                         policy=st.policy,
                         steer=steer,
-                        steer_source="seeded" if seeded else "human",
+                        seeded=seeded,
                         launch=deps.launch(st, row["repo"]),
                         on_approve=deps._on_approve(st),
                     ),
@@ -911,7 +920,49 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
             )
         except deps.AlreadyRunning:
             raise HTTPException(409, "a walk is already running for this work item") from None
-        return {"id": wid, "node_id": node_id, "loop": key, "steer": steer}
+        return {
+            "id": wid,
+            "node_id": node_id,
+            "path": target.path if target is not None else None,
+            "loop": key,
+            "steer": steer,
+        }
+
+
+def _retry_target(chain, row, body: Retry) -> ChainPath | None:
+    """What a retry reruns: `body.path`, the whole chain on `restart`, or the
+    node the item stopped on. A retry reruns its target and everything after
+    it, so a target past where the item stands would skip the work between --
+    that is `skip`'s job, and refused here."""
+    if body.restart:
+        if body.path is not None:
+            raise HTTPException(422, "path: a restart reruns the whole chain; give one, not both")
+        return None
+    try:
+        target = ChainPath.parse(chain, body.path or row["current_node_id"])
+    except PathError as exc:
+        raise HTTPException(422, f"path: {exc}") from None
+    here = store.node_index(row, row["current_node_id"])
+    if target.node_index > here:
+        raise HTTPException(
+            409,
+            f"path: {target.path!r} is after the node the item stands on "
+            f"({row['current_node_id']!r}); a retry reruns work, it does not skip ahead",
+        )
+    return target
+
+
+def _retry_override(chain, target: ChainPath | None, override: RetryOverride | None):
+    """The validated override, or a 422 naming the field it was refused for
+    (`retry-overrides-are-policy-bounded`)."""
+    if override is None or override.is_empty():
+        return None
+    if target is None:
+        raise HTTPException(422, "override: a work-item restart carries no task override")
+    try:
+        return validate_retry_override(chain, target.path, override)
+    except RetryOverrideError as exc:
+        raise HTTPException(422, str(exc)) from None
 
 
 class RaiseBudget(BaseModel):

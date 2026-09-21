@@ -360,15 +360,11 @@ async def test_a_resume_at_an_approved_gate_continues_past_it(item_on):
 
 
 async def test_a_resume_at_an_unanswered_gate_re_requests_it(item_on):
-    """The other half of the same branch: a gate that was *not* cleared before
-    the crash reopens rather than being walked past. Crash resume only picks up
-    an `active` item (`reattach`), so the item is left active as a crash in the
-    window before `request_gate` would leave it."""
+    """The other half: a gate *not* cleared before the crash reopens rather than
+    being walked past. Crash resume picks up only an `active` item."""
     it = await item_on(_spec_gate())
     await _walk(it)
-    await it.database.write(
-        lambda c: c.execute("UPDATE work_items SET status = 'active' WHERE id = ?", (it.id,))
-    )
+    await it.database.write(lambda c: c.execute("UPDATE work_items SET status = 'active'"))
 
     assert await _resume(it) == "awaiting_gate"
     # The node after the gate still has not run.

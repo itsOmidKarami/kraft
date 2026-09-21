@@ -651,10 +651,14 @@ async def walk_node(
     steer: Steer | None = None,
     launch: LaunchContext | None = None,
     start_step: int = 0,
+    preserve: frozenset[str] = frozenset(),
 ) -> str:
     """One entry into an execution node: measure it, recover, fix, and, when
     none of those can advance it, escalate -- a successful escalation reruns
-    the node from its first step, as a fresh entry."""
+    the node from its first step, as a fresh entry.
+
+    `preserve` is a task retry's completed siblings (`RunFork.preserved`),
+    kept on the entry measurement only."""
     # Derived here rather than passed in: every caller already hands us the
     # policy, so no call site can forget the cap and silently lose it. Folded
     # through the item's own cap (UI v2 · 04 point 4) -- re-read fresh from
@@ -682,6 +686,7 @@ async def walk_node(
             steer=steer,
             launch=launch,
             start_step=start_step,
+            preserve=preserve,
             # A handler runs at most once per entry into the node; a retry the
             # escalation earned is a new entry.
             spent=set(),
@@ -703,6 +708,7 @@ async def walk_node(
         if outcome != "retry":
             return outcome
         start_step = 0
+        preserve = frozenset()
 
 
 async def _walk_node_once(
@@ -720,6 +726,7 @@ async def _walk_node_once(
     launch: LaunchContext | None,
     start_step: int,
     spent: set[str],
+    preserve: frozenset[str] = frozenset(),
 ) -> str | _Stuck:
     loop = node.node.fix_loop if isinstance(node.node, ExecNode) else None
     key = _loop_key(node) if loop is not None else None
@@ -746,6 +753,7 @@ async def _walk_node_once(
             loop_severities=loop_severities,
             start_step=start_step,
             spent=spent,
+            preserve=preserve,
         )
         if verdict == BASE_MOVED:
             return await _moved_base(db, work_item_id, node)
@@ -886,8 +894,10 @@ async def _walk_node_once(
             loop_severities=loop_severities,
             start_step=resume_step,
             spent=spent,
+            preserve=preserve,
         )
         resume_step = 0
+        preserve = frozenset()
         if verdict == BASE_MOVED:
             # Not a failure: no fix cycle is spent on code a restart is about
             # to re-measure (`base-change-is-not-an-execution-failure`).
@@ -1604,6 +1614,11 @@ async def run_once(
 
     i = start_index
     step = start_step
+    # A task retry keeps its completed siblings (`task-retry-reruns-that-task-
+    # and-later-work`) -- read off the fork rather than passed in, so a crash
+    # resume that lands back on the retried step keeps them too.
+    fork = db.read(lambda c: store.current_fork(c, work_item_id))
+    preserve = fork.preserved if fork is not None and fork.start == (i, step) else frozenset()
     while i < len(nodes):
         # Kraft-e7pm: a session verdict of "paused" is not the only way a walk
         # has to stop. Pausing between two nodes' dispatches leaves no live
@@ -1646,8 +1661,10 @@ async def run_once(
             steer=carried,
             launch=launch,
             start_step=step,
+            preserve=preserve,
         )
         step = 0  # only the entry node resumes mid-way
+        preserve = frozenset()
         if result in ("paused", "needs_human", RATE_LIMITED, WAITING):
             # This call is ending without giving `node` -- or any later node
             # in this same run_once, since none of these statuses continue

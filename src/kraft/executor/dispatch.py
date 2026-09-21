@@ -711,6 +711,7 @@ async def measure_node(
     loop_severities: frozenset[str] = _policy.DEFAULT_LOOP_SEVERITIES,
     start_step: int = 0,
     spent: set[str] | None = None,
+    preserve: frozenset[str] = frozenset(),
 ) -> tuple[str, list[ResolvedTask], list[BaseException]]:
     """Run `steps` (the node's own, by default) and report one verdict.
 
@@ -751,6 +752,14 @@ async def measure_node(
         return _config.git_read(Path(worktree), "rev-parse", "HEAD") if worktree else None
 
     async def _measure(task: ResolvedTask, *, retry: bool = False) -> str:
+        if task.path in preserve and not retry:
+            # A task retry's completed sibling (`RunFork.preserved`): its latest
+            # outcome stands, whatever HEAD the retried task later moves.
+            kept = db.read(
+                lambda c: store.latest_session_per_task(c, work_item_id, node.id, [task.path])
+            )
+            if kept and kept[0]["status"] in _ADVANCING:
+                return kept[0]["status"]
         # Kraft-gl9d: a crash/resume re-entry into this same (node, round) must
         # not re-spend an agent session on a task whose session already reached
         # 'done' against the worktree as it stands right now.

@@ -398,3 +398,32 @@ async def test_resume_after_escalation_stops_an_item_whose_node_left_the_chain(i
 
     assert it.status() == "needs_human", "left claimed 'active' with no walk behind it"
     assert status == "needs_human"
+
+
+@pytest.mark.parametrize(
+    ("extra", "path"),
+    [
+        ({}, "implementation"),
+        ({"path": "implementation.main.run"}, "implementation.main.run"),
+        ({"restart": True}, None),
+    ],
+    ids=["an-older-request-names-its-node", "by-path", "restart"],
+)
+async def test_a_self_retry_forks_at_the_path_it_asked_for(
+    item_on, run_dirs, no_rebase_no_walk, extra, path
+):
+    """The escalated agent's `kraft item retry --path` is deferred with its
+    path, and consuming the request forks the run there, as `/retry` would."""
+    it = await _stuck(item_on, "stuck")
+    cursor = it.events()[-1]["seq"]
+    payload = _self_retry_event(**extra)
+    await it.database.write(
+        lambda c: events.append(c, it.id, "work_item_self_retry_requested", payload)
+    )
+
+    await gates_module.resume_after_escalation(
+        it.database, run_dirs, work_item_id=it.id, cursor=cursor, registry=None
+    )
+
+    assert it.events("run_forked")[-1]["payload"]["path"] == path
+    assert len(no_rebase_no_walk) == 1
