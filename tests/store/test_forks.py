@@ -169,3 +169,23 @@ async def test_the_item_runs_its_forks_copy_of_the_chain(item_on, database):
     runs = ChainPath.parse(store.materialized_chain_of(it.row()), "b.main.run").task.task
     assert runs.command == "make again"
     assert it.row()["materialized_chain"] == snapshot
+
+
+async def test_the_sessions_under_a_path_stop_at_its_separator(item_on, database):
+    """Kraft-lpccn: `n.pair` is not a prefix of `n.pair_x`, nor `n.pair.a` of
+    `n.pair.a_x`, however the strings compare."""
+    it = await item_on(CHAIN, "a")
+    for sid, path in (
+        ("s1", "a.first.x"),
+        ("s2", "a.first_x.y"),
+        ("s3", "a.first.x_y"),
+    ):
+        await it.session(sid, path, running=(1, 1.0), node="a")
+
+    def under(path):
+        return sorted(
+            r["id"] for r in database.read(lambda c: store.running_sessions_under(c, it.id, path))
+        )
+
+    assert under("a.first") == ["s1", "s3"]
+    assert under("a.first.x") == ["s1"]

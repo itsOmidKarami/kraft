@@ -395,3 +395,36 @@ def test_a_task_that_disallows_skipping_is_not_skipped(client, repo, walked):
     assert r.status_code == 409, r.text
     assert "does not allow skipping" in r.json()["detail"]
     assert walked == []
+
+
+def _unskippable_spec_approval(templates_dir):
+    chain = templates_dir / "chains" / "default.yaml"
+    text = chain.read_text()
+    old = "  - id: spec_approval\n    kind: gate\n"
+    assert old in text
+    chain.write_text(text.replace(old, old + "    skippable: false\n"))
+
+
+@pytest.mark.api_client(edit_templates=_unskippable_spec_approval)
+def test_a_pending_gate_that_disallows_skipping_is_not_skipped(client, repo, walked):
+    """Kraft-v1iz2: the no-path `/skip` on a pending gate honours the gate's own
+    `skippable: false`."""
+    from kraft import store
+
+    wid = client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
+    ).json()["id"]
+    db = client.app.state.db
+
+    async def at_the_gate():
+        await db.write(lambda c: store.load_chain(c, wid, "spec_approval"))
+        await db.write(lambda c: store.request_gate(c, wid, "spec_approval", "spec_approval"))
+
+    client.portal.call(at_the_gate)
+
+    r = client.post(f"/api/work-items/{wid}/skip", json={})
+
+    assert r.status_code == 409, r.text
+    assert "'spec_approval' does not allow skipping" in r.json()["detail"]
+    assert client.get(f"/api/work-items/{wid}").json()["pending_gate"] == "spec_approval"

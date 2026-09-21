@@ -167,3 +167,28 @@ async def _crash_resume(database, run_dirs, it):
         policy=_policy(),
         launch=LAUNCH,
     )
+
+
+#: One step of two tasks: a crash can land between their starts.
+PAIR = """
+- id: n
+  kind: exec
+  tasks:
+    - {id: a, kind: subprocess, command: "true"}
+    - {id: b, kind: subprocess, command: "true"}
+- {id: after, kind: exec, tasks: [{id: c, kind: subprocess, command: "true"}]}
+"""
+
+
+async def test_crash_resume_dispatches_a_sibling_the_crash_never_started(
+    item_on, database, run_dirs, dispatched
+):
+    """Kraft-fvmym: `a` finished and `b` has no session yet -- the crash came
+    between their starts. That is not a failure for a human: the walk runs
+    the node again and `b` gets dispatched."""
+    it = await item_on(PAIR, "n", worktree=True)
+    await it.session("s-a", "n.main.a", "done")
+
+    assert await _crash_resume(database, run_dirs, it) == "completed"
+    assert "n.main.b" in dispatched
+    assert it.events("work_item_needs_human") == []
