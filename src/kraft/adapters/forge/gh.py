@@ -195,8 +195,8 @@ class GhCli(mr_ops.CliWaits):
         return mr_ops.parse_json(await git.run_git(repo, ["gh", *args]), what)
 
     async def _bot_review(self, repo: Path, bot: str) -> ReviewResult:
-        """`bot`'s latest review of the PR's current head: pending until
-        there is one. Changes requested, or any inline comment, is actionable
+        """`bot`'s latest review of the PR's current head, dismissed ones
+        skipped: pending until there is one. Changes requested, or any inline comment, is actionable
         -- one finding per comment; anything else is clean."""
         pr = await self._json(repo, ["pr", "view", "--json", "number,headRefOid"], "gh pr view")
         number, head = pr["number"], pr["headRefOid"]
@@ -211,7 +211,10 @@ class GhCli(mr_ops.CliWaits):
             for r in reviews
             if mr_ops.same_login(str((r.get("user") or {}).get("login", "")), bot)
             and r.get("commit_id") == head
-            and r.get("state") != "PENDING"
+            # A draft review is not submitted, and a dismissed one is a
+            # maintainer's "this no longer blocks" (Kraft-mlicj): neither
+            # counts, so the bot's latest other review of this head stands.
+            and r.get("state") not in ("PENDING", "DISMISSED")
         ]
         if not mine:
             return ReviewResult("pending", detail=f"waiting for {bot} to review {head[:7]}")

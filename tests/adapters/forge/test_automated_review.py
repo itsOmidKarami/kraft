@@ -30,8 +30,10 @@ GLAB_DISCUSSIONS = "api projects/:id/merge_requests/9/discussions?per_page=100"
 GLAB_STATUSES = f"api projects/:id/repository/commits/{HEAD}/statuses?per_page=100"
 
 
-def _gh_review(state: str, *, commit: str = HEAD, login: str = "coderabbitai[bot]") -> dict:
-    return {"id": 51, "user": {"login": login}, "state": state, "commit_id": commit, "body": ""}
+def _gh_review(
+    state: str, *, commit: str = HEAD, login: str = "coderabbitai[bot]", id: int = 51
+) -> dict:
+    return {"id": id, "user": {"login": login}, "state": state, "commit_id": commit, "body": ""}
 
 
 def _glab_note(body: str, *, resolved: bool) -> dict:
@@ -126,6 +128,53 @@ async def test_a_bot_s_unresolved_feedback_is_actionable(cli, tmp_path, backend,
 
     assert review.state == "actionable"
     assert review.findings == ("calc.py:3: rename `x` to `total`",)
+
+
+@pytest.mark.parametrize(
+    "backend, routes, expected",
+    [
+        # Dismissed, and nothing else from the bot on this head: not reviewed.
+        (
+            GH,
+            {
+                "pr view": GH_PR,
+                GH_REVIEWS: json.dumps([_gh_review("DISMISSED")]),
+                GH_COMMENTS: json.dumps([{"path": "calc.py", "line": 3, "body": "stale"}]),
+            },
+            "pending",
+        ),
+        # Dismissed over an earlier clean review of the same head: the
+        # earlier one stands, and the dismissed review's comments are ignored.
+        (
+            GH,
+            {
+                "pr view": GH_PR,
+                GH_REVIEWS: json.dumps(
+                    [_gh_review("COMMENTED", id=50), _gh_review("DISMISSED", id=51)]
+                ),
+                GH_COMMENTS: json.dumps([{"path": "calc.py", "line": 3, "body": "stale"}]),
+                "api repos/{owner}/{repo}/pulls/7/reviews/50/comments?per_page=100": "[]",
+            },
+            "clean",
+        ),
+        # GitLab's withdrawal is resolving the discussion: a resolved note is
+        # no feedback, and without an approval nothing is reviewed yet.
+        (
+            GLAB,
+            {
+                "mr view": GLAB_MR,
+                GLAB_APPROVALS: '{"approved_by": []}',
+                GLAB_DISCUSSIONS: json.dumps([_glab_note("stale", resolved=True)]),
+            },
+            "pending",
+        ),
+    ],
+    ids=["gh-dismissed-only", "gh-dismissed-over-an-earlier-review", "glab-resolved-only"],
+)
+async def test_a_withdrawn_bot_review_does_not_count(cli, tmp_path, backend, routes, expected):
+    """Kraft-mlicj: a maintainer dismissing a bot's review is GitHub's "this no
+    longer blocks". Its comments must not keep the item in a repair loop."""
+    assert (await _review(backend, cli, tmp_path, routes, BOT)).state == expected
 
 
 # --- a check reviewer ----------------------------------------------------------
